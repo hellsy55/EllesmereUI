@@ -363,8 +363,11 @@ local function _unitHasBuffFromPlayer(u, spellIDs)
                     return true
                 end
                 -- Direct lookup found the aura but couldn't verify source.
-                -- Fall through to iteration below (OOC only) which often
-                -- populates sourceUnit when the direct API doesn't.
+                -- OOC: can't disprove ownership, so assume it's ours.
+                -- In combat we fall through to the snapshot path instead.
+                if not inCombat then
+                    return true
+                end
             end
         end
     end
@@ -377,7 +380,12 @@ local function _unitHasBuffFromPlayer(u, spellIDs)
             local sid = aura.spellId
             if sid and not issecretvalue(sid) and idLookup[sid] then
                 local src = aura.sourceUnit
-                if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+                if src and not issecretvalue(src) then
+                    -- sourceUnit is available: verify it's the player
+                    if UnitIsUnit(src, "player") then return true end
+                else
+                    -- sourceUnit unavailable OOC: can't disprove ownership,
+                    -- assume it's ours to avoid false-positive warnings.
                     return true
                 end
             end
@@ -550,7 +558,9 @@ local AURAS = {
     { key="berserk_stance", class="WARRIOR", name="Berserker Stance", castSpell=386196, buffIDs={386196},
       check="player", specs={71, 72}, combatOk=false },
     -- Shadowform: NOT on non-secret list, OOC only
-    { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698},
+    -- Void Form (194249) replaces Shadowform visually while in Void Form,
+    -- so either buff satisfies the "in Shadowform" requirement.
+    { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false },
     -- Devotion Aura: still ContextuallySecret (465) â€” hide in combat
     -- Must check self-cast: Holy Paladins need their OWN aura for Aura Mastery,

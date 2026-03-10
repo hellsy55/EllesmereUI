@@ -1170,7 +1170,7 @@ local function BuildSliderCore(parent, trackW, trackH, thumbSz, inputW, inputH, 
         if EllesmereUI._sliderDragging == 0 then
             EllesmereUI._sliderDragging = nil
         end
-        CommitSnap()  -- final setValue runs with _sliderDragging cleared ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ Snap() rounds
+        CommitSnap()  -- final setValue runs with _sliderDragging cleared Snap() rounds
         if not EllesmereUI._sliderDragging then
             -- Fire any deferred drift checks now that all sliders have finished dragging
             if EllesmereUI._deferredDriftChecks then
@@ -1829,7 +1829,7 @@ function WidgetFactory:Checkbox(parent, text, yOffset, getValue, setValue, toolt
 end
 
 -------------------------------------------------------------------------------
---  HSV ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â RGB Conversion Helpers
+--  HSV RGB Conversion Helpers
 -------------------------------------------------------------------------------
 local function HSVtoRGB(h, s, v)
     local c = v * s
@@ -2095,7 +2095,7 @@ local function BuildColorPickerPopup()
     alphaBar:EnableMouse(true)
 
     local CK = 10
-    -- Coarse checkerboard: 2 columns ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â 20 rows = 40 textures (vs 160 before)
+    -- Coarse checkerboard: 2 columns 20 rows = 40 textures (vs 160 before)
     local ckCols = math.ceil(BAR_W / CK)
     local ckRows = math.ceil(SV_SIZE / CK)
     for row = 0, ckRows - 1 do
@@ -3495,7 +3495,7 @@ function WidgetFactory:Spacer(parent, yOffset, height)
 end
 
 -------------------------------------------------------------------------------
---  BuildCogPopup  ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ reusable cog settings popup with consistent layout
+--  BuildCogPopup reusable cog settings popup with consistent layout
 --
 --  opts = {
 --    title = "Popup Title",
@@ -4029,7 +4029,7 @@ local function BuildSegmentedControl(cfg)
     capRightAccent:SetVertexColor(ACCENT.r, ACCENT.g, ACCENT.b, 0.05)
     capRightAccent:Hide()
 
-    -- Cap click zones ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â anchored to pillBody for now, re-anchored after segments
+    -- Cap click zones anchored to pillBody for now, re-anchored after segments
     local capLeftBtn = CreateFrame("Button", nil, frame)
     capLeftBtn:SetSize(capW, SEG_H)
     PP.Point(capLeftBtn, "RIGHT", pillBody, "LEFT", 0, 0)
@@ -4085,7 +4085,7 @@ local function BuildSegmentedControl(cfg)
     end)
 
     -------------------------------------------------------------------
-    -- Segments ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â each has full 1px border; adjacent segments overlap by 1px
+    -- Segments each has full 1px border; adjacent segments overlap by 1px
     -------------------------------------------------------------------
     local segments = {}
     local BASE_LEVEL = pillBody:GetFrameLevel() + 3
@@ -4115,7 +4115,7 @@ local function BuildSegmentedControl(cfg)
         accentBg:SetColorTexture(ACCENT.r, ACCENT.g, ACCENT.b, 0.05)
         accentBg:Hide()
 
-        -- Full 1px border on all 4 sides ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â matches MakeBorder's pixel-perfect
+        -- Full 1px border on all 4 sides matches MakeBorder's pixel-perfect
         -- technique: vertical edges inset by 1px to avoid overlapping corners.
         local segTop = btn:CreateTexture(nil, "ARTWORK", nil, 7)
         segTop:SetColorTexture(INACTIVE_R, INACTIVE_G, INACTIVE_B, INACTIVE_A)
@@ -4330,7 +4330,7 @@ end
 
 
 -------------------------------------------------------------------------------
---  Exports  (widget helpers ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ EllesmereUI table for EllesmereUI_Presets.lua)
+--  Exports  (widget helpers EllesmereUI table for EllesmereUI_Presets.lua)
 -------------------------------------------------------------------------------
 EllesmereUI.MakeStyledButton    = MakeStyledButton
 EllesmereUI.WB_COLOURS          = WB_COLOURS

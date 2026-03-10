@@ -1,7 +1,7 @@
 -------------------------------------------------------------------------------
 --  EUI_ActionBar_Options.lua
 --  Registers the real Action Bars module with EllesmereUI
---  Pure UI makeover ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ all get/set calls go to EAB.db.profile, same as before
+--  Pure UI makeover all get/set calls go to EAB.db.profile, same as before
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 local EAB = ns.EAB
@@ -180,7 +180,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Scale slider 2x multiplier conversion
-    --  Slider value ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â stored barScale with 2x distance from 100
+    --  Slider value stored barScale with 2x distance from 100
     ---------------------------------------------------------------------------
     local function SliderToScale(sliderVal)
         return (100 + (sliderVal - 100) * 2) / 100
@@ -318,7 +318,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  preview creates its child frames once and exposes an :Update() method
     --  that re-reads all current DB values and applies them to the existing
     --  textures.  Widget callbacks call UpdatePreview() which is extremely
-    --  cheap ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â no frame creation, no GC pressure, just SetPoint / SetSize /
+    --  cheap no frame creation, no GC pressure, just SetPoint / SetSize /
     --  SetColorTexture / SetTexCoord calls on already-existing objects.
     ---------------------------------------------------------------------------
     local activePreview    -- reference to the current preview frame (if any)
@@ -333,7 +333,7 @@ initFrame:SetScript("OnEvent", function(self)
         return EllesmereUIDB and EllesmereUIDB.previewHintDismissed
     end
 
-    -- Lightweight refresh ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â just re-reads settings and updates visuals
+    -- Lightweight refresh just re-reads settings and updates visuals
     local function UpdatePreview()
         -- Recover activePreview from content header if it was lost (e.g. page cache restore)
         if not activePreview and EllesmereUI._contentHeaderPreview then
@@ -344,7 +344,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
-    -- Full refresh ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â also recalculates content header height (for bar scale changes)
+    -- Full refresh also recalculates content header height (for bar scale changes)
     local function UpdatePreviewAndResize()
         if not activePreview and EllesmereUI._contentHeaderPreview then
             activePreview = EllesmereUI._contentHeaderPreview
@@ -495,7 +495,7 @@ initFrame:SetScript("OnEvent", function(self)
         pf._buttons   = buttons
         pf._previewBG = previewBG
 
-        -- The Update method ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â reads current DB + Blizzard state, applies it --
+        -- The Update method reads current DB + Blizzard state, applies it --
         pf.Update = function(self)
             local settings = SB()
             if not settings then return end
@@ -826,7 +826,7 @@ initFrame:SetScript("OnEvent", function(self)
                     countFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1 + ctOX, 4 + ctOY)
                     end -- close alwaysShowButtons else
                 else
-                    -- Button beyond numButtonsShowable ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â hide it
+                    -- Button beyond numButtonsShowable hide it
                     bf:Hide()
                 end
             end
@@ -957,7 +957,7 @@ initFrame:SetScript("OnEvent", function(self)
         txt:SetPoint("CENTER")
         txt:SetText("Click to Sync Different Values")
 
-        -- Hover effect (text only ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â backdrop stays constant)
+        -- Hover effect (text only backdrop stays constant)
         overlay:SetScript("OnEnter", function()
             txt:SetTextColor(1, 1, 1, 1)
         end)
@@ -977,7 +977,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  WrapGroupCogPopup  ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“  overlay for cog-popup settings in multi-edit
+    --  WrapGroupCogPopup overlay for cog-popup settings in multi-edit
     --  If ANY of the settingKeys are MIXED, wraps the showFn so that when the
     --  popup opens an overlay covers the entire popup with "Click to Sync".
     --  Clicking syncs ALL listed settings from the eyeball bar.
@@ -3456,7 +3456,7 @@ initFrame:SetScript("OnEvent", function(self)
             if pageName == PAGE_BARS then
                 UpdatePreview()
                 ShowEditOverlay(SelectedKey())
-                -- Refresh hint visibility ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â never recreate here, just show/hide
+                -- Refresh hint visibility never recreate here, just show/hide
                 local dismissed = IsPreviewHintDismissed()
                 if _abPreviewHintFS then
                     if dismissed then

@@ -260,6 +260,12 @@ lifecycleFrame:SetScript("OnEvent", function(self, event, arg1)
 
     -- Process enable queue once logged in
     if IsLoggedIn() then
+        -- Ensure PP.mult is current before any addon's OnEnable runs.
+        -- PP is defined in EllesmereUI.lua (loaded after this file) so it
+        -- exists by the time PLAYER_LOGIN fires.
+        if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+            EllesmereUI.PP.UpdateMult()
+        end
         while #enableQueue > 0 do
             local addon = tremove(enableQueue, 1)
             if addon.enabledState then

@@ -5045,6 +5045,9 @@ function EAB:OnInitialize()
     end
 
     -- Slash commands
+    -- Expose apply hook for PP scale change re-apply
+    _G._EAB_Apply = function() ApplyAll() end
+
     SLASH_ELLESMEREACTIONBARS1 = "/eab"
     SlashCmdList["ELLESMEREACTIONBARS"] = function(msg)
         if EllesmereUI and EllesmereUI.Toggle then

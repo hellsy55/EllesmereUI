@@ -1787,7 +1787,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local row = MakeListRow(-totalH)
                 local capturedIdx = idx
 
-                -- === LEFT HALF: delete (Ã—) | zone name | talent name + icon ===
+                -- === LEFT HALF: delete (—) | zone name | talent name + icon ===
 
                 -- Delete button (far left)
                 local delBtn = CreateFrame("Button", nil, row)

@@ -453,6 +453,26 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
 end
 
+--- Snapshot current font settings; returns a function that checks if they
+--- changed and shows a reload popup if so.
+function EllesmereUI.CaptureFontState()
+    local fontsDB = EllesmereUI.GetFontsDB()
+    local prevFont = fontsDB.global
+    local prevOutline = fontsDB.outlineMode
+    return function()
+        local cur = EllesmereUI.GetFontsDB()
+        if cur.global ~= prevFont or cur.outlineMode ~= prevOutline then
+            EllesmereUI:ShowConfirmPopup({
+                title       = "Reload Required",
+                message     = "Font changed. A UI reload is needed to apply the new font.",
+                confirmText = "Reload Now",
+                cancelText  = "Later",
+                onConfirm   = function() ReloadUI() end,
+            })
+        end
+    end
+end
+
 --- Apply a partial profile (specific addons only) by merging into active
 function EllesmereUI.ApplyPartialProfile(profileData)
     if not profileData or not profileData.addons then return end
@@ -525,6 +545,85 @@ function EllesmereUI.ExportAddons(folderList)
     local compressed = LibDeflate:CompressDeflate(serialized)
     local encoded = LibDeflate:EncodeForPrint(compressed)
     return EXPORT_PREFIX .. encoded
+end
+
+--- Export CDM spell layouts for selected spec keys.
+--- specKeys = { "250", "251", ... } (specID strings)
+function EllesmereUI.ExportCDMSpellLayouts(specKeys)
+    local cdmEntry
+    for _, e in ipairs(ADDON_DB_MAP) do
+        if e.folder == "EllesmereUICooldownManager" then cdmEntry = e; break end
+    end
+    if not cdmEntry then return nil end
+    local profile = GetAddonProfile(cdmEntry)
+    if not profile or not profile.specProfiles then return nil end
+    local exported = {}
+    for _, key in ipairs(specKeys) do
+        if profile.specProfiles[key] then
+            exported[key] = DeepCopy(profile.specProfiles[key])
+        end
+    end
+    if not next(exported) then return nil end
+    local payload = { version = 1, type = "cdm_spells", data = exported }
+    local serialized = Serializer.Serialize(payload)
+    if not LibDeflate then return nil end
+    local compressed = LibDeflate:CompressDeflate(serialized)
+    local encoded = LibDeflate:EncodeForPrint(compressed)
+    return EXPORT_PREFIX .. encoded
+end
+
+--- Import CDM spell layouts from a string. Overwrites matching spec profiles.
+function EllesmereUI.ImportCDMSpellLayouts(importStr)
+    local payload, err = EllesmereUI.DecodeImportString(importStr)
+    if not payload then return false, err end
+    if payload.type ~= "cdm_spells" then
+        return false, "Not a CDM spell layout string"
+    end
+    local cdmEntry
+    for _, e in ipairs(ADDON_DB_MAP) do
+        if e.folder == "EllesmereUICooldownManager" then cdmEntry = e; break end
+    end
+    if not cdmEntry then return false, "Cooldown Manager not found" end
+    local profile = GetAddonProfile(cdmEntry)
+    if not profile then return false, "Cooldown Manager profile not available" end
+    if not profile.specProfiles then profile.specProfiles = {} end
+    local imported = payload.data
+    if type(imported) ~= "table" then return false, "Invalid data" end
+    local count = 0
+    for specKey, specData in pairs(imported) do
+        profile.specProfiles[specKey] = DeepCopy(specData)
+        count = count + 1
+    end
+    return true, nil, count
+end
+
+--- Get a list of saved CDM spec profile keys with display info.
+--- Returns: { { key="250", name="Blood", icon=... }, ... }
+function EllesmereUI.GetCDMSpecProfiles()
+    local cdmEntry
+    for _, e in ipairs(ADDON_DB_MAP) do
+        if e.folder == "EllesmereUICooldownManager" then cdmEntry = e; break end
+    end
+    if not cdmEntry then return {} end
+    local profile = GetAddonProfile(cdmEntry)
+    if not profile or not profile.specProfiles then return {} end
+    local result = {}
+    for specKey in pairs(profile.specProfiles) do
+        local specID = tonumber(specKey)
+        local name, icon
+        if specID and specID > 0 and GetSpecializationInfoByID then
+            local _, sName, _, sIcon = GetSpecializationInfoByID(specID)
+            name = sName
+            icon = sIcon
+        end
+        result[#result + 1] = {
+            key  = specKey,
+            name = name or ("Spec " .. specKey),
+            icon = icon,
+        }
+    end
+    table.sort(result, function(a, b) return a.key < b.key end)
+    return result
 end
 
 function EllesmereUI.ExportCurrentProfile()

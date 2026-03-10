@@ -151,10 +151,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
-    -- Snap helper ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â created per-preview-build so it reads the correct effective scale
+    -- Snap helper created per-preview-build so it reads the correct effective scale
     local _previewSnap  -- set in _previewHeaderBuilder
 
-    -- Border refreshers ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â re-snap sizes when scale changes
+    -- Border refreshers re-snap sizes when scale changes
     local _borderRefreshers = {}
     --- Pixel-perfect border for preview frames.
     --- Uses the unified PP border system (raw integer sizes, never scaled).
@@ -197,7 +197,7 @@ initFrame:SetScript("OnEvent", function(self)
         local p = DB()
         if not p then return end
 
-        -- No class resource for this spec ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hide everything
+        -- No class resource for this spec hide everything
         if not HasClassResource() then
             local pc = _previewFrames.pipContainer
             if pc then pc:Hide() end
@@ -301,7 +301,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local pipSp = (sp.pipSpacing > 0) and math.max(onePx, PipSnap(sp.pipSpacing)) or 0
                 local snappedPipH = PipSnap(sp.pipHeight)
                 local numPips = 5
-                local isVertical = (sp.pipOrientation or "HORIZONTAL") == "VERTICAL"
+                local isVertical = false   -- preview always horizontal
+                local isReversed = false
                 -- Available length for pips along the stacking axis
                 local availW = totalW - (numPips - 1) * pipSp
                 local baseW = math.floor(availW * pcScale / numPips) / pcScale
@@ -335,7 +336,11 @@ initFrame:SetScript("OnEvent", function(self)
                     if isVertical then
                         pip:SetSize(snappedPipH, pipW[i])
                         pip:ClearAllPoints()
-                        pip:SetPoint("TOP", pc, "TOP", 0, -pipX[i])
+                        if isReversed then
+                            pip:SetPoint("BOTTOM", pc, "BOTTOM", 0, pipX[i])
+                        else
+                            pip:SetPoint("TOP", pc, "TOP", 0, -pipX[i])
+                        end
                     else
                         pip:SetSize(pipW[i], snappedPipH)
                         pip:ClearAllPoints()
@@ -444,7 +449,7 @@ initFrame:SetScript("OnEvent", function(self)
                 pc._barBorder:SetShown(false)
             end
 
-            -- Full-bar background (for pips only ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â bar-type uses _barBg)
+            -- Full-bar background (for pips only bar-type uses _barBg)
             if not isBar then
                 if not pc._pipBarBg then
                     pc._pipBarBg = pc:CreateTexture(nil, "BACKGROUND", nil, -1)
@@ -1018,9 +1023,14 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "dropdown", text = "Orientation",
               disabled = classOff,
               disabledTooltip = "Enable Class Resource",
-              values = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" },
-              order  = { "HORIZONTAL", "VERTICAL" },
-              getValue = function() local p = DB(); return p and p.secondary.pipOrientation or "HORIZONTAL" end,
+              values = { HORIZONTAL = "Horizontal", VERTICAL_UP = "Vertical Up", VERTICAL_DOWN = "Vertical Down" },
+              order  = { "HORIZONTAL", "VERTICAL_UP", "VERTICAL_DOWN" },
+              getValue = function()
+                  local p = DB(); if not p then return "HORIZONTAL" end
+                  local v = p.secondary.pipOrientation or "HORIZONTAL"
+                  if v == "VERTICAL" then v = "VERTICAL_DOWN" end
+                  return v
+              end,
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.secondary.pipOrientation = v; SmoothRefresh()
@@ -2543,14 +2553,15 @@ initFrame:SetScript("OnEvent", function(self)
         local w, h = Snap(cb.width), Snap(cb.height)
         local bs = cb.borderSize
 
-        -- Container size: icon (h×h) + border gap + bar
-        local iconW = Snap(h)
-        pf.container:SetSize(w + iconW + Snap(bs), h)
+        -- Container size: icon (h×h) + bar (only when icon shown)
+        local hasIcon = cb.showIcon ~= false
+        local iconW = hasIcon and Snap(h) or 0
+        pf.container:SetSize(w + iconW, h)
         pf.container:ClearAllPoints(); pf.container:SetPoint("CENTER", pf.container:GetParent(), "CENTER", 0, 0)
         -- Bar frame
         pf.barFrame:SetSize(w, h)
         pf.barFrame:ClearAllPoints()
-        pf.barFrame:SetPoint("LEFT", pf.container, "LEFT", iconW + Snap(bs), 0)
+        pf.barFrame:SetPoint("LEFT", pf.container, "LEFT", iconW, 0)
 
         -- Background
         local texKey = cb.texture
@@ -2607,13 +2618,13 @@ initFrame:SetScript("OnEvent", function(self)
             pf.spark:Hide()
         end
 
-        -- Icon: always shown, left side of container inset by border
+        -- Icon: left side of container, flush against the edge (hidden when showIcon is off)
         do
-            local iSize = Snap(h - bs * 2)
+            local iSize = Snap(h)
             pf.iconFrame:SetSize(iSize, iSize)
             pf.iconFrame:ClearAllPoints()
-            pf.iconFrame:SetPoint("TOPLEFT", pf.container, "TOPLEFT", Snap(bs), -Snap(bs))
-            pf.iconFrame:Show()
+            pf.iconFrame:SetPoint("TOPLEFT", pf.container, "TOPLEFT", 0, 0)
+            if hasIcon then pf.iconFrame:Show() else pf.iconFrame:Hide() end
         end
 
         -- Timer text
@@ -2664,14 +2675,14 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local w, h = Snap(cb.width), Snap(cb.height)
-        local iconW = 0
-        local iconW = Snap(h)
-        container:SetSize(w + iconW + Snap(cb.borderSize), h)
+        local hasIcon = cb.showIcon ~= false
+        local iconW = hasIcon and Snap(h) or 0
+        container:SetSize(w + iconW, h)
 
         -- Bar frame (holds bg, border, status bar)
         local barFrame = CreateFrame("Frame", nil, container)
         barFrame:SetSize(w, h)
-        barFrame:SetPoint("LEFT", container, "LEFT", iconW + Snap(cb.borderSize), 0)
+        barFrame:SetPoint("LEFT", container, "LEFT", iconW, 0)
         _castBarPreviewFrames.barFrame = barFrame
         _castBarPreviewFrames.container = container
 
@@ -2728,15 +2739,16 @@ initFrame:SetScript("OnEvent", function(self)
         if not cb.showSpark then spark:Hide() end
         _castBarPreviewFrames.spark = spark
 
-        -- Icon: always shown, left side of container inset by border
+        -- Icon: left side of container, flush against the edge (hidden when showIcon is off)
         local iconFrame = CreateFrame("Frame", nil, container)
         local icon = iconFrame:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints()
         icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         icon:SetTexture(NextCastBarIcon())
-        local iSize = Snap(h - bs * 2)
+        local iSize = Snap(h)
         iconFrame:SetSize(iSize, iSize)
-        iconFrame:SetPoint("TOPLEFT", container, "TOPLEFT", Snap(bs), -Snap(bs))
+        iconFrame:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+        if not hasIcon then iconFrame:Hide() end
         _castBarPreviewFrames.iconFrame = iconFrame
         _castBarPreviewFrames.icon = icon
 
@@ -2856,7 +2868,7 @@ initFrame:SetScript("OnEvent", function(self)
         local castSection
         castSection, h = W:SectionHeader(parent, "LAYOUT", y);  y = y - h
 
-        -- Row 1: Enable Player Cast Bar (cog RESIZE: position/scale) | empty
+        -- Row 1: Enable Player Cast Bar | Show Spell Icon
         local castEnableRow
         castEnableRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Player Cast Bar",
@@ -2866,7 +2878,15 @@ initFrame:SetScript("OnEvent", function(self)
                   p.castBar.enabled = v; RefreshCast()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            { type = "toggle", text = "Show Spell Icon",
+              disabled = castOff,
+              disabledTooltip = "Enable Player Cast Bar",
+              getValue = function() local p = DB(); return p and p.castBar.showIcon ~= false end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.showIcon = v; RefreshCast()
+                  EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
         -- Inline cog (DIRECTIONS) on Enable for x/y position
         do
@@ -3251,7 +3271,7 @@ initFrame:SetScript("OnEvent", function(self)
                 _previewPipCount = math.random(minPips, maxPips)
                 _previewBarFillPct = math.random(30, 80)
                 UpdatePreviewHeader()
-                -- Refresh hint visibility ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â never recreate here, just show/hide
+                -- Refresh hint visibility never recreate here, just show/hide
                 local dismissed = IsPreviewHintDismissed()
                 if _previewHintFS then
                     if dismissed then

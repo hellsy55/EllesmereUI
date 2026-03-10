@@ -2045,6 +2045,17 @@ initFrame:SetScript("OnEvent", function(self)
         })
     end
 
+    local function ShowConflictBarPopup(spellName, targetIsBuffBar)
+        if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then return end
+        local otherType = targetIsBuffBar and "a Cooldown or Utility bar" or "a Buff bar"
+        EllesmereUI:ShowConfirmPopup({
+            title = "Already Tracked",
+            message = (spellName or "This spell") .. " is already tracked on " .. otherType .. ". Remove it from there first to add it here.",
+            confirmText = "OK",
+            cancelText = "Close",
+        })
+    end
+
     ---------------------------------------------------------------------------
     --  Spell picker dropdown (right-click on icon or click "+" button)
     ---------------------------------------------------------------------------
@@ -2204,6 +2215,8 @@ initFrame:SetScript("OnEvent", function(self)
                     wrongCatGroup = true
                 end
             end
+            -- Conflict: spell is already tracked on a bar of the opposite type
+            local isConflict = not isDisabled and not wrongCatGroup and sp.isConflict
             local item = CreateFrame("Button", nil, inner)
             item:SetHeight(ITEM_H)
             item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -2234,6 +2247,23 @@ initFrame:SetScript("OnEvent", function(self)
                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
                 ico:SetDesaturated(true)
                 ico:SetAlpha(0.4)
+            elseif isConflict then
+                -- Spell is tracked on a bar of the opposite type: show dimmed, clickable for info
+                lbl:SetTextColor(tDimR * 0.7, tDimG * 0.7, tDimB * 0.7, tDimA * 0.5)
+                ico:SetDesaturated(true)
+                ico:SetAlpha(0.35)
+                item:SetScript("OnEnter", function()
+                    lbl:SetTextColor(1, 0.6, 0.2, 0.9)
+                    hl:SetColorTexture(1, 1, 1, hlA * 0.5); hl:SetAlpha(1)
+                end)
+                item:SetScript("OnLeave", function()
+                    lbl:SetTextColor(tDimR * 0.7, tDimG * 0.7, tDimB * 0.7, tDimA * 0.5)
+                    hl:SetAlpha(0)
+                end)
+                item:SetScript("OnClick", function()
+                    menu:Hide()
+                    ShowConflictBarPopup(sp.name, isBuffBar)
+                end)
             else
                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                 item:SetScript("OnEnter", function()

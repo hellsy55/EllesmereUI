@@ -48,6 +48,7 @@ ns.GetNPUseShadow = GetNPUseShadow
 ns.SetFSFont = SetFSFont
 ns.plates = {}
 _G.EllesmereNameplates_NS = ns
+
 local defaults = {
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
@@ -3127,7 +3128,7 @@ function NameplateFrame:UpdateHealthValues()
         local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
         pctText = string.format("%d%%", pctVal)
         pctNoSignText = string.format("%d", pctVal)
-        numText = AbbreviateNumbers(UnitHealth(unit))
+        numText = AbbreviateLargeNumbers(UnitHealth(unit))
     else
         pctText = ""
         pctNoSignText = ""

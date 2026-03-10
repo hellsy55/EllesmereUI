@@ -1,4 +1,4 @@
-﻿-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 --  EllesmereUIResourceBars.lua
 --  Custom class resource, health, and mana bar display
 --  Features: Health bar, primary resource bar (mana/rage/energy/etc),
@@ -245,7 +245,7 @@ end
 -------------------------------------------------------------------------------
 --  ColorCurve helper for secret-value-safe bar threshold coloring
 --  Builds a two-point step curve: base color below threshold, threshold color
---  at or above. Pass the curve to UnitPowerPercent as the 4th arg — WoW
+--  at or above. Pass the curve to UnitPowerPercent as the 4th arg � WoW
 --  evaluates the secret value on the C side and returns a Color object.
 -------------------------------------------------------------------------------
 local _barColorCurve = nil
@@ -357,6 +357,7 @@ local DEFAULTS = {
         },
         castBar = {
             enabled       = true,
+            showIcon      = true,
             width         = 220,
             height        = 20,
             anchorX       = 0,
@@ -882,8 +883,8 @@ local function RegisterUnlockElements()
         getFrame = function() return castBarFrame end,
         getSize = function()
             local cb = ERB.db.profile.castBar
-            -- Total width includes the icon (h×h) plus border gap
-            return cb.width + cb.height + cb.borderSize, cb.height
+            local iconW = (cb.showIcon ~= false) and cb.height or 0
+            return cb.width + iconW, cb.height
         end,
         getScale = function()
             return ERB.db.profile.castBar.scale or 1.0
@@ -1307,7 +1308,8 @@ local function BuildBars()
         local pipH = sp.pipHeight or 20
         local pipSp = sp.pipSpacing or 1
         local pipOri = sp.pipOrientation or "HORIZONTAL"
-        local isVertical = (pipOri == "VERTICAL")
+        local isVertical = (pipOri ~= "HORIZONTAL")
+        local isReversed = (pipOri == "VERTICAL_UP")
         local totalW
 
         local isBarType = cachedSecondary.type == "bar"
@@ -1415,7 +1417,11 @@ local function BuildBars()
                     local ah  = rf["_barAnim_ph"] or pipH
                     rf:ClearAllPoints()
                     if isVertical then
-                        rf:SetPoint("TOP", secondaryFrame, "TOP", 0, -ap0)
+                        if isReversed then
+                            rf:SetPoint("BOTTOM", secondaryFrame, "BOTTOM", 0, ap0)
+                        else
+                            rf:SetPoint("TOP", secondaryFrame, "TOP", 0, -ap0)
+                        end
                         rf:SetHeight(aw)
                         rf:SetWidth(ah)
                     else
@@ -1456,7 +1462,11 @@ local function BuildBars()
                     local ah  = pip["_barAnim_ph"] or pipH
                     pip:ClearAllPoints()
                     if isVertical then
-                        pip:SetPoint("TOP", secondaryFrame, "TOP", 0, -ap0)
+                        if isReversed then
+                            pip:SetPoint("BOTTOM", secondaryFrame, "BOTTOM", 0, ap0)
+                        else
+                            pip:SetPoint("TOP", secondaryFrame, "TOP", 0, -ap0)
+                        end
                         pip:SetHeight(aw)
                         pip:SetWidth(ah)
                     else
@@ -1777,9 +1787,18 @@ local function UpdateSecondaryResource()
                 local slot = slots[pos]
                 local x0 = slot.x0
                 local w  = slot.x1 - slot.x0
+                local pipOri = sp.pipOrientation or "HORIZONTAL"
                 rf:ClearAllPoints()
-                rf:SetPoint("LEFT", secondaryFrame, "LEFT", x0, 0)
-                rf:SetWidth(w)
+                if pipOri == "VERTICAL_UP" then
+                    rf:SetPoint("BOTTOM", secondaryFrame, "BOTTOM", 0, x0)
+                    rf:SetHeight(w)
+                elseif pipOri == "VERTICAL_DOWN" or pipOri == "VERTICAL" then
+                    rf:SetPoint("TOP", secondaryFrame, "TOP", 0, -x0)
+                    rf:SetHeight(w)
+                else
+                    rf:SetPoint("LEFT", secondaryFrame, "LEFT", x0, 0)
+                    rf:SetWidth(w)
+                end
 
                 if _runeReady[runeIdx] then
                     -- Ready rune: full brightness, hide recharge overlay
@@ -2195,7 +2214,7 @@ local function OnUpdate(self, dt)
         end
     end
 
-    -- DK rune updates (throttled to ~10 fps) — calls the full sorted
+    -- DK rune updates (throttled to ~10 fps) � calls the full sorted
     -- update so rune positions stay consistent with depletion order.
     if cachedSecondary and cachedSecondary.type == "runes" then
         _runeThrottle = _runeThrottle + dt
@@ -2507,8 +2526,9 @@ BuildCastBar = function()
     -- Apply settings
     local w, h = cb.width, cb.height
     local bs = cb.borderSize
-    -- Total frame width includes icon (h x h) + border gap between icon and bar
-    local totalW = w + h + bs
+    local hasIcon = cb.showIcon ~= false
+    -- Total frame width includes icon (h x h) only when icon is shown
+    local totalW = hasIcon and (w + h) or w
     if cb.unlockPos and cb.unlockPos.point then
         -- Position managed by unlock mode -- only animate size changes
         local rp = cb.unlockPos.relPoint or cb.unlockPos.point
@@ -2552,18 +2572,23 @@ BuildCastBar = function()
     castBarFrame._bR:SetPoint("BOTTOMRIGHT", castBarFrame._bB, "TOPRIGHT", 0, 0)
     castBarFrame._bR:SetWidth(bs)
 
-    -- Icon: left side of the container, inset by border
+    -- Icon: left side of the container, inset by border size to sit within the border
     local iconFrame = castBarFrame._iconFrame
-    local iSize = h - bs * 2
-    iconFrame:SetSize(iSize, iSize)
-    iconFrame:ClearAllPoints()
-    iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", bs, -bs)
-    iconFrame:Show()
+    if hasIcon then
+        local iSize = h - 2 * bs
+        if iSize < 1 then iSize = 1 end
+        iconFrame:SetSize(iSize, iSize)
+        iconFrame:ClearAllPoints()
+        iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", bs, -bs)
+        iconFrame:Show()
+    else
+        iconFrame:Hide()
+    end
 
-    -- Bar: right of the icon, inset by border
+    -- Bar: right of the icon (or full width when no icon), inset by border
     local bar = castBarFrame._bar
     bar:ClearAllPoints()
-    bar:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", h + bs, -bs)
+    bar:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", (hasIcon and h or 0) + bs, -bs)
     bar:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -bs, bs)
 
     -- Bar texture
@@ -2757,11 +2782,11 @@ OnCastStart = function()
     end
     castBarFrame._numStages = 0
 
-    -- Icon: always shown
+    -- Icon
     do
         local spellInfo = C_Spell.GetSpellInfo(spellID)
         local iconTex = spellInfo and spellInfo.iconID
-        if iconTex then
+        if iconTex and ERB.db.profile.castBar.showIcon ~= false then
             castBarFrame._icon:SetTexture(iconTex)
             castBarFrame._iconFrame:Show()
         else
@@ -2796,11 +2821,11 @@ OnChannelStart = function()
     end
     castBarFrame._numStages = 0
 
-    -- Icon: always shown
+    -- Icon
     do
         local spellInfo = C_Spell.GetSpellInfo(spellID)
         local iconTex = spellInfo and spellInfo.iconID
-        if iconTex then
+        if iconTex and ERB.db.profile.castBar.showIcon ~= false then
             castBarFrame._icon:SetTexture(iconTex)
             castBarFrame._iconFrame:Show()
         else
@@ -2901,11 +2926,11 @@ OnEmpowerStart = function()
     castBarFrame._nameText:SetText(name)
     castBarFrame._bar:SetValue(0)
 
-    -- Icon: always shown
+    -- Icon
     do
         local spellInfo = C_Spell.GetSpellInfo(spellID)
         local iconTex = spellInfo and spellInfo.iconID
-        if iconTex then
+        if iconTex and ERB.db.profile.castBar.showIcon ~= false then
             castBarFrame._icon:SetTexture(iconTex)
             castBarFrame._iconFrame:Show()
         else

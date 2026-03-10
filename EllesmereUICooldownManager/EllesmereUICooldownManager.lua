@@ -37,6 +37,12 @@ local GetSpecializationInfo = GetSpecializationInfo
 
 local DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
 
+-- Spells whose buff-bar icon should display a different spell's texture.
+-- Key = tracked spellID, value = texture fileID to use on buff bars only.
+local BUFF_ICON_OVERRIDES = {
+    [470057] = 135813,  -- Voltaic Blaze: show Flame Shock icon
+}
+
 -------------------------------------------------------------------------------
 --  Shape Constants (shared with action bars)
 -------------------------------------------------------------------------------
@@ -206,6 +212,7 @@ local _tickBlizzOverrideCache = {} -- [baseSpellID] = overrideSpellID, built eac
 local _tickBlizzChildCache = {}    -- [overrideSpellID] = blizzChild, for direct charge/cooldown reads on activation overrides
 local _tickBlizzAllChildCache = {} -- [resolvedSid] = blizzChild, for all CDM children (used by custom bars)
 local _tickBlizzBuffChildCache = {} -- [resolvedSid] = blizzChild, only from BuffIcon/BuffBar viewers
+local _tickBlizzCDChildCache   = {} -- [resolvedSid] = blizzChild, only from Essential/Utility viewers
 
 -- Separate tables keyed by child frame reference — avoids reading tainted fields on Blizzard-owned frames.
 -- ch.isActive and ch._ecmeDurObj etc. are tainted secret values; we track state in our own tables instead.
@@ -3340,10 +3347,13 @@ local function UpdateCustomBarIcons(barKey)
                     _spellIconCache[resolvedID] = texID
                 end
             end
-            if texID then
-                if texID ~= ourIcon._lastTex then
-                    ourIcon._tex:SetTexture(texID)
-                    ourIcon._lastTex = texID
+            -- Buff bars may have a hardcoded icon override for specific spells.
+            local overrideTex = (barKey == "buffs" or barData.barType == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+            local effectiveTex = overrideTex or texID
+            if effectiveTex then
+                if effectiveTex ~= ourIcon._lastTex then
+                    ourIcon._tex:SetTexture(effectiveTex)
+                    ourIcon._lastTex = effectiveTex
                 end
 
                 -- Cooldown, desaturation, and charge text (consolidated)
@@ -3622,20 +3632,26 @@ UpdateCDMBarIcons = function(barKey)
             -- always show the correct icon even when Blizzard's CDM child uses an
             -- internal tracking spellID with a different icon (e.g. spec passives).
             do
-                local set = false
-                if resolvedSid and resolvedSid > 0 then
-                    local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(resolvedSid)
-                    if tex then
-                        ourIcon._tex:SetTexture(tex)
-                        set = true
+                -- Buff bars may have a hardcoded icon override for specific spells.
+                local overrideTex = (barKey == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+                if overrideTex then
+                    ourIcon._tex:SetTexture(overrideTex)
+                else
+                    local set = false
+                    if resolvedSid and resolvedSid > 0 then
+                        local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(resolvedSid)
+                        if tex then
+                            ourIcon._tex:SetTexture(tex)
+                            set = true
+                        end
                     end
-                end
-                if not set then
-                    -- Fallback: copy directly from the Blizzard child
-                    local blizzTex = blizzIcon.Icon
-                    if blizzTex then
-                        local texPath = blizzTex:GetTexture()
-                        if texPath then ourIcon._tex:SetTexture(texPath) end
+                    if not set then
+                        -- Fallback: copy directly from the Blizzard child
+                        local blizzTex = blizzIcon.Icon
+                        if blizzTex then
+                            local texPath = blizzTex:GetTexture()
+                            if texPath then ourIcon._tex:SetTexture(texPath) end
+                        end
                     end
                 end
             end
@@ -4092,10 +4108,12 @@ local function UpdateTrackedBarIcons(barKey)
                     _spellIconCache[resolvedID] = texID
                 end
             end
-            if texID then
-                if texID ~= ourIcon._lastTex then
-                    ourIcon._tex:SetTexture(texID)
-                    ourIcon._lastTex = texID
+            local overrideTex = (barKey == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+            local effectiveTex = overrideTex or texID
+            if effectiveTex then
+                if effectiveTex ~= ourIcon._lastTex then
+                    ourIcon._tex:SetTexture(effectiveTex)
+                    ourIcon._lastTex = effectiveTex
                 end
 
                 ourIcon._spellID = resolvedID
@@ -4133,13 +4151,28 @@ local function UpdateTrackedBarIcons(barKey)
                             blizzChild = FindCDMChildByCooldownID(cdID)
                         end
                     end
+                    -- For CD/utility bars, prefer the CD-viewer child over the buff-viewer
+                    -- child so spells that appear in both viewers show their cooldown, not
+                    -- their buff duration (e.g. Voltaic Blaze).
+                    if not isBuffBarForOvr then
+                        local cdChild = _tickBlizzCDChildCache[resolvedID] or _tickBlizzCDChildCache[spellID]
+                        if cdChild then blizzChild = cdChild end
+                    end
                     local isAura = blizzChild and (blizzChild.wasSetFromAura == true or blizzChild.auraInstanceID ~= nil)
                     local auraID = blizzChild and blizzChild.auraInstanceID
                     local auraUnit = blizzChild and blizzChild.auraDataUnit or "player"
 
                     if not isAura then
-                        if _tickBlizzActiveCache[resolvedID] or _tickBlizzActiveCache[spellID] then
-                            isAura = true
+                        -- For CD/utility bars: only use the active cache if there's no
+                        -- dedicated CD-viewer child for this spell. If there is a CD child,
+                        -- the active cache may have been set by the buff viewer for a
+                        -- dual-viewer spell — trust the CD child's state instead.
+                        local skipActiveCache = not isBuffBarForOvr
+                            and (_tickBlizzCDChildCache[resolvedID] or _tickBlizzCDChildCache[spellID])
+                        if not skipActiveCache then
+                            if _tickBlizzActiveCache[resolvedID] or _tickBlizzActiveCache[spellID] then
+                                isAura = true
+                            end
                         end
                     end
 
@@ -4295,6 +4328,7 @@ local function UpdateAllCDMBars(dt)
     wipe(_tickBlizzChildCache)
     wipe(_tickBlizzAllChildCache)
     wipe(_tickBlizzBuffChildCache)
+    wipe(_tickBlizzCDChildCache)
     do
         local viewers = { "EssentialCooldownViewer", "UtilityCooldownViewer", "BuffIconCooldownViewer", "BuffBarCooldownViewer" }
         for _, vName in ipairs(viewers) do
@@ -4323,6 +4357,11 @@ local function UpdateAllCDMBars(dt)
                                     -- summon-type spells that have no aura)
                                     if isBuffViewer then
                                         _tickBlizzBuffChildCache[resolvedSid] = ch
+                                    else
+                                        -- CD/utility viewer child cache: used by CD bars to
+                                        -- avoid picking up the buff viewer's aura state for
+                                        -- spells that appear in both viewer types.
+                                        _tickBlizzCDChildCache[resolvedSid] = ch
                                     end
                                 end
                                 -- Also map the correct spellID for buff viewer children.
@@ -4826,6 +4865,9 @@ end
 ns.GetExtraSpells = GetExtraSpells
 
 --- Get all available CDM spells for a bar's categories.
+-- Forward declaration — defined after GetCDMSpellsForBar (which calls it)
+local SpellConflictsWithOtherBar
+
 --- Returns array of { cdID, spellID, name, icon, isDisplayed, isKnown [, isExtra] }
 --- Sorted: displayed+known first, then known, then unlearned (desaturated).
 function ns.GetCDMSpellsForBar(barKey)
@@ -4966,6 +5008,7 @@ function ns.GetCDMSpellsForBar(barKey)
                         local tex = C_Spell.GetSpellTexture(sid)
                         if name and tex then
                             seenSpellID[sid] = true
+                            local isConflict = SpellConflictsWithOtherBar(sid, barKey)
                             spells[#spells + 1] = {
                                 cdID = cdID,
                                 spellID = sid,
@@ -4975,6 +5018,7 @@ function ns.GetCDMSpellsForBar(barKey)
                                 cdmCatGroup = (cat == 2 or cat == 3) and "buff" or "cooldown",
                                 isDisplayed = ourPool[sid] or blizzTracked[sid] or false,
                                 isKnown = knownSet[cdID] or false,
+                                isConflict = isConflict or false,
                             }
                         end
                     end
@@ -5143,9 +5187,52 @@ function ns.MoveTrackedSpell(barKey, fromIdx, toIdx)
     return false
 end
 
+-- Returns the bar type ("buffs", "cooldowns", "utility", etc.) for a given barKey.
+local function GetBarType(barKey)
+    if barKey == "cooldowns" then return "cooldowns" end
+    if barKey == "utility"   then return "utility"   end
+    if barKey == "buffs"     then return "buffs"     end
+    local bd = barDataByKey[barKey]
+    return bd and bd.barType
+end
+
+-- Returns true if spellID is already tracked on any bar whose type conflicts
+-- with targetBarType.  Buff bars conflict with CD/utility bars and vice versa.
+-- Returns the conflicting barKey as a second value for error messages.
+SpellConflictsWithOtherBar = function(spellID, targetBarKey)
+    local targetType = GetBarType(targetBarKey)
+    local targetIsBuff = (targetType == "buffs")
+    local p = ECME.db.profile
+    for _, b in ipairs(p.cdmBars.bars) do
+        if b.key ~= targetBarKey then
+            local bt = GetBarType(b.key)
+            local bIsBuff = (bt == "buffs")
+            -- Conflict: one is buff, the other is CD/utility
+            if targetIsBuff ~= bIsBuff then
+                local lists = { b.customSpells, b.trackedSpells, b.extraSpells }
+                for _, list in ipairs(lists) do
+                    if list then
+                        for _, sid in ipairs(list) do
+                            if sid == spellID then return true, b.key end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+-- Expose for options UI conflict display
+ns.SpellConflictsWithOtherBar = SpellConflictsWithOtherBar
+
 --- Add a tracked spell (spellID) to a bar
 --- When isExtra is true, id is a spellID (positive) or trinket slot (negative)
 function ns.AddTrackedSpell(barKey, id, isExtra)
+    -- Block assignment if this spell is already tracked on a bar of the opposite type
+    if id and id > 0 then
+        local conflicts = SpellConflictsWithOtherBar(id, barKey)
+        if conflicts then return false, "conflict" end
+    end
     local p = ECME.db.profile
     for _, b in ipairs(p.cdmBars.bars) do
         if b.key == barKey then
@@ -5226,6 +5313,11 @@ end
 --- Replace a tracked spell at a given index with a new spellID
 --- When isExtra is true, newID is a spellID or trinket slot directly
 function ns.ReplaceTrackedSpell(barKey, idx, newID, isExtra)
+    -- Block replacement if the new spell is already tracked on a bar of the opposite type
+    if newID and newID > 0 then
+        local conflicts = SpellConflictsWithOtherBar(newID, barKey)
+        if conflicts then return false, "conflict" end
+    end
     local p = ECME.db.profile
     for _, b in ipairs(p.cdmBars.bars) do
         if b.key == barKey then

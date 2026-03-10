@@ -374,7 +374,7 @@ local function DisablePixelSnap(obj)
 end
 
 -- Create a dropdown arrow texture for dropdown buttons.
--- Uses a 30Ã--30 square canvas image with the arrow centered, anchored via
+-- Uses a 30--30 square canvas image with the arrow centered, anchored via
 -- two-point attachment so it inherits the parent's pixel-aligned bounds.
 local function MakeDropdownArrow(parent, xPad, ppOverride)
     local pp = ppOverride or PP
@@ -632,6 +632,12 @@ do
         EllesmereUIDB.ppUIScale = newScale
         UIParent:SetScale(newScale)
         PP.UpdateMult()
+        -- Rebuild child addon frames with the new pixel multiplier.
+        -- PP.Size/Point values are baked at frame-build time, so each addon
+        -- needs to re-run its layout pass after mult changes.
+        if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
+        if _G._ERB_Apply then _G._ERB_Apply() end
+        if _G._EAB_Apply then _G._EAB_Apply() end
     end
 
     ---------------------------------------------------------------------------
@@ -5281,7 +5287,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "3.9.8"
+EllesmereUI.VERSION = "4.0"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

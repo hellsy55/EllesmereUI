@@ -22,9 +22,6 @@ local PAGE_CORE        = "Quick Setup"
 local PAGE_COLORS      = "Fonts & Colors"
 local PAGE_PROFILES    = "Profiles"
 
--- CDM Layout import pending state (persists across page rebuilds)
-local _cdmPendingLayout = nil
-local _cdmMissingSpells = nil
 
 -------------------------------------------------------------------------------
 --  FCT font — handled by EllesmereUI_Startup.lua which runs earlier.
@@ -2862,30 +2859,35 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Shared dropdown builder (reused for profile dd and preset dd)
-        local function MakeDropdown(parent, w, h, getLabel)
-            local btn = CreateFrame("Button", nil, parent)
+        local function MakeDropdown(parentFrame, w, h, getLabel)
+            local btn = CreateFrame("Button", nil, parentFrame)
             PP.Size(btn, w, h)
-            btn:SetFrameLevel(parent:GetFrameLevel() + 2)
+            btn:SetFrameLevel(parentFrame:GetFrameLevel() + 2)
             local bg = btn:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints()
             bg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-            EllesmereUI.MakeBorder(btn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+            local brd = EllesmereUI.MakeBorder(btn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
             local lbl = EllesmereUI.MakeFont(btn, 13, nil, 1, 1, 1)
             lbl:SetAlpha(EllesmereUI.DD_TXT_A)
-            lbl:SetPoint("LEFT", btn, "LEFT", 10, 0)
-            lbl:SetPoint("RIGHT", btn, "RIGHT", -26, 0)
             lbl:SetJustifyH("LEFT")
+            lbl:SetWordWrap(false)
+            lbl:SetMaxLines(1)
+            lbl:SetPoint("LEFT", btn, "LEFT", 12, 0)
+            local arrow = EllesmereUI.MakeDropdownArrow(btn, 12, PP)
+            lbl:SetPoint("RIGHT", arrow, "LEFT", -5, 0)
             lbl:SetText(getLabel())
-            EllesmereUI.MakeDropdownArrow(btn, 12, PP)
+            local s = EllesmereUI.RD_DD_COLOURS
             btn:SetScript("OnEnter", function()
-                bg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
-                lbl:SetAlpha(EllesmereUI.DD_TXT_HA)
+                lbl:SetTextColor(s[21], s[22], s[23], s[24])
+                brd:SetColor(s[13], s[14], s[15], s[16])
+                bg:SetColorTexture(s[5], s[6], s[7], s[8])
             end)
             btn:SetScript("OnLeave", function()
-                bg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                lbl:SetAlpha(EllesmereUI.DD_TXT_A)
+                lbl:SetTextColor(s[17], s[18], s[19], s[20])
+                brd:SetColor(s[9], s[10], s[11], s[12])
+                bg:SetColorTexture(s[1], s[2], s[3], s[4])
             end)
-            return btn, lbl, bg
+            return btn, lbl, bg, brd
         end
 
         local function MakeDropdownMenu(anchor, w)
@@ -2964,7 +2966,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         do
             local ROW_H  = 70
-            local ITEM_H = 42
+            local ITEM_H = 38
             local GAP    = 35
             local ITEM_W = 220
 
@@ -3001,12 +3003,14 @@ initFrame:SetScript("OnEvent", function(self)
                         cancelText  = "Cancel",
                         onConfirm   = function(name)
                             if not name or name == "" then return end
+                            local checkFontChanged = EllesmereUI.CaptureFontState()
                             local ok, err = EllesmereUI.ImportProfile(importStr, name)
                             if ok then
                                 if ddLabel then ddLabel:SetText(name) end
                                 EllesmereUI.RefreshAllAddons()
                                 EllesmereUI:InvalidatePageCache()
                                 EllesmereUI:RefreshPage(true)
+                                checkFontChanged()
                             else
                                 EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
                             end
@@ -3021,11 +3025,13 @@ initFrame:SetScript("OnEvent", function(self)
                 presetEntries[#presetEntries + 1] = {
                     label = "Spin the Wheel",
                     onApply = function()
+                        local checkFontChanged = EllesmereUI.CaptureFontState()
                         EllesmereUI.SpinTheWheel()
                         EllesmereUI.SaveCurrentAsProfile(UniquePresetName("Spin the Wheel"))
                         EllesmereUI.RefreshAllAddons()
                         EllesmereUI:InvalidatePageCache()
                         EllesmereUI:RefreshPage(true)
+                        checkFontChanged()
                     end,
                 }
                 if EllesmereUI.WEEKLY_SPOTLIGHT then
@@ -3034,11 +3040,13 @@ initFrame:SetScript("OnEvent", function(self)
                         label = "Weekly Spotlight: " .. spot.name,
                         onApply = function()
                             if not spot.exportString then return end
+                            local checkFontChanged = EllesmereUI.CaptureFontState()
                             local ok, err = EllesmereUI.ImportProfile(spot.exportString, UniquePresetName("Weekly: " .. spot.name))
                             if ok then
                                 EllesmereUI.RefreshAllAddons()
                                 EllesmereUI:InvalidatePageCache()
                                 EllesmereUI:RefreshPage(true)
+                                checkFontChanged()
                             else EllesmereUI:ShowInfoPopup({ title = "Spotlight Error", content = err or "Unknown error" }) end
                         end,
                     }
@@ -3049,11 +3057,13 @@ initFrame:SetScript("OnEvent", function(self)
                         presetEntries[#presetEntries + 1] = {
                             label = p.name,
                             onApply = function()
+                                local checkFontChanged = EllesmereUI.CaptureFontState()
                                 local ok, err = EllesmereUI.ImportProfile(p.exportString, UniquePresetName(p.name))
                                 if ok then
                                     EllesmereUI.RefreshAllAddons()
                                     EllesmereUI:InvalidatePageCache()
                                     EllesmereUI:RefreshPage(true)
+                                    checkFontChanged()
                                 else EllesmereUI:ShowInfoPopup({ title = "Preset Error", content = err or "Unknown error" }) end
                             end,
                         }
@@ -3068,15 +3078,19 @@ initFrame:SetScript("OnEvent", function(self)
                 local ddBg = ddBtn:CreateTexture(nil, "BACKGROUND")
                 ddBg:SetAllPoints()
                 ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+                local ddBrd = EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
 
                 local ddLbl = EllesmereUI.MakeFont(ddBtn, 13, nil, 1, 1, 1)
                 ddLbl:SetAlpha(EllesmereUI.DD_TXT_A)
-                ddLbl:SetPoint("LEFT",  ddBtn, "LEFT",  10, 0)
-                ddLbl:SetPoint("RIGHT", ddBtn, "RIGHT", -26, 0)
                 ddLbl:SetJustifyH("LEFT")
+                ddLbl:SetWordWrap(false)
+                ddLbl:SetMaxLines(1)
+                ddLbl:SetPoint("LEFT",  ddBtn, "LEFT",  14, 0)
+                local ddArrow = EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+                ddLbl:SetPoint("RIGHT", ddArrow, "LEFT", -5, 0)
                 ddLbl:SetText("Popular Presets")
-                EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+
+                local pS = EllesmereUI.RD_DD_COLOURS
 
                 local menu = MakeDropdownMenu(ddBtn, ITEM_W)
                 local menuBtns = MakeMenuItems(menu, presetEntries, function(idx, entry)
@@ -3094,20 +3108,23 @@ initFrame:SetScript("OnEvent", function(self)
                     else LayoutMenuItems(menu, menuBtns, 0); menu:Show() end
                 end)
                 ddBtn:SetScript("OnEnter", function()
-                    ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
-                    ddLbl:SetAlpha(EllesmereUI.DD_TXT_HA)
+                    ddLbl:SetTextColor(pS[21], pS[22], pS[23], pS[24])
+                    ddBrd:SetColor(pS[13], pS[14], pS[15], pS[16])
+                    ddBg:SetColorTexture(pS[5], pS[6], pS[7], pS[8])
                 end)
                 ddBtn:SetScript("OnLeave", function()
                     if not menu:IsShown() then
-                        ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                        ddLbl:SetAlpha(EllesmereUI.DD_TXT_A)
+                        ddLbl:SetTextColor(pS[17], pS[18], pS[19], pS[20])
+                        ddBrd:SetColor(pS[9], pS[10], pS[11], pS[12])
+                        ddBg:SetColorTexture(pS[1], pS[2], pS[3], pS[4])
                     end
                 end)
                 ddBtn:HookScript("OnHide", function() menu:Hide() end)
                 menu:SetScript("OnHide", function(self)
                     self:SetScript("OnUpdate", nil)
-                    ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                    ddLbl:SetAlpha(EllesmereUI.DD_TXT_A)
+                    ddLbl:SetTextColor(pS[17], pS[18], pS[19], pS[20])
+                    ddBrd:SetColor(pS[9], pS[10], pS[11], pS[12])
+                    ddBg:SetColorTexture(pS[1], pS[2], pS[3], pS[4])
                 end)
             end
 
@@ -3142,15 +3159,19 @@ initFrame:SetScript("OnEvent", function(self)
             local ddBg = ddBtn:CreateTexture(nil, "BACKGROUND")
             ddBg:SetAllPoints()
             ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-            EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+            local ddBrd = EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
 
             ddLabel = EllesmereUI.MakeFont(ddBtn, 13, nil, 1, 1, 1)
             ddLabel:SetAlpha(EllesmereUI.DD_TXT_A)
-            ddLabel:SetPoint("LEFT",  ddBtn, "LEFT",  10, 0)
-            ddLabel:SetPoint("RIGHT", ddBtn, "RIGHT", -26, 0)
             ddLabel:SetJustifyH("LEFT")
+            ddLabel:SetWordWrap(false)
+            ddLabel:SetMaxLines(1)
+            ddLabel:SetPoint("LEFT",  ddBtn, "LEFT",  12, 0)
+            local ddArrow2 = EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+            ddLabel:SetPoint("RIGHT", ddArrow2, "LEFT", -5, 0)
             ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-            EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+
+            local aS = EllesmereUI.RD_DD_COLOURS
 
             local menu = MakeDropdownMenu(ddBtn, DD_W)
             local X_SZ = 14
@@ -3250,20 +3271,23 @@ initFrame:SetScript("OnEvent", function(self)
                 else RebuildProfileMenu(); menu:Show() end
             end)
             ddBtn:SetScript("OnEnter", function()
-                ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
-                ddLabel:SetAlpha(EllesmereUI.DD_TXT_HA)
+                ddLabel:SetTextColor(aS[21], aS[22], aS[23], aS[24])
+                ddBrd:SetColor(aS[13], aS[14], aS[15], aS[16])
+                ddBg:SetColorTexture(aS[5], aS[6], aS[7], aS[8])
             end)
             ddBtn:SetScript("OnLeave", function()
                 if not menu:IsShown() then
-                    ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                    ddLabel:SetAlpha(EllesmereUI.DD_TXT_A)
+                    ddLabel:SetTextColor(aS[17], aS[18], aS[19], aS[20])
+                    ddBrd:SetColor(aS[9], aS[10], aS[11], aS[12])
+                    ddBg:SetColorTexture(aS[1], aS[2], aS[3], aS[4])
                 end
             end)
             ddBtn:HookScript("OnHide", function() menu:Hide() end)
             menu:SetScript("OnHide", function(self)
                 self:SetScript("OnUpdate", nil)
-                ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                ddLabel:SetAlpha(EllesmereUI.DD_TXT_A)
+                ddLabel:SetTextColor(aS[17], aS[18], aS[19], aS[20])
+                ddBrd:SetColor(aS[9], aS[10], aS[11], aS[12])
+                ddBg:SetColorTexture(aS[1], aS[2], aS[3], aS[4])
             end)
 
             -- Save As button
@@ -3331,12 +3355,88 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -------------------------------------------------------------------
+        --  Shared: Check All / Uncheck All link builder
+        -------------------------------------------------------------------
+        local function BuildCheckLinks(anchorFrame, items, refreshAll)
+            local FONT_L = EllesmereUI.EXPRESSWAY
+            local LINK_GAP = 16
+            local checkAllBtn = CreateFrame("Button", nil, anchorFrame)
+            checkAllBtn:SetFrameLevel(anchorFrame:GetFrameLevel() + 2)
+            local checkAllLbl = checkAllBtn:CreateFontString(nil, "OVERLAY")
+            checkAllLbl:SetFont(FONT_L, 12, "")
+            checkAllLbl:SetText("Check All")
+            checkAllLbl:SetTextColor(1, 1, 1, 0.40)
+            checkAllLbl:SetPoint("CENTER")
+            checkAllBtn:SetSize(checkAllLbl:GetStringWidth() + 4, 18)
+            PP.Point(checkAllBtn, "BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", -LINK_GAP - 70, 8)
+            checkAllBtn:SetScript("OnEnter", function() checkAllLbl:SetTextColor(1, 1, 1, 0.80) end)
+            checkAllBtn:SetScript("OnLeave", function() checkAllLbl:SetTextColor(1, 1, 1, 0.40) end)
+            checkAllBtn:SetScript("OnClick", function()
+                for _, item in ipairs(items) do
+                    if item.enabled ~= false then item.setVal(true) end
+                end
+                if refreshAll then refreshAll() end
+            end)
+
+            local linkDiv = anchorFrame:CreateTexture(nil, "OVERLAY", nil, 7)
+            linkDiv:SetColorTexture(1, 1, 1, 0.15)
+            if linkDiv.SetSnapToPixelGrid then linkDiv:SetSnapToPixelGrid(false); linkDiv:SetTexelSnappingBias(0) end
+            PP.Point(linkDiv, "LEFT", checkAllBtn, "RIGHT", LINK_GAP / 2, 0)
+            linkDiv:SetWidth(1)
+            linkDiv:SetHeight(10)
+
+            local uncheckAllBtn = CreateFrame("Button", nil, anchorFrame)
+            uncheckAllBtn:SetFrameLevel(anchorFrame:GetFrameLevel() + 2)
+            local uncheckAllLbl = uncheckAllBtn:CreateFontString(nil, "OVERLAY")
+            uncheckAllLbl:SetFont(FONT_L, 12, "")
+            uncheckAllLbl:SetText("Uncheck All")
+            uncheckAllLbl:SetTextColor(1, 1, 1, 0.40)
+            uncheckAllLbl:SetPoint("CENTER")
+            uncheckAllBtn:SetSize(uncheckAllLbl:GetStringWidth() + 4, 18)
+            PP.Point(uncheckAllBtn, "LEFT", checkAllBtn, "RIGHT", LINK_GAP, 0)
+            uncheckAllBtn:SetScript("OnEnter", function() uncheckAllLbl:SetTextColor(1, 1, 1, 0.80) end)
+            uncheckAllBtn:SetScript("OnLeave", function() uncheckAllLbl:SetTextColor(1, 1, 1, 0.40) end)
+            uncheckAllBtn:SetScript("OnClick", function()
+                for _, item in ipairs(items) do
+                    if item.enabled ~= false then item.setVal(false) end
+                end
+                if refreshAll then refreshAll() end
+            end)
+        end
+
+        -- Shared: error flash on a MakeBorder object (red highlight that fades)
+        local function BuildErrorFlash(btn, brd)
+            local flashFrame = CreateFrame("Frame", nil, btn)
+            flashFrame:Hide()
+            local elapsed = 0
+            local FLASH_DUR = 0.7
+            local lerp = EllesmereUI.lerp
+            flashFrame:SetScript("OnUpdate", function(self, dt)
+                elapsed = elapsed + dt
+                if elapsed >= FLASH_DUR then
+                    self:Hide()
+                    brd:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A)
+                    return
+                end
+                local t = elapsed / FLASH_DUR
+                brd:SetColor(lerp(0.9, 1, t), lerp(0.15, 1, t), lerp(0.15, 1, t), lerp(0.7, EllesmereUI.DD_BRD_A, t))
+            end)
+            return function()
+                elapsed = 0
+                brd:SetColor(0.9, 0.15, 0.15, 0.7)
+                flashFrame:Show()
+            end
+        end
+
+        -------------------------------------------------------------------
         --  PER-ADDON EXPORT section
         -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "PER-ADDON EXPORT", y);  y = y - h
+        local perAddonHeader
+        perAddonHeader, h = W:SectionHeader(parent, "PER-ADDON EXPORT", y);  y = y - h
 
         -- 4-column checkbox grid for addon selection
         local selectedAddons = {}
+        local addonGridVisuals = {}
         do
             local ADDON_DB_MAP_LOCAL = EllesmereUI._ADDON_DB_MAP
             local GRID_COLS  = 4
@@ -3370,6 +3470,12 @@ initFrame:SetScript("OnEvent", function(self)
                     setVal  = function() end,
                 }
             end
+
+            -- Check All / Uncheck All links on the section header
+            local function RefreshAddonGrid()
+                for _, fn in ipairs(addonGridVisuals) do fn() end
+            end
+            BuildCheckLinks(perAddonHeader, gridItems, RefreshAddonGrid)
 
             local totalW = parent:GetWidth() - GRID_PAD * 2
             local colW   = math.floor(totalW / GRID_COLS)
@@ -3450,6 +3556,7 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end
                         ApplyVisual()
+                        addonGridVisuals[#addonGridVisuals + 1] = ApplyVisual
 
                         btn:SetScript("OnClick", function()
                             item.setVal(not item.getVal())
@@ -3467,14 +3574,31 @@ initFrame:SetScript("OnEvent", function(self)
         -- Extra spacing before Export button
         _, h = W:Spacer(parent, y, 10);  y = y - h
 
-        -- Export Selected Addons button
-        _, h = W:WideButton(parent, "Export Selected Addons", y, function()
-            local folders = {}
-            for folder in pairs(selectedAddons) do folders[#folders + 1] = folder end
-            if #folders == 0 then return end
-            local str = EllesmereUI.ExportAddons(folders)
-            if str then EllesmereUI:ShowExportPopup(str) end
-        end);  y = y - h
+        -- Export Selected Addons button (with error flash when nothing selected)
+        do
+            local BTN_W = 450
+            local BTN_H = 42
+            local ROW_H_E = BTN_H + 20
+            local btnFrame = CreateFrame("Frame", nil, parent)
+            PP.Size(btnFrame, parent:GetWidth() - (EllesmereUI.CONTENT_PAD or 16) * 2, ROW_H_E)
+            PP.Point(btnFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD or 16, y)
+            local exportAddonBtn = CreateFrame("Button", nil, btnFrame)
+            PP.Size(exportAddonBtn, BTN_W, BTN_H)
+            PP.Point(exportAddonBtn, "CENTER", btnFrame, "CENTER", 0, 0)
+            exportAddonBtn:SetFrameLevel(btnFrame:GetFrameLevel() + 1)
+            local eaBg, eaBrd, eaLbl = EllesmereUI.MakeStyledButton(exportAddonBtn, "Export Selected Addons", 14, EllesmereUI.WB_COLOURS, function()
+                local folders = {}
+                for folder in pairs(selectedAddons) do folders[#folders + 1] = folder end
+                if #folders == 0 then
+                    if exportAddonBtn._flashError then exportAddonBtn._flashError() end
+                    return
+                end
+                local str = EllesmereUI.ExportAddons(folders)
+                if str then EllesmereUI:ShowExportPopup(str) end
+            end)
+            exportAddonBtn._flashError = BuildErrorFlash(exportAddonBtn, eaBrd)
+            y = y - ROW_H_E
+        end
 
         -- "How does this work?" centered link
         do
@@ -3521,112 +3645,221 @@ initFrame:SetScript("OnEvent", function(self)
         --  CDM SPELL LAYOUT section
         -------------------------------------------------------------------
         if C_AddOns.IsAddOnLoaded("EllesmereUICooldownManager") then
-            _, h = W:SectionHeader(parent, "CDM SPELL LAYOUT", y);  y = y - h
+            local cdmHeader
+            cdmHeader, h = W:SectionHeader(parent, "CDM SPELL LAYOUT", y);  y = y - h
 
-            -- Export / Import CDM spell layout
-            _, h = W:WideDualButton(parent, "Export CDM Spell Layout", "Import CDM Spell Layout", y,
-                function()
-                    local str, err = EllesmereUI.ExportCDMLayout()
+            -- Per-spec checkbox grid
+            local selectedSpecs = {}
+            local cdmGridVisuals = {}
+            do
+                local specProfiles = EllesmereUI.GetCDMSpecProfiles()
+                local GRID_COLS  = 4
+                local GRID_ROW_H = 50
+                local GRID_BOX_SZ = 18
+                local GRID_PAD   = EllesmereUI.CONTENT_PAD or 16
+                local GRID_SIDE  = 20
+                local ICON_SZ    = 22
+
+                local gridItems = {}
+                for _, sp in ipairs(specProfiles) do
+                    local key = sp.key
+                    gridItems[#gridItems + 1] = {
+                        label   = sp.name,
+                        icon    = sp.icon,
+                        enabled = true,
+                        getVal  = function() return selectedSpecs[key] or false end,
+                        setVal  = function(v) selectedSpecs[key] = v or nil end,
+                    }
+                end
+
+                local function RefreshCDMGrid()
+                    for _, fn in ipairs(cdmGridVisuals) do fn() end
+                end
+                BuildCheckLinks(cdmHeader, gridItems, RefreshCDMGrid)
+
+                local totalW = parent:GetWidth() - GRID_PAD * 2
+                local colW   = math.floor(totalW / GRID_COLS)
+                local totalRows = math.ceil(#gridItems / GRID_COLS)
+
+                if #gridItems == 0 then
+                    -- No saved spec profiles: show a hint
+                    local hintRow = CreateFrame("Frame", nil, parent)
+                    PP.Size(hintRow, totalW, 40)
+                    PP.Point(hintRow, "TOPLEFT", parent, "TOPLEFT", GRID_PAD, y)
+                    hintRow._skipRowDivider = true
+                    EllesmereUI.RowBg(hintRow, parent)
+                    local hintLbl = EllesmereUI.MakeFont(hintRow, 13, nil, 1, 1, 1)
+                    hintLbl:SetPoint("CENTER")
+                    hintLbl:SetAlpha(0.4)
+                    hintLbl:SetText("No saved spec profiles found. Play each spec once to generate them.")
+                    y = y - 40
+                end
+
+                for row = 0, totalRows - 1 do
+                    local rowFrame = CreateFrame("Frame", nil, parent)
+                    PP.Size(rowFrame, totalW, GRID_ROW_H)
+                    PP.Point(rowFrame, "TOPLEFT", parent, "TOPLEFT", GRID_PAD, y - row * GRID_ROW_H)
+                    rowFrame._skipRowDivider = true
+                    EllesmereUI.RowBg(rowFrame, parent)
+
+                    for d = 1, GRID_COLS - 1 do
+                        local div = rowFrame:CreateTexture(nil, "ARTWORK")
+                        div:SetColorTexture(1, 1, 1, 0.06)
+                        if div.SetSnapToPixelGrid then div:SetSnapToPixelGrid(false); div:SetTexelSnappingBias(0) end
+                        div:SetWidth(1)
+                        PP.Point(div, "TOP",    rowFrame, "TOPLEFT", d * colW, 0)
+                        PP.Point(div, "BOTTOM", rowFrame, "BOTTOMLEFT", d * colW, 0)
+                    end
+
+                    for col = 0, GRID_COLS - 1 do
+                        local idx = row * GRID_COLS + col + 1
+                        local item = gridItems[idx]
+                        if not item then break end
+
+                        local cell = CreateFrame("Frame", nil, rowFrame)
+                        cell:SetSize(colW, GRID_ROW_H)
+                        cell:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", col * colW, 0)
+
+                        -- Spec icon
+                        if item.icon then
+                            local ico = cell:CreateTexture(nil, "ARTWORK")
+                            ico:SetSize(ICON_SZ, ICON_SZ)
+                            ico:SetPoint("LEFT", cell, "LEFT", GRID_SIDE, 0)
+                            ico:SetTexture(item.icon)
+                            ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                            local label = EllesmereUI.MakeFont(cell, 13, nil, 1, 1, 1)
+                            label:SetPoint("LEFT", ico, "RIGHT", 6, 0)
+                            label:SetText(item.label)
+                            item._label = label
+                            item._icon  = ico
+                        else
+                            local label = EllesmereUI.MakeFont(cell, 13, nil, 1, 1, 1)
+                            label:SetPoint("LEFT", cell, "LEFT", GRID_SIDE, 0)
+                            label:SetText(item.label)
+                            item._label = label
+                        end
+
+                        local box = CreateFrame("Frame", nil, cell)
+                        box:SetSize(GRID_BOX_SZ, GRID_BOX_SZ)
+                        box:SetPoint("RIGHT", cell, "RIGHT", -GRID_SIDE, 0)
+
+                        local boxBg = box:CreateTexture(nil, "BACKGROUND")
+                        boxBg:SetAllPoints()
+                        boxBg:SetColorTexture(0.12, 0.12, 0.14, 1)
+                        if boxBg.SetSnapToPixelGrid then boxBg:SetSnapToPixelGrid(false); boxBg:SetTexelSnappingBias(0) end
+
+                        local boxBrd = EllesmereUI.MakeBorder(box, 0.25, 0.25, 0.28, 0.6, EllesmereUI.PanelPP)
+
+                        local check = box:CreateTexture(nil, "ARTWORK")
+                        check:SetPoint("TOPLEFT", box, "TOPLEFT", 3, -3)
+                        check:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -3, 3)
+                        check:SetColorTexture(EG.r, EG.g, EG.b, 1)
+                        if check.SetSnapToPixelGrid then check:SetSnapToPixelGrid(false); check:SetTexelSnappingBias(0) end
+
+                        local btn = CreateFrame("Button", nil, cell)
+                        btn:SetAllPoints(cell)
+                        btn:SetFrameLevel(cell:GetFrameLevel() + 2)
+
+                        local function ApplyVisual()
+                            local on = item.getVal()
+                            if on then
+                                check:Show()
+                                item._label:SetAlpha(1)
+                                if item._icon then item._icon:SetAlpha(1) end
+                                boxBrd:SetColor(EG.r, EG.g, EG.b, 0.15)
+                            else
+                                check:Hide()
+                                item._label:SetAlpha(0.5)
+                                if item._icon then item._icon:SetAlpha(0.5) end
+                                boxBrd:SetColor(0.25, 0.25, 0.28, 0.6)
+                            end
+                        end
+                        ApplyVisual()
+                        cdmGridVisuals[#cdmGridVisuals + 1] = ApplyVisual
+
+                        btn:SetScript("OnClick", function()
+                            item.setVal(not item.getVal())
+                            ApplyVisual()
+                        end)
+                        btn:SetScript("OnEnter", function()
+                            if not item.getVal() then
+                                item._label:SetAlpha(0.8)
+                                if item._icon then item._icon:SetAlpha(0.8) end
+                            end
+                        end)
+                        btn:SetScript("OnLeave", function()
+                            if not item.getVal() then
+                                item._label:SetAlpha(0.5)
+                                if item._icon then item._icon:SetAlpha(0.5) end
+                            end
+                        end)
+                    end
+                end
+
+                if totalRows > 0 then y = y - totalRows * GRID_ROW_H end
+            end
+
+            -- Spacing before buttons
+            _, h = W:Spacer(parent, y, 10);  y = y - h
+
+            -- Export CDM Spell Layout button (with error flash)
+            do
+                local BTN_W = 450
+                local BTN_H = 42
+                local ROW_H_E = BTN_H + 20
+                local btnFrame = CreateFrame("Frame", nil, parent)
+                PP.Size(btnFrame, parent:GetWidth() - (EllesmereUI.CONTENT_PAD or 16) * 2, ROW_H_E)
+                PP.Point(btnFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD or 16, y)
+                local exportCDMBtn = CreateFrame("Button", nil, btnFrame)
+                PP.Size(exportCDMBtn, BTN_W, BTN_H)
+                PP.Point(exportCDMBtn, "CENTER", btnFrame, "CENTER", 0, 0)
+                exportCDMBtn:SetFrameLevel(btnFrame:GetFrameLevel() + 1)
+                local _, ecBrd = EllesmereUI.MakeStyledButton(exportCDMBtn, "Export CDM Spell Layout", 14, EllesmereUI.WB_COLOURS, function()
+                    local keys = {}
+                    for key in pairs(selectedSpecs) do keys[#keys + 1] = key end
+                    if #keys == 0 then
+                        if exportCDMBtn._flashError then exportCDMBtn._flashError() end
+                        return
+                    end
+                    local str = EllesmereUI.ExportCDMSpellLayouts(keys)
                     if str then
                         EllesmereUI:ShowExportPopup(str)
                     else
-                        EllesmereUI:ShowInfoPopup({ title = "Export Failed", content = err or "Unknown error" })
+                        EllesmereUI:ShowInfoPopup({ title = "Export Failed", content = "No data found for selected specs." })
                     end
-                end,
-                function()
+                end)
+                exportCDMBtn._flashError = BuildErrorFlash(exportCDMBtn, ecBrd)
+                y = y - ROW_H_E
+            end
+
+            -- Import CDM Spell Layout button
+            do
+                local BTN_W = 450
+                local BTN_H = 42
+                local ROW_H_I = BTN_H + 20
+                local btnFrame = CreateFrame("Frame", nil, parent)
+                PP.Size(btnFrame, parent:GetWidth() - (EllesmereUI.CONTENT_PAD or 16) * 2, ROW_H_I)
+                PP.Point(btnFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD or 16, y)
+                local importCDMBtn = CreateFrame("Button", nil, btnFrame)
+                PP.Size(importCDMBtn, BTN_W, BTN_H)
+                PP.Point(importCDMBtn, "CENTER", btnFrame, "CENTER", 0, 0)
+                importCDMBtn:SetFrameLevel(btnFrame:GetFrameLevel() + 1)
+                EllesmereUI.MakeStyledButton(importCDMBtn, "Import CDM Spell Layout", 14, EllesmereUI.WB_COLOURS, function()
                     EllesmereUI:ShowImportPopup(function(importStr)
-                        local layoutData, err = EllesmereUI.DecodeCDMLayoutString(importStr)
-                        if not layoutData then
-                            EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
-                            return
-                        end
-
-                        local missing, allPresent = EllesmereUI.AnalyzeCDMLayoutSpells(layoutData)
-
-                        if allPresent then
-                            local ok, applyErr = EllesmereUI.ApplyCDMLayout(layoutData)
-                            if ok then
-                                print("|cff0cd29fEllesmereUI|r: CDM spell layout imported successfully. /reload to apply.")
-                                EllesmereUI:ShowInfoPopup({
-                                    title = "CDM Spell Layout Imported",
-                                    content = "Spell layout applied successfully.\n\nPlease /reload to see the changes.",
-                                })
-                            else
-                                EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = applyErr or "Unknown error" })
-                            end
-                        else
-                            _cdmPendingLayout = layoutData
-                            _cdmMissingSpells = missing
-                            EllesmereUI.PrintCDMLayoutMissingSpells(missing)
-                            EllesmereUI:ShowInfoPopup({
-                                title = "Spells Required",
-                                content = #missing .. " spell(s) need to be enabled in CDM before this layout can be imported.\n\n"
-                                    .. "Check your chat window for the full list of required spells.\n\n"
-                                    .. "Enable them in CDM Cooldowns/Utility/Buffs settings, then click \"Apply Pending CDM Spell Layout\" below.",
-                            })
-                            EllesmereUI:RefreshPage()
-                        end
-                    end)
-                end
-            );  y = y - h
-
-            -- "Apply Pending CDM Spell Layout" button (only visible when there's a pending import)
-            if _cdmPendingLayout then
-                _, h = W:WideButton(parent, "Apply Pending CDM Spell Layout", y, function()
-                    if not _cdmPendingLayout then return end
-
-                    -- Re-check missing spells
-                    local missing, allPresent = EllesmereUI.AnalyzeCDMLayoutSpells(_cdmPendingLayout)
-
-                    if allPresent then
-                        local ok, applyErr = EllesmereUI.ApplyCDMLayout(_cdmPendingLayout)
+                        local ok, err, count = EllesmereUI.ImportCDMSpellLayouts(importStr)
                         if ok then
-                            _cdmPendingLayout = nil
-                            _cdmMissingSpells = nil
-                            print("|cff0cd29fEllesmereUI|r: CDM spell layout imported successfully. /reload to apply.")
+                            print("|cff0cd29fEllesmereUI|r: Imported " .. (count or 0) .. " spec layout(s). /reload to apply.")
                             EllesmereUI:ShowInfoPopup({
                                 title = "CDM Spell Layout Imported",
-                                content = "Spell layout applied successfully.\n\nPlease /reload to see the changes.",
+                                content = (count or 0) .. " spec layout(s) imported successfully.\n\nPlease /reload to see the changes.",
                             })
-                            EllesmereUI:RefreshPage()
                         else
-                            EllesmereUI:ShowInfoPopup({
-                                title = "Import Failed",
-                                content = applyErr or "Unknown error",
-                            })
+                            EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
                         end
-                    else
-                        -- Still missing spells
-                        _cdmMissingSpells = missing
-                        EllesmereUI.PrintCDMLayoutMissingSpells(missing)
-                        EllesmereUI:ShowInfoPopup({
-                            title = "Still Missing Spells",
-                            content = #missing .. " spell(s) still need to be enabled.\n\nCheck chat for the updated list.",
-                        })
-                    end
-                end);  y = y - h
-
-                -- "Re-check Spells" button
-                _, h = W:WideButton(parent, "Re-check Required Spells", y, function()
-                    if not _cdmPendingLayout then return end
-                    local missing, allPresent = EllesmereUI.AnalyzeCDMLayoutSpells(_cdmPendingLayout)
-                    _cdmMissingSpells = missing
-                    EllesmereUI.PrintCDMLayoutMissingSpells(missing)
-                    if allPresent then
-                        EllesmereUI:ShowInfoPopup({
-                            title = "All Spells Ready",
-                            content = "All required spells are now tracked. Click \"Apply Pending CDM Spell Layout\" to finish the import.",
-                        })
-                    end
-                end);  y = y - h
-
-                -- "Cancel Pending Import" button
-                _, h = W:WideButton(parent, "Cancel Pending Import", y, function()
-                    _cdmPendingLayout = nil
-                    _cdmMissingSpells = nil
-                    print("|cff0cd29fEllesmereUI|r: CDM spell layout import cancelled.")
-                    EllesmereUI:RefreshPage()
-                end);  y = y - h
+                    end)
+                end)
+                y = y - ROW_H_I
             end
 
             -- "How does this work?" link for CDM spell layouts
@@ -3646,12 +3879,8 @@ initFrame:SetScript("OnEvent", function(self)
                 infoFS:SetPoint("CENTER")
                 infoBtn:SetSize(infoFS:GetStringWidth() + 10, 18)
                 PP.Point(infoBtn, "CENTER", infoFrame, "CENTER", 0, 0)
-                infoBtn:SetScript("OnEnter", function()
-                    infoFS:SetTextColor(EG.r, EG.g, EG.b, 1)
-                end)
-                infoBtn:SetScript("OnLeave", function()
-                    infoFS:SetTextColor(EG.r, EG.g, EG.b, 0.70)
-                end)
+                infoBtn:SetScript("OnEnter", function() infoFS:SetTextColor(EG.r, EG.g, EG.b, 1) end)
+                infoBtn:SetScript("OnLeave", function() infoFS:SetTextColor(EG.r, EG.g, EG.b, 0.70) end)
                 infoBtn:SetScript("OnClick", function()
                     EllesmereUI:ShowInfoPopup({
                         title = "CDM Spell Layout",
@@ -3660,10 +3889,10 @@ initFrame:SetScript("OnEvent", function(self)
                             .. "Spell assignments for all CDM bars (Cooldowns, Utility, Buffs, and custom bars), plus tracked buff bar spell assignments.\n\n"
                             .. "WHAT'S NOT INCLUDED\n"
                             .. "Visual styling (icon size, borders, colors, shapes), bar positions, bar glows, and all other appearance settings. Those stay in your main profile.\n\n"
+                            .. "EXPORTING\n"
+                            .. "Select which spec layouts to include, then export. The recipient imports and matching specs are overwritten with your layout.\n\n"
                             .. "IMPORTING\n"
-                            .. "When you import a CDM spell layout, the system checks which spells need to be tracked in CDM. "
-                            .. "If any spells are missing, they'll be listed in chat. Enable them in CDM settings first, then apply the layout.\n\n"
-                            .. "This is spec-specific. Export from the spec you want to share, and import on the spec you want to apply it to.",
+                            .. "Paste the import string and all matching spec layouts are applied directly. /reload to see the changes.",
                     })
                 end)
 

@@ -31,14 +31,25 @@ do
             f:SetScript("OnEvent", function(self)
                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
                 UIParent:SetScale(scale)
+                -- UI_SCALE_CHANGED may not fire if scale didn't change; update mult directly
+                if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+                    EllesmereUI.PP.UpdateMult()
+                end
             end)
         else
             UIParent:SetScale(scale)
+            -- UI_SCALE_CHANGED only fires when the value actually changes.
+            -- Always update mult so PP.Scale() stays correct even when the
+            -- scale was already set to this value.
+            if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+                EllesmereUI.PP.UpdateMult()
+            end
         end
     end
 
     local scaleFrame = CreateFrame("Frame")
     scaleFrame:RegisterEvent("ADDON_LOADED")
+    scaleFrame:RegisterEvent("PLAYER_LOGIN")
     scaleFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     scaleFrame:SetScript("OnEvent", function(self, event, addonName)
         if event == "ADDON_LOADED" then
@@ -67,6 +78,17 @@ do
                 ApplyScaleSafe(pendingScale)
             end
 
+        elseif event == "PLAYER_LOGIN" then
+            self:UnregisterEvent("PLAYER_LOGIN")
+            -- Update PP.mult before child addon OnEnable handlers run.
+            -- Child addons (UnitFrames, ActionBars) call PP.Scale/Size/Point
+            -- during OnEnable (which fires on PLAYER_LOGIN). If PP.mult is
+            -- still the file-load value at that point, all pixel-snapped
+            -- geometry is wrong until the next reload.
+            if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+                EllesmereUI.PP.UpdateMult()
+            end
+
         elseif event == "PLAYER_ENTERING_WORLD" then
             self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
@@ -87,18 +109,23 @@ do
             -- after a short delay to beat any Blizzard resets
             local scale = EllesmereUIDB.ppUIScale
             if scale then
+                -- Update PP.mult immediately so any frames built between now
+                -- and the timer passes use the correct pixel multiplier.
+                if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+                    EllesmereUI.PP.UpdateMult()
+                end
                 ApplyScaleSafe(scale)
                 C_Timer.After(2, function()
                     if InCombatLockdown() then return end
                     if EllesmereUIDB and EllesmereUIDB.ppUIScale then
                         ApplyScaleSafe(EllesmereUIDB.ppUIScale)
                     end
-                    -- Re-snap all borders unconditionally. UI_SCALE_CHANGED only
-                    -- fires when the scale value actually changes, so if the scale
-                    -- is already correct the event never fires and borders that
-                    -- were created after the last scale change never get re-snapped.
-                    if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.ResnapAllBorders then
-                        EllesmereUI.PP.ResnapAllBorders()
+                    -- Always update PP.mult — UI_SCALE_CHANGED only fires when
+                    -- the scale value changes, so if Blizzard reset and re-set
+                    -- the same value the event never fires and mult stays stale.
+                    if EllesmereUI and EllesmereUI.PP then
+                        if EllesmereUI.PP.UpdateMult then EllesmereUI.PP.UpdateMult() end
+                        if EllesmereUI.PP.ResnapAllBorders then EllesmereUI.PP.ResnapAllBorders() end
                     end
                 end)
                 -- Second pass: catch any borders created late (e.g. lazy-init frames)
@@ -107,8 +134,9 @@ do
                     if EllesmereUIDB and EllesmereUIDB.ppUIScale then
                         ApplyScaleSafe(EllesmereUIDB.ppUIScale)
                     end
-                    if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.ResnapAllBorders then
-                        EllesmereUI.PP.ResnapAllBorders()
+                    if EllesmereUI and EllesmereUI.PP then
+                        if EllesmereUI.PP.UpdateMult then EllesmereUI.PP.UpdateMult() end
+                        if EllesmereUI.PP.ResnapAllBorders then EllesmereUI.PP.ResnapAllBorders() end
                     end
                 end)
             end

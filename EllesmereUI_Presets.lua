@@ -429,7 +429,7 @@ do
             closeFill:SetColorTexture(0.06, 0.08, 0.10, 0.92)
             local closeLbl = closeBtn:CreateFontString(nil, "OVERLAY")
             closeLbl:SetFont(FONT, 16, "")
-            closeLbl:SetPoint("CENTER")
+            PP.Point(closeLbl, "CENTER", closeBtn, "CENTER", 0, 0)
             closeLbl:SetText("Done")
             closeLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
             closeBtn:SetScript("OnEnter", function()
