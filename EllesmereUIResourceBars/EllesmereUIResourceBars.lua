@@ -312,7 +312,8 @@ local DEFAULTS = {
             customColored = false,
             fillR       = playerPowerCC[1], fillG = playerPowerCC[2], fillB = playerPowerCC[3], fillA = 1,
             bgR         = 0x11/255, bgG = 0x11/255, bgB = 0x11/255, bgA = 0.75,
-            textFormat  = "perpp",  -- "none","curpp","perpp","both"
+            textFormat  = "perpp",  -- "none","smart","curpp","perpp","both"
+            showPercent = true,
             textSize    = 10,
             textXOffset = 0,
             textYOffset = 0,
@@ -1664,16 +1665,18 @@ local function UpdatePrimaryBar()
     -- Text
     if pp.textFormat ~= "none" then
         local fmt = pp.textFormat
+        local percentSuffix = (pp.showPercent == false) and "" or "%"
+        local percentText = format("%d", pctRaw) .. percentSuffix
         local txt
         if fmt == "smart" then
             local isPercent = EllesmereUI.IsSmartPowerPercent and EllesmereUI.IsSmartPowerPercent()
-            txt = isPercent and (format("%d", pctRaw) .. "%") or AbbreviateLargeNumbers(cur)
+            txt = isPercent and percentText or AbbreviateLargeNumbers(cur)
         elseif fmt == "both" then
-            txt = AbbreviateLargeNumbers(cur) .. " | " .. format("%d", pctRaw) .. "%"
+            txt = AbbreviateLargeNumbers(cur) .. " | " .. percentText
         elseif fmt == "curpp" then
             txt = AbbreviateLargeNumbers(cur)
         elseif fmt == "perpp" then
-            txt = format("%d", pctRaw) .. "%"
+            txt = percentText
         else
             txt = AbbreviateLargeNumbers(cur)
         end

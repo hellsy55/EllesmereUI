@@ -1813,12 +1813,21 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdatePowerSwDis)
             UpdatePowerSwDis()
         end
-        -- Inline cog (RESIZE) on Power Text for text size + x/y offsets
+        -- Inline cog (RESIZE) on Power Text for percent sign + text size + x/y offsets
         do
             local rgn = powerColorRow._rightRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Power Text",
                 rows = {
+                    { type = "toggle", label = "Show %",
+                      get = function()
+                          local p = DB()
+                          return (not p) or p.primary.showPercent ~= false
+                      end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.primary.showPercent = v; RefreshPower()
+                      end },
                     { type = "slider", label = "Size", min = 8, max = 24, step = 1,
                       get = function() local p = DB(); return p and p.primary.textSize or 11 end,
                       set = function(v)

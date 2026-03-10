@@ -762,8 +762,12 @@ ns.ApplyDarkTheme = ApplyDarkTheme
 local function EUI_IsSmartPowerPercent()
     local _, cls = UnitClass("player")
     if not cls then return false end
-    -- All healers
-    if cls == "PRIEST" or cls == "DRUID" or cls == "SHAMAN" or cls == "MONK" then
+    -- Druids: use percent in caster and travel form; other forms use raw value.
+    if cls == "DRUID" then
+        local form = GetShapeshiftForm()
+        return form == nil or form == 0 or form == 3
+    end
+    if cls == "PRIEST" or cls == "SHAMAN" or cls == "MONK" then
         return true
     end
     -- Paladin: only Holy
@@ -802,7 +806,7 @@ do
       end)
       return ok and result or ""
   end
-  oUF.Tags.Events["eui-smartpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER PLAYER_SPECIALIZATION_CHANGED"
+  oUF.Tags.Events["eui-smartpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER PLAYER_SPECIALIZATION_CHANGED UPDATE_SHAPESHIFT_FORM"
 end
 
 do
