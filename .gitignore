@@ -4,3 +4,4 @@ EllesmereUIUnitFrames/Libs/
 
 # Kiro workspace files
 .kiro/
+.DS_Store
