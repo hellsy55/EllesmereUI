@@ -548,13 +548,21 @@ _secureHandler:SetAttribute("_onattributechanged", [=[
             local barRef = self:GetFrameRef("bar-" .. barKey)
             if btnRef and barRef then
                 btnRef:SetParent(barRef)
-                btnRef:SetID(0)
                 btnRef:ClearAllPoints()
                 btnRef:SetPoint("TOPLEFT", barRef, "TOPLEFT", tonumber(x) or 0, tonumber(y) or 0)
                 btnRef:SetWidth(tonumber(w) or 45)
                 btnRef:SetHeight(tonumber(h) or 45)
-                if actionSlot and actionSlot ~= "" and actionSlot ~= "0" then
-                    btnRef:SetAttribute("action", tonumber(actionSlot))
+                if barKey == "PetBar" then
+                    -- PetActionButtons use their slot index as their frame ID
+                    -- to know which pet ability to display. Must not be reset to 0.
+                    local petIndex = tonumber(actionSlot) or 1
+                    btnRef:SetID(petIndex)
+                    btnRef:SetAttribute("action", nil)
+                else
+                    btnRef:SetID(0)
+                    if actionSlot and actionSlot ~= "" and actionSlot ~= "0" then
+                        btnRef:SetAttribute("action", tonumber(actionSlot))
+                    end
                 end
                 if show == "1" then
                     btnRef:Show()
@@ -5303,7 +5311,10 @@ function EAB:FinishSetup()
                                 -- For MainBar, actionSlot encodes the button index (1-12)
                                 -- so the secure snippet can set up _childupdate-offset paging
                                 actionSlot = i
-                            elseif not info.isStance and not info.isPetBar then
+                            elseif info.isPetBar then
+                                -- PetActionButtons use their index (1-10) as their slot ID
+                                actionSlot = i
+                            elseif not info.isStance then
                                 actionSlot = slotOffset + i
                             end
                             layoutData[btn._secureSlotIdx] = {

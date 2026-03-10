@@ -1797,8 +1797,10 @@ local function CreateMover(barKey)
         if not l or not t then fs:Hide(); return end
         local cx = (l + r) / 2
         local cy = (t + b2) / 2
+        local screenW = UIParent:GetWidth()
         local screenH = UIParent:GetHeight()
-        fs:SetText(format("%.0f, %.0f", cx, cy - screenH))
+        -- Display as offset from screen center so X is bar-width-independent
+        fs:SetText(format("%.0f, %.0f", cx - screenW * 0.5, cy - screenH * 0.5))
         fs:Show()
     end
 
@@ -1990,7 +1992,7 @@ local function CreateMover(barKey)
 
             -- Show live coordinates during drag (only on elements >= 20px tall)
             if s._coordFS and s:GetHeight() >= 20 then
-                s._coordFS:SetText(format("%.0f, %.0f", snapCX, snapCY - screenH))
+                s._coordFS:SetText(format("%.0f, %.0f", snapCX - screenW * 0.5, snapCY - screenH * 0.5))
                 s._coordFS:Show()
             end
 
