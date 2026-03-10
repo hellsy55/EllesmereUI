@@ -2,7 +2,7 @@
 --  EllesmereUICdmBuffBars.lua
 --  Buff Bars: Tracked Buff Bars v2 (per-bar buff tracking with individual
 --  settings) and legacy Buff Bars (disabled). Currently the legacy system is
---  disabled â€” uncomment blocks to re-enable.
+--  disabled uncomment blocks to re-enable.
 --------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
@@ -605,7 +605,7 @@ function ns.RegisterTBBUnlockElements()
     end
 end
 
---[[ BUFF BARS: DISABLED (untested â€” uncomment to re-enable)
+--[[ BUFF BARS: DISABLED (untested uncomment to re-enable)
 -------------------------------------------------------------------------------
 --  Buff Bars: Custom aura tracking display
 --  Shows player buffs as horizontal timer bars

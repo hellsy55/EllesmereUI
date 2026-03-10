@@ -94,7 +94,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Bar Glows page  (v2 â€” buff â†’ action button glow assignments)
+    --  Bar Glows page buff action button glow assignments)
     ---------------------------------------------------------------------------
     local BAR_BUTTON_PREFIXES = {
         [1] = "ActionButton",
@@ -866,7 +866,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Buff Bars page (v2 â€” per-bar tracked buff bars with individual settings)
+    --  Buff Bars page per-bar tracked buff bars with individual settings)
     ---------------------------------------------------------------------------
     local _tbbSelectedBar = 1
     local _tbbHeaderBuilder
@@ -1358,7 +1358,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
-                -- Hover highlight â€” covers bar + icon
+                -- Hover highlight covers bar + icon
                 local eg = EllesmereUI.ELLESMERE_GREEN
                 -- Build a container that wraps both bar and icon for the highlight
                 local hlContainer = CreateFrame("Frame", nil, pvFrame)
@@ -2407,7 +2407,7 @@ initFrame:SetScript("OnEvent", function(self)
         local barKey = barData.key
         local PAD = EllesmereUI.CONTENT_PAD or 10
 
-        -- Create preview container â€” scale to match real in-game icon sizes
+        -- Create preview container scale to match real in-game icon sizes
         local pf = CreateFrame("Frame", nil, parent)
         pf:SetClipsChildren(false)
 
@@ -3218,7 +3218,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             slot:SetScript("OnMouseUp", function(self, button)
                 if button == "LeftButton" and pendingDragSlot then
-                    -- Mouse released before threshold â€” not a drag, let OnClick handle it
+                    -- Mouse released before threshold not a drag, let OnClick handle it
                     pendingDragSlot = nil
                     self:SetScript("OnUpdate", nil)
                 end
@@ -3384,7 +3384,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local gridIdx = i - 1
                 local col = gridIdx % stride
                 local fillRow = math.floor(gridIdx / stride)  -- 0 = first filled row
-                local visRow = (numRows - 1) - fillRow         -- map to visual: 0=first filled â†’ bottom
+                local visRow = (numRows - 1) - fillRow         -- map to visual: 0=first filled bottom
                 PosAtGrid(slot, col, visRow)
 
                 if i <= count then
@@ -3957,7 +3957,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Inline cog on Bar Visibility (left) â€” Housing hide + Background
+        -- Inline cog on Bar Visibility (left) Housing hide + Background
         do
             local leftRgn = visRow._leftRegion
             local ctrl = leftRgn._control
@@ -3975,7 +3975,7 @@ initFrame:SetScript("OnEvent", function(self)
             MakeCogBtn(leftRgn, housingCogShow, ctrl, EllesmereUI.COGS_ICON)
         end
 
-        -- Inline cog on Bar Opacity (right) â€” Background toggle + color
+        -- Inline cog on Bar Opacity (right) Background toggle + color
         do
             local rightRgn = visRow._rightRegion
             local ctrl = rightRgn._control
@@ -4091,7 +4091,7 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildAllCDMBars(); Refresh()
               end });  y = y - h
 
-        -- Inline cog on Anchor Position (DIRECTIONS icon) â€” Growth + X + Y
+        -- Inline cog on Anchor Position (DIRECTIONS icon) Growth + X + Y
         do
             local posRgn = row3AnchorFrame._rightRegion
             local _, posCogShow = EllesmereUI.BuildCogPopup({

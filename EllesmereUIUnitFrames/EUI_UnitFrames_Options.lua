@@ -27,7 +27,7 @@ initFrame:SetScript("OnEvent", function(self)
     local frames = ns.frames
     local ReloadFrames = ns.ReloadFrames
     local ResolveFontPath = ns.ResolveFontPath
-    -- fontPaths removed â€” all modules use EllesmereUI.GetFontPath() now
+    -- fontPaths removed all modules use EllesmereUI.GetFontPath() now
 
     local floor = math.floor
     local abs = math.abs
@@ -3501,7 +3501,7 @@ initFrame:SetScript("OnEvent", function(self)
               end });  y = y - h
         SWrap(sharedHealthColorRow._leftRegion, "healthClassColored")
         SWrap(sharedHealthColorRow._rightRegion, "centerTextContent")
-        -- Inline bg + fill swatches on Class Colored â€” disabled when toggle is ON
+        -- Inline bg + fill swatches on Class Colored disabled when toggle is ON
         do
             local rgn = sharedHealthColorRow._leftRegion
 
@@ -3918,7 +3918,7 @@ initFrame:SetScript("OnEvent", function(self)
               end });  y = y - h
         SWrap(sharedPowerRow3._leftRegion, "powerPercentPowerColor")
         SWrap(sharedPowerRow3._rightRegion, "powerPercentTextPowerColor")
-        -- Inline bg + fill swatches on Power Colored â€” disabled when toggle is ON
+        -- Inline bg + fill swatches on Power Colored disabled when toggle is ON
         do
             local rgn = sharedPowerRow3._leftRegion
 

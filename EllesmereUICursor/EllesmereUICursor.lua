@@ -390,7 +390,7 @@ local function CreateGCDCircle()
         local g2 = GCD_DB()
         if not g2.enabled then return end
         if g2.instanceOnly and not InRealInstancedContent() then return end
-        -- On cancelled/failed/interrupted casts the GCD resets â€” stop the ring
+        -- On cancelled/failed/interrupted casts the GCD resets stop the ring
         if event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_STOP" then
             local cdData = GetSpellCooldown(61304)
             if not cdData or not cdData.duration or cdData.duration <= 0 or not cdData.startTime or cdData.startTime <= 0 then

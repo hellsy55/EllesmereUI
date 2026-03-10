@@ -462,7 +462,7 @@ end
 local function lerp(a, b, t) return a + (b - a) * t end
 
 -------------------------------------------------------------------------------
---  Exports  (shared locals â†’ EllesmereUI table for split files)
+--  Exports  (shared locals EllesmereUI table for split files)
 -------------------------------------------------------------------------------
 -- Visual constants (tables)
 EllesmereUI.ELLESMERE_GREEN = ELLESMERE_GREEN
@@ -5287,7 +5287,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.1.2"
+EllesmereUI.VERSION = "4.1.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

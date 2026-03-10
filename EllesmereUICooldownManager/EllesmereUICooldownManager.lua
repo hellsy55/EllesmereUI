@@ -3,7 +3,7 @@
 --  CDM Look Customization and Cooldown Display
 --  Mirrors Blizzard CDM bars with custom styling, cooldown swipes,
 --  desaturation, active state animations, and per-spec profiles.
---  Does NOT parse secret values ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ works around restricted APIs.
+--  Does NOT parse secret values works around restricted APIs.
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 local ECME = EllesmereUI.Lite.NewAddon("EllesmereUICooldownManager")
@@ -105,7 +105,7 @@ end
 
 -- Multi-charge spell cache: populated out of combat when values are not secret.
 -- Falls back to SavedVariables for combat /reload scenarios.
--- Maps spellID ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó true for spells with maxCharges > 1
+-- Maps spellID true for spells with maxCharges > 1
 local _multiChargeSpells = {}
 local _maxChargeCount    = {}  -- [spellID] = maxCharges, populated alongside _multiChargeSpells
 
@@ -327,12 +327,12 @@ local _inCombat = false
 --  Called from all update functions to avoid duplicating this logic.
 --
 --  Parameters:
---    icon       ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ our ECME icon frame (has _cooldown, _tex, _chargeText, etc.)
---    spellID    ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ resolved spell ID
---    desatOnCD  ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ boolean, whether to desaturate when on cooldown
---    showCharges ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ boolean, whether to show charge count text
---    swAlpha    ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ swipe alpha (number)
---    skipCD     ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├àΓÇ£ if true, skip cooldown application (e.g. aura already handled)
+--    icon        our ECME icon frame (has _cooldown, _tex, _chargeText, etc.)
+--    spellID     resolved spell ID
+--    desatOnCD   boolean, whether to desaturate when on cooldown
+--    showCharges  boolean, whether to show charge count text
+--    swAlpha     swipe alpha (number)
+--    skipCD      if true, skip cooldown application (e.g. aura already handled)
 --
 --  Returns: durObj (DurationObject|nil)
 -------------------------------------------------------------------------------
@@ -361,10 +361,10 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
     -- _scdShadow  (fed SCD, GCD filtered):
     --   During GCD: cleared so GCD doesn't pollute.
     --   Outside GCD: fed real SCD.
-    --   IsShown()=true  ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó all charges depleted (only outside GCD)
+    --   IsShown()=true   all charges depleted (only outside GCD)
     --
     -- _ccdShadow  (fed CCD, always live):
-    --   IsShown()=true  ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó recharge active (checked only when SCD not shown)
+    --   IsShown()=true   recharge active (checked only when SCD not shown)
     --
     -- State: isOnCooldown (0 charges), isRecharging (has charges, recharging)
     ---------------------------------------------------------------------------
@@ -748,7 +748,7 @@ local DEFAULTS = {
         -- Bar Glows (per-spec)
         spec            = {},
         activeSpecKey   = "0",
-        -- Bar Glows v2 (buff ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó action button glow assignments)
+        -- Bar Glows v2 (buff  action button glow assignments)
         barGlows = {
             enabled = true,
             selectedBar = 1,
@@ -756,7 +756,7 @@ local DEFAULTS = {
             selectedAssignment = 1,
             assignments = {},  -- ["barIdx_btnIdx"] = { {spellID, glowStyle, glowColor, classColor, mode}, ... }
         },
-        -- Buff Bars (legacy ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ kept for migration)
+        -- Buff Bars (legacy  kept for migration)
         buffBars = {
             enabled     = false,
             width       = 200,
@@ -1735,7 +1735,7 @@ end
 -------------------------------------------------------------------------------
 local PROC_GLOW_STYLE = 6  -- "Modern WoW Glow" flipbook
 
--- Reverse lookup: Blizzard CDM viewer frame name ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó our bar key
+-- Reverse lookup: Blizzard CDM viewer frame name  our bar key
 local _blizzViewerToBarKey = {
     EssentialCooldownViewer = "cooldowns",
     UtilityCooldownViewer   = "utility",
@@ -1866,7 +1866,7 @@ local function InstallProcGlowHooks()
         if spellID and C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed then
             local ok, overlayed = pcall(C_SpellActivationOverlay.IsSpellOverlayed, spellID)
             if ok and overlayed then
-                -- Spell still active ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ suppress Blizzard's alert again and keep our glow
+                -- Spell still active  suppress Blizzard's alert again and keep our glow
                 if cdmChild.SpellActivationAlert then
                     cdmChild.SpellActivationAlert:SetAlpha(0)
                     cdmChild.SpellActivationAlert:Hide()
@@ -2002,7 +2002,7 @@ end
 -------------------------------------------------------------------------------
 --  Player Frame Discovery
 --  Scans known unit frame addons to find the player's unit frame.
---  Priority: ours ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó ElvUI ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó Dander's party header ├â╞Æ├é┬ó├â┬ó├óΓÇÜ┬¼├é┬á├â┬ó├óΓÇÜ┬¼├óΓÇ₧┬ó Blizzard PlayerFrame
+--  Priority: ours  ElvUI  Dander's party header  Blizzard PlayerFrame
 -------------------------------------------------------------------------------
 local PLAYER_FRAME_SOURCES = {
     { addon = "EllesmereUIUnitFrames", global = "EllesmereUIUnitFrames_Player" },
@@ -2537,7 +2537,7 @@ BuildCDMBar = function(barIndex)
                 frame:SetPoint(fp, partyFrame, "BOTTOM", oX, oY)
             end
         else
-            -- No party frame found ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ fall back to saved position
+            -- No party frame found  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
                 ApplyBarPositionCentered(frame, pos, 1, 1, scale)
@@ -2568,7 +2568,7 @@ BuildCDMBar = function(barIndex)
                 frame:SetPoint(fp, playerFrame, "BOTTOM", oX, oY)
             end
         else
-            -- No player frame found ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ fall back to saved position
+            -- No player frame found  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
                 ApplyBarPositionCentered(frame, pos, 1, 1, scale)
@@ -2611,7 +2611,7 @@ BuildCDMBar = function(barIndex)
                 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
             end
         else
-            -- Resource Bars frame not available ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ fall back to saved position
+            -- Resource Bars frame not available  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
                 ApplyBarPositionCentered(frame, pos, 1, 1, scale)
@@ -2844,7 +2844,7 @@ local function CreateCDMIcon(barKey, index)
     icon._cooldown = cd
 
     -- Cooldown text styling
-    -- Defer cooldown text font styling (avoids closure per icon ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ uses icon._pendingFont)
+    -- Defer cooldown text font styling (avoids closure per icon  uses icon._pendingFont)
     if barData.showCooldownText then
         icon._pendingFontPath = GetCDMFont(); icon._pendingFontSize = barData.cooldownFontSize or 12
     end
@@ -2877,7 +2877,7 @@ local function CreateCDMIcon(barKey, index)
     stackText:Hide()
     icon._stackText = stackText
 
-    -- Glow overlay (for active state animations ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ extends 3px beyond icon so pixel glow ants are visible outside border)
+    -- Glow overlay (for active state animations  extends 3px beyond icon so pixel glow ants are visible outside border)
     local glowOverlay = CreateFrame("Frame", nil, icon)
     glowOverlay:ClearAllPoints()
     glowOverlay:SetPoint("TOPLEFT",     icon, "TOPLEFT",     -3,  3)
@@ -4810,7 +4810,7 @@ ns.HideBlizzardCDM = HideBlizzardCDM
 local function GetExtraSpells()
     local extras = {}
 
-    -- Trinket slots (dynamic ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ reads currently equipped item)
+    -- Trinket slots (dynamic  reads currently equipped item)
     for _, slot in ipairs({ TRINKET_SLOT_1, TRINKET_SLOT_2 }) do
         local itemID = GetInventoryItemID("player", slot)
         if itemID then

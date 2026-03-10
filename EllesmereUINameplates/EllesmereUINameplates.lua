@@ -319,7 +319,7 @@ local function GetPandemicGlowStyle()
     local db = EllesmereUINameplatesDB
     local raw = db and db.pandemicGlowStyle
     if raw == nil then return defaults.pandemicGlowStyle end
-    -- One-time legacy migration: old string keys or old numeric indices â†’ new order
+    -- One-time legacy migration: old string keys or old numeric indices new order
     -- The flag _pandemicGlowMigrated prevents re-migration after the user picks a new value
     if not db._pandemicGlowMigrated then
         local migrated
@@ -602,7 +602,7 @@ ns.GetAuraSlots = GetAuraSlots
 -- Externally-needed items are stored on ns.
 do
 -- Pandemic curve: step function returns 1 when remaining% <= 30% (pandemic window), 0 otherwise
--- Secret values from duration objects are passed ONLY to Blizzard widget APIs (SetAlpha) â€” never compared in Lua
+-- Secret values from duration objects are passed ONLY to Blizzard widget APIs (SetAlpha) never compared in Lua
 local pandemicCurve
 if C_CurveUtil and C_CurveUtil.CreateCurve then
     pandemicCurve = C_CurveUtil.CreateCurve()
@@ -613,7 +613,7 @@ end
 ns.pandemicCurve = pandemicCurve
 
 -------------------------------------------------------------------------------
---  Glow Engines â€” provided by shared EllesmereUI_Glows.lua
+--  Glow Engines provided by shared EllesmereUI_Glows.lua
 --  Local aliases for the pandemic glow wrapper below.
 -------------------------------------------------------------------------------
 local _G_Glows = EllesmereUI.Glows
@@ -753,7 +753,7 @@ local function ApplyPandemicGlow(slot)
         return
     end
     StartPandemicGlow(slot, GetDebuffIconSize())
-    -- Secret boolean/number â†’ EvaluateColorValueFromBoolean â†’ SetAlpha (all Blizzard APIs, no Lua comparisons)
+    -- Secret boolean/number EvaluateColorValueFromBoolean SetAlpha (all Blizzard APIs, no Lua comparisons)
     slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(pandemicCurve)))
     -- Register for alpha-only tick updates
     activePandemicSlots[slot] = true
@@ -1436,25 +1436,25 @@ local function InitDB()
         EllesmereUINameplatesDB.debuffIconW = nil
         EllesmereUINameplatesDB.debuffIconH = nil
     end
-    -- Migrate debuffTextPosition â†’ auraTextPosition (timer position now applies to all auras)
+    -- Migrate debuffTextPosition auraTextPosition (timer position now applies to all auras)
     if EllesmereUINameplatesDB.debuffTextPosition and not EllesmereUINameplatesDB.auraTextPosition then
         EllesmereUINameplatesDB.auraTextPosition = EllesmereUINameplatesDB.debuffTextPosition
     end
-    -- Migrate unified auraTextPosition â†’ per-type timer positions
+    -- Migrate unified auraTextPosition per-type timer positions
     if EllesmereUINameplatesDB.auraTextPosition and not EllesmereUINameplatesDB.debuffTimerPosition then
         local pos = EllesmereUINameplatesDB.auraTextPosition
         EllesmereUINameplatesDB.debuffTimerPosition = pos
         EllesmereUINameplatesDB.buffTimerPosition = pos
         EllesmereUINameplatesDB.ccTimerPosition = pos
     end
-    -- Migrate old per-type text color â†’ unified auraDurationTextColor
+    -- Migrate old per-type text color unified auraDurationTextColor
     if not EllesmereUINameplatesDB.auraDurationTextColor then
         if EllesmereUINameplatesDB.debuffTimerColor then
             local c = EllesmereUINameplatesDB.debuffTimerColor
             EllesmereUINameplatesDB.auraDurationTextColor = { r = c.r, g = c.g, b = c.b }
         end
     end
-    -- Migrate showHealthNumber toggle â†’ hpNumberPos dropdown
+    -- Migrate showHealthNumber toggle hpNumberPos dropdown
     if EllesmereUINameplatesDB.showHealthNumber ~= nil and not EllesmereUINameplatesDB.hpNumberPos then
         if EllesmereUINameplatesDB.showHealthNumber then
             EllesmereUINameplatesDB.hpNumberPos = "center"
@@ -1462,7 +1462,7 @@ local function InitDB()
             EllesmereUINameplatesDB.hpNumberPos = "none"
         end
     end
-    -- Migrate old text position keys â†’ new slot-based system
+    -- Migrate old text position keys new slot-based system
     if EllesmereUINameplatesDB.textSlotTop == nil
        and (EllesmereUINameplatesDB.enemyNamePos ~= nil
          or EllesmereUINameplatesDB.hpPercentPos ~= nil
@@ -1501,7 +1501,7 @@ local function InitDB()
         db.hpPercentPos = nil
         db.hpNumberPos = nil
     end
-    -- Migrate old global text colors â†’ per-slot colors
+    -- Migrate old global text colors per-slot colors
     if EllesmereUINameplatesDB.textSlotTopColor == nil then
         local db = EllesmereUINameplatesDB
         local oldNameC = db.enemyNameColor or defaults.enemyNameColor
@@ -1612,7 +1612,7 @@ function ns.RefreshStackingMotion()
     SetCVar("nameplateMotion", enabled and 1 or 0)
 end
 
---- Full visual refresh for all plates â€” called when an entire preset is applied.
+--- Full visual refresh for all plates called when an entire preset is applied.
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
 function ns.RefreshAllSettings()
@@ -1797,7 +1797,7 @@ local function SetupAuraCVars()
             end)
         end
         -- Hook OnNamePlateAdded to suppress Blizzard UnitFrame as early as
-        -- possible â€” before our NAME_PLATE_UNIT_ADDED fires.  This prevents
+        -- possible before our NAME_PLATE_UNIT_ADDED fires.  This prevents
         -- the initial layout pass from affecting nameplate bounds.
         hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, addedUnit)
             if addedUnit == "preview" then return end
@@ -1837,7 +1837,7 @@ local CP_CLASS_COLORS = {
 }
 local CP_DEFAULT_COLOR = { 1.00, 0.84, 0.30 }  -- fallback gold
 
--- Map class â†’ { powerType, maxPips (fallback) }
+-- Map class { powerType, maxPips (fallback) }
 -- Entries can be a simple table { type, max } or a spec-keyed table { [specID] = { type, max } }
 local CLASS_POWER_MAP = {
     ROGUE       = { Enum.PowerType.ComboPoints, 5 },
@@ -2375,7 +2375,7 @@ end
 local function IsQuestMob(unit)
     if not C_TooltipInfo or not QUEST_LINE_TYPES then return false end
     if questMobCache[unit] ~= nil then return questMobCache[unit] end
-    -- Skip inside instances â€” quest mobs are open-world only
+    -- Skip inside instances quest mobs are open-world only
     if InRealInstancedContent() then
         questMobCache[unit] = false
         return false
@@ -2436,18 +2436,18 @@ end)
 
 local function GetReactionColor(unit)
     local db = EllesmereUINameplatesDB
-    -- 1. Tapped â€” always highest
+    -- 1. Tapped always highest
     if UnitIsTapDenied(unit) then
         return db.tapped.r, db.tapped.g, db.tapped.b
     end
-    -- 2. Quest mob â€” second highest
+    -- 2. Quest mob second highest
     if db.questMobColorEnabled and IsQuestMob(unit) then
         local qc = db.questMobColor or defaults.questMobColor
         return qc.r, qc.g, qc.b
     end
-    -- 3â€“4. Threat colors that can NEVER be overwritten:
-    --   â€¢ Non-tank: has aggro, near aggro
-    --   â€¢ Tank: losing aggro, no aggro
+    -- Threat colors that can NEVER be overwritten:
+    -- Non-tank: has aggro, near aggro
+    -- Tank: losing aggro, no aggro
     local isThreatUnit = false   -- set true when threat data exists
     local threatStatus = 0
     if InRealInstancedContent() then
@@ -2456,7 +2456,7 @@ local function GetReactionColor(unit)
             isThreatUnit = true
             threatStatus = status
             if not _isTankRole then
-                -- Non-tank: has aggro / near aggro â€” absolute priority
+                -- Non-tank: has aggro / near aggro absolute priority
                 -- Only apply when in a group (solo players always have aggro)
                 if IsInGroup() then
                 if status >= 3 then
@@ -2466,7 +2466,7 @@ local function GetReactionColor(unit)
                 end
                 end
             else
-                -- Tank: losing aggro / no aggro â€” absolute priority
+                -- Tank: losing aggro / no aggro absolute priority
                 if status < 3 and status >= 2 then
                     return db.tankLosingAggro.r, db.tankLosingAggro.g, db.tankLosingAggro.b
                 elseif status < 3 then
@@ -2530,7 +2530,7 @@ local function GetReactionColor(unit)
             return DarkenColor(db.caster.r, db.caster.g, db.caster.b)
         end
     end
-    -- 9. Tank has aggro (if enabled) â€” below focus/caster/miniboss
+    -- 9. Tank has aggro (if enabled) below focus/caster/miniboss
     if isThreatUnit and _isTankRole and threatStatus >= 3 then
         local enabled = defaults.tankHasAggroEnabled
         if db.tankHasAggroEnabled ~= nil then enabled = db.tankHasAggroEnabled end
@@ -2593,7 +2593,7 @@ local function HideBlizzardFrame(nameplate, unit)
         MoveToOffscreen(uf.RaidTargetFrame, unit)
         MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
         if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
-        -- Move AurasFrame list frames offscreen â€” we query C_UnitAuras
+        -- Move AurasFrame list frames offscreen we query C_UnitAuras
         -- directly for debuff/CC data so these visual lists are unused.
         if uf.AurasFrame then
             MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
@@ -2601,7 +2601,7 @@ local function HideBlizzardFrame(nameplate, unit)
             MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
             MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
         end
-        -- Do NOT unregister events on the Blizzard UnitFrame â€” we need its
+        -- Do NOT unregister events on the Blizzard UnitFrame we need its
         -- AurasFrame to keep processing UNIT_AURA so debuffList stays current
         -- for our "important" debuff filtering.  All visual children are already
         -- reparented offscreen so layout recalculations won't shift bounds.
@@ -2859,7 +2859,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     local auraDurColor = (db and db.auraDurationTextColor) or defaults.auraDurationTextColor
     local auraStackSize = (db and db.auraStackTextSize) or defaults.auraStackTextSize
     local auraStackColor = (db and db.auraStackTextColor) or defaults.auraStackTextColor
-    -- Aura timer positions (per-type: debuffs, buffs, CCs â€” with "none" to hide)
+    -- Aura timer positions (per-type: debuffs, buffs, CCs with "none" to hide)
     local debuffTPos = (db and db.debuffTimerPosition) or (db and db.auraTextPosition) or defaults.debuffTimerPosition
     local buffTPos   = (db and db.buffTimerPosition)   or (db and db.auraTextPosition) or defaults.buffTimerPosition
     local ccTPos     = (db and db.ccTimerPosition)     or (db and db.auraTextPosition) or defaults.ccTimerPosition
@@ -3882,7 +3882,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
         self:HideKickTick()
         return
     end
-    -- kickProtected is a secret boolean on Midnight â€” cannot branch on it.
+    -- kickProtected is a secret boolean on Midnight cannot branch on it.
     -- Store it so we can apply visibility via SetAlphaFromBoolean after setup.
     self._kickProtected = kickProtected
     if not (C_Spell and C_Spell.GetSpellCooldownDuration) then
@@ -3950,7 +3950,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
             self.kickTick:SetAlpha(0)
         end
         -- Ticker: only updates tick alpha at 10fps.
-        -- Neither positioner nor marker values are updated â€” both are set once
+        -- Neither positioner nor marker values are updated both are set once
         -- at cast start and left alone.  The marker's
         -- secret duration naturally counts down via the engine, moving the
         -- tick mark as the kick CD expires.
@@ -3961,7 +3961,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
                 return
             end
             -- Compute tick visibility: show only when kick is on CD AND cast is interruptible.
-            -- Both are secret booleans â€” chain EvaluateColorValueFromBoolean calls
+            -- Both are secret booleans chain EvaluateColorValueFromBoolean calls
             -- to combine conditions into a single secret alpha.
             local icd = C_Spell.GetSpellCooldownDuration(activeKickSpell)
             if icd and icd.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
@@ -4156,7 +4156,7 @@ CreatePendingWatcher = function(unit, nameplate)
     watcher:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
     watcher:SetScript("OnEvent", function(self, event, u)
         if not UnitCanAttack("player", u) then return end
-        -- Unit became attackable â€” promote to enemy plate
+        -- Unit became attackable promote to enemy plate
         self:UnregisterAllEvents()
         pendingWatchers[u] = nil
         pendingUnits[u] = nil
@@ -4176,7 +4176,7 @@ CreatePendingWatcher = function(unit, nameplate)
             ns.plates[u] = plate
             plate:SetUnit(u, currentPlate)
         end
-        -- Watch for the reverse transition (enemy â†’ friendly, e.g. duel end)
+        -- Watch for the reverse transition (enemy friendly, e.g. duel end)
         enemyWatchers[u] = CreateEnemyWatcher(u)
     end)
     return watcher
@@ -4188,7 +4188,7 @@ CreateEnemyWatcher = function(unit)
     watcher:RegisterUnitEvent("UNIT_FLAGS", unit)
     watcher:SetScript("OnEvent", function(self, event, u)
         if UnitCanAttack("player", u) then return end
-        -- Unit became friendly again â€” tear down enemy plate, restore to pending
+        -- Unit became friendly again tear down enemy plate, restore to pending
         self:UnregisterAllEvents()
         enemyWatchers[u] = nil
         local plate = ns.plates[u]
@@ -4215,7 +4215,7 @@ CreateEnemyWatcher = function(unit)
     return watcher
 end
 
--- Single shared UNIT_FACTION handler â€” avoids N watchers each registering
+-- Single shared UNIT_FACTION handler avoids N watchers each registering
 -- the global event.  Dispatches to the correct watcher's OnEvent handler.
 -- Only active in the open world (duels can't happen in instanced content).
 local factionFrame = CreateFrame("Frame")
@@ -4315,7 +4315,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
             -- Hide NPC health bars in name-only mode (show name only)
             if ns.TrySuppressNPCHealthBar then ns.TrySuppressNPCHealthBar(unit, nameplate) end
             -- Ensure the Blizzard UF is visible for name-only friendly plates.
-            -- Nameplate frames are recycled â€” a UF previously used for an enemy
+            -- Nameplate frames are recycled a UF previously used for an enemy
             -- may still have alpha 0 or children parented offscreen.
             local db = EllesmereUINameplatesDB or defaults
             if db.friendlyNameOnly ~= false then

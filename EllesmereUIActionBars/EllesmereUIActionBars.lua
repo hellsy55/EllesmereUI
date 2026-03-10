@@ -442,7 +442,7 @@ local function ResolveBorderThickness(s)
 end
 ns.ResolveBorderThickness = ResolveBorderThickness
 
--- Condense keybind text (CTRL-2 â†’ C2, Mouse Button 4 â†’ M4, etc.)
+-- Condense keybind text (CTRL-2 C2, Mouse Button 4 M4, etc.)
 local function FormatHotkeyText(text)
     if not text or text == "" then return "" end
     text = text:gsub("CTRL%-", "C")
@@ -803,26 +803,26 @@ end
 local allButtons = {}   -- [actionSlot] = button
 local barButtons = {}   -- [barKey] = { btn1, btn2, ... }
 local barFrames  = {}   -- [barKey] = secure header frame
-local dataBarFrames = {} -- [barKey] = data bar frame (XP/Rep) â€” populated later in SetupDataBars
+local dataBarFrames = {} -- [barKey] = data bar frame (XP/Rep) populated later in SetupDataBars
 local blizzMovableHolders = {} -- [barKey] = holder frame for Blizzard movable frames (ExtraAction, Encounter)
 local extraBarHolders = {} -- [barKey] = holder frame for extra bars (MicroBar, BagBar)
 local BLIZZ_MOVABLE_OVERLAY = { -- Fixed overlay sizes for unlock mode movers (not the actual Blizzard frames)
     ExtraActionButton = { w = 100, h = 100 },
     EncounterBar      = { w = 150, h = 40 },
 }
-local barBaseSize = {}  -- [barKey] = { w, h } â€” original button size before any shape/scale
+local barBaseSize = {}  -- [barKey] = { w, h } original button size before any shape/scale
 
 -- Map bar config to action slot ranges
 -- These MUST match Blizzard's internal action slot assignments for each
 -- button prefix.  Confirmed via warcraft.wiki.gg/wiki/ActionSlot:
---   ActionButton1-12           â†’ slots 1-12  (paged via state driver)
---   MultiBarBottomLeftButton   â†’ slots 61-72
---   MultiBarBottomRightButton  â†’ slots 49-60
---   MultiBarRightButton        â†’ slots 25-36
---   MultiBarLeftButton         â†’ slots 37-48
---   MultiBar5Button            â†’ slots 145-156
---   MultiBar6Button            â†’ slots 157-168
---   MultiBar7Button            â†’ slots 169-180
+--   ActionButton1-12           slots 1-12  (paged via state driver)
+--   MultiBarBottomLeftButton   slots 61-72
+--   MultiBarBottomRightButton  slots 49-60
+--   MultiBarRightButton        slots 25-36
+--   MultiBarLeftButton         slots 37-48
+--   MultiBar5Button            slots 145-156
+--   MultiBar6Button            slots 157-168
+--   MultiBar7Button            slots 169-180
 -- Slots 133-144 are reserved/unknown (not used by any bar).
 -- Stance bar: uses StanceButton1-10 (not action slots)
 local BAR_SLOT_OFFSETS = {
@@ -1752,7 +1752,7 @@ local function CreateBarFrame(info)
 end
 
 -------------------------------------------------------------------------------
---  Bar Setup â€” creates frames and buttons for each bar
+--  Bar Setup creates frames and buttons for each bar
 -------------------------------------------------------------------------------
 local function SetupBar(info, skipProtected)
     local key = info.key
@@ -1863,7 +1863,7 @@ local function CaptureBlizzardDefaults()
 
     -- MainActionBar is the Edit Mode frame for Action Bar 1 in modern WoW.
     -- MainMenuBar no longer exists; the parent chain is:
-    -- ActionButton1 â†’ MainActionBarButtonContainer1 â†’ MainActionBar â†’ UIParent
+    -- ActionButton1 MainActionBarButtonContainer1 MainActionBar UIParent
     local mainActionBar = _G["MainActionBar"]
 
     for _, info in ipairs(BAR_CONFIG) do
@@ -1929,7 +1929,7 @@ local function CaptureBlizzardDefaults()
                 data.y = cy - (uiH / 2)
             end
 
-            -- Number of visible buttons â€” try Edit Mode setting 2 first
+            -- Number of visible buttons try Edit Mode setting 2 first
             if bar.GetSettingValue then
                 local ok, val = pcall(bar.GetSettingValue, bar, 2)
                 if ok and val and val >= 6 and val <= 12 then
@@ -1940,7 +1940,7 @@ local function CaptureBlizzardDefaults()
                 data.numIcons = bar.numButtonsShowable
             end
 
-            -- Number of rows â€” try Edit Mode setting 1 first
+            -- Number of rows try Edit Mode setting 1 first
             if bar.GetSettingValue then
                 local ok, val = pcall(bar.GetSettingValue, bar, 1)
                 if ok and val and val >= 1 and val <= 4 then
@@ -2018,7 +2018,7 @@ local function CaptureBlizzardDefaults()
 end
 
 -------------------------------------------------------------------------------
---  Layout Engine â€” positions buttons in a grid
+--  Layout Engine positions buttons in a grid
 -------------------------------------------------------------------------------
 -- Snap a value to a whole number of physical pixels at the bar's effective scale.
 -- Uses the same approach as the border system: convert to physical pixels,
@@ -2257,7 +2257,7 @@ local function LayoutBar(key)
 end
 
 -------------------------------------------------------------------------------
---  Visual Customization â€” Button Appearance
+--  Visual Customization Button Appearance
 -------------------------------------------------------------------------------
 local function HideSelfDeferred(self)
     -- Reuse a cached closure per frame to avoid allocation on every OnShow
@@ -2528,7 +2528,7 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
             omask:SetSize(0.001, 0.001)
             omask:Hide()
         elseif btn._eabShapeMask then
-            -- Overlays were on the main mask (no border case) â€” clean them off
+            -- Overlays were on the main mask (no border case) clean them off
             local mask = btn._eabShapeMask
             if btn.HighlightTexture then pcall(btn.HighlightTexture.RemoveMaskTexture, btn.HighlightTexture, mask) end
             if btn.PushedTexture then pcall(btn.PushedTexture.RemoveMaskTexture, btn.PushedTexture, mask) end
@@ -2673,7 +2673,7 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
         PP.Point(overlayMask, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
         overlayMask:Show()
     else
-        -- No border â€” overlays share the main mask, hide overlay mask if it exists
+        -- No border overlays share the main mask, hide overlay mask if it exists
         if btn._eabOverlayMask then btn._eabOverlayMask:Hide() end
         overlayMask = mask
     end
@@ -2684,7 +2684,7 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
     if btn.CheckedTexture then pcall(btn.CheckedTexture.AddMaskTexture, btn.CheckedTexture, overlayMask) end
     if btn.NewActionTexture then pcall(btn.NewActionTexture.AddMaskTexture, btn.NewActionTexture, overlayMask) end
     if btn.Flash then pcall(btn.Flash.AddMaskTexture, btn.Flash, overlayMask) end
-    -- Hide Blizzard's item quality border (Dragonflight+) for custom shapes â€”
+    -- Hide Blizzard's item quality border (Dragonflight+) for custom shapes
     -- it uses a round atlas that doesn't match non-square shapes.
     if btn.Border then
         btn.Border:Hide()
@@ -2815,7 +2815,7 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
 end
 
 -------------------------------------------------------------------------------
---  EAB Methods â€” Apply functions called by the options UI
+--  EAB Methods Apply functions called by the options UI
 -------------------------------------------------------------------------------
 function EAB:ApplyBordersForBar(barKey)
     if not self.db then return end
@@ -2988,7 +2988,7 @@ function EAB:ApplyFontsForBar(barKey)
     local fontPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("actionBars") or FONT_PATH
     local hideKB = s.hideKeybind
     local kbSize = s.keybindFontSize or 12
-    -- Stance/pet bar buttons are smaller (30px vs 45px) â€” shrink keybind text
+    -- Stance/pet bar buttons are smaller (30px vs 45px) shrink keybind text
     -- by 2px so it doesn't overwhelm the icon.
     local info = BAR_LOOKUP[barKey]
     if info and (info.isStance or info.isPetBar) then kbSize = max(kbSize - 2, 6) end
@@ -3902,7 +3902,7 @@ local PROC_START_TYPES = {
 ns.PROC_START_TYPES = PROC_START_TYPES
 
 -------------------------------------------------------------------------------
---  Glow Engines â€” provided by shared EllesmereUI_Glows.lua
+--  Glow Engines provided by shared EllesmereUI_Glows.lua
 -------------------------------------------------------------------------------
 local _G_Glows = EllesmereUI.Glows
 local StartProceduralAnts = _G_Glows.StartProceduralAnts
@@ -4452,7 +4452,7 @@ function EAB:ApplyMiscTextures()
             for i = 1, #buttons do
                 local btn = buttons[i]
                 if btn and btn._eabSquared then
-                    -- Do NOT color CheckedTexture or Border â€” Blizzard uses
+                    -- Do NOT color CheckedTexture or Border Blizzard uses
                     -- these for item rarity borders (green/blue/purple) on
                     -- active trinkets / equipped items.
                     if btn.NewActionTexture then btn.NewActionTexture:SetDesaturated(true); btn.NewActionTexture:SetVertexColor(cr, cg, cb, ca) end
@@ -4704,7 +4704,7 @@ RegisterStateDriver(_vehicleStateFrame, "vehicleui", "[vehicleui] invehicle; nov
 --  Vehicle Exit Button
 --  Reparent Blizzard's MainMenuBarVehicleLeaveButton so it stays visible
 --  when we hide the default action bars.  Anchor it above the top-right of
---  action bar 1.  This is a secure button â€” no taint, works in combat.
+--  action bar 1.  This is a secure button no taint, works in combat.
 --
 --  Phase 1 (file scope): strip taint-causing scripts, reparent to UIParent,
 --  set a temporary fallback anchor, hook SetPoint to block Blizzard repos.
@@ -4757,7 +4757,7 @@ if IsHouseEditorActive then
     _housingEventFrame:RegisterEvent("HOUSE_EDITOR_MODE_CHANGED")
     _housingEventFrame:SetScript("OnEvent", function()
         if IsHouseEditorActive() then
-            -- House editor opened â€” clear our override bindings
+            -- House editor opened clear our override bindings
             if _housingBindsCleared then return end
             _housingBindsCleared = true
             if not InCombatLockdown() then
@@ -4773,7 +4773,7 @@ if IsHouseEditorActive then
                 end
             end
         else
-            -- House editor closed â€” restore our override bindings
+            -- House editor closed restore our override bindings
             if not _housingBindsCleared then return end
             _housingBindsCleared = false
             if not InCombatLockdown() then
@@ -4826,7 +4826,7 @@ local function OnGridChange()
 end
 
 -------------------------------------------------------------------------------
---  Apply All â€” orchestrates full visual application
+--  Apply All orchestrates full visual application
 -------------------------------------------------------------------------------
 local function ApplyAll()
     -- Restore any strata raised during a drag that wasn't cleaned up
@@ -5049,7 +5049,7 @@ function EAB:OnInitialize()
     -- Migration: convert old settings formats if needed
     local p = self.db.profile
     if p.font and p.font:find("EllesmereUIActionBars") and not p.font:find("\\EllesmereUI\\") then
-        -- Old path without EllesmereUI subfolder â€” leave as-is, fonts are at addon root
+        -- Old path without EllesmereUI subfolder leave as-is, fonts are at addon root
     end
 
     -- Slash commands
@@ -5154,8 +5154,8 @@ function EAB:OnFirstLogin()
             if data.alwaysShowButtons ~= nil then
                 s.alwaysShowButtons = data.alwaysShowButtons
             end
-            -- Visibility: 3=Hidden â†’ set alwaysHidden
-            -- 1=InCombat â†’ combatShowEnabled, 2=OutOfCombat â†’ combatHideEnabled
+            -- Visibility: 3=Hidden set alwaysHidden
+            -- 1=InCombat combatShowEnabled, 2=OutOfCombat combatHideEnabled
             if data.visibility then
                 if data.visibility == 3 then
                     s.alwaysHidden = true
@@ -5964,7 +5964,7 @@ local function UpdateRepBar()
     local nextReactionThreshold = data.nextReactionThreshold or 1
     local standing
 
-    -- Friendship handling (check first â€” friendships override normal standing)
+    -- Friendship handling (check first friendships override normal standing)
     local isFriendship = false
     if factionID then
         local friendInfo = C_GossipInfo and C_GossipInfo.GetFriendshipReputation and C_GossipInfo.GetFriendshipReputation(factionID)
@@ -5977,7 +5977,7 @@ local function UpdateRepBar()
         end
     end
 
-    -- Paragon handling (check before renown â€” max-renown factions become paragon)
+    -- Paragon handling (check before renown max-renown factions become paragon)
     local isParagon = false
     if factionID and C_Reputation.IsFactionParagonForCurrentPlayer and C_Reputation.IsFactionParagonForCurrentPlayer(factionID) then
         local paragonVal, paragonThreshold = C_Reputation.GetFactionParagonInfo(factionID)
@@ -6293,7 +6293,7 @@ local function SetupBlizzardMovableFrame(barKey)
         holder:ClearAllPoints()
         holder:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
     else
-        -- No saved position yet â€” try to capture Blizzard's Edit Mode position
+        -- No saved position yet try to capture Blizzard's Edit Mode position
         -- immediately, or defer if the frame doesn't have valid bounds yet.
         local src = posSource or blizzFrame
         local bL, bT = src:GetLeft(), src:GetTop()
@@ -6309,7 +6309,7 @@ local function SetupBlizzardMovableFrame(barKey)
             holder:ClearAllPoints()
             holder:SetPoint("CENTER", UIParent, "TOPLEFT", cx, cy)
         else
-            -- Frame not positioned yet â€” place temporarily, capture after Edit Mode applies
+            -- Frame not positioned yet place temporarily, capture after Edit Mode applies
             holder:ClearAllPoints()
             holder:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
             local attempts = 0
@@ -6386,7 +6386,7 @@ local function SetupBlizzardMovableFrame(barKey)
             blizzFrame:SetUserPlaced(true)
             blizzFrame:SetDontSavePosition(true)
 
-            -- Hook SetupPlayerPowerBarPosition â€” Blizzard calls this to reposition
+            -- Hook SetupPlayerPowerBarPosition Blizzard calls this to reposition
             -- the bar when it activates; re-reparent into our holder.
             if type(blizzFrame.SetupPlayerPowerBarPosition) == "function" then
                 hooksecurefunc(blizzFrame, "SetupPlayerPowerBarPosition", function(bar)
@@ -6396,7 +6396,7 @@ local function SetupBlizzardMovableFrame(barKey)
                 end)
             end
 
-            -- Hook UnitPowerBarAlt_SetUp â€” called when the encounter power bar
+            -- Hook UnitPowerBarAlt_SetUp called when the encounter power bar
             -- is initialized for a fight; re-reparent the player bar.
             if type(UnitPowerBarAlt_SetUp) == "function" then
                 hooksecurefunc("UnitPowerBarAlt_SetUp", function(bar)
@@ -6546,7 +6546,7 @@ local function SetupBlizzardMovableFrames()
 end
 
 -------------------------------------------------------------------------------
---  Extra Bar Holders (MicroBar, BagBar) â€” positioning via holder frames
+--  Extra Bar Holders (MicroBar, BagBar) positioning via holder frames
 --  Reparents Blizzard frames into holder frames so unlock mode can position them.
 -------------------------------------------------------------------------------
 AttachExtraBarHoverHooks = function(info)
@@ -6806,7 +6806,7 @@ local function RegisterExtraBarsWithUnlockMode()
 end
 
 -------------------------------------------------------------------------------
---  Extra Bars (MicroBar, BagBar) â€” visibility-only management
+--  Extra Bars (MicroBar, BagBar) visibility-only management
 --  These use Blizzard's existing frames, we just manage visibility.
 -------------------------------------------------------------------------------
 local function SetupExtraBars()
