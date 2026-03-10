@@ -6454,7 +6454,7 @@ end
 -- Event frame
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
 eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
