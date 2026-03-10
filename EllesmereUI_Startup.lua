@@ -191,3 +191,9 @@ do
         end
     end)
 end
+
+-- /rl reload shortcut -- only register if nothing else has claimed it
+if not SlashCmdList["RL"] then
+    SlashCmdList["RL"] = function() ReloadUI() end
+    SLASH_RL1 = "/rl"
+end

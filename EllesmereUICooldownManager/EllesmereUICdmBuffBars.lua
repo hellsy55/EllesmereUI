@@ -7,7 +7,7 @@
 local ADDON_NAME, ns = ...
 
 -- Set to true to enable Tracked Buff Bars functionality
-local TBB_ENABLED = false
+local TBB_ENABLED = true
 
 -- Forward references from main CDM file (set during init)
 local ECME
@@ -147,17 +147,15 @@ local function GetCDMFont()
     return (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("cdm")) or CDM_FONT_FALLBACK
 end
 local function GetCDMOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    return "OUTLINE"
 end
 local function GetCDMUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
 end
 local function SetCDMFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    local f = GetCDMOutline()
-    fs:SetFont(font, size, f)
-    if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else fs:SetShadowOffset(0, 0) end
+    fs:SetFont(font, size, "OUTLINE")
+    fs:SetShadowOffset(0, 0)
 end
 
 local function CreateTrackedBuffBarFrame(parent, idx)

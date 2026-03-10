@@ -50,6 +50,11 @@ local max   = math.max
 local sqrt  = math.sqrt
 local sin   = math.sin
 
+-- IEEE 754 branchless round-to-nearest-even (avoids -0 from half-pixel centers)
+local function round(num)
+    return num + (2^52 + 2^51) - (2^52 + 2^51)
+end
+
 -------------------------------------------------------------------------------
 --  Constants
 -------------------------------------------------------------------------------
@@ -293,7 +298,7 @@ end
 
 -- Apply an anchor relationship: position the child element relative to the target
 -- side: "LEFT", "RIGHT", "TOP", "BOTTOM" — child is placed on that side of the target
-local function ApplyAnchorPosition(childKey, targetKey, side)
+local function ApplyAnchorPosition(childKey, targetKey, side, noMark)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
     if not childBar or not targetBar then return end
@@ -359,7 +364,7 @@ local function ApplyAnchorPosition(childKey, targetKey, side)
     }
     local prevScale = type(pendingPositions[childKey]) == "table" and pendingPositions[childKey].scale or nil
     if prevScale then pendingPositions[childKey].scale = prevScale end
-    hasChanges = true
+    if not noMark then hasChanges = true end
 end
 
 -- Re-apply all saved anchor positions (called on open and after target moves)
@@ -368,7 +373,7 @@ local function ReapplyAllAnchors()
     if not db then return end
     for childKey, info in pairs(db) do
         if movers[childKey] and movers[info.target] then
-            ApplyAnchorPosition(childKey, info.target, info.side)
+            ApplyAnchorPosition(childKey, info.target, info.side, true)
         end
     end
 end
@@ -1795,11 +1800,10 @@ local function CreateMover(barKey)
         if not fs then return end
         local l, r, t, b2 = self:GetLeft(), self:GetRight(), self:GetTop(), self:GetBottom()
         if not l or not t then fs:Hide(); return end
-        local cx = (l + r) / 2
-        local cy = (t + b2) / 2
+        local cx = round((l + r) / 2)
+        local cy = round((t + b2) / 2)
         local screenW = UIParent:GetWidth()
         local screenH = UIParent:GetHeight()
-        -- Display as offset from screen center so X is bar-width-independent
         fs:SetText(format("%.0f, %.0f", cx - screenW * 0.5, cy - screenH * 0.5))
         fs:Show()
     end
@@ -1972,8 +1976,8 @@ local function CreateMover(barKey)
                 s._shiftAxis = nil  -- release shift = unlock axis
             end
 
-            local halfW = s:GetWidth() / 2
-            local halfH = s:GetHeight() / 2
+            local halfW = round(s:GetWidth() / 2)
+            local halfH = round(s:GetHeight() / 2)
 
             -- Apply snap
             local snapCX, snapCY = SnapPosition(s._barKey, rawCX, rawCY, halfW, halfH)
@@ -1992,7 +1996,7 @@ local function CreateMover(barKey)
 
             -- Show live coordinates during drag (only on elements >= 20px tall)
             if s._coordFS and s:GetHeight() >= 20 then
-                s._coordFS:SetText(format("%.0f, %.0f", snapCX - screenW * 0.5, snapCY - screenH * 0.5))
+                s._coordFS:SetText(format("%.0f, %.0f", round(snapCX - screenW * 0.5), round(snapCY - screenH * 0.5)))
                 s._coordFS:Show()
             end
 
@@ -2046,9 +2050,16 @@ local function CreateMover(barKey)
         -- Re-anchor toolbar in case mover moved near/away from screen top
         if self._anchorToolbar then self._anchorToolbar() end
 
-        -- Store position in pending table (NOT saved until user clicks Save & Exit)
+        -- Check if the mover actually moved (avoids false dirty flag from
+        -- click-and-hold without movement)
         local cx = (self:GetLeft() + self:GetRight()) / 2
         local cy = (self:GetTop() + self:GetBottom()) / 2
+        local startCX = self._dragStartCX or cx
+        local startCY = self._dragStartCY or cy
+        local moved = (abs(cx - startCX) > 0.5) or (abs(cy - startCY) > 0.5)
+        if not moved then return end
+
+        -- Store position in pending table (NOT saved until user clicks Save & Exit)
 
         local bar = GetBarFrame(self._barKey)
         if not InCombatLockdown() then
@@ -5378,6 +5389,7 @@ function ns.OpenUnlockMode()
                 SortMoverFrameLevels()
                 -- Re-apply saved anchor positions and refresh anchored mover text
                 ReapplyAllAnchors()
+                wipe(pendingPositions)
                 for bk, _ in pairs(movers) do
                     if movers[bk].RefreshAnchoredText then
                         movers[bk]:RefreshAnchoredText()

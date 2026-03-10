@@ -1599,7 +1599,7 @@ initFrame:SetScript("OnEvent", function(self)
         showDmgRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Damage Text",
               disabled=function() return eqolLoaded end,
-              disabledTooltip="Temporarily disabled due to conflicts with third-party addons",
+              disabledTooltip="This option is temporarily disabled due to EQoL crashing things in conjunction with EUI. Please enable this via EQoL or disable EQoL to use this option",
               getValue=function()
                 if eqolLoaded then return false end
                 return GetCVarBool("floatingCombatTextCombatDamage_v2")
@@ -2925,15 +2925,16 @@ initFrame:SetScript("OnEvent", function(self)
                 local lbl = itm:CreateFontString(nil, "OVERLAY")
                 lbl:SetFont(FONT, 13, EllesmereUI.GetFontOutlineFlag())
                 lbl:SetPoint("LEFT", itm, "LEFT", 10, 0)
-                lbl:SetTextColor(0.55, 0.60, 0.65, 1)
+                lbl:SetJustifyH("LEFT")
+                lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                 itm._lbl = lbl
                 local hl = itm:CreateTexture(nil, "ARTWORK")
                 hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
                 itm._hl = hl
-                itm:SetScript("OnEnter", function() lbl:SetTextColor(1,1,1,1); hl:SetAlpha(0.08) end)
+                itm:SetScript("OnEnter", function() lbl:SetTextColor(1,1,1,1); hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A) end)
                 itm:SetScript("OnLeave", function()
-                    lbl:SetTextColor(0.55, 0.60, 0.65, 1)
-                    hl:SetAlpha(itm._isSel and 0.04 or 0)
+                    lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
+                    hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
                 end)
                 itm._lbl:SetText(item.label)
                 local idx = i
@@ -2966,7 +2967,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         do
             local ROW_H  = 70
-            local ITEM_H = 38
+            local ITEM_H = 36
             local GAP    = 35
             local ITEM_W = 220
 
@@ -3085,7 +3086,7 @@ initFrame:SetScript("OnEvent", function(self)
                 ddLbl:SetJustifyH("LEFT")
                 ddLbl:SetWordWrap(false)
                 ddLbl:SetMaxLines(1)
-                ddLbl:SetPoint("LEFT",  ddBtn, "LEFT",  14, 0)
+                ddLbl:SetPoint("LEFT",  ddBtn, "LEFT",  12, 0)
                 local ddArrow = EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
                 ddLbl:SetPoint("RIGHT", ddArrow, "LEFT", -5, 0)
                 ddLbl:SetText("Popular Presets")
@@ -3103,28 +3104,33 @@ initFrame:SetScript("OnEvent", function(self)
                     })
                 end)
 
+                local function PresetApplyNormal()
+                    ddLbl:SetTextColor(pS[17], pS[18], pS[19], pS[20])
+                    ddBrd:SetColor(pS[9], pS[10], pS[11], pS[12])
+                    ddBg:SetColorTexture(pS[1], pS[2], pS[3], pS[4])
+                end
+                local function PresetApplyHover()
+                    ddLbl:SetTextColor(pS[21], pS[22], pS[23], pS[24])
+                    ddBrd:SetColor(pS[13], pS[14], pS[15], pS[16])
+                    ddBg:SetColorTexture(pS[5], pS[6], pS[7], pS[8])
+                end
+
                 ddBtn:SetScript("OnClick", function()
                     if menu:IsShown() then menu:Hide()
                     else LayoutMenuItems(menu, menuBtns, 0); menu:Show() end
                 end)
-                ddBtn:SetScript("OnEnter", function()
-                    ddLbl:SetTextColor(pS[21], pS[22], pS[23], pS[24])
-                    ddBrd:SetColor(pS[13], pS[14], pS[15], pS[16])
-                    ddBg:SetColorTexture(pS[5], pS[6], pS[7], pS[8])
-                end)
+                ddBtn:SetScript("OnEnter", function() PresetApplyHover() end)
                 ddBtn:SetScript("OnLeave", function()
-                    if not menu:IsShown() then
-                        ddLbl:SetTextColor(pS[17], pS[18], pS[19], pS[20])
-                        ddBrd:SetColor(pS[9], pS[10], pS[11], pS[12])
-                        ddBg:SetColorTexture(pS[1], pS[2], pS[3], pS[4])
-                    end
+                    if not menu:IsShown() then PresetApplyNormal() end
                 end)
                 ddBtn:HookScript("OnHide", function() menu:Hide() end)
+                menu:HookScript("OnShow", function()
+                    PresetApplyHover()
+                end)
                 menu:SetScript("OnHide", function(self)
                     self:SetScript("OnUpdate", nil)
-                    ddLbl:SetTextColor(pS[17], pS[18], pS[19], pS[20])
-                    ddBrd:SetColor(pS[9], pS[10], pS[11], pS[12])
-                    ddBg:SetColorTexture(pS[1], pS[2], pS[3], pS[4])
+                    if ddBtn:IsMouseOver() then PresetApplyHover()
+                    else PresetApplyNormal() end
                 end)
             end
 
@@ -3196,7 +3202,8 @@ initFrame:SetScript("OnEvent", function(self)
                             lbl:SetFont(FONT, 13, EllesmereUI.GetFontOutlineFlag())
                             lbl:SetPoint("LEFT",  itm, "LEFT",  10, 0)
                             lbl:SetPoint("RIGHT", itm, "RIGHT", -(X_SZ + 14), 0)
-                            lbl:SetTextColor(0.55, 0.60, 0.65, 1)
+                            lbl:SetJustifyH("LEFT")
+                            lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                             itm._lbl = lbl
 
                             local hl = itm:CreateTexture(nil, "ARTWORK")
@@ -3216,12 +3223,12 @@ initFrame:SetScript("OnEvent", function(self)
 
                             itm:SetScript("OnEnter", function()
                                 lbl:SetTextColor(1, 1, 1, 1)
-                                hl:SetAlpha(0.08)
+                                hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
                                 xBtn:SetAlpha(0.8)
                             end)
                             itm:SetScript("OnLeave", function()
-                                lbl:SetTextColor(0.55, 0.60, 0.65, 1)
-                                hl:SetAlpha(itm._isSel and 0.04 or 0)
+                                lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
+                                hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
                                 xBtn:SetAlpha(0.4)
                             end)
                             menuItems[idx] = itm
@@ -3266,28 +3273,33 @@ initFrame:SetScript("OnEvent", function(self)
                 menu:SetHeight(mH + 4)
             end
 
+            local function ActiveApplyNormal()
+                ddLabel:SetTextColor(aS[17], aS[18], aS[19], aS[20])
+                ddBrd:SetColor(aS[9], aS[10], aS[11], aS[12])
+                ddBg:SetColorTexture(aS[1], aS[2], aS[3], aS[4])
+            end
+            local function ActiveApplyHover()
+                ddLabel:SetTextColor(aS[21], aS[22], aS[23], aS[24])
+                ddBrd:SetColor(aS[13], aS[14], aS[15], aS[16])
+                ddBg:SetColorTexture(aS[5], aS[6], aS[7], aS[8])
+            end
+
             ddBtn:SetScript("OnClick", function()
                 if menu:IsShown() then menu:Hide()
                 else RebuildProfileMenu(); menu:Show() end
             end)
-            ddBtn:SetScript("OnEnter", function()
-                ddLabel:SetTextColor(aS[21], aS[22], aS[23], aS[24])
-                ddBrd:SetColor(aS[13], aS[14], aS[15], aS[16])
-                ddBg:SetColorTexture(aS[5], aS[6], aS[7], aS[8])
-            end)
+            ddBtn:SetScript("OnEnter", function() ActiveApplyHover() end)
             ddBtn:SetScript("OnLeave", function()
-                if not menu:IsShown() then
-                    ddLabel:SetTextColor(aS[17], aS[18], aS[19], aS[20])
-                    ddBrd:SetColor(aS[9], aS[10], aS[11], aS[12])
-                    ddBg:SetColorTexture(aS[1], aS[2], aS[3], aS[4])
-                end
+                if not menu:IsShown() then ActiveApplyNormal() end
             end)
             ddBtn:HookScript("OnHide", function() menu:Hide() end)
+            menu:HookScript("OnShow", function()
+                ActiveApplyHover()
+            end)
             menu:SetScript("OnHide", function(self)
                 self:SetScript("OnUpdate", nil)
-                ddLabel:SetTextColor(aS[17], aS[18], aS[19], aS[20])
-                ddBrd:SetColor(aS[9], aS[10], aS[11], aS[12])
-                ddBg:SetColorTexture(aS[1], aS[2], aS[3], aS[4])
+                if ddBtn:IsMouseOver() then ActiveApplyHover()
+                else ActiveApplyNormal() end
             end)
 
             -- Save As button

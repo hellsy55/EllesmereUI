@@ -5550,34 +5550,11 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
             btn:RegisterForClicks("LeftButtonDown")
             local c = EllesmereUI.ELLESMERE_GREEN
-            local behindText = opts and opts.hlBehindText
-            local hlParent, hlAnchorFrame
-            if behindText then
-                local hlFrame = CreateFrame("Frame", nil, element)
-                hlFrame:SetAllPoints()
-                hlFrame:SetFrameLevel(element:GetFrameLevel() + 1)
-                hlParent = hlFrame
-                hlAnchorFrame = element
-            else
-                hlParent = btn
-                hlAnchorFrame = (opts and opts.hlAnchor) or btn
-            end
-            local function MkHL()
-                local t = hlParent:CreateTexture(nil, "OVERLAY", nil, 7)
-                t:SetColorTexture(c.r, c.g, c.b, 1)
-                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                return t
-            end
-            local ht = MkHL(); ht:SetHeight(2); ht:SetPoint("TOPLEFT", hlAnchorFrame, "TOPLEFT"); ht:SetPoint("TOPRIGHT", hlAnchorFrame, "TOPRIGHT")
-            local hb = MkHL(); hb:SetHeight(2); hb:SetPoint("BOTTOMLEFT", hlAnchorFrame, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", hlAnchorFrame, "BOTTOMRIGHT")
-            local hl = MkHL(); hl:SetWidth(2); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-            local hr = MkHL(); hr:SetWidth(2); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-            btn._hlTextures = { ht, hb, hl, hr }
-            local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-            local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-            HideHL()
-            btn:SetScript("OnEnter", function() ShowHL() end)
-            btn:SetScript("OnLeave", function() HideHL() end)
+            local hlTarget = (opts and opts.hlBehindText) and element or (opts and opts.hlAnchor) or btn
+            local brd = EllesmereUI.PP.CreateBorder(hlTarget, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() MultiNavigateToSetting(mappingKey) end)
             return btn
         end
@@ -5847,34 +5824,11 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
             btn:RegisterForClicks("LeftButtonDown")
             local c = EllesmereUI.ELLESMERE_GREEN
-            local behindText = opts and opts.hlBehindText
-            local hlParent, hlAnchorFrame
-            if behindText then
-                local hlFrame = CreateFrame("Frame", nil, element)
-                hlFrame:SetAllPoints()
-                hlFrame:SetFrameLevel(element:GetFrameLevel() + 1)
-                hlParent = hlFrame
-                hlAnchorFrame = element
-            else
-                hlParent = btn
-                hlAnchorFrame = (opts and opts.hlAnchor) or btn
-            end
-            local function MkHL()
-                local t = hlParent:CreateTexture(nil, "OVERLAY", nil, 7)
-                t:SetColorTexture(c.r, c.g, c.b, 1)
-                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                return t
-            end
-            local ht = MkHL(); ht:SetHeight(2); ht:SetPoint("TOPLEFT", hlAnchorFrame, "TOPLEFT"); ht:SetPoint("TOPRIGHT", hlAnchorFrame, "TOPRIGHT")
-            local hb = MkHL(); hb:SetHeight(2); hb:SetPoint("BOTTOMLEFT", hlAnchorFrame, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", hlAnchorFrame, "BOTTOMRIGHT")
-            local hl = MkHL(); hl:SetWidth(2); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-            local hr = MkHL(); hr:SetWidth(2); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-            btn._hlTextures = { ht, hb, hl, hr }
-            local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-            local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-            HideHL()
-            btn:SetScript("OnEnter", function() ShowHL() end)
-            btn:SetScript("OnLeave", function() HideHL() end)
+            local hlTarget = (opts and opts.hlBehindText) and element or (opts and opts.hlAnchor) or btn
+            local brd = EllesmereUI.PP.CreateBorder(hlTarget, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
             return btn
         end
@@ -6308,24 +6262,17 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
             btn:RegisterForClicks("LeftButtonDown")
             local c = EllesmereUI.ELLESMERE_GREEN
-            local hlParent = btn
-            local hlAnchorFrame = (opts and opts.hlAnchor) or btn
-            local function MkHL()
-                local t = hlParent:CreateTexture(nil, "OVERLAY", nil, 7)
-                t:SetColorTexture(c.r, c.g, c.b, 1)
-                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                return t
-            end
-            local ht = MkHL(); ht:SetHeight(2); ht:SetPoint("TOPLEFT", hlAnchorFrame, "TOPLEFT"); ht:SetPoint("TOPRIGHT", hlAnchorFrame, "TOPRIGHT")
-            local hb = MkHL(); hb:SetHeight(2); hb:SetPoint("BOTTOMLEFT", hlAnchorFrame, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", hlAnchorFrame, "BOTTOMRIGHT")
-            local hl = MkHL(); hl:SetWidth(2); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-            local hr = MkHL(); hr:SetWidth(2); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-            btn._hlTextures = { ht, hb, hl, hr }
-            local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-            local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-            HideHL()
-            btn:SetScript("OnEnter", function() ShowHL() end)
-            btn:SetScript("OnLeave", function() HideHL() end)
+            local PP = EllesmereUI.PP
+            -- Use a child container so the hover border doesn't conflict with
+            -- any existing PP border on the target frame.
+            local hlBase = (opts and opts.hlAnchor) or btn
+            local hlCont = CreateFrame("Frame", nil, hlBase)
+            hlCont:SetAllPoints()
+            hlCont:SetFrameLevel(hlBase:GetFrameLevel() + 1)
+            local brd = PP.CreateBorder(hlCont, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
             return btn
         end

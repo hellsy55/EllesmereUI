@@ -3189,7 +3189,7 @@ local function ApplyRangeTint(btn, outOfRange, barSettings)
     local ico = btn.icon or btn.Icon
     if not ico then return end
     if outOfRange and barSettings.outOfRangeColoring then
-        local c = barSettings.outOfRangeColor or { r = 0.8, g = 0.1, b = 0.1 }
+        local c = barSettings.outOfRangeColor or { r = 0.7, g = 0.2, b = 0.2 }
         ico:SetVertexColor(c.r, c.g, c.b)
         btn._eabRangeTinted = true
     elseif btn._eabRangeTinted then

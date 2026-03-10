@@ -11,13 +11,11 @@ ns.ECME = ECME
 
 local PP = EllesmereUI.PP
 
-local function GetCDMOutline() return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "" end
+local function GetCDMOutline() return "OUTLINE" end
 local function SetCDMFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    local f = GetCDMOutline()
-    fs:SetFont(font, size, f)
-    if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else fs:SetShadowOffset(0, 0) end
+    fs:SetFont(font, size, "OUTLINE")
+    fs:SetShadowOffset(0, 0)
 end
 
 -- Snap a value to a whole number of physical pixels at the bar's effective scale.
@@ -46,44 +44,46 @@ local BUFF_ICON_OVERRIDES = {
 -------------------------------------------------------------------------------
 --  Shape Constants (shared with action bars)
 -------------------------------------------------------------------------------
-local CDM_SHAPE_MASKS = {
-    circle   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
-    csquare  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\csquare_mask.tga",
-    diamond  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_mask.tga",
-    hexagon  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_mask.tga",
-    portrait = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\portrait_mask.tga",
-    shield   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_mask.tga",
-    square   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\square_mask.tga",
+local CDM_SHAPES = {
+    masks = {
+        circle   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
+        csquare  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\csquare_mask.tga",
+        diamond  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_mask.tga",
+        hexagon  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_mask.tga",
+        portrait = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\portrait_mask.tga",
+        shield   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_mask.tga",
+        square   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\square_mask.tga",
+    },
+    borders = {
+        circle   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_border.tga",
+        csquare  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\csquare_border.tga",
+        diamond  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_border.tga",
+        hexagon  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_border.tga",
+        portrait = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\portrait_border.tga",
+        shield   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_border.tga",
+        square   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\square_border.tga",
+    },
+    insets = {
+        circle = 17, csquare = 17, diamond = 14,
+        hexagon = 17, portrait = 17, shield = 13, square = 17,
+    },
+    iconExpand = 7,
+    iconExpandOffsets = {
+        circle = 2, csquare = 4, diamond = 2, hexagon = 4,
+        portrait = 2, shield = 2, square = 4,
+    },
+    zoomDefaults = {
+        none = 0.08, cropped = 0.05, square = 0.06, circle = 0.06, csquare = 0.06,
+        diamond = 0.06, hexagon = 0.06, portrait = 0.06, shield = 0.06,
+    },
+    edgeScales = {
+        circle = 0.75, csquare = 0.75, diamond = 0.70,
+        hexagon = 0.65, portrait = 0.70, shield = 0.65, square = 0.75,
+    },
 }
-local CDM_SHAPE_BORDERS = {
-    circle   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_border.tga",
-    csquare  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\csquare_border.tga",
-    diamond  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_border.tga",
-    hexagon  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_border.tga",
-    portrait = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\portrait_border.tga",
-    shield   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_border.tga",
-    square   = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\square_border.tga",
-}
-local CDM_SHAPE_INSETS = {
-    circle = 17, csquare = 17, diamond = 14,
-    hexagon = 17, portrait = 17, shield = 13, square = 17,
-}
-local CDM_SHAPE_ICON_EXPAND = 7
-local CDM_SHAPE_ICON_EXPAND_OFFSETS = {
-    circle = 2, csquare = 4, diamond = 2, hexagon = 4,
-    portrait = 2, shield = 2, square = 4,
-}
-local CDM_SHAPE_ZOOM_DEFAULTS = {
-    none = 0.08, cropped = 0.05, square = 0.06, circle = 0.06, csquare = 0.06,
-    diamond = 0.06, hexagon = 0.06, portrait = 0.06, shield = 0.06,
-}
-local CDM_SHAPE_EDGE_SCALES = {
-    circle = 0.75, csquare = 0.75, diamond = 0.70,
-    hexagon = 0.65, portrait = 0.70, shield = 0.65, square = 0.75,
-}
-ns.CDM_SHAPE_MASKS   = CDM_SHAPE_MASKS
-ns.CDM_SHAPE_BORDERS = CDM_SHAPE_BORDERS
-ns.CDM_SHAPE_ZOOM_DEFAULTS = CDM_SHAPE_ZOOM_DEFAULTS
+ns.CDM_SHAPE_MASKS   = CDM_SHAPES.masks
+ns.CDM_SHAPE_BORDERS = CDM_SHAPES.borders
+ns.CDM_SHAPE_ZOOM_DEFAULTS = CDM_SHAPES.zoomDefaults
 -------------------------------------------------------------------------------
 --  Desaturation Curve for DurationObject evaluation
 --  Step curve: returns 0 when remaining <= 0 (off CD), 1 when > 0.001 (on CD)
@@ -722,6 +722,62 @@ local function ApplyStackCount(icon, resolvedSid, auraInstanceID, auraUnit, show
 
     icon._stackText:Hide()
 end
+
+-------------------------------------------------------------------------------
+--  Out-of-range overlay helper
+--  Uses C_Spell.IsSpellInRange wrapped in pcall + issecretvalue guards.
+--  When the result is a secret value (combat), we hide the overlay to avoid
+--  taint from comparing secret booleans.
+-------------------------------------------------------------------------------
+local function ApplyRangeOverlay(icon, spellID, showOverlay)
+    if not showOverlay or not spellID or spellID <= 0 then
+        if icon._oorTinted then
+            if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+            icon._oorTinted = false
+        end
+        return
+    end
+    -- No target or dead target: clear tint
+    if not UnitExists("target") or UnitIsDeadOrGhost("target") then
+        if icon._oorTinted then
+            if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+            icon._oorTinted = false
+        end
+        return
+    end
+    local ok, inRange = pcall(C_Spell.IsSpellInRange, spellID, "target")
+    if not ok then
+        if icon._oorTinted then
+            if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+            icon._oorTinted = false
+        end
+        return
+    end
+    -- nil means the spell has no range component or invalid target type
+    if inRange == nil then
+        if icon._oorTinted then
+            if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+            icon._oorTinted = false
+        end
+        return
+    end
+    -- Secret value in combat: clear tint rather than risk taint
+    if issecretvalue and issecretvalue(inRange) then
+        if icon._oorTinted then
+            if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+            icon._oorTinted = false
+        end
+        return
+    end
+    if inRange == false then
+        if icon._tex then icon._tex:SetVertexColor(0.7, 0.2, 0.2) end
+        icon._oorTinted = true
+    elseif icon._oorTinted then
+        if icon._tex then icon._tex:SetVertexColor(1, 1, 1) end
+        icon._oorTinted = false
+    end
+end
+
 local BuildAllCDMBars
 local RegisterCDMUnlockElements
 local ForceResnapshotMainBars
@@ -828,6 +884,7 @@ local DEFAULTS = {
                 keybindOffsetX = 2,
                 keybindOffsetY = -2,
                 keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
+                outOfRangeOverlay = false,
             },
             -- The 3 default bars (match Blizzard CDM)
             bars = {
@@ -855,6 +912,7 @@ local DEFAULTS = {
                     showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
+                    outOfRangeOverlay = false,
                 },
                 {
                     key = "utility", name = "Utility", enabled = true,
@@ -880,6 +938,7 @@ local DEFAULTS = {
                     showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
+                    outOfRangeOverlay = false,
                 },
                 {
                     key = "buffs", name = "Buffs", enabled = true,
@@ -905,6 +964,7 @@ local DEFAULTS = {
                     showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
+                    outOfRangeOverlay = false,
                 },
             },
         },
@@ -1629,9 +1689,10 @@ local function UpdateAllCDMBorders()
         end
     end
 end
+ns.UpdateAllCDMBorders = UpdateAllCDMBorders
 
 -------------------------------------------------------------------------------
---  Native Glow System ΓÇö engines provided by shared EllesmereUI_Glows.lua
+--  Native Glow System -- engines provided by shared EllesmereUI_Glows.lua
 --  CDM keeps its own GLOW_STYLES (different scale values) and Start/Stop
 --  wrappers that handle CDM-specific shape glow (icon masks/borders).
 -------------------------------------------------------------------------------
@@ -1667,8 +1728,8 @@ StartNativeGlow = function(overlay, style, cr, cg, cb)
         -- CDM-specific: read shape mask/border from the icon frame
         local icon = parent
         local shape = icon._shapeApplied and icon._shapeName or nil
-        local maskPath   = shape and CDM_SHAPE_MASKS[shape]
-        local borderPath = shape and CDM_SHAPE_BORDERS[shape]
+        local maskPath   = shape and CDM_SHAPES.masks[shape]
+        local borderPath = shape and CDM_SHAPES.borders[shape]
         _G_Glows.StartShapeGlow(overlay, sz, cr, cg, cb, entry.scale or 1.20, {
             maskPath   = maskPath,
             borderPath = borderPath,
@@ -1883,17 +1944,36 @@ end
 
 -- Handle proc glow for custom bars via spell activation overlay events.
 -- Called from the event handler when SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE fires.
+-- Matches both base spellIDs and their talent/activation overrides so glows
+-- fire correctly even when the user's customSpells entry is the base spell
+-- but the event carries the override ID (or vice versa).
 local function OnProcGlowEvent(event, spellID)
     if not spellID then return end
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return end
 
     for _, barData in ipairs(p.cdmBars.bars) do
-        if barData.enabled and barData.isCustom and barData.customSpells then
+        if barData.enabled and barData.customSpells then
             local icons = cdmBarIcons[barData.key]
             if icons then
                 for i, sid in ipairs(barData.customSpells) do
-                    if sid == spellID and icons[i] then
+                    -- Direct match
+                    local matched = (sid == spellID)
+                    -- Override match: resolve the base spell to its current override
+                    if not matched and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                        local overrideID = C_SpellBook.FindSpellOverrideByID(sid)
+                        if overrideID and overrideID == spellID then
+                            matched = true
+                        end
+                    end
+                    -- Blizzard CDM override cache (deeper activation overrides)
+                    if not matched then
+                        local blizzOvr = _tickBlizzOverrideCache[sid]
+                        if blizzOvr and blizzOvr == spellID then
+                            matched = true
+                        end
+                    end
+                    if matched and icons[i] then
                         if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
                             ShowProcGlow(icons[i], PROC_GLOW_R, PROC_GLOW_G, PROC_GLOW_B)
                         else
@@ -1920,17 +2000,12 @@ local function GetCDMFont()
     return CDM_FONT_FALLBACK
 end
 local function GetCDMOutline()
-    if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        return EllesmereUI.GetFontOutlineFlag()
-    end
     return "OUTLINE"
 end
 local function SetBlizzCDMFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    local f = GetCDMOutline()
-    fs:SetFont(font, size, f)
-    if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else fs:SetShadowOffset(0, 0) end
+    fs:SetFont(font, size, "OUTLINE")
+    fs:SetShadowOffset(0, 0)
 end
 
 -- Blizzard CDM frame names
@@ -2120,18 +2195,31 @@ local _myRacialsSet = {}
 -- Forward declaration is kept so call sites in LoadSpecProfile/OnEnable compile.
 RefreshRacialSpells = function() end
 
--- Health potions / healthstones: { itemID, spellID [, class] [, combatLockout] }
+-- Health potions / healthstones: { itemID, spellID [, altItemID] [, class] [, combatLockout] }
+-- altItemID: alternate quality tier of the same potion (e.g. Artisan quality variant).
+-- When the player has the alt version but not the base, we display the alt instead.
 local HEALTH_ITEMS = {
-    { itemID = 241304, spellID = 1234768 },                      -- Silvermoon Health Potion
-    { itemID = 241308, spellID = 1236616 },                      -- Light's Potential
-    { itemID = 5512,   spellID = 6262, combatLockout = true },   -- Healthstone
-    { itemID = 224464, spellID = 452930, class = "WARLOCK" },    -- Demonic Healthstone
+    { itemID = 241304, spellID = 1234768, altItemID = 241305 },              -- Silvermoon Health Potion
+    { itemID = 241308, spellID = 1236616, altItemID = 241309 },              -- Light's Potential
+    { itemID = 5512,   spellID = 6262, combatLockout = true },               -- Healthstone
+    { itemID = 224464, spellID = 452930, class = "WARLOCK" },                -- Demonic Healthstone
 }
 
 -- Reverse lookup: spellID -> HEALTH_ITEMS entry (for item-aware cooldown/count display)
 local HEALTH_ITEM_BY_SPELL = {}
 for _, hi in ipairs(HEALTH_ITEMS) do
     HEALTH_ITEM_BY_SPELL[hi.spellID] = hi
+end
+
+-- Returns the active itemID for a health item entry: base if player has any, alt if only alt exists.
+local function GetActiveHealthItemID(hi)
+    local baseCount = C_Item.GetItemCount(hi.itemID, false, true) or 0
+    if baseCount > 0 then return hi.itemID, baseCount end
+    if hi.altItemID then
+        local altCount = C_Item.GetItemCount(hi.altItemID, false, true) or 0
+        if altCount > 0 then return hi.altItemID, altCount end
+    end
+    return hi.itemID, 0
 end
 
 -- Combat lockout state: [spellID] = true while item was used in combat
@@ -3014,7 +3102,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     end
 
     -- Custom shape
-    local maskTex = CDM_SHAPE_MASKS[shape]
+    local maskTex = CDM_SHAPES.masks[shape]
     if not maskTex then return end
 
     if not icon._shapeMask then
@@ -3034,9 +3122,9 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     if icon._bg then icon._bg:AddMaskTexture(mask) end
 
     -- Expand icon beyond frame for shape
-    local shapeOffset = CDM_SHAPE_ICON_EXPAND_OFFSETS[shape] or 0
-    local shapeDefault = CDM_SHAPE_ZOOM_DEFAULTS[shape] or 0.06
-    local iconExp = CDM_SHAPE_ICON_EXPAND + shapeOffset + ((zoom - shapeDefault) * 200)
+    local shapeOffset = CDM_SHAPES.iconExpandOffsets[shape] or 0
+    local shapeDefault = CDM_SHAPES.zoomDefaults[shape] or 0.06
+    local iconExp = CDM_SHAPES.iconExpand + shapeOffset + ((zoom - shapeDefault) * 200)
     if iconExp < 0 then iconExp = 0 end
     local halfIE = iconExp / 2
     if icon._tex then
@@ -3055,7 +3143,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     end
 
     -- Expand texcoords for shape
-    local insetPx = CDM_SHAPE_INSETS[shape] or 17
+    local insetPx = CDM_SHAPES.insets[shape] or 17
     local visRatio = (128 - 2 * insetPx) / 128
     local expand = ((1 / visRatio) - 1) * 0.5
     if icon._tex then icon._tex:SetTexCoord(-expand, 1 + expand, -expand, 1 + expand) end
@@ -3079,8 +3167,8 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     local borderTex = icon._shapeBorder
     borderTex:ClearAllPoints()
     borderTex:SetAllPoints(icon)
-    if borderSz > 0 and CDM_SHAPE_BORDERS[shape] then
-        borderTex:SetTexture(CDM_SHAPE_BORDERS[shape])
+    if borderSz > 0 and CDM_SHAPES.borders[shape] then
+        borderTex:SetTexture(CDM_SHAPES.borders[shape])
         borderTex:SetVertexColor(brdR, brdG, brdB, brdA)
         borderTex:SetSnapToPixelGrid(false)
         borderTex:SetTexelSnappingBias(0)
@@ -3099,7 +3187,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         end
         local useCircular = (shape ~= "square" and shape ~= "csquare")
         if icon._cooldown.SetUseCircularEdge then pcall(icon._cooldown.SetUseCircularEdge, icon._cooldown, useCircular) end
-        local edgeScale = CDM_SHAPE_EDGE_SCALES[shape] or 0.60
+        local edgeScale = CDM_SHAPES.edgeScales[shape] or 0.60
         if icon._cooldown.SetEdgeScale then pcall(icon._cooldown.SetEdgeScale, icon._cooldown, edgeScale) end
     end
 
@@ -3223,13 +3311,13 @@ local function UpdateCustomBarIcons(barKey)
             -- Health item handling: show item icon, count, desaturation, combat lockout
             local healthItem = HEALTH_ITEM_BY_SPELL[spellID]
             if healthItem then
-                local itemCount = C_Item.GetItemCount(healthItem.itemID, false, true) or 0
+                local activeID, itemCount = GetActiveHealthItemID(healthItem)
                 local inLockout = _healthCombatLockout[spellID]
                 -- Hide if player has none and not in combat lockout
                 if itemCount <= 0 and not inLockout then
                     ourIcon:Hide()
                 else
-                    local tex = C_Item.GetItemIconByID(healthItem.itemID)
+                    local tex = C_Item.GetItemIconByID(activeID)
                     if tex then
                         if tex ~= ourIcon._lastTex then
                             ourIcon._tex:SetTexture(tex)
@@ -3242,7 +3330,7 @@ local function UpdateCustomBarIcons(barKey)
                             ourIcon._lastDesat = true
                         else
                             -- Item cooldown via C_Container.GetItemCooldown
-                            local cdStart, cdDur = C_Container.GetItemCooldown(healthItem.itemID)
+                            local cdStart, cdDur = C_Container.GetItemCooldown(activeID)
                             if cdStart and cdDur and cdDur > 1.5 then
                                 ourIcon._cooldown:SetCooldown(cdStart, cdDur)
                                 if barData.desaturateOnCD then
@@ -3505,7 +3593,29 @@ local function UpdateCustomBarIcons(barKey)
                     ourIcon._cooldown:SetUseAuraDisplayTime(false)
                 end
 
+                -- Stack count for buff-type custom bars (mirrors tracked buff bar logic)
+                if isBuffBarForOverride then
+                    local blizzChild = _tickBlizzAllChildCache[resolvedID]
+                    if not blizzChild then
+                        local cdID = _spellToCooldownID[resolvedID] or _spellToCooldownID[spellID]
+                        if cdID then blizzChild = FindCDMChildByCooldownID(cdID) end
+                    end
+                    ApplyStackCount(ourIcon, resolvedID,
+                        blizzChild and blizzChild.auraInstanceID,
+                        blizzChild and blizzChild.auraDataUnit or "player",
+                        true, blizzChild)
+                    ourIcon._blizzChild = blizzChild
+                end
+
                 ApplyActiveAnimation(ourIcon, auraHandled, barData, barKey, activeAnim, animR, animG, animB, swAlpha)
+
+                -- Out-of-range overlay (skip buff bars -- buffs don't target enemies)
+                if not isBuffBarForOverride then
+                    ApplyRangeOverlay(ourIcon, resolvedID, barData.outOfRangeOverlay)
+                elseif ourIcon._oorTinted then
+                    if ourIcon._tex then ourIcon._tex:SetVertexColor(1, 1, 1) end
+                    ourIcon._oorTinted = false
+                end
 
                 ourIcon:Show()
                 visibleCount = visibleCount + 1
@@ -3707,7 +3817,15 @@ UpdateCDMBarIcons = function(barKey)
             -- Active state animation (consolidated)
             ApplyActiveAnimation(ourIcon, auraHandled, barData, barKey, activeAnim, animR, animG, animB, swAlpha)
 
-            -- Stack count text (consolidated ΓÇö always enabled)
+            -- Out-of-range overlay (skip buff bars)
+            if not isBuffBar then
+                ApplyRangeOverlay(ourIcon, resolvedSid, barData.outOfRangeOverlay)
+            elseif ourIcon._oorTinted then
+                if ourIcon._tex then ourIcon._tex:SetVertexColor(1, 1, 1) end
+                ourIcon._oorTinted = false
+            end
+
+            -- Stack count text (consolidated -- always enabled)
             ApplyStackCount(ourIcon, resolvedSid, blizzIcon.auraInstanceID, blizzIcon.auraDataUnit, true, blizzIcon)
 
             ourIcon:Show()
@@ -4003,12 +4121,12 @@ local function UpdateTrackedBarIcons(barKey)
             -- Health item handling: show item icon, count, desaturation, combat lockout
             local healthItem = HEALTH_ITEM_BY_SPELL[spellID]
             if healthItem then
-                local itemCount = C_Item.GetItemCount(healthItem.itemID, false, true) or 0
+                local activeID, itemCount = GetActiveHealthItemID(healthItem)
                 local inLockout = _healthCombatLockout[spellID]
                 if itemCount <= 0 and not inLockout then
                     ourIcon:Hide()
                 else
-                    local tex = C_Item.GetItemIconByID(healthItem.itemID)
+                    local tex = C_Item.GetItemIconByID(activeID)
                     if tex then
                         if tex ~= ourIcon._lastTex then
                             ourIcon._tex:SetTexture(tex)
@@ -4019,7 +4137,7 @@ local function UpdateTrackedBarIcons(barKey)
                             ourIcon._cooldown:Clear()
                             ourIcon._lastDesat = true
                         else
-                            local cdStart, cdDur = C_Container.GetItemCooldown(healthItem.itemID)
+                            local cdStart, cdDur = C_Container.GetItemCooldown(activeID)
                             if cdStart and cdDur and cdDur > 1.5 then
                                 ourIcon._cooldown:SetCooldown(cdStart, cdDur)
                                 if desatOnCD then
@@ -4247,6 +4365,14 @@ local function UpdateTrackedBarIcons(barKey)
 
                 -- Active state animation
                 ApplyActiveAnimation(ourIcon, auraHandled, barData, barKey, activeAnim, animR, animG, animB, swAlpha)
+
+                -- Out-of-range overlay (skip buff bars)
+                if not isBuffBarForOvr then
+                    ApplyRangeOverlay(ourIcon, resolvedID, barData.outOfRangeOverlay)
+                elseif ourIcon._oorTinted then
+                    if ourIcon._tex then ourIcon._tex:SetVertexColor(1, 1, 1) end
+                    ourIcon._oorTinted = false
+                end
 
                 -- Stack count
                 local blizzChild = _tickBlizzAllChildCache[resolvedID]
@@ -4849,7 +4975,9 @@ local function GetExtraSpells()
     for _, item in ipairs(HEALTH_ITEMS) do
         if not item.class or item.class == _playerClass then
             local sName = C_Spell.GetSpellName(item.spellID)
-            local sTex  = C_Item.GetItemIconByID(item.itemID)
+            -- Use the active item ID (base or alt) for the icon
+            local activeID = GetActiveHealthItemID(item)
+            local sTex  = C_Item.GetItemIconByID(activeID)
             if sName then
                 extras[#extras + 1] = {
                     spellID = item.spellID, cdID = nil,
@@ -5456,6 +5584,7 @@ function ns.AddCDMBar(barType, name, numRows)
         stackCountR = 1, stackCountG = 1, stackCountB = 1,
         -- Custom bars use a spell list instead of mirroring Blizzard
         customSpells = {},
+        outOfRangeOverlay = false,
     }
     BuildAllCDMBars()
     RegisterCDMUnlockElements()
@@ -5683,9 +5812,11 @@ RegisterCDMUnlockElements = function()
 end
 ns.RegisterCDMUnlockElements = RegisterCDMUnlockElements
 
--- Stub: Bar Glows disabled ΓÇö RequestUpdate is a no-op until re-enabled
-local function RequestUpdate() end
-ns.RequestUpdate = RequestUpdate
+-- RequestUpdate delegates to ns.RequestUpdate (defined in EllesmereUICdmBarGlows.lua).
+-- Falls back to no-op if bar glows module hasn't loaded yet.
+local function RequestUpdate()
+    if ns.RequestUpdate then ns.RequestUpdate() end
+end
 
 
 -------------------------------------------------------------------------------
@@ -5816,14 +5947,14 @@ function ECME:OnEnable()
         self:CDMFinishSetup()
     end
 
-    if ApplyPerSlotHidingAndPackSoon then ApplyPerSlotHidingAndPackSoon() end
+    if ns.ApplyPerSlotHidingAndPackSoon then ns.ApplyPerSlotHidingAndPackSoon() end
     RequestUpdate()
     if UpdateBuffBars then UpdateBuffBars() end
 
-    if HookAllCDMChildren then
-        HookAllCDMChildren(_G.BuffIconCooldownViewer)
-        C_Timer.After(1, function() HookAllCDMChildren(_G.BuffIconCooldownViewer) end)
-        C_Timer.After(3, function() HookAllCDMChildren(_G.BuffIconCooldownViewer) end)
+    if ns.HookAllCDMChildren then
+        ns.HookAllCDMChildren(_G.BuffIconCooldownViewer)
+        C_Timer.After(1, function() if ns.HookAllCDMChildren then ns.HookAllCDMChildren(_G.BuffIconCooldownViewer) end end)
+        C_Timer.After(3, function() if ns.HookAllCDMChildren then ns.HookAllCDMChildren(_G.BuffIconCooldownViewer) end end)
     end
 
     -- Proc glow hooks (ShowAlert/HideAlert on Blizzard CDM children)
@@ -6327,6 +6458,35 @@ local function ReconcileMainBarSpells()
                 end
             end
         end
+
+        -- Custom bars: scan customSpells and check IsSpellOverlayed directly.
+        -- Custom bars have no Blizzard viewer children, so the viewer scan
+        -- above does not cover them.
+        local p2 = ECME.db and ECME.db.profile
+        if p2 and p2.cdmBars and p2.cdmBars.bars then
+            for _, barData in ipairs(p2.cdmBars.bars) do
+                if barData.enabled and barData.customSpells then
+                    local icons = cdmBarIcons[barData.key]
+                    if icons then
+                        for i, sid in ipairs(barData.customSpells) do
+                            if sid and sid > 0 and icons[i] then
+                                -- Check base spell
+                                local checkID = sid
+                                -- Resolve talent override
+                                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                                    local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+                                    if ovr and ovr ~= 0 then checkID = ovr end
+                                end
+                                local ok2, ov2 = pcall(C_SpellActivationOverlay.IsSpellOverlayed, checkID)
+                                if ok2 and ov2 then
+                                    ShowProcGlow(icons[i], PROC_GLOW_R, PROC_GLOW_G, PROC_GLOW_B)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end)
 end
 -- Keep old name as alias so existing callers work during transition
@@ -6653,7 +6813,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end
         return
     end
-    if ApplyPerSlotHidingAndPackSoon then ApplyPerSlotHidingAndPackSoon() end
+    if ns.ApplyPerSlotHidingAndPackSoon then ns.ApplyPerSlotHidingAndPackSoon() end
     RequestUpdate()
     if UpdateBuffBars then UpdateBuffBars() end
 end)

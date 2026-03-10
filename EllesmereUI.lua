@@ -629,15 +629,22 @@ do
             return
         end
         if not EllesmereUIDB then EllesmereUIDB = {} end
+        -- Only trigger frame rebuilds when the scale is actually changing.
+        -- On login, Blizzard may reset UIParent scale, so we re-apply the
+        -- stored value -- but if UIParent is already at the correct scale
+        -- the frames are already positioned correctly and rebuilding them
+        -- would shift user-customized positions unnecessarily.
+        local currentScale = UIParent and UIParent:GetScale() or 1
+        local scaleChanged = math.abs(currentScale - newScale) > 0.0001
         EllesmereUIDB.ppUIScale = newScale
         UIParent:SetScale(newScale)
         PP.UpdateMult()
-        -- Rebuild child addon frames with the new pixel multiplier.
-        -- PP.Size/Point values are baked at frame-build time, so each addon
-        -- needs to re-run its layout pass after mult changes.
-        if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
-        if _G._ERB_Apply then _G._ERB_Apply() end
-        if _G._EAB_Apply then _G._EAB_Apply() end
+        -- Rebuild child addon frames only when the scale actually changed.
+        if scaleChanged then
+            if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
+            if _G._ERB_Apply then _G._ERB_Apply() end
+            if _G._EAB_Apply then _G._EAB_Apply() end
+        end
     end
 
     ---------------------------------------------------------------------------
@@ -2591,6 +2598,8 @@ local function CreateMainFrame()
     mainFrame:EnableMouse(false)
     mainFrame:SetMovable(true)
     mainFrame:SetScript("OnShow", function()
+        -- Re-sync PanelPP mult in case UIParent scale changed since last open
+        if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()
@@ -4731,6 +4740,10 @@ function EllesmereUI:ResetAllModules()
             config.onReset()
         end
     end
+    -- Clear unlock mode anchor relationships
+    if EllesmereUIDB then
+        EllesmereUIDB.unlockAnchors = nil
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -5287,7 +5300,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.1.3"
+EllesmereUI.VERSION = "4.1.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

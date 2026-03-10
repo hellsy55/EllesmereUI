@@ -4680,40 +4680,29 @@ initFrame:SetScript("OnEvent", function(self)
             end
             btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
             btn:RegisterForClicks("LeftButtonDown")
-            -- Pixel-perfect accent border highlight
             local c = EllesmereUI.ELLESMERE_GREEN
-            -- When hlBehindText is set, create a dedicated highlight child frame
-            -- at icon level + 1 (between icon artwork and the text child frame at +2).
-            -- Frame-level ordering is reliable; no sublevel tricks needed.
+            local PP = EllesmereUI.PP
+            -- When hlBehindText is set, attach the border to a dedicated child frame
+            -- at icon level + 1 so it sits between the icon artwork and text layers.
+            -- Always use a child container so the hover border doesn't conflict
+            -- with any existing PP border on the target frame.
             local behindText = opts and opts.hlBehindText
-            local hlParent, hlAnchorFrame
+            local hlBase
             if behindText then
                 local hlFrame = CreateFrame("Frame", nil, element)
                 hlFrame:SetAllPoints()
                 hlFrame:SetFrameLevel(element:GetFrameLevel() + 1)
-                hlParent = hlFrame
-                hlAnchorFrame = element
+                hlBase = hlFrame
             else
-                hlParent = btn
-                hlAnchorFrame = (opts and opts.hlAnchor) or btn
+                hlBase = (opts and opts.hlAnchor) or btn
             end
-            local function MkHL()
-                local t = hlParent:CreateTexture(nil, "OVERLAY", nil, 7)
-                t:SetColorTexture(c.r, c.g, c.b, 1)
-                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                return t
-            end
-            local hlPx = SnapPreview(2)
-            local ht = MkHL(); ht:SetHeight(hlPx); ht:SetPoint("TOPLEFT", hlAnchorFrame, "TOPLEFT"); ht:SetPoint("TOPRIGHT", hlAnchorFrame, "TOPRIGHT")
-            local hb = MkHL(); hb:SetHeight(hlPx); hb:SetPoint("BOTTOMLEFT", hlAnchorFrame, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", hlAnchorFrame, "BOTTOMRIGHT")
-            local hl = MkHL(); hl:SetWidth(hlPx); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-            local hr = MkHL(); hr:SetWidth(hlPx); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-            btn._hlTextures = { ht, hb, hl, hr }
-            local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-            local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-            HideHL()
-            btn:SetScript("OnEnter", function() ShowHL() end)
-            btn:SetScript("OnLeave", function() HideHL() end)
+            local hlCont = CreateFrame("Frame", nil, hlBase)
+            hlCont:SetAllPoints()
+            hlCont:SetFrameLevel(hlBase:GetFrameLevel() + 1)
+            local brd = PP.CreateBorder(hlCont, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
             return btn
         end
@@ -4776,23 +4765,10 @@ initFrame:SetScript("OnEvent", function(self)
                     iconOv:SetAllPoints(pv._castIconFrame)
                     iconOv:SetFrameLevel(castOverlayLevel)
                     iconOv:RegisterForClicks("LeftButtonDown")
-                    local function MkIOHL()
-                        local t = iconOv:CreateTexture(nil, "OVERLAY", nil, 7)
-                        t:SetColorTexture(cc.r, cc.g, cc.b, 1)
-                        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                        return t
-                    end
-                    local ioPx = SnapPreview(2)
-                    local it = MkIOHL(); it:SetHeight(ioPx); it:SetPoint("TOPLEFT"); it:SetPoint("TOPRIGHT")
-                    local ib = MkIOHL(); ib:SetHeight(ioPx); ib:SetPoint("BOTTOMLEFT"); ib:SetPoint("BOTTOMRIGHT")
-                    local il = MkIOHL(); il:SetWidth(ioPx); il:SetPoint("TOPLEFT", it, "BOTTOMLEFT"); il:SetPoint("BOTTOMLEFT", ib, "TOPLEFT")
-                    local ir = MkIOHL(); ir:SetWidth(ioPx); ir:SetPoint("TOPRIGHT", it, "BOTTOMRIGHT"); ir:SetPoint("BOTTOMRIGHT", ib, "TOPRIGHT")
-                    iconOv._hlTextures = { it, ib, il, ir }
-                    local function ShowIOHL() for _, t in ipairs(iconOv._hlTextures) do t:Show() end end
-                    local function HideIOHL() for _, t in ipairs(iconOv._hlTextures) do t:Hide() end end
-                    HideIOHL()
-                    iconOv:SetScript("OnEnter", function() ShowIOHL() end)
-                    iconOv:SetScript("OnLeave", function() HideIOHL() end)
+                    local ioBrd = EllesmereUI.PP.CreateBorder(iconOv, cc.r, cc.g, cc.b, 1, 2, "OVERLAY", 7)
+                    ioBrd:Hide()
+                    iconOv:SetScript("OnEnter", function() ioBrd:Show() end)
+                    iconOv:SetScript("OnLeave", function() ioBrd:Hide() end)
                     iconOv:SetScript("OnMouseDown", function() NavigateToSetting("castIcon") end)
                 end
                 -- Cast bar overlay (bar only, not icon)
@@ -4800,23 +4776,10 @@ initFrame:SetScript("OnEvent", function(self)
                 castOverlay:SetAllPoints(pv._cast)
                 castOverlay:SetFrameLevel(castOverlayLevel)
                 castOverlay:RegisterForClicks("LeftButtonDown")
-                local function MkCHL()
-                    local t = castOverlay:CreateTexture(nil, "OVERLAY", nil, 7)
-                    t:SetColorTexture(cc.r, cc.g, cc.b, 1)
-                    if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                    return t
-                end
-                local coPx = SnapPreview(2)
-                local ct = MkCHL(); ct:SetHeight(coPx); ct:SetPoint("TOPLEFT"); ct:SetPoint("TOPRIGHT")
-                local cb = MkCHL(); cb:SetHeight(coPx); cb:SetPoint("BOTTOMLEFT"); cb:SetPoint("BOTTOMRIGHT")
-                local cl = MkCHL(); cl:SetWidth(coPx); cl:SetPoint("TOPLEFT", ct, "BOTTOMLEFT"); cl:SetPoint("BOTTOMLEFT", cb, "TOPLEFT")
-                local cr = MkCHL(); cr:SetWidth(coPx); cr:SetPoint("TOPRIGHT", ct, "BOTTOMRIGHT"); cr:SetPoint("BOTTOMRIGHT", cb, "TOPRIGHT")
-                castOverlay._hlTextures = { ct, cb, cl, cr }
-                local function ShowCHL() for _, t in ipairs(castOverlay._hlTextures) do t:Show() end end
-                local function HideCHL() for _, t in ipairs(castOverlay._hlTextures) do t:Hide() end end
-                HideCHL()
-                castOverlay:SetScript("OnEnter", function() ShowCHL() end)
-                castOverlay:SetScript("OnLeave", function() HideCHL() end)
+                local coBrd = EllesmereUI.PP.CreateBorder(castOverlay, cc.r, cc.g, cc.b, 1, 2, "OVERLAY", 7)
+                coBrd:Hide()
+                castOverlay:SetScript("OnEnter", function() coBrd:Show() end)
+                castOverlay:SetScript("OnLeave", function() coBrd:Hide() end)
                 castOverlay:SetScript("OnMouseDown", function() NavigateToSetting("castBar") end)
             end
             -- Cast spell name and target text (above the cast bar overlay)

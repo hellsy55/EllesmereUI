@@ -434,19 +434,8 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ECL_Apply then _G._ECL_Apply() end
     -- AuraBuffReminders
     if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
-    -- ActionBars
-    local EAB = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
-    if EAB then
-        if EAB.ApplyBorders  then EAB:ApplyBorders()  end
-        if EAB.ApplyShapes   then EAB:ApplyShapes()   end
-        if EAB.ApplyFonts    then EAB:ApplyFonts()    end
-        if EAB.ApplyBarOpacity then
-            local bars = EAB.db and EAB.db.profile and EAB.db.profile.bars
-            if bars then
-                for barKey in pairs(bars) do EAB:ApplyBarOpacity(barKey) end
-            end
-        end
-    end
+    -- ActionBars: use the full apply which includes bar positions
+    if _G._EAB_Apply then _G._EAB_Apply() end
     -- UnitFrames
     if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
     -- Nameplates
@@ -1379,7 +1368,8 @@ local function BuildStringPopup(title, subtitle, readOnly, onConfirm, confirmLab
     -- Resize scroll child to fit editbox content
     local function RefreshHeight()
         C_Timer.After(0.01, function()
-            local h = editBox:GetNumLines() * (editBox:GetLineHeight() or 14)
+            local lineH = (editBox.GetLineHeight and editBox:GetLineHeight()) or 14
+            local h = editBox:GetNumLines() * lineH
             h = math.max(h, sf:GetHeight() or 100)
             sc:SetHeight(h + 4)
             editBox:SetHeight(h + 4)

@@ -799,23 +799,10 @@ initFrame:SetScript("OnEvent", function(self)
         btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
         btn:RegisterForClicks("LeftButtonDown")
         local c = EllesmereUI.ELLESMERE_GREEN
-        local function MkHL()
-            local t = btn:CreateTexture(nil, "OVERLAY", nil, 7)
-            t:SetColorTexture(c.r, c.g, c.b, 1)
-            if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-            return t
-        end
-        local hlPx = PP.Scale(2)
-        local ht = MkHL(); ht:SetHeight(hlPx); ht:SetPoint("TOPLEFT", btn, "TOPLEFT"); ht:SetPoint("TOPRIGHT", btn, "TOPRIGHT")
-        local hb = MkHL(); hb:SetHeight(hlPx); hb:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT")
-        local hl = MkHL(); hl:SetWidth(hlPx); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-        local hr = MkHL(); hr:SetWidth(hlPx); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-        btn._hlTextures = { ht, hb, hl, hr }
-        local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-        local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-        HideHL()
-        btn:SetScript("OnEnter", function() ShowHL() end)
-        btn:SetScript("OnLeave", function() HideHL() end)
+        local brd = EllesmereUI.PP.CreateBorder(btn, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+        brd:Hide()
+        btn:SetScript("OnEnter", function() brd:Show() end)
+        btn:SetScript("OnLeave", function() brd:Hide() end)
         btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
         _hitOverlays[#_hitOverlays + 1] = btn
         return btn
