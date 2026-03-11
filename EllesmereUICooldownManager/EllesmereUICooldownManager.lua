@@ -4745,9 +4745,7 @@ local function UpdateAllCDMBars(dt)
                                         _ecmeRawStartCache[ch] = start
                                         _ecmeRawDurCache[ch] = dur
                                     else
-                                        -- SetCooldown(0,0) is equivalent to Clear(); wipe cached state
-                                        -- so IsBufChildCooldownActive does not permanently return true
-                                        -- (Lua treats 0 as truthy, so storing dur=0 would stick)
+                                        -- dur=0 means inactive; wipe like Clear() (0 is truthy in Lua)
                                         _ecmeDurObjCache[ch] = nil
                                         _ecmeChildHasDurObj[ch] = nil
                                         _ecmeRawStartCache[ch] = nil
