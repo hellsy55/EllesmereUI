@@ -49,6 +49,14 @@ ns.SetFSFont = SetFSFont
 ns.plates = {}
 _G.EllesmereNameplates_NS = ns
 
+-- Constant table for health text bar slots (hoisted to file scope to avoid
+-- per-call allocation inside UpdateHealthValues).
+local HP_BAR_SLOTS = {
+    { key = "textSlotRight",  anchor = "RIGHT",  point = "RIGHT",  xOff = -2 },
+    { key = "textSlotLeft",   anchor = "LEFT",   point = "LEFT",   xOff = 4 },
+    { key = "textSlotCenter", anchor = "CENTER", point = "CENTER", xOff = 0 },
+}
+
 local defaults = {
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
@@ -3210,13 +3218,7 @@ function NameplateFrame:UpdateHealthValues()
     self.hpText:Hide()
     self.hpNumber:Hide()
 
-    -- Helper to show a health FontString in a bar slot
-    local barSlots = {
-        { key = "textSlotRight",  anchor = "RIGHT",  point = "RIGHT",  xOff = -2 },
-        { key = "textSlotLeft",   anchor = "LEFT",   point = "LEFT",   xOff = 4 },
-        { key = "textSlotCenter", anchor = "CENTER", point = "CENTER", xOff = 0 },
-    }
-    for _, slot in ipairs(barSlots) do
+    for _, slot in ipairs(HP_BAR_SLOTS) do
         local element = GetTextSlot(slot.key)
         local txOff, tyOff = GetTextSlotOffsets(slot.key)
         local slotFontSz = GetTextSlotSize(slot.key)
@@ -3286,7 +3288,7 @@ function NameplateFrame:UpdateHealthValues()
                 fs:SetText(FormatCombinedHealth(topElement, pctText, numText))
             end
         end
-        SetFSFont(fs, topFontSz, GetNPOutline())      SetFSFont(fs, topFontSz, GetNPOutline())
+        SetFSFont(fs, topFontSz, GetNPOutline())
         fs:SetParent(self.topTextFrame)
         fs:ClearAllPoints()
         PP.Point(fs, "BOTTOM", self.health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)

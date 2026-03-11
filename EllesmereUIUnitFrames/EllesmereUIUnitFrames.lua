@@ -5461,13 +5461,15 @@ function InitializeFrames()
         local ps = db.profile.player
         local COMBAT_MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
 
-        -- Create a holder frame at a high frame level so the indicator draws above everything
-        local combatHolder = CreateFrame("Frame", nil, pf)
-        combatHolder:SetAllPoints(pf)
-        combatHolder:SetFrameLevel(pf:GetFrameLevel() + 20)
-        local combat = combatHolder:CreateTexture(nil, "OVERLAY", nil, 7)
-        combat:Hide()
-        pf._combatIndicator = combat
+        -- Create holder + texture ONCE, reuse on subsequent calls
+        if not pf._combatHolder then
+            pf._combatHolder = CreateFrame("Frame", nil, pf)
+            pf._combatHolder:SetAllPoints(pf)
+            pf._combatIndicator = pf._combatHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+            pf._combatIndicator:Hide()
+        end
+        pf._combatHolder:SetFrameLevel(pf:GetFrameLevel() + 20)
+        local combat = pf._combatIndicator
 
         -- Helper: resolve which texture file + coords to use
         local function ApplyCombatTexture()
@@ -5522,10 +5524,13 @@ function InitializeFrames()
         end
         pf._applyCombatTexture = ApplyCombatTexture
 
-        -- Event frame for combat state changes
-        local combatFrame = CreateFrame("Frame", nil, pf)
-        combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-        combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        -- Event frame for combat state changes (reuse existing)
+        if not pf._combatEventFrame then
+            pf._combatEventFrame = CreateFrame("Frame", nil, pf)
+            pf._combatEventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+            pf._combatEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        end
+        local combatFrame = pf._combatEventFrame
         combatFrame:SetScript("OnEvent", function(_, event)
             local style = ps.combatIndicatorStyle or "standard"
             if style ~= "none" then
@@ -5552,30 +5557,32 @@ function InitializeFrames()
     do
         local pf = frames.player
         if pf and pf.Health then
-            local restHolder = CreateFrame("Frame", nil, pf.Health)
-            restHolder:SetAllPoints(pf.Health)
-            restHolder:SetFrameLevel(pf.Health:GetFrameLevel() + 5)
+            if not pf._restHolder then
+                pf._restHolder = CreateFrame("Frame", nil, pf.Health)
+                local restText = pf._restHolder:CreateFontString(nil, "OVERLAY")
+                SetFSFont(restText, 9)
+                restText:SetTextColor(1, 1, 1)
+                restText:SetText("ZZZ")
+                restText:Hide()
+                pf._restIndicator = restText
 
-            local restText = restHolder:CreateFontString(nil, "OVERLAY")
-            SetFSFont(restText, 9)
-            restText:SetTextColor(1, 1, 1)
-            restText:SetText("ZZZ")
-            restText:SetPoint("TOPLEFT", pf.Health, "TOPLEFT", 3, -2)
-            restText:Hide()
-            pf._restIndicator = restText
+                pf._restEventFrame = CreateFrame("Frame", nil, pf)
+                pf._restEventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+                pf._restEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+                pf._restEventFrame:SetScript("OnEvent", function()
+                    if IsResting() then
+                        pf._restIndicator:Show()
+                    else
+                        pf._restIndicator:Hide()
+                    end
+                end)
+            end
+            pf._restHolder:SetAllPoints(pf.Health)
+            pf._restHolder:SetFrameLevel(pf.Health:GetFrameLevel() + 5)
+            pf._restIndicator:ClearAllPoints()
+            pf._restIndicator:SetPoint("TOPLEFT", pf.Health, "TOPLEFT", 3, -2)
 
-            local restFrame = CreateFrame("Frame", nil, pf)
-            restFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
-            restFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-            restFrame:SetScript("OnEvent", function()
-                if IsResting() then
-                    restText:Show()
-                else
-                    restText:Hide()
-                end
-            end)
-
-            if IsResting() then restText:Show() end
+            if IsResting() then pf._restIndicator:Show() else pf._restIndicator:Hide() end
         end
     end
 
@@ -5595,10 +5602,10 @@ function InitializeFrames()
     -- on PLAYER_ENTERING_WORLD, which lets it show again on the next cast.
     -- The hooksecurefunc on Show above already makes it permanently invisible,
     -- but hiding it here prevents even a single-frame flash before the hook fires.
-    do
-        local cbSuppressFrame = CreateFrame("Frame")
-        cbSuppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        cbSuppressFrame:SetScript("OnEvent", function()
+    if not frames._cbSuppressFrame then
+        frames._cbSuppressFrame = CreateFrame("Frame")
+        frames._cbSuppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        frames._cbSuppressFrame:SetScript("OnEvent", function()
             if PlayerCastingBarFrame then
                 PlayerCastingBarFrame:Hide()
             end
@@ -6112,20 +6119,24 @@ function InitializeFrames()
     end
     ns.UpdateFrameVisibility = UpdateFrameVisibility
 
-    local visFrame = CreateFrame("Frame")
-    visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    visFrame:SetScript("OnEvent", UpdateFrameVisibility)
+    if not frames._visFrame then
+        frames._visFrame = CreateFrame("Frame")
+        frames._visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+        frames._visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    end
+    frames._visFrame:SetScript("OnEvent", UpdateFrameVisibility)
     UpdateFrameVisibility()
 
     ---------------------------------------------------------------------------
     --  Portrait border color: update when target/focus unit changes
     --  so "class color" mode reflects the new unit's color.
     ---------------------------------------------------------------------------
-    local portraitBorderUpdater = CreateFrame("Frame")
-    portraitBorderUpdater:RegisterEvent("PLAYER_TARGET_CHANGED")
-    portraitBorderUpdater:RegisterEvent("PLAYER_FOCUS_CHANGED")
-    portraitBorderUpdater:SetScript("OnEvent", function(_, event)
+    if not frames._portraitBorderUpdater then
+        frames._portraitBorderUpdater = CreateFrame("Frame")
+        frames._portraitBorderUpdater:RegisterEvent("PLAYER_TARGET_CHANGED")
+        frames._portraitBorderUpdater:RegisterEvent("PLAYER_FOCUS_CHANGED")
+    end
+    frames._portraitBorderUpdater:SetScript("OnEvent", function(_, event)
         local unitKey = (event == "PLAYER_TARGET_CHANGED") and "target" or "focus"
         local frame = frames[unitKey]
         if not frame or not frame.Portrait then return end
