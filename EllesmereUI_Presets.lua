@@ -52,7 +52,7 @@ do
         { class = "DEMONHUNTER",  name = "Demon Hunter",  specs = {
             { id = 577, name = "Havoc" },
             { id = 581, name = "Vengeance" },
-            { id = 1456, name = "Devourer" },
+            { id = 1480, name = "Devourer" },
         }},
         { class = "DRUID",        name = "Druid",         specs = {
             { id = 102, name = "Balance" },
