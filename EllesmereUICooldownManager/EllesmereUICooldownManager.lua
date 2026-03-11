@@ -6514,9 +6514,13 @@ local function TalentAwareReconcile()
                         local removed = barData.removedSpells or {}
                         local kept, keptSet = {}, {}
                         for _, sid in ipairs(barData.trackedSpells) do
-                            if sid and sid ~= 0 and pool[sid] and not removed[sid] then
-                                kept[#kept + 1] = sid
-                                keptSet[sid] = true
+                            if sid and sid ~= 0 and not removed[sid] then
+                                -- Also accept knownSet so a partially-populated
+                                -- viewer can't permanently drop buff bar spells.
+                                if pool[sid] or knownSet[sid] then
+                                    kept[#kept + 1] = sid
+                                    keptSet[sid] = true
+                                end
                             end
                         end
                         -- Append new spells in stable viewer child order
