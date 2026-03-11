@@ -44,72 +44,124 @@ local CB_ACT_BRD_A = EllesmereUI.CB_ACT_BRD_A
 do
     -- All WoW Retail classes and their specs (as of TWW / 12.0)
     local SPEC_DATA = {
-        { class = "DEATHKNIGHT",  name = "Death Knight",  specs = {
-            { id = 250, name = "Blood" },
-            { id = 251, name = "Frost" },
-            { id = 252, name = "Unholy" },
-        }},
-        { class = "DEMONHUNTER",  name = "Demon Hunter",  specs = {
-            { id = 577, name = "Havoc" },
-            { id = 581, name = "Vengeance" },
-            { id = 1480, name = "Devourer" },
-        }},
-        { class = "DRUID",        name = "Druid",         specs = {
-            { id = 102, name = "Balance" },
-            { id = 103, name = "Feral" },
-            { id = 104, name = "Guardian" },
-            { id = 105, name = "Restoration" },
-        }},
-        { class = "EVOKER",       name = "Evoker",        specs = {
-            { id = 1467, name = "Devastation" },
-            { id = 1468, name = "Preservation" },
-            { id = 1473, name = "Augmentation" },
-        }},
-        { class = "HUNTER",       name = "Hunter",        specs = {
-            { id = 253, name = "Beast Mastery" },
-            { id = 254, name = "Marksmanship" },
-            { id = 255, name = "Survival" },
-        }},
-        { class = "MAGE",         name = "Mage",          specs = {
-            { id = 62,  name = "Arcane" },
-            { id = 63,  name = "Fire" },
-            { id = 64,  name = "Frost" },
-        }},
-        { class = "MONK",         name = "Monk",          specs = {
-            { id = 268, name = "Brewmaster" },
-            { id = 270, name = "Mistweaver" },
-            { id = 269, name = "Windwalker" },
-        }},
-        { class = "PALADIN",      name = "Paladin",       specs = {
-            { id = 65,  name = "Holy" },
-            { id = 66,  name = "Protection" },
-            { id = 70,  name = "Retribution" },
-        }},
-        { class = "PRIEST",       name = "Priest",        specs = {
-            { id = 256, name = "Discipline" },
-            { id = 257, name = "Holy" },
-            { id = 258, name = "Shadow" },
-        }},
-        { class = "ROGUE",        name = "Rogue",         specs = {
-            { id = 259, name = "Assassination" },
-            { id = 260, name = "Outlaw" },
-            { id = 261, name = "Subtlety" },
-        }},
-        { class = "SHAMAN",       name = "Shaman",        specs = {
-            { id = 262, name = "Elemental" },
-            { id = 263, name = "Enhancement" },
-            { id = 264, name = "Restoration" },
-        }},
-        { class = "WARLOCK",      name = "Warlock",       specs = {
-            { id = 265, name = "Affliction" },
-            { id = 266, name = "Demonology" },
-            { id = 267, name = "Destruction" },
-        }},
-        { class = "WARRIOR",      name = "Warrior",       specs = {
-            { id = 71,  name = "Arms" },
-            { id = 72,  name = "Fury" },
-            { id = 73,  name = "Protection" },
-        }},
+        {
+            class = "DEATHKNIGHT",
+            name = "Death Knight",
+            specs = {
+                { id = 250, name = "Blood" },
+                { id = 251, name = "Frost" },
+                { id = 252, name = "Unholy" },
+            }
+        },
+        {
+            class = "DEMONHUNTER",
+            name = "Demon Hunter",
+            specs = {
+                { id = 577,  name = "Havoc" },
+                { id = 581,  name = "Vengeance" },
+                { id = 1480, name = "Devourer" },
+            }
+        },
+        {
+            class = "DRUID",
+            name = "Druid",
+            specs = {
+                { id = 102, name = "Balance" },
+                { id = 103, name = "Feral" },
+                { id = 104, name = "Guardian" },
+                { id = 105, name = "Restoration" },
+            }
+        },
+        {
+            class = "EVOKER",
+            name = "Evoker",
+            specs = {
+                { id = 1467, name = "Devastation" },
+                { id = 1468, name = "Preservation" },
+                { id = 1473, name = "Augmentation" },
+            }
+        },
+        {
+            class = "HUNTER",
+            name = "Hunter",
+            specs = {
+                { id = 253, name = "Beast Mastery" },
+                { id = 254, name = "Marksmanship" },
+                { id = 255, name = "Survival" },
+            }
+        },
+        {
+            class = "MAGE",
+            name = "Mage",
+            specs = {
+                { id = 62, name = "Arcane" },
+                { id = 63, name = "Fire" },
+                { id = 64, name = "Frost" },
+            }
+        },
+        {
+            class = "MONK",
+            name = "Monk",
+            specs = {
+                { id = 268, name = "Brewmaster" },
+                { id = 270, name = "Mistweaver" },
+                { id = 269, name = "Windwalker" },
+            }
+        },
+        {
+            class = "PALADIN",
+            name = "Paladin",
+            specs = {
+                { id = 65, name = "Holy" },
+                { id = 66, name = "Protection" },
+                { id = 70, name = "Retribution" },
+            }
+        },
+        {
+            class = "PRIEST",
+            name = "Priest",
+            specs = {
+                { id = 256, name = "Discipline" },
+                { id = 257, name = "Holy" },
+                { id = 258, name = "Shadow" },
+            }
+        },
+        {
+            class = "ROGUE",
+            name = "Rogue",
+            specs = {
+                { id = 259, name = "Assassination" },
+                { id = 260, name = "Outlaw" },
+                { id = 261, name = "Subtlety" },
+            }
+        },
+        {
+            class = "SHAMAN",
+            name = "Shaman",
+            specs = {
+                { id = 262, name = "Elemental" },
+                { id = 263, name = "Enhancement" },
+                { id = 264, name = "Restoration" },
+            }
+        },
+        {
+            class = "WARLOCK",
+            name = "Warlock",
+            specs = {
+                { id = 265, name = "Affliction" },
+                { id = 266, name = "Demonology" },
+                { id = 267, name = "Destruction" },
+            }
+        },
+        {
+            class = "WARRIOR",
+            name = "Warrior",
+            specs = {
+                { id = 71, name = "Arms" },
+                { id = 72, name = "Fury" },
+                { id = 73, name = "Protection" },
+            }
+        },
     }
     EllesmereUI._SPEC_DATA = SPEC_DATA
 
