@@ -3901,7 +3901,6 @@ UpdateCDMBarIcons = function(barKey)
             local skipCDDisplay = false
 
             if isAura and activeAnim ~= "hideActive" then
-                -- Use cached charge detection to avoid allocating a table per tick
                 local isChargeSid = resolvedSid and _multiChargeSpells[resolvedSid] == true
                 -- Buff bars always show buff duration; other bars skip aura duration for charge spells
                 local isBuffBar = (barKey == "buffs")
