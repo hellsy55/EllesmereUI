@@ -6514,12 +6514,22 @@ _blizzMovableCombatFrame:SetScript("OnEvent", function()
             end
         end
         if holder and blizzFrame and not InCombatLockdown() then
+            -- Remove from Blizzard's managed layout before reparenting to
+            -- prevent UIParentBottomManagedFrameContainer:SetSize() taint.
+            blizzFrame.ignoreInLayout = true
+            if blizzFrame.SetIsLayoutFrame then
+                pcall(blizzFrame.SetIsLayoutFrame, blizzFrame, false)
+            end
             blizzFrame:SetParent(holder)
             blizzFrame:ClearAllPoints()
             blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
         end
         -- Also reparent widget power bar for encounter bar
         if barKey == "EncounterBar" and holder and UIWidgetPowerBarContainerFrame and not InCombatLockdown() then
+            UIWidgetPowerBarContainerFrame.ignoreInLayout = true
+            if UIWidgetPowerBarContainerFrame.SetIsLayoutFrame then
+                pcall(UIWidgetPowerBarContainerFrame.SetIsLayoutFrame, UIWidgetPowerBarContainerFrame, false)
+            end
             UIWidgetPowerBarContainerFrame:SetParent(holder)
             UIWidgetPowerBarContainerFrame:ClearAllPoints()
             UIWidgetPowerBarContainerFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
