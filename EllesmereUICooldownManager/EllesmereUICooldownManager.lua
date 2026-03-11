@@ -4664,6 +4664,17 @@ local function UpdateAllCDMBars(dt)
                             local resolvedSid = ch._ecmeResolvedSid
                             local baseSpellID = ch._ecmeBaseSpellID
                             local cachedOverride = ch._ecmeOverrideSid
+                            -- Invalidate cache when cooldownID changes (child recycled
+                            -- by Blizzard CDM for a different spell, e.g. Empty Barrel
+                            -- proc replacing another spell's child frame).
+                            if resolvedSid and ch._ecmeCachedCdID ~= cdID then
+                                resolvedSid = nil
+                                baseSpellID = nil
+                                cachedOverride = nil
+                                ch._ecmeResolvedSid = nil
+                                ch._ecmeBaseSpellID = nil
+                                ch._ecmeOverrideSid = nil
+                            end
                             if not resolvedSid then
                                 local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                                 if info then
@@ -4673,6 +4684,7 @@ local function UpdateAllCDMBars(dt)
                                     ch._ecmeBaseSpellID = baseSpellID
                                     ch._ecmeOverrideSid = cachedOverride
                                     ch._ecmeResolvedSid = resolvedSid
+                                    ch._ecmeCachedCdID = cdID
                                 end
                             else
                                 -- Refresh override from lightweight API (returns
@@ -6995,6 +7007,7 @@ local function ScheduleTalentRebuild()
                         ch._ecmeResolvedSid = nil
                         ch._ecmeBaseSpellID = nil
                         ch._ecmeOverrideSid = nil
+                        ch._ecmeCachedCdID = nil
                     end
                 end
             end
