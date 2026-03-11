@@ -1830,7 +1830,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     local barWidth = settings.frameWidth
     local barHeight = settings.healthHeight
 
-    hpBar:SetClipsChildren(true)
+    hpBar:SetClipsChildren(false)
 
     local shieldBar = CreateFrame("StatusBar", nil, hpBar)
     shieldBar:SetStatusBarTexture("Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga")
@@ -2097,7 +2097,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     backdrop:SetFrameStrata(frame:GetFrameStrata())
     backdrop:SetFrameLevel(frame:GetFrameLevel() + 1)
     PP.Size(backdrop, adjustedHeight, adjustedHeight)
-    backdrop:SetClipsChildren(true)
+    backdrop:SetClipsChildren(false)
 
     local bgTex = backdrop:CreateTexture(nil, "BACKGROUND")
     PP.Point(bgTex, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)

@@ -976,7 +976,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.health:SetPoint("CENTER", plate, "CENTER", 0, GetNameplateYOffset())
     plate.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     plate.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    plate.health:SetClipsChildren(true)
+    plate.health:SetClipsChildren(false)
     plate.healthBG = plate.health:CreateTexture(nil, "BACKGROUND")
     plate.healthBG:SetAllPoints()
     plate.healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)

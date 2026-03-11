@@ -1298,7 +1298,7 @@ local function BuildBars()
     if sp.enabled ~= false and cachedSecondary then
         if not secondaryFrame then
             secondaryFrame = CreateFrame("Frame", "ERB_SecondaryFrame", mainFrame)
-            secondaryFrame:SetClipsChildren(true)
+            secondaryFrame:SetClipsChildren(false)
         end
 
         local maxPts = cachedSecondary.max or 5
