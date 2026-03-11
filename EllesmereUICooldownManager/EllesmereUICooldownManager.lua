@@ -5752,6 +5752,13 @@ function ns.AddCDMBar(barType, name, numRows)
         customSpells = {},
         outOfRangeOverlay = false,
     }
+    -- Auto-populate new trinkets bars with player's current extras
+    if barType == "trinkets" then
+        local newBar = bars[#bars]
+        for _, ex in ipairs(GetExtraSpells()) do
+            newBar.customSpells[#newBar.customSpells + 1] = ex.spellID
+        end
+    end
     BuildAllCDMBars()
     RegisterCDMUnlockElements()
     return key
