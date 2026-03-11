@@ -408,6 +408,7 @@ local targetAlpha = 1
 local cachedClass
 local cachedPrimary
 local cachedSecondary
+local RefreshAnchoredBarsForUnlockTarget
 
 -- Forward declarations
 local UpdateCastBar
@@ -755,6 +756,7 @@ local function RegisterUnlockElements()
         end,
         applyPosition = function()
             local hp = ERB.db.profile.health
+            if hp.anchorTo and hp.anchorTo ~= "none" then return end
             local pos = hp.unlockPos
             if not pos then return end
             if healthBar then
@@ -763,6 +765,9 @@ local function RegisterUnlockElements()
                 healthBar:ClearAllPoints()
                 healthBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
             end
+        end,
+        onLiveMove = function(key)
+            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
         end,
     }
 
@@ -807,6 +812,7 @@ local function RegisterUnlockElements()
         end,
         applyPosition = function()
             local pp = ERB.db.profile.primary
+            if pp.anchorTo and pp.anchorTo ~= "none" then return end
             local pos = pp.unlockPos
             if not pos then return end
             if primaryBar then
@@ -815,6 +821,9 @@ local function RegisterUnlockElements()
                 primaryBar:ClearAllPoints()
                 primaryBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
             end
+        end,
+        onLiveMove = function(key)
+            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
         end,
     }
 
@@ -863,6 +872,7 @@ local function RegisterUnlockElements()
         end,
         applyPosition = function()
             local sp = ERB.db.profile.secondary
+            if sp.anchorTo and sp.anchorTo ~= "none" then return end
             local pos = sp.unlockPos
             if not pos then return end
             if secondaryFrame then
@@ -871,6 +881,9 @@ local function RegisterUnlockElements()
                 secondaryFrame:ClearAllPoints()
                 secondaryFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
             end
+        end,
+        onLiveMove = function(key)
+            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
         end,
     }
 
@@ -1001,18 +1014,17 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
     growthDir = growthDir or "UP"
     local centered = (growCentered ~= false)
 
-    -- Determine the frame's own anchor point -- always the near edge center.
-    -- LayoutCDMBar-equivalent offset logic handles non-centered icon positioning.
-    --   grow RIGHT -> near edge = LEFT   -> "LEFT"
-    --   grow LEFT  -> near edge = RIGHT  -> "RIGHT"
-    --   grow DOWN  -> near edge = TOP    -> "TOP"
-    --   grow UP    -> near edge = BOTTOM -> "BOTTOM"
-    local function GetFramePoint()
-        if growthDir == "RIGHT" then return "LEFT"   end
-        if growthDir == "LEFT"  then return "RIGHT"  end
-        if growthDir == "DOWN"  then return "TOP"    end
-        if growthDir == "UP"    then return "BOTTOM" end
-        return "LEFT"
+    local function GetAnchorPoints()
+        if anchorPos == "left" then
+            return "RIGHT", "LEFT"
+        elseif anchorPos == "right" then
+            return "LEFT", "RIGHT"
+        elseif anchorPos == "top" then
+            return "BOTTOM", "TOP"
+        elseif anchorPos == "bottom" then
+            return "TOP", "BOTTOM"
+        end
+        return "LEFT", "RIGHT"
     end
 
     if anchorKey == "mouse" then
@@ -1052,30 +1064,16 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
     elseif anchorKey == "partyframe" then
         local partyFrame = _G._ECME_FindPlayerPartyFrame and _G._ECME_FindPlayerPartyFrame()
         if not partyFrame then return false end
+        local framePoint, targetPoint = GetAnchorPoints()
         frame:ClearAllPoints()
-        if anchorPos == "left" then
-            frame:SetPoint(GetFramePoint(), partyFrame, "LEFT", offsetX, offsetY)
-        elseif anchorPos == "right" then
-            frame:SetPoint(GetFramePoint(), partyFrame, "RIGHT", offsetX, offsetY)
-        elseif anchorPos == "top" then
-            frame:SetPoint(GetFramePoint(), partyFrame, "TOP", offsetX, offsetY)
-        elseif anchorPos == "bottom" then
-            frame:SetPoint(GetFramePoint(), partyFrame, "BOTTOM", offsetX, offsetY)
-        end
+        frame:SetPoint(framePoint, partyFrame, targetPoint, offsetX, offsetY)
         return true
     elseif anchorKey == "playerframe" then
         local playerFrame = _G._ECME_FindPlayerUnitFrame and _G._ECME_FindPlayerUnitFrame()
         if not playerFrame then return false end
+        local framePoint, targetPoint = GetAnchorPoints()
         frame:ClearAllPoints()
-        if anchorPos == "left" then
-            frame:SetPoint(GetFramePoint(), playerFrame, "LEFT", offsetX, offsetY)
-        elseif anchorPos == "right" then
-            frame:SetPoint(GetFramePoint(), playerFrame, "RIGHT", offsetX, offsetY)
-        elseif anchorPos == "top" then
-            frame:SetPoint(GetFramePoint(), playerFrame, "TOP", offsetX, offsetY)
-        elseif anchorPos == "bottom" then
-            frame:SetPoint(GetFramePoint(), playerFrame, "BOTTOM", offsetX, offsetY)
-        end
+        frame:SetPoint(framePoint, playerFrame, targetPoint, offsetX, offsetY)
         return true
     end
 
@@ -1083,17 +1081,77 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
     if not targetFrame or not targetFrame:IsShown() then return false end
 
     frame:ClearAllPoints()
+    local framePoint, targetPoint = GetAnchorPoints()
     local ok
-    if anchorPos == "left" then
-        ok = pcall(frame.SetPoint, frame, GetFramePoint(), targetFrame, "LEFT", offsetX, offsetY)
-    elseif anchorPos == "right" then
-        ok = pcall(frame.SetPoint, frame, GetFramePoint(), targetFrame, "RIGHT", offsetX, offsetY)
-    elseif anchorPos == "top" then
-        ok = pcall(frame.SetPoint, frame, GetFramePoint(), targetFrame, "TOP", offsetX, offsetY)
-    elseif anchorPos == "bottom" then
-        ok = pcall(frame.SetPoint, frame, GetFramePoint(), targetFrame, "BOTTOM", offsetX, offsetY)
-    end
+    ok = pcall(frame.SetPoint, frame, framePoint, targetFrame, targetPoint, offsetX, offsetY)
     return ok or false
+end
+
+local UNLOCK_TARGET_TO_ERB_ANCHOR = {
+    ERB_Health = "erb_health",
+    ERB_Power = "erb_powerbar",
+    ERB_ClassResource = "erb_classresource",
+    ERB_CastBar = "erb_castbar",
+}
+
+local function GetAnchorOffsets(settings)
+    if not settings then return 0, 0 end
+    local offsetX = settings.anchorOffsetX
+    if offsetX == nil then offsetX = settings.anchorX end
+    local offsetY = settings.anchorOffsetY
+    if offsetY == nil then offsetY = settings.anchorY end
+    return offsetX or 0, offsetY or 0
+end
+
+local function ReapplyInternalBarAnchors()
+    if not (ERB and ERB.db and ERB.db.profile) then return end
+
+    local p = ERB.db.profile
+    local anchoredBars = {
+        { frame = healthBar, settings = p.health },
+        { frame = primaryBar, settings = p.primary },
+        { frame = secondaryFrame, settings = p.secondary },
+    }
+
+    for _ = 1, 2 do
+        for _, info in ipairs(anchoredBars) do
+            local frame = info.frame
+            local settings = info.settings
+            local anchorKey = settings and settings.anchorTo
+            if frame and settings and frame:IsShown()
+                and anchorKey and anchorKey ~= "none"
+                and ERB_ANCHOR_FRAMES[anchorKey]
+            then
+                local offsetX, offsetY = GetAnchorOffsets(settings)
+                ApplyBarAnchor(frame, anchorKey, settings.anchorPosition, offsetX, offsetY, settings.growthDirection, settings.growCentered)
+            end
+        end
+    end
+end
+
+RefreshAnchoredBarsForUnlockTarget = function(unlockKey)
+    local targetAnchor = UNLOCK_TARGET_TO_ERB_ANCHOR[unlockKey]
+    if not (targetAnchor and ERB and ERB.db and ERB.db.profile) then return end
+
+    local p = ERB.db.profile
+    local bars = {
+        { frame = healthBar, settings = p.health },
+        { frame = primaryBar, settings = p.primary },
+        { frame = secondaryFrame, settings = p.secondary },
+    }
+
+    for _ = 1, 2 do
+        for _, info in ipairs(bars) do
+            local frame = info.frame
+            local settings = info.settings
+            if frame and settings and frame:IsShown()
+                and settings.anchorTo == targetAnchor
+            then
+                local offsetX, offsetY = GetAnchorOffsets(settings)
+                ApplyBarAnchor(frame, settings.anchorTo, settings.anchorPosition, offsetX, offsetY, settings.growthDirection, settings.growCentered)
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1135,7 +1193,13 @@ local function BuildBars()
             healthBar = CreateStatusBar(mainFrame, "ERB_HealthBar", hp.width, hp.height,
                 hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA)
         end
-        if hp.unlockPos and hp.unlockPos.point then
+        if hp.anchorTo and hp.anchorTo ~= "none" then
+            local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
+            local offsetX, offsetY = GetAnchorOffsets(hp)
+            healthBar:SetScale(hp.scale)
+            healthBar:SetSize(ow, oh)
+            ApplyBarAnchor(healthBar, hp.anchorTo, hp.anchorPosition, offsetX, offsetY, hp.growthDirection, hp.growCentered)
+        elseif hp.unlockPos and hp.unlockPos.point then
             -- Position fully managed by unlock mode -- no animations, just apply directly
             local rp = hp.unlockPos.relPoint or hp.unlockPos.point
             local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
@@ -1143,11 +1207,6 @@ local function BuildBars()
             healthBar:SetSize(ow, oh)
             healthBar:ClearAllPoints()
             healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
-        elseif hp.anchorTo and hp.anchorTo ~= "none" then
-            local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
-            healthBar:SetScale(hp.scale)
-            healthBar:SetSize(ow, oh)
-            ApplyBarAnchor(healthBar, hp.anchorTo, hp.anchorPosition, hp.anchorOffsetX, hp.anchorOffsetY, hp.growthDirection, hp.growCentered)
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(healthBar, "none")
@@ -1211,7 +1270,13 @@ local function BuildBars()
             primaryBar = CreateStatusBar(mainFrame, "ERB_PrimaryBar", pp.width, pp.height,
                 pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
         end
-        if pp.unlockPos and pp.unlockPos.point then
+        if pp.anchorTo and pp.anchorTo ~= "none" then
+            local ow, oh = OrientedSize(pp.width, pp.height, ppOri)
+            local offsetX, offsetY = GetAnchorOffsets(pp)
+            primaryBar:SetScale(pp.scale)
+            primaryBar:SetSize(ow, oh)
+            ApplyBarAnchor(primaryBar, pp.anchorTo, pp.anchorPosition, offsetX, offsetY, pp.growthDirection, pp.growCentered)
+        elseif pp.unlockPos and pp.unlockPos.point then
             -- Position fully managed by unlock mode -- no animations, just apply directly
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
             local ow, oh = OrientedSize(pp.width, pp.height, ppOri)
@@ -1219,11 +1284,6 @@ local function BuildBars()
             primaryBar:SetSize(ow, oh)
             primaryBar:ClearAllPoints()
             primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
-        elseif pp.anchorTo and pp.anchorTo ~= "none" then
-            local ow, oh = OrientedSize(pp.width, pp.height, ppOri)
-            primaryBar:SetScale(pp.scale)
-            primaryBar:SetSize(ow, oh)
-            ApplyBarAnchor(primaryBar, pp.anchorTo, pp.anchorPosition, pp.anchorOffsetX, pp.anchorOffsetY, pp.growthDirection, pp.growCentered)
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(primaryBar, "none")
@@ -1323,15 +1383,16 @@ local function BuildBars()
         local frameW = isVertical and pipH or totalW
         local frameH = isVertical and totalW or pipH
 
-        if sp.unlockPos and sp.unlockPos.point then
+        if sp.anchorTo and sp.anchorTo ~= "none" then
+            local offsetX, offsetY = GetAnchorOffsets(sp)
+            secondaryFrame:SetScale(sp.scale or 1)
+            secondaryFrame:SetSize(frameW, frameH)
+            ApplyBarAnchor(secondaryFrame, sp.anchorTo, sp.anchorPosition, offsetX, offsetY, sp.growthDirection, sp.growCentered)
+        elseif sp.unlockPos and sp.unlockPos.point then
             secondaryFrame:SetScale(sp.scale or 1)
             secondaryFrame:SetSize(frameW, frameH)
             secondaryFrame:ClearAllPoints()
             secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
-        elseif sp.anchorTo and sp.anchorTo ~= "none" then
-            secondaryFrame:SetScale(sp.scale or 1)
-            secondaryFrame:SetSize(frameW, frameH)
-            ApplyBarAnchor(secondaryFrame, sp.anchorTo, sp.anchorPosition, sp.anchorOffsetX, sp.anchorOffsetY, sp.growthDirection, sp.growCentered)
         else
             ApplyBarAnchor(secondaryFrame, "none")
             local function ApplySecondaryBarTransform()
@@ -1545,6 +1606,8 @@ local function BuildBars()
     elseif secondaryFrame then
         secondaryFrame:Hide()
     end
+
+    ReapplyInternalBarAnchors()
 end
 
 
