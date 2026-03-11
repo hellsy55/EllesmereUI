@@ -5976,6 +5976,59 @@ initFrame:SetScript("OnEvent", function(self, event)
     -- Create native minimap button
     EllesmereUI.CreateMinimapButton()
 
+    -- Add button to the Game Menu (Escape / pause menu)
+    if GameMenuFrame and not GameMenuFrame.EllesmereUI then
+        local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
+        btn:SetSize(200, 35)
+        btn:SetScript("OnClick", function()
+            if not InCombatLockdown() then
+                HideUIPanel(GameMenuFrame)
+            end
+            EllesmereUI:Toggle()
+        end)
+        GameMenuFrame.EllesmereUI = btn
+
+        hooksecurefunc(GameMenuFrame, "Layout", function()
+            local eg = ELLESMERE_GREEN
+            local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
+            btn:SetFormattedText("%sEllesmereUI|r", hex)
+
+            -- Find the Shop button to anchor below it (fall back to Options)
+            local anchorBtn
+            for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
+                local text = menuBtn:GetText()
+                if text == BLIZZARD_STORE then
+                    anchorBtn = menuBtn
+                    break
+                elseif text == GAMEMENU_OPTIONS then
+                    anchorBtn = menuBtn
+                end
+            end
+            if not anchorBtn then return end
+
+            -- Anchor our button below the Shop (or Options) button
+            btn:ClearAllPoints()
+            btn:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -12)
+
+            -- Push all buttons that sit below the anchor down to make room
+            local anchorBottom = anchorBtn:GetBottom()
+            if anchorBottom then
+                for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
+                    local top = menuBtn:GetTop()
+                    if top and top < anchorBottom + 2 then
+                        local p, rel, rp, x, y = menuBtn:GetPoint(1)
+                        if p then
+                            menuBtn:ClearAllPoints()
+                            menuBtn:SetPoint(p, rel, rp, x, (y or 0) - 40)
+                        end
+                    end
+                end
+            end
+
+            GameMenuFrame:SetHeight(GameMenuFrame:GetHeight() + 40)
+        end)
+    end
+
     -- Apply streamer settings
     if EllesmereUI._applyGuildChatPrivacy then EllesmereUI._applyGuildChatPrivacy() end
     if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
