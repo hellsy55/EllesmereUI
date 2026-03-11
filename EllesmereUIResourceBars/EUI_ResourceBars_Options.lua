@@ -1514,7 +1514,9 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() local p = DB(); return p and p.secondary.anchorTo or "none" end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.secondary.anchorTo = v; SmoothRefresh()
+                  p.secondary.anchorTo = v
+                  if v ~= "none" then p.secondary.unlockPos = nil end
+                  SmoothRefresh()
               end },
             { type = "dropdown", text = "Anchor Position",
               disabled = function() local p = DB(); return p and (not p.secondary.enabled or (p.secondary.anchorTo or "none") == "none") end,
@@ -2061,7 +2063,9 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() local p = DB(); return p and p.primary.anchorTo or "none" end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.primary.anchorTo = v; SmoothRefresh()
+                  p.primary.anchorTo = v
+                  if v ~= "none" then p.primary.unlockPos = nil end
+                  SmoothRefresh()
               end },
             { type = "dropdown", text = "Anchor Position",
               disabled = function()
@@ -2563,7 +2567,9 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() local p = DB(); return p and p.health.anchorTo or "none" end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.health.anchorTo = v; SmoothRefresh()
+                  p.health.anchorTo = v
+                  if v ~= "none" then p.health.unlockPos = nil end
+                  SmoothRefresh()
               end },
             { type = "dropdown", text = "Anchor Position",
               disabled = function() local p = DB(); return p and (not p.health.enabled or (p.health.anchorTo or "none") == "none") end,

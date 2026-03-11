@@ -222,7 +222,9 @@ end
 
 local function IsAnchored(barKey)
     local info = GetAnchorInfo(barKey)
-    return info ~= nil
+    if info ~= nil then return true end
+    local elem = registeredElements[barKey]
+    return elem and elem.isAnchored and elem.isAnchored() or false
 end
 
 -- Smoothly fade the background overlay between normal and select-element alpha
@@ -1569,12 +1571,16 @@ local function SortMoverFrameLevels()
 end
 
 local function CreateMover(barKey)
-    if movers[barKey] then return movers[barKey] end
-
-    -- Skip elements that are intentionally hidden (e.g. alwaysHidden action bars)
     local elem = registeredElements[barKey]
-    if elem and elem.isHidden and elem.isHidden() then return nil end
-    if elem and elem.isAnchored and elem.isAnchored() then return nil end
+    local existing = movers[barKey]
+
+    -- Skip elements that are intentionally hidden or currently anchored.
+    if elem and ((elem.isHidden and elem.isHidden()) or (elem.isAnchored and elem.isAnchored())) then
+        if existing then existing:Hide() end
+        return nil
+    end
+
+    if existing then return existing end
 
     local bar = GetBarFrame(barKey)
     if not bar then return nil end
@@ -2079,6 +2085,11 @@ local function CreateMover(barKey)
                 end
             end
 
+            local elem = registeredElements[s._barKey]
+            if elem and elem.onLiveMove then
+                pcall(elem.onLiveMove, s._barKey)
+            end
+
             ShowAlignmentGuides(s._barKey)
         end)
     end)
@@ -2151,6 +2162,11 @@ local function CreateMover(barKey)
                     if movers[childKey] then movers[childKey]:Sync() end
                 end
             end
+        end
+
+        local elem = registeredElements[self._barKey]
+        if elem and elem.onLiveMove then
+            pcall(elem.onLiveMove, self._barKey)
         end
     end)
 
