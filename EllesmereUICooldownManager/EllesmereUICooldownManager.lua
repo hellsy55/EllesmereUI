@@ -4741,8 +4741,18 @@ local function UpdateAllCDMBars(dt)
                                     end)
                                 end
                                 hooksecurefunc(ch.Cooldown, "SetCooldown", function(_, start, dur)
-                                    _ecmeRawStartCache[ch] = start
-                                    _ecmeRawDurCache[ch] = dur
+                                    if dur and dur > 0 then
+                                        _ecmeRawStartCache[ch] = start
+                                        _ecmeRawDurCache[ch] = dur
+                                    else
+                                        -- SetCooldown(0,0) is equivalent to Clear(); wipe cached state
+                                        -- so IsBufChildCooldownActive does not permanently return true
+                                        -- (Lua treats 0 as truthy, so storing dur=0 would stick)
+                                        _ecmeDurObjCache[ch] = nil
+                                        _ecmeChildHasDurObj[ch] = nil
+                                        _ecmeRawStartCache[ch] = nil
+                                        _ecmeRawDurCache[ch] = nil
+                                    end
                                 end)
                                 -- Clear hook: wipe our cached state when Blizzard clears the cooldown.
                                 -- This ensures IsBufChildCooldownActive returns false after expiry.
