@@ -672,6 +672,13 @@ local function ApplyStackCount(icon, resolvedSid, auraInstanceID, auraUnit, show
     end
 
     if blizzChild then
+        -- Totems: Applications frame shows cast charges, not aura stacks. Hide.
+        local totemSlot = blizzChild.preferredTotemUpdateSlot
+        if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
+            icon._stackText:Hide()
+            return
+        end
+
         blizzChild._ecmeIcon = icon
         HookBlizzChildApplications(blizzChild)
 
@@ -1866,18 +1873,36 @@ local function GetBarKeyForBlizzChild(frame)
     return nil
 end
 
--- Find our icon that mirrors a given Blizzard CDM child
+local ResolveBlizzChildSpellID  -- forward-declare (defined below)
+
+-- Find our icon that mirrors a given Blizzard CDM child.
+-- Falls back to spellID + override matching for proc glows on transformed spells.
 local function FindOurIconForBlizzChild(barKey, blizzChild)
     local icons = cdmBarIcons[barKey]
     if not icons then return nil end
     for _, icon in ipairs(icons) do
         if icon._blizzChild == blizzChild then return icon end
     end
+    -- Fallback: match by spellID (covers override spells like HST -> Storm Stream)
+    local alertSid = ResolveBlizzChildSpellID(blizzChild)
+    if alertSid then
+        for _, icon in ipairs(icons) do
+            if icon._spellID == alertSid then return icon end
+        end
+        -- Check override mapping (base spell <-> override)
+        for _, icon in ipairs(icons) do
+            local iconSid = icon._spellID
+            if iconSid and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                local ovr = C_SpellBook.FindSpellOverrideByID(iconSid)
+                if ovr and ovr == alertSid then return icon end
+            end
+        end
+    end
     return nil
 end
 
--- Resolve spellID from a Blizzard CDM child (for IsSpellOverlayed guard)
-local function ResolveBlizzChildSpellID(blizzChild)
+-- Resolve spellID from a Blizzard CDM child (for IsSpellOverlayed guard and proc glow matching)
+ResolveBlizzChildSpellID = function(blizzChild)
     local cdID = blizzChild.cooldownID
     if not cdID and blizzChild.cooldownInfo then
         cdID = blizzChild.cooldownInfo.cooldownID
@@ -2996,11 +3021,20 @@ local function CreateCDMIcon(barKey, index)
         icon._pendingFontPath = GetCDMFont(); icon._pendingFontSize = barData.cooldownFontSize or 12
     end
 
-    -- Text overlay frame: sits above the cooldown swipe so charge/stack text
-    -- is always visible on top of the swipe animation
+    -- Glow overlay: above cooldown swipe, below text so numbers stay readable
+    local glowOverlay = CreateFrame("Frame", nil, icon)
+    glowOverlay:ClearAllPoints()
+    glowOverlay:SetPoint("TOPLEFT",     icon, "TOPLEFT",     -3,  3)
+    glowOverlay:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",  3, -3)
+    glowOverlay:SetFrameLevel(icon:GetFrameLevel() + 2)
+    glowOverlay:SetAlpha(0)
+    glowOverlay:EnableMouse(false)
+    icon._glowOverlay = glowOverlay
+
+    -- Text overlay: above glow so charge/stack/keybind text stays visible
     local textOverlay = CreateFrame("Frame", nil, icon)
     textOverlay:SetAllPoints(icon)
-    textOverlay:SetFrameLevel(icon:GetFrameLevel() + 2)
+    textOverlay:SetFrameLevel(icon:GetFrameLevel() + 3)
     textOverlay:EnableMouse(false)
     icon._textOverlay = textOverlay
 
@@ -3023,16 +3057,6 @@ local function CreateCDMIcon(barKey, index)
     stackText:SetTextColor(barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1)
     stackText:Hide()
     icon._stackText = stackText
-
-    -- Glow overlay (for active state animations  extends 3px beyond icon so pixel glow ants are visible outside border)
-    local glowOverlay = CreateFrame("Frame", nil, icon)
-    glowOverlay:ClearAllPoints()
-    glowOverlay:SetPoint("TOPLEFT",     icon, "TOPLEFT",     -3,  3)
-    glowOverlay:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",  3, -3)
-    glowOverlay:SetFrameLevel(icon:GetFrameLevel() + 3)
-    glowOverlay:SetAlpha(0)
-    glowOverlay:EnableMouse(false)
-    icon._glowOverlay = glowOverlay
 
     -- Keybind text overlay (top-left corner of icon)
     local keybindText = textOverlay:CreateFontString(nil, "OVERLAY")
@@ -4813,13 +4837,37 @@ local function UpdateAllCDMBars(dt)
                                     _tickBlizzAllChildCache[correctSid] = ch
                                     _tickBlizzBuffChildCache[correctSid] = ch
                                     if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
-                                        _tickBlizzActiveCache[correctSid] = true
+                                        -- Totems: validate liveness via GetTotemInfo
+                                        local totemSlot = ch.preferredTotemUpdateSlot
+                                        local totemOk = true
+                                        if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
+                                            local ht = GetTotemInfo(totemSlot)
+                                            if issecretvalue and issecretvalue(ht) then
+                                                totemOk = true
+                                            else
+                                                totemOk = ht == true
+                                            end
+                                        end
+                                        if totemOk then
+                                            _tickBlizzActiveCache[correctSid] = true
+                                        end
                                     end
                                 end
                             end
-                            -- Active cache: resolved spellID -> true when aura-active
+                            -- Active cache: validate totems via GetTotemInfo (flags
+                            -- can persist after totem expires into cooldown phase)
                             if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
-                                if resolvedSid and resolvedSid > 0 then
+                                local totemSlot = ch.preferredTotemUpdateSlot
+                                local totemValid = true
+                                if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
+                                    local haveTotem = GetTotemInfo(totemSlot)
+                                    if issecretvalue and issecretvalue(haveTotem) then
+                                        totemValid = true
+                                    else
+                                        totemValid = haveTotem == true
+                                    end
+                                end
+                                if totemValid and resolvedSid and resolvedSid > 0 then
                                     _tickBlizzActiveCache[resolvedSid] = true
                                 end
                             end
