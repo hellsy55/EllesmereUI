@@ -6106,6 +6106,22 @@ function ECME:OnEnable()
         _specValidated = true
     elseif newSpecKey ~= "0" then
         SetActiveSpec()
+        -- Restore trackedSpells from specProfiles if any main bar lost them.
+        local specKey = p.activeSpecKey
+        if specKey and specKey ~= "0" and p.specProfiles and p.specProfiles[specKey] then
+            local needsRestore = false
+            if p.cdmBars and p.cdmBars.bars then
+                for _, barData in ipairs(p.cdmBars.bars) do
+                    if MAIN_BAR_KEYS[barData.key] and not barData.trackedSpells then
+                        needsRestore = true
+                        break
+                    end
+                end
+            end
+            if needsRestore then
+                LoadSpecProfile(specKey)
+            end
+        end
         _specValidated = true
     else
         -- GetSpecialization() not ready yet ΓÇö leave activeSpecKey as-is,
@@ -6610,7 +6626,6 @@ local function ReconcileMainBarSpells()
                 if poolHasAny then
                     local existing = barData.trackedSpells
                     local removed = barData.removedSpells or {}
-                    local isTalentAware = TALENT_AWARE_BAR_TYPES[barData.key]
                     local kept = {}
                     local keptSet = {}
                     local isBuffBar = (barData.key == "buffs")
@@ -6628,14 +6643,9 @@ local function ReconcileMainBarSpells()
                                 -- Spell exists in some viewer or is known — keep it in place
                                 kept[#kept + 1] = sid
                                 keptSet[sid] = true
-                            elseif isTalentAware then
-                                -- Talent-aware bar: spell not known at all — move to dormant
-                                if not barData.dormantSpells then barData.dormantSpells = {} end
-                                barData.dormantSpells[sid] = i
                             else
-                                -- Non-talent-aware bar: viewer may not be fully populated yet.
-                                -- Keep the spell in its current position rather than dropping it,
-                                -- so a partially-populated viewer can't scramble the saved order.
+                                -- Keep — viewer may be incomplete; TalentAwareReconcile
+                                -- handles dormant transitions on actual talent events.
                                 kept[#kept + 1] = sid
                                 keptSet[sid] = true
                             end
