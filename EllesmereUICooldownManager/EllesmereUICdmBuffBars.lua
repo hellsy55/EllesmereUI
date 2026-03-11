@@ -380,6 +380,27 @@ local function _TBBGetExpiration() return _tbbAura.expirationTime end
 local function _TBBGetName() return _tbbAura.name end
 local function _TBBGetSpellId() return _tbbAura.spellId end
 
+-- Scan player HELPFUL auras by name and return the matching auraData + spellId.
+-- Cleans up _tbbAura after use so callers don't leak stale references.
+local function _TBBScanByName(name)
+    for ai = 1, 40 do
+        local aData = C_UnitAuras.GetAuraDataByIndex("player", ai, "HELPFUL")
+        if not aData then break end
+        _tbbAura = aData
+        local nOk, aName = pcall(_TBBGetName)
+        if nOk and aName and aName == name then
+            local sOk, sid = pcall(_TBBGetSpellId)
+            _tbbAura = nil
+            if sOk and sid and sid > 0 then
+                return aData, sid
+            end
+            return nil, nil
+        end
+    end
+    _tbbAura = nil
+    return nil, nil
+end
+
 -- Scan current player buffs OOC to cache the real aura spellID for each TBB bar.
 local function RefreshTBBResolvedIDs()
     if InCombatLockdown() then return end
@@ -394,19 +415,8 @@ local function RefreshTBBResolvedIDs()
             if ok and aura then
                 bar._resolvedAuraID = cfg.spellID
             else
-                for ai = 1, 40 do
-                    local aData = C_UnitAuras.GetAuraDataByIndex("player", ai, "HELPFUL")
-                    if not aData then break end
-                    _tbbAura = aData
-                    local nameOk, aName = pcall(_TBBGetName)
-                    if nameOk and aName and aName == cfg.name then
-                        local sidOk, sid = pcall(_TBBGetSpellId)
-                        if sidOk and sid and sid > 0 then
-                            bar._resolvedAuraID = sid
-                        end
-                        break
-                    end
-                end
+                local _, sid = _TBBScanByName(cfg.name)
+                if sid then bar._resolvedAuraID = sid end
             end
         end
     end
@@ -506,6 +516,31 @@ function ns.UpdateTrackedBuffBarTimers()
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, resolvedID)
             if ok and result then aura = result end
 
+            -- Fallback: if the resolved ID missed (e.g. Inertia proc consumed
+            -- into the active buff), also try the configured spellID directly.
+            if not aura and resolvedID ~= cfg.spellID then
+                ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, cfg.spellID)
+                if ok and result then
+                    aura = result
+                    bar._resolvedAuraID = cfg.spellID
+                end
+            end
+
+            -- Last resort: scan by name so that same-name spells with different
+            -- IDs (proc vs active variants) are still tracked.  Throttled to at
+            -- most once per second to avoid a 40-slot scan every tick.
+            if not aura and cfg.name and cfg.name ~= "" then
+                local lastScan = bar._lastNameScan or 0
+                if now - lastScan >= 1.0 then
+                    bar._lastNameScan = now
+                    local aData, sid = _TBBScanByName(cfg.name)
+                    if aData and sid then
+                        aura = aData
+                        bar._resolvedAuraID = sid
+                    end
+                end
+            end
+
             if aura then
                 local duration = aura.duration or 0
                 local expiration = aura.expirationTime or 0
@@ -529,6 +564,7 @@ function ns.UpdateTrackedBuffBarTimers()
             else
                 bar:SetValue(0)
                 if bar._timerText then bar._timerText:SetText(""); bar._timerText:Hide() end
+                bar._resolvedAuraID = nil
             end
         end
     end
