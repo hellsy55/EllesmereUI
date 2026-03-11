@@ -155,7 +155,8 @@ local dbRegistry = {}  -- all db objects, for logout cleanup
 -- Returns a db object with .profile pointing to the active profile table.
 -- @param svName  Global SavedVariables name (string)
 -- @param defaults  Table with a .profile sub-table of default values
-function EUILite.NewDB(svName, defaults)
+-- @param defaultToCharKey  When true, new characters default to their own profile
+function EUILite.NewDB(svName, defaults, defaultToCharKey)
     -- Get or create the global SV table
     local sv = _G[svName]
     if type(sv) ~= "table" then
@@ -166,7 +167,8 @@ function EUILite.NewDB(svName, defaults)
     -- Determine profile key
     local charKey = UnitName("player") .. " - " .. GetRealmName()
     if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
-    local profileName = sv.profileKeys[charKey] or "Default"
+    local profileName = sv.profileKeys[charKey]
+        or (defaultToCharKey and charKey or "Default")
     sv.profileKeys[charKey] = profileName
 
     -- Get or create the profile table
