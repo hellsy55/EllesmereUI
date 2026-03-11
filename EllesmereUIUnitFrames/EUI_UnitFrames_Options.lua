@@ -788,6 +788,10 @@ initFrame:SetScript("OnEvent", function(self)
                 return portraitModel
             end
 
+            -- Track last applied mode+style to avoid redundant re-init
+            local _lastAppliedMode = nil
+            local _lastAppliedStyle = nil
+
             local function ApplyPortraitMode()
                 -- Read settings fresh from DB so the closure never goes stale
                 -- after a preview switch or cache restore.
@@ -800,6 +804,12 @@ initFrame:SetScript("OnEvent", function(self)
                 elseif unitKey == "targettarget" then curSettings = db.profile.totPet
                 else curSettings = db.profile.player end
                 local mode = curSettings.portraitMode or "2d"
+                local style = curSettings.classThemeStyle or "modern"
+                -- Skip if nothing changed -- avoids re-initializing PlayerModel
+                -- every Update() call which causes blinking and massive GPU cost
+                if mode == _lastAppliedMode and style == _lastAppliedStyle then return end
+                _lastAppliedMode = mode
+                _lastAppliedStyle = style
                 if mode == "3d" then
                     portraitFrame:Show()
                     portraitTex:Hide()
@@ -812,8 +822,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if portraitModel then portraitModel:Hide() end
                     portraitTex:Show()
                     local _, ct = UnitClass("player")
-                    local cts = curSettings.classThemeStyle or "modern"
-                    ApplyClassIconTexture_Preview(portraitTex, ct or "WARRIOR", cts)
+                    ApplyClassIconTexture_Preview(portraitTex, ct or "WARRIOR", style)
                     portraitTex:SetAlpha(0.9)
                     -- Use current portrait frame height for inset (not captured barH)
                     local curBH = portraitFrame:GetHeight()
@@ -5475,7 +5484,10 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
               disabledTooltip="Enable Class Resource is set to None",
               getValue=function()
-                  local v = SGetSupported("classPowerClassColor")
+                  return SGetSupported("classPowerClassColor")
+              end,
+              setValue=function(v)
+                  SSetSupported("classPowerClassColor", v)
                   ReloadAndUpdate(); UpdatePreview()
                   C_Timer.After(0, function() local rl = EllesmereUI._widgetRefreshList; if rl then for i = 1, #rl do rl[i]() end end end)
               end });  y = y - h
@@ -5770,7 +5782,12 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Enable Class Resource is set to None",
               getValue=function()
                   local c = SGetSupported("classPowerBgColor")
-                  UpdatePreview(); UpdatePreview()
+                  c = c or { r=0.082, g=0.082, b=0.082, a=1.0 }
+                  return c.r, c.g, c.b, c.a
+              end,
+              setValue=function(r, g, b, a)
+                  SSetSupported("classPowerBgColor", { r=r, g=g, b=b, a=a or 1 })
+                  UpdatePreview()
               end });  y = y - h
         SApplySupport(sharedClassResRow3._leftRegion, "classPowerSpacing")
         SApplySupport(sharedClassResRow3._rightRegion, "classPowerBgColor")

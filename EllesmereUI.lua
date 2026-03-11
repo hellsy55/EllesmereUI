@@ -3456,6 +3456,10 @@ local function CreateMainFrame()
     PanelPP.Point(scrollFrame, "TOPLEFT", clickArea, "TOPLEFT", rightX, -contentBaseTop)
     scrollFrame:SetFrameLevel(clickArea:GetFrameLevel() + 3)
     scrollFrame:EnableMouseWheel(true)
+    -- Clip child rendering to the scroll viewport so off-screen widgets
+    -- are skipped by the renderer. Without this, all widgets on a page
+    -- render every frame regardless of scroll position.
+    scrollFrame:SetClipsChildren(true)
 
     scrollChild = CreateFrame("Frame", nil, scrollFrame)
     PanelPP.Size(scrollChild, rightW, 1)
@@ -5352,7 +5356,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.3.2"
+EllesmereUI.VERSION = "4.3.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
