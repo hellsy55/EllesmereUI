@@ -1,4 +1,4 @@
-﻿-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 --  EllesmereUIActionBars.lua  Custom Action Bars (full rewrite)
 --
 --  Creates its own secure action bar frames and buttons instead of hooking
@@ -2201,8 +2201,8 @@ local function LayoutBar(key)
                 btn:SetAlpha(0)
                 btn:Hide()
             else
-                -- Don't override alpha here; mouseover system handles it
                 btn:Show()
+                btn:SetAlpha(1)
             end
         end
     end
