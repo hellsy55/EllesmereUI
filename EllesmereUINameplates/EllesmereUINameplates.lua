@@ -1759,17 +1759,17 @@ local function SetupAuraCVars()
     end
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
+        local nameGap = 4 + GetEnemyNameTextSize()
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
             -- Size must cover the full visual footprint (name + health + cast)
             -- to prevent stacking jitter. Health bar alone is too small.
             local barH = GetHealthBarHeight()
             local castH = GetCastBarHeight()
-            local nameGap = 4 + GetEnemyNameTextSize()
             local totalH = nameGap + barH + castH
             C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), totalH)
         end
         if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets and Enum and Enum.NamePlateType then
-            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, 0, 0, nameGap, 0)
         end
     end
     ApplyNamePlateClickArea()
