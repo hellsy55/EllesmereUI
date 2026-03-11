@@ -1112,6 +1112,9 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.repairWarning = v
+                if not v and EllesmereUI._durWarnHidePreview then
+                    EllesmereUI._durWarnHidePreview()
+                end
                 EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Disable Right Click Enemies",
@@ -1292,6 +1295,8 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = durOff()
                 if off then
+                    durPreviewShown = false
+                    RefreshDurEye()
                     eyeBtn:SetAlpha(0.15)
                     eyeBlock:Show()
                 else

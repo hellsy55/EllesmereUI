@@ -2202,7 +2202,9 @@ local function LayoutBar(key)
                 btn:Hide()
             else
                 btn:Show()
-                btn:SetAlpha(1)
+                if not s.mouseoverEnabled then
+                    btn:SetAlpha(1)
+                end
             end
         end
     end
@@ -3714,16 +3716,20 @@ function EAB:ApplySmartNumIcons(barKey)
         end
     end
 
-    -- Set numIcons to the last filled slot (minimum 1, or 0 if bar is empty)
-    -- Don't expand beyond what the user already has set
+    -- Use overrideNumIcons as a runtime-only trim so we never clobber the
+    -- user's saved numIcons setting.  Only trim down, never expand beyond
+    -- what the user has set.
     local current = s.numIcons or info.count
     local trimmed = lastFilled > 0 and lastFilled or 1
     if trimmed < current then
-        s.numIcons = trimmed
+        s.overrideNumIcons = trimmed
         -- Re-apply layout so the bar resizes immediately
         LayoutBar(barKey)
         self:ApplyAlwaysShowButtons(barKey)
         self:ApplyBackgroundForBar(barKey)
+    else
+        -- No trim needed -- clear any stale override
+        s.overrideNumIcons = nil
     end
 end
 

@@ -5356,7 +5356,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.3.5"
+EllesmereUI.VERSION = "4.3.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -5988,10 +5988,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         end)
         GameMenuFrame.EllesmereUI = btn
 
+        local _gameMenuBaseHeight = nil
         hooksecurefunc(GameMenuFrame, "Layout", function()
             local eg = ELLESMERE_GREEN
             local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
-            btn:SetFormattedText("%sEllesmereUI|r", hex)
+            btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
 
             -- Find the Shop button to anchor below it (fall back to Options)
             local anchorBtn
@@ -6025,7 +6026,12 @@ initFrame:SetScript("OnEvent", function(self, event)
                 end
             end
 
-            GameMenuFrame:SetHeight(GameMenuFrame:GetHeight() + 40)
+            -- Store the base height once, then always set to base + 40
+            -- to prevent accumulation if Layout fires multiple times per open.
+            if not _gameMenuBaseHeight then
+                _gameMenuBaseHeight = GameMenuFrame:GetHeight()
+            end
+            GameMenuFrame:SetHeight(_gameMenuBaseHeight + 40)
         end)
     end
 

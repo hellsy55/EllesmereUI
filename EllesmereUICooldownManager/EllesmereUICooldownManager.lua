@@ -223,6 +223,8 @@ local _tickBlizzChildCache = {}    -- [overrideSpellID] = blizzChild, for direct
 local _tickBlizzAllChildCache = {} -- [resolvedSid] = blizzChild, for all CDM children (used by custom bars)
 local _tickBlizzBuffChildCache = {} -- [resolvedSid] = blizzChild, only from BuffIcon/BuffBar viewers
 local _tickBlizzCDChildCache   = {} -- [resolvedSid] = blizzChild, only from Essential/Utility viewers
+local _tickBlizzMultiChildCache = {} -- [baseSid] = { ch1, ch2, ... } when multiple CDM children share a base spellID
+local _activeMultiScratch = {}      -- reusable scratch table for active multi-child filtering and companion child mapping
 
 -- Reusable spell list buffers -- avoids table allocation every tick in update functions
 local _combinedBuf = {}   -- reused by UpdateTrackedBarIcons for tracked+extra spell list
@@ -2199,10 +2201,8 @@ end
 --  Trinket / Racial / Health Potion data (for "trinkets" bar type)
 --  Encoding in customSpells:  positive = spellID,  -13/-14 = trinket slot
 -------------------------------------------------------------------------------
-local TRINKET_SLOT_1 = 13
-local TRINKET_SLOT_2 = 14
 
--- Racial abilities by internal race name — list of spellIDs
+-- Racial abilities by internal race name -- list of spellIDs
 -- Entries with a table { spellID, class="CLASS" } are class-restricted.
 local RACE_RACIALS = {
     Scourge            = { 7744 },
@@ -4218,6 +4218,49 @@ local function UpdateTrackedBarIcons(barKey)
     local combined = _combinedBuf
     local combinedN = 0
     for _, sid in ipairs(tracked) do combinedN = combinedN + 1; combined[combinedN] = sid end
+    local isBuffBarForOvr = (barKey == "buffs" or barData.barType == "buffs")
+    -- companionChild[i] = specific CDM child for multi-child companion icons.
+    -- When a single tracked spellID has multiple CDM children (e.g. Eclipse
+    -- has two children with different auraInstanceIDs for Lunar and Solar),
+    -- each child gets its own icon entry. Uses module-level scratch table
+    -- (wiped here) to avoid per-tick allocation / GC pressure.
+    wipe(_activeMultiScratch)
+    local hasCompanions = false
+    if isBuffBarForOvr then
+        local baseN = combinedN
+        for bi = 1, baseN do
+            local sid = combined[bi]
+            local multiChildren = _tickBlizzMultiChildCache[sid]
+            if multiChildren then
+                -- Collect only active (shown) children to avoid showing inactive eclipses
+                -- and to avoid tainted Icon textures from inactive CDM children.
+                -- Use :IsShown() instead of .isActive to avoid WoW taint on secure properties.
+                local activeCount = 0
+                local mc1, mc2, mc3, mc4
+                for mi = 1, #multiChildren do
+                    local mc = multiChildren[mi]
+                    if mc:IsShown() then
+                        activeCount = activeCount + 1
+                        if     activeCount == 1 then mc1 = mc
+                        elseif activeCount == 2 then mc2 = mc
+                        elseif activeCount == 3 then mc3 = mc
+                        else                         mc4 = mc end
+                    end
+                end
+                if activeCount > 0 then
+                    hasCompanions = true
+                    _activeMultiScratch[bi] = mc1
+                    local extras2 = { mc2, mc3, mc4 }
+                    for ci = 1, activeCount - 1 do
+                        combinedN = combinedN + 1
+                        combined[combinedN] = sid
+                        _activeMultiScratch[combinedN] = extras2[ci]
+                    end
+                end
+            end
+        end
+    end
+    local companionChild = hasCompanions and _activeMultiScratch or nil
     local extras = barData.extraSpells
     if extras then
         for _, sid in ipairs(extras) do
@@ -4233,12 +4276,29 @@ local function UpdateTrackedBarIcons(barKey)
     for i = combinedN + 1, #combined do combined[i] = nil end
 
     -- Ensure we have enough icon frames
-    while #icons < #combined do
+    while #icons < combinedN do
         local newIcon = CreateCDMIcon(barKey, #icons + 1)
         icons[#icons + 1] = newIcon
+        -- Apply pending cooldown font immediately for dynamically created icons
+        -- (the batch applicator in BuildAllCDMBars only runs once at setup).
+        if newIcon._pendingFontPath and newIcon._cooldown then
+            C_Timer.After(0, function()
+                if newIcon._pendingFontPath and newIcon._cooldown then
+                    for ri = 1, newIcon._cooldown:GetNumRegions() do
+                        local region = select(ri, newIcon._cooldown:GetRegions())
+                        if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                            SetBlizzCDMFont(region, newIcon._pendingFontPath, newIcon._pendingFontSize)
+                            break
+                        end
+                    end
+                    newIcon._pendingFontPath = nil; newIcon._pendingFontSize = nil
+                end
+            end)
+        end
     end
 
-    for i, spellID in ipairs(combined) do
+    for i = 1, combinedN do
+        local spellID = combined[i]
         local ourIcon = icons[i]
         if not ourIcon then break end
 
@@ -4320,7 +4380,6 @@ local function UpdateTrackedBarIcons(barKey)
                     resolvedID = overrideID
                 end
             end
-            local isBuffBarForOvr = (barKey == "buffs" or barData.barType == "buffs")
             -- Second-level runtime override from Blizzard CDM children cache
             -- Skip on buff bars: show the base spell's state, not the temporary
             -- replacement that appears while the spell is on cooldown.
@@ -4361,6 +4420,10 @@ local function UpdateTrackedBarIcons(barKey)
                 end
             end
 
+            -- Companion child for multi-child buff spells (e.g. Eclipse).
+            -- When set, this specific CDM child is used instead of cache lookups.
+            local assignedChild = companionChild and companionChild[i]
+
             -- Cache spell icon texture
             local texID = _spellIconCache[resolvedID]
             if not texID then
@@ -4384,7 +4447,8 @@ local function UpdateTrackedBarIcons(barKey)
             -- aura-driven icon changes (e.g. Heating Up -> Hot Streak) are
             -- reflected each tick instead of staying stuck on the static cache.
             local blizzBuffChild = isBuffBarForOvr
-                and (_tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
+                and (assignedChild
+                     or _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
                      or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
                 or nil
             local blizzBuffChildTexSet = false
@@ -4445,7 +4509,7 @@ local function UpdateTrackedBarIcons(barKey)
                 local skipCDDisplay = false
                 local hasRuntimeOverride = resolvedID ~= spellID and not isBuffBarForOvr
                 do
-                    local blizzChild = _tickBlizzAllChildCache[resolvedID]
+                    local blizzChild = assignedChild or _tickBlizzAllChildCache[resolvedID]
                     if not blizzChild then
                         local cdID = _spellToCooldownID[resolvedID] or _spellToCooldownID[spellID]
                         if cdID then
@@ -4515,7 +4579,7 @@ local function UpdateTrackedBarIcons(barKey)
                                 if IsBufChildCooldownActive(blzBufCh) then blzFbActive = true end
                             end
                             if blzFbActive then
-                                local blzFb = _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
+                                local blzFb = assignedChild or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
                                 auraHandled = true
                                 skipCDDisplay = true
                                 -- Use the cached DurationObject captured by our hook
@@ -4557,7 +4621,7 @@ local function UpdateTrackedBarIcons(barKey)
                 end
 
                 -- Stack count
-                local blizzChild = _tickBlizzAllChildCache[resolvedID]
+                local blizzChild = assignedChild or _tickBlizzAllChildCache[resolvedID]
                 if not blizzChild then
                     local cdID = _spellToCooldownID[resolvedID] or _spellToCooldownID[spellID]
                     if cdID then blizzChild = FindCDMChildByCooldownID(cdID) end
@@ -4578,7 +4642,7 @@ local function UpdateTrackedBarIcons(barKey)
                     local isActive = _tickBlizzActiveCache[resolvedID] or _tickBlizzActiveCache[spellID]
                     -- Fallback: check if the buff-viewer child's cooldown is running
                     if not isActive then
-                        local blzBufCh = _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
+                        local blzBufCh = assignedChild or _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
                                       or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
                         if IsBufChildCooldownActive(blzBufCh) then isActive = true end
                     end
@@ -4599,7 +4663,7 @@ local function UpdateTrackedBarIcons(barKey)
     end
 
     -- Hide excess icons
-    for i = #combined + 1, #icons do
+    for i = combinedN + 1, #icons do
         local ic = icons[i]
         ic._blizzChild = nil
         if ic._procGlowActive then
@@ -4609,8 +4673,12 @@ local function UpdateTrackedBarIcons(barKey)
         ic:Hide()
     end
 
-    -- Only re-layout when visible count changes
-    if visCount ~= prevCount then
+    -- Re-layout when visible count changes, or when companion icons are/were
+    -- active (dynamic combined list can change composition without changing
+    -- visible count, leaving newly-created icons unpositioned).
+    local needsLayout = visCount ~= prevCount or hasCompanions or frame._hadCompanions
+    frame._hadCompanions = hasCompanions
+    if needsLayout then
         frame._prevVisibleCount = visCount
         LayoutCDMBar(barKey)
     end
@@ -4637,6 +4705,7 @@ local function UpdateAllCDMBars(dt)
     wipe(_tickBlizzAllChildCache)
     wipe(_tickBlizzBuffChildCache)
     wipe(_tickBlizzCDChildCache)
+    wipe(_tickBlizzMultiChildCache)
     do
         for vi = 1, 4 do
             local vName = _cdmViewerNames[vi]
@@ -4706,6 +4775,21 @@ local function UpdateAllCDMBars(dt)
                                 if baseSpellID and cachedOverride and cachedOverride ~= baseSpellID then
                                     _tickBlizzOverrideCache[baseSpellID] = cachedOverride
                                     _tickBlizzChildCache[cachedOverride] = ch
+                                end
+                                -- Multi-child cache: track children that share a base spellID
+                                -- within the same viewer (e.g. Eclipse has two BuffIcon children).
+                                -- Cross-viewer duplicates must not trigger this, as different
+                                -- viewers have different child structures.
+                                local baseSid = baseSpellID
+                                if baseSid and baseSid > 0 and isBuffViewer then
+                                    local prevChild = _tickBlizzAllChildCache[resolvedSid]
+                                    if prevChild and baseSid == resolvedSid
+                                            and prevChild.viewerFrame == ch.viewerFrame then
+                                        if not _tickBlizzMultiChildCache[baseSid] then
+                                            _tickBlizzMultiChildCache[baseSid] = { prevChild }
+                                        end
+                                        _tickBlizzMultiChildCache[baseSid][#_tickBlizzMultiChildCache[baseSid] + 1] = ch
+                                    end
                                 end
                                 _tickBlizzAllChildCache[resolvedSid] = ch
                                 -- Buff-viewer-only child cache (for IsShown fallback on
@@ -5173,12 +5257,12 @@ local function GetExtraSpells()
     local extras = {}
 
     -- Trinket slots (dynamic  reads currently equipped item)
-    for _, slot in ipairs({ TRINKET_SLOT_1, TRINKET_SLOT_2 }) do
+    for _, slot in ipairs({ 13, 14 }) do
         local itemID = GetInventoryItemID("player", slot)
         if itemID then
             local tex  = C_Item.GetItemIconByID(itemID)
             if tex then
-                local label = (slot == TRINKET_SLOT_1) and "Trinket Slot 1" or "Trinket Slot 2"
+                local label = (slot == 13) and "Trinket Slot 1" or "Trinket Slot 2"
                 extras[#extras + 1] = {
                     spellID = -slot, cdID = nil,
                     name = label, icon = tex,
@@ -5370,7 +5454,7 @@ function ns.GetCDMSpellsForBar(barKey)
                     if not skip then
                         local name = C_Spell.GetSpellName(sid)
                         local tex = C_Spell.GetSpellTexture(sid)
-                        if name and tex then
+                        if name and (tex or cat == 2 or cat == 3) then
                             seenSpellID[sid] = true
                             local isConflict = SpellConflictsWithOtherBar(sid, barKey)
                             spells[#spells + 1] = {

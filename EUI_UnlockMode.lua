@@ -2963,9 +2963,11 @@ local function CreateMover(barKey)
                 regSub:SetWidth(rsMaxW)
                 regSub:EnableMouse(true)
                 regSub:SetScript("OnLeave", function(self)
-                    if self:IsShown() and not self:IsMouseOver() and not rgItem:IsMouseOver() then
-                        self:Hide()
-                    end
+                    C_Timer.After(0.05, function()
+                        if self:IsShown() and not self:IsMouseOver() and not rgItem:IsMouseOver() then
+                            self:Hide()
+                        end
+                    end)
                 end)
                 regSub:Show()
                 regSubMenus[gName] = regSub
@@ -2981,10 +2983,12 @@ local function CreateMover(barKey)
                 rgHl:SetColorTexture(1, 1, 1, 0)
                 rgLbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                 rgArrow:SetAlpha(0.5)
-                local rs = regSubMenus[gName]
-                if rs and rs:IsShown() and not rs:IsMouseOver() and not rgItem:IsMouseOver() then
-                    rs:Hide()
-                end
+                C_Timer.After(0.05, function()
+                    local rs = regSubMenus[gName]
+                    if rs and rs:IsShown() and not rs:IsMouseOver() and not rgItem:IsMouseOver() then
+                        rs:Hide()
+                    end
+                end)
             end)
         end
 
@@ -3368,9 +3372,11 @@ local function CreateMover(barKey)
                     crSub:SetWidth(crsMaxW)
                     crSub:EnableMouse(true)
                     crSub:SetScript("OnLeave", function(self)
-                        if self:IsShown() and not self:IsMouseOver() and not crItem:IsMouseOver() then
-                            self:Hide()
-                        end
+                        C_Timer.After(0.05, function()
+                            if self:IsShown() and not self:IsMouseOver() and not crItem:IsMouseOver() then
+                                self:Hide()
+                            end
+                        end)
                     end)
                     crSub:Show()
                     cogRegSubMenus[gName] = crSub
@@ -3386,24 +3392,28 @@ local function CreateMover(barKey)
                     crHl:SetColorTexture(1, 1, 1, 0)
                     crLbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                     crArrow:SetAlpha(0.5)
-                    local crs = cogRegSubMenus[gName]
-                    if crs and crs:IsShown() and not crs:IsMouseOver() and not crItem:IsMouseOver() then
-                        crs:Hide()
-                    end
+                    C_Timer.After(0.05, function()
+                        local crs = cogRegSubMenus[gName]
+                        if crs and crs:IsShown() and not crs:IsMouseOver() and not crItem:IsMouseOver() then
+                            crs:Hide()
+                        end
+                    end)
                 end)
             end
             cogSnapMenu:SetHeight(-sYOff + 4)
             cogSnapMenu:EnableMouse(true)
             cogSnapMenu:SetScript("OnLeave", function(self)
-                if self:IsShown() and not self:IsMouseOver() and not snapItem:IsMouseOver() then
-                    for _, crs in pairs(cogRegSubMenus) do
-                        if crs and crs:IsShown() and crs:IsMouseOver() then return end
+                C_Timer.After(0.05, function()
+                    if self:IsShown() and not self:IsMouseOver() and not snapItem:IsMouseOver() then
+                        for _, crs in pairs(cogRegSubMenus) do
+                            if crs and crs:IsShown() and crs:IsMouseOver() then return end
+                        end
+                        for _, crs in pairs(cogRegSubMenus) do
+                            if crs then crs:Hide() end
+                        end
+                        self:Hide()
                     end
-                    for _, crs in pairs(cogRegSubMenus) do
-                        if crs then crs:Hide() end
-                    end
-                    self:Hide()
-                end
+                end)
             end)
             cogSnapMenu:Show()
         end

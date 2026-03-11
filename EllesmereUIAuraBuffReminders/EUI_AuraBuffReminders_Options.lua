@@ -880,6 +880,19 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Frame Strata
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Frame Strata",
+              values=_G._EABR_STRATA_VALUES or {MEDIUM="Medium"},
+              order=_G._EABR_STRATA_ORDER or {"MEDIUM"},
+              getValue=function() local d = DDB(); return d and d.frameStrata or "MEDIUM" end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.frameStrata = v
+                  if _G._EABR_ApplyStrata then _G._EABR_ApplyStrata() end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------

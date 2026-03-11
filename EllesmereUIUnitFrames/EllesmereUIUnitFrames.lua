@@ -5406,6 +5406,52 @@ local function ReloadFrames()
     end
 end
 
+-- Manage the Blizzard default castbar based on whether the UnitFrames player
+-- castbar is active.  oUF's DisableBlizzard() strips events from
+-- PlayerCastingBarFrame and may leave it parented under a hidden frame.
+-- This function is safe to call multiple times (re-entrant).
+local function ApplyBlizzCastbarState()
+    local blizzBar = PlayerCastingBarFrame
+    if not blizzBar then return end
+
+    if db.profile.player.showPlayerCastbar then
+        -- UnitFrames has its own castbar -- suppress the Blizzard one.
+        blizzBar:UnregisterAllEvents()
+        blizzBar:SetScript("OnUpdate", nil)
+        blizzBar:Hide()
+    else
+        -- No UnitFrames castbar -- restore the Blizzard bar.
+        -- Re-parent to UIParent in case oUF left it under a hidden frame.
+        if blizzBar:GetParent() ~= UIParent then
+            blizzBar:SetParent(UIParent)
+        end
+        -- Re-register the events oUF stripped.
+        -- Do NOT clear OnUpdate -- Blizzard's cast bar uses it to animate the fill.
+        blizzBar:UnregisterAllEvents()
+        blizzBar:RegisterEvent("PLAYER_ENTERING_WORLD")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_START",             "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_STOP",              "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_FAILED",            "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED",       "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_DELAYED",           "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START",     "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP",      "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE",    "player", "vehicle")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE",     "player")
+        blizzBar:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", "player")
+    end
+
+    -- Hook Show() once so Blizzard can't flash the bar when it's suppressed.
+    -- Only hooks when showPlayerCastbar is true; skipped in restore path so
+    -- Edit Mode and normal casting can show the bar freely.
+    if db.profile.player.showPlayerCastbar and not blizzBar._euiShowHooked then
+        blizzBar._euiShowHooked = true
+        hooksecurefunc(blizzBar, "Show", function(self)
+            if db.profile.player.showPlayerCastbar then self:Hide() end
+        end)
+    end
+end
+
 function InitializeFrames()
     if oUF and oUF.colors and oUF.colors.power then
         local manaColor = { r = MANA_COLOR.r, g = MANA_COLOR.g, b = MANA_COLOR.b }
@@ -5589,30 +5635,27 @@ function InitializeFrames()
         end
     end
 
-    -- Always suppress the Blizzard default castbar ? we have our own.
-    -- This must run unconditionally so zone changes (portals, etc.) can't
-    -- re-show it even when the player castbar setting is disabled.
-    if PlayerCastingBarFrame then
-        PlayerCastingBarFrame:UnregisterAllEvents()
-        PlayerCastingBarFrame:Hide()
-        PlayerCastingBarFrame:SetScript("OnUpdate", nil)
-        if not PlayerCastingBarFrame._euiShowHooked then
-            PlayerCastingBarFrame._euiShowHooked = true
-            hooksecurefunc(PlayerCastingBarFrame, "Show", function(self) self:Hide() end)
-        end
-    end
-    -- Re-suppress after zone changes: Blizzard re-registers events on PlayerCastingBarFrame
-    -- on PLAYER_ENTERING_WORLD, which lets it show again on the next cast.
-    -- The hooksecurefunc on Show above already makes it permanently invisible,
-    -- but hiding it here prevents even a single-frame flash before the hook fires.
+    -- Castbar state is managed by ApplyBlizzCastbarState (called here and also
+    -- from ReloadFrames so toggling the setting works without a /reload).
+    ApplyBlizzCastbarState()
+
+    -- Re-apply after zone changes and after Edit Mode closes, both of which
+    -- can cause Blizzard to reparent or re-hide the cast bar.
     if not frames._cbSuppressFrame then
         frames._cbSuppressFrame = CreateFrame("Frame")
         frames._cbSuppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        frames._cbSuppressFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
         frames._cbSuppressFrame:SetScript("OnEvent", function()
-            if PlayerCastingBarFrame then
-                PlayerCastingBarFrame:Hide()
-            end
+            ApplyBlizzCastbarState()
         end)
+        -- Edit Mode exit reparents the cast bar back into its layout frame
+        -- (which gets hidden), so re-apply our state when the panel closes.
+        if EditModeManagerFrame and not EditModeManagerFrame._euiCastbarHooked then
+            EditModeManagerFrame._euiCastbarHooked = true
+            hooksecurefunc(EditModeManagerFrame, "Hide", function()
+                C_Timer.After(0, ApplyBlizzCastbarState)
+            end)
+        end
     end
 
     -- Resize frame and portrait to account for class power pips above health bar
@@ -6210,6 +6253,7 @@ function SetupOptionsPanel()
         self:Hide()
         reloadPending = false
         ReloadFrames()
+        ApplyBlizzCastbarState()
     end)
     ns.ReloadFrames = function()
         if not reloadPending then
