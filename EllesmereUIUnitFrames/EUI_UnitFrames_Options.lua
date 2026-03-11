@@ -6534,17 +6534,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return settingsTable.frameScale or 100 end,
               setValue=function(v)
                 settingsTable.frameScale = v
-                if ns.ApplyFrameScale then
-                    for unit, frame in pairs(ns.frames or {}) do
-                        if type(unit) == "string" and unit:sub(1,1) ~= "_" then
-                            local uKey = unit:match("^boss%d$") and "boss" or (unit == "targettarget" or unit == "focustarget") and "totPet" or unit
-                            if db.profile[uKey] == settingsTable then
-                                ns.ApplyFrameScale(frame, unit)
-                            end
-                        end
-                    end
-                end
-                UpdatePreview()
+                ReloadAndUpdate()
               end }, { type="label", text="" });  y = y - h
 
         -- TEXT section

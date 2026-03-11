@@ -5959,6 +5959,7 @@ function InitializeFrames()
     oUF:SetActiveStyle("EllesmerePet")
     frames.pet = oUF:Spawn("pet", "EllesmereUIUnitFrames_Pet")
     ApplyFramePosition(frames.pet, "pet")
+    ApplyFrameScale(frames.pet, "pet")
     SetupUnitMenu(frames.pet, "pet")
     if enabled.pet == false then
         frames.pet:Hide()
@@ -5968,6 +5969,7 @@ function InitializeFrames()
     oUF:SetActiveStyle("EllesmereTargetTarget")
     frames.targettarget = oUF:Spawn("targettarget", "EllesmereUIUnitFrames_TargetTarget")
     ApplyFramePosition(frames.targettarget, "targettarget")
+    ApplyFrameScale(frames.targettarget, "targettarget")
     SetupUnitMenu(frames.targettarget, "targettarget")
     if enabled.targettarget == false then
         frames.targettarget:Hide()
@@ -5977,6 +5979,7 @@ function InitializeFrames()
     oUF:SetActiveStyle("EllesmereFocusTarget")
     frames.focustarget = oUF:Spawn("focustarget", "EllesmereUIUnitFrames_FocusTarget")
     ApplyFramePosition(frames.focustarget, "focustarget")
+    ApplyFrameScale(frames.focustarget, "focustarget")
     SetupUnitMenu(frames.focustarget, "focustarget")
     if enabled.focustarget == false then
         frames.focustarget:Hide()
@@ -6339,6 +6342,7 @@ function SetupOptionsPanel()
                     if scale then
                         local unitKey = (k == "boss") and "boss"
                                      or (k == "classPower") and nil
+                                     or (k == "targettarget" or k == "focustarget") and "totPet"
                                      or k
                         if unitKey and db.profile[unitKey] then
                             db.profile[unitKey].frameScale = math.floor(scale * 100 + 0.5)
