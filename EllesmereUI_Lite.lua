@@ -140,7 +140,8 @@ local function StripDefaults(db, defaults)
     for k, v in pairs(defaults) do
         if type(v) == "table" and type(db[k]) == "table" then
             StripDefaults(db[k], v)
-            if not next(db[k]) then
+            -- Keep empty array entries; DeepMergeDefaults fills them on login.
+            if not next(db[k]) and type(k) ~= "number" then
                 db[k] = nil
             end
         elseif db[k] == v then
