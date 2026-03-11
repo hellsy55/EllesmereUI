@@ -1262,6 +1262,53 @@ initFrame:SetScript("OnEvent", function(self)
                     })
                 end
 
+                -- Sync icon: Always Show Buttons (right region)
+                do
+                    local rgn = visRow1._rightRegion
+                    EllesmereUI.BuildSyncIcon({
+                        region  = rgn,
+                        tooltip = "Apply Always Show Buttons to all Bars",
+                        onClick = function()
+                            local v = SGet("alwaysShowButtons")
+                            if v == nil then v = true end
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                EAB.db.profile.bars[key].alwaysShowButtons = v
+                                EAB:ApplyAlwaysShowButtons(key)
+                                EAB:ApplyPaddingForBar(key)
+                                EAB:ApplyBackgroundForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                        isSynced = function()
+                            local v = SGet("alwaysShowButtons")
+                            if v == nil then v = true end
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                local bv = EAB.db.profile.bars[key].alwaysShowButtons
+                                if bv == nil then bv = true end
+                                if bv ~= v then return false end
+                            end
+                            return true
+                        end,
+                        flashTargets = function() return { rgn } end,
+                        multiApply = {
+                            elementKeys   = GROUP_BAR_ORDER,
+                            elementLabels = SHORT_LABELS,
+                            getCurrentKey = function() return SelectedKey() end,
+                            onApply       = function(checkedKeys)
+                                local v = SGet("alwaysShowButtons")
+                                if v == nil then v = true end
+                                for _, key in ipairs(checkedKeys) do
+                                    EAB.db.profile.bars[key].alwaysShowButtons = v
+                                    EAB:ApplyAlwaysShowButtons(key)
+                                    EAB:ApplyPaddingForBar(key)
+                                    EAB:ApplyBackgroundForBar(key)
+                                end
+                                EllesmereUI:RefreshPage()
+                            end,
+                        },
+                    })
+                end
+
                 -- Housing cog on the visibility dropdown
                 do
                     local leftRgn = visRow1._leftRegion
@@ -1800,6 +1847,93 @@ initFrame:SetScript("OnEvent", function(self)
                                 EAB:ApplyBordersForBar(key)
                                 EAB:ApplyShapesForBar(key)
                             end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+            -- Sync icon: Custom Button Shape (right region of classColorBorderRow)
+            do
+                local rgn = classColorBorderRow._rightRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Custom Button Shape to all Bars",
+                    onClick = function()
+                        local v = SGet("buttonShape") or "none"
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            local bs = EAB.db.profile.bars[key]
+                            bs.iconZoom = ns.SHAPE_ZOOM_DEFAULTS[v] or 5.5
+                            bs.buttonShape = v
+                            if v ~= "none" and v ~= "cropped" then
+                                bs.borderThickness = ns.BORDER_THICKNESS_DEFAULT_SHAPE
+                                local entry = ns.BORDER_THICKNESS[ns.BORDER_THICKNESS_DEFAULT_SHAPE]
+                                bs.shapeBorderSize = entry.shape
+                                bs.shapeBorderEnabled = true
+                            else
+                                bs.borderThickness = ns.BORDER_THICKNESS_DEFAULT_REGULAR
+                                local entry = ns.BORDER_THICKNESS[ns.BORDER_THICKNESS_DEFAULT_REGULAR]
+                                bs.borderSize = entry.regular
+                                bs.borderEnabled = true
+                            end
+                            if v == "cropped" then
+                                bs.keybindFontSize = 11; bs.keybindOffsetX = 0; bs.keybindOffsetY = 1
+                                bs.countFontSize = 11; bs.countOffsetX = 0; bs.countOffsetY = -1
+                            else
+                                bs.keybindFontSize = 12; bs.keybindOffsetX = 0; bs.keybindOffsetY = 0
+                                bs.countFontSize = 12; bs.countOffsetX = 0; bs.countOffsetY = 0
+                            end
+                            EAB:ApplyShapesForBar(key)
+                            EAB:ApplyPaddingForBar(key)
+                            EAB:ApplyBordersForBar(key)
+                            EAB:ApplyFontsForBar(key)
+                        end
+                        EAB:RefreshProcGlows()
+                        SUpdatePreview()
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SGet("buttonShape") or "none"
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].buttonShape or "none") ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SGet("buttonShape") or "none"
+                            for _, key in ipairs(checkedKeys) do
+                                local bs = EAB.db.profile.bars[key]
+                                bs.iconZoom = ns.SHAPE_ZOOM_DEFAULTS[v] or 5.5
+                                bs.buttonShape = v
+                                if v ~= "none" and v ~= "cropped" then
+                                    bs.borderThickness = ns.BORDER_THICKNESS_DEFAULT_SHAPE
+                                    local entry = ns.BORDER_THICKNESS[ns.BORDER_THICKNESS_DEFAULT_SHAPE]
+                                    bs.shapeBorderSize = entry.shape
+                                    bs.shapeBorderEnabled = true
+                                else
+                                    bs.borderThickness = ns.BORDER_THICKNESS_DEFAULT_REGULAR
+                                    local entry = ns.BORDER_THICKNESS[ns.BORDER_THICKNESS_DEFAULT_REGULAR]
+                                    bs.borderSize = entry.regular
+                                    bs.borderEnabled = true
+                                end
+                                if v == "cropped" then
+                                    bs.keybindFontSize = 11; bs.keybindOffsetX = 0; bs.keybindOffsetY = 1
+                                    bs.countFontSize = 11; bs.countOffsetX = 0; bs.countOffsetY = -1
+                                else
+                                    bs.keybindFontSize = 12; bs.keybindOffsetX = 0; bs.keybindOffsetY = 0
+                                    bs.countFontSize = 12; bs.countOffsetX = 0; bs.countOffsetY = 0
+                                end
+                                EAB:ApplyShapesForBar(key)
+                                EAB:ApplyPaddingForBar(key)
+                                EAB:ApplyBordersForBar(key)
+                                EAB:ApplyFontsForBar(key)
+                            end
+                            EAB:RefreshProcGlows()
+                            SUpdatePreview()
                             EllesmereUI:RefreshPage()
                         end,
                     },

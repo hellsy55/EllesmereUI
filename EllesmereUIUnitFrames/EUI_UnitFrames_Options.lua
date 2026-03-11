@@ -3303,6 +3303,100 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateDetShapeCogState()
             RegisterWidgetRefresh(UpdateDetShapeCogState)
         end
+        -- Sync icons: Shape (left) and Shape Border (right)
+        do
+            local rgn = sharedShapeBorderRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Portrait Shape to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().detachedPortraitShape or "portrait"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().detachedPortraitShape = v end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().detachedPortraitShape or "portrait"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().detachedPortraitShape or "portrait") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().detachedPortraitShape or "portrait"
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().detachedPortraitShape = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+        do
+            local rgn = sharedShapeBorderRow._rightRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Shape Border to all Frames",
+                onClick = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local bc = src.detachedPortraitBorderColor
+                    local bo = src.detachedPortraitBorderOpacity
+                    local bs = src.detachedPortraitBorderSize
+                    local cc = src.detachedPortraitClassColor
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then
+                            local d = UNIT_DB_MAP[key]()
+                            if bc then d.detachedPortraitBorderColor = { r=bc.r, g=bc.g, b=bc.b }
+                            else d.detachedPortraitBorderColor = nil end
+                            d.detachedPortraitBorderOpacity = bo
+                            d.detachedPortraitBorderSize = bs
+                            d.detachedPortraitClassColor = cc
+                        end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local cc = src.detachedPortraitClassColor
+                    if cc == nil then cc = true end
+                    local bs = src.detachedPortraitBorderSize or 7
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local d = UNIT_DB_MAP[key]()
+                        local dcc = d.detachedPortraitClassColor
+                        if dcc == nil then dcc = true end
+                        if dcc ~= cc then return false end
+                        if (d.detachedPortraitBorderSize or 7) ~= bs then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local src = UNIT_DB_MAP[selectedUnit]()
+                        local bc = src.detachedPortraitBorderColor
+                        local bo = src.detachedPortraitBorderOpacity
+                        local bs = src.detachedPortraitBorderSize
+                        local cc = src.detachedPortraitClassColor
+                        for _, key in ipairs(checkedKeys) do
+                            local d = UNIT_DB_MAP[key]()
+                            if bc then d.detachedPortraitBorderColor = { r=bc.r, g=bc.g, b=bc.b }
+                            else d.detachedPortraitBorderColor = nil end
+                            d.detachedPortraitBorderOpacity = bo
+                            d.detachedPortraitBorderSize = bs
+                            d.detachedPortraitClassColor = cc
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -4795,6 +4889,39 @@ initFrame:SetScript("OnEvent", function(self)
                     onApply       = function(checkedKeys)
                         local v = UNIT_DB_MAP[selectedUnit]().bottomTextBar or false
                         for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().bottomTextBar = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+        -- Sync icon: Text Bar Position (right region)
+        do
+            local rgn = sharedBtbToggleRow._rightRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Text Bar Position to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().btbPosition or "bottom"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().btbPosition = v end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().btbPosition or "bottom"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().btbPosition or "bottom") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().btbPosition or "bottom"
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().btbPosition = v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
