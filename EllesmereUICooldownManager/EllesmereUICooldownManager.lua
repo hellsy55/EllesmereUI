@@ -243,8 +243,7 @@ local _cdmInVehicle = false      -- true when [vehicleui] or [petbattle] is acti
 local _ecmeRawDurCache = {}      -- [ch] = dur captured from SetCooldown hook
 local _tickTotemCache = {}       -- [slot] = haveTotem (cached per tick to avoid inconsistent reads)
 
--- Cached wrapper for GetTotemInfo: returns the same haveTotem value for a given
--- slot within a single tick, preventing show/hide oscillation during totem expiry.
+-- Per-tick cached GetTotemInfo to prevent inconsistent reads during totem expiry.
 local function GetCachedTotemInfo(slot)
     local cached = _tickTotemCache[slot]
     if cached ~= nil then return cached end
@@ -253,12 +252,9 @@ local function GetCachedTotemInfo(slot)
     return haveTotem
 end
 
--- Validate that a totem CDM child still represents a live effect.
--- GetTotemInfo only confirms "a totem exists in this slot" but not WHICH totem.
--- This secondary check verifies the child's own aura/cooldown data is still live,
--- preventing stale children (e.g. expired SLT) from ghosting back.
+-- Secondary validation: GetTotemInfo confirms a totem exists in the slot but not
+-- WHICH totem. This checks the child's own aura/cooldown data is still live.
 local function IsTotemChildStillValid(ch)
-    -- Check aura instance first
     if ch.auraInstanceID then
         local ok, data = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID,
                                ch.auraDataUnit or "player", ch.auraInstanceID)
@@ -268,7 +264,6 @@ local function IsTotemChildStillValid(ch)
         end
         return true  -- pcall failed, trust GetTotemInfo
     end
-    -- No auraInstanceID: check cooldown state from our hooks
     if _ecmeChildHasDurObj[ch] then return true end
     local rd = _ecmeRawDurCache[ch]
     if rd then
@@ -548,8 +543,7 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
 
     -- Charge text: show spell charges for charge-based spells, or aura stacks as fallback
     if showCharges then
-        -- Totems: charge count shows totem charges (e.g. HST "2"), not aura stacks.
-        -- Hide charge text for totem spells to avoid misleading stack display.
+        -- Totems: hide charge count (e.g. HST "2") — not meaningful as stacks.
         local ts = blizzChild and blizzChild.preferredTotemUpdateSlot
         if ts and type(ts) == "number" and ts > 0 then
             icon._chargeText:Hide()
@@ -3565,9 +3559,7 @@ local function UpdateCustomBarIcons(barKey)
                                     auraHandled = true
                                     skipCDDisplay = true
                                 else
-                                    -- For totems with stale aura (e.g. Stormstream consumed),
-                                    -- skip auraHandled to fall through to the summon-type
-                                    -- fallback which reads remaining totem duration.
+                                    -- Totems: skip auraHandled so summon-type fallback shows totem duration
                                     local bts = blizzChild and blizzChild.preferredTotemUpdateSlot
                                     if not (bts and type(bts) == "number" and bts > 0) then
                                         auraHandled = true
@@ -3875,9 +3867,7 @@ UpdateCDMBarIcons = function(barKey)
                         auraHandled = true
                         skipCDDisplay = true
                     else
-                        -- For totems with stale aura (e.g. Stormstream consumed),
-                        -- skip auraHandled to fall through to the summon-type
-                        -- fallback which reads remaining totem duration.
+                        -- Totems: skip auraHandled so summon-type fallback shows totem duration
                         local bts = blizzIcon and blizzIcon.preferredTotemUpdateSlot
                         if not (bts and type(bts) == "number" and bts > 0) then
                             auraHandled = true
@@ -4523,9 +4513,7 @@ local function UpdateTrackedBarIcons(barKey)
                                     auraHandled = true
                                     skipCDDisplay = true
                                 else
-                                    -- For totems with stale aura (e.g. Stormstream consumed),
-                                    -- skip auraHandled to fall through to the summon-type
-                                    -- fallback which reads remaining totem duration.
+                                    -- Totems: skip auraHandled so summon-type fallback shows totem duration
                                     local bts = blizzChild and blizzChild.preferredTotemUpdateSlot
                                     if not (bts and type(bts) == "number" and bts > 0) then
                                         auraHandled = true
@@ -4786,7 +4774,6 @@ local function UpdateAllCDMBars(dt)
                                     _tickBlizzAllChildCache[correctSid] = ch
                                     _tickBlizzBuffChildCache[correctSid] = ch
                                     if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
-                                        -- Totems: validate liveness via GetCachedTotemInfo + secondary check
                                         local totemSlot = ch.preferredTotemUpdateSlot
                                         local totemOk = true
                                         if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
@@ -4806,8 +4793,7 @@ local function UpdateAllCDMBars(dt)
                                     end
                                 end
                             end
-                            -- Active cache: validate totems via GetCachedTotemInfo + secondary check
-                            -- (flags can persist after totem expires into cooldown phase)
+                            -- Active cache: validate totems (flags can persist after expiry)
                             if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
                                 local totemSlot = ch.preferredTotemUpdateSlot
                                 local totemValid = true
