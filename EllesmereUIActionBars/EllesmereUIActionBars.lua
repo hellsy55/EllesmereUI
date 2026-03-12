@@ -4627,7 +4627,6 @@ local function UpdateKeybinds()
 
     local keyDownEnabled = IsKeyDownEnabled()
     local clickType = keyDownEnabled and "HOTKEY" or "LeftButton"
-    print("|cffff9900[EAB DEBUG]|r keyDown=" .. tostring(keyDownEnabled) .. " clickType=" .. clickType)
 
     for _, info in ipairs(BAR_CONFIG) do
         -- Stance and pet bar buttons use Blizzard's native binding system -- skip them
@@ -5107,65 +5106,6 @@ function EAB:OnInitialize()
         end
     end
 
-    SLASH_EABDEBUG1 = "/eabdebug"
-    SlashCmdList["EABDEBUG"] = function()
-        local btn = ActionButton1
-        if not btn then print("[EAB] ActionButton1 not found") return end
-        print("[EAB] btn name: " .. tostring(btn:GetName()))
-        print("[EAB] btn type attr: " .. tostring(btn:GetAttribute("type")))
-        print("[EAB] btn pressAndHoldAction: " .. tostring(btn:GetAttribute("pressAndHoldAction")))
-        print("[EAB] _pahHooked: " .. tostring(btn._pahHooked))
-        print("[EAB] CVar ActionButtonUseKeyDown: " .. tostring(GetCVar("ActionButtonUseKeyDown")))
-        local k1, k2 = GetBindingKey("ACTIONBUTTON1")
-        print("[EAB] ACTIONBUTTON1 keys: " .. tostring(k1) .. ", " .. tostring(k2))
-        if k1 then
-            print("[EAB] GetBindingAction(" .. k1 .. "): " .. tostring(GetBindingAction(k1, true)))
-        end
-    end
-
-    SLASH_EABBORDER1 = "/eabborder"
-    SlashCmdList["EABBORDER"] = function()
-        local PP = EllesmereUI and EllesmereUI.PP
-        local p = function(...) print("|cffff8800[Border]|r", ...) end
-        p("--- PP state ---")
-        p("mult=", PP and PP.mult, "perfect=", PP and PP.perfect)
-        p("UIParent:GetScale()=", UIParent:GetScale())
-        p("UIParent:GetEffectiveScale()=", UIParent:GetEffectiveScale())
-        p("ppUIScale=", EllesmereUIDB and EllesmereUIDB.ppUIScale)
-        p("physH=", PP and PP.physicalHeight)
-        p("--- ActionButton1 ---")
-        local btn = ActionButton1
-        if not btn then p("ActionButton1 not found") return end
-        p("btn size:", btn:GetWidth(), "x", btn:GetHeight())
-        p("btn scale:", btn:GetScale(), "effectiveScale:", btn:GetEffectiveScale())
-        p("_ppBorders:", tostring(btn._ppBorders))
-        p("_ppBorderSize:", tostring(btn._ppBorderSize))
-        p("_eabBorders:", tostring(btn._eabBorders))
-        local border = btn._ppBorders
-        if border then
-            p("border frame size:", border:GetWidth(), "x", border:GetHeight())
-            p("border frame scale:", border:GetScale())
-            local bc = btn._ppBorderColor
-            if bc then
-                p("border color:", bc[1], bc[2], bc[3], bc[4])
-            else
-                p("NO _ppBorderColor stored")
-            end
-            p("borderSize stored:", tostring(btn._ppBorderSize))
-            p("expected thickness (size*mult):", PP and btn._ppBorderSize and (btn._ppBorderSize * PP.mult))
-            p("expected thickness (size*perfect/es):", PP and btn._ppBorderSize and border.GetEffectiveScale and (btn._ppBorderSize * PP.perfect / border:GetEffectiveScale()))
-            -- Check individual texture strips
-            if border._top then
-                p("top height:", border._top:GetHeight())
-                p("top PixelSnapDisabled:", tostring(border._top.PixelSnapDisabled))
-            end
-            if border._left then
-                p("left width:", border._left:GetWidth())
-            end
-        else
-            p("NO _ppBorders on button")
-        end
-    end
 end
 
 function EAB:OnEnable()
