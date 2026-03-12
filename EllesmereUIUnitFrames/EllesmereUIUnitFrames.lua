@@ -2784,9 +2784,10 @@ local function StyleFullFrame(frame, unit)
     UpdateBordersForScale(frame, unit)
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
-    local textOverlay = CreateFrame("Frame", nil, frame.Health)
+    local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(frame.Health)
-    textOverlay:SetFrameLevel(frame.Health:GetFrameLevel() + 12)
+    textOverlay:SetFrameStrata(frame:GetFrameStrata())
+    textOverlay:SetFrameLevel(math.max(frame:GetFrameLevel() + 20, frame.Health:GetFrameLevel() + 12))
     frame._textOverlay = textOverlay
 
     local leftContent = settings.leftTextContent or "name"

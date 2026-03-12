@@ -929,10 +929,11 @@ initFrame:SetScript("OnEvent", function(self)
         pf._healthFill = healthFill
         pf._hR, pf._hG, pf._hB, pf._hA = hR, hG, hB, hA
 
-        -- Text overlay frame (sits above absorb StatusBar)
-        local textOverlay = CreateFrame("Frame", nil, health)
+        -- Text overlay frame (sits above absorb StatusBar and border)
+        local textOverlay = CreateFrame("Frame", nil, pf)
         textOverlay:SetAllPoints(health)
-        textOverlay:SetFrameLevel(health:GetFrameLevel() + 3)
+        textOverlay:SetFrameStrata(pf:GetFrameStrata())
+        textOverlay:SetFrameLevel(math.max(pf:GetFrameLevel() + 20, health:GetFrameLevel() + 12))
 
         -- Left text
         local leftContent = settings.leftTextContent or "name"
