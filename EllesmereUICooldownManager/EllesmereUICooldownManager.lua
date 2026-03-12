@@ -6877,6 +6877,7 @@ local function ReconcileMainBarSpells()
                             local ch = select(ci, vf:GetChildren())
                             if ch then
                                 local sid = ResolveChildSpellID(ch)
+                                if sid and sidCorrection[sid] then sid = sidCorrection[sid] end
                                 if sid and sid > 0
                                    and not keptSet[sid] and not removed[sid]
                                    and not (dormant and dormant[sid]) then
@@ -6892,7 +6893,16 @@ local function ReconcileMainBarSpells()
                     for _, sid in ipairs(newSpells) do
                         kept[#kept + 1] = sid
                     end
-                    barData.trackedSpells = kept
+                    -- Deduplicate: clean up any duplicates from prior buggy reconciles
+                    local seen = {}
+                    local deduped = {}
+                    for _, sid in ipairs(kept) do
+                        if not seen[sid] then
+                            seen[sid] = true
+                            deduped[#deduped + 1] = sid
+                        end
+                    end
+                    barData.trackedSpells = deduped
                 end
             end
         end
