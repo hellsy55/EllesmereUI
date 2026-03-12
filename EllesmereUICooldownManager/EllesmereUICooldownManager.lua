@@ -241,20 +241,58 @@ local _ecmeRawStartCache = {}    -- [ch] = start captured from SetCooldown hook
 local _cdmVehicleProxy           -- SecureHandlerStateTemplate proxy for [vehicleui]/[petbattle] hiding
 local _cdmInVehicle = false      -- true when [vehicleui] or [petbattle] is active
 local _ecmeRawDurCache = {}      -- [ch] = dur captured from SetCooldown hook
+local _tickTotemCache = {}       -- [slot] = haveTotem (cached per tick to avoid inconsistent reads)
+
+-- Cached wrapper for GetTotemInfo: returns the same haveTotem value for a given
+-- slot within a single tick, preventing show/hide oscillation during totem expiry.
+local function GetCachedTotemInfo(slot)
+    local cached = _tickTotemCache[slot]
+    if cached ~= nil then return cached end
+    local haveTotem = GetTotemInfo(slot)
+    _tickTotemCache[slot] = haveTotem
+    return haveTotem
+end
+
+-- Validate that a totem CDM child still represents a live effect.
+-- GetTotemInfo only confirms "a totem exists in this slot" but not WHICH totem.
+-- This secondary check verifies the child's own aura/cooldown data is still live,
+-- preventing stale children (e.g. expired SLT) from ghosting back.
+local function IsTotemChildStillValid(ch)
+    -- Check aura instance first
+    if ch.auraInstanceID then
+        local ok, data = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID,
+                               ch.auraDataUnit or "player", ch.auraInstanceID)
+        if ok then
+            if issecretvalue and issecretvalue(data) then return true end
+            return data ~= nil
+        end
+        return true  -- pcall failed, trust GetTotemInfo
+    end
+    -- No auraInstanceID: check cooldown state from our hooks
+    if _ecmeChildHasDurObj[ch] then return true end
+    local rd = _ecmeRawDurCache[ch]
+    if rd then
+        if issecretvalue and issecretvalue(rd) then return true end
+        return rd > 0
+    end
+    return false
+end
 
 -- Check if a Blizzard CDM buff-viewer child represents an actively running effect.
 -- Uses only our own tracking tables and safe APIs — never reads tainted fields.
--- For totem-type spells: uses GetTotemInfo(preferredTotemUpdateSlot).
+-- For totem-type spells: uses GetCachedTotemInfo(preferredTotemUpdateSlot).
 -- For summon/aura-type spells: uses our hook-captured cooldown state tables.
 local function IsBufChildCooldownActive(ch)
     if not ch then return false end
     -- Totem check: preferredTotemUpdateSlot is set by Blizzard on totem CDM children.
     local totemSlot = ch.preferredTotemUpdateSlot
     if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
-        local haveTotem = GetTotemInfo(totemSlot)
+        local haveTotem = GetCachedTotemInfo(totemSlot)
         -- haveTotem can be a secret boolean in combat; secret = active totem
-        if issecretvalue and issecretvalue(haveTotem) then return true end
-        if haveTotem then return true end
+        if issecretvalue and issecretvalue(haveTotem) then
+            return IsTotemChildStillValid(ch)
+        end
+        if haveTotem then return IsTotemChildStillValid(ch) end
         return false
     end
     -- Non-totem: check our hook-captured cooldown state tables
@@ -364,10 +402,11 @@ local _inCombat = false
 --    showCharges  boolean, whether to show charge count text
 --    swAlpha     swipe alpha (number)
 --    skipCD      if true, skip cooldown application (e.g. aura already handled)
+--    blizzChild  optional Blizzard CDM child frame (used for totem charge guard)
 --
 --  Returns: durObj (DurationObject|nil)
 -------------------------------------------------------------------------------
-local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha, skipCD)
+local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha, skipCD, blizzChild)
     -- Ensure charge cache is populated (cheap: skips if already cached)
     CacheMultiChargeSpell(spellID)
 
@@ -508,6 +547,15 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
     end
 
     -- Charge text: show spell charges for charge-based spells, or aura stacks as fallback
+    if showCharges then
+        -- Totems: charge count shows totem charges (e.g. HST "2"), not aura stacks.
+        -- Hide charge text for totem spells to avoid misleading stack display.
+        local ts = blizzChild and blizzChild.preferredTotemUpdateSlot
+        if ts and type(ts) == "number" and ts > 0 then
+            icon._chargeText:Hide()
+            showCharges = false  -- skip rest of charge logic
+        end
+    end
     if showCharges then
         -- Zero-start charge spells (e.g. Teachings of the Monastery, Mana Tea)
         -- report as charge spells but start at 0 stacks. Treat them as non-charge
@@ -3517,7 +3565,13 @@ local function UpdateCustomBarIcons(barKey)
                                     auraHandled = true
                                     skipCDDisplay = true
                                 else
-                                    auraHandled = true
+                                    -- For totems with stale aura (e.g. Stormstream consumed),
+                                    -- skip auraHandled to fall through to the summon-type
+                                    -- fallback which reads remaining totem duration.
+                                    local bts = blizzChild and blizzChild.preferredTotemUpdateSlot
+                                    if not (bts and type(bts) == "number" and bts > 0) then
+                                        auraHandled = true
+                                    end
                                 end
                             else
                                 auraHandled = true
@@ -3565,7 +3619,8 @@ local function UpdateCustomBarIcons(barKey)
                     end
                 end
 
-                ApplySpellCooldown(ourIcon, resolvedID, barData.desaturateOnCD, barData.showCharges, swAlpha, skipCDDisplay)
+                ApplySpellCooldown(ourIcon, resolvedID, barData.desaturateOnCD, barData.showCharges, swAlpha, skipCDDisplay,
+                    _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
 
                 -- Buff bars: swipe fills as buff expires (starts empty, ends full).
                 if isBuffBarForOverride then
@@ -3820,7 +3875,13 @@ UpdateCDMBarIcons = function(barKey)
                         auraHandled = true
                         skipCDDisplay = true
                     else
-                        auraHandled = true
+                        -- For totems with stale aura (e.g. Stormstream consumed),
+                        -- skip auraHandled to fall through to the summon-type
+                        -- fallback which reads remaining totem duration.
+                        local bts = blizzIcon and blizzIcon.preferredTotemUpdateSlot
+                        if not (bts and type(bts) == "number" and bts > 0) then
+                            auraHandled = true
+                        end
                     end
                 else
                     -- Charge spell on non-buff bar: mark active for glow, show charge CD
@@ -3830,7 +3891,7 @@ UpdateCDMBarIcons = function(barKey)
 
             -- Spell cooldown + desaturation (uses shared helper)
             if resolvedSid and resolvedSid > 0 then
-                ApplySpellCooldown(ourIcon, resolvedSid, desatOnCD, showCharges, swAlpha, skipCDDisplay)
+                ApplySpellCooldown(ourIcon, resolvedSid, desatOnCD, showCharges, swAlpha, skipCDDisplay, blizzIcon)
             else
                 if desatOnCD and ourIcon._lastDesat then
                     ourIcon._tex:SetDesaturation(0)
@@ -4462,7 +4523,13 @@ local function UpdateTrackedBarIcons(barKey)
                                     auraHandled = true
                                     skipCDDisplay = true
                                 else
-                                    auraHandled = true
+                                    -- For totems with stale aura (e.g. Stormstream consumed),
+                                    -- skip auraHandled to fall through to the summon-type
+                                    -- fallback which reads remaining totem duration.
+                                    local bts = blizzChild and blizzChild.preferredTotemUpdateSlot
+                                    if not (bts and type(bts) == "number" and bts > 0) then
+                                        auraHandled = true
+                                    end
                                 end
                             else
                                 auraHandled = true
@@ -4506,7 +4573,8 @@ local function UpdateTrackedBarIcons(barKey)
                 end
 
                 -- Spell cooldown + desaturation
-                ApplySpellCooldown(ourIcon, resolvedID, desatOnCD, showCharges, swAlpha, skipCDDisplay)
+                ApplySpellCooldown(ourIcon, resolvedID, desatOnCD, showCharges, swAlpha, skipCDDisplay,
+                    assignedChild or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
 
                 -- Buff bars: swipe fills as buff expires (starts empty, ends full).
                 if isBuffBarForOvr then
@@ -4594,10 +4662,11 @@ local function UpdateAllCDMBars(dt)
     if cdmUpdateThrottle < CDM_UPDATE_INTERVAL then return end
     cdmUpdateThrottle = 0
 
-    -- Wipe per-tick caches (GCD, charges, auras)
+    -- Wipe per-tick caches (GCD, charges, auras, totem info)
     wipe(_tickGCDCache)
     wipe(_tickChargeCache)
     wipe(_tickAuraCache)
+    wipe(_tickTotemCache)
     -- Build per-tick Blizzard active state cache: scan all CDM viewers for
     -- children marked wasSetFromAura, map their resolved spellID -> true.
     -- Also build override cache: maps base spellID -> current overrideSpellID
@@ -4717,11 +4786,11 @@ local function UpdateAllCDMBars(dt)
                                     _tickBlizzAllChildCache[correctSid] = ch
                                     _tickBlizzBuffChildCache[correctSid] = ch
                                     if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
-                                        -- Totems: validate liveness via GetTotemInfo
+                                        -- Totems: validate liveness via GetCachedTotemInfo + secondary check
                                         local totemSlot = ch.preferredTotemUpdateSlot
                                         local totemOk = true
                                         if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
-                                            local ht = GetTotemInfo(totemSlot)
+                                            local ht = GetCachedTotemInfo(totemSlot)
                                             if issecretvalue and issecretvalue(ht) then
                                                 totemOk = true
                                             else
@@ -4729,23 +4798,29 @@ local function UpdateAllCDMBars(dt)
                                             end
                                         end
                                         if totemOk then
+                                            totemOk = IsTotemChildStillValid(ch)
+                                        end
+                                        if totemOk then
                                             _tickBlizzActiveCache[correctSid] = true
                                         end
                                     end
                                 end
                             end
-                            -- Active cache: validate totems via GetTotemInfo (flags
-                            -- can persist after totem expires into cooldown phase)
+                            -- Active cache: validate totems via GetCachedTotemInfo + secondary check
+                            -- (flags can persist after totem expires into cooldown phase)
                             if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
                                 local totemSlot = ch.preferredTotemUpdateSlot
                                 local totemValid = true
                                 if totemSlot and type(totemSlot) == "number" and totemSlot > 0 then
-                                    local haveTotem = GetTotemInfo(totemSlot)
+                                    local haveTotem = GetCachedTotemInfo(totemSlot)
                                     if issecretvalue and issecretvalue(haveTotem) then
                                         totemValid = true
                                     else
                                         totemValid = haveTotem == true
                                     end
+                                end
+                                if totemValid then
+                                    totemValid = IsTotemChildStillValid(ch)
                                 end
                                 if totemValid and resolvedSid and resolvedSid > 0 then
                                     _tickBlizzActiveCache[resolvedSid] = true
