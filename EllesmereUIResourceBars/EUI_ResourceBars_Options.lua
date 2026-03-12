@@ -861,17 +861,7 @@ initFrame:SetScript("OnEvent", function(self)
         return cogBtn
     end
 
-    local VALID_ANCHOR_TARGETS = {
-        none = true,
-        erb_classresource = true,
-        erb_powerbar = true,
-        erb_health = true,
-        erb_cdm = true,
-        mouse = true,
-        partyframe = true,
-        playerframe = true,
-        erb_castbar = true,
-    }
+    local VALID_ANCHOR_TARGETS = EllesmereUI.RESOURCE_BAR_ANCHOR_KEYS or {}
 
     local function GetAnchorDropdownValue(value)
         if VALID_ANCHOR_TARGETS[value] then

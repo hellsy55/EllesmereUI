@@ -970,17 +970,7 @@ local ERB_ANCHOR_FRAMES = {
     playerframe       = nil,  -- handled separately
 }
 
-local ERB_VALID_ANCHORS = {
-    none = true,
-    mouse = true,
-    partyframe = true,
-    playerframe = true,
-    erb_classresource = true,
-    erb_powerbar = true,
-    erb_health = true,
-    erb_castbar = true,
-    erb_cdm = true,
-}
+local ERB_VALID_ANCHORS = EllesmereUI.RESOURCE_BAR_ANCHOR_KEYS
 
 local function ResolveAnchorFrame(anchorKey)
     local fn = ERB_ANCHOR_FRAMES[anchorKey]
@@ -993,27 +983,6 @@ local function NormalizeAnchorKey(anchorKey)
         return anchorKey
     end
     return "none"
-end
-
-local function SafeResolveExternalFrame(resolver)
-    if type(resolver) ~= "function" then return nil end
-    local ok, frame = pcall(resolver)
-    if ok then return frame end
-    return nil
-end
-
-local function FindPartyAnchorFrame()
-    return SafeResolveExternalFrame(EllesmereUI and EllesmereUI.FindPlayerPartyFrame)
-end
-
-local function FindPlayerAnchorFrame()
-    return SafeResolveExternalFrame(EllesmereUI and EllesmereUI.FindPlayerUnitFrame)
-end
-
-local function InvalidateDiscoveredUnitFrames()
-    if EllesmereUI and EllesmereUI.InvalidateDiscoveredUnitFrames then
-        EllesmereUI.InvalidateDiscoveredUnitFrames()
-    end
 end
 
 -- Apply anchor-based positioning for a bar frame.
@@ -1114,14 +1083,14 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
         end)
         return true
     elseif anchorKey == "partyframe" then
-        local partyFrame = FindPartyAnchorFrame()
+        local partyFrame = EllesmereUI and EllesmereUI.FindPlayerPartyFrame and EllesmereUI.FindPlayerPartyFrame()
         if not partyFrame then return false end
         local framePoint, targetPoint = GetAnchorPoints()
         frame:ClearAllPoints()
         frame:SetPoint(framePoint, partyFrame, targetPoint, offsetX, offsetY)
         return true
     elseif anchorKey == "playerframe" then
-        local playerFrame = FindPlayerAnchorFrame()
+        local playerFrame = EllesmereUI and EllesmereUI.FindPlayerUnitFrame and EllesmereUI.FindPlayerUnitFrame()
         if not playerFrame then return false end
         local framePoint, targetPoint = GetAnchorPoints()
         frame:ClearAllPoints()
@@ -3197,14 +3166,8 @@ function ERB:ApplyAll()
     end
 end
 
-local _rosterApplyToken = 0
-
 local function ScheduleRosterApply()
-    InvalidateDiscoveredUnitFrames()
-    _rosterApplyToken = _rosterApplyToken + 1
-    local token = _rosterApplyToken
     C_Timer.After(0.2, function()
-        if token ~= _rosterApplyToken then return end
         ERB:ApplyAll()
     end)
 end
@@ -3269,7 +3232,6 @@ local function OnEvent(self, event, ...)
     elseif event == "GROUP_ROSTER_UPDATE" then
         ScheduleRosterApply()
     elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
-        InvalidateDiscoveredUnitFrames()
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
         BuildBars()

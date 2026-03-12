@@ -1660,6 +1660,18 @@ function EllesmereUI.GetMaelstromWeapon()
     return (aura and aura.applications or 0), max
 end
 
+EllesmereUI.RESOURCE_BAR_ANCHOR_KEYS = {
+    none = true,
+    mouse = true,
+    partyframe = true,
+    playerframe = true,
+    erb_classresource = true,
+    erb_powerbar = true,
+    erb_health = true,
+    erb_castbar = true,
+    erb_cdm = true,
+}
+
 do
 local PARTY_FRAME_SOURCES = {
     { addon = "ElvUI",  prefix = "ElvUF_PartyGroup1UnitButton", count = 5 },
@@ -1673,36 +1685,13 @@ local PLAYER_FRAME_SOURCES = {
     { addon = "ElvUI",                 global = "ElvUF_Player" },
 }
 
-local _cachedPartyFrame
-local _cachedPartyFrameRoster = 0
-local _cachedPlayerFrame
-local _cachedPlayerFrameRoster = 0
-
-function EllesmereUI.InvalidateDiscoveredUnitFrames()
-    _cachedPartyFrame = nil
-    _cachedPartyFrameRoster = 0
-    _cachedPlayerFrame = nil
-    _cachedPlayerFrameRoster = 0
-end
-
 function EllesmereUI.FindPlayerPartyFrame()
-    local rosterToken = GetNumGroupMembers()
-    if _cachedPartyFrame and _cachedPartyFrameRoster == rosterToken then
-        if _cachedPartyFrame:IsVisible() then
-            return _cachedPartyFrame
-        end
-    end
-
-    _cachedPartyFrame = nil
-    _cachedPartyFrameRoster = rosterToken
-
     for _, src in ipairs(PARTY_FRAME_SOURCES) do
         if not src.addon or C_AddOns.IsAddOnLoaded(src.addon) then
             for i = 1, src.count do
                 local frame = _G[src.prefix .. i]
                 if frame and frame.GetAttribute and frame:GetAttribute("unit") == "player"
                    and frame.IsVisible and frame:IsVisible() then
-                    _cachedPartyFrame = frame
                     return frame
                 end
             end
@@ -1712,7 +1701,6 @@ function EllesmereUI.FindPlayerPartyFrame()
     if C_AddOns.IsAddOnLoaded("DandersFrames") then
         local container = _G["DandersPartyContainer"]
         if container and container.IsVisible and container:IsVisible() then
-            _cachedPartyFrame = container
             return container
         end
     end
@@ -1721,24 +1709,10 @@ function EllesmereUI.FindPlayerPartyFrame()
 end
 
 function EllesmereUI.FindPlayerUnitFrame()
-    local rosterToken = GetNumGroupMembers()
-    if _cachedPlayerFrame and _cachedPlayerFrameRoster == rosterToken then
-        if _cachedPlayerFrame:IsVisible() then
-            local unit = _cachedPlayerFrame.GetAttribute and _cachedPlayerFrame:GetAttribute("unit")
-            if not unit or UnitIsUnit(unit, "player") then
-                return _cachedPlayerFrame
-            end
-        end
-    end
-
-    _cachedPlayerFrame = nil
-    _cachedPlayerFrameRoster = rosterToken
-
     for _, src in ipairs(PLAYER_FRAME_SOURCES) do
         if C_AddOns.IsAddOnLoaded(src.addon) then
             local frame = _G[src.global]
             if frame and frame.IsVisible and frame:IsVisible() then
-                _cachedPlayerFrame = frame
                 return frame
             end
         end
@@ -1751,7 +1725,6 @@ function EllesmereUI.FindPlayerUnitFrame()
                 local child = header:GetAttribute("child" .. i)
                 if child and child.GetAttribute and child:GetAttribute("unit") == "player"
                    and child.IsVisible and child:IsVisible() then
-                    _cachedPlayerFrame = child
                     return child
                 end
             end
@@ -1760,7 +1733,6 @@ function EllesmereUI.FindPlayerUnitFrame()
 
     local blizz = _G["PlayerFrame"]
     if blizz and blizz.IsVisible and blizz:IsVisible() then
-        _cachedPlayerFrame = blizz
         return blizz
     end
 
