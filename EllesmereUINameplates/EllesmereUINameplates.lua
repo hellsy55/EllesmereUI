@@ -3631,7 +3631,19 @@ function NameplateFrame:UpdateAuras(updateInfo)
     local db = EllesmereUINameplatesDB
     if debuffSlotVal ~= "none" then
     local showAll = db and db.showAllDebuffs
-    local IsFiltered = C_UnitAuras.IsAuraFilteredOutByInstanceID
+    -- Build the important set from Blizzard's debuffList synchronously.
+    -- The debuffList is already current when UNIT_AURA fires -- Blizzard's
+    -- UnitFrame processes the same event in the same dispatch cycle.
+    local importantSet
+    if not showAll and self.nameplate then
+        importantSet = {}
+        local uf = self.nameplate.UnitFrame
+        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
+            uf.AurasFrame.debuffList:Iterate(function(auraInstanceID)
+                importantSet[auraInstanceID] = true
+            end)
+        end
+    end
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then
         local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
         if allDebuffs then
@@ -3640,7 +3652,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             for _, aura in ipairs(allDebuffs) do
                 if dIdx > 4 then break end
                 local id = aura and aura.auraInstanceID
-                if id and aura.icon and (showAll or (IsFiltered and not IsFiltered(unit, id, "HARMFUL|INCLUDE_NAME_PLATE_ONLY"))) then
+                if id and aura.icon and (showAll or (importantSet and importantSet[id])) then
                         local slot = self.debuffs[dIdx]
                         slot.icon:SetTexture(aura.icon)
                         slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
