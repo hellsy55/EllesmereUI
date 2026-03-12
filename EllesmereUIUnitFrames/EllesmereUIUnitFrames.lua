@@ -1830,7 +1830,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     local barWidth = settings.frameWidth
     local barHeight = settings.healthHeight
 
-    hpBar:SetClipsChildren(false)
+    hpBar:SetClipsChildren(true)
 
     local shieldBar = CreateFrame("StatusBar", nil, hpBar)
     shieldBar:SetStatusBarTexture("Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga")
