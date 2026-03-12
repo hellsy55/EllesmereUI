@@ -223,7 +223,7 @@ local function SnapshotPlayerAuras()
     end
 end
 
--- Pre-combat snapshot for "ownOnRaid" buffs (Source of Magic, Beacon, etc.)
+-- Pre-combat snapshot for "ownOnRaid" buffs (Source of Magic, etc.)
 -- These are buffs the player casts on OTHER group members. sourceUnit is
 -- unreadable in combat, so we snapshot the result of the full group scan
 -- before entering combat.
@@ -329,8 +329,8 @@ local function _unitHasBuff(u, spellIDs)
 end
 
 -- Like _unitHasBuff but only returns true if the buff's source is the player.
--- Used for Beacon of Light, Beacon of Faith, Earth Shield (orbit) we need
--- to verify it's OUR buff, not another Paladin's/Shaman's.
+-- Used for Source of Magic, Earth Shield (orbit) we need to verify it's OUR
+-- buff, not another caster's.
 -- Works in combat for non-secret spell IDs via GetUnitAuraBySpellID (direct
 -- lookup, no iteration).  Falls back to GetAuraDataByIndex iteration OOC.
 local function _unitHasBuffFromPlayer(u, spellIDs)
@@ -398,7 +398,7 @@ end
 -- now that _unitHasBuffFromPlayer is defined).
 SnapshotOwnOnRaidBuffs = function()
     wipe(_preCombatOwnOnRaidCache)
-    local ownOnRaidIDs = { 53563, 156910, 369459 }
+    local ownOnRaidIDs = { 369459 }
     for _, id in ipairs(ownOnRaidIDs) do
         local found = false
         if _unitHasBuffFromPlayer("player", {id}) then found = true end
@@ -481,7 +481,7 @@ end
 
 -- Check if the PLAYER'S buff exists on ANY group/raid member (source must be player).
 -- Returns true if at least one member has the buff cast by the player.
--- Used for Beacon of Light, Beacon of Faith, Earth Shield (orbit other).
+-- Used for Source of Magic, Earth Shield (orbit other).
 local function PlayerOwnBuffOnAnyGroupMember(spellIDs)
     if _unitHasBuffFromPlayer("player", spellIDs) then return true end
     if IsInRaid() then
@@ -562,18 +562,15 @@ local AURAS = {
     -- so either buff satisfies the "in Shadowform" requirement.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false },
-    -- Devotion Aura: still ContextuallySecret (465) hide in combat
-    -- Must check self-cast: Holy Paladins need their OWN aura for Aura Mastery,
-    -- Lightsmith Prot Paladins need their own aura for amplification.
-    -- Another paladin's Devotion Aura does NOT satisfy this.
+    -- Devotion Aura: simple player buff check, OOC only
     { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,    buffIDs={465},
-      check="playerSelfCast", combatOk=false },
-    -- Beacon of Light: non-secret (53563) must verify source is player
+      check="player", combatOk=false },
+    -- Beacon of Light: standalone IsSpellOverlayed system (not checked by CollectAuras)
     { key="bol",        class="PALADIN", name="Beacon of Light",   castSpell=53563,  buffIDs={53563},
-      check="ownOnRaid", combatOk=true, notIfKnown=200025 },
-    -- Beacon of Faith: non-secret (156910) must verify source is player
+      standalone=true, notIfKnown=200025 },
+    -- Beacon of Faith: standalone IsSpellOverlayed system (not checked by CollectAuras)
     { key="bof",        class="PALADIN", name="Beacon of Faith",   castSpell=156910, buffIDs={156910},
-      check="ownOnRaid", combatOk=true, requireInstanceGroup=true },
+      standalone=true },
     -- Source of Magic: non-secret (369459) applied to a specific healer,
     -- not the caster; check if player's cast exists on any group member.
     { key="som",        class="EVOKER",  name="Source of Magic",   castSpell=369459, buffIDs={369459},
@@ -998,7 +995,7 @@ local combatActiveIcons = {}
 local CURSOR_IMPORTANT = {
     -- All raid buffs are important (checked by cat == "raidbuff")
     -- Specific aura/consumable keys:
-    bol = true, bof = true, es = true, som = true,
+    es = true, som = true,
 }
 local cursorAnchor
 local cursorIconPool = {}
@@ -1448,7 +1445,9 @@ local function CollectAuras(missing, playerClass, specID, inInstance, inCombat)
 local au = db.profile.auras
 if inInstance or au.showNonInstanced then
     for _, aura in ipairs(AURAS) do
-        if au.enabled[aura.key] and (aura.class == playerClass) and Known(aura.castSpell)
+        if aura.standalone then
+            -- Handled by standalone system, skip
+        elseif au.enabled[aura.key] and (aura.class == playerClass) and Known(aura.castSpell)
            and not (aura.notIfKnown and Known(aura.notIfKnown)) then
             -- Spec check
             local specOk = true
@@ -2094,6 +2093,257 @@ local function TrackItemUse(itemID)
 end
 
 -------------------------------------------------------------------------------
+--  STANDALONE BEACON REMINDERS (IsSpellOverlayed-based, fully combat-safe)
+--  Completely independent from the aura/buff reminder system above.
+--  Uses Blizzard's spell activation overlay to detect missing beacons.
+-------------------------------------------------------------------------------
+local _beaconFrame = CreateFrame("Frame")
+local _beaconIsPaladin = false
+local _beaconOverlayRegistered = false
+local _beaconAnchor
+local _beaconIcons = {}       -- [spellID] = frame
+local _beaconIconState = {}   -- [spellID] = true/false
+local _beaconGlowState = {}  -- [spellID] = true/false
+
+local BEACON_BOL = 53563
+local BEACON_BOF = 156910
+local BEACON_VIRTUE = 200025
+local BEACON_ALL = { BEACON_BOL, BEACON_BOF }
+
+local IsSpellOverlayed = (C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed) or IsSpellOverlayed
+
+local _beaconCachedInInstance = false
+
+local function BeaconUpdateInstanceCache()
+    local _, instanceType, difficultyID = GetInstanceInfo()
+    difficultyID = tonumber(difficultyID) or 0
+    if difficultyID == 0 then _beaconCachedInInstance = false; return end
+    if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
+        _beaconCachedInInstance = false; return
+    end
+    _beaconCachedInInstance = (instanceType == "party" or instanceType == "raid")
+end
+
+local function BeaconUpdateOverlayEvents()
+    if _beaconCachedInInstance and _beaconIsPaladin then
+        if not _beaconOverlayRegistered then
+            _beaconFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+            _beaconFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
+            _beaconOverlayRegistered = true
+        end
+    else
+        if _beaconOverlayRegistered then
+            _beaconFrame:UnregisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+            _beaconFrame:UnregisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
+            _beaconOverlayRegistered = false
+        end
+    end
+end
+
+local function BeaconMakeIcon(spellID)
+    local f = CreateFrame("Frame", nil, UIParent)
+    f:SetSize(ICON_SIZE, ICON_SIZE)
+    f:SetFrameStrata("HIGH")
+    f:SetFrameLevel(120)
+    f:Hide()
+    local icon = f:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    icon:SetTexture(Tex(spellID))
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f._icon = icon
+    f._spellID = spellID
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP then PP.CreateBorder(f, 0, 0, 0, 1, 1, "OVERLAY", 7) end
+    local text = f:CreateFontString(nil, "OVERLAY")
+    text:SetPoint("TOP", f, "BOTTOM", 0, -2)
+    SetABRFont(text, ResolveFontPath(), 11)
+    text:SetTextColor(1, 1, 1, 1)
+    f._text = text
+    return f
+end
+
+local function BeaconLayoutIcons()
+    local visible = {}
+    for _, id in ipairs(BEACON_ALL) do
+        if _beaconIconState[id] then visible[#visible+1] = _beaconIcons[id] end
+    end
+    local count = #visible
+    if count == 0 then if _beaconAnchor then _beaconAnchor:Hide() end; return end
+    if not _beaconAnchor then return end
+    _beaconAnchor:Show()
+    local p = db and db.profile.display
+    local spacing = p and p.iconSpacing or 8
+    local baseScale = (p and p.scale or 1.0) * (db and db.profile.auras and db.profile.auras.scale or 1.0)
+    local sz = floor(ICON_SIZE * baseScale + 0.5)
+    local totalW = (count * sz) + ((count - 1) * spacing)
+    local startX = -(totalW / 2) + (sz / 2)
+    for i, f in ipairs(visible) do
+        f:SetSize(sz, sz)
+        f:SetAlpha(p and p.opacity or 1.0)
+        f:ClearAllPoints()
+        f:SetPoint("CENTER", _beaconAnchor, "CENTER", startX + (i - 1) * (sz + spacing), 0)
+    end
+end
+
+local function BeaconApplyGlow(f, show)
+    if show then
+        local p = db and db.profile.display
+        local glowType = p and p.glowType or 0
+        if glowType > 0 then
+            local gc = p and p.glowColor or {r=1, g=0.776, b=0.376}
+            ApplyGlow(f, glowType, gc.r, gc.g, gc.b)
+        end
+        _beaconGlowState[f._spellID] = true
+    else
+        if _beaconGlowState[f._spellID] then
+            RemoveGlow(f)
+            _beaconGlowState[f._spellID] = false
+        end
+    end
+end
+
+local function BeaconApplyText(f)
+    local p = db and db.profile.display
+    if p and p.showText then
+        local tc = p.textColor or {r=1, g=1, b=1}
+        local fontPath = ResolveFontPath(p.textFont)
+        local textSize = p.textSize or 11
+        local xOff = p.textXOffset or 0
+        local yOff = p.textYOffset or -2
+        SetABRFont(f._text, fontPath, textSize)
+        f._text:ClearAllPoints()
+        f._text:SetPoint("TOP", f, "BOTTOM", xOff, yOff)
+        f._text:SetTextColor(tc.r, tc.g, tc.b, 1)
+        f._text:SetText(ShortLabel(f._spellID == BEACON_BOL and "Beacon of Light" or "Beacon of Faith"))
+        f._text:Show()
+    else
+        f._text:SetText("")
+        f._text:Hide()
+    end
+end
+
+local function BeaconSetVisible(spellID, show)
+    local f = _beaconIcons[spellID]
+    if not f then return end
+    local changed = false
+    if show then
+        if not _beaconIconState[spellID] then
+            BeaconApplyText(f)
+            f:Show()
+            _beaconIconState[spellID] = true
+            BeaconApplyGlow(f, true)
+            changed = true
+        end
+    else
+        if _beaconIconState[spellID] then
+            BeaconApplyGlow(f, false)
+            f._text:SetText("")
+            f:Hide()
+            _beaconIconState[spellID] = false
+            changed = true
+        end
+    end
+    if changed then BeaconLayoutIcons() end
+end
+
+local function BeaconRefresh()
+    if not _beaconIsPaladin then return end
+    if euiPanelOpen or not IsSpellOverlayed then
+        BeaconSetVisible(BEACON_BOL, false)
+        BeaconSetVisible(BEACON_BOF, false)
+        return
+    end
+    if UnitInVehicle("player") or (IsMounted() and IsFlying()) then
+        BeaconSetVisible(BEACON_BOL, false)
+        BeaconSetVisible(BEACON_BOF, false)
+        return
+    end
+    if not _beaconCachedInInstance or not (IsInGroup() or IsInRaid()) then
+        BeaconSetVisible(BEACON_BOL, false)
+        BeaconSetVisible(BEACON_BOF, false)
+        return
+    end
+
+    local au = db and db.profile.auras
+    local enabled = au and au.enabled
+
+    local trackBOL = enabled and enabled.bol ~= false
+                     and Known(BEACON_BOL) and not Known(BEACON_VIRTUE)
+    local trackBOF = enabled and enabled.bof ~= false
+                     and Known(BEACON_BOF)
+
+    BeaconSetVisible(BEACON_BOL, trackBOL and IsSpellOverlayed(BEACON_BOL))
+    BeaconSetVisible(BEACON_BOF, trackBOF and IsSpellOverlayed(BEACON_BOF))
+end
+
+local _beaconRefreshPending = false
+local function BeaconRefreshSoon()
+    if _beaconRefreshPending then return end
+    _beaconRefreshPending = true
+    C_Timer.After(0, function()
+        _beaconRefreshPending = false
+        BeaconRefresh()
+    end)
+end
+
+local function BeaconInit()
+    local _, classFile = UnitClass("player")
+    _beaconIsPaladin = (classFile == "PALADIN")
+    if not _beaconIsPaladin then return end
+
+    _beaconIcons[BEACON_BOL] = BeaconMakeIcon(BEACON_BOL)
+    _beaconIcons[BEACON_BOF] = BeaconMakeIcon(BEACON_BOF)
+
+    -- Anchor follows the main combat anchor position
+    _beaconAnchor = CreateFrame("Frame", "EABR_BeaconAnchor", UIParent)
+    _beaconAnchor:SetSize(1, 1)
+    _beaconAnchor:SetFrameStrata("HIGH")
+    _beaconAnchor:EnableMouse(false)
+    _beaconAnchor:Hide()
+    -- Anchor to the combat anchor (created by mainFrame PLAYER_LOGIN before this call)
+    if combatAnchor then
+        _beaconAnchor:SetPoint("CENTER", combatAnchor, "CENTER", 0, -60)
+    else
+        _beaconAnchor:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
+    end
+
+    BeaconUpdateInstanceCache()
+    BeaconUpdateOverlayEvents()
+    BeaconRefresh()
+end
+
+-- Expose for options and anchor positioning
+_G._EABR_BeaconRefresh = BeaconRefresh
+_G._EABR_BeaconAnchor = function() return _beaconAnchor end
+
+_beaconFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+_beaconFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+_beaconFrame:RegisterEvent("SPELLS_CHANGED")
+_beaconFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+_beaconFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+_beaconFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
+_beaconFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+_beaconFrame:SetScript("OnEvent", function(_, e, id)
+    if not _beaconIsPaladin then return end
+    if e == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or e == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+        if id == BEACON_BOL or id == BEACON_BOF then
+            BeaconRefresh()
+        end
+        return
+    end
+    if e == "PLAYER_ENTERING_WORLD" or e == "ZONE_CHANGED_NEW_AREA" then
+        BeaconUpdateInstanceCache()
+        BeaconUpdateOverlayEvents()
+    end
+    if e == "TRAIT_CONFIG_UPDATED" or e == "PLAYER_TALENT_UPDATE"
+       or e == "SPELLS_CHANGED" or e == "PLAYER_SPECIALIZATION_CHANGED" then
+        BeaconRefreshSoon()
+        return
+    end
+    BeaconRefresh()
+end)
+
+-------------------------------------------------------------------------------
 --  MAIN EVENT HANDLER
 -------------------------------------------------------------------------------
 local mainFrame = CreateFrame("Frame")
@@ -2205,20 +2455,26 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2)
         -- Hook EUI panel show/hide
         if EllesmereUI then
             if EllesmereUI.RegisterOnShow then
-                EllesmereUI:RegisterOnShow(function() euiPanelOpen = true; HideAllIcons() end)
+                EllesmereUI:RegisterOnShow(function()
+                    euiPanelOpen = true; HideAllIcons(); BeaconRefresh()
+                end)
             end
             if EllesmereUI.RegisterOnHide then
-                EllesmereUI:RegisterOnHide(function() euiPanelOpen = false; RequestRefresh() end)
+                EllesmereUI:RegisterOnHide(function()
+                    euiPanelOpen = false; RequestRefresh(); BeaconRefresh()
+                end)
             end
         end
 
         RequestRefresh()
+        BeaconInit()
         C_Timer.After(0.5, RegisterUnlockElements)
         return
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat: snapshot aura state, then refresh to switch to combat icons
+        -- Entering combat: immediately hide OOC secure icons, snapshot, then refresh
+        FadeOutSecureIcons()
         SnapshotPlayerAuras()
         SnapshotOwnOnRaidBuffs()
         RequestRefresh()
@@ -2568,4 +2824,49 @@ SLASH_EABRLOG1 = "/eabrlog"
 SlashCmdList["EABRLOG"] = function()
     _eabrLogEnabled = not _eabrLogEnabled
     print("|cffff9900[EABR]|r Combat aura logging " .. (_eabrLogEnabled and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
+end
+
+-------------------------------------------------------------------------------
+--  /beacondebug standalone beacon system diagnostics
+-------------------------------------------------------------------------------
+SLASH_BEACONDEBUG1 = "/beacondebug"
+SlashCmdList["BEACONDEBUG"] = function()
+    local p = function(...) print("|cffffcc00[Beacon Debug]|r", ...) end
+    p("--- Beacon Reminder Debug ---")
+    p("isPaladin:", tostring(_beaconIsPaladin))
+    p("db:", db and "exists" or "|cffff4444NIL|r")
+    p("IsSpellOverlayed:", IsSpellOverlayed and "exists" or "|cffff4444NIL|r")
+    p("cachedInInstance:", tostring(_beaconCachedInInstance))
+    p("overlayEventsRegistered:", tostring(_beaconOverlayRegistered))
+    p("beaconAnchor:", _beaconAnchor and "exists" or "|cffff4444NIL|r")
+    p("InGroup:", tostring(IsInGroup()), "InRaid:", tostring(IsInRaid()))
+    p("InCombat:", tostring(InCombatLockdown()))
+
+    local _, iType, diffID = GetInstanceInfo()
+    p("InstanceType:", tostring(iType), "DifficultyID:", tostring(diffID))
+
+    local au = db and db.profile.auras
+    local enabled = au and au.enabled
+    p("auras.enabled.bol:", tostring(enabled and enabled.bol))
+    p("auras.enabled.bof:", tostring(enabled and enabled.bof))
+
+    p("Known(BOL 53563):", tostring(Known(BEACON_BOL)))
+    p("Known(BOF 156910):", tostring(Known(BEACON_BOF)))
+    p("Known(Virtue 200025):", tostring(Known(BEACON_VIRTUE)))
+
+    if IsSpellOverlayed then
+        local bolOverlay = IsSpellOverlayed(BEACON_BOL)
+        local bofOverlay = IsSpellOverlayed(BEACON_BOF)
+        p("IsSpellOverlayed(BOL):", tostring(bolOverlay))
+        p("IsSpellOverlayed(BOF):", tostring(bofOverlay))
+    else
+        p("|cffff4444IsSpellOverlayed function not available|r")
+    end
+
+    p("iconState[BOL]:", tostring(_beaconIconState[BEACON_BOL]))
+    p("iconState[BOF]:", tostring(_beaconIconState[BEACON_BOF]))
+    p("icon frames: BOL=", _beaconIcons[BEACON_BOL] and "exists" or "NIL",
+      "BOF=", _beaconIcons[BEACON_BOF] and "exists" or "NIL")
+
+    p("--- End Beacon Debug ---")
 end
