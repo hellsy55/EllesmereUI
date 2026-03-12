@@ -7059,11 +7059,17 @@ local function ScheduleTalentRebuild()
         -- stale charge data from spells that changed with the talent swap.
         -- Also wipe the persisted DB entries so CacheMultiChargeSpell
         -- re-detects from live API rather than reading a stale false entry.
-        wipe(_multiChargeSpells)
-        wipe(_maxChargeCount)
-        local db = ECME.db
-        if db and db.global and db.global.multiChargeSpells then
-            wipe(db.global.multiChargeSpells)
+        -- Skip during combat: actual talent changes are combat-locked, so these
+        -- events only fire mid-combat from hero talent procs (e.g. Celestial
+        -- Infusion). Wiping here would clear charge data for all spells with no
+        -- way to re-detect it until the next out-of-combat cache rebuild.
+        if not InCombatLockdown() then
+            wipe(_multiChargeSpells)
+            wipe(_maxChargeCount)
+            local db = ECME.db
+            if db and db.global and db.global.multiChargeSpells then
+                wipe(db.global.multiChargeSpells)
+            end
         end
         -- Reconcile bar spellIDs against the new talent set.
         -- Unavailable spells are moved to dormant slots (preserving position);
