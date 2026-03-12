@@ -1767,17 +1767,20 @@ local function SetupAuraCVars()
     end
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
-        local nameGap = 4 + GetEnemyNameTextSize()
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
-            -- Size must cover the full visual footprint (name + health + cast)
-            -- to prevent stacking jitter. Health bar alone is too small.
-            local barH = GetHealthBarHeight()
-            local castH = GetCastBarHeight()
-            local totalH = nameGap + barH + castH
-            C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), totalH)
+            -- Size the nameplate to the health bar only so the click/target
+            -- region matches the bar exactly. Stacking uses a separate
+            -- SetStackingBoundsFrame that covers the full visual footprint
+            -- (name + health + cast), so this won't cause jitter.
+            C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), GetHealthBarHeight())
         end
+        -- On Midnight the default hit-test region can be smaller than the
+        -- nameplate frame. Expand it with large negative insets so the
+        -- entire frame area (which we just sized to the health bar) is
+        -- clickable.
         if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets and Enum and Enum.NamePlateType then
-            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, 0, 0, nameGap, 0)
+            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
         end
     end
     ApplyNamePlateClickArea()

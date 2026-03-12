@@ -1217,15 +1217,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 4: Fill Color (inline swatches) | Resource Text (inline cog RESIZE)
         local classColorRow
         classColorRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Fill Color",
-              disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
-              getValue = function() local p = DB(); return p and (p.secondary.classColored ~= false) end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.secondary.classColored = v; RebuildClass()
-                  EllesmereUI:RefreshPage()
-              end },
+            { type = "label", text = "Fill Color" },
             { type = "toggle", text = "Resource Text",
               disabled = classOff,
               disabledTooltip = "Enable Class Resource",
@@ -1816,15 +1808,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 4: Power Colored Fill (inline swatch) | Power Text (inline cog RESIZE)
         local powerColorRow
         powerColorRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Fill Color",
-              disabled = powerOff,
-              disabledTooltip = powerDisTip,
-              getValue = function() local p = DB(); return p and not p.primary.customColored end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.primary.customColored = not v; RebuildPower()
-                  EllesmereUI:RefreshPage()
-              end },
+            { type = "label", text = "Fill Color" },
             { type = "dropdown", text = "Power Text",
               disabled = powerOff,
               disabledTooltip = powerDisTip,
@@ -2341,16 +2325,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 4: Fill Color (inline swatches) | Health Text (inline cog RESIZE)
         local healthColorRow
         healthColorRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Fill Color",
-              disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
-              getValue = function() local p = DB(); return p and p.health.customColored end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.health.customColored = v
-                  if v and p.health.darkTheme then p.health.darkTheme = false end
-                  RebuildHealth(); EllesmereUI:RefreshPage()
-              end },
+            { type = "label", text = "Fill Color" },
             { type = "dropdown", text = "Health Text",
               disabled = healthOff,
               disabledTooltip = "Enable Health Bar",
