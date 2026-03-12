@@ -861,6 +861,25 @@ initFrame:SetScript("OnEvent", function(self)
         return cogBtn
     end
 
+    local VALID_ANCHOR_TARGETS = {
+        none = true,
+        erb_classresource = true,
+        erb_powerbar = true,
+        erb_health = true,
+        erb_cdm = true,
+        mouse = true,
+        partyframe = true,
+        playerframe = true,
+        erb_castbar = true,
+    }
+
+    local function GetAnchorDropdownValue(value)
+        if VALID_ANCHOR_TARGETS[value] then
+            return value
+        end
+        return "none"
+    end
+
     ---------------------------------------------------------------------------
     --  Bar Display page
     ---------------------------------------------------------------------------
@@ -1506,12 +1525,11 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip = "Enable Class Resource",
               values = {
                   none = "None", erb_powerbar = "Power Bar", erb_health = "Health Bar",
-                  ["---1"] = "---",
                   erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
                   partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
               },
-              order = { "none", "erb_powerbar", "erb_health", "---1", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return p and p.secondary.anchorTo or "none" end,
+              order = { "none", "erb_powerbar", "erb_health", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
+              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.secondary.anchorTo) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.secondary.anchorTo = v
@@ -2055,12 +2073,11 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip = powerDisTip,
               values = {
                   none = "None", erb_classresource = "Class Resource", erb_health = "Health Bar",
-                  ["---1"] = "---",
                   erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
                   partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
               },
-              order = { "none", "erb_classresource", "erb_health", "---1", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return p and p.primary.anchorTo or "none" end,
+              order = { "none", "erb_classresource", "erb_health", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
+              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.primary.anchorTo) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.primary.anchorTo = v
@@ -2559,12 +2576,11 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip = "Enable Health Bar",
               values = {
                   none = "None", erb_classresource = "Class Resource", erb_powerbar = "Power Bar",
-                  ["---1"] = "---",
                   erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
                   partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
               },
-              order = { "none", "erb_classresource", "erb_powerbar", "---1", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return p and p.health.anchorTo or "none" end,
+              order = { "none", "erb_classresource", "erb_powerbar", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
+              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.health.anchorTo) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.health.anchorTo = v

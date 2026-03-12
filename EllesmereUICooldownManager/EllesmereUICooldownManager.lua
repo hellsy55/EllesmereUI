@@ -1806,6 +1806,8 @@ local cdmBarFrames = {}
 local cdmBarIcons = {}
 -- Fast barData lookup by key (rebuilt in BuildAllCDMBars, avoids linear scan per tick)
 local barDataByKey = {}
+local FindPlayerPartyFrame
+local FindPlayerUnitFrame
 
 -- Expose our CDM bar frames so the glow system can reference them
 ns.GetCDMBarFrame = function(barKey)
@@ -2122,7 +2124,7 @@ local PARTY_FRAME_PREFIXES = {
 local _cachedPartyFrame
 local _cachedPartyFrameRoster = 0  -- invalidate on roster change
 
-local function FindPlayerPartyFrame()
+FindPlayerPartyFrame = function()
     -- Use cache if roster hasn't changed
     local rosterToken = GetNumGroupMembers()
     if _cachedPartyFrame and _cachedPartyFrameRoster == rosterToken then
@@ -2170,7 +2172,7 @@ local PLAYER_FRAME_SOURCES = {
 local _cachedPlayerFrame
 local _cachedPlayerFrameRoster = 0
 
-local function FindPlayerUnitFrame()
+FindPlayerUnitFrame = function()
     -- Invalidate cache when group roster changes (spec swap, join/leave)
     local rosterToken = GetNumGroupMembers()
     if _cachedPlayerFrame and _cachedPlayerFrameRoster == rosterToken then
