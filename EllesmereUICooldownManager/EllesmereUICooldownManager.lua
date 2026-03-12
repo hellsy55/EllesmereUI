@@ -242,6 +242,7 @@ local _cdmVehicleProxy           -- SecureHandlerStateTemplate proxy for [vehicl
 local _cdmInVehicle = false      -- true when [vehicleui] or [petbattle] is active
 local _ecmeRawDurCache = {}      -- [ch] = dur captured from SetCooldown hook
 local _tickTotemCache = {}       -- [slot] = haveTotem (cached per tick to avoid inconsistent reads)
+local _cdmHoverStates = {}       -- [barKey] = { isHovered=false, fadeDir=nil }
 
 -- Per-tick cached GetTotemInfo to prevent inconsistent reads during totem expiry.
 local function GetCachedTotemInfo(slot)
@@ -4888,7 +4889,6 @@ end
 -------------------------------------------------------------------------------
 --  Bar Visibility (always / in combat / mouseover / never) + Housing
 -------------------------------------------------------------------------------
-local _cdmHoverStates = {}  -- [barKey] = { isHovered=false, fadeDir=nil }
 
 local function _CDMFadeTo(frame, toAlpha, duration)
     if not frame._cdmFadeAG then
