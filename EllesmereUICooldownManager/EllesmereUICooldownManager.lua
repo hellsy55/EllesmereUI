@@ -7012,6 +7012,13 @@ eventFrame:RegisterEvent("STOP_MOVIE")
 -- Debounce token for talent-change rebuilds: rapid talent clicks collapse
 -- into a single deferred rebuild rather than firing once per click.
 local _talentRebuildToken = 0
+local _rosterRebuildToken = 0
+
+local function InvalidateDiscoveredUnitFrames()
+    if EllesmereUI and EllesmereUI.InvalidateDiscoveredUnitFrames then
+        EllesmereUI.InvalidateDiscoveredUnitFrames()
+    end
+end
 
 local function ScheduleTalentRebuild()
     _talentRebuildToken = _talentRebuildToken + 1
@@ -7056,6 +7063,17 @@ local function ScheduleTalentRebuild()
         UpdateCDMKeybinds()
     end)
 end
+
+local function ScheduleRosterRebuild()
+    InvalidateDiscoveredUnitFrames()
+    _rosterRebuildToken = _rosterRebuildToken + 1
+    local token = _rosterRebuildToken
+    C_Timer.After(0.2, function()
+        if token ~= _rosterRebuildToken then return end
+        BuildAllCDMBars()
+    end)
+end
+
 local _unitAuraTimer = nil
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if not ECME.db then return end
@@ -7091,12 +7109,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "GROUP_ROSTER_UPDATE" then
-        -- Invalidate party/player frame caches and re-anchor
-        _cachedPartyFrame = nil
-        _cachedPartyFrameRoster = 0
-        _cachedPlayerFrame = nil
-        _cachedPlayerFrameRoster = 0
-        C_Timer.After(0.2, function() BuildAllCDMBars() end)
+        ScheduleRosterRebuild()
         return
     end
     if event == "CINEMATIC_STOP" or event == "STOP_MOVIE" then
@@ -7169,10 +7182,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
-        -- Invalidate player frame cache ΓÇö Dander's party header children
-        -- get reassigned when the secure group system updates after spec swap.
-        _cachedPlayerFrame = nil
-        _cachedPlayerFrameRoster = 0
+        -- Dander's party header children can be reassigned after spec swaps.
+        InvalidateDiscoveredUnitFrames()
         local newSpecKey = GetCurrentSpecKey()
         local p = ECME.db.profile
         if newSpecKey ~= "0" and newSpecKey ~= p.activeSpecKey then

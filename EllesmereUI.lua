@@ -1678,6 +1678,13 @@ local _cachedPartyFrameRoster = 0
 local _cachedPlayerFrame
 local _cachedPlayerFrameRoster = 0
 
+function EllesmereUI.InvalidateDiscoveredUnitFrames()
+    _cachedPartyFrame = nil
+    _cachedPartyFrameRoster = 0
+    _cachedPlayerFrame = nil
+    _cachedPlayerFrameRoster = 0
+end
+
 function EllesmereUI.FindPlayerPartyFrame()
     local rosterToken = GetNumGroupMembers()
     if _cachedPartyFrame and _cachedPartyFrameRoster == rosterToken then

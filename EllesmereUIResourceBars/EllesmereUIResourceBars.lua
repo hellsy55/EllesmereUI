@@ -1010,6 +1010,12 @@ local function FindPlayerAnchorFrame()
     return SafeResolveExternalFrame(EllesmereUI and EllesmereUI.FindPlayerUnitFrame)
 end
 
+local function InvalidateDiscoveredUnitFrames()
+    if EllesmereUI and EllesmereUI.InvalidateDiscoveredUnitFrames then
+        EllesmereUI.InvalidateDiscoveredUnitFrames()
+    end
+end
+
 -- Apply anchor-based positioning for a bar frame.
 -- anchorKey: the anchorTo setting value
 -- anchorPos: "left"/"right"/"top"/"bottom"
@@ -3191,6 +3197,18 @@ function ERB:ApplyAll()
     end
 end
 
+local _rosterApplyToken = 0
+
+local function ScheduleRosterApply()
+    InvalidateDiscoveredUnitFrames()
+    _rosterApplyToken = _rosterApplyToken + 1
+    local token = _rosterApplyToken
+    C_Timer.After(0.2, function()
+        if token ~= _rosterApplyToken then return end
+        ERB:ApplyAll()
+    end)
+end
+
 
 -------------------------------------------------------------------------------
 --  Event handling
@@ -3249,8 +3267,9 @@ local function OnEvent(self, event, ...)
     elseif event == "PLAYER_TARGET_CHANGED" then
         UpdateVisibility()
     elseif event == "GROUP_ROSTER_UPDATE" then
-        ERB:ApplyAll()
+        ScheduleRosterApply()
     elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        InvalidateDiscoveredUnitFrames()
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
         BuildBars()
