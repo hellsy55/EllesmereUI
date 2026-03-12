@@ -3141,27 +3141,30 @@ function ERB:ApplyAll()
     UpdateVisibility()
 
     -- Vehicle proxy: hide resource bars during full vehicle UI ([vehicleui] condition)
-    -- RegisterStateDriver calls SetAttribute which is blocked in combat -- defer if needed
+    -- Secure frame creation + RegisterStateDriver both need to happen outside combat
     if not ERB._vehicleProxy then
-        ERB._vehicleProxy = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
-        ERB._vehicleProxy:SetAttribute("_onstate-erbvehicle", [[
-            self:CallMethod("OnVehicleStateChanged", newstate)
-        ]])
-        ERB._vehicleProxy.OnVehicleStateChanged = function(_, state)
-            ERB._inVehicle = (state == "hide")
-            UpdateVisibility()
+        local function InitVehicleProxy()
+            if ERB._vehicleProxy then return end
+            ERB._vehicleProxy = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
+            ERB._vehicleProxy:SetAttribute("_onstate-erbvehicle", [[
+                self:CallMethod("OnVehicleStateChanged", newstate)
+            ]])
+            ERB._vehicleProxy.OnVehicleStateChanged = function(_, state)
+                ERB._inVehicle = (state == "hide")
+                UpdateVisibility()
+            end
+            RegisterStateDriver(ERB._vehicleProxy, "erbvehicle", "[vehicleui][petbattle] hide; show")
         end
         if InCombatLockdown() then
-            ERB._vehicleProxy:RegisterEvent("PLAYER_REGEN_ENABLED")
-            ERB._vehicleProxy:SetScript("OnEvent", function(self, event)
-                if event == "PLAYER_REGEN_ENABLED" then
-                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                    self:SetScript("OnEvent", nil)
-                    RegisterStateDriver(self, "erbvehicle", "[vehicleui][petbattle] hide; show")
-                end
+            local waiter = CreateFrame("Frame")
+            waiter:RegisterEvent("PLAYER_REGEN_ENABLED")
+            waiter:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                self:SetScript("OnEvent", nil)
+                InitVehicleProxy()
             end)
         else
-            RegisterStateDriver(ERB._vehicleProxy, "erbvehicle", "[vehicleui][petbattle] hide; show")
+            InitVehicleProxy()
         end
     end
 end

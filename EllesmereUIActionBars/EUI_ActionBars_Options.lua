@@ -402,14 +402,8 @@ initFrame:SetScript("OnEvent", function(self)
             local btnH  = self._baseBtnH
 
             -- How many buttons are visible (from our DB settings)
-            local numVisible = settings.numIcons or info.count
+            local numVisible = settings.overrideNumIcons or settings.numIcons or info.count
             if numVisible < 1 then numVisible = info.count end
-
-            -- Apply override for # of icons (limit from end)
-            local ovIcons = settings.overrideNumIcons
-            if ovIcons and ovIcons > 0 and ovIcons < numVisible then
-                numVisible = ovIcons
-            end
 
             -- Stance bar: ignore icon count setting, use actual shapeshift form count
             if info.isStance then

@@ -2463,6 +2463,12 @@ local function SetupShowOnCastBar(frame, unit)
     castbar.PostCastStop = dismissCastBar
     castbar.PostChannelStop = dismissCastBar
     castbar.PostCastFail = dismissCastBar
+
+    -- Catch-all: hide the icon whenever the castbar hides for any reason
+    -- (oUF holdTime expiry, target switch, etc.) so it never gets stuck.
+    castbar:HookScript("OnHide", function(self)
+        if self._iconFrame then self._iconFrame:Hide() end
+    end)
 end
 
 
