@@ -259,7 +259,8 @@ local function IsBufChildCooldownActive(ch)
     end
     -- Non-totem: check our hook-captured cooldown state tables
     if _ecmeChildHasDurObj[ch] then return true end
-    if _ecmeRawDurCache[ch] then return true end
+    local rawDur = _ecmeRawDurCache[ch]
+    if rawDur and (issecretvalue and issecretvalue(rawDur) or rawDur > 0) then return true end
     return false
 end
 
@@ -4763,7 +4764,11 @@ local function UpdateAllCDMBars(dt)
                                     end)
                                 end
                                 hooksecurefunc(ch.Cooldown, "SetCooldown", function(_, start, dur)
-                                    if dur and dur > 0 then
+                                    if issecretvalue and (issecretvalue(dur) or issecretvalue(start)) then
+                                        -- Secret values (in combat): store as-is, sink handles them
+                                        _ecmeRawStartCache[ch] = start
+                                        _ecmeRawDurCache[ch] = dur
+                                    elseif dur and dur > 0 then
                                         _ecmeRawStartCache[ch] = start
                                         _ecmeRawDurCache[ch] = dur
                                     else
@@ -7058,6 +7063,9 @@ local function ScheduleTalentRebuild()
 end
 
 local function ScheduleRosterRebuild()
+    if EllesmereUI and EllesmereUI.InvalidateFrameCache then
+        EllesmereUI.InvalidateFrameCache()
+    end
     C_Timer.After(0.2, function()
         BuildAllCDMBars()
     end)
@@ -7171,6 +7179,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
+        if EllesmereUI and EllesmereUI.InvalidateFrameCache then
+            EllesmereUI.InvalidateFrameCache()
+        end
         local newSpecKey = GetCurrentSpecKey()
         local p = ECME.db.profile
         if newSpecKey ~= "0" and newSpecKey ~= p.activeSpecKey then

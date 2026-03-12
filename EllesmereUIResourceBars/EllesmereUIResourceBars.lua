@@ -3167,6 +3167,9 @@ function ERB:ApplyAll()
 end
 
 local function ScheduleRosterApply()
+    if EllesmereUI and EllesmereUI.InvalidateFrameCache then
+        EllesmereUI.InvalidateFrameCache()
+    end
     C_Timer.After(0.2, function()
         ERB:ApplyAll()
     end)

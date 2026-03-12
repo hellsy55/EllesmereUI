@@ -2835,6 +2835,32 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Profiles page
     ---------------------------------------------------------------------------
+
+    -- Builds a red warning string from a decoded payload's meta vs current client.
+    -- Returns nil if no mismatch.
+    local function BuildScaleWarning(payload)
+        if not payload or not payload.meta then return nil end
+        local m = payload.meta
+        local warnings = {}
+        local myScale  = EllesmereUIDB and EllesmereUIDB.ppUIScale or (UIParent and UIParent:GetScale()) or 1
+        local expScale = m.euiScale or m.uiScale
+        if expScale and math.abs(myScale - expScale) > 0.02 then
+            local expPct = math.floor(expScale * 100 + 0.5)
+            local myPct  = math.floor(myScale  * 100 + 0.5)
+            warnings[#warnings + 1] = "UI Scale Issue: Profile was made at " .. expPct .. "%, yours is " .. myPct .. "%"
+        end
+        local sw, sh = GetPhysicalScreenSize()
+        local mySW  = sw and math.floor(sw) or 0
+        local mySH  = sh and math.floor(sh) or 0
+        local expSW = m.screenW or 0
+        local expSH = m.screenH or 0
+        if expSW > 0 and expSH > 0 and (mySW ~= expSW or mySH ~= expSH) then
+            warnings[#warnings + 1] = "Resolution Issue: Profile was made at " .. expSW .. "x" .. expSH .. ", yours is " .. mySW .. "x" .. mySH
+        end
+        if #warnings == 0 then return nil end
+        return "WARNING: Frame positions may be off.\n" .. table.concat(warnings, "\n")
+    end
+
     local function BuildProfilesPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -3016,14 +3042,16 @@ initFrame:SetScript("OnEvent", function(self)
                             warnText = "Not included: " .. table.concat(missing, ", ")
                         end
                     end
-
+                    -- Check UI scale and resolution mismatch
+                    local scaleWarnText = BuildScaleWarning(payload)
                     EllesmereUI:ShowInputPopup({
-                        title       = "Name This Profile",
-                        message     = "Enter a name for the imported profile:",
-                        placeholder = "Imported Profile",
-                        confirmText = "Import & Reload",
-                        cancelText  = "Cancel",
-                        warning     = warnText,
+                        title        = "Name This Profile",
+                        message      = "Enter a name for the imported profile:",
+                        placeholder  = "Imported Profile",
+                        confirmText  = "Import & Reload",
+                        cancelText   = "Cancel",
+                        warning      = warnText,
+                        scaleWarning = scaleWarnText,
                         onConfirm   = function(name)
                             if not name or name == "" then return end
                             local ok, err, status = EllesmereUI.ImportProfile(importStr, name)
@@ -3065,6 +3093,7 @@ initFrame:SetScript("OnEvent", function(self)
                         label = "Weekly Spotlight: " .. spot.name,
                         onApply = function()
                             if not spot.exportString then return end
+                            local spotPayload = EllesmereUI.DecodeImportString(spot.exportString)
                             local ok, err, status = EllesmereUI.ImportProfile(spot.exportString, UniquePresetName("Weekly: " .. spot.name))
                             if ok and status == "spec_locked" then
                                 EllesmereUI:ShowInfoPopup({
@@ -3073,11 +3102,12 @@ initFrame:SetScript("OnEvent", function(self)
                                 })
                             elseif ok then
                                 EllesmereUI:ShowConfirmPopup({
-                                    title       = "Reload Required",
-                                    message     = "Preset applied. Reload to apply.",
-                                    confirmText = "Reload Now",
-                                    cancelText  = "Cancel",
-                                    onConfirm   = function() ReloadUI() end,
+                                    title        = "Reload Required",
+                                    message      = "Preset applied. Reload to apply.",
+                                    confirmText  = "Reload Now",
+                                    cancelText   = "Cancel",
+                                    scaleWarning = BuildScaleWarning(spotPayload),
+                                    onConfirm    = function() ReloadUI() end,
                                 })
                             else EllesmereUI:ShowInfoPopup({ title = "Spotlight Error", content = err or "Unknown error" }) end
                         end,
@@ -3096,12 +3126,14 @@ initFrame:SetScript("OnEvent", function(self)
                                         content = "Profile was saved but cannot be loaded because this spec has an assigned profile.",
                                     })
                                 elseif ok then
+                                    local pPayload = EllesmereUI.DecodeImportString(p.exportString)
                                     EllesmereUI:ShowConfirmPopup({
-                                        title       = "Reload Required",
-                                        message     = "Preset applied. Reload to apply.",
-                                        confirmText = "Reload Now",
-                                        cancelText  = "Cancel",
-                                        onConfirm   = function() ReloadUI() end,
+                                        title        = "Reload Required",
+                                        message      = "Preset applied. Reload to apply.",
+                                        confirmText  = "Reload Now",
+                                        cancelText   = "Cancel",
+                                        scaleWarning = BuildScaleWarning(pPayload),
+                                        onConfirm    = function() ReloadUI() end,
                                     })
                                 else EllesmereUI:ShowInfoPopup({ title = "Preset Error", content = err or "Unknown error" }) end
                             end,

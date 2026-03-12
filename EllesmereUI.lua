@@ -1685,13 +1685,40 @@ local PLAYER_FRAME_SOURCES = {
     { addon = "ElvUI",                 global = "ElvUF_Player" },
 }
 
+local _cachedPartyFrame   = nil
+local _cachedPlayerFrame  = nil
+local _cachedRosterToken  = -1
+
+local function RosterToken()
+    return GetNumGroupMembers()
+end
+
+local function CacheValid()
+    return _cachedRosterToken == RosterToken()
+end
+
+-- Invalidate both caches. Called by CDM and ResourceBars on GROUP_ROSTER_UPDATE
+-- and PLAYER_SPECIALIZATION_CHANGED so the next lookup rescans.
+function EllesmereUI.InvalidateFrameCache()
+    _cachedPartyFrame  = nil
+    _cachedPlayerFrame = nil
+    _cachedRosterToken = -1
+end
+
 function EllesmereUI.FindPlayerPartyFrame()
+    if _cachedPartyFrame and CacheValid() and _cachedPartyFrame:IsVisible() then
+        return _cachedPartyFrame
+    end
+    _cachedPartyFrame  = nil
+    _cachedRosterToken = RosterToken()
+
     for _, src in ipairs(PARTY_FRAME_SOURCES) do
         if not src.addon or C_AddOns.IsAddOnLoaded(src.addon) then
             for i = 1, src.count do
                 local frame = _G[src.prefix .. i]
                 if frame and frame.GetAttribute and frame:GetAttribute("unit") == "player"
                    and frame.IsVisible and frame:IsVisible() then
+                    _cachedPartyFrame = frame
                     return frame
                 end
             end
@@ -1701,6 +1728,7 @@ function EllesmereUI.FindPlayerPartyFrame()
     if C_AddOns.IsAddOnLoaded("DandersFrames") then
         local container = _G["DandersPartyContainer"]
         if container and container.IsVisible and container:IsVisible() then
+            _cachedPartyFrame = container
             return container
         end
     end
@@ -1709,10 +1737,20 @@ function EllesmereUI.FindPlayerPartyFrame()
 end
 
 function EllesmereUI.FindPlayerUnitFrame()
+    if _cachedPlayerFrame and CacheValid() and _cachedPlayerFrame:IsVisible() then
+        local u = _cachedPlayerFrame.GetAttribute and _cachedPlayerFrame:GetAttribute("unit")
+        if not u or UnitIsUnit(u, "player") then
+            return _cachedPlayerFrame
+        end
+    end
+    _cachedPlayerFrame = nil
+    _cachedRosterToken = RosterToken()
+
     for _, src in ipairs(PLAYER_FRAME_SOURCES) do
         if C_AddOns.IsAddOnLoaded(src.addon) then
             local frame = _G[src.global]
             if frame and frame.IsVisible and frame:IsVisible() then
+                _cachedPlayerFrame = frame
                 return frame
             end
         end
@@ -1725,6 +1763,7 @@ function EllesmereUI.FindPlayerUnitFrame()
                 local child = header:GetAttribute("child" .. i)
                 if child and child.GetAttribute and child:GetAttribute("unit") == "player"
                    and child.IsVisible and child:IsVisible() then
+                    _cachedPlayerFrame = child
                     return child
                 end
             end
@@ -1733,6 +1772,7 @@ function EllesmereUI.FindPlayerUnitFrame()
 
     local blizz = _G["PlayerFrame"]
     if blizz and blizz.IsVisible and blizz:IsVisible() then
+        _cachedPlayerFrame = blizz
         return blizz
     end
 
@@ -2003,6 +2043,16 @@ local function CreateConfirmPopup()
     disc:Hide()
     popup._disclaimer = disc
 
+    -- Scale/resolution mismatch warning (red, below disclaimer)
+    local scaleWarn = MakeFont(popup, 10, nil, 1, 0.2, 0.2, 1)
+    scaleWarn:SetWidth(POPUP_W - 40)
+    scaleWarn:SetJustifyH("CENTER")
+    scaleWarn:SetWordWrap(true)
+    scaleWarn:SetSpacing(2)
+    scaleWarn:Hide()
+    popup._scaleWarnLabel = scaleWarn
+    popup._baseH = POPUP_H
+
     -- Button dimensions
     local BTN_W, BTN_H = 135, 29
     local BTN_GAP = 16
@@ -2118,6 +2168,24 @@ function EllesmereUI:ShowConfirmPopup(opts)
         popup._disclaimer:SetText("")
         popup._disclaimer:Hide()
     end
+
+    -- Scale/resolution mismatch warning (red)
+    local scaleWarnH = 0
+    if opts.scaleWarning and opts.scaleWarning ~= "" then
+        popup._scaleWarnLabel:ClearAllPoints()
+        if opts.disclaimer and opts.disclaimer ~= "" then
+            popup._scaleWarnLabel:SetPoint("TOP", popup._disclaimer, "BOTTOM", 0, -14)
+        else
+            popup._scaleWarnLabel:SetPoint("TOP", popup._msg, "BOTTOM", 0, -14)
+        end
+        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:Show()
+        scaleWarnH = 16
+    else
+        popup._scaleWarnLabel:SetText("")
+        popup._scaleWarnLabel:Hide()
+    end
+    popup:SetHeight((popup._baseH or 176) + scaleWarnH)
     popup._cancelBtn._lbl:SetText(opts.cancelText or "Cancel")
     popup._confirmBtn._lbl:SetText(opts.confirmText or "Confirm")
     -- onDismiss: called on escape/click-outside. Falls back to onCancel if not provided.
@@ -2510,6 +2578,16 @@ function EllesmereUI:ShowInputPopup(opts)
         warnLabel:SetSpacing(2)
         warnLabel:Hide()
         popup._warnLabel = warnLabel
+        popup._inputFrame = inputFrame  -- store so reuse block can anchor against it
+
+        -- Optional scale/resolution mismatch warning (red, shown below the orange warning)
+        local scaleWarnLabel = MakeFont(popup, 10, nil, 1, 0.2, 0.2, 1)
+        scaleWarnLabel:SetWidth(POPUP_W - 40)
+        scaleWarnLabel:SetJustifyH("CENTER")
+        scaleWarnLabel:SetWordWrap(true)
+        scaleWarnLabel:SetSpacing(2)
+        scaleWarnLabel:Hide()
+        popup._scaleWarnLabel = scaleWarnLabel
 
         -- Optional extra button (shown above the input field, e.g. "Add Current Zone")
         local EXTRA_BTN_W, EXTRA_BTN_H = 160, 28
@@ -2663,15 +2741,34 @@ function EllesmereUI:ShowInputPopup(opts)
     -- Optional warning text below the input field
     local warnH = 0
     if opts.warning and opts.warning ~= "" then
+        popup._warnLabel:ClearAllPoints()
+        popup._warnLabel:SetPoint("TOP", popup._inputFrame, "BOTTOM", 0, -18)
         popup._warnLabel:SetText(opts.warning)
         popup._warnLabel:Show()
-        warnH = popup._warnLabel:GetStringHeight() + 10
+        warnH = 24
     else
         popup._warnLabel:SetText("")
         popup._warnLabel:Hide()
     end
 
-    popup:SetHeight(194 + extraH + warnH)
+    -- Optional scale/resolution mismatch warning (red)
+    local scaleWarnH = 0
+    if opts.scaleWarning and opts.scaleWarning ~= "" then
+        popup._scaleWarnLabel:ClearAllPoints()
+        if opts.warning and opts.warning ~= "" then
+            popup._scaleWarnLabel:SetPoint("TOP", popup._warnLabel, "BOTTOM", 0, -14)
+        else
+            popup._scaleWarnLabel:SetPoint("TOP", popup._inputFrame, "BOTTOM", 0, -18)
+        end
+        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:Show()
+        scaleWarnH = 30
+    else
+        popup._scaleWarnLabel:SetText("")
+        popup._scaleWarnLabel:Hide()
+    end
+
+    popup:SetHeight(194 + extraH + warnH + scaleWarnH)
 
     popup._cancelBtn:SetScript("OnClick", function()
         popup._dimmer:Hide()
@@ -5436,7 +5533,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.3.8"
+EllesmereUI.VERSION = "4.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
