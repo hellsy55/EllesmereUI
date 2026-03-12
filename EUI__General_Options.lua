@@ -76,8 +76,6 @@ initFrame:SetScript("OnEvent", function(self)
     --  { cvarName, euiPreferred }
     --  For the "hide pet/periodic" group we set three CVars to "0" (hidden).
     ---------------------------------------------------------------------------
-    local eqolLoaded = C_AddOns and C_AddOns.IsAddOnLoaded("EnhanceQoL")
-
     local EUI_DEFAULTS = {
         { "cameraDistanceMaxZoomFactor",                    "2.6" },
         { "ActionButtonUseKeyDown",                         "1"   },
@@ -87,13 +85,8 @@ initFrame:SetScript("OnEvent", function(self)
         { "floatingCombatTextCombatLogPeriodicSpells_v2",   "0"   },
         { "floatingCombatTextPetMeleeDamage_v2",            "0"   },
         { "floatingCombatTextPetSpellDamage_v2",            "0"   },
+        { "floatingCombatTextCombatDamage_v2",              "1"   },
     }
-
-    -- If conflicting addon is loaded, also add damage text CVar to defaults
-    -- so it gets forced to "1" only when the conflict isn't present
-    if not eqolLoaded then
-        EUI_DEFAULTS[#EUI_DEFAULTS + 1] = { "floatingCombatTextCombatDamage_v2", "1" }
-    end
 
     --- Walk the table once at login and apply only where safe.
     local function ApplySmartDefaults()
@@ -105,14 +98,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
     ApplySmartDefaults()
-
-    -- Force damage text CVars off when conflicting addon is present
-    if eqolLoaded then
-        SetCVarSafe("floatingCombatTextCombatDamage_v2", "0")
-        SetCVarSafe("floatingCombatTextCombatLogPeriodicSpells_v2", "0")
-        SetCVarSafe("floatingCombatTextPetMeleeDamage_v2", "0")
-        SetCVarSafe("floatingCombatTextPetSpellDamage_v2", "0")
-    end
 
     ---------------------------------------------------------------------------
     --  Lightweight Error Grabber (replaces Blizzard error popup with chat links)
@@ -1549,27 +1534,27 @@ initFrame:SetScript("OnEvent", function(self)
         local FCT_FONT_DIR = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\"
         local fctFontValues = {
             ["default"]                                = { text = "Blizzard Default", font = "Fonts\\FRIZQT__.TTF" },
-            [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = "Expressway",           font = FCT_FONT_DIR .. "Expressway.TTF" },
-            [FCT_FONT_DIR .. "Avant Garde.ttf"]        = { text = "Avant Garde (Naowh)",  font = FCT_FONT_DIR .. "Avant Garde.ttf" },
-            [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = "Arial Bold",           font = FCT_FONT_DIR .. "Arial Bold.TTF" },
-            [FCT_FONT_DIR .. "Poppins.ttf"]            = { text = "Poppins",              font = FCT_FONT_DIR .. "Poppins.ttf" },
-            [FCT_FONT_DIR .. "FiraSans Medium.ttf"]    = { text = "Fira Sans Medium",     font = FCT_FONT_DIR .. "FiraSans Medium.ttf" },
-            [FCT_FONT_DIR .. "Arial Narrow.ttf"]       = { text = "Arial Narrow",         font = FCT_FONT_DIR .. "Arial Narrow.ttf" },
-            [FCT_FONT_DIR .. "Changa.ttf"]             = { text = "Changa",               font = FCT_FONT_DIR .. "Changa.ttf" },
-            [FCT_FONT_DIR .. "Cinzel Decorative.ttf"]  = { text = "Cinzel Decorative",    font = FCT_FONT_DIR .. "Cinzel Decorative.ttf" },
-            [FCT_FONT_DIR .. "Exo.otf"]                = { text = "Exo",                  font = FCT_FONT_DIR .. "Exo.otf" },
-            [FCT_FONT_DIR .. "FiraSans Bold.ttf"]      = { text = "Fira Sans Bold",       font = FCT_FONT_DIR .. "FiraSans Bold.ttf" },
-            [FCT_FONT_DIR .. "FiraSans Light.ttf"]     = { text = "Fira Sans Light",      font = FCT_FONT_DIR .. "FiraSans Light.ttf" },
-            [FCT_FONT_DIR .. "Future X Black.otf"]     = { text = "Future X Black",       font = FCT_FONT_DIR .. "Future X Black.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow Ultra.otf"] = { text = "Gotham Narrow Ultra", font = FCT_FONT_DIR .. "Gotham Narrow Ultra.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow.otf"]      = { text = "Gotham Narrow",        font = FCT_FONT_DIR .. "Gotham Narrow.otf" },
-            [FCT_FONT_DIR .. "Russo One.ttf"]          = { text = "Russo One",            font = FCT_FONT_DIR .. "Russo One.ttf" },
-            [FCT_FONT_DIR .. "Ubuntu.ttf"]             = { text = "Ubuntu",               font = FCT_FONT_DIR .. "Ubuntu.ttf" },
-            [FCT_FONT_DIR .. "Homespun.ttf"]           = { text = "Homespun",             font = FCT_FONT_DIR .. "Homespun.ttf" },
-            ["Fonts\\FRIZQT__.TTF"]                    = { text = "Friz Quadrata",        font = "Fonts\\FRIZQT__.TTF" },
-            ["Fonts\\ARIALN.TTF"]                      = { text = "Arial",                font = "Fonts\\ARIALN.TTF" },
-            ["Fonts\\MORPHEUS.TTF"]                    = { text = "Morpheus",             font = "Fonts\\MORPHEUS.TTF" },
-            ["Fonts\\skurri.ttf"]                      = { text = "Skurri",               font = "Fonts\\skurri.ttf" },
+            [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = "Expressway",            font = FCT_FONT_DIR .. "Expressway.TTF" },
+            [FCT_FONT_DIR .. "Avant Garde.ttf"]        = { text = "Avant Garde (Naowh)",   font = FCT_FONT_DIR .. "Avant Garde.ttf" },
+            [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = "Arial Bold",            font = FCT_FONT_DIR .. "Arial Bold.TTF" },
+            [FCT_FONT_DIR .. "Poppins.ttf"]            = { text = "Poppins",               font = FCT_FONT_DIR .. "Poppins.ttf" },
+            [FCT_FONT_DIR .. "FiraSans Medium.ttf"]    = { text = "Fira Sans Medium",      font = FCT_FONT_DIR .. "FiraSans Medium.ttf" },
+            [FCT_FONT_DIR .. "Arial Narrow.ttf"]       = { text = "Arial Narrow",          font = FCT_FONT_DIR .. "Arial Narrow.ttf" },
+            [FCT_FONT_DIR .. "Changa.ttf"]             = { text = "Changa",                font = FCT_FONT_DIR .. "Changa.ttf" },
+            [FCT_FONT_DIR .. "Cinzel Decorative.ttf"]  = { text = "Cinzel Decorative",     font = FCT_FONT_DIR .. "Cinzel Decorative.ttf" },
+            [FCT_FONT_DIR .. "Exo.otf"]                = { text = "Exo",                   font = FCT_FONT_DIR .. "Exo.otf" },
+            [FCT_FONT_DIR .. "FiraSans Bold.ttf"]      = { text = "Fira Sans Bold",        font = FCT_FONT_DIR .. "FiraSans Bold.ttf" },
+            [FCT_FONT_DIR .. "FiraSans Light.ttf"]     = { text = "Fira Sans Light",       font = FCT_FONT_DIR .. "FiraSans Light.ttf" },
+            [FCT_FONT_DIR .. "Future X Black.otf"]     = { text = "Future X Black",        font = FCT_FONT_DIR .. "Future X Black.otf" },
+            [FCT_FONT_DIR .. "Gotham Narrow Ultra.otf"] = { text = "Gotham Narrow Ultra",  font = FCT_FONT_DIR .. "Gotham Narrow Ultra.otf" },
+            [FCT_FONT_DIR .. "Gotham Narrow.otf"]      = { text = "Gotham Narrow",         font = FCT_FONT_DIR .. "Gotham Narrow.otf" },
+            [FCT_FONT_DIR .. "Russo One.ttf"]          = { text = "Russo One",             font = FCT_FONT_DIR .. "Russo One.ttf" },
+            [FCT_FONT_DIR .. "Ubuntu.ttf"]             = { text = "Ubuntu",                font = FCT_FONT_DIR .. "Ubuntu.ttf" },
+            [FCT_FONT_DIR .. "Homespun.ttf"]           = { text = "Homespun",              font = FCT_FONT_DIR .. "Homespun.ttf" },
+            ["Fonts\\FRIZQT__.TTF"]                    = { text = "Friz Quadrata",         font = "Fonts\\FRIZQT__.TTF" },
+            ["Fonts\\ARIALN.TTF"]                      = { text = "Arial",                 font = "Fonts\\ARIALN.TTF" },
+            ["Fonts\\MORPHEUS.TTF"]                    = { text = "Morpheus",              font = "Fonts\\MORPHEUS.TTF" },
+            ["Fonts\\skurri.ttf"]                      = { text = "Skurri",                font = "Fonts\\skurri.ttf" },
         }
         local fctFontOrder = {
             "default",
@@ -1603,14 +1588,10 @@ initFrame:SetScript("OnEvent", function(self)
         local showDmgRow
         showDmgRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Damage Text",
-              disabled=function() return eqolLoaded end,
-              disabledTooltip="This option is temporarily disabled due to EQoL crashing things in conjunction with EUI. Please enable this via EQoL or disable EQoL to use this option",
               getValue=function()
-                if eqolLoaded then return false end
                 return GetCVarBool("floatingCombatTextCombatDamage_v2")
               end,
               setValue=function(v)
-                if eqolLoaded then return end
                 SetCVarSafe("floatingCombatTextCombatDamage_v2", v and "1" or "0")
               end },
             { type="dropdown", text="Combat Text Font",
@@ -3370,7 +3351,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 })
                             end)
                             iXBtn:SetScript("OnClick", function()
-                                if capName == "Custom" then return end
+                                if capName == "Default" then return end
                                 menu:Hide()
                                 EllesmereUI:ShowConfirmPopup({
                                     title       = "Delete Profile",

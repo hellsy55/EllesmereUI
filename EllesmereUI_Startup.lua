@@ -20,30 +20,31 @@ local ADDON_NAME = ...
 do
     local GetPhysicalScreenSize = GetPhysicalScreenSize
     local dbReady = false
-
-    local pendingScale = nil   -- scale to apply once the world is ready
+    local scaleKnown = false   -- true when ppUIScale was already saved
 
     local function ApplyScaleSafe(scale)
         if InCombatLockdown() then
-            -- Defer until combat ends — UIParent:SetScale is protected in combat
             local f = CreateFrame("Frame")
             f:RegisterEvent("PLAYER_REGEN_ENABLED")
             f:SetScript("OnEvent", function(self)
                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
                 UIParent:SetScale(scale)
-                -- UI_SCALE_CHANGED may not fire if scale didn't change; update mult directly
                 if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
                     EllesmereUI.PP.UpdateMult()
                 end
             end)
         else
             UIParent:SetScale(scale)
-            -- UI_SCALE_CHANGED only fires when the value actually changes.
-            -- Always update mult so PP.Scale() stays correct even when the
-            -- scale was already set to this value.
             if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
                 EllesmereUI.PP.UpdateMult()
             end
+        end
+    end
+
+    local function SyncMultOnly()
+        if EllesmereUI and EllesmereUI.PP then
+            if EllesmereUI.PP.UpdateMult then EllesmereUI.PP.UpdateMult() end
+            if EllesmereUI.PP.ResnapAllBorders then EllesmereUI.PP.ResnapAllBorders() end
         end
     end
 
@@ -71,20 +72,24 @@ do
                 EllesmereUIDB.ppUIScaleAuto = true
             end
 
-            -- Apply saved scale immediately for non-migration cases
-            -- (returning users who already have ppUIScale set)
+            -- If ppUIScale is already saved from a previous session,
+            -- the user is a returning user. We skip SetScale here and
+            -- apply it once at PLAYER_LOGIN instead.
             if EllesmereUIDB.ppUIScale then
-                pendingScale = EllesmereUIDB.ppUIScale
-                ApplyScaleSafe(pendingScale)
+                scaleKnown = true
             end
 
         elseif event == "PLAYER_LOGIN" then
             self:UnregisterEvent("PLAYER_LOGIN")
-            -- Update PP.mult before child addon OnEnable handlers run.
-            -- Child addons (UnitFrames, ActionBars) call PP.Scale/Size/Point
-            -- during OnEnable (which fires on PLAYER_LOGIN). If PP.mult is
-            -- still the file-load value at that point, all pixel-snapped
-            -- geometry is wrong until the next reload.
+
+            if scaleKnown and EllesmereUIDB.ppUIScale then
+                -- Returning user: single SetScale at PLAYER_LOGIN.
+                -- No timers, no repeated calls.
+                ApplyScaleSafe(EllesmereUIDB.ppUIScale)
+                return
+            end
+
+            -- First-time path: just sync mult for child addon OnEnable
             if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
                 EllesmereUI.PP.UpdateMult()
             end
@@ -92,9 +97,12 @@ do
         elseif event == "PLAYER_ENTERING_WORLD" then
             self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
-            -- If ADDON_LOADED hasn't fired yet (shouldn't happen, but safety)
             if not dbReady then return end
             if not EllesmereUIDB then EllesmereUIDB = {} end
+
+            -- Returning user: scale was applied once at PLAYER_LOGIN,
+            -- nothing else needed.
+            if scaleKnown then return end
 
             -- First install or reset: snapshot the user's Blizzard scale
             if EllesmereUIDB.ppUIScale == nil then
@@ -102,44 +110,32 @@ do
                 local clamped = max(0.4, min(blizzScale, 1.15))
                 EllesmereUIDB.ppUIScale = clamped
                 EllesmereUIDB.ppUIScaleAuto = false
-                pendingScale = clamped
             end
 
-            -- Re-apply scale now that the world is loaded, then again
-            -- after a short delay to beat any Blizzard resets
             local scale = EllesmereUIDB.ppUIScale
-            if scale then
-                -- Update PP.mult immediately so any frames built between now
-                -- and the timer passes use the correct pixel multiplier.
-                if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
-                    EllesmereUI.PP.UpdateMult()
-                end
-                ApplyScaleSafe(scale)
-                C_Timer.After(2, function()
-                    if InCombatLockdown() then return end
-                    if EllesmereUIDB and EllesmereUIDB.ppUIScale then
-                        ApplyScaleSafe(EllesmereUIDB.ppUIScale)
-                    end
-                    -- Always update PP.mult — UI_SCALE_CHANGED only fires when
-                    -- the scale value changes, so if Blizzard reset and re-set
-                    -- the same value the event never fires and mult stays stale.
-                    if EllesmereUI and EllesmereUI.PP then
-                        if EllesmereUI.PP.UpdateMult then EllesmereUI.PP.UpdateMult() end
-                        if EllesmereUI.PP.ResnapAllBorders then EllesmereUI.PP.ResnapAllBorders() end
-                    end
-                end)
-                -- Second pass: catch any borders created late (e.g. lazy-init frames)
-                C_Timer.After(5, function()
-                    if InCombatLockdown() then return end
-                    if EllesmereUIDB and EllesmereUIDB.ppUIScale then
-                        ApplyScaleSafe(EllesmereUIDB.ppUIScale)
-                    end
-                    if EllesmereUI and EllesmereUI.PP then
-                        if EllesmereUI.PP.UpdateMult then EllesmereUI.PP.UpdateMult() end
-                        if EllesmereUI.PP.ResnapAllBorders then EllesmereUI.PP.ResnapAllBorders() end
-                    end
-                end)
+            if not scale then return end
+
+            -- First-time conversion / migration path: full safety net.
+            -- Apply scale multiple times to guarantee it sticks even on
+            -- slow machines where Blizzard may reset it during init.
+            if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+                EllesmereUI.PP.UpdateMult()
             end
+            ApplyScaleSafe(scale)
+            C_Timer.After(2, function()
+                if InCombatLockdown() then return end
+                if EllesmereUIDB and EllesmereUIDB.ppUIScale then
+                    ApplyScaleSafe(EllesmereUIDB.ppUIScale)
+                end
+                SyncMultOnly()
+            end)
+            C_Timer.After(5, function()
+                if InCombatLockdown() then return end
+                if EllesmereUIDB and EllesmereUIDB.ppUIScale then
+                    ApplyScaleSafe(EllesmereUIDB.ppUIScale)
+                end
+                SyncMultOnly()
+            end)
         end
     end)
 end
@@ -192,7 +188,7 @@ do
     end)
 end
 
--- /rl reload shortcut -- only register if nothing else has claimed it
+-- /rl reload shortcut -- only
 if not SlashCmdList["RL"] then
     SlashCmdList["RL"] = function() ReloadUI() end
     SLASH_RL1 = "/rl"

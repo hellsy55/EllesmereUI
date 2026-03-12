@@ -301,8 +301,8 @@ end
 --      fonts  = <snapshot of EllesmereUIDB.fonts>,
 --      customColors = <snapshot of EllesmereUIDB.customColors>,
 --  }
---  EllesmereUIDB.activeProfile = "Custom"  (name of active profile)
---  EllesmereUIDB.profileOrder  = { "Custom", ... }
+--  EllesmereUIDB.activeProfile = "Default"  (name of active profile)
+--  EllesmereUIDB.profileOrder  = { "Default", ... }
 --  EllesmereUIDB.specProfiles  = { [specID] = "profileName" }
 -------------------------------------------------------------------------------
 local function GetProfilesDB()
@@ -958,9 +958,9 @@ function EllesmereUI.DeleteProfile(name)
     for specID, pName in pairs(db.specProfiles) do
         if pName == name then db.specProfiles[specID] = nil end
     end
-    -- If deleted profile was active, fall back to Custom
+    -- If deleted profile was active, fall back to Default
     if db.activeProfile == name then
-        db.activeProfile = "Custom"
+        db.activeProfile = "Default"
     end
 end
 
@@ -990,7 +990,7 @@ end
 
 function EllesmereUI.GetActiveProfileName()
     local db = GetProfilesDB()
-    return db.activeProfile or "Custom"
+    return db.activeProfile or "Default"
 end
 
 function EllesmereUI.GetProfileList()
@@ -1021,7 +1021,7 @@ end
 function EllesmereUI.AutoSaveActiveProfile()
     if EllesmereUI._profileSaveLocked then return end
     local db = GetProfilesDB()
-    local name = db.activeProfile or "Custom"
+    local name = db.activeProfile or "Default"
     db.profiles[name] = EllesmereUI.SnapshotAllAddons()
 end
 
@@ -1070,7 +1070,7 @@ do
         local db = GetProfilesDB()
         local targetProfile = db.specProfiles[specID]
         if targetProfile and db.profiles[targetProfile] then
-            local current = db.activeProfile or "Custom"
+            local current = db.activeProfile or "Default"
             if current ~= targetProfile then
                 -- Auto-save current before switching (skip on first login,
                 -- SavedVariables already has the previous character's save)
@@ -1439,7 +1439,7 @@ end
 
 -------------------------------------------------------------------------------
 --  Initialize profile system on first login
---  Creates the "Custom" profile from current settings if none exists.
+--  Creates the "Default" profile from current settings if none exists.
 --  Also saves the active profile on logout (via Lite pre-logout callback)
 --  so SavedVariables are current before StripDefaults runs.
 -------------------------------------------------------------------------------
@@ -1448,7 +1448,7 @@ do
     EllesmereUI.Lite.RegisterPreLogout(function()
         if not EllesmereUI._profileSaveLocked then
             local db = GetProfilesDB()
-            local name = db.activeProfile or "Custom"
+            local name = db.activeProfile or "Default"
             db.profiles[name] = EllesmereUI.SnapshotAllAddons()
         end
     end)
@@ -1459,26 +1459,46 @@ do
         self:UnregisterEvent("PLAYER_LOGIN")
 
         local db = GetProfilesDB()
-        -- On first install, create "Custom" from current (default) settings
-        if not db.activeProfile then
-            db.activeProfile = "Custom"
+
+        -- Migration: rename legacy "Custom" profile to "Default".
+        -- Only runs if no user-created "Default" profile already exists;
+        -- otherwise we leave "Custom" as-is to avoid data loss.
+        if db.profiles["Custom"] and not db.profiles["Default"] then
+            db.profiles["Default"] = db.profiles["Custom"]
+            db.profiles["Custom"] = nil
+            if db.activeProfile == "Custom" then
+                db.activeProfile = "Default"
+            end
+            for i, n in ipairs(db.profileOrder) do
+                if n == "Custom" then db.profileOrder[i] = "Default"; break end
+            end
+            if db.specProfiles then
+                for specID, pName in pairs(db.specProfiles) do
+                    if pName == "Custom" then db.specProfiles[specID] = "Default" end
+                end
+            end
         end
-        -- Ensure Custom profile exists with current settings
-        if not db.profiles["Custom"] then
+
+        -- On first install, create "Default" from current (default) settings
+        if not db.activeProfile then
+            db.activeProfile = "Default"
+        end
+        -- Ensure Default profile exists with current settings
+        if not db.profiles["Default"] then
             -- Delay slightly to let all addons initialize their DBs
             EllesmereUI._profileSaveLocked = true
             C_Timer.After(0.5, function()
-                db.profiles["Custom"] = EllesmereUI.SnapshotAllAddons()
+                db.profiles["Default"] = EllesmereUI.SnapshotAllAddons()
                 EllesmereUI._profileSaveLocked = false
             end)
         end
-        -- Ensure Custom is in the order list
-        local hasCustom = false
+        -- Ensure Default is in the order list
+        local hasDefault = false
         for _, n in ipairs(db.profileOrder) do
-            if n == "Custom" then hasCustom = true; break end
+            if n == "Default" then hasDefault = true; break end
         end
-        if not hasCustom then
-            table.insert(db.profileOrder, "Custom")
+        if not hasDefault then
+            table.insert(db.profileOrder, "Default")
         end
 
         ---------------------------------------------------------------

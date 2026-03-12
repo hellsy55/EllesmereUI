@@ -630,17 +630,11 @@ do
             return
         end
         if not EllesmereUIDB then EllesmereUIDB = {} end
-        -- Only trigger frame rebuilds when the scale is actually changing.
-        -- On login, Blizzard may reset UIParent scale, so we re-apply the
-        -- stored value -- but if UIParent is already at the correct scale
-        -- the frames are already positioned correctly and rebuilding them
-        -- would shift user-customized positions unnecessarily.
         local currentScale = UIParent and UIParent:GetScale() or 1
         local scaleChanged = math.abs(currentScale - newScale) > 0.0001
         EllesmereUIDB.ppUIScale = newScale
         UIParent:SetScale(newScale)
         PP.UpdateMult()
-        -- Rebuild child addon frames only when the scale actually changed.
         if scaleChanged then
             if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
             if _G._ERB_Apply then _G._ERB_Apply() end
@@ -737,6 +731,7 @@ do
     ---------------------------------------------------------------------------
     function PP.DisablePixelSnap(obj)
         if not obj or obj.PixelSnapDisabled then return end
+        if obj.IsForbidden and obj:IsForbidden() then return end
 
         -- Textures and FontStrings expose SetSnapToPixelGrid directly
         local target = obj
@@ -5533,7 +5528,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.4.7"
+EllesmereUI.VERSION = "4.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
