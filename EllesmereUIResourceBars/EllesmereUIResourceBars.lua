@@ -1003,11 +1003,11 @@ local function SafeResolveExternalFrame(resolver)
 end
 
 local function FindPartyAnchorFrame()
-    return SafeResolveExternalFrame(_G._ECME_FindPlayerPartyFrame)
+    return SafeResolveExternalFrame(EllesmereUI and EllesmereUI.FindPlayerPartyFrame)
 end
 
 local function FindPlayerAnchorFrame()
-    return SafeResolveExternalFrame(_G._ECME_FindPlayerUnitFrame)
+    return SafeResolveExternalFrame(EllesmereUI and EllesmereUI.FindPlayerUnitFrame)
 end
 
 -- Apply anchor-based positioning for a bar frame.

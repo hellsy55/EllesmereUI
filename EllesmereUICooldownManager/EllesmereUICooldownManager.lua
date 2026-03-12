@@ -1806,8 +1806,20 @@ local cdmBarFrames = {}
 local cdmBarIcons = {}
 -- Fast barData lookup by key (rebuilt in BuildAllCDMBars, avoids linear scan per tick)
 local barDataByKey = {}
-local FindPlayerPartyFrame
-local FindPlayerUnitFrame
+
+local function FindPlayerPartyFrame()
+    if EllesmereUI and EllesmereUI.FindPlayerPartyFrame then
+        return EllesmereUI.FindPlayerPartyFrame()
+    end
+    return nil
+end
+
+local function FindPlayerUnitFrame()
+    if EllesmereUI and EllesmereUI.FindPlayerUnitFrame then
+        return EllesmereUI.FindPlayerUnitFrame()
+    end
+    return nil
+end
 
 -- Expose our CDM bar frames so the glow system can reference them
 ns.GetCDMBarFrame = function(barKey)
@@ -2109,120 +2121,6 @@ local CDM_BAR_CATEGORIES = {
 
 -- Maximum number of custom bars a user can create
 local MAX_CUSTOM_BARS = 6
-
--------------------------------------------------------------------------------
---  Party Frame Discovery
---  Scans known party/raid frame addons to find the player's own unit button.
--------------------------------------------------------------------------------
-local PARTY_FRAME_PREFIXES = {
-    { addon = "ElvUI",  prefix = "ElvUF_PartyGroup1UnitButton", count = 5 },
-    { addon = "Cell",   prefix = "CellPartyFrameMember",        count = 5 },
-    { addon = nil,      prefix = "CompactPartyFrameMember",     count = 5 },
-    { addon = nil,      prefix = "CompactRaidFrame",            count = 40 },
-}
-
-local _cachedPartyFrame
-local _cachedPartyFrameRoster = 0  -- invalidate on roster change
-
-FindPlayerPartyFrame = function()
-    -- Use cache if roster hasn't changed
-    local rosterToken = GetNumGroupMembers()
-    if _cachedPartyFrame and _cachedPartyFrameRoster == rosterToken then
-        if _cachedPartyFrame:IsVisible() then
-            return _cachedPartyFrame
-        end
-    end
-    _cachedPartyFrame = nil
-    _cachedPartyFrameRoster = rosterToken
-
-    for _, src in ipairs(PARTY_FRAME_PREFIXES) do
-        if not src.addon or C_AddOns.IsAddOnLoaded(src.addon) then
-            for i = 1, src.count do
-                local frame = _G[src.prefix .. i]
-                if frame and frame.GetAttribute and frame:GetAttribute("unit") == "player"
-                   and frame.IsVisible and frame:IsVisible() then
-                    _cachedPartyFrame = frame
-                    return frame
-                end
-            end
-        end
-    end
-    -- Check Dander's party container
-    if C_AddOns.IsAddOnLoaded("DandersFrames") then
-        local container = _G["DandersPartyContainer"]
-        if container and container.IsVisible and container:IsVisible() then
-            _cachedPartyFrame = container
-            return container
-        end
-    end
-
-    return nil
-end
-
--------------------------------------------------------------------------------
---  Player Frame Discovery
---  Scans known unit frame addons to find the player's unit frame.
---  Priority: ours  ElvUI  Dander's party header  Blizzard PlayerFrame
--------------------------------------------------------------------------------
-local PLAYER_FRAME_SOURCES = {
-    { addon = "EllesmereUIUnitFrames", global = "EllesmereUIUnitFrames_Player" },
-    { addon = "ElvUI",                 global = "ElvUF_Player" },
-}
-
-local _cachedPlayerFrame
-local _cachedPlayerFrameRoster = 0
-
-FindPlayerUnitFrame = function()
-    -- Invalidate cache when group roster changes (spec swap, join/leave)
-    local rosterToken = GetNumGroupMembers()
-    if _cachedPlayerFrame and _cachedPlayerFrameRoster == rosterToken then
-        -- Also re-verify the unit attribute ΓÇö party header children get
-        -- reassigned dynamically by the secure group system.
-        if _cachedPlayerFrame:IsVisible() then
-            local u = _cachedPlayerFrame.GetAttribute and _cachedPlayerFrame:GetAttribute("unit")
-            if not u or UnitIsUnit(u, "player") then
-                return _cachedPlayerFrame
-            end
-        end
-    end
-    _cachedPlayerFrame = nil
-    _cachedPlayerFrameRoster = rosterToken
-
-    -- Check dedicated player frame addons first
-    for _, src in ipairs(PLAYER_FRAME_SOURCES) do
-        if C_AddOns.IsAddOnLoaded(src.addon) then
-            local frame = _G[src.global]
-            if frame and frame.IsVisible and frame:IsVisible() then
-                _cachedPlayerFrame = frame
-                return frame
-            end
-        end
-    end
-
-    -- Check Dander's party header children for the player unit
-    if C_AddOns.IsAddOnLoaded("DandersFrames") then
-        local header = _G["DandersPartyHeader"]
-        if header then
-            for i = 1, 5 do
-                local child = header:GetAttribute("child" .. i)
-                if child and child.GetAttribute and child:GetAttribute("unit") == "player"
-                   and child.IsVisible and child:IsVisible() then
-                    _cachedPlayerFrame = child
-                    return child
-                end
-            end
-        end
-    end
-
-    -- Fallback: Blizzard default player frame
-    local blizz = _G["PlayerFrame"]
-    if blizz and blizz.IsVisible and blizz:IsVisible() then
-        _cachedPlayerFrame = blizz
-        return blizz
-    end
-
-    return nil
-end
 
 -------------------------------------------------------------------------------
 --  Trinket / Racial / Health Potion data (for "trinkets" bar type)

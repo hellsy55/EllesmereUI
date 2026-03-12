@@ -1660,6 +1660,107 @@ function EllesmereUI.GetMaelstromWeapon()
     return (aura and aura.applications or 0), max
 end
 
+do
+local PARTY_FRAME_SOURCES = {
+    { addon = "ElvUI",  prefix = "ElvUF_PartyGroup1UnitButton", count = 5 },
+    { addon = "Cell",   prefix = "CellPartyFrameMember",        count = 5 },
+    { addon = nil,      prefix = "CompactPartyFrameMember",     count = 5 },
+    { addon = nil,      prefix = "CompactRaidFrame",            count = 40 },
+}
+
+local PLAYER_FRAME_SOURCES = {
+    { addon = "EllesmereUIUnitFrames", global = "EllesmereUIUnitFrames_Player" },
+    { addon = "ElvUI",                 global = "ElvUF_Player" },
+}
+
+local _cachedPartyFrame
+local _cachedPartyFrameRoster = 0
+local _cachedPlayerFrame
+local _cachedPlayerFrameRoster = 0
+
+function EllesmereUI.FindPlayerPartyFrame()
+    local rosterToken = GetNumGroupMembers()
+    if _cachedPartyFrame and _cachedPartyFrameRoster == rosterToken then
+        if _cachedPartyFrame:IsVisible() then
+            return _cachedPartyFrame
+        end
+    end
+
+    _cachedPartyFrame = nil
+    _cachedPartyFrameRoster = rosterToken
+
+    for _, src in ipairs(PARTY_FRAME_SOURCES) do
+        if not src.addon or C_AddOns.IsAddOnLoaded(src.addon) then
+            for i = 1, src.count do
+                local frame = _G[src.prefix .. i]
+                if frame and frame.GetAttribute and frame:GetAttribute("unit") == "player"
+                   and frame.IsVisible and frame:IsVisible() then
+                    _cachedPartyFrame = frame
+                    return frame
+                end
+            end
+        end
+    end
+
+    if C_AddOns.IsAddOnLoaded("DandersFrames") then
+        local container = _G["DandersPartyContainer"]
+        if container and container.IsVisible and container:IsVisible() then
+            _cachedPartyFrame = container
+            return container
+        end
+    end
+
+    return nil
+end
+
+function EllesmereUI.FindPlayerUnitFrame()
+    local rosterToken = GetNumGroupMembers()
+    if _cachedPlayerFrame and _cachedPlayerFrameRoster == rosterToken then
+        if _cachedPlayerFrame:IsVisible() then
+            local unit = _cachedPlayerFrame.GetAttribute and _cachedPlayerFrame:GetAttribute("unit")
+            if not unit or UnitIsUnit(unit, "player") then
+                return _cachedPlayerFrame
+            end
+        end
+    end
+
+    _cachedPlayerFrame = nil
+    _cachedPlayerFrameRoster = rosterToken
+
+    for _, src in ipairs(PLAYER_FRAME_SOURCES) do
+        if C_AddOns.IsAddOnLoaded(src.addon) then
+            local frame = _G[src.global]
+            if frame and frame.IsVisible and frame:IsVisible() then
+                _cachedPlayerFrame = frame
+                return frame
+            end
+        end
+    end
+
+    if C_AddOns.IsAddOnLoaded("DandersFrames") then
+        local header = _G["DandersPartyHeader"]
+        if header then
+            for i = 1, 5 do
+                local child = header:GetAttribute("child" .. i)
+                if child and child.GetAttribute and child:GetAttribute("unit") == "player"
+                   and child.IsVisible and child:IsVisible() then
+                    _cachedPlayerFrame = child
+                    return child
+                end
+            end
+        end
+    end
+
+    local blizz = _G["PlayerFrame"]
+    if blizz and blizz.IsVisible and blizz:IsVisible() then
+        _cachedPlayerFrame = blizz
+        return blizz
+    end
+
+    return nil
+end
+end
+
 -- Tip of the Spear and Whirlwind Stacks are now tracked manually via
 -- HandleTipOfTheSpear / HandleWhirlwindStacks + UNIT_SPELLCAST_SUCCEEDED.
 -- See the manual tracker section above.
