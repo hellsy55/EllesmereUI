@@ -402,7 +402,7 @@ local _inCombat = false
 --
 --  Returns: durObj (DurationObject|nil)
 -------------------------------------------------------------------------------
-local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha, skipCD, blizzChild)
+local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha, skipCD, blizzChild, isBuffBar)
     -- Ensure charge cache is populated (cheap: skips if already cached)
     CacheMultiChargeSpell(spellID)
 
@@ -544,9 +544,9 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
 
     -- Charge text: show spell charges for charge-based spells, or aura stacks as fallback
     if showCharges then
-        -- Totems: hide charge count (e.g. HST "2") — not meaningful as stacks.
+        -- Totems on buff bars: hide charge count (e.g. HST "2") — not meaningful as stacks.
         local ts = blizzChild and blizzChild.preferredTotemUpdateSlot
-        if ts and type(ts) == "number" and ts > 0 then
+        if ts and type(ts) == "number" and ts > 0 and isBuffBar then
             icon._chargeText:Hide()
             showCharges = false  -- skip rest of charge logic
         end
@@ -3613,7 +3613,7 @@ local function UpdateCustomBarIcons(barKey)
                 end
 
                 ApplySpellCooldown(ourIcon, resolvedID, barData.desaturateOnCD, barData.showCharges, swAlpha, skipCDDisplay,
-                    _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
+                    _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID], isBuffBarForOverride)
 
                 -- Buff bars: swipe fills as buff expires (starts empty, ends full).
                 if isBuffBarForOverride then
@@ -3626,11 +3626,16 @@ local function UpdateCustomBarIcons(barKey)
                 -- but the Applications frame text is always readable.
                 if barData.showCharges then
                     local blizzChild = _tickBlizzChildCache[resolvedID]
-                    if blizzChild and blizzChild.Applications and blizzChild.Applications.Applications then
-                        local ok, txt = pcall(blizzChild.Applications.Applications.GetText, blizzChild.Applications.Applications)
-                        if ok and txt and txt ~= "" and txt ~= "0" then
-                            ourIcon._chargeText:SetText(txt)
-                            ourIcon._chargeText:Show()
+                    -- Totems on buff bars: skip (ApplySpellCooldown already hid charge text)
+                    local bts = blizzChild and blizzChild.preferredTotemUpdateSlot
+                    local isTotem = bts and type(bts) == "number" and bts > 0
+                    if not (isTotem and isBuffBarForOverride) then
+                        if blizzChild and blizzChild.Applications and blizzChild.Applications.Applications then
+                            local ok, txt = pcall(blizzChild.Applications.Applications.GetText, blizzChild.Applications.Applications)
+                            if ok and txt and txt ~= "" and txt ~= "0" then
+                                ourIcon._chargeText:SetText(txt)
+                                ourIcon._chargeText:Show()
+                            end
                         end
                     end
                 end
@@ -3880,9 +3885,35 @@ UpdateCDMBarIcons = function(barKey)
                 end
             end
 
+            -- Buff bar summon-type fallback: show remaining totem duration from
+            -- hook-cached cooldown data when aura duration is unavailable.
+            if not auraHandled and activeAnim ~= "hideActive" and (barKey == "buffs") then
+                local baseSpellFb = blizzIcon and blizzIcon._ecmeBaseSpellID
+                local blzFbActive = _tickBlizzActiveCache[resolvedSid] or (baseSpellFb and _tickBlizzActiveCache[baseSpellFb])
+                if not blzFbActive then
+                    local blzBufCh = _tickBlizzBuffChildCache[resolvedSid] or (baseSpellFb and _tickBlizzBuffChildCache[baseSpellFb])
+                    if IsBufChildCooldownActive and blzBufCh then
+                        if IsBufChildCooldownActive(blzBufCh) then blzFbActive = true end
+                    end
+                end
+                if blzFbActive then
+                    auraHandled = true
+                    skipCDDisplay = true
+                    if blizzIcon and blizzIcon.Cooldown then
+                        ourIcon._cooldown:Clear()
+                        if _ecmeDurObjCache[blizzIcon] then
+                            pcall(ourIcon._cooldown.SetCooldownFromDurationObject, ourIcon._cooldown, _ecmeDurObjCache[blizzIcon], true)
+                        elseif _ecmeRawStartCache[blizzIcon] and _ecmeRawDurCache[blizzIcon] then
+                            pcall(ourIcon._cooldown.SetCooldown, ourIcon._cooldown, _ecmeRawStartCache[blizzIcon], _ecmeRawDurCache[blizzIcon])
+                        end
+                        ourIcon._cooldown:SetReverse(false)
+                    end
+                end
+            end
+
             -- Spell cooldown + desaturation (uses shared helper)
             if resolvedSid and resolvedSid > 0 then
-                ApplySpellCooldown(ourIcon, resolvedSid, desatOnCD, showCharges, swAlpha, skipCDDisplay, blizzIcon)
+                ApplySpellCooldown(ourIcon, resolvedSid, desatOnCD, showCharges, swAlpha, skipCDDisplay, blizzIcon, (barKey == "buffs"))
             else
                 if desatOnCD and ourIcon._lastDesat then
                     ourIcon._tex:SetDesaturation(0)
@@ -4563,7 +4594,7 @@ local function UpdateTrackedBarIcons(barKey)
 
                 -- Spell cooldown + desaturation
                 ApplySpellCooldown(ourIcon, resolvedID, desatOnCD, showCharges, swAlpha, skipCDDisplay,
-                    assignedChild or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
+                    assignedChild or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID], isBuffBarForOvr)
 
                 -- Buff bars: swipe fills as buff expires (starts empty, ends full).
                 if isBuffBarForOvr then
@@ -4698,7 +4729,10 @@ local function UpdateAllCDMBars(dt)
                             -- Invalidate cache when cooldownID changes (child recycled
                             -- by Blizzard CDM for a different spell, e.g. Empty Barrel
                             -- proc replacing another spell's child frame).
-                            if resolvedSid and ch._ecmeCachedCdID ~= cdID then
+                            -- Also invalidate when auraInstanceID changes (e.g. SLT→HST
+                            -- in same totem slot share cdID but have different auras).
+                            if resolvedSid and (ch._ecmeCachedCdID ~= cdID
+                                or (ch._ecmeCachedAuraInstID ~= nil and ch._ecmeCachedAuraInstID ~= ch.auraInstanceID)) then
                                 resolvedSid = nil
                                 baseSpellID = nil
                                 cachedOverride = nil
@@ -4716,6 +4750,7 @@ local function UpdateAllCDMBars(dt)
                                     ch._ecmeOverrideSid = cachedOverride
                                     ch._ecmeResolvedSid = resolvedSid
                                     ch._ecmeCachedCdID = cdID
+                                    ch._ecmeCachedAuraInstID = ch.auraInstanceID
                                 end
                             else
                                 -- Refresh override from lightweight API (returns
@@ -4731,6 +4766,7 @@ local function UpdateAllCDMBars(dt)
                                         ch._ecmeResolvedSid = resolvedSid
                                     end
                                 end
+                                ch._ecmeCachedAuraInstID = ch.auraInstanceID
                             end
                             if resolvedSid and resolvedSid > 0 then
                                 -- Override cache: base -> override (always, not just when active)
