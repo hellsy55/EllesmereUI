@@ -265,17 +265,29 @@ local _barColorCurveHash = nil
 
 local function GetBarThresholdCurve(baseR, baseG, baseB, threshR, threshG, threshB, threshPct)
     if not C_CurveUtil or not C_CurveUtil.CreateColorCurve then return nil end
-    local hash = format("%.3f,%.3f,%.3f|%.3f,%.3f,%.3f|%.1f", baseR, baseG, baseB, threshR, threshG, threshB, threshPct)
+
+    local hash = format("%.3f,%.3f,%.3f|%.3f,%.3f,%.3f|%.1f",
+        baseR, baseG, baseB, threshR, threshG, threshB, threshPct)
     if _barColorCurveHash == hash then return _barColorCurve end
+
     local curve = C_CurveUtil.CreateColorCurve()
     local t = math.max(0, math.min(1, threshPct / 100))
     local EPSILON = 0.0001
-    curve:AddPoint(0.0, CreateColor(baseR, baseG, baseB, 1))
+
+    -- At or below threshold -> use threshold color
+    curve:AddPoint(0.0, CreateColor(threshR, threshG, threshB, 1))
+
     if t > EPSILON then
-        curve:AddPoint(t - EPSILON, CreateColor(baseR, baseG, baseB, 1))
+        curve:AddPoint(t, CreateColor(threshR, threshG, threshB, 1))
     end
-    curve:AddPoint(t,   CreateColor(threshR, threshG, threshB, 1))
-    curve:AddPoint(1.0, CreateColor(threshR, threshG, threshB, 1))
+
+    -- Above threshold -> revert to base bar color
+    if t < 1.0 then
+        curve:AddPoint(math.min(1.0, t + EPSILON), CreateColor(baseR, baseG, baseB, 1))
+    end
+
+    curve:AddPoint(1.0, CreateColor(baseR, baseG, baseB, 1))
+
     _barColorCurve = curve
     _barColorCurveHash = hash
     return curve
@@ -1752,7 +1764,7 @@ local function UpdatePrimaryBar()
     -- Color: threshold via ColorCurve (secret-safe) for non-mana specs;
     -- otherwise dark/custom/power-type color applied directly.
     local ft = primaryBar:GetStatusBarTexture()
-    if pp.thresholdEnabled and cachedPrimary ~= PT.MANA and ft and UnitPowerPercent then
+    if pp.thresholdEnabled and ft and UnitPowerPercent then
         local baseR, baseG, baseB
         if pp.darkTheme then
             baseR, baseG, baseB = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
