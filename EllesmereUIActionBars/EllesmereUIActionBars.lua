@@ -814,11 +814,28 @@ local function HideBlizzardBars()
         RegisterAttributeDriver(OverrideActionBar, "state-visibility",
             "[vehicleui][overridebar] show; hide")
     end
-    -- Keep Blizzard's actionButtons tables and MultiActionButtonDown/Up
-    -- handlers intact. The buttons are reparented to our bar frames but
-    -- they are the same objects -- native keybinds continue to work through
-    -- Blizzard's binding chain. Our override bindings (_EABBind) take over
-    -- once created out of combat via UpdateKeybinds.
+    -- Wipe Blizzard's actionButtons tables so they don't interfere
+    for _, name in ipairs({"MainActionBar", "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7"}) do
+        local bar = _G[name]
+        if bar and bar.actionButtons then
+            wipe(bar.actionButtons)
+        end
+    end
+    -- Replace Blizzard's multi-bar button handlers with no-ops.
+    -- After wiping actionButtons, the original functions would error
+    -- if a Blizzard binding fires before our override bindings are set.
+    if MultiActionButtonDown then _G.MultiActionButtonDown = function() end end
+    if MultiActionButtonUp then _G.MultiActionButtonUp = function() end end
+    -- Also wipe button container references on MainActionBar
+    local mainAB = _G["MainActionBar"]
+    if mainAB then
+        for i = 1, 3 do
+            local container = _G["MainActionBarButtonContainer" .. i]
+            if container and container.actionButtons then
+                wipe(container.actionButtons)
+            end
+        end
+    end
 
     -- Force all Blizzard action bars to be "enabled" via CVars so buttons work
     C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_1", "1")
@@ -5251,11 +5268,13 @@ function EAB:FinishSetup()
             if OverrideActionBar then
                 RegisterAttributeDriver(OverrideActionBar, "state-visibility", "[vehicleui][overridebar] show; hide")
             end
-            -- During combat, keep Blizzard's actionButtons tables and handlers
-            -- intact so native keybinds continue working until our override
-            -- bindings are set up after combat ends.
-            -- DoVisuals (deferred to PLAYER_REGEN_ENABLED) calls ApplyAll
-            -- which handles the full setup including HideBlizzardBars.
+            -- Wipe Blizzard's actionButtons tables during combat reload
+            for _, name in ipairs({"MainActionBar", "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7"}) do
+                local bar = _G[name]
+                if bar and bar.actionButtons then wipe(bar.actionButtons) end
+            end
+            if MultiActionButtonDown then _G.MultiActionButtonDown = function() end end
+            if MultiActionButtonUp then _G.MultiActionButtonUp = function() end end
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_1", "1")
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_2", "1")
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_3", "1")
