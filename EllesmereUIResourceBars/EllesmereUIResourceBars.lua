@@ -2745,39 +2745,62 @@ local fillTex = bar:GetStatusBarTexture()
 if cb.gradientEnabled then
     local dir = cb.gradientDir or "HORIZONTAL"
 
-    -- Disable legacy overlay gradient
-    if castBarFrame._gradClip then
-        castBarFrame._gradClip:Hide()
-    end
-    if castBarFrame._gradientOverlay then
-        castBarFrame._gradientOverlay:Hide()
-    end
-    castBarFrame._gradientFullBar = nil
+    -- Hide the status bar fill
+    fillTex:SetVertexColor(1, 1, 1, 0)
 
-    -- Ensure text renders above the fill
-    castBarFrame._nameText:SetParent(bar)
-    castBarFrame._timerText:SetParent(bar)
+    if not castBarFrame._gradClip then
+        local clip = CreateFrame("Frame", nil, bar)
+        clip:SetClipsChildren(true)
+        clip:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+        clip:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+        clip:SetWidth(0.01)
+        clip:SetFrameLevel(bar:GetFrameLevel() + 1)
 
-    -- Apply gradient to bar texture
-    fillTex:SetVertexColor(1, 1, 1, 1)
-    fillTex:SetGradient(dir,
+        local tex = clip:CreateTexture(nil, "ARTWORK", nil, 1)
+        tex:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+        tex:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+
+        castBarFrame._gradClip = clip
+        castBarFrame._gradTex = tex
+
+        local textOverlay = CreateFrame("Frame", nil, bar)
+        textOverlay:SetAllPoints(bar)
+        textOverlay:SetFrameLevel(clip:GetFrameLevel() + 1)
+        castBarFrame._textOverlay = textOverlay
+    end
+
+    local clip = castBarFrame._gradClip
+    local tex = castBarFrame._gradTex
+
+    -- Match the selected cast bar texture
+    local texKey = cb.texture
+    local texPath = CAST_BAR_TEXTURES[texKey]
+    if texPath then
+        tex:SetTexture(texPath)
+    else
+        tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+    end
+
+    tex:SetVertexColor(1, 1, 1, 1)
+    tex:SetGradient(dir,
         CreateColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA),
         CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA)
     )
+
+    castBarFrame._nameText:SetParent(castBarFrame._textOverlay)
+    castBarFrame._timerText:SetParent(castBarFrame._textOverlay)
+
+    clip:Show()
+    castBarFrame._gradientFullBar = true
 else
-    -- Disable gradient overlay
     if castBarFrame._gradClip then
         castBarFrame._gradClip:Hide()
-    end
-    if castBarFrame._gradientOverlay then
-        castBarFrame._gradientOverlay:Hide()
     end
     castBarFrame._gradientFullBar = nil
 
     castBarFrame._nameText:SetParent(bar)
     castBarFrame._timerText:SetParent(bar)
 
-    -- Flat bar color
     fillTex:SetVertexColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA)
 end
 
@@ -2786,12 +2809,17 @@ end
     if cb.showSpark then
         spark:SetSize(8, h)
         spark:ClearAllPoints()
-        spark:SetPoint("CENTER", fillTex, "RIGHT", 0, 0)
+    
+        if cb.gradientEnabled and castBarFrame._gradClip then
+            spark:SetPoint("CENTER", castBarFrame._gradClip, "RIGHT", 0, 0)
+        else
+            spark:SetPoint("CENTER", fillTex, "RIGHT", 0, 0)
+        end
+    
         spark:Show()
     else
         spark:Hide()
     end
-
 
     -- Timer text
     local timerText = castBarFrame._timerText
@@ -2875,7 +2903,12 @@ UpdateCastBar = function(dt)
     -- Update spark position
     if castBarFrame._spark:IsShown() then
         castBarFrame._spark:ClearAllPoints()
-        castBarFrame._spark:SetPoint("CENTER", bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+    
+        if castBarFrame._gradientFullBar and castBarFrame._gradClip and castBarFrame._gradClip:IsShown() then
+            castBarFrame._spark:SetPoint("CENTER", castBarFrame._gradClip, "RIGHT", 0, 0)
+        else
+            castBarFrame._spark:SetPoint("CENTER", bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+        end
     end
 end
 
