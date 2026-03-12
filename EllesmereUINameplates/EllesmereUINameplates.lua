@@ -2657,7 +2657,7 @@ local function HideBlizzardFrame(nameplate, unit)
         MoveToOffscreen(uf.RaidTargetFrame, unit)
         MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
         if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
-        -- Move AurasFrame list frames offscreen we query C_UnitAuras
+        -- Move AurasFrame list frames offscreen -- we query C_UnitAuras
         -- directly for debuff/CC data so these visual lists are unused.
         if uf.AurasFrame then
             MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
@@ -2665,10 +2665,8 @@ local function HideBlizzardFrame(nameplate, unit)
             MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
             MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
         end
-        -- Do NOT unregister events on the Blizzard UnitFrame we need its
-        -- AurasFrame to keep processing UNIT_AURA so debuffList stays current
-        -- for our "important" debuff filtering.  All visual children are already
-        -- reparented offscreen so layout recalculations won't shift bounds.
+        -- All visual children are reparented offscreen so layout
+        -- recalculations won't shift bounds.
         -- Only silence the castBar events (we render our own cast bar).
         if uf.castBar then
             uf.castBar:UnregisterAllEvents()
@@ -2802,11 +2800,6 @@ end)
 
 local NameplateFrame = {}
 function NameplateFrame:SetUnit(unit, nameplate)
-    -- Cancel any stale deferred aura timer from a previous unit assignment
-    if self._auraDeferTimer then
-        self._auraDeferTimer:Cancel()
-        self._auraDeferTimer = nil
-    end
     self.unit = unit
     self.nameplate = nameplate
     self:SetParent(nameplate)
@@ -2908,10 +2901,10 @@ function NameplateFrame:SetUnit(unit, nameplate)
                     classToken = UnitClassBase(targetUnit)
                 end
             end
-            if classToken then
-                local okC, c = pcall(function() return RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] end)
-                if okC and c then
-                    self.castTarget:SetTextColor(c.r, c.g, c.b, 1)
+            if classToken and C_ClassColor then
+                local c = C_ClassColor.GetClassColor(classToken)
+                if c then
+                    self.castTarget:SetTextColor(c:GetRGB())
                     appliedCTC = true
                 end
             end
@@ -3043,12 +3036,6 @@ end
 end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
-    -- Cancel any pending deferred aura update so it cannot fire on a
-    -- cleared or recycled plate and leave stale icons visible.
-    if self._auraDeferTimer then
-        self._auraDeferTimer:Cancel()
-        self._auraDeferTimer = nil
-    end
     
     if self.isCasting then
         self.isCasting = false
@@ -3644,19 +3631,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
     local db = EllesmereUINameplatesDB
     if debuffSlotVal ~= "none" then
     local showAll = db and db.showAllDebuffs
-    -- Build the "important" set from Blizzard's own nameplate debuff list.
-    -- Our UNIT_AURA handler defers via C_Timer.After(0) so Blizzard's
-    -- UnitFrame has already processed the event and debuffList is current.
-    local importantSet
-    if not showAll and self.nameplate then
-        importantSet = {}
-        local uf = self.nameplate.UnitFrame
-        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
-            uf.AurasFrame.debuffList:Iterate(function(auraInstanceID)
-                importantSet[auraInstanceID] = true
-            end)
-        end
-    end
+    local IsFiltered = C_UnitAuras.IsAuraFilteredOutByInstanceID
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then
         local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
         if allDebuffs then
@@ -3665,7 +3640,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             for _, aura in ipairs(allDebuffs) do
                 if dIdx > 4 then break end
                 local id = aura and aura.auraInstanceID
-                if id and (showAll or (importantSet and importantSet[id])) and aura.icon then
+                if id and aura.icon and (showAll or (IsFiltered and not IsFiltered(unit, id, "HARMFUL|INCLUDE_NAME_PLATE_ONLY"))) then
                         local slot = self.debuffs[dIdx]
                         slot.icon:SetTexture(aura.icon)
                         slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -3869,10 +3844,10 @@ function NameplateFrame:UpdateCast()
     if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
     if useClassColor then
         local appliedCTC = false
-        if spellTargetClass then
-            local okC, c = pcall(function() return RAID_CLASS_COLORS and RAID_CLASS_COLORS[spellTargetClass] end)
-            if okC and c then
-                self.castTarget:SetTextColor(c.r, c.g, c.b, 1)
+        if spellTargetClass and C_ClassColor then
+            local c = C_ClassColor.GetClassColor(spellTargetClass)
+            if c then
+                self.castTarget:SetTextColor(c:GetRGB())
                 appliedCTC = true
             end
         end
@@ -4155,19 +4130,7 @@ function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()
     self:UpdateHealthValues()
 end
 function NameplateFrame:UNIT_AURA(_, updateInfo)
-    -- Defer aura updates by one frame so Blizzard's UnitFrame has time to
-    -- process the same UNIT_AURA event and update its debuffList.  This
-    -- prevents a race where our handler runs first and the newly added
-    -- aura isn't in the "important" set yet.
-    if self._auraDeferTimer then
-        self._auraDeferTimer:Cancel()
-    end
-    local plate = self
-    local info = updateInfo
-    self._auraDeferTimer = C_Timer.NewTimer(0, function()
-        plate._auraDeferTimer = nil
-        plate:UpdateAuras(info)
-    end)
+    self:UpdateAuras(updateInfo)
 end
 function NameplateFrame:UNIT_NAME_UPDATE()
     self:UpdateName()
