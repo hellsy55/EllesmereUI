@@ -3109,8 +3109,17 @@ initFrame:SetScript("OnEvent", function(self)
                 presetEntries[#presetEntries + 1] = {
                     label = "Spin the Wheel",
                     onApply = function()
+                        -- Snapshot before randomizing so the original profile
+                        -- isn't corrupted for other characters sharing it.
+                        local origName = EllesmereUI.GetActiveProfileName()
+                        local origSnap = EllesmereUI.SnapshotAllAddons()
                         EllesmereUI.SpinTheWheel()
-                        EllesmereUI.SaveCurrentAsProfile(UniquePresetName("Spin the Wheel"))
+                        local newName = UniquePresetName("Spin the Wheel")
+                        EllesmereUI.SaveCurrentAsProfile(newName)
+                        -- Restore original profile data so the shared AceDB
+                        -- tables are clean when SavedVariables flush on reload.
+                        local pdb = EllesmereUI.GetProfilesDB and EllesmereUI.GetProfilesDB()
+                        if pdb then pdb.profiles[origName] = origSnap end
                         EllesmereUI:ShowConfirmPopup({
                             title       = "Reload Required",
                             message     = "Preset applied. Reload to apply.",
