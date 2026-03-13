@@ -5063,6 +5063,9 @@ function EllesmereUI:SelectPage(pageName)
         cached.wrapper:Show()
         contentFrame:SetHeight(cached.totalH + 30)
 
+        -- Restore any elements hidden by a previous inline search
+        EllesmereUI:ApplyInlineSearch("")
+
         -- Restore this page's refresh list
         ClearWidgetRefreshList()
         if cached.refreshList then
