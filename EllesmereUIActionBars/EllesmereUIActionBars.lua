@@ -1845,6 +1845,20 @@ local function SetupBar(info, skipProtected)
             if btn then
                 if not skipProtected then btn:SetParent(frame) end
                 buttons[i] = btn
+                -- Hook drag handlers so spellbook drops work even though
+                -- the original PetActionBar is hidden and unregistered.
+                btn:HookScript("OnReceiveDrag", function(self)
+                    if InCombatLockdown() then return end
+                    -- The Blizzard mixin handler runs first; this hook
+                    -- calls PickupPetAction as a fallback in case the
+                    -- mixin handler didn't fire properly. The resulting
+                    -- PET_BAR_UPDATE event triggers our full refresh
+                    -- (LayoutBar + ApplyAlwaysShowButtons) automatically.
+                    local cType = GetCursorInfo()
+                    if cType == "petaction" then
+                        PickupPetAction(self:GetID())
+                    end
+                end)
             end
         end
     else
@@ -1894,6 +1908,12 @@ local function SetupBar(info, skipProtected)
                 end
                 if btn.EnableMouseWheel then
                     btn:EnableMouseWheel(true)
+                end
+                -- Tell the Blizzard mixin to always consider the grid
+                -- "shown" so its UpdateShownState never hides our buttons.
+                -- We control visibility purely through alpha instead.
+                if not skipProtected then
+                    btn:SetAttribute("showgrid", 1)
                 end
                 -- Register parent button with our custom flyout system
                 -- (intercepts flyout clicks to avoid Blizzard taint path).
@@ -2116,7 +2136,6 @@ local function ComputeBarLayout(key)
     if numIcons < 1 then numIcons = info.count end
     if numIcons > info.count then numIcons = info.count end
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
-    if info.isPetBar then numIcons = GetNumPetActionSlots and GetNumPetActionSlots() or info.count end
 
     local numRows = s.overrideNumRows or s.numRows or 1
     if numRows < 1 then numRows = 1 end
@@ -2141,7 +2160,7 @@ local function ComputeBarLayout(key)
 
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
-    if info.isStance or info.isPetBar then showEmpty = false end
+    if info.isStance then showEmpty = false end
 
     local result = {}
     for i = 1, info.count do
@@ -2200,7 +2219,6 @@ local function LayoutBar(key)
     if numIcons < 1 then numIcons = info.count end
     if numIcons > info.count then numIcons = info.count end
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
-    if info.isPetBar then numIcons = GetNumPetActionSlots and GetNumPetActionSlots() or info.count end
 
     local numRows = s.overrideNumRows or s.numRows or 1
     if numRows < 1 then numRows = 1 end
@@ -2232,10 +2250,10 @@ local function LayoutBar(key)
     local stepW = btnW + padding
     local stepH = btnH + padding
 
-    -- Show empty slots (stance/pet bar always forces this off)
+    -- Show empty slots (stance bar always forces this off)
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
-    if info.isStance or info.isPetBar then showEmpty = false end
+    if info.isStance then showEmpty = false end
 
     for i = 1, info.count do
         local btn = buttons[i]
@@ -2245,6 +2263,11 @@ local function LayoutBar(key)
             btn:Hide()
             btn:SetAlpha(0)
         else
+            -- Always keep buttons within the icon range shown. Visibility
+            -- is controlled purely through alpha so page swaps during
+            -- combat never leave buttons stuck in a hidden state.
+            btn:Show()
+
             local col, row
             if isVertical then
                 col = floor((i - 1) / stride)
@@ -2270,11 +2293,14 @@ local function LayoutBar(key)
             btn:SetPoint("TOPLEFT", frame, "TOPLEFT", xOff, yOff)
             btn:SetSize(btnW, btnH)
 
+            -- Resize the autocast overlay to match the button size
+            if btn.AutoCastOverlay then
+                btn.AutoCastOverlay:SetAllPoints(btn)
+            end
+
             if not showEmpty and not gridShown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
-                btn:Hide()
             else
-                btn:Show()
                 if not s.mouseoverEnabled then
                     btn:SetAlpha(1)
                 end
@@ -3184,7 +3210,8 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if not buttons then return end
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
-    if info.isStance or info.isPetBar then showEmpty = false end
+    -- Stance bar always hides empty slots (count is dynamic per class)
+    if info.isStance then showEmpty = false end
 
     -- During a spell drag (grid shown), keep everything visible
     if gridShown then return end
@@ -3194,7 +3221,6 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if numIcons < 1 then numIcons = info.count end
     if numIcons > info.count then numIcons = info.count end
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
-    if info.isPetBar then numIcons = GetNumPetActionSlots and GetNumPetActionSlots() or info.count end
 
     local lastVisible = 0
     for i = 1, numIcons do
@@ -3215,10 +3241,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
 
             if not visible then
                 btn:SetAlpha(0)
-                -- Actually hide the frame so it doesn't eat mouse clicks
-                if not InCombatLockdown() then btn:Hide() end
             else
-                if not InCombatLockdown() then btn:Show() end
                 if not s.mouseoverEnabled then
                     btn:SetAlpha(1)
                 end
@@ -4862,7 +4885,6 @@ local function OnGridChange()
             if not numIcons or numIcons < 1 then numIcons = info.count end
             if numIcons > info.count then numIcons = info.count end
             if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
-            if info.isPetBar then numIcons = GetNumPetActionSlots and GetNumPetActionSlots() or info.count end
             for i = 1, numIcons do
                 local btn = buttons[i]
                 if btn then
@@ -5462,6 +5484,8 @@ function EAB:FinishSetup()
     end)
 
     self:RegisterEvent("ACTIONBAR_SHOWGRID", OnGridChange)
+    -- Pet actions fire their own grid events when dragging pet spells
+    self:RegisterEvent("PET_BAR_SHOWGRID", OnGridChange)
 
     -- Re-apply useOnKeyDown when the "Press and Hold Casting" CVar changes.
     self:RegisterEvent("CVAR_UPDATE", function(_, cvarName)
@@ -5626,12 +5650,14 @@ function EAB:FinishSetup()
     end)
 
     -- Grid hide: restore empty slot visibility
-    self:RegisterEvent("ACTIONBAR_HIDEGRID", function()
+    local function OnGridHide()
         gridShown = false
         for _, info in ipairs(BAR_CONFIG) do
             self:ApplyAlwaysShowButtons(info.key)
         end
-    end)
+    end
+    self:RegisterEvent("ACTIONBAR_HIDEGRID", OnGridHide)
+    self:RegisterEvent("PET_BAR_HIDEGRID", OnGridHide)
 
     -- Spell updates: refresh button icons and visibility
     -- Also re-layout the stance bar since GetNumShapeshiftForms() may have changed
@@ -5670,15 +5696,44 @@ function EAB:FinishSetup()
     -- summoning/dismissal; UNIT_PET covers pet swaps. PLAYER_ENTERING_WORLD
     -- ensures button state is populated on login (PetActionBar was
     -- unregistered from all events, so Blizzard's own update never fires).
-    local function UpdatePetBar()
+    local function UpdatePetBar(_, event)
         C_Timer_After(0, function()
-            -- PetActionBar:Update() only sets textures and cooldown frames â€”
-            -- not combat-restricted, so run it before the lockdown guard so
-            -- PET_BAR_UPDATE_COOLDOWN (which fires during combat) still works.
+            if event == "PET_BAR_UPDATE_COOLDOWN" then
+                -- Cooldown-only path: safe during combat, no taint risk.
+                -- Update each button's cooldown frame directly.
+                for i = 1, NUM_PET_ACTION_SLOTS do
+                    local btn = _G["PetActionButton" .. i]
+                    if btn and btn.cooldown then
+                        local start, duration, enable = GetPetActionCooldown(i)
+                        CooldownFrame_Set(btn.cooldown, start, duration, enable)
+                    end
+                end
+                return
+            end
+            -- Full update path: only safe out of combat.
+            if InCombatLockdown() then return end
+            if gridShown then
+                -- During a spell drag, skip PetActionBar:Update() which
+                -- hides empty slots. Just refresh textures per-button so
+                -- the vacated slot clears its icon while the grid stays.
+                for i = 1, NUM_PET_ACTION_SLOTS do
+                    local btn = _G["PetActionButton" .. i]
+                    if btn then
+                        local name, texture, isToken = GetPetActionInfo(i)
+                        if texture then
+                            if isToken then btn.icon:SetTexture(_G[texture])
+                            else btn.icon:SetTexture(texture) end
+                            btn.icon:Show()
+                        else
+                            btn.icon:Hide()
+                        end
+                    end
+                end
+                return
+            end
             if PetActionBar and PetActionBar.Update then
                 PetActionBar:Update()
             end
-            if InCombatLockdown() then return end
             LayoutBar("PetBar")
             self:ApplyAlwaysShowButtons("PetBar")
             -- Re-register the state driver so the [pet] condition is always
@@ -5698,7 +5753,6 @@ function EAB:FinishSetup()
     _petEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     _petEventFrame:RegisterUnitEvent("UNIT_PET", "player")
     _petEventFrame:SetScript("OnEvent", UpdatePetBar)
-
 
 
     -- Talent changes can cause Blizzard to re-show hidden bars.

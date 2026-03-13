@@ -293,12 +293,25 @@ local function ApplyCDMStyleOnly(profile, snap)
         end
     end
 
+    -- Wipe non-internal top-level keys so stale values from a previous
+    -- profile (e.g. Spin the Wheel) do not persist when the snapshot is
+    -- missing those keys.
+    for k in pairs(profile) do
+        if not CDM_INTERNAL[k] and k ~= "cdmBars" then
+            profile[k] = nil
+        end
+    end
+
     -- Apply top-level non-spell keys
     for k, v in pairs(snap) do
         if CDM_INTERNAL[k] then
             -- Skip -- managed by CDM's own spec system (seeded above)
         elseif k == "cdmBars" and type(v) == "table" then
             if not profile.cdmBars then profile.cdmBars = {} end
+            -- Wipe non-bars keys so stale values do not persist
+            for bk in pairs(profile.cdmBars) do
+                if bk ~= "bars" then profile.cdmBars[bk] = nil end
+            end
             for bk, bv in pairs(v) do
                 if bk == "bars" and type(bv) == "table" then
                     if not profile.cdmBars.bars then profile.cdmBars.bars = {} end
@@ -315,6 +328,13 @@ local function ApplyCDMStyleOnly(profile, snap)
                             local liveIdx = liveIdxByKey[snapKey]
                             if liveIdx then
                                 local liveBar = profile.cdmBars.bars[liveIdx]
+                                -- Wipe non-spell keys so stale randomized
+                                -- values do not persist from a previous profile
+                                for fk in pairs(liveBar) do
+                                    if not CDM_SPELL_KEYS[fk] then
+                                        liveBar[fk] = nil
+                                    end
+                                end
                                 for fk, fv in pairs(barSnap) do
                                     if not CDM_SPELL_KEYS[fk] then
                                         liveBar[fk] = DeepCopy(fv)
@@ -725,17 +745,21 @@ function EllesmereUI.ApplyProfileData(profileData)
         end
     end
     -- Apply fonts and colors
-    if profileData.fonts then
+    do
         local fontsDB = EllesmereUI.GetFontsDB()
         for k in pairs(fontsDB) do fontsDB[k] = nil end
-        for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
+        if profileData.fonts then
+            for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
+        end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
     end
-    if profileData.customColors then
+    do
         local colorsDB = EllesmereUI.GetCustomColorsDB()
         for k in pairs(colorsDB) do colorsDB[k] = nil end
-        for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
+        if profileData.customColors then
+            for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
+        end
     end
 end
 
@@ -1216,6 +1240,36 @@ function EllesmereUI.SaveCurrentAsProfile(name)
     db.activeProfile = name
 end
 
+--- Create a new profile populated with default settings (does not switch to it).
+function EllesmereUI.CreateDefaultProfile(name)
+    local db = GetProfilesDB()
+    -- Reset each addon DB to defaults, snapshot, then restore the live profile
+    local registry = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry or {}
+    local backups = {}
+    for i, ldb in ipairs(registry) do
+        if ldb.profile then
+            backups[i] = DeepCopy(ldb.profile)
+            ldb:ResetProfile()
+        end
+    end
+    local snap = EllesmereUI.SnapshotAllAddons()
+    -- Restore current profile data
+    for i, ldb in ipairs(registry) do
+        if backups[i] then
+            for k in pairs(ldb.profile) do ldb.profile[k] = nil end
+            for k, v in pairs(backups[i]) do ldb.profile[k] = v end
+        end
+    end
+    db.profiles[name] = snap
+    local found = false
+    for _, n in ipairs(db.profileOrder) do
+        if n == name then found = true; break end
+    end
+    if not found then
+        table.insert(db.profileOrder, 1, name)
+    end
+end
+
 function EllesmereUI.DeleteProfile(name)
     local db = GetProfilesDB()
     db.profiles[name] = nil
@@ -1580,16 +1634,6 @@ function EllesmereUI.SpinTheWheel()
         end
     end
 
-    -- Randomize global fonts
-    local fontsDB = EllesmereUI.GetFontsDB()
-    local validFonts = {}
-    for _, name in ipairs(EllesmereUI.FONT_ORDER) do
-        if name ~= "---" then validFonts[#validFonts + 1] = name end
-    end
-    fontsDB.global = pick(validFonts)
-    local outlineModes = { "none", "outline", "shadow" }
-    fontsDB.outlineMode = pick(outlineModes)
-
     -- Randomize class colors
     local colorsDB = EllesmereUI.GetCustomColorsDB()
     colorsDB.class = {}
@@ -1672,12 +1716,25 @@ function EllesmereUI._RandomizeProfile(profile, folderName)
             savedVis.enabledFrames[k] = v
         end
     elseif folderName == "EllesmereUICooldownManager" and profile.cdmBars then
+        -- Save bar visibility and all spell layout data per bar
         savedVis.cdmBars = {}
         if profile.cdmBars.bars then
             for i, bar in ipairs(profile.cdmBars.bars) do
-                savedVis.cdmBars[i] = bar.barVisibility
+                local saved = { barVisibility = bar.barVisibility }
+                for fk, fv in pairs(bar) do
+                    if CDM_SPELL_KEYS[fk] then
+                        saved[fk] = fv  -- shallow ref is fine, we restore before GC
+                    end
+                end
+                savedVis.cdmBars[i] = saved
             end
         end
+        -- Save top-level CDM internal tables that must not be randomized
+        savedVis.specProfiles    = profile.specProfiles
+        savedVis.activeSpecKey   = profile.activeSpecKey
+        savedVis.barGlows        = profile.barGlows
+        savedVis.trackedBuffBars = profile.trackedBuffBars
+        savedVis.spec            = profile.spec
     elseif folderName == "EllesmereUIResourceBars" then
         savedVis.secondary = profile.secondary and profile.secondary.visibility
         savedVis.health    = profile.health    and profile.health.visibility
@@ -1705,12 +1762,23 @@ function EllesmereUI._RandomizeProfile(profile, folderName)
         end
     elseif folderName == "EllesmereUICooldownManager" and savedVis.cdmBars then
         if profile.cdmBars and profile.cdmBars.bars then
-            for i, vis in pairs(savedVis.cdmBars) do
+            for i, saved in pairs(savedVis.cdmBars) do
                 if profile.cdmBars.bars[i] then
-                    profile.cdmBars.bars[i].barVisibility = vis
+                    profile.cdmBars.bars[i].barVisibility = saved.barVisibility
+                    for fk, fv in pairs(saved) do
+                        if CDM_SPELL_KEYS[fk] then
+                            profile.cdmBars.bars[i][fk] = fv
+                        end
+                    end
                 end
             end
         end
+        -- Restore top-level CDM internal tables
+        profile.specProfiles    = savedVis.specProfiles
+        profile.activeSpecKey   = savedVis.activeSpecKey
+        profile.barGlows        = savedVis.barGlows
+        profile.trackedBuffBars = savedVis.trackedBuffBars
+        profile.spec            = savedVis.spec
     elseif folderName == "EllesmereUIResourceBars" then
         if profile.secondary then profile.secondary.visibility = savedVis.secondary end
         if profile.health    then profile.health.visibility    = savedVis.health    end

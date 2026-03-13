@@ -1197,7 +1197,7 @@ end
 -- Canonical font name → filename mapping (shared across all addons)
 EllesmereUI.FONT_FILES = {
     ["Expressway"]          = "Expressway.TTF",
-    ["Avant Garde"]         = "Avant Garde.ttf",
+    ["Avant Garde"]         = "Avant Garde Naowh.ttf",
     ["Arial Bold"]          = "Arial Bold.TTF",
     ["Poppins"]             = "Poppins.ttf",
     ["Fira Sans Medium"]    = "FiraSans Medium.ttf",
@@ -1237,6 +1237,36 @@ EllesmereUI.FONT_ORDER = {
 EllesmereUI.FONT_DISPLAY_NAMES = {
     ["Avant Garde"] = "Avant Garde (Naowh)",
 }
+
+-- Register our bundled fonts with LibSharedMedia so other addons can use them
+-- and so SM's HashTable("font") includes them for our own dropdown lookups.
+-- Also populate _smFontPaths so ResolveFontName can resolve SM fonts at runtime.
+do
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if LSM then
+        for name, file in pairs(EllesmereUI.FONT_FILES) do
+            if file then
+                LSM:Register(LSM.MediaType.FONT, name, MEDIA_PATH .. "fonts\\" .. file)
+            end
+        end
+        -- Snapshot all currently registered SM fonts into the path lookup
+        local smFonts = LSM:HashTable("font")
+        if smFonts then
+            EllesmereUI._smFontPaths = {}
+            for name, path in pairs(smFonts) do
+                EllesmereUI._smFontPaths[name] = path
+            end
+        end
+        -- Listen for late-registered fonts from other addons
+        LSM.RegisterCallback(EllesmereUI, "LibSharedMedia_Registered", function(_, mediatype, key)
+            if mediatype == "font" then
+                if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+                local path = LSM:Fetch("font", key)
+                if path then EllesmereUI._smFontPaths[key] = path end
+            end
+        end)
+    end
+end
 
 -- Get the fonts DB table (lazy-init)
 function EllesmereUI.GetFontsDB()
@@ -1885,6 +1915,12 @@ function EllesmereUI.AppendSharedMediaFonts(values, order, opts)
     if not LSM then return end
     local smFonts = LSM:HashTable("font")
     if not smFonts then return end
+
+    -- Build the SM font path lookup so ResolveFontName can find SM fonts
+    if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+    for name, path in pairs(smFonts) do
+        EllesmereUI._smFontPaths[name] = path
+    end
 
     local keyByName = opts and opts.keyByName
     local sorted = {}
@@ -2816,6 +2852,17 @@ local function CreateMainFrame()
         mainFrame:SetScale(baseScale2 * userScale2)
         -- Re-sync PanelPP mult for the (possibly new) scale
         if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
+        -- Re-snap all borders after the scale change. Effective scale
+        -- propagates through the frame hierarchy after layout, so wait
+        -- 2 frames before re-snapping to ensure accurate values.
+        local snapTicks = 0
+        mainFrame:SetScript("OnUpdate", function(self)
+            snapTicks = snapTicks + 1
+            if snapTicks >= 2 then
+                self:SetScript("OnUpdate", nil)
+                PP.ResnapAllBorders()
+            end
+        end)
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()
@@ -5531,7 +5578,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.7"
+EllesmereUI.VERSION = "4.7.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

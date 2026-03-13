@@ -1343,14 +1343,14 @@ local function SaveCurrentSpecProfile()
                 entry.extraSpells   = DeepCopy(barData.extraSpells)
                 entry.removedSpells = DeepCopy(barData.removedSpells)
                 entry.dormantSpells = DeepCopy(barData.dormantSpells)
-            elseif barData.barType ~= "trinkets" then
-                -- Custom non-trinket bars: save customSpells
+            elseif barData.barType ~= "misc" then
+                -- Custom non-misc bars: save customSpells
                 entry.customSpells = DeepCopy(barData.customSpells)
                 if TALENT_AWARE_BAR_TYPES[barData.barType] then
                     entry.dormantSpells = DeepCopy(barData.dormantSpells)
                 end
             end
-            -- Trinket/racial/potion bars: nothing to save (refreshed on login)
+            -- Misc bars: nothing to save (spell list is shared across all specs)
             prof.barSpells[key] = entry
         end
     end
@@ -1387,7 +1387,7 @@ local function LoadSpecProfile(specKey)
                         barData.extraSpells   = DeepCopy(saved.extraSpells)
                         barData.removedSpells = DeepCopy(saved.removedSpells)
                         barData.dormantSpells = DeepCopy(saved.dormantSpells)
-                    elseif barData.barType ~= "trinkets" then
+                    elseif barData.barType ~= "misc" then
                         barData.customSpells = DeepCopy(saved.customSpells)
                         if TALENT_AWARE_BAR_TYPES[barData.barType] then
                             barData.dormantSpells = DeepCopy(saved.dormantSpells)
@@ -1405,7 +1405,7 @@ local function LoadSpecProfile(specKey)
                         barData.removedSpells = nil
                         barData.dormantSpells = nil
                     end
-                    -- trinket bars and custom bars: no action -- preserve existing state
+                    -- misc bars and custom bars: no action -- preserve existing state
                 end
             end
         end
@@ -1431,7 +1431,7 @@ local function LoadSpecProfile(specKey)
                 barData.extraSpells = nil
                 barData.removedSpells = nil
                 barData.dormantSpells = nil
-            elseif barData.barType ~= "trinkets" then
+            elseif barData.barType ~= "misc" then
                 barData.customSpells = {}
                 barData.dormantSpells = nil
             end
@@ -1445,29 +1445,6 @@ local function LoadSpecProfile(specKey)
             selectedAssignment = 1,
             assignments = {},
         }
-    end
-
-    -- Fix anchors: if a custom bar is anchored to a bar key that no longer
-    -- has spells (went blank on spec switch), un-anchor it.
-    -- Only applies to trinket/racial/potion bars anchored to custom bars.
-    local barKeySet = {}
-    for _, barData in ipairs(p.cdmBars.bars) do
-        barKeySet[barData.key] = barData
-    end
-    for _, barData in ipairs(p.cdmBars.bars) do
-        if barData.barType == "trinkets" and barData.anchorTo and barData.anchorTo ~= "none" then
-            local anchor = barKeySet[barData.anchorTo]
-            if anchor and anchor.barType ~= "trinkets" and not MAIN_BAR_KEYS[anchor.key] then
-                -- Anchored to a custom bar — check if that bar has spells
-                local spells = anchor.customSpells
-                if not spells or #spells == 0 then
-                    barData.anchorTo = "none"
-                    barData.anchorPosition = "left"
-                    barData.anchorOffsetX = 0
-                    barData.anchorOffsetY = 0
-                end
-            end
-        end
     end
 
     -- Replace any stale racial spellIDs with the current character's racial
@@ -2168,8 +2145,11 @@ local CDM_BAR_CATEGORIES = {
 local MAX_CUSTOM_BARS = 6
 
 -------------------------------------------------------------------------------
---  Trinket / Racial / Health Potion data (for "trinkets" bar type)
---  Encoding in customSpells:  positive = spellID,  -13/-14 = trinket slot
+--  Trinket / Racial / Health Potion / On-Use Bag Item data (misc and custom bars)
+--  Encoding in customSpells:
+--    positive        = spellID
+--    -13 / -14       = trinket slot (inventory slot)
+--    <= -100         = on-use bag item (negated itemID)
 -------------------------------------------------------------------------------
 
 -- Racial abilities by internal race name -- list of spellIDs
@@ -3069,7 +3049,15 @@ local _cdmTooltipOnUpdate = function(self)
         local sid = self._spellID
         if sid then
             GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-            GameTooltip:SetSpellByID(sid)
+            -- On-use bag items stored as large negative IDs: show item tooltip
+            if sid <= -100 then
+                GameTooltip:SetItemByID(-sid)
+            elseif sid < 0 and sid > -100 then
+                -- Trinket slot: show equipped item tooltip
+                GameTooltip:SetInventoryItem("player", -sid)
+            else
+                GameTooltip:SetSpellByID(sid)
+            end
             GameTooltip:Show()
             self._tooltipShown = true
         end
@@ -3358,17 +3346,62 @@ local function UpdateCustomBarIcons(barKey)
             -- Skip blank placeholder slots (0 entries from grid reordering)
             if spellID == 0 then
                 ourIcon:Hide()
-            -- Trinket slot entries use negative IDs (-13, -14)
-            elseif spellID < 0 then
+            -- Trinket slot entries use small negative IDs (-13, -14)
+            elseif spellID < 0 and spellID > -100 then
                 local slot = -spellID
                 local itemID = GetInventoryItemID("player", slot)
                 if itemID then
-                    local tex = C_Item.GetItemIconByID(itemID)
-                    if tex and tex ~= ourIcon._lastTex then
+                    -- On misc bars, hide trinkets that have no on-use effect
+                    if barData.barType == "misc" then
+                        local spellName = C_Item.GetItemSpell(itemID)
+                        if not spellName then
+                            ourIcon:Hide()
+                            itemID = nil
+                        end
+                    end
+                    if itemID then
+                        local tex = C_Item.GetItemIconByID(itemID)
+                        if tex and tex ~= ourIcon._lastTex then
+                            ourIcon._tex:SetTexture(tex)
+                            ourIcon._lastTex = tex
+                        end
+                        ourIcon._spellID = spellID
+                        ApplyTrinketCooldown(ourIcon, slot, barData.desaturateOnCD)
+                        ourIcon:Show()
+                        visibleCount = visibleCount + 1
+                    end
+                else
+                    ourIcon:Hide()
+                end
+            -- On-use bag items use large negative IDs (<= -100, negated itemID)
+            elseif spellID <= -100 then
+                local bagItemID = -spellID
+                local tex = C_Item.GetItemIconByID(bagItemID)
+                if tex then
+                    if tex ~= ourIcon._lastTex then
                         ourIcon._tex:SetTexture(tex)
                         ourIcon._lastTex = tex
                     end
-                    ApplyTrinketCooldown(ourIcon, slot, barData.desaturateOnCD)
+                    ourIcon._spellID = spellID
+                    -- Item cooldown
+                    local cdStart, cdDur = C_Container.GetItemCooldown(bagItemID)
+                    if cdStart and cdDur and cdDur > 1.5 then
+                        ourIcon._cooldown:SetCooldown(cdStart, cdDur)
+                        if barData.desaturateOnCD then
+                            ourIcon._tex:SetDesaturation(1)
+                            ourIcon._lastDesat = true
+                        elseif ourIcon._lastDesat then
+                            ourIcon._tex:SetDesaturation(0)
+                            ourIcon._lastDesat = false
+                        end
+                    else
+                        ourIcon._cooldown:Clear()
+                        if ourIcon._lastDesat then
+                            ourIcon._tex:SetDesaturation(0)
+                            ourIcon._lastDesat = false
+                        end
+                    end
+                    ourIcon._chargeText:Hide()
                     ourIcon:Show()
                     visibleCount = visibleCount + 1
                 else
@@ -4169,7 +4202,7 @@ local function BuildCustomBarSpellSet()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return set end
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.customSpells and not MAIN_BAR_KEYS[bd.key] and bd.barType ~= "trinkets" then
+        if bd.customSpells and not MAIN_BAR_KEYS[bd.key] and bd.barType ~= "misc" then
             for _, sid in ipairs(bd.customSpells) do
                 if sid and sid > 0 then set[sid] = true end
             end
@@ -4391,8 +4424,8 @@ local function UpdateTrackedBarIcons(barKey)
         -- Skip blank placeholder slots
         if spellID == 0 then
             ourIcon:Hide()
-        -- Trinket slot entries use negative IDs (-13, -14)
-        elseif spellID < 0 then
+        -- Trinket slot entries use small negative IDs (-13, -14)
+        elseif spellID < 0 and spellID > -100 then
             local slot = -spellID
             local itemID = GetInventoryItemID("player", slot)
             if itemID then
@@ -4401,7 +4434,41 @@ local function UpdateTrackedBarIcons(barKey)
                     ourIcon._tex:SetTexture(tex)
                     ourIcon._lastTex = tex
                 end
+                ourIcon._spellID = spellID
                 ApplyTrinketCooldown(ourIcon, slot, desatOnCD)
+                ourIcon:Show()
+                visCount = visCount + 1
+            else
+                ourIcon:Hide()
+            end
+        -- On-use bag items use large negative IDs (<= -100, negated itemID)
+        elseif spellID <= -100 then
+            local bagItemID = -spellID
+            local tex = C_Item.GetItemIconByID(bagItemID)
+            if tex then
+                if tex ~= ourIcon._lastTex then
+                    ourIcon._tex:SetTexture(tex)
+                    ourIcon._lastTex = tex
+                end
+                ourIcon._spellID = spellID
+                local cdStart, cdDur = C_Container.GetItemCooldown(bagItemID)
+                if cdStart and cdDur and cdDur > 1.5 then
+                    ourIcon._cooldown:SetCooldown(cdStart, cdDur)
+                    if desatOnCD then
+                        ourIcon._tex:SetDesaturation(1)
+                        ourIcon._lastDesat = true
+                    elseif ourIcon._lastDesat then
+                        ourIcon._tex:SetDesaturation(0)
+                        ourIcon._lastDesat = false
+                    end
+                else
+                    ourIcon._cooldown:Clear()
+                    if ourIcon._lastDesat then
+                        ourIcon._tex:SetDesaturation(0)
+                        ourIcon._lastDesat = false
+                    end
+                end
+                ourIcon._chargeText:Hide()
                 ourIcon:Show()
                 visCount = visCount + 1
             else
@@ -5531,12 +5598,7 @@ function ns.GetCDMSpellsForBar(barKey)
         end
     end
 
-    -- Trinket/racial/potion bars: return only extras
-    if barType == "trinkets" then
-        local extras = GetExtraSpells()
-        table.sort(extras, function(a, b) return a.name < b.name end)
-        return extras
-    end
+    -- Misc bars use the normal custom bar spell picker (no early return)
 
     local cats = CDM_BAR_CATEGORIES[barKey]
         or CDM_BAR_CATEGORIES[barType or "cooldowns"]
@@ -5715,8 +5777,8 @@ function ns.GetCDMSpellsForBar(barKey)
         return a.name < b.name
     end)
 
-    -- Append trinket/racial/potion extras only for the dedicated extras bar
-    if barType == "trinkets" then
+    -- Append trinket/racial/potion extras for misc bars
+    if barType == "misc" then
         local extras = GetExtraSpells()
         table.sort(extras, function(a, b) return a.name < b.name end)
         for _, ex in ipairs(extras) do
@@ -6141,7 +6203,7 @@ function ns.AddCDMBar(barType, name, numRows)
     local typeLabel = barType == "cooldowns" and "Cooldowns"
                    or barType == "utility" and "Utility"
                    or barType == "buffs" and "Buffs"
-                   or barType == "trinkets" and "Trinkets/Racials/Potions"
+                   or barType == "misc" and "Miscellaneous"
                    or "Cooldowns"
     -- Count existing custom bars of this type for numbering
     local typeCount = 0
@@ -6151,7 +6213,7 @@ function ns.AddCDMBar(barType, name, numRows)
     local key = "custom_" .. (#bars + 1) .. "_" .. GetTime()
     key = key:gsub("%.", "_")
     bars[#bars + 1] = {
-        key = key, name = name or ((barType == "trinkets" and "Miscellaneous " or "Custom " .. typeLabel .. " Bar ") .. (typeCount + 1)),
+        key = key, name = name or ((barType == "misc" and "Miscellaneous " or "Custom " .. typeLabel .. " Bar ") .. (typeCount + 1)),
         barType = barType,
         enabled = true, barScale = 1.0, iconSize = 36, numRows = numRows or 1,
         spacing = 2,
@@ -6176,14 +6238,17 @@ function ns.AddCDMBar(barType, name, numRows)
         customSpells = {},
         outOfRangeOverlay = false,
     }
-    -- Auto-populate new trinkets bars with player's current extras
-    if barType == "trinkets" then
+    -- Auto-populate new misc bars with player's current extras
+    if barType == "misc" then
         local newBar = bars[#bars]
         for _, ex in ipairs(GetExtraSpells()) do
             newBar.customSpells[#newBar.customSpells + 1] = ex.spellID
         end
     end
     BuildAllCDMBars()
+    -- Immediately populate icons so the bar is visible without a /reload
+    UpdateCustomBarIcons(key)
+    LayoutCDMBar(key)
     RegisterCDMUnlockElements()
     return key
 end
@@ -6500,6 +6565,20 @@ function ECME:OnInitialize()
             for _, b in ipairs(bars) do
                 if b.hideBuffsWhenInactive == nil then
                     b.hideBuffsWhenInactive = true
+                end
+            end
+        end
+    end
+
+    -- Migration: rename barType "trinkets" to "misc" (4.7)
+    -- Runs across ALL profiles so switching profiles later works correctly.
+    if sv.profiles then
+        for _, prof in pairs(sv.profiles) do
+            if type(prof) == "table" and prof.cdmBars and prof.cdmBars.bars then
+                for _, b in ipairs(prof.cdmBars.bars) do
+                    if b.barType == "trinkets" then
+                        b.barType = "misc"
+                    end
                 end
             end
         end

@@ -1533,7 +1533,7 @@ initFrame:SetScript("OnEvent", function(self)
         local fctFontValues = {
             ["default"]                                = { text = "Blizzard Default", font = "Fonts\\FRIZQT__.TTF" },
             [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = "Expressway",            font = FCT_FONT_DIR .. "Expressway.TTF" },
-            [FCT_FONT_DIR .. "Avant Garde.ttf"]        = { text = "Avant Garde (Naowh)",   font = FCT_FONT_DIR .. "Avant Garde.ttf" },
+            [FCT_FONT_DIR .. "Avant Garde Naowh.ttf"]        = { text = "Avant Garde (Naowh)",   font = FCT_FONT_DIR .. "Avant Garde Naowh.ttf" },
             [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = "Arial Bold",            font = FCT_FONT_DIR .. "Arial Bold.TTF" },
             [FCT_FONT_DIR .. "Poppins.ttf"]            = { text = "Poppins",               font = FCT_FONT_DIR .. "Poppins.ttf" },
             [FCT_FONT_DIR .. "FiraSans Medium.ttf"]    = { text = "Fira Sans Medium",      font = FCT_FONT_DIR .. "FiraSans Medium.ttf" },
@@ -1557,7 +1557,7 @@ initFrame:SetScript("OnEvent", function(self)
         local fctFontOrder = {
             "default",
             FCT_FONT_DIR .. "Expressway.TTF",
-            FCT_FONT_DIR .. "Avant Garde.ttf",
+            FCT_FONT_DIR .. "Avant Garde Naowh.ttf",
             FCT_FONT_DIR .. "Arial Bold.TTF",
             FCT_FONT_DIR .. "Poppins.ttf",
             FCT_FONT_DIR .. "FiraSans Medium.ttf",
@@ -3114,7 +3114,7 @@ initFrame:SetScript("OnEvent", function(self)
                         title        = "Name This Profile",
                         message      = "Enter a name for the imported profile:",
                         placeholder  = "Imported Profile",
-                        confirmText  = "Import & Reload",
+                        confirmText  = "Import",
                         cancelText   = "Cancel",
                         warning      = warnText,
                         scaleWarning = scaleWarnText,
@@ -3127,7 +3127,20 @@ initFrame:SetScript("OnEvent", function(self)
                                     content = "\"" .. name .. "\" was saved but cannot be loaded because this spec has an assigned profile. Switch specs or remove the spec assignment to use it.",
                                 })
                             elseif ok then
-                                ReloadUI()
+                                local fontWillChange = EllesmereUI.ProfileChangesFont(payload and payload.data)
+                                EllesmereUI.RefreshAllAddons()
+                                ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                if fontWillChange then
+                                    EllesmereUI:ShowConfirmPopup({
+                                        title       = "Reload Required",
+                                        message     = "Font changed. A UI reload is needed to apply the new font.",
+                                        confirmText = "Reload Now",
+                                        cancelText  = "Later",
+                                        onConfirm   = function() ReloadUI() end,
+                                    })
+                                else
+                                    EllesmereUI:RefreshPage()
+                                end
                             else
                                 EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
                             end
@@ -3143,14 +3156,10 @@ initFrame:SetScript("OnEvent", function(self)
                     label = "Spin the Wheel",
                     onApply = function()
                         EllesmereUI.SpinTheWheel()
-                        EllesmereUI.SaveCurrentAsProfile(UniquePresetName("Spin the Wheel"))
-                        EllesmereUI:ShowConfirmPopup({
-                            title       = "Reload Required",
-                            message     = "Preset applied. Reload to apply.",
-                            confirmText = "Reload Now",
-                            cancelText  = "Cancel",
-                            onConfirm   = function() ReloadUI() end,
-                        })
+                        EllesmereUI.SaveCurrentAsProfile("Spin the Wheel")
+                        EllesmereUI.RefreshAllAddons()
+                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                        EllesmereUI:RefreshPage()
                     end,
                 }
                 if EllesmereUI.WEEKLY_SPOTLIGHT then
@@ -3167,14 +3176,20 @@ initFrame:SetScript("OnEvent", function(self)
                                     content = "Profile was saved but cannot be loaded because this spec has an assigned profile.",
                                 })
                             elseif ok then
-                                EllesmereUI:ShowConfirmPopup({
-                                    title        = "Reload Required",
-                                    message      = "Preset applied. Reload to apply.",
-                                    confirmText  = "Reload Now",
-                                    cancelText   = "Cancel",
-                                    scaleWarning = BuildScaleWarning(spotPayload),
-                                    onConfirm    = function() ReloadUI() end,
-                                })
+                                local fontWillChange = EllesmereUI.ProfileChangesFont(spotPayload and spotPayload.data)
+                                EllesmereUI.RefreshAllAddons()
+                                ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                if fontWillChange then
+                                    EllesmereUI:ShowConfirmPopup({
+                                        title       = "Reload Required",
+                                        message     = "Font changed. A UI reload is needed to apply the new font.",
+                                        confirmText = "Reload Now",
+                                        cancelText  = "Later",
+                                        onConfirm   = function() ReloadUI() end,
+                                    })
+                                else
+                                    EllesmereUI:RefreshPage()
+                                end
                             else EllesmereUI:ShowInfoPopup({ title = "Spotlight Error", content = err or "Unknown error" }) end
                         end,
                     }
@@ -3193,14 +3208,20 @@ initFrame:SetScript("OnEvent", function(self)
                                     })
                                 elseif ok then
                                     local pPayload = EllesmereUI.DecodeImportString(p.exportString)
-                                    EllesmereUI:ShowConfirmPopup({
-                                        title        = "Reload Required",
-                                        message      = "Preset applied. Reload to apply.",
-                                        confirmText  = "Reload Now",
-                                        cancelText   = "Cancel",
-                                        scaleWarning = BuildScaleWarning(pPayload),
-                                        onConfirm    = function() ReloadUI() end,
-                                    })
+                                    local fontWillChange = EllesmereUI.ProfileChangesFont(pPayload and pPayload.data)
+                                    EllesmereUI.RefreshAllAddons()
+                                    ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                    if fontWillChange then
+                                        EllesmereUI:ShowConfirmPopup({
+                                            title       = "Reload Required",
+                                            message     = "Font changed. A UI reload is needed to apply the new font.",
+                                            confirmText = "Reload Now",
+                                            cancelText  = "Later",
+                                            onConfirm   = function() ReloadUI() end,
+                                        })
+                                    else
+                                        EllesmereUI:RefreshPage()
+                                    end
                                 else EllesmereUI:ShowInfoPopup({ title = "Preset Error", content = err or "Unknown error" }) end
                             end,
                         }
@@ -3282,7 +3303,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Size(rowFrame, totalW, ROW_H)
             PP.Point(rowFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
 
-            local groupW = DD_W + GAP * 2 + BTN_W * 2
+            local groupW = DD_W + GAP * 3 + BTN_W * 3
             local startX = math.floor((totalW - groupW) / 2)
             local offsetY = -math.floor((ROW_H - ITEM_H) / 2)
 
@@ -3338,7 +3359,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local lbl = itm:CreateFontString(nil, "OVERLAY")
                             lbl:SetFont(FONT, 13, EllesmereUI.GetFontOutlineFlag())
                             lbl:SetPoint("LEFT",  itm, "LEFT",  10, 0)
-                            lbl:SetPoint("RIGHT", itm, "RIGHT", -(X_SZ + 14), 0)
+                            lbl:SetPoint("RIGHT", itm, "RIGHT", -(X_SZ * 2 + 22), 0)
                             lbl:SetJustifyH("LEFT")
                             lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                             itm._lbl = lbl
@@ -3358,32 +3379,65 @@ initFrame:SetScript("OnEvent", function(self)
                             xBtn:SetAlpha(0.4)
                             itm._xBtn = xBtn
 
+                            local editBtn = CreateFrame("Button", nil, itm)
+                            editBtn:SetSize(X_SZ, X_SZ)
+                            editBtn:SetPoint("RIGHT", xBtn, "LEFT", -4, 0)
+                            editBtn:SetFrameLevel(itm:GetFrameLevel() + 2)
+                            local editIcon = editBtn:CreateTexture(nil, "OVERLAY")
+                            editIcon:SetAllPoints()
+                            if editIcon.SetSnapToPixelGrid then editIcon:SetSnapToPixelGrid(false); editIcon:SetTexelSnappingBias(0) end
+                            editIcon:SetTexture(MEDIA .. "icons\\eui-edit.png")
+                            editBtn:SetAlpha(0.4)
+                            itm._editBtn = editBtn
+
+                            local function IsOverInlineBtn()
+                                return xBtn:IsMouseOver() or editBtn:IsMouseOver()
+                            end
+
                             itm:SetScript("OnEnter", function()
                                 lbl:SetTextColor(1, 1, 1, 1)
                                 hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
                                 xBtn:SetAlpha(0.8)
+                                editBtn:SetAlpha(0.8)
                             end)
                             itm:SetScript("OnLeave", function()
-                                -- Stay highlighted if mouse moved to the X button
-                                if xBtn:IsMouseOver() then return end
+                                if IsOverInlineBtn() then return end
                                 lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
                                 xBtn:SetAlpha(0.4)
+                                editBtn:SetAlpha(0.4)
                             end)
                             xBtn:SetScript("OnEnter", function()
                                 lbl:SetTextColor(1, 1, 1, 1)
                                 hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
                                 xBtn:SetAlpha(1)
+                                editBtn:SetAlpha(0.8)
                             end)
                             xBtn:SetScript("OnLeave", function()
-                                -- Stay highlighted if mouse moved back to the item row
-                                if itm:IsMouseOver() then
+                                if itm:IsMouseOver() or editBtn:IsMouseOver() then
                                     xBtn:SetAlpha(0.8)
                                     return
                                 end
                                 lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
                                 xBtn:SetAlpha(0.4)
+                                editBtn:SetAlpha(0.4)
+                            end)
+                            editBtn:SetScript("OnEnter", function()
+                                lbl:SetTextColor(1, 1, 1, 1)
+                                hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
+                                editBtn:SetAlpha(1)
+                                xBtn:SetAlpha(0.8)
+                            end)
+                            editBtn:SetScript("OnLeave", function()
+                                if itm:IsMouseOver() or xBtn:IsMouseOver() then
+                                    editBtn:SetAlpha(0.8)
+                                    return
+                                end
+                                lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
+                                hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
+                                xBtn:SetAlpha(0.4)
+                                editBtn:SetAlpha(0.4)
                             end)
                             menuItems[idx] = itm
                         end
@@ -3398,9 +3452,10 @@ initFrame:SetScript("OnEvent", function(self)
                         local specLocked = specAssigned and specAssigned ~= capName
 
                         if specLocked then
-                            -- Disable: dim label, hide X, block clicks, show tooltip
+                            -- Disable: dim label, hide X and edit, block clicks, show tooltip
                             itm._lbl:SetTextColor(1, 1, 1, 0.25)
                             itm._xBtn:Hide()
+                            itm._editBtn:Hide()
                             itm:SetScript("OnClick", nil)
                             itm:SetScript("OnEnter", function()
                                 EllesmereUI.ShowWidgetTooltip(itm, "This spec has an assigned profile")
@@ -3409,19 +3464,30 @@ initFrame:SetScript("OnEvent", function(self)
                                 EllesmereUI.HideWidgetTooltip()
                             end)
                         else
-                            local iLbl, iHl, iXBtn = itm._lbl, itm._hl, itm._xBtn
+                            local iLbl, iHl, iXBtn, iEditBtn = itm._lbl, itm._hl, itm._xBtn, itm._editBtn
                             iLbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
-                            iXBtn:Show()
+                            if capName == "Default" then
+                                iXBtn:Hide()
+                                iEditBtn:Hide()
+                            else
+                                iXBtn:Show()
+                                iEditBtn:Show()
+                            end
+                            local function IsOverInline()
+                                return iXBtn:IsMouseOver() or iEditBtn:IsMouseOver()
+                            end
                             itm:SetScript("OnEnter", function()
                                 iLbl:SetTextColor(1, 1, 1, 1)
                                 iHl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
                                 iXBtn:SetAlpha(0.8)
+                                iEditBtn:SetAlpha(0.8)
                             end)
                             itm:SetScript("OnLeave", function()
-                                if iXBtn:IsMouseOver() then return end
+                                if IsOverInline() then return end
                                 iLbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 iHl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
                                 iXBtn:SetAlpha(0.4)
+                                iEditBtn:SetAlpha(0.4)
                             end)
                             itm:SetScript("OnClick", function()
                                 menu:Hide()
@@ -3459,6 +3525,24 @@ initFrame:SetScript("OnEvent", function(self)
                                     cancelText  = "Cancel",
                                     onConfirm   = function()
                                         EllesmereUI.DeleteProfile(capName)
+                                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                        EllesmereUI:InvalidatePageCache()
+                                        EllesmereUI:RefreshPage(true)
+                                    end,
+                                })
+                            end)
+                            iEditBtn:SetScript("OnClick", function()
+                                if capName == "Default" then return end
+                                menu:Hide()
+                                EllesmereUI:ShowInputPopup({
+                                    title       = "Rename Profile",
+                                    message     = "Enter a new name for \"" .. capName .. "\":",
+                                    placeholder = capName,
+                                    confirmText = "Rename",
+                                    cancelText  = "Cancel",
+                                    onConfirm   = function(newName)
+                                        if not newName or newName == "" or newName == capName then return end
+                                        EllesmereUI.RenameProfile(capName, newName)
                                         ddLabel:SetText(EllesmereUI.GetActiveProfileName())
                                         EllesmereUI:InvalidatePageCache()
                                         EllesmereUI:RefreshPage(true)
@@ -3503,14 +3587,14 @@ initFrame:SetScript("OnEvent", function(self)
                 else ActiveApplyNormal() end
             end)
 
-            -- Save As button
+            -- Copy Profile button
             local saveAsBtn = CreateFrame("Button", nil, rowFrame)
             PP.Size(saveAsBtn, BTN_W, ITEM_H)
             PP.Point(saveAsBtn, "LEFT", ddBtn, "RIGHT", GAP, 0)
             saveAsBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
-            EllesmereUI.MakeStyledButton(saveAsBtn, "Save As", 11, PROF_BTN_COLOURS, function()
+            EllesmereUI.MakeStyledButton(saveAsBtn, "Copy Profile", 11, PROF_BTN_COLOURS, function()
                 EllesmereUI:ShowInputPopup({
-                    title       = "Save Profile As",
+                    title       = "Copy Profile",
                     message     = "Enter a name for the new profile:",
                     placeholder = "My Profile",
                     confirmText = "Save",
@@ -3524,10 +3608,27 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end)
 
+            -- Create New button (creates a profile from default settings)
+            local createNewBtn = CreateFrame("Button", nil, rowFrame)
+            PP.Size(createNewBtn, BTN_W, ITEM_H)
+            PP.Point(createNewBtn, "LEFT", saveAsBtn, "RIGHT", GAP, 0)
+            createNewBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
+            EllesmereUI.MakeStyledButton(createNewBtn, "Create New", 11, PROF_BTN_COLOURS, function()
+                local _, profiles = EllesmereUI.GetProfileList()
+                local n = 2
+                while profiles["Default " .. n] do n = n + 1 end
+                local newName = "Default " .. n
+                EllesmereUI.CreateDefaultProfile(newName)
+                EllesmereUI.SwitchProfile(newName)
+                EllesmereUI.RefreshAllAddons()
+                ddLabel:SetText(newName)
+                EllesmereUI:RefreshPage()
+            end)
+
             -- Assign to Spec button
             local assignBtn = CreateFrame("Button", nil, rowFrame)
             PP.Size(assignBtn, BTN_W, ITEM_H)
-            PP.Point(assignBtn, "LEFT", saveAsBtn, "RIGHT", GAP, 0)
+            PP.Point(assignBtn, "LEFT", createNewBtn, "RIGHT", GAP, 0)
             assignBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
             EllesmereUI.MakeStyledButton(assignBtn, "Assign to Spec", 11, PROF_BTN_COLOURS, function()
                 local db = EllesmereUIDB or {}

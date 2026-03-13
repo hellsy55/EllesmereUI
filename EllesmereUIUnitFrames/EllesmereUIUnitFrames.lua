@@ -40,6 +40,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             healthDisplay = "both",
             showBuffs = false,
             maxBuffs = 4,
@@ -173,6 +174,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
@@ -299,6 +301,7 @@ local defaults = {
             frameWidth = 101,
             healthHeight = 25,
             frameScale = 100,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitMode = "2d",
             selectedFont = "Expressway",
@@ -317,6 +320,7 @@ local defaults = {
             frameWidth = 101,
             healthHeight = 25,
             frameScale = 100,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitMode = "2d",
             selectedFont = "Expressway",
@@ -349,6 +353,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
@@ -453,6 +458,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             healthDisplay = "perhp",
             showPortrait = false,
@@ -826,9 +832,9 @@ do
     if not unit or not UnitExists(unit) then return "" end
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
-    local hp, maxHP = UnitHealth(unit), UnitHealthMax(unit)
-    if not hp or not maxHP or maxHP == 0 then return "0" end
-    return tostring(math.floor(hp / maxHP * 100 + 0.5))
+    local pct = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
+    if not pct then return "0" end
+    return string.format("%d", pct)
   end
   oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end

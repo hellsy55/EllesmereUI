@@ -384,13 +384,12 @@ initFrame:SetScript("OnEvent", function(self)
         menu:ClearAllPoints()
         menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -2)
 
-        local closer = CreateFrame("Button", nil, UIParent)
-        closer:SetFrameStrata("FULLSCREEN_DIALOG")
-        closer:SetFrameLevel(menu:GetFrameLevel() - 1)
-        closer:SetAllPoints(UIParent)
-        closer:SetScript("OnClick", function() menu:Hide(); closer:Hide() end)
-        menu:HookScript("OnHide", function() closer:Hide() end)
-        closer:Show()
+        menu:SetScript("OnUpdate", function(m)
+            if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                m:Hide()
+            end
+        end)
+        menu:HookScript("OnHide", function(m) m:SetScript("OnUpdate", nil) end)
 
         menu:Show()
         _bgSpellPickerMenu = menu
@@ -1003,13 +1002,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         menu:ClearAllPoints()
         menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -2)
-        local closer = CreateFrame("Button", nil, UIParent)
-        closer:SetFrameStrata("FULLSCREEN_DIALOG")
-        closer:SetFrameLevel(menu:GetFrameLevel() - 1)
-        closer:SetAllPoints(UIParent)
-        closer:SetScript("OnClick", function() menu:Hide(); closer:Hide() end)
-        menu:HookScript("OnHide", function() closer:Hide() end)
-        closer:Show()
+        menu:SetScript("OnUpdate", function(m)
+            if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                m:Hide()
+            end
+        end)
+        menu:HookScript("OnHide", function(m) m:SetScript("OnUpdate", nil) end)
         menu:Show()
         _tbbSpellPickerMenu = menu
     end
@@ -1219,13 +1217,12 @@ initFrame:SetScript("OnEvent", function(self)
                 mH = mH + ITEM_H
 
                 menu:SetHeight(mH + 4)
-                local closer = CreateFrame("Button", nil, UIParent)
-                closer:SetFrameStrata("FULLSCREEN_DIALOG")
-                closer:SetFrameLevel(menu:GetFrameLevel() - 1)
-                closer:SetAllPoints(UIParent)
-                closer:SetScript("OnClick", function() menu:Hide(); closer:Hide() end)
-                menu:HookScript("OnHide", function() closer:Hide() end)
-                closer:Show()
+                menu:SetScript("OnUpdate", function(m)
+                    if not m:IsMouseOver() and not ddBtn:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                        m:Hide()
+                    end
+                end)
+                menu:HookScript("OnHide", function(m) m:SetScript("OnUpdate", nil) end)
                 menu:Show()
                 ddMenu = menu
             end
@@ -2048,12 +2045,28 @@ initFrame:SetScript("OnEvent", function(self)
     --  Spell picker dropdown (right-click on icon or click "+" button)
     ---------------------------------------------------------------------------
     local _spellPickerMenu
+    -- Close the spell picker when the main EUI options panel closes
+    EllesmereUI:RegisterOnHide(function()
+        if _spellPickerMenu and _spellPickerMenu:IsShown() then _spellPickerMenu:Hide() end
+    end)
     local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSelect)
+        -- Toggle: if the picker is already open for this same icon, close it
+        if _spellPickerMenu and _spellPickerMenu:IsShown() and _spellPickerMenu._anchorFrame == anchorFrame then
+            _spellPickerMenu:Hide()
+            return
+        end
         -- Close existing
         if _spellPickerMenu then _spellPickerMenu:Hide() end
 
         local allSpells = ns.GetCDMSpellsForBar(barKey)
-        if not allSpells or #allSpells == 0 then return end
+        -- Misc bars only show custom options (no spell list needed)
+        local isMiscBarEarly = false
+        do
+            local bde = SelectedCDMBar()
+            isMiscBarEarly = bde and bde.barType == "misc"
+        end
+        if not isMiscBarEarly and (not allSpells or #allSpells == 0) then return end
+        if not allSpells then allSpells = {} end
 
         -- Standard EllesmereUI dropdown colors
         local mBgR  = EllesmereUI.DD_BG_R  or 0.075
@@ -2106,7 +2119,7 @@ initFrame:SetScript("OnEvent", function(self)
         local primaryCat   = isCooldownType and 0 or (isUtilityType and 1 or nil)
         local secondaryCat = isCooldownType and 1 or (isUtilityType and 0 or nil)
 
-        local isTrinketBar = bd and bd.barType == "trinkets"
+        local isMiscBar = bd and bd.barType == "misc"
         local isBuffBar = bd and (bd.barType == "buffs" or bd.key == "buffs")
 
         -- Buckets for cooldown/utility bars (two-section layout)
@@ -2192,6 +2205,447 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + 9
         end
 
+        -- "Custom Item" sub-menu for misc bars: on-use bag items
+        -- Only builds the flyout when the user hovers; bag scan is deferred.
+        local _customTrackingSub
+        if isMiscBar then
+            local ctItem = CreateFrame("Button", nil, inner)
+            ctItem:SetHeight(ITEM_H)
+            ctItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            ctItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            ctItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+            local ctHl = ctItem:CreateTexture(nil, "ARTWORK")
+            ctHl:SetAllPoints(); ctHl:SetColorTexture(1, 1, 1, 0); ctHl:SetAlpha(0)
+
+            local ctLbl = ctItem:CreateFontString(nil, "OVERLAY")
+            ctLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            ctLbl:SetPoint("LEFT", 10, 0)
+            ctLbl:SetJustifyH("LEFT")
+            ctLbl:SetText("Custom Item")
+            ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+
+            local ctArrow = ctItem:CreateTexture(nil, "ARTWORK")
+            ctArrow:SetSize(10, 10)
+            ctArrow:SetPoint("RIGHT", ctItem, "RIGHT", -8, 0)
+            ctArrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
+            ctArrow:SetAlpha(0.7)
+
+            -- Scan bags for on-use items with real cooldowns (only called when sub-menu opens)
+            -- Blacklist: items that pass filters but should not appear
+            local BAG_ITEM_BLACKLIST = {
+                [234389] = true, -- Gallagio Loyalty Rewards Card: Silver
+                [234390] = true, -- Gallagio Loyalty Rewards Card: Gold
+                [249699] = true, -- Shadowguard Translocator
+            }
+            local function ScanBagOnUseItems()
+                local MIN_CD_SEC = 30
+                local MAX_CD_SEC = 660  -- 11 minutes
+                local results = {}
+                local seen = {}
+                for bag = 0, 4 do
+                    local numSlots = C_Container.GetContainerNumSlots(bag)
+                    for slot = 1, numSlots do
+                        local info = C_Container.GetContainerItemInfo(bag, slot)
+                        if info and info.itemID and not seen[info.itemID] and not BAG_ITEM_BLACKLIST[info.itemID] then
+                            -- Skip trinkets (handled by trinket slot entries)
+                            local invType = C_Item.GetItemInventoryTypeByID(info.itemID)
+                            local isTrinket = invType and invType == Enum.InventoryType.IndexTrinketType
+                            if isTrinket then
+                                seen[info.itemID] = true
+                            end
+                            if not isTrinket then
+                            local spellName, spellID = C_Item.GetItemSpell(info.itemID)
+                            if spellName and spellID then
+                                -- Parse tooltip for cooldown duration and filter by range
+                                local cdSec = nil
+                                local tipData = C_TooltipInfo.GetItemByID(info.itemID)
+                                if tipData and tipData.lines then
+                                    for _, line in ipairs(tipData.lines) do
+                                        local text = line.leftText
+                                        if text and text:find("Cooldown%)") then
+                                            -- Extract everything between the last "(" before "Cooldown)" and "Cooldown)"
+                                            local cdStr = text:match(".*%((.+Cooldown)%)")
+                                            if cdStr then
+                                                local totalSec = 0
+                                                for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
+                                                    local n = tonumber(num)
+                                                    if n then
+                                                        local u = unit:lower()
+                                                        if u == "min" then totalSec = totalSec + n * 60
+                                                        elseif u == "sec" then totalSec = totalSec + n
+                                                        elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                                                        end
+                                                    end
+                                                end
+                                                if totalSec > 0 then cdSec = totalSec end
+                                                break
+                                            end
+                                        end
+                                    end
+                                end
+                                if cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC then
+                                    seen[info.itemID] = true
+                                    local tex = C_Item.GetItemIconByID(info.itemID)
+                                    local itemName = C_Item.GetItemNameByID(info.itemID)
+                                    results[#results + 1] = {
+                                        itemID = info.itemID,
+                                        name = itemName or spellName,
+                                        icon = tex,
+                                        spellID = spellID,
+                                    }
+                                end
+                            end
+                            end -- not isTrinket
+                        end
+                    end
+                end
+                table.sort(results, function(a, b) return a.name < b.name end)
+                return results
+            end
+
+            local function ShowCustomTrackingSub()
+                if _customTrackingSub and _customTrackingSub:IsShown() then return end
+
+                local items = ScanBagOnUseItems()
+
+                -- Filter out items already tracked on this bar
+                local alreadyTracked = {}
+                if bd and bd.customSpells then
+                    for _, sid in ipairs(bd.customSpells) do
+                        if sid <= -100 then alreadyTracked[-sid] = true end
+                    end
+                end
+                local filtered = {}
+                for _, it in ipairs(items) do
+                    if not alreadyTracked[it.itemID] then
+                        filtered[#filtered + 1] = it
+                    end
+                end
+
+                if not _customTrackingSub then
+                    _customTrackingSub = CreateFrame("Frame", nil, UIParent)
+                    _customTrackingSub:SetFrameStrata("FULLSCREEN_DIALOG")
+                    _customTrackingSub:SetFrameLevel(menu:GetFrameLevel() + 5)
+                    _customTrackingSub:SetClampedToScreen(true)
+                    _customTrackingSub:EnableMouse(true)
+                else
+                    -- Clear previous children
+                    for _, child in ipairs({_customTrackingSub:GetChildren()}) do
+                        child:Hide(); child:SetParent(nil)
+                    end
+                    for _, rgn in ipairs({_customTrackingSub:GetRegions()}) do
+                        if rgn.Hide then rgn:Hide() end
+                    end
+                end
+
+                local subW = 220
+                local SUB_ITEM_H = 26
+                local SUB_MAX_H = 260
+                _customTrackingSub:SetSize(subW, 10)
+                _customTrackingSub:ClearAllPoints()
+                _customTrackingSub:SetPoint("TOPLEFT", ctItem, "TOPRIGHT", 2, 0)
+
+                local subBg = _customTrackingSub:CreateTexture(nil, "BACKGROUND")
+                subBg:SetAllPoints()
+                subBg:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
+                EllesmereUI.MakeBorder(_customTrackingSub, 1, 1, 1, mBrdA, EllesmereUI.PP)
+
+                -- Inner frame for items (scrollable if needed)
+                local subInner = CreateFrame("Frame", nil, _customTrackingSub)
+                subInner:SetWidth(subW)
+                subInner:SetPoint("TOPLEFT")
+
+                local subH = 4
+
+                if #filtered == 0 then
+                    local emptyLbl = subInner:CreateFontString(nil, "OVERLAY")
+                    emptyLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
+                    emptyLbl:SetPoint("TOPLEFT", subInner, "TOPLEFT", 10, -subH - 4)
+                    emptyLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.6)
+                    emptyLbl:SetText("No on-use items in bags")
+                    subH = subH + SUB_ITEM_H
+                else
+                    for _, it in ipairs(filtered) do
+                        local si = CreateFrame("Button", nil, subInner)
+                        si:SetHeight(SUB_ITEM_H)
+                        si:SetPoint("TOPLEFT", subInner, "TOPLEFT", 1, -subH)
+                        si:SetPoint("TOPRIGHT", subInner, "TOPRIGHT", -1, -subH)
+                        si:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 2)
+                        si:RegisterForClicks("AnyUp")
+
+                        local sIco = si:CreateTexture(nil, "ARTWORK")
+                        local icoSz = SUB_ITEM_H - 2
+                        sIco:SetSize(icoSz, icoSz)
+                        sIco:SetPoint("RIGHT", si, "RIGHT", -6, 0)
+                        if it.icon then sIco:SetTexture(it.icon) end
+                        local zoom = 0.08
+                        sIco:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+
+                        local sLbl = si:CreateFontString(nil, "OVERLAY")
+                        sLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                        sLbl:SetPoint("LEFT", si, "LEFT", 10, 0)
+                        sLbl:SetPoint("RIGHT", sIco, "LEFT", -5, 0)
+                        sLbl:SetJustifyH("LEFT")
+                        sLbl:SetWordWrap(false)
+                        sLbl:SetMaxLines(1)
+                        sLbl:SetText(it.name)
+                        sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+
+                        local sHl = si:CreateTexture(nil, "ARTWORK")
+                        sHl:SetAllPoints()
+                        sHl:SetColorTexture(1, 1, 1, 0); sHl:SetAlpha(0)
+
+                        si:SetScript("OnEnter", function()
+                            sLbl:SetTextColor(1, 1, 1, 1)
+                            sHl:SetColorTexture(1, 1, 1, hlA); sHl:SetAlpha(1)
+                        end)
+                        si:SetScript("OnLeave", function()
+                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                            sHl:SetAlpha(0)
+                        end)
+                        si:SetScript("OnClick", function()
+                            _customTrackingSub:Hide()
+                            menu:Hide()
+                            -- Store as negated itemID
+                            if onSelect then onSelect(-it.itemID, true) end
+                        end)
+
+                        subH = subH + SUB_ITEM_H
+                    end
+                end
+
+                local totalSubH = subH + 4
+                subInner:SetHeight(totalSubH)
+
+                if totalSubH > SUB_MAX_H then
+                    _customTrackingSub:SetHeight(SUB_MAX_H)
+                    local sf = CreateFrame("ScrollFrame", nil, _customTrackingSub)
+                    sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+                    sf:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 1)
+                    sf:EnableMouseWheel(true)
+                    sf:SetScrollChild(subInner)
+                    subInner:SetWidth(subW)
+                    local scrollPos = 0
+                    local maxScroll = totalSubH - SUB_MAX_H
+                    sf:SetScript("OnMouseWheel", function(_, delta)
+                        scrollPos = math.max(0, math.min(maxScroll, scrollPos - delta * 30))
+                        sf:SetVerticalScroll(scrollPos)
+                    end)
+                else
+                    _customTrackingSub:SetHeight(totalSubH)
+                    subInner:SetParent(_customTrackingSub)
+                    subInner:SetPoint("TOPLEFT")
+                end
+                _customTrackingSub:SetScript("OnLeave", function(self)
+                    C_Timer.After(0.1, function()
+                        if self:IsShown() and not self:IsMouseOver()
+                           and not ctItem:IsMouseOver() then
+                            self:Hide()
+                        end
+                    end)
+                end)
+                _customTrackingSub:Show()
+            end
+
+            ctItem:SetScript("OnEnter", function()
+                ctLbl:SetTextColor(1, 1, 1, 1)
+                ctHl:SetColorTexture(1, 1, 1, hlA); ctHl:SetAlpha(1)
+                ShowCustomTrackingSub()
+            end)
+            ctItem:SetScript("OnLeave", function()
+                ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                ctHl:SetAlpha(0)
+                -- Delay hide so user can move mouse to sub-menu
+                C_Timer.After(0.15, function()
+                    if _customTrackingSub and _customTrackingSub:IsShown()
+                       and not _customTrackingSub:IsMouseOver()
+                       and not ctItem:IsMouseOver() then
+                        _customTrackingSub:Hide()
+                    end
+                end)
+            end)
+
+            allItems[#allItems + 1] = ctItem
+            mH = mH + ITEM_H
+
+            -- "Custom Spell ID" option: opens a popup to enter a spell ID
+            local csItem = CreateFrame("Button", nil, inner)
+            csItem:SetHeight(ITEM_H)
+            csItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            csItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            csItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+            local csHl = csItem:CreateTexture(nil, "ARTWORK")
+            csHl:SetAllPoints(); csHl:SetColorTexture(1, 1, 1, 0); csHl:SetAlpha(0)
+
+            local csLbl = csItem:CreateFontString(nil, "OVERLAY")
+            csLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            csLbl:SetPoint("LEFT", 10, 0)
+            csLbl:SetJustifyH("LEFT")
+            csLbl:SetText("Custom Spell ID")
+            csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+
+            csItem:SetScript("OnEnter", function()
+                csLbl:SetTextColor(1, 1, 1, 1)
+                csHl:SetColorTexture(1, 1, 1, hlA); csHl:SetAlpha(1)
+            end)
+            csItem:SetScript("OnLeave", function()
+                csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                csHl:SetAlpha(0)
+            end)
+            csItem:SetScript("OnClick", function()
+                menu:Hide()
+                -- Show spell ID input popup
+                local popupName = "EUI_CDM_SpellIDPopup"
+                local popup = _G[popupName]
+                if not popup then
+                    local POPUP_W, POPUP_H = 320, 160
+                    local dimmer = CreateFrame("Frame", popupName .. "Dimmer", UIParent)
+                    dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+                    dimmer:SetAllPoints(UIParent)
+                    dimmer:EnableMouse(true)
+                    dimmer:Hide()
+                    local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+                    dimTex:SetAllPoints(); dimTex:SetColorTexture(0, 0, 0, 0.25)
+                    dimmer:SetScript("OnMouseDown", function(self) self:Hide() end)
+
+                    popup = CreateFrame("Frame", popupName, dimmer)
+                    popup:SetSize(POPUP_W, POPUP_H)
+                    popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+                    popup:SetFrameStrata("FULLSCREEN_DIALOG")
+                    popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+                    popup:EnableMouse(true)
+                    local popBg = popup:CreateTexture(nil, "BACKGROUND")
+                    popBg:SetAllPoints(); popBg:SetColorTexture(0.06, 0.08, 0.10, 1)
+                    EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PP)
+
+                    local title = popup:CreateFontString(nil, "OVERLAY")
+                    title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
+                    title:SetPoint("TOP", popup, "TOP", 0, -18)
+                    title:SetTextColor(1, 1, 1, 1)
+                    title:SetText("Add Custom Spell")
+                    popup._title = title
+
+                    local editBox = CreateFrame("EditBox", nil, popup)
+                    editBox:SetSize(180, 28)
+                    editBox:SetPoint("TOP", title, "BOTTOM", 0, -16)
+                    editBox:SetAutoFocus(true)
+                    editBox:SetNumeric(true)
+                    editBox:SetMaxLetters(7)
+                    editBox:SetFont(FONT_PATH, 13, GetCDMOptOutline())
+                    editBox:SetTextColor(1, 1, 1, 0.9)
+                    editBox:SetJustifyH("CENTER")
+                    local ebBg = editBox:CreateTexture(nil, "BACKGROUND")
+                    ebBg:SetAllPoints(); ebBg:SetColorTexture(0.04, 0.06, 0.08, 1)
+                    EllesmereUI.MakeBorder(editBox, 1, 1, 1, 0.12, EllesmereUI.PP)
+
+                    local placeholder = editBox:CreateFontString(nil, "ARTWORK")
+                    placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+                    placeholder:SetPoint("CENTER")
+                    placeholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
+                    placeholder:SetText("Spell ID")
+                    editBox:SetScript("OnTextChanged", function(self)
+                        if self:GetText() == "" then placeholder:Show() else placeholder:Hide() end
+                    end)
+                    popup._editBox = editBox
+
+                    local status = popup:CreateFontString(nil, "OVERLAY")
+                    status:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                    status:SetPoint("TOP", editBox, "BOTTOM", 0, -6)
+                    status:SetTextColor(1, 0.3, 0.3, 1)
+                    status:SetText("")
+                    popup._status = status
+                    popup._statusTimer = nil
+
+                    -- Add button
+                    local ar, ag, ab = EllesmereUI.GetAccentColor()
+                    local addBtn = CreateFrame("Button", nil, popup)
+                    addBtn:SetSize(80, 28)
+                    addBtn:SetPoint("BOTTOMRIGHT", popup, "BOTTOM", -4, 16)
+                    local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
+                    addBg:SetAllPoints(); addBg:SetColorTexture(ar, ag, ab, 0.15)
+                    EllesmereUI.MakeBorder(addBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
+                    local addLbl = addBtn:CreateFontString(nil, "OVERLAY")
+                    addLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+                    addLbl:SetPoint("CENTER"); addLbl:SetText("Add")
+                    addLbl:SetTextColor(ar, ag, ab, 0.9)
+                    addBtn:SetScript("OnEnter", function() addLbl:SetTextColor(1, 1, 1, 1) end)
+                    addBtn:SetScript("OnLeave", function() addLbl:SetTextColor(ar, ag, ab, 0.9) end)
+                    popup._addBtn = addBtn
+
+                    -- Cancel button
+                    local cancelBtn = CreateFrame("Button", nil, popup)
+                    cancelBtn:SetSize(80, 28)
+                    cancelBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 4, 16)
+                    local cBg = cancelBtn:CreateTexture(nil, "BACKGROUND")
+                    cBg:SetAllPoints(); cBg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+                    EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
+                    local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
+                    cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+                    cLbl:SetPoint("CENTER"); cLbl:SetText("Cancel")
+                    cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
+                    cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
+                    cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
+                    cancelBtn:SetScript("OnClick", function() dimmer:Hide() end)
+                    popup._cancelBtn = cancelBtn
+
+                    editBox:SetScript("OnEscapePressed", function() dimmer:Hide() end)
+
+                    popup._dimmer = dimmer
+                    _G[popupName] = popup
+                end
+
+                -- Wire up the Add action for this invocation
+                local function SetStatus(text, r, g, b)
+                    popup._status:SetText(text)
+                    popup._status:SetTextColor(r or 1, g or 0.3, b or 0.3, 1)
+                    if popup._statusTimer then popup._statusTimer:Cancel() end
+                    if text ~= "" then
+                        popup._statusTimer = C_Timer.NewTimer(2.5, function()
+                            popup._status:SetText("")
+                        end)
+                    end
+                end
+
+                local function DoAdd()
+                    local text = popup._editBox:GetText()
+                    local sid = tonumber(text)
+                    if not sid or sid <= 0 then
+                        SetStatus("Enter a valid spell ID")
+                        return
+                    end
+                    sid = math.floor(sid)
+                    local spellName = C_Spell.GetSpellName(sid)
+                    if not spellName then
+                        SetStatus("Unknown spell ID")
+                        return
+                    end
+                    -- Check if already tracked
+                    if bd and bd.customSpells then
+                        for _, existing in ipairs(bd.customSpells) do
+                            if existing == sid then
+                                SetStatus("Already tracked")
+                                return
+                            end
+                        end
+                    end
+                    popup._dimmer:Hide()
+                    if onSelect then onSelect(sid, true) end
+                end
+
+                popup._addBtn:SetScript("OnClick", DoAdd)
+                popup._editBox:SetScript("OnEnterPressed", DoAdd)
+                popup._editBox:SetText("")
+                popup._status:SetText("")
+                popup._dimmer:Show()
+                popup._editBox:SetFocus()
+            end)
+
+            allItems[#allItems + 1] = csItem
+            mH = mH + ITEM_H
+        end
+
         local function MakeItem(sp, isDisabled, firesPopup)
             -- Check if this spell belongs to the wrong category group for this bar type.
             -- e.g. a cooldown-category spell on a buffs bar, or vice versa.
@@ -2199,7 +2653,7 @@ initFrame:SetScript("OnEvent", function(self)
             if not isDisabled and sp.cdmCatGroup then
                 if isBuffBar and sp.cdmCatGroup == "cooldown" then
                     wrongCatGroup = true
-                elseif not isBuffBar and not isTrinketBar and sp.cdmCatGroup == "buff" then
+                elseif not isBuffBar and not isMiscBar and sp.cdmCatGroup == "buff" then
                     wrongCatGroup = true
                 end
             end
@@ -2290,9 +2744,14 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + 9
         end
 
-        if isCDorUtil then
-            -- Layout: available primary → unavailable primary → available secondary
-            -- → unavailable secondary → disabled (unlearned)
+        if isMiscBar then
+            -- Misc bars: only show extras (trinket slots, racials, etc.)
+            -- Skip all cooldown/utility/buff spell categories.
+            if isMiscBar and mH > 4 and #itemsExtra > 0 then MakeDivider() end
+            for _, sp in ipairs(itemsExtra) do MakeItem(sp, false, false) end
+        elseif isCDorUtil then
+            -- Layout: available primary -> unavailable primary -> available secondary
+            -- -> unavailable secondary -> disabled (unlearned)
             local hasPriDisp    = #priDisplayed > 0
             local hasPriNotDisp = #priNotDisplayed > 0
             local hasSecDisp    = #secDisplayed > 0
@@ -2371,17 +2830,21 @@ initFrame:SetScript("OnEvent", function(self)
         menu:ClearAllPoints()
         menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -2)
 
-        -- Close on click outside: invisible full-screen button behind menu
-        local closer = CreateFrame("Button", nil, UIParent)
-        closer:SetFrameStrata("FULLSCREEN_DIALOG")
-        closer:SetFrameLevel(menu:GetFrameLevel() - 1)
-        closer:SetAllPoints(UIParent)
-        closer:SetScript("OnClick", function() menu:Hide(); closer:Hide() end)
-        menu:HookScript("OnHide", function() closer:Hide() end)
-        closer:Show()
+        -- Close on left-click outside (non-blocking, preserves world interactions)
+        menu:SetScript("OnUpdate", function(m)
+            local overSub = _customTrackingSub and _customTrackingSub:IsShown() and _customTrackingSub:IsMouseOver()
+            if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and not overSub and IsMouseButtonDown("LeftButton") then
+                m:Hide()
+            end
+        end)
+        menu:HookScript("OnHide", function(m)
+            m:SetScript("OnUpdate", nil)
+            if _customTrackingSub then _customTrackingSub:Hide() end
+        end)
 
         menu:Show()
         _spellPickerMenu = menu
+        menu._anchorFrame = anchorFrame
     end
 
     --- Build the live CDM bar preview in the content header (interactive)
@@ -3425,7 +3888,10 @@ initFrame:SetScript("OnEvent", function(self)
                     if id then
                         local tex
                         if isCustomBar then
-                            if id < 0 then
+                            if id <= -100 then
+                                -- On-use bag item: negated itemID
+                                tex = C_Item.GetItemIconByID(-id)
+                            elseif id < 0 then
                                 -- Trinket slot: get icon from equipped item
                                 local itemID = GetInventoryItemID("player", -id)
                                 tex = itemID and C_Item.GetItemIconByID(itemID) or nil
@@ -3437,8 +3903,10 @@ initFrame:SetScript("OnEvent", function(self)
                             -- Default bar: check if this is an extra spell
                             local trackedLen = bd.trackedSpells and #bd.trackedSpells or 0
                             if i > trackedLen then
-                                -- Extra spell (trinket/racial/potion)
-                                if id < 0 then
+                                -- Extra spell (trinket/racial/potion/bag item)
+                                if id <= -100 then
+                                    tex = C_Item.GetItemIconByID(-id)
+                                elseif id < 0 then
                                     local itemID = GetInventoryItemID("player", -id)
                                     tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                                 else
@@ -3696,7 +4164,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local bd = bars[selectedCDMBarIndex]
                 local label = bd and (bd.name or bd.key) or ""
                 -- Clean up legacy verbose names for display
-                if bd and bd.barType == "trinkets" then
+                if bd and bd.barType == "misc" then
                     label = label:gsub("Custom ", ""):gsub("Trinkets/Racials/Potions Bar ", "Miscellaneous "):gsub("Trinkets Bar ", "Miscellaneous "):gsub("^Trinkets ", "Miscellaneous ")
                 end
                 ddLbl:SetText(label)
@@ -3741,7 +4209,7 @@ initFrame:SetScript("OnEvent", function(self)
                     iLbl:SetPoint("LEFT", item, "LEFT", 10, 0)
                     local displayName = b.name or b.key
                     -- Clean up legacy verbose names for display
-                    if b.barType == "trinkets" then
+                    if b.barType == "misc" then
                         displayName = displayName:gsub("Custom ", ""):gsub("Trinkets/Racials/Potions Bar ", "Miscellaneous "):gsub("Trinkets Bar ", "Miscellaneous "):gsub("^Trinkets ", "Miscellaneous ")
                     end
                     iLbl:SetText(displayName)
@@ -3835,7 +4303,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type = "cooldowns", label = "+ Add New Cooldowns Bar" },
                     { type = "utility",   label = "+ Add New Utility Bar" },
                     { type = "buffs",     label = "+ Add New Buff Bar" },
-                    { type = "trinkets",  label = "+ Add Trinket/Racials/Potion Bar" },
+                    { type = "misc",      label = "+ Add Miscellaneous Bar" },
                 }
                 for _, entry in ipairs(addBarTypes) do
                     local addItem = CreateFrame("Button", nil, menu)
@@ -3877,14 +4345,13 @@ initFrame:SetScript("OnEvent", function(self)
 
                 menu:SetHeight(mH + 4)
 
-                -- Close on outside click
-                local closer = CreateFrame("Button", nil, UIParent)
-                closer:SetFrameStrata("FULLSCREEN_DIALOG")
-                closer:SetFrameLevel(menu:GetFrameLevel() - 1)
-                closer:SetAllPoints(UIParent)
-                closer:SetScript("OnClick", function() menu:Hide(); closer:Hide() end)
-                menu:HookScript("OnHide", function() closer:Hide() end)
-                closer:Show()
+                -- Close on left-click outside (non-blocking)
+                menu:SetScript("OnUpdate", function(m)
+                    if not m:IsMouseOver() and not ddBtn:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                        m:Hide()
+                    end
+                end)
+                menu:HookScript("OnHide", function(m) m:SetScript("OnUpdate", nil) end)
 
                 menu:Show()
                 ddMenu = menu

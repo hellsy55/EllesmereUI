@@ -509,6 +509,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetFrameLevel(200)
     menu:SetClampedToScreen(true)
+    menu:SetClipsChildren(true)
     menu:EnableMouse(true)
     menu:SetSize(menuW, 10)
     menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
