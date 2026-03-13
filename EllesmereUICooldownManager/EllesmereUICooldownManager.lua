@@ -51,6 +51,12 @@ local BUFF_PROC_ICON_OVERRIDES = {
     [400254] = { buffID = 441583, replacementSpellID = 441583 }, -- Raze -> Ravage
 }
 
+--- Talent spell ID -> correct buff aura ID for CDM entries that report the
+--- wrong spell.  Key = talent spellID, value = buff aura spellID.
+local BUFF_SPELLID_CORRECTIONS = {
+    [12950] = 85739,  -- Improved Whirlwind
+}
+
 -------------------------------------------------------------------------------
 --  Shape Constants (shared with action bars)
 -------------------------------------------------------------------------------
@@ -1153,17 +1159,19 @@ local TALENT_AWARE_BAR_TYPES = { cooldowns = true, utility = true }
 -------------------------------------------------------------------------------
 local function ResolveInfoSpellID(info)
     if not info then return nil end
+    local sid
     if info.overrideSpellID and info.overrideSpellID > 0 then
-        return info.overrideSpellID
-    end
-    local linked = info.linkedSpellIDs
-    if linked then
-        for i = 1, #linked do
-            if linked[i] and linked[i] > 0 then return linked[i] end
+        sid = info.overrideSpellID
+    else
+        local linked = info.linkedSpellIDs
+        if linked then
+            for i = 1, #linked do
+                if linked[i] and linked[i] > 0 then sid = linked[i]; break end
+            end
         end
+        if not sid and info.spellID and info.spellID > 0 then sid = info.spellID end
     end
-    if info.spellID and info.spellID > 0 then return info.spellID end
-    return nil
+    return sid and (BUFF_SPELLID_CORRECTIONS[sid] or sid) or nil
 end
 
 -------------------------------------------------------------------------------
@@ -1183,7 +1191,7 @@ local function ResolveChildSpellID(child)
         local ok, auraID = pcall(child.GetAuraSpellID, child)
         if ok and auraID then
             local cmpOk, gt = pcall(function() return auraID > 0 end)
-            if cmpOk and gt then return auraID end
+            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[auraID] or auraID end
         end
     end
     -- Then try the frame's own spellID
@@ -1191,7 +1199,7 @@ local function ResolveChildSpellID(child)
         local ok, fid = pcall(child.GetSpellID, child)
         if ok and fid then
             local cmpOk, gt = pcall(function() return fid > 0 end)
-            if cmpOk and gt then return fid end
+            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[fid] or fid end
         end
     end
     -- Fall back to cooldownInfo struct
