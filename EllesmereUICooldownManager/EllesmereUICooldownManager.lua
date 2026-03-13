@@ -1281,11 +1281,27 @@ local function BuildKnownSpellIDSet()
             for _, cdID in ipairs(knownIDs) do
                 local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                 if info then
-                    local sid = ResolveInfoSpellID(info)
-                    if sid and sid > 0 then
-                        local skip = filterPassives and IsTrulyPassive(sid)
-                        if not skip then
-                            known[sid] = true
+                    local primarySid = ResolveInfoSpellID(info)
+                    local skip = filterPassives and primarySid and IsTrulyPassive(primarySid)
+                    if not skip then
+                        -- Store ALL related spell IDs so reconcile can match
+                        -- regardless of whether the bar stores the base ID,
+                        -- override ID, or a linked ID.
+                        if primarySid and primarySid > 0 then
+                            known[primarySid] = true
+                        end
+                        if info.spellID and info.spellID > 0 then
+                            known[info.spellID] = true
+                        end
+                        if info.overrideSpellID and info.overrideSpellID > 0 then
+                            known[info.overrideSpellID] = true
+                        end
+                        if info.linkedSpellIDs then
+                            for _, lsid in ipairs(info.linkedSpellIDs) do
+                                if lsid and lsid > 0 then
+                                    known[lsid] = true
+                                end
+                            end
                         end
                     end
                 end
@@ -6241,7 +6257,8 @@ local function CDMFirstLoginCapture()
         end
     end
 
-    p._capturedOnce = true
+    p._capturedOnce = nil  -- no longer per-profile
+    ECME.db.sv._capturedOnce = true
 end
 
 -------------------------------------------------------------------------------
@@ -6436,6 +6453,25 @@ end
 function ECME:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUICooldownManagerDB", DEFAULTS, true)
 
+    -- Migration: move _capturedOnce from per-profile to per-install (SV root).
+    local sv = self.db.sv
+    if not sv._capturedOnce then
+        if sv.profiles then
+            for _, prof in pairs(sv.profiles) do
+                if type(prof) == "table" and prof._capturedOnce then
+                    sv._capturedOnce = true
+                    break
+                end
+            end
+        end
+    end
+    -- Strip the old per-profile flag from all profiles
+    if sv.profiles then
+        for _, prof in pairs(sv.profiles) do
+            if type(prof) == "table" then prof._capturedOnce = nil end
+        end
+    end
+
     -- Save spec profile before StripDefaults runs on logout
     EllesmereUI.Lite.RegisterPreLogout(function()
         local p = ECME.db and ECME.db.profile
@@ -6469,8 +6505,8 @@ function ECME:OnInitialize()
         end
     end
 
-    -- Check if we need first-login capture
-    self._needsCapture = not self.db.profile._capturedOnce
+    -- Check if we need first-login capture (per-install flag on SV root)
+    self._needsCapture = not self.db.sv._capturedOnce
 
     -- Expose for options
     _G._ECME_AceDB = self.db
@@ -6748,7 +6784,10 @@ local function TalentAwareReconcile()
 
         -- Phase 3: clean up dormant entries for spells that are no longer in
         -- any CDM category at all (removed from game / different class)
-        -- Keep dormant entries for spells that exist but are just unlearned
+        -- Keep dormant entries for spells that exist but are just unlearned.
+        -- Store ALL related IDs (base, override, linked) so a spell stored
+        -- by its base ID is still recognized even if the viewer resolves it
+        -- to an override ID.
         local allSpellIDs = {}
         if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
             for cat = 0, 3 do
@@ -6757,9 +6796,18 @@ local function TalentAwareReconcile()
                     for _, cdID in ipairs(allIDs) do
                         local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                         if info then
-                            local sid = ResolveInfoSpellID(info)
-                            if sid and sid > 0 then
-                                allSpellIDs[sid] = true
+                            if info.spellID and info.spellID > 0 then
+                                allSpellIDs[info.spellID] = true
+                            end
+                            if info.overrideSpellID and info.overrideSpellID > 0 then
+                                allSpellIDs[info.overrideSpellID] = true
+                            end
+                            if info.linkedSpellIDs then
+                                for _, lsid in ipairs(info.linkedSpellIDs) do
+                                    if lsid and lsid > 0 then
+                                        allSpellIDs[lsid] = true
+                                    end
+                                end
                             end
                         end
                     end
@@ -6783,14 +6831,6 @@ local function TalentAwareReconcile()
                 barData.trackedSpells, barData.dormantSpells =
                     ReconcileSpellList(barData.trackedSpells, barData.dormantSpells, barData.removedSpells)
             end
-        elseif MAIN_BAR_KEYS[barData.key] then
-            -- Buffs bar: use the same dormant/returning approach as other bars.
-            -- Our DB is authoritative -- never re-read from the viewer to
-            -- add or remove spells after the initial snapshot.
-            if barData.trackedSpells and #barData.trackedSpells > 0 then
-                barData.trackedSpells, barData.dormantSpells =
-                    ReconcileSpellList(barData.trackedSpells, barData.dormantSpells, barData.removedSpells)
-            end
         elseif TALENT_AWARE_BAR_TYPES[barData.barType] then
             -- Custom cooldown/utility bars: reconcile customSpells
             if barData.customSpells and #barData.customSpells > 0 then
@@ -6798,6 +6838,9 @@ local function TalentAwareReconcile()
                     ReconcileSpellList(barData.customSpells, barData.dormantSpells, nil)
             end
         end
+        -- Buffs bar (and other MAIN_BAR_KEYS not in TALENT_AWARE_BAR_TYPES):
+        -- skip entirely. Buff/proc spells are not talent-dependent and should
+        -- never be moved to dormant on talent or level-up events.
     end
 
     BuildAllCDMBars()

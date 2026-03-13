@@ -5101,10 +5101,31 @@ function EAB:OnInitialize()
 
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIActionBarsDB", defaults, true)
 
-    -- Mark whether we need to capture Blizzard layout on first login.
+    -- Migration: move _capturedOnce from per-profile to per-install (SV root).
+    -- Check all profiles for the old flag and promote it.
+    local sv = self.db.sv
+    if not sv._capturedOnce then
+        if sv.profiles then
+            for _, prof in pairs(sv.profiles) do
+                if type(prof) == "table" and prof._capturedOnce then
+                    sv._capturedOnce = true
+                    break
+                end
+            end
+        end
+    end
+    -- Strip the old per-profile flag from all profiles
+    if sv.profiles then
+        for _, prof in pairs(sv.profiles) do
+            if type(prof) == "table" then prof._capturedOnce = nil end
+        end
+    end
+
+    -- Mark whether we need to capture Blizzard layout on first install.
     -- The actual capture is deferred to PLAYER_ENTERING_WORLD when
     -- Edit Mode has fully applied bar positions/sizes.
-    self._needsCapture = not self.db.profile._capturedOnce
+    -- Uses the per-install flag on the SV root, not per-profile.
+    self._needsCapture = not sv._capturedOnce
 
     -- Migration: convert old settings formats if needed
     local p = self.db.profile
@@ -5183,8 +5204,8 @@ function EAB:OnFirstLogin()
         end
     end
 
-    -- Mark capture as done so we never read Edit Mode again
-    self.db.profile._capturedOnce = true
+    -- Mark capture as done so we never read Edit Mode again (per-install flag)
+    self.db.sv._capturedOnce = true
     self._needsCapture = false
 
     -- Stance bar visibility must always be "Always" â€” it manages its own

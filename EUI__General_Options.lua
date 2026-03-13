@@ -2902,6 +2902,39 @@ initFrame:SetScript("OnEvent", function(self)
         local EG = EllesmereUI.ELLESMERE_GREEN
         local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\"
 
+        -- Safety net: verify the active profile matches the current spec
+        -- assignment. If the user opens settings while on the wrong profile
+        -- (e.g. spec info was unavailable at login), correct it now.
+        do
+            local si = GetSpecialization and GetSpecialization() or 0
+            local sid = si and si > 0 and GetSpecializationInfo(si) or nil
+            if sid then
+                local assigned = EllesmereUI.GetSpecProfile(sid)
+                if assigned then
+                    local current = EllesmereUI.GetActiveProfileName()
+                    if assigned ~= current then
+                        local _, profiles = EllesmereUI.GetProfileList()
+                        if profiles and profiles[assigned] then
+                            -- Save current state before switching
+                            EllesmereUI.AutoSaveActiveProfile()
+                            local fontWillChange = EllesmereUI.ProfileChangesFont(profiles[assigned])
+                            EllesmereUI.SwitchProfile(assigned)
+                            EllesmereUI.RefreshAllAddons()
+                            if fontWillChange then
+                                EllesmereUI:ShowConfirmPopup({
+                                    title       = "Reload Required",
+                                    message     = "Font changed. A UI reload is needed to apply the new font.",
+                                    confirmText = "Reload Now",
+                                    cancelText  = "Later",
+                                    onConfirm   = function() ReloadUI() end,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         parent._showRowDivider = false
 
         -- Button colours matching dropdown border style

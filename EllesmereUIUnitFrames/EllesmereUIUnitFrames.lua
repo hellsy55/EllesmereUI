@@ -787,10 +787,10 @@ local function EUI_IsSmartPowerPercent()
     if cls == "PRIEST" or cls == "SHAMAN" or cls == "MONK" then
         return true
     end
-    -- Paladin: only Holy
+    -- Paladin: Holy and Protection (mana-based specs)
     if cls == "PALADIN" then
         local spec = GetSpecialization()
-        return spec == 1  -- Holy
+        return spec == 1 or spec == 2  -- Holy, Protection
     end
     -- Mage: only Arcane
     if cls == "MAGE" then
