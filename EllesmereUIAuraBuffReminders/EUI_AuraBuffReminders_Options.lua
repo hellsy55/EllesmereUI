@@ -409,6 +409,19 @@ initFrame:SetScript("OnEvent", function(self)
         local sf = EllesmereUI._scrollFrame
         if not sf then return end
 
+        local child = sf.GetScrollChild and sf:GetScrollChild()
+        if child and m.target and m.target.GetTop and child.GetTop then
+            local targetTop = m.target:GetTop()
+            local childTop = child:GetTop()
+            if targetTop and childTop then
+                local scrollPos = math.max(0, childTop - targetTop - 40)
+                EllesmereUI.SmoothScrollTo(scrollPos)
+                C_Timer.After(0.15, function() EABRPlaySettingGlow(m.target) end)
+                return
+            end
+        end
+
+        -- Fallback for layouts where the scroll child isn't ready yet.
         local _, _, _, _, headerY = m.section:GetPoint(1)
         if headerY then
             local scrollPos = math.max(0, math.abs(headerY) - 40)
