@@ -5371,8 +5371,7 @@ BuildAllCDMBars = function()
         barDataByKey[barData.key] = barData
         BuildCDMBar(i)
         RefreshCDMIconAppearance(barData.key)
-        -- Clear stale per-character state on reused icon frames so the first
-        -- update tick after a character switch forces a full texture refresh.
+        -- Reset cached icon state so textures re-evaluate after a character switch
         local icons = cdmBarIcons[barData.key]
         if icons then
             for _, icon in ipairs(icons) do
@@ -7178,8 +7177,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
-        -- Wipe spell icon cache on world entry to prevent cross-character
-        -- texture contamination when sharing profiles between alts.
         wipe(_spellIconCache)
         -- Validate spec on every zone-in (catches auto spec swaps, login, etc.)
         C_Timer.After(0.5, function()
