@@ -4445,12 +4445,20 @@ local function UpdateTrackedBarIcons(barKey)
                      or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID])
                 or nil
             local blizzBuffChildTexSet = false
-            if blizzBuffChild and not overrideTex and blizzBuffChild.Icon and blizzBuffChild.Icon.GetTexture then
-                local childTex = blizzBuffChild.Icon:GetTexture()
-                if childTex then
-                    ourIcon._tex:SetTexture(childTex)
-                    ourIcon._lastTex = 0
-                    blizzBuffChildTexSet = true
+            if blizzBuffChild and not overrideTex then
+                -- BuffIcon children have Icon as a Texture widget directly.
+                -- BuffBar children wrap it: Icon is a Frame, Icon.Icon is the Texture.
+                local iconWidget = blizzBuffChild.Icon
+                if iconWidget and not iconWidget.GetTexture and iconWidget.Icon then
+                    iconWidget = iconWidget.Icon
+                end
+                if iconWidget and iconWidget.GetTexture then
+                    local childTex = iconWidget:GetTexture()
+                    if childTex then
+                        ourIcon._tex:SetTexture(childTex)
+                        ourIcon._lastTex = 0
+                        blizzBuffChildTexSet = true
+                    end
                 end
             end
             local effectiveTex = overrideTex or texID
@@ -4710,6 +4718,7 @@ local function UpdateAllCDMBars(dt)
             local vName = _cdmViewerNames[vi]
             local vf = _G[vName]
             local isBuffViewer = (vi == 3 or vi == 4)
+            local isBuffIconViewer = (vi == 3)
             if vf then
                 -- Load children into reusable buffer with a single GetChildren call
                 local nChildren = vf:GetNumChildren()
@@ -4745,6 +4754,7 @@ local function UpdateAllCDMBars(dt)
                                 ch._ecmeResolvedSid = nil
                                 ch._ecmeBaseSpellID = nil
                                 ch._ecmeOverrideSid = nil
+                                ch._ecmeLinkedSpellIDs = nil
                             end
                             if not resolvedSid then
                                 local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
@@ -4757,6 +4767,17 @@ local function UpdateAllCDMBars(dt)
                                     ch._ecmeResolvedSid = resolvedSid
                                     ch._ecmeCachedCdID = cdID
                                     ch._ecmeCachedAuraInstID = ch.auraInstanceID
+                                    -- Cache linkedSpellIDs for spells like Eclipse that
+                                    -- have multiple variant auras under a single CDM child.
+                                    -- Static property — only needs to be set once.
+                                    -- Only cache when values are clean (non-secret) to
+                                    -- avoid taint from combat API calls after /reload.
+                                    if info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                                        local firstID = info.linkedSpellIDs[1]
+                                        if not (issecretvalue and issecretvalue(firstID)) then
+                                            ch._ecmeLinkedSpellIDs = info.linkedSpellIDs
+                                        end
+                                    end
                                 end
                             else
                                 -- Refresh override from lightweight API (returns
@@ -4799,7 +4820,39 @@ local function UpdateAllCDMBars(dt)
                                 -- Buff-viewer-only child cache (for IsShown fallback on
                                 -- summon-type spells that have no aura)
                                 if isBuffViewer then
-                                    _tickBlizzBuffChildCache[resolvedSid] = ch
+                                    -- Prefer BuffIcon children (vi=3) over BuffBar
+                                    -- children (vi=4): BuffIcon's Icon is a Texture
+                                    -- widget with GetTexture(), while BuffBar's Icon
+                                    -- is a Frame wrapper.  Since BuffIcon is processed
+                                    -- first, BuffBar only stores when no entry exists.
+                                    if isBuffIconViewer or not _tickBlizzBuffChildCache[resolvedSid] then
+                                        _tickBlizzBuffChildCache[resolvedSid] = ch
+                                    end
+                                    -- Linked-spell cache: for spells like Eclipse that
+                                    -- have multiple variant auras (Lunar/Solar) under a
+                                    -- single CDM child, the tracked spell ID can be any
+                                    -- variant depending on when snapshot/reconciliation
+                                    -- ran.  Store the child at the base spellID and every
+                                    -- linkedSpellID so it can always be found.
+                                    local linked = ch._ecmeLinkedSpellIDs
+                                    if linked then
+                                        local base = baseSpellID
+                                        if base and base > 0 and base ~= resolvedSid then
+                                            if isBuffIconViewer or not _tickBlizzBuffChildCache[base] then
+                                                _tickBlizzBuffChildCache[base] = ch
+                                            end
+                                            _tickBlizzAllChildCache[base] = ch
+                                        end
+                                        for li = 1, #linked do
+                                            local lsid = linked[li]
+                                            if lsid and lsid > 0 and lsid ~= resolvedSid then
+                                                if isBuffIconViewer or not _tickBlizzBuffChildCache[lsid] then
+                                                    _tickBlizzBuffChildCache[lsid] = ch
+                                                end
+                                                _tickBlizzAllChildCache[lsid] = ch
+                                            end
+                                        end
+                                    end
                                 else
                                     -- CD/utility viewer child cache: used by CD bars to
                                     -- avoid picking up the buff viewer's aura state for
@@ -4815,7 +4868,9 @@ local function UpdateAllCDMBars(dt)
                                 local correctSid = _cdIDToCorrectSID[cdID]
                                 if correctSid and resolvedSid and correctSid ~= resolvedSid then
                                     _tickBlizzAllChildCache[correctSid] = ch
-                                    _tickBlizzBuffChildCache[correctSid] = ch
+                                    if isBuffIconViewer or not _tickBlizzBuffChildCache[correctSid] then
+                                        _tickBlizzBuffChildCache[correctSid] = ch
+                                    end
                                     if ch.wasSetFromAura == true or ch.auraInstanceID ~= nil then
                                         local totemSlot = ch.preferredTotemUpdateSlot
                                         local totemOk = true
@@ -4853,6 +4908,21 @@ local function UpdateAllCDMBars(dt)
                                 end
                                 if totemValid and resolvedSid and resolvedSid > 0 then
                                     _tickBlizzActiveCache[resolvedSid] = true
+                                    -- Also mark linked spell IDs as active so
+                                    -- hideBuffsWhenInactive finds them regardless
+                                    -- of which variant the tracked spell resolved to.
+                                    local linked = ch._ecmeLinkedSpellIDs
+                                    if linked then
+                                        if baseSpellID and baseSpellID > 0 then
+                                            _tickBlizzActiveCache[baseSpellID] = true
+                                        end
+                                        for li = 1, #linked do
+                                            local lsid = linked[li]
+                                            if lsid and lsid > 0 then
+                                                _tickBlizzActiveCache[lsid] = true
+                                            end
+                                        end
+                                    end
                                 end
                             end
                             -- Hook the child's Cooldown widget to capture DurationObjects
