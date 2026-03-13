@@ -2206,9 +2206,129 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- "Custom Item" sub-menu for misc bars: on-use bag items
-        -- Only builds the flyout when the user hovers; bag scan is deferred.
+        -- Bag scan starts immediately when the picker opens so tooltip data
+        -- can cache in the background; the sub-menu refreshes live as items load.
         local _customTrackingSub
+        local _cachedBagItems       -- cached scan results (populated async)
+        local _bagScanComplete = false
         if isMiscBar then
+            -- Scan bags for on-use items with real cooldowns
+            -- Blacklist: items that pass filters but should not appear
+            local BAG_ITEM_BLACKLIST = {
+                [234389] = true, -- Gallagio Loyalty Rewards Card: Silver
+                [234390] = true, -- Gallagio Loyalty Rewards Card: Gold
+                [249699] = true, -- Shadowguard Translocator
+            }
+            local MIN_CD_SEC = 30
+            local MAX_CD_SEC = 660  -- 11 minutes
+
+            -- Collect candidate itemIDs from bags (fast, no tooltip needed)
+            local _candidateItems = {}
+            do
+                local seen = {}
+                for bag = 0, 4 do
+                    local numSlots = C_Container.GetContainerNumSlots(bag)
+                    for slot = 1, numSlots do
+                        local info = C_Container.GetContainerItemInfo(bag, slot)
+                        if info and info.itemID and not seen[info.itemID] and not BAG_ITEM_BLACKLIST[info.itemID] then
+                            seen[info.itemID] = true
+                            local invType = C_Item.GetItemInventoryTypeByID(info.itemID)
+                            local isTrinket = invType and invType == Enum.InventoryType.IndexTrinketType
+                            if not isTrinket then
+                                local spellName, spellID = C_Item.GetItemSpell(info.itemID)
+                                if spellName and spellID then
+                                    _candidateItems[#_candidateItems + 1] = {
+                                        itemID = info.itemID,
+                                        spellName = spellName,
+                                        spellID = spellID,
+                                    }
+                                    -- Pre-request item data so tooltip info caches
+                                    C_Item.RequestLoadItemDataByID(info.itemID)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Resolve candidates into final results using tooltip cooldown data.
+            -- Returns true if all candidates have been resolved.
+            local function ResolveBagItems()
+                local results = {}
+                local allResolved = true
+                for _, cand in ipairs(_candidateItems) do
+                    local tipData = C_TooltipInfo.GetItemByID(cand.itemID)
+                    if tipData and tipData.lines then
+                        local cdSec = nil
+                        for _, line in ipairs(tipData.lines) do
+                            local text = line.leftText
+                            if text and text:find("Cooldown%)") then
+                                local cdStr = text:match(".*%((.+Cooldown)%)")
+                                if cdStr then
+                                    local totalSec = 0
+                                    for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
+                                        local n = tonumber(num)
+                                        if n then
+                                            local u = unit:lower()
+                                            if u == "min" then totalSec = totalSec + n * 60
+                                            elseif u == "sec" then totalSec = totalSec + n
+                                            elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                                            end
+                                        end
+                                    end
+                                    if totalSec > 0 then cdSec = totalSec end
+                                    break
+                                end
+                            end
+                        end
+                        if cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC then
+                            local tex = C_Item.GetItemIconByID(cand.itemID)
+                            local itemName = C_Item.GetItemNameByID(cand.itemID)
+                            results[#results + 1] = {
+                                itemID = cand.itemID,
+                                name = itemName or cand.spellName,
+                                icon = tex,
+                                spellID = cand.spellID,
+                            }
+                        end
+                        -- Item data loaded (even if it didn't qualify) -- resolved
+                    else
+                        allResolved = false
+                    end
+                end
+                table.sort(results, function(a, b) return a.name < b.name end)
+                _cachedBagItems = results
+                _bagScanComplete = allResolved
+                return allResolved
+            end
+
+            -- Kick off the first resolve immediately (will get whatever is cached)
+            ResolveBagItems()
+
+            -- If not all resolved, poll until done (tooltip data loads async)
+            if not _bagScanComplete then
+                local attempts = 0
+                local ticker
+                ticker = C_Timer.NewTicker(0.2, function()
+                    attempts = attempts + 1
+                    local done = ResolveBagItems()
+                    if done or attempts >= 25 then
+                        if ticker then ticker:Cancel() end
+                        _bagScanComplete = true
+                        -- If the sub-menu is already visible, rebuild it live
+                        if _customTrackingSub and _customTrackingSub:IsShown() then
+                            _customTrackingSub._needsRebuild = true
+                        end
+                    elseif _customTrackingSub and _customTrackingSub:IsShown() then
+                        -- Rebuild live as more items resolve
+                        _customTrackingSub._needsRebuild = true
+                    end
+                end)
+                -- Clean up ticker when menu closes
+                menu:HookScript("OnHide", function()
+                    if ticker then ticker:Cancel(); ticker = nil end
+                end)
+            end
             local ctItem = CreateFrame("Button", nil, inner)
             ctItem:SetHeight(ITEM_H)
             ctItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -2231,85 +2351,9 @@ initFrame:SetScript("OnEvent", function(self)
             ctArrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
             ctArrow:SetAlpha(0.7)
 
-            -- Scan bags for on-use items with real cooldowns (only called when sub-menu opens)
-            -- Blacklist: items that pass filters but should not appear
-            local BAG_ITEM_BLACKLIST = {
-                [234389] = true, -- Gallagio Loyalty Rewards Card: Silver
-                [234390] = true, -- Gallagio Loyalty Rewards Card: Gold
-                [249699] = true, -- Shadowguard Translocator
-            }
-            local function ScanBagOnUseItems()
-                local MIN_CD_SEC = 30
-                local MAX_CD_SEC = 660  -- 11 minutes
-                local results = {}
-                local seen = {}
-                for bag = 0, 4 do
-                    local numSlots = C_Container.GetContainerNumSlots(bag)
-                    for slot = 1, numSlots do
-                        local info = C_Container.GetContainerItemInfo(bag, slot)
-                        if info and info.itemID and not seen[info.itemID] and not BAG_ITEM_BLACKLIST[info.itemID] then
-                            -- Skip trinkets (handled by trinket slot entries)
-                            local invType = C_Item.GetItemInventoryTypeByID(info.itemID)
-                            local isTrinket = invType and invType == Enum.InventoryType.IndexTrinketType
-                            if isTrinket then
-                                seen[info.itemID] = true
-                            end
-                            if not isTrinket then
-                            local spellName, spellID = C_Item.GetItemSpell(info.itemID)
-                            if spellName and spellID then
-                                -- Parse tooltip for cooldown duration and filter by range
-                                local cdSec = nil
-                                local tipData = C_TooltipInfo.GetItemByID(info.itemID)
-                                if tipData and tipData.lines then
-                                    for _, line in ipairs(tipData.lines) do
-                                        local text = line.leftText
-                                        if text and text:find("Cooldown%)") then
-                                            -- Extract everything between the last "(" before "Cooldown)" and "Cooldown)"
-                                            local cdStr = text:match(".*%((.+Cooldown)%)")
-                                            if cdStr then
-                                                local totalSec = 0
-                                                for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
-                                                    local n = tonumber(num)
-                                                    if n then
-                                                        local u = unit:lower()
-                                                        if u == "min" then totalSec = totalSec + n * 60
-                                                        elseif u == "sec" then totalSec = totalSec + n
-                                                        elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
-                                                        end
-                                                    end
-                                                end
-                                                if totalSec > 0 then cdSec = totalSec end
-                                                break
-                                            end
-                                        end
-                                    end
-                                end
-                                if cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC then
-                                    seen[info.itemID] = true
-                                    local tex = C_Item.GetItemIconByID(info.itemID)
-                                    local itemName = C_Item.GetItemNameByID(info.itemID)
-                                    results[#results + 1] = {
-                                        itemID = info.itemID,
-                                        name = itemName or spellName,
-                                        icon = tex,
-                                        spellID = spellID,
-                                    }
-                                end
-                            end
-                            end -- not isTrinket
-                        end
-                    end
-                end
-                table.sort(results, function(a, b) return a.name < b.name end)
-                return results
-            end
-
             local function ShowCustomTrackingSub()
-                if _customTrackingSub and _customTrackingSub:IsShown() then return end
-
-                local items = ScanBagOnUseItems()
-
                 -- Filter out items already tracked on this bar
+                local items = _cachedBagItems or {}
                 local alreadyTracked = {}
                 if bd and bd.customSpells then
                     for _, sid in ipairs(bd.customSpells) do
@@ -2323,12 +2367,17 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
+                -- Track the last filtered count so we know when to rebuild
+                local prevCount = _customTrackingSub and _customTrackingSub._itemCount or -1
+
                 if not _customTrackingSub then
                     _customTrackingSub = CreateFrame("Frame", nil, UIParent)
                     _customTrackingSub:SetFrameStrata("FULLSCREEN_DIALOG")
                     _customTrackingSub:SetFrameLevel(menu:GetFrameLevel() + 5)
                     _customTrackingSub:SetClampedToScreen(true)
                     _customTrackingSub:EnableMouse(true)
+                elseif _customTrackingSub:IsShown() and #filtered == prevCount and not _customTrackingSub._needsRebuild then
+                    return -- already showing with same items
                 else
                     -- Clear previous children
                     for _, child in ipairs({_customTrackingSub:GetChildren()}) do
@@ -2338,6 +2387,9 @@ initFrame:SetScript("OnEvent", function(self)
                         if rgn.Hide then rgn:Hide() end
                     end
                 end
+
+                _customTrackingSub._itemCount = #filtered
+                _customTrackingSub._needsRebuild = false
 
                 local subW = 220
                 local SUB_ITEM_H = 26
@@ -2359,11 +2411,12 @@ initFrame:SetScript("OnEvent", function(self)
                 local subH = 4
 
                 if #filtered == 0 then
+                    local loadingText = (not _bagScanComplete) and "Loading items..." or "No on-use items in bags"
                     local emptyLbl = subInner:CreateFontString(nil, "OVERLAY")
                     emptyLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
                     emptyLbl:SetPoint("TOPLEFT", subInner, "TOPLEFT", 10, -subH - 4)
                     emptyLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.6)
-                    emptyLbl:SetText("No on-use items in bags")
+                    emptyLbl:SetText(loadingText)
                     subH = subH + SUB_ITEM_H
                 else
                     for _, it in ipairs(filtered) do
@@ -2445,6 +2498,20 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end)
                 end)
+                -- Live-rebuild when async item data finishes loading
+                if not _bagScanComplete then
+                    _customTrackingSub:SetScript("OnUpdate", function(self)
+                        if self._needsRebuild then
+                            ShowCustomTrackingSub()
+                        end
+                        -- Stop polling once scan is done
+                        if _bagScanComplete then
+                            self:SetScript("OnUpdate", nil)
+                        end
+                    end)
+                else
+                    _customTrackingSub:SetScript("OnUpdate", nil)
+                end
                 _customTrackingSub:Show()
             end
 

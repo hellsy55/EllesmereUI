@@ -6335,6 +6335,7 @@ local _blizzMovablePendingOOC = {} -- deferred actions for when combat ends
 local function SetupBlizzardMovableFrame(barKey)
     local holder = CreateFrame("Frame", "EllesmereEAB_" .. barKey, UIParent)
     holder:SetClampedToScreen(true)
+    holder:EnableMouse(false)
     blizzMovableHolders[barKey] = holder
 
     -- Holder uses the fixed overlay size (only affects unlock mode mover)
@@ -6448,14 +6449,18 @@ local function SetupBlizzardMovableFrame(barKey)
         _recentering = false
     end
 
-    -- Disable ExtraAbilityContainer layout repositioning only
-    -- We keep OnShow intact so the frame appears naturally when extra actions become available.
+    -- Disable ExtraAbilityContainer layout repositioning and scripts to prevent
+    -- the container from absorbing mouse events when no extra action is active.
     if blizzContainer and barKey == "ExtraActionButton" then
         blizzContainer.ignoreInLayout = true
         if blizzContainer.SetIsLayoutFrame then
             blizzContainer:SetIsLayoutFrame(false)
         end
         blizzContainer.IsLayoutFrame = nil
+        blizzContainer:SetScript("OnShow", nil)
+        blizzContainer:SetScript("OnUpdate", nil)
+        blizzContainer.OnUpdate = nil
+        blizzContainer:EnableMouse(false)
     end
 
     -- For encounter bar: mark as user-placed so Blizzard doesn't reposition,
