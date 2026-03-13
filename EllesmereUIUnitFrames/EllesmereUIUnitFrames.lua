@@ -2264,7 +2264,8 @@ local function CreateCastBar(frame, unit, settings)
     PP.Size(castbarBg, totalWidth, settings.castbarHeight or 14)
 
     local ppPos2 = settings.powerPosition or "below"
-    local anchorFrame = (ppPos2 == "below" and frame.Power) or frame.Health
+    local ppHasHeight = (settings.powerHeight or 0) > 0
+    local anchorFrame = (ppPos2 == "below" and ppHasHeight and frame.Power) or frame.Health
     local pcbX = 0
     local pcbY = 0
     if unit == "player" then
@@ -2400,29 +2401,24 @@ local function SetupShowOnCastBar(frame, unit)
     local castbarBg = castbar:GetParent()
     local iconFrame = castbar._iconFrame
 
-    -- Read per-unit "hide while not casting" setting.
-    -- When true, the castbar bg hides when nothing is being cast (player/focus default).
-    -- When false, the castbar bg stays visible as part of the frame layout (target default).
-    local settings = GetSettingsForUnit(unit)
-    local hideWhenInactive = true
-    if settings then
-        local v = settings.castbarHideWhenInactive
-        if v == nil then
-            -- Legacy fallback: target always showed bg, others hid it
-            hideWhenInactive = (unit ~= "target")
-        else
-            hideWhenInactive = v
-        end
+    -- Read the hide-when-inactive flag dynamically so closures always
+    -- reflect the current setting rather than a value captured at
+    -- frame-creation time.
+    local function shouldHideWhenInactive()
+        local s = GetSettingsForUnit(unit)
+        if not s then return (unit ~= "target") end
+        local v = s.castbarHideWhenInactive
+        if v == nil then return (unit ~= "target") end
+        return v
     end
-    local alwaysShowBg = not hideWhenInactive
 
     castbar:Hide()
     if iconFrame then iconFrame:Hide() end
     if castbarBg then
-        if alwaysShowBg then
-            castbarBg:Show()
-        else
+        if shouldHideWhenInactive() then
             castbarBg:Hide()
+        else
+            castbarBg:Show()
         end
     end
 
@@ -2455,7 +2451,8 @@ local function SetupShowOnCastBar(frame, unit)
     local function dismissCastBar(self)
         self:Hide()
         if self._iconFrame then self._iconFrame:Hide() end
-        if not alwaysShowBg then
+        -- Read setting dynamically so changes take effect without a reload.
+        if shouldHideWhenInactive() then
             local bg = self:GetParent()
             if bg then bg:Hide() end
         end
@@ -2588,31 +2585,30 @@ local function CreateTargetAuras(frame, unit)
 
     local maxDebuffs = (settings and settings.maxDebuffs) or 28
 
-    local debuffs = CreateFrame("Frame", nil, frame)
-    local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(
-        settings and settings.debuffAnchor or "bottomleft",
-        settings and settings.debuffGrowth or "auto"
-    )
-    local debuffCbOff = 0
-    local dAnc = settings.debuffAnchor or "bottomleft"
-    if dAnc == "bottomleft" or dAnc == "bottomright" then
-        debuffCbOff = cbOffset
+    local dAnc = settings and settings.debuffAnchor or "bottomleft"
+    if dAnc ~= "none" then
+        local debuffs = CreateFrame("Frame", nil, frame)
+        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings and settings.debuffGrowth or "auto")
+        local debuffCbOff = 0
+        if dAnc == "bottomleft" or dAnc == "bottomright" then
+            debuffCbOff = cbOffset
+        end
+        debuffs:SetPoint(dia, frame, dfp, dox * gap, doy * gap + debuffCbOff)
+        debuffs:SetSize(containerWidth, auraSize)
+        debuffs.size = auraSize
+        debuffs.spacing = gap
+        debuffs.num = maxDebuffs
+        debuffs["size-x"] = perRow
+        debuffs.initialAnchor = dia
+        debuffs.growthX = dgx
+        debuffs.growthY = dgy
+        debuffs.filter = "HARMFUL"
+        debuffs.PostCreateButton = SetupAuraIcon
+        if settings and settings.onlyPlayerDebuffs then
+            debuffs.onlyShowPlayer = true
+        end
+        frame.Debuffs = debuffs
     end
-    debuffs:SetPoint(dia, frame, dfp, dox * gap, doy * gap + debuffCbOff)
-    debuffs:SetSize(containerWidth, auraSize)
-    debuffs.size = auraSize
-    debuffs.spacing = gap
-    debuffs.num = maxDebuffs
-    debuffs["size-x"] = perRow
-    debuffs.initialAnchor = dia
-    debuffs.growthX = dgx
-    debuffs.growthY = dgy
-    debuffs.filter = "HARMFUL"
-    debuffs.PostCreateButton = SetupAuraIcon
-    if settings and settings.onlyPlayerDebuffs then
-        debuffs.onlyShowPlayer = true
-    end
-    frame.Debuffs = debuffs
 end
 
 local function StyleFullFrame(frame, unit)
@@ -4400,7 +4396,7 @@ local function ReloadFrames()
                                 castbarBg:ClearAllPoints()
                                 local pBtbPos = settings.btbPosition or "bottom"
                                 local pBtbVisible = (settings.bottomTextBar and pBtbPos == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
-                                local anchorFrame = pBtbVisible and frame.BottomTextBar or (ppIsAtt and frame.Power) or frame.Health
+                                local anchorFrame = pBtbVisible and frame.BottomTextBar or (ppIsAtt and (settings.powerHeight or 0) > 0 and frame.Power) or frame.Health
                                 local pCbXOff = pBtbVisible and 0 or castBarOffset
                                 -- Player castbar is always locked to frame ? no x/y offsets
                                 castbarBg:SetPoint("TOP", anchorFrame, "BOTTOM", pCbXOff, 0)
@@ -4703,7 +4699,7 @@ local function ReloadFrames()
                     end
 
                     -- Bottom Text Bar update (target) ? must come before castbar so castbar can anchor to it
-                    local tPpBtbAnchor = (ppIsAtt and frame.Power) or frame.Health
+                    local tPpBtbAnchor = (ppIsAtt and (settings.powerHeight or 0) > 0 and frame.Power) or frame.Health
                     if settings.bottomTextBar then
                         local btbPos2 = settings.btbPosition or "bottom"
                         local btbIsAtt = (btbPos2 == "top" or btbPos2 == "bottom")

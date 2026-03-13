@@ -1959,6 +1959,46 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdatePowerThreshSwDis)
             UpdatePowerThreshSwDis()
         end
+        -- Inline cog on Threshold % for partial coloring direction toggle
+        do
+            local rgn = powerThreshRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Threshold Coloring",
+                rows = {
+                    { type = "toggle", label = "Reverse Threshold Fill Color",
+                      get = function() local p = DB(); return p and p.primary.thresholdPartialOnly end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.primary.thresholdPartialOnly = v; RefreshPower()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, cogShow)
+            local cogDis = CreateFrame("Frame", nil, rgn)
+            cogDis:SetAllPoints(cogBtn)
+            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
+            cogDis:EnableMouse(true)
+            cogDis:SetScript("OnEnter", function()
+                if noPrimaryPower then
+                    EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(SPEC_DIS))
+                else
+                    EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Threshold Color first"))
+                end
+            end)
+            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdatePowerThreshCogDis()
+                if noPrimaryPower then cogDis:Show(); cogBtn:SetAlpha(0.15); return end
+                local p = DB()
+                if p and (not p.primary.enabled or not p.primary.thresholdEnabled) then
+                    cogDis:Show(); cogBtn:SetAlpha(0.15)
+                else
+                    cogDis:Hide(); cogBtn:SetAlpha(0.4)
+                end
+            end
+            cogBtn:HookScript("OnShow", UpdatePowerThreshCogDis)
+            EllesmereUI.RegisterWidgetRefresh(UpdatePowerThreshCogDis)
+            UpdatePowerThreshCogDis()
+        end
 
         -- Row 6: Anchored To | Anchor Position (inline DIRECTIONS cog)
         local powerAnchorRow

@@ -137,14 +137,12 @@ local function BuildToggleControl(parent, frameLevel, getValue, setValue, opts)
     local RealPP = EllesmereUI.PP
 
     local TOGGLE_W, TOGGLE_H = 40, 20
-    local KNOB_SZ  = 16
     local KNOB_PAD = 2
 
     if opts.sizeRatio and opts.sizeRatio ~= 1 then
         local r = opts.sizeRatio
         TOGGLE_W = math.floor(TOGGLE_W * r + 0.5)
         TOGGLE_H = math.floor(TOGGLE_H * r + 0.5)
-        KNOB_SZ  = TOGGLE_H - KNOB_PAD * 2
     end
 
     local offTR = opts.offColors and opts.offColors[1] or TG.OFF_R
@@ -169,23 +167,64 @@ local function BuildToggleControl(parent, frameLevel, getValue, setValue, opts)
     DisablePixelSnap(tBg)
     tBg:SetAllPoints()
 
+    -- Use PanelPP for knob offsets: SetPoint coordinates are relative to
+    -- the toggle frame which lives inside the panel (panel coordinate space).
+    local PanelPP = EllesmereUI.PanelPP or RealPP
+    local snappedPad = PanelPP.Scale(KNOB_PAD)
+
     local knob = toggle:CreateTexture(nil, "ARTWORK")
     DisablePixelSnap(knob)
     knob:SetColorTexture(offKR, offKG, offKB, offKA)
-    RealPP.Size(knob, KNOB_SZ, KNOB_SZ)
-    RealPP.Point(knob, "LEFT", toggle, "LEFT", KNOB_PAD, 0)
 
-    local POS_OFF = KNOB_PAD
-    local POS_ON  = TOGGLE_W - KNOB_SZ - KNOB_PAD
+    -- Two-point vertical anchoring: knob top/bottom are always exactly
+    -- snappedPad from the track edges. No independent size calculation.
+    -- Horizontal: set width explicitly from the snapped track height
+    -- minus the two pads so the knob is square.
+    local snappedTrackH = PanelPP.Scale(TOGGLE_H)
+    local snappedTrackW = PanelPP.Scale(TOGGLE_W)
+    local knobSz = snappedTrackH - snappedPad * 2
+
+    -- OFF = left edge, ON = right edge. Raw offsets, no PP.Scale.
+    -- POS_ON is computed at SetKnobPos time using the toggle's actual
+    -- rendered width, so it matches the real right edge regardless of
+    -- any scale mismatch between RealPP/PanelPP and the frame's coords.
+    local POS_OFF = snappedPad
+    local POS_ON  = 0  -- computed dynamically in SetKnobPos
+
+    -- Position knob with raw SetPoint (bypass PP snapping).
+    -- TOPLEFT + BOTTOMLEFT with explicit width gives equal vertical gap.
+    local function SetKnobPos(xOff)
+        knob:ClearAllPoints()
+        knob:SetPoint("TOPLEFT", toggle, "TOPLEFT", xOff, -snappedPad)
+        knob:SetPoint("BOTTOMLEFT", toggle, "BOTTOMLEFT", xOff, snappedPad)
+        knob:SetWidth(knobSz)
+    end
+
+    local function GetPosOn()
+        local w = toggle:GetWidth()
+        if w and w > 0 then
+            return w - snappedPad - knobSz
+        end
+        return snappedTrackW - snappedPad - knobSz
+    end
 
     local animProgress = getValue() and 1 or 0
     local animTarget   = animProgress
     local ANIM_DUR = 0.075
 
     local function ApplyVisual(p)
-        local xOff = math.floor(lerp(POS_OFF, POS_ON, p) + 0.5)
-        knob:ClearAllPoints()
-        RealPP.Point(knob, "LEFT", toggle, "LEFT", xOff, 0)
+        local posOn = GetPosOn()
+        local xOff = lerp(POS_OFF, posOn, p)
+        -- Only round mid-animation; at endpoints use the pre-snapped values
+        -- directly so rounding at the toggle's effective scale can't shift
+        -- the knob away from its intended position.
+        if p > 0 and p < 1 then
+            local es = toggle:GetEffectiveScale()
+            if es and es > 0 then
+                xOff = math.floor(xOff * es + 0.5) / es
+            end
+        end
+        SetKnobPos(xOff)
         tBg:SetColorTexture(
             lerp(offTR, ELLESMERE_GREEN.r, p),
             lerp(offTG, ELLESMERE_GREEN.g, p),

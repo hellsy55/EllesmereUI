@@ -1614,10 +1614,15 @@ function ns.RefreshStackingBounds()
 end
 
 function ns.RefreshStackingMotion()
-    if not SetCVar then return end
+    if not C_CVar or not C_CVar.SetCVarBitfield then return end
     local db = EllesmereUINameplatesDB or defaults
     local enabled = (db.stackingEnabled ~= false)
-    SetCVar("nameplateMotion", enabled and 1 or 0)
+    -- Enemy stacking follows our toggle. Friendly stacking is always forced
+    -- off so Blizzard's "Stack Nameplates: Friendly Units" setting has no effect.
+    if Enum and Enum.NamePlateStackType then
+        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, enabled)
+        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Friendly, false)
+    end
 end
 
 --- Full visual refresh for all plates called when an entire preset is applied.
@@ -1733,7 +1738,6 @@ local function SetupAuraCVars()
         local showDefaultNames = (db.friendlyShowDefaultNames == true)
         SetCVar("nameplateShowOnlyNameForFriendlyPlayerUnits", nameOnly and 1 or 0)
         SetCVar("nameplateShowFriendlyPlayers", showPlayers and 1 or 0)
-        SetCVar("nameplateShowFriendlyPlayerUnits", showPlayers and 1 or 0)
         SetCVar("UnitNameFriendlyPlayerName", (showPlayers or showDefaultNames) and 1 or 0)
         SetCVar("nameplateShowFriends", showPlayers and 1 or 0)
         SetCVar("nameplateShowFriendlyNPCs", showNPCs and 1 or 0)
@@ -1743,28 +1747,21 @@ local function SetupAuraCVars()
         SetCVar("ShowClassColorInNameplate", 1)
         SetCVar("nameplateSize", 3)
         SetCVar("nameplateShowAll", 1)
-        SetCVar("nameplatePlayerLargerScale", 1)
-        SetCVar("nameplateLargerScale", 1)
-        SetCVar("nameplateTargetRadialPosition", 1)
         SetCVar("nameplateMinScale", 1)
         SetCVar("nameplateOverlapH", 1)
         SetCVar("nameplateOverlapV", EllesmereUINameplatesDB and EllesmereUINameplatesDB.nameplateOverlapV or defaults.nameplateOverlapV)
-        SetCVar("nameplateMotion", (db.stackingEnabled ~= false) and 1 or 0)
-        SetCVar("nameplateGlobalScale", 1)
-        SetCVar("NamePlateHorizontalScale", 1)
-        SetCVar("NamePlateVerticalScale", 1)
-        SetCVar("nameplateLargeBottomInset", 0.15)
         SetCVar("nameplateMaxAlpha", 1)
         SetCVar("nameplateMaxAlphaDistance", 40)
         SetCVar("nameplateMinAlpha", 0.6)
         SetCVar("nameplateMinAlphaDistance", -100000)
         SetCVar("nameplateMaxDistance", 60)
         SetCVar("nameplateMaxScale", 1)
-        SetCVar("nameplateMotionSpeed", 0.025)
         SetCVar("nameplateTargetBehindMaxDistance", 30)
         SetCVar("clampTargetNameplateToScreen", 1)
         SetCVar("nameplateUseClassColorForFriendlyPlayerUnitNames", (db.classColorFriendly ~= false) and 1 or 0)
     end
+    -- Apply stacking state via the Midnight bitfield CVar
+    ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
@@ -3633,7 +3630,10 @@ function NameplateFrame:UpdateAuras(updateInfo)
     local showAll = db and db.showAllDebuffs
     -- Build the important set from Blizzard's debuffList synchronously.
     -- The debuffList is already current when UNIT_AURA fires -- Blizzard's
-    -- UnitFrame processes the same event in the same dispatch cycle.
+    -- UnitFrame processes the same event in the same dispatch cycle, but
+    -- ordering is not guaranteed. For newly added auras, Blizzard's list
+    -- may not yet include them, so we treat addedAuras as always important
+    -- to avoid a one-event delay on AoE dot application (e.g. Crimson Tempest).
     local importantSet
     if not showAll and self.nameplate then
         importantSet = {}
@@ -3642,6 +3642,15 @@ function NameplateFrame:UpdateAuras(updateInfo)
             uf.AurasFrame.debuffList:Iterate(function(auraInstanceID)
                 importantSet[auraInstanceID] = true
             end)
+        end
+        -- Treat any aura that was just added as important regardless of
+        -- whether Blizzard's debuffList has caught up yet.
+        if updateInfo and updateInfo.addedAuras then
+            for _, aura in ipairs(updateInfo.addedAuras) do
+                if aura.auraInstanceID then
+                    importantSet[aura.auraInstanceID] = true
+                end
+            end
         end
     end
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then

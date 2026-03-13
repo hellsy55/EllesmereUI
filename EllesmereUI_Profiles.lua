@@ -272,15 +272,27 @@ local function ApplyCDMStyleOnly(profile, snap)
             for bk, bv in pairs(v) do
                 if bk == "bars" and type(bv) == "table" then
                     if not profile.cdmBars.bars then profile.cdmBars.bars = {} end
-                    for i, barSnap in ipairs(bv) do
-                        if not profile.cdmBars.bars[i] then
-                            profile.cdmBars.bars[i] = {}
-                        end
-                        local liveBar = profile.cdmBars.bars[i]
-                        for fk, fv in pairs(barSnap) do
-                            if not CDM_SPELL_KEYS[fk] then
-                                liveBar[fk] = DeepCopy(fv)
+                    -- Build a key->index lookup for the live bars so we can
+                    -- match by key instead of array index. Index-based matching
+                    -- breaks when bar order differs between snapshot and live.
+                    local liveIdxByKey = {}
+                    for i, liveBar in ipairs(profile.cdmBars.bars) do
+                        if liveBar.key then liveIdxByKey[liveBar.key] = i end
+                    end
+                    for _, barSnap in ipairs(bv) do
+                        local snapKey = barSnap.key
+                        if snapKey then
+                            local liveIdx = liveIdxByKey[snapKey]
+                            if liveIdx then
+                                local liveBar = profile.cdmBars.bars[liveIdx]
+                                for fk, fv in pairs(barSnap) do
+                                    if not CDM_SPELL_KEYS[fk] then
+                                        liveBar[fk] = DeepCopy(fv)
+                                    end
+                                end
                             end
+                            -- If the bar key doesn't exist in the live profile,
+                            -- skip it -- don't create ghost entries.
                         end
                     end
                 else
@@ -318,6 +330,180 @@ local function IsAddonLoaded(name)
     if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
     if _G.IsAddOnLoaded then return _G.IsAddOnLoaded(name) end
     return false
+end
+
+-------------------------------------------------------------------------------
+--  Spec profile pre-seed
+--
+--  Runs once just before child addon OnEnable calls, after all OnInitialize
+--  calls have completed (so all NewDB calls have run and SV globals exist).
+--  At this point the spec API is available, so we can resolve the current
+--  spec and inject the correct profile snapshot into each child SV before
+--  any addon builds its UI.
+--
+--  The ADDON_LOADED frame below handles the profileKeys rewrite (which must
+--  happen before NewDB runs). The actual data injection is done here since
+--  the spec is not available at ADDON_LOADED time.
+-------------------------------------------------------------------------------
+do
+    local preSeedFrame = CreateFrame("Frame")
+    preSeedFrame:RegisterEvent("ADDON_LOADED")
+    preSeedFrame:SetScript("OnEvent", function(self, event, addonName)
+        if addonName ~= "EllesmereUI" then return end
+        self:UnregisterEvent("ADDON_LOADED")
+
+        if not EllesmereUIDB then return end
+        local specProfiles = EllesmereUIDB.specProfiles
+        if not specProfiles then return end
+
+        local charKey = UnitName("player") .. " - " .. GetRealmName()
+
+        -- Resolve the current spec. Prefer the saved lastSpecByChar value
+        -- (always reliable). If this is a new character with no saved entry,
+        -- try GetSpecialization() live -- it is available at ADDON_LOADED
+        -- time for returning characters and most new characters. If it
+        -- returns nothing, we cannot pre-seed and fall back to the deferred
+        -- SwitchProfile path in the spec handler.
+        if not EllesmereUIDB.lastSpecByChar then
+            EllesmereUIDB.lastSpecByChar = {}
+        end
+        local lastSpecByChar = EllesmereUIDB.lastSpecByChar
+        local resolvedSpecID = lastSpecByChar[charKey]
+
+        if not resolvedSpecID then
+            -- No saved entry -- try to read the spec live right now
+            local specIdx = GetSpecialization and GetSpecialization()
+            if specIdx and specIdx > 0 then
+                local liveSpecID = GetSpecializationInfo(specIdx)
+                if liveSpecID and specProfiles[liveSpecID] then
+                    resolvedSpecID = liveSpecID
+                    -- Persist it so future logins use the fast path
+                    lastSpecByChar[charKey] = resolvedSpecID
+                end
+            end
+        end
+
+        if not resolvedSpecID or not specProfiles[resolvedSpecID] then
+            -- Still no spec -- lock auto-save conservatively so a stale
+            -- session cannot corrupt stored profile data.
+            if next(specProfiles) then
+                EllesmereUI._profileSaveLocked = true
+            end
+            return
+        end
+
+        local targetProfile = specProfiles[resolvedSpecID]
+        if not targetProfile then return end
+
+        -- Rewrite profileKeys in each child addon SV so NewDB loads the
+        -- correct profile on first read. Data injection happens later in
+        -- PreSeedSpecProfile (called just before OnEnable) when the spec
+        -- API is guaranteed available.
+        for _, entry in ipairs(ADDON_DB_MAP) do
+            local sv = _G[entry.svName]
+            if sv == nil then sv = {} ; _G[entry.svName] = sv end
+            if type(sv) == "table" then
+                if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
+                sv.profileKeys[charKey] = targetProfile
+            end
+        end
+
+        EllesmereUIDB.activeProfile = targetProfile
+    end)
+end
+
+--- Called by EllesmereUI_Lite just before child addon OnEnable calls fire.
+-- At this point the spec API is available. Resolves the current spec,
+-- injects the correct profile snapshot into each child SV, and sets
+-- _preSeedComplete so the spec handler skips its redundant SwitchProfile.
+function EllesmereUI.PreSeedSpecProfile()
+    if not EllesmereUIDB then return end
+    local specProfiles = EllesmereUIDB.specProfiles
+    if not specProfiles or not next(specProfiles) then return end
+
+    local charKey = UnitName("player") .. " - " .. GetRealmName()
+
+    if not EllesmereUIDB.lastSpecByChar then
+        EllesmereUIDB.lastSpecByChar = {}
+    end
+    local lastSpecByChar = EllesmereUIDB.lastSpecByChar
+    local resolvedSpecID = lastSpecByChar[charKey]
+
+    if not resolvedSpecID then
+        local specIdx = GetSpecialization and GetSpecialization()
+        if specIdx and specIdx > 0 then
+            local liveSpecID = GetSpecializationInfo(specIdx)
+            if liveSpecID and specProfiles[liveSpecID] then
+                resolvedSpecID = liveSpecID
+                lastSpecByChar[charKey] = resolvedSpecID
+            end
+        end
+    end
+
+    if not resolvedSpecID or not specProfiles[resolvedSpecID] then
+        if next(specProfiles) then
+            EllesmereUI._profileSaveLocked = true
+        end
+        return
+    end
+
+    local targetProfile = specProfiles[resolvedSpecID]
+    if not targetProfile then return end
+
+    local profiles = EllesmereUIDB.profiles
+    if not profiles or not profiles[targetProfile] then return end
+
+    -- Build a lookup of svName -> db object so we can update db.profile in-place
+    local dbByName = {}
+    if EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry then
+        for _, db in ipairs(EllesmereUI.Lite._dbRegistry) do
+            if db.svName then
+                dbByName[db.svName] = db
+            end
+        end
+    end
+
+    local addonSnap = profiles[targetProfile].addons
+    for _, entry in ipairs(ADDON_DB_MAP) do
+        local sv = _G[entry.svName]
+        if sv == nil then sv = {} ; _G[entry.svName] = sv end
+        if type(sv) == "table" then
+            if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
+            sv.profileKeys[charKey] = targetProfile
+            local snap = addonSnap and addonSnap[entry.folder]
+            if snap and not entry.isFlat then
+                -- Find the live db object for this SV
+                local db = dbByName[entry.svName]
+                if db then
+                    if entry.folder == "EllesmereUICooldownManager" then
+                        -- CDM: apply style-only snapshot so spell profiles
+                        -- (specProfiles, per-bar spell lists) are preserved.
+                        ApplyCDMStyleOnly(db.profile, snap)
+                    else
+                        -- Wipe and copy snapshot into the existing db.profile
+                        -- table in-place so the reference held by the addon stays valid.
+                        wipe(db.profile)
+                        for k, v in pairs(snap) do
+                            db.profile[k] = DeepCopy(v)
+                        end
+                    end
+                    -- Fill any missing keys from defaults
+                    if db._profileDefaults then
+                        EllesmereUI.Lite.DeepMergeDefaults(db.profile, db._profileDefaults)
+                    end
+                    -- _capturedOnce is stripped from snapshots but must be set
+                    -- so addons skip their first-login Blizzard capture.
+                    db.profile._capturedOnce = true
+                    -- Keep sv.profiles in sync
+                    if type(sv.profiles) ~= "table" then sv.profiles = {} end
+                    sv.profiles[targetProfile] = db.profile
+                end
+            end
+        end
+    end
+
+    EllesmereUIDB.activeProfile = targetProfile
+    EllesmereUI._preSeedComplete = true
 end
 
 --- Get the live profile table for an addon
@@ -406,34 +592,50 @@ end
 --- Apply a profile data table to all loaded addons
 function EllesmereUI.ApplyProfileData(profileData)
     if not profileData or not profileData.addons then return end
+
+    -- Build a svName -> db lookup from the Lite registry so we can write
+    -- directly into db.profile (the reference the addon actually holds)
+    -- rather than going through the SV profileKeys lookup which may still
+    -- point to the old profile name.
+    local dbByName = {}
+    if EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry then
+        for _, db in ipairs(EllesmereUI.Lite._dbRegistry) do
+            if db.svName then dbByName[db.svName] = db end
+        end
+    end
+
+    local charKey = UnitName("player") .. " - " .. GetRealmName()
+
     for _, entry in ipairs(ADDON_DB_MAP) do
         local snap = profileData.addons[entry.folder]
         if snap and IsAddonLoaded(entry.folder) then
-            local profile = GetAddonProfile(entry)
-            if profile then
-                if entry.folder == "EllesmereUICooldownManager" then
-                    -- Style-only: preserve all spell-layout fields
-                    ApplyCDMStyleOnly(profile, snap)
-                elseif entry.isFlat then
-                    -- Flat DB: wipe and copy
-                    local db = _G[entry.svName]
-                    if db then
-                        for k in pairs(db) do
-                            if not k:match("^_") then
-                                db[k] = nil
-                            end
-                        end
-                        for k, v in pairs(snap) do
-                            if not k:match("^_") then
-                                db[k] = DeepCopy(v)
-                            end
-                        end
+            if entry.folder == "EllesmereUICooldownManager" then
+                -- CDM: use globalName accessor, apply style-only
+                local aceDB = entry.globalName and _G[entry.globalName]
+                local profile = aceDB and aceDB.profile
+                if profile then ApplyCDMStyleOnly(profile, snap) end
+            elseif entry.isFlat then
+                -- Flat DB (Nameplates): wipe and copy the global SV directly
+                local db = _G[entry.svName]
+                if db then
+                    for k in pairs(db) do
+                        if not k:match("^_") then db[k] = nil end
                     end
-                else
-                    -- AceDB: wipe profile and copy
-                    for k in pairs(profile) do profile[k] = nil end
                     for k, v in pairs(snap) do
-                        profile[k] = DeepCopy(v)
+                        if not k:match("^_") then db[k] = DeepCopy(v) end
+                    end
+                end
+            else
+                -- Lite.NewDB addon: write directly into db.profile so the
+                -- addon's held reference is updated, then sync the SV.
+                local db = dbByName[entry.svName]
+                if db then
+                    local profile = db.profile
+                    for k in pairs(profile) do profile[k] = nil end
+                    for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
+                    -- Fill missing keys from defaults
+                    if db._profileDefaults then
+                        EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                     end
                     -- Ensure per-unit bg colors are never nil after a profile load
                     if entry.folder == "EllesmereUIUnitFrames" then
@@ -446,6 +648,17 @@ function EllesmereUI.ApplyProfileData(profileData)
                             end
                         end
                     end
+                    -- Keep the SV in sync: point profileKeys to the active
+                    -- profile name and store the live table there.
+                    local sv = _G[entry.svName]
+                    local activeName = EllesmereUIDB and EllesmereUIDB.activeProfile or "Default"
+                    if sv then
+                        if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
+                        sv.profileKeys[charKey] = activeName
+                        if type(sv.profiles) ~= "table" then sv.profiles = {} end
+                        sv.profiles[activeName] = profile
+                        db._profileName = activeName
+                    end
                 end
             end
         end
@@ -454,16 +667,14 @@ function EllesmereUI.ApplyProfileData(profileData)
     if profileData.fonts then
         local fontsDB = EllesmereUI.GetFontsDB()
         for k in pairs(fontsDB) do fontsDB[k] = nil end
-        for k, v in pairs(profileData.fonts) do
-            fontsDB[k] = DeepCopy(v)
-        end
+        for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
+        if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
+        if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
     end
     if profileData.customColors then
         local colorsDB = EllesmereUI.GetCustomColorsDB()
         for k in pairs(colorsDB) do colorsDB[k] = nil end
-        for k, v in pairs(profileData.customColors) do
-            colorsDB[k] = DeepCopy(v)
-        end
+        for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
     end
 end
 
@@ -490,24 +701,19 @@ function EllesmereUI.RefreshAllAddons()
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
 end
 
---- Snapshot current font settings; returns a function that checks if they
---- changed and shows a reload popup if so.
-function EllesmereUI.CaptureFontState()
-    local fontsDB = EllesmereUI.GetFontsDB()
-    local prevFont = fontsDB.global
-    local prevOutline = fontsDB.outlineMode
-    return function()
-        local cur = EllesmereUI.GetFontsDB()
-        if cur.global ~= prevFont or cur.outlineMode ~= prevOutline then
-            EllesmereUI:ShowConfirmPopup({
-                title       = "Reload Required",
-                message     = "Font changed. A UI reload is needed to apply the new font.",
-                confirmText = "Reload Now",
-                cancelText  = "Later",
-                onConfirm   = function() ReloadUI() end,
-            })
-        end
-    end
+--- Returns true if applying profileData would change the global font or outline mode.
+--- Used to decide whether to show a reload popup after a profile switch.
+function EllesmereUI.ProfileChangesFont(profileData)
+    if not profileData or not profileData.fonts then return false end
+    local cur = EllesmereUI.GetFontsDB()
+    local curFont    = cur.global      or "Expressway"
+    local curOutline = cur.outlineMode or "shadow"
+    local newFont    = profileData.fonts.global      or "Expressway"
+    local newOutline = profileData.fonts.outlineMode or "shadow"
+    -- "none" and "shadow" are both drop-shadow (no outline) -- treat as identical
+    if curOutline == "none" then curOutline = "shadow" end
+    if newOutline == "none" then newOutline = "shadow" end
+    return curFont ~= newFont or curOutline ~= newOutline
 end
 
 --- Apply a partial profile (specific addons only) by merging into active
@@ -1031,7 +1237,9 @@ end
 do
     local specFrame = CreateFrame("Frame")
     local lastKnownSpecID = nil
+    local lastKnownCharKey = nil
     local pendingReload = false
+    local pendingFontCheck = nil
     specFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     specFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     specFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1040,7 +1248,17 @@ do
         if event == "PLAYER_REGEN_ENABLED" then
             if pendingReload then
                 pendingReload = false
-                StaticPopup_Show("EUI_PROFILE_RELOAD")
+                EllesmereUI.RefreshAllAddons()
+                if pendingFontCheck then
+                    pendingFontCheck = nil
+                    EllesmereUI:ShowConfirmPopup({
+                        title       = "Reload Required",
+                        message     = "Font changed. A UI reload is needed to apply the new font.",
+                        confirmText = "Reload Now",
+                        cancelText  = "Later",
+                        onConfirm   = function() ReloadUI() end,
+                    })
+                end
             end
             return
         end
@@ -1055,41 +1273,128 @@ do
             and GetSpecializationInfo(specIdx) or nil
         if not specID then return end
 
+        local charKey = UnitName("player") .. " - " .. GetRealmName()
         local isFirstLogin = (lastKnownSpecID == nil)
+        -- charChanged is true when the active character is different from the
+        -- last session (alt-swap). On a plain /reload the charKey stays the same.
+        local charChanged = (lastKnownCharKey ~= nil) and (lastKnownCharKey ~= charKey)
 
-        -- On PLAYER_ENTERING_WORLD (reload/zone-in), only switch if the spec
-        -- actually changed. A plain /reload should not override the user's
+        -- On PLAYER_ENTERING_WORLD (reload/zone-in), skip if same character
+        -- and same spec -- a plain /reload should not override the user's
         -- active profile selection.
         if event == "PLAYER_ENTERING_WORLD" then
-            if not isFirstLogin and specID == lastKnownSpecID then
-                return -- spec unchanged on reload/zone-in, skip
+            if not isFirstLogin and not charChanged and specID == lastKnownSpecID then
+                return -- same char, same spec, nothing to do
             end
         end
         lastKnownSpecID = specID
+        lastKnownCharKey = charKey
+
+        -- Persist the current spec so the pre-seed logic at ADDON_LOADED
+        -- can guarantee the correct profile is loaded on next login.
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if not EllesmereUIDB.lastSpecByChar then EllesmereUIDB.lastSpecByChar = {} end
+        EllesmereUIDB.lastSpecByChar[charKey] = specID
 
         local db = GetProfilesDB()
         local targetProfile = db.specProfiles[specID]
         if targetProfile and db.profiles[targetProfile] then
             local current = db.activeProfile or "Default"
             if current ~= targetProfile then
-                -- Auto-save current before switching (skip on first login,
-                -- SavedVariables already has the previous character's save)
-                if not isFirstLogin then
+                -- Auto-save current profile before switching, unless this is
+                -- the very first event in the session on the same character
+                -- (SavedVariables already holds the correct state in that case).
+                if not isFirstLogin or charChanged then
                     db.profiles[current] = EllesmereUI.SnapshotAllAddons()
                 end
-                if isFirstLogin then
-                    -- On first login, addons already loaded correct state from
-                    -- SavedVariables. Just update the active profile name so the
-                    -- UI shows the right profile -- don't apply snapshot data on
-                    -- top, which would overwrite positions with stale values.
-                    db.activeProfile = targetProfile
-                else
+                local function doSwitch()
+                    local fontWillChange = EllesmereUI.ProfileChangesFont(db.profiles[targetProfile])
                     EllesmereUI.SwitchProfile(targetProfile)
-                    if InCombatLockdown() then
-                        pendingReload = true
-                    else
-                        StaticPopup_Show("EUI_PROFILE_RELOAD")
+                    if not isFirstLogin then
+                        -- Spec switch: apply live without a reload prompt.
+                        -- All addon apply hooks are safe to call mid-session.
+                        if InCombatLockdown() then
+                            -- Defer until combat ends so protected frames can update.
+                            pendingReload = true
+                            pendingFontCheck = fontWillChange
+                        else
+                            EllesmereUI.RefreshAllAddons()
+                            -- Font changes require a reload -- show popup only if font changed.
+                            if fontWillChange then
+                                EllesmereUI:ShowConfirmPopup({
+                                    title       = "Reload Required",
+                                    message     = "Font changed. A UI reload is needed to apply the new font.",
+                                    confirmText = "Reload Now",
+                                    cancelText  = "Later",
+                                    onConfirm   = function() ReloadUI() end,
+                                })
+                            end
+                        end
                     end
+                end
+                if isFirstLogin then
+                    -- Defer two frames: one frame lets child addon OnEnable
+                    -- callbacks run, a second frame lets any deferred
+                    -- registrations inside OnEnable (e.g. SetupOptionsPanel)
+                    -- complete before SwitchProfile tries to rebuild frames.
+                    C_Timer.After(0, function()
+                        C_Timer.After(0, doSwitch)
+                    end)
+                else
+                    doSwitch()
+                end
+            elseif isFirstLogin or charChanged then
+                -- activeProfile already matches the target. If the pre-seed
+                -- already injected the correct data into each child SV, the
+                -- addons built with the right values and no further action is
+                -- needed. Only call SwitchProfile if the pre-seed did not run
+                -- (e.g. first session after update, no lastSpecByChar entry).
+                if not EllesmereUI._preSeedComplete then
+                    C_Timer.After(0, function()
+                        C_Timer.After(0, function()
+                            EllesmereUI.SwitchProfile(targetProfile)
+                        end)
+                    end)
+                end
+            end
+        elseif isFirstLogin or charChanged then
+            -- No spec assignment for this character. If the current
+            -- activeProfile is spec-assigned (left over from a previous
+            -- character), switch to the last non-spec profile so this
+            -- character doesn't inherit another spec's layout.
+            local current = db.activeProfile or "Default"
+            local currentIsSpecAssigned = false
+            if db.specProfiles then
+                for _, pName in pairs(db.specProfiles) do
+                    if pName == current then currentIsSpecAssigned = true; break end
+                end
+            end
+            if currentIsSpecAssigned then
+                -- Find the best fallback: lastNonSpecProfile, or any profile
+                -- that isn't spec-assigned, or Default as last resort.
+                local fallback = db.lastNonSpecProfile
+                if not fallback or not db.profiles[fallback] then
+                    -- Walk profileOrder to find first non-spec-assigned profile
+                    local specAssignedSet = {}
+                    if db.specProfiles then
+                        for _, pName in pairs(db.specProfiles) do
+                            specAssignedSet[pName] = true
+                        end
+                    end
+                    for _, pName in ipairs(db.profileOrder or {}) do
+                        if not specAssignedSet[pName] and db.profiles[pName] then
+                            fallback = pName
+                            break
+                        end
+                    end
+                end
+                fallback = fallback or "Default"
+                if fallback ~= current and db.profiles[fallback] then
+                    C_Timer.After(0, function()
+                        C_Timer.After(0, function()
+                            EllesmereUI.SwitchProfile(fallback)
+                        end)
+                    end)
                 end
             end
         end
@@ -1103,7 +1408,7 @@ end
 --  To update the weekly spotlight: change WEEKLY_SPOTLIGHT.
 -------------------------------------------------------------------------------
 EllesmereUI.POPULAR_PRESETS = {
-    { name = "EllesmereUI (2k)", description = "The default EllesmereUI look", exportString = "!EUI_T31EVTnUY(VkNVa1qVF1)kjTPTiBBds9E32dwGazBLyDRJKVwYTn7I8D)odhsrsjsz78OB3D7cCWjvwIpMh)MFZqkQ)8SMGSBkAZH)ijRyB5hMNVQOYzsKFk(FjHrPbjPp)SM4SM5BkkQEDLBqGJYf(TkVWiNNFh2sT3UUa()UA7Qv4n8LInnL1vvUph)Xf5SUjm7Q6Q2g4VIYUEv9S8vnUozV8BR3u00818BpRX1nREB7QYQI3wVaBVQ6QcO9D9YMVTPT(MtQxvVPH1wZxL308N3Dh2A5lwuxHx2lk7LRwv0CtXMIF9nNuxVAr9xREBEv(1fB(twdnB7vxDC(gA6IJVeXLWginRzz9xNwcnWuCImREZIInhxrZ7zxF0Q1lZbPuaBInlFZRG)rIh8VGPcDZFO8pOgw80xWF6M15ZlRUUcV7OSv1Z)CXItzp4vLRAl2WMZ(z5OimjRCEDf1ujyR7NTTP4eCoZKbNkB(JyDwxR8lLnTnoz4VxF1vnfTFSY3Hgafv5ZwX6ZWSVwUODzLh7xytKJrDpn0UEt9x)11SU4M8VHsMQeL5ZRyZNOSLfLxVSLgFIo7tvptPnHz(eNqMmgfRVbMstbfMxy2L3uE9M82IfVhmv2uUO4dRlwT6nVOzkBUcweFUS6yw3HxYlq(eNdYGYVO(aXzZxCdxb2nlNYhdn)jQ3d5J9PllN)5kWEdTzxwwHdTpxC7SYQfhtYXGS5lZ3CDXPGTkj)zx2nRPnF(NpPEBv7XC1B12BUO(Rn8)LQ6fAf5TlBfDvMp2ZGf3CUzAd8CXOdW7V6I8QRlqrZQ8BjtKMVwUUqy9ftDrE18L1BoVUPSfC2Gz0QIRAzYp6xEpxL40FcCbFilfv9EMpYvXODX1c7xvTFNu7iy4KsTF(8wqVCuv5nK)IBu3utkm9ipovhqThL5pfsZpWDiVDlQ0FF1jVGPqRYVPaezNOiYsYwwVTbK8VgmJEPCgfYB1p0cna20y)UQ8p(J8nlineys(HozYP9KrVIn28CugBAUF(aAaZ(oHMQK0XOh6XCrgjHNwd)W22YvLT32Rp5QkpsU)Yo3vnjeP8Ctrq22sqk((nLfvWKeSb4tcecdKqTLRpD3atGQhD4Fr5MI5C7OF5LNovddkqycbT8jm3dMxPB2sqMFmaF28BllQEtfnkNYeiS7LRNMw8T2PKmdnyIEonSWzjzt7QAt9kHNi)FlSj9mCveWr9zVG7An76J7uoUIFKKakM2KMjLMOlZxlI5iM8)366Bend2MVs8p4p)Rg6B9Xkfz1zu)EktkdpX)tzt5mMMhJATcc61C3HbpzbGym4jV(ZxdMtMqMuTsnRlmaljXbDF(ayLpPJD8QHWq9nE1GGmGHzvSAwT)KbjfN9RczLoqPf719e(ziuWbd7Sh4GgIunMRTDh3oDIoGsy2fV5vVM)O6qrJJV25cRaf55kDVKqrgJFThGq2qr7brAlgJbWBRHLvW)fGmMcAAM)X3diQEX0pqGP7jVjnGPbSkmblfY4R3CMXOI3pejZWBQatAwJ)Dbukm7yssD)GK6BG)VeiP(0q6hssblY3tEd)telYmzJVhyr2IlSdqjDAo3tijtGoW4HQaXLbx6g47L46EzCA0zMtnZegtVSTScqydmWIxXiU)EEzNWgZ)NU0L(pqwY)h3(acX4Ozkwbh9Krh68)O7QpamPhMNgUBVCSnyDA0HEhP70bfO6yh99WX2KJ0yOCg8WTbgyaqCOhVv4bTaCpcU29JpoG87FvU1GQH7whIU1PooExgh(D0RUFiE7EZGQM7nZSnm7jVNPv8y7glbqujN1xTRNu(berEScP(D3PDehu78cVpXJh4cBZz)PiESLGn9GR)RYTvgnoI72gFzGtW3r)2dpASj)xV7P)RnB6hQFSbN2XIhpIpS16y)y6A3hg7(6sR73(uXVEG)8iijpfU0dOAna1(GCNVhfIC3UZXG7CqyyuYLr(EFhDNpGWWHzVTSzEXQv5vfGDIHyWgi889ZfwQutYA3uw95I2gZkFnU029KTaBVdpzBvV7P1r(rGq9dJ4SnWJhvc1wd90Nu9DSNhATxuCv(2vSLE)PVIE6E4MlT2E7ypMZ8ijYPx8hd1j0m61G6pQhz4qjdS31RZi2SoKYWQgUxWmJy9)yNeG1aNMl34yr(nW99ryLd((KFaVduRx4G6j(G4rmSoDF)xmZHynmJyMPg3Ga3OhGfdTZm6My)5z2iVJytz3c22GNNBuSBCOxQptbUPy151LvTW48Kx(UPV8cC)RSU3vCZ(w1ZCtIMehKMeeh46b(G3DMnUfIEZDsCOJtQByOxSFWb2DEPrtW9kfUtP8c8WUtPaA8U4zPXtss8D9HPtqy8b2fbEtIJIsIJ88CID8XUGtwt08HPtIDJc8DIIcCI8oS2NT7TmxeeHekKerXEbXPEHhwZ)mFVKjbUrrHrbPbUbyV1TQYkYN400ehNKyVeNduLhfoja0aUroGyk65SqE(zxopFnaWwS49vZli8vENQWXZlRD2mPH5DNPcWRSdXWFiwBBLTDttnUBY8Zww8nya5CYl8sFboeB6A(qG9vE5kgC01ZxOC3NY(p0RBt(IYTn0kA29SoefH8wW5AjdafGDz4GjeqjqQ7AaqcU8kC)xXMjLvGplmxFF1kglCt7wmXU)6oJpb4MK30Es5M5RkugS(NEuS2G135agSq)aW6B(SmyGC4hbytBUjF1(m(N2B83JU)W7TfaSb9pICH93LuxDhlEOIM8DaJ(1RGGzmVjyoN3S8xkRkyneZ(CdzRKXx8WSzCdcFwx8Hv1TxGkb2dxKVQD55fBMdrdod762614DWc(4XcAeNDvn4RXAFLiKu0MtX4ilwD77o)KgSqtEmvcyj(RvGHFXMnBx3woJPEWbMZKGq(yR7pNr)jb9IHqW()JuKnckpfhvBWX8GFYx0FVMVX(IjSFXmDA9AaFROQ4MBrbhfcgOX8cKkd4dHrjvy)Kc8CqKk2MPSZplg7Fk4waTFqddZEdo9UkFEXVF0cWNT53v0r)(nflkZ)D2T(7Ynl6KPtrzKF2vcPgmKqZNpXNspZJhiN0lW0Ak3OqHgp4IU4TGbkNxHxanJXm9(KQObyrT(DBVzgBIOgkE(CSv3T9IhXNaKVSnbjZqKTdwpV(RaPl5MBTxRaKgd60Sm4FyuZTR0gHXzRZRwuCt58xTcImVUOyrva5cIkH30T9jyxmiRZI6II8f32zsL611X(stkpoiOMnVKkkyh8)TTOP9T1ZuTSpLj(vSE2TyYpRZ0uz0Y9A480v3cUWpTjFtXlbO9c5uKpMKY3xEZ62Bv7DCkjMNE6tZKSBkRkNbQ5U7nK2cU0Dh43D)ardUGzu7CGym6MWylTFwlHCycWCr4l6W1YZQBbtfd(Ustz0enPZnN9JmN23uDs9nZYB7MxYzLRFC3Sc)BAqW9FHH8VTeeWNYgaAtfT0p5MLAJRin4gPofupAgtApeezoV6ZVoV5ORHm86gUos4UePslImob19CDJ8(DHM7sOq90ZuZR7z(f4hLE6ewmIXOKbwGI2qbKNWrzdgv2gDaNO(Xh7F2yuZ(TNovi(3hlgajYMbi0lcuYZXODFAiQpoU2DVeR4t9rDX5Nlblc4)PfvRftYQ9OnqA6srrSimtNInUtVkX6s5DyNuRN5MRiFvnVANizBj(7z8)U)e44R79Sjsmbhfdm8VjrmAv(l1ygU6gMjs06y5Z5MsWjOseTqKfjcOpbjkDe4ijeI4tPhrOJptZuLz7hAVDfUk9fI4JNXIOR4TOG96PfsGUIWIsP4frzwPd0nCEv(ArDcfk6DBTa8WPmvphc6w0IZIUX92s2WzX6M3vKVz)fNGpxNfXUhbPAEZAM9ugSN0ndrXtIgy1RaR22LaHwbmAsxRDsbg9ubjirnm3N05BPsTdC)ULEJgugBuRT7zdnKNY8PqnkXIqVv67A3n)qqNioEft0Ba8lHU)YRkNZi0XSA1dKPGA2ZyrJbqNU0nu6qMeQqsnoSZPsmFiJ7bwjHD0YvSTdK06(n2BYsKuPE0QvVGf5QHL4cI2uOe43xAEf6kXBIObueJ836bWKXYRt8qw))u5YdjXLBuQwCn9uTropRak7jfRfwGPDR51TJ7H8k0h9gUsvV4h4XHwUMpAqtIoRBWssfTOR6W0tPY74t6X3rj(Rz6cIG8P9Tt652rKkKHQ5fttLHNGOowL42nLRlw8SVGRgKlr(qTqHHQoEkoKXAsSDlH9zZJxIqlNdqvQMys4s(manOiVqTouDgS7omsn7ODE7G1xX22n5R2xqsDubjpMyfEIFsj4dROjSSqiWAB5dpR34Bt1djFyDQauyFXSk45IPkf6Eya)zwc4VrjGVpxmRoxhpXAEk0DdJWU287xI17pPHDNL9i0k4jGhhpAc4YIKS3PLF)4RmwQ6gzUyir9dImtOYf1OQpGwc336mDpoUF4Du2MDOcA1I6aZ8NsZx0pjbAoz95SqlUIPQbCVOQySOauEXIbKV0Bi1BFdGpgRbtP7Bo2(ifbWmZ8DPZSgJuJYGGBGOzcD7AgKjbPwmgrWsKzlKcgREf66a58WJdXzLL3UkmXOznAVSf2ccyRSf8R3nxIKtMe5SXjKAf7KhSu9ut5jBpo1i1jju1jEpAQHvvru)eX0t83u1wOWyd4WyLoOTE2sr1SD72OMy7(3pYyhALGCruvTA6mJ(bYTQ)e0yvJqNhb0q)yPacW7Q759lveEEQDWOvFAeY2gkm1y2ZSUASm0gRevPmJXpOSoldAQrg2A(no8YuRe60wHqef8qmFCuNqj7OoWhw1Z0ce1lNgZK6nwynLi(gYmzQScums92Q7NdNgfJZfV4CJKIUnxNHliGT70kf9E1FwuNzHcru)zrDPVJfVAoBCllvHoz0EMCJSMn7Sca2YRYY00ZDqVTZNXCc)MktPTgWyXnI0g5cRksP1hzsD9x6QzbB(e0vj1pawx89vfoQA0xnQxBeMsFrAWziDYAya)sDi4PKGhLwJrpA122ugLIc(Z4y6XYu0aitVks3J7IPaKwYzDeoXHkPwVZ2XkOFkKYk(WJxLX4SL1nTLklBQVKuORBNeXruXzfacEjaf5Gbjooq)smuDdr5dwW71qaYUEkCOv0erzMoauRXb(ncDfsBIhGJHKO0OoJ2e(wrPvj1jOV1zN1F5zoiikOpLR8KrMPM9LpBWQGI5JqZht1baAguEyTxIjziNRg5KeY1s9x1zYQEy6KOFqI6woatGh3nExadsyKYoZAWWgqFV9gutPDi2a)TxgTn18Gb713aQ)l3STQG2LdiHSpt)nTdkWDPgG(1W2igFTEBf)LbRS6Z3E5Svixn8g(kEd422yt96LLZNY3cNZWTMbB4aj)2UCv5xOlaQAyIHpkw1QCQ6MjzFfMaxTDZT8kjuZ7R8BwVQ8QBPhnb03TfxMV4)LAyOHUPOTU66T02CN9Rn5vZPCz)Ar(66QllQMVKMmaafW5eAqO1OWM4u5yCM8FRX6tIN0rE8TJ26I5L5RAExD1B47NeMzVx26nfxbj2wS43yT)lPMhACyA1E52MIf6BEhWCP7rofMy63jOOrvWlkBwd8JzNAtrz3CBlijzJq5JIsn1NLqZAXUPvAaWzjQD1UDXaZGloBb1z)jkrrBFCdOIcBTtpl8uYc3AshX2ooSTE41yTCVDDb3LTrzv4Qr762BPjmOz2G0ZAbSHCy682x(I38RVfVTBfEmoeR0R1IUWILeh155hZ)BjHi2Uru8c4t7WogexX34VG540roDzdTVPN4aEhQqpCmPUyFepTDWlGfTBBfESBbE7S772QN57NojXh(pC7T9CTTEwC203FoDs4i27zkxc38zUorXSNoYlnf39zmlAi)YJfBqpcox1G80(E35LtXTBvZNVL5FndEGTTmxQBQB)kDTn1v)rb3nBtl6iOzTgZ6L33UeSMEBztd3zjKbVrNwAnQeM7pMMQpMG8PRxrdQ6BiF6ML5lQ)k053mL(9Ri)1zqpwS5ZxsneZFDrXxQVKHRYon1UfqvQBzymSivxjU37UJS7vWg)1QY2trZq(2XAnmzbXzlvxj52mJDYEXji7L1uSQyEl6OAWLWbAeaoMIsZtIGDfEXx6oCSmuCzHrn3gYruTfWBEMKkcAshrT5NQEgFteig5mWbVmpc1GDtaNH3l88C4bWjFpfwy8IhrHOHi(vT83)eM(tDcG3I6oAAjmQwTFLrqijeX(cb1j4CZehSFHpffNwt67)AC7EZibjP2jkJR64JD)PKubT7oNlzoDGQG2RXiATYfPIKk4nczTY4)0tUisYKgp8rTpN1pJIH6da6HInlxlf8CkCr8q7SUhz3lKWNjxndoMVsBmwrRv(nHkpLnhhQcLZZt7mN(OrWo0cKv04bPThP(FQllYWRVXW1VtAJoLfHzZn5CP1613Pr4dcEujwmB(sToLL(JW3OCrrV32aWtFrb5(kmbO9OEsNZcIxi(7pkQ43S2zSmnxPSxwvCWyYLhb)60o)TpwPuRHE(5yPgBNXglSDRJOYl8BTVNqixtDA5QvYraw260U(wOLc8t9CdJDtJsttOyOOsnHuo(bEUjr8QZjTO1ek0IPjy3VB3FVUPSMXfv8y8YGzljSjQZDjdLVTTUR)yhdJYk74(aaVCv8U)OUsDieLdttqzdjkSHQU5xQPkyixandGAdwBgUcwzntCP7dU6Xx)Efgtb4LKwzTYDsUS(7sJQUd2VHquErdCm0twobBDwL20ajWA1Ok)3PcFxOoQI0U3lfH7xFW2rXvt429dQUyUw9uoBOBiXn8dWdqkJHiDS3wmz20UXi5n)GOKa)y1YwgdxaFzg8ttLR8d3UFugdsXTM71OXLI0C9KgoyjqKbS08whsmjvk(1U1eHsq(E8YhGYoIDpAKC6upko3rAEi0pWxXn5WuB9vrTXBQohYgKyNQsZzqGPePBV64pTB8(jre((g80b960ZSrDASGSUcXJI)Q9W17IeMgxGdInLdHrOht2(Q2zI0xQo4RiYdcv5fBrOTZiBAWQKgqQreNZRk8nKXG7aTKbBxuOubh9GHIZ2rU24t9cGRd1mKNH6RjFpIMUDO04R28zMzEsUH7dZtczziZtvhq9rBKINzFGWrPK6iDd7E9I7UcpSvQffBp7ZibjdDYeSsSPuqtLLRjjYNd7BUdyYN4NFMnoV8YznDzbwxamdSiiLu4bRoZo12o2chXEVfj1jAtZdc7GNO0CkJ8A25WrzUasCEkpWkxJekXIhY2x14JF97OAWIfp1cn1thJM6P)frt1EyI)fslTN5WFJzK(a4b9JazvNmf)y16I3JfBal(0UzXkxYhfHNCRxynGWHYZ9PH24HZEoHD45Za684cufSppoddBeSTX63aXB2RHYYhchbDA32yZEpzoBHDzpMcdOD84sqEmwmhcv5bKEhNJS5KSFCikpwC29LvX(qEwyEzN78HWtwJRPf6(hi3yosv)Obd59AKXQzMeNzNnPnQp0B6XX8IHbnBf9UE17eI5EXY8bqk2cd89Jt8UkQs)mjEW0H7LhwcFfl(HI77HLPx)uZ37ssowwV7hjz71SGvXZf5B(mBgEkb)kpIoqBbgRzU9fByEB1Z8OL)MDWrm8ez4oCPHwtuVX7oX3DsyIVVtINBAQl)jJJcWJeI0OWGKa2oNBWQRDN6c8qRsx4eVG0eVii6SxmVLCJD8N4gf7eh56Yoitm1sUE8mcK5fGnzCqieU33n1j1noTRjH4(tGleK4aCdS1KQB9bCEghJZOGqVaNy(w16BvPrXyhe4fh4LABAQMTcBuf7It0uV4qphoFfyu5fLmbK9WCpXj0wB5QUdI70yE7qJfX10JpcIivzyAiCDRYfCvKrbJ(Ckj0dfpHroaRlhFXCYjkcpyrG8hs9CmpNWMmq47)E9LRgnpelRmRAnDMEhs0ODrPPpB)rbK3x)6ble2asfhY6CXotwSeiDK0EEkxfjRfhyS64zkOVEWahEWadeG5j)761LZR2Kk0vUbkJcLVddU0rsdUDJBp)Nwp)B36Xgbxp3SljusAJ59w(xISPAWNp8L)8qQJuGEeArsudkx0pUfgYyQr2lHZ4RbWG60KOlFuiGDWRC4UEHT6KjDeqzOdkfDzxleiRek7QejP6Zi(JYvZwszBSIsyB)riEyTIcm2RNe)e6Bhl4XyP3SNz2VZKV9WdWl8LX5nvlWDWETb1LTQoUl8dkveZPAMO)kyrAoXwXDiyV19fIt)HpL7bpBK(jpVpPtLoOfXrHhVgh)qLwvCV3UrEXE7b0rZR9l)Nb1P)Wk(U1xsgvd(D8YYayh4oouoRMwZ2HBtzZmL9lmk5qE1yueDnwNbvk3SbKcND41vF)RJ(qZqwRJBIBM30zJx08dABLnWHvlWvXUlTTMu8yrGqnv3h0otX1Q6O1ICVh1ZE2JYUYWE9GSwB4(vu4(vw2bLUXyztpSQJ2R4Np9150ybmpS6Z84uwtlf5wlSPUbK1QSpwLoTT4nMk2P9vdxRs4DfMSNJuh6QTKauQ3jbMySENhqLO3ZeG0Enlybruw0egylVOOsK2hHAJoByHJjcsN3fDsSSCdW06WA0xzt7fEw2UhnRPEZStFilUJ5n7W9FTj3Xo0vxMmlFh73J(R7ZoxNnBlzq)vl6jzvahj3AssloKsf7IDQoMkjkoTR8HtLL)dLCA1oJMOQ1TCkVcx8sAQMo6FEMTT6G9SG6TyfgwAsdbRTTJVnU1BTUvIpBSLwXGLV5fMyeJWErHmMPS5mWmdbAMHXiPJzKYQfkXwtDZmD4blQSzhUD6fzEFKyEXxSq1B0A10dcLycR(AWXoY(pM(MTJV2EBBaKT(zRPs0oYrwdVe)Ucsmjn2NZJIAJFT3bFSxy3H68lxCDr)F2ns7NP0JMGDl)OZhfQ45ksv5nuzbiiEQZus7jGSk7OmmOJyNX)NRSklbzW83xuMCxp3q2ltKNtAueoaoS3fP0yGqtCCuItqyqkvacO9J4TFCWKyhhhx6CeVxZVRtzBxNa3jWOIoL0fh6PV8BGYLRi3c8qQetLW4eAMK4fe7eFWtfVeaeggRraomvuq2uXtru5pbrUJDtDIco42pi1DsCCCIFCSxqsx7NiAF)uqtGdGeFxNWd9mp3nDsa8SbrbyyLWUMxCIQ)SOq20ZXpbUP0d8eHNfgko7T5LO3JOjtcXftj1nkk1ji(GnEaFOjrUUEo(bHOThfJ5LvZXZ2Fg0t3yNRA9tJsDzCspOoYfK3ynct8JcXx4oHSjUt16gpXnnnne(d3KKdt28SaVqQE(hNFTYGggObSJj(0eNuVDBp2Z4p2lCIJVpmHzhW(3Hp(BlNVPwRlIJzFlasJCtc9pWUWlYhLkXEEUorPm8S0SpWEp5uvYW4icKAoGxOB)JI)Dl7JDCNeK4gheaQyXcFCErRsp4L4pXdL(XEXH(PhQ0p2Dcybg5fMghfg1PCfFAhEgaaXm8daukIW1b08WJYwfr2hsaqpesh2)Pse3EGXUd)oaaPJ1D38IiZE5y9Oa6BB6(6v8I82Cm60Ppkht5yHk))2MVHDIkW)OJSEtDVtQbmk3yVlTEDpdBq7sH)Par9Nn4X5i)MheikwlI39kARYhuKqkBb5esE2SOkUFaH2dWaN6bm9Yyqt07eSCZ9WIcDE(IfkFJyPCXqwxYtteifBTV1oQF(Iq6ESpPjGMC3P9ddKv4bI7Yn1BVEjv2MEFVJ48HOpBrVUCXIIkIAU8lqeRF4V89rINFVgakF4Y4FxAm9v4HsbtPD1wXfAK9bw(aOaSHtquif0l8dL05adkuiR3JqY1hsALgRtEdUgz9ZZvX0Xyd1)7cLx221OKc0Ym)prLhVbKtf1FPq98QN48j)s3O9LMyWhYiEIokJszfWhwqJDnUdKJiTp6NknV2NJqYCx)l9JR9pVxWp1ZIRd1XTZ9ZTZ5tCCLvl)6gH6OLW)(paJc2hUdLrm9fhapWF5(I9hVAUSFKMYsgQ)W4qFFuB)f5W7EFC37BG)pAhDxhRE6Ao2dSnhQwh3z3SRRbO1PN9JLhDs3xXSZoy3z1aFJKr4qpbZqVM9STAGB2w0(CWuK6bknTun)jM0HJjDpjH8VluPN3d(XS)GjqjBqhpcGvrz4f2aYW3jgOCvJfuPdh6XcE4iaCpQ0p6HxjZn9b6OBre9dGhVMv2tGVEYp91n5RB1nD)D0hcvFiU4QGnEwD51dqDV8OhX11IZ(tUhDYpME07zHcEA9yD)P)6UInBpJH9Wp9GdfFFW5)NNNSr4Y7ux2KF88NVpAUV7(7)mc9pJq)xOF9Wi0AlC5pDQVNo1P)0PEhHX57MOVp(YJKv()g8PdZ(45DE0pOs9z2klm7RS9JuGyx5AQ6f6dRP4sBVKVZMsE(ytXbsMx)(lEZ)99VB6r)YzwCYi6893DepW5(FjL5m(7bmmp82bad)drUsCWSFcZocmBYdbM9NjlDVaGTLSK6ME6Vzyr6BNQ)Mn47TrTEQrt)jPwROTtp7FGOT)mt1Z(oaQoKvR6wJ8hpF6Fiyi5(G9y)No)OFwn5)c8LTtq6II1poCm(7sIQu4FXBhmUFM7kahtjj2YUDpa79pxzxnFrrt92nmYn03Lk8TgIlddbR)8f4qsZvKj2pInz1GF8ZAWxkA57hlzQjAJxvrVzUYRiAJC2B(l5HeMDv5Qvhd3BSp7Mh8b9jXnb3h(jUbPjXU9Ebc29MKpniAcEaMe577esFsFeZPxXgbDQlphLr3NQEwiUhMbZXRVGDF0lyh7JR7uzBCm)3eZXJROs0R(b6HEYpSgpD2yVIGyBiFD11HUen8fIFVti)jEeG2Ehwk4q8iuaY6kwJBsFCbxFO2KKoaBGJ5AdYGNoKX4Juvff2iPr8N5vk)aPBbBtr3bGOdSP95ccEVpfvLS3Gw69SLAj0UjmK0txxuvqFJ8t4ggI4VJ564Gr06FKYOB2POMXxxzwNTEt5n5ByFKSHz(s4zxwVAHwuF1VSvCsdZLBdEJom1QHdOJ3e5llO(r2N6PHYGG9o8Vsy9EXlDKJ0livGYvOXGWfR)VEm3GWI7a7fium(fUdmYcsWpU3HHtdkD)dTpxv7WKNBnAOn7m0d7nteqnDMVU8JQ1U74858Vk3C7wtNFvJAuPAL35k88oJIEF)g)szt5SYvLT3cYtkW0qZBXRA5tObND7ln08t7BFPCkCT3MxCe8dXcls3cl6jXcZ5VZwyey7dWidI9uaORlgdylcf5hZdbyWOJ)7hX5HpkcNh9QvZnphfIBaHcnJn8Tdl2jmjXZp0lnW1BhgFrgS9ICdJsI8IdcDsjIdSq4uOhDJsfZq)eBMHUJB2fKTUC97TRHtWF)3uTF6zHjMRUXr078jzPoeJeY8REUC0LKnFjEWbWeBbylNID1Rv41iSSDL6Zxvjnx1AfCOehREfsy7PmCXdORY8v4xkvkz1UF5emjOk)rSrHRdJUUpHKYrKyYX71JvuXd8l4uOn4x0l6I0Ji953H)3))d" },
+    { name = "EllesmereUI (2k)", description = "The default EllesmereUI look", exportString = "!EUI_T316YTTXs6xLZlGzH738VKKTSDPylvYmBSpvQsfijKiwtbWLamYkU07(290ZGzgGbGeusooj2vT7rbeyU0D)91xWmd(2zvEj3MvNc)rus228popDvwH1Ka3y8Fr(bXErXV8SQWKQ5BYYkEBHTNNLYf(Tch)aRx(a2s13Vod(FUE7Qv4n8hzBQYllkSFj(JlszDJFY1Lf1vWFfKCZQYzPRQSTsE9xxVjRQ6U07pRY2oPCB9Q8IS3xUaBVIYImO9TDsMVTQU82tkxvUPI1wZxLwv9ThEaBT0flklWl7eK86vRYQUnBt2V(UtklxTO8UI3NwKEt2MVXAOzBV(6Jt3qtxC8fjUe2aXjvllVBAo0atXjYSYnlY2CCbnVNDZrRwVmfKsESj2S0nVb(pICG)lyQq38hZ)tQHfp9L8NUAD688IBkW7oizv58VKT4u2dED(Q6SnS5SBskkcJsYNxwqnve26UjBRYobNZmzWPYM)iwN10k)sEvDLvc(7LxFDvw9NkCTObqwr6SvS(0p5U8f1llCy)cBICmQ7PH2nBkV7xxZ6IBt)kkzkIuMpVHnFcswMLFZYAA8j6Spx8cL2eM5tS8zYyuS(oyknfuyo(jxDB(nBsRZwCoyQSjFr2hxNTA17Ev1u2CfSi(sEXXSUdVKJN8jUaKb5)H2dawdlUfgNxuwLxNZnfS42mxfCLTNBSLv4vEwEOrqY9f2wwtITdcTd9DIDzJWnzRUOmhmqdso51Fy6RVeftRBDf7KVw8c7OGjHEXrEHE2o22icq2BHqV557heDvGRJO3SNe6BzfB777e66nYUZjoyccjraPJNd2DXjZ522v8U4fXHtIICTDHPJNF4i7cpNjHbbrHboowHwUyx4ZGfnnVF8Kq7apxRGaplMDYiAFgjHDSqe5Zvioxf6lKq(Kik0Xlm2XFCn)lCDIM4zhe4h4f7z7H9wyY268v513RiFcbAnlROqNiRrQYd8N4bAa7alqmf8YhyDazZHsOgO1uUHF13(gZSKamtxMp)lfajhsuUmVabpiI7gIxXoez9o)6ltlUjdXdRsV)ugzyvD68VCs52I6J5mkfBV9YY7Q4exFj7(z5flocGzitTTN4kNZr(oVSnpHlElQ2pkTZBemjv3LVotq1fsTmcG)yZ45ugmnTy(YYnNZr(wSMFgoRMyf9sDXc0cZxMU5MStbFaeVM9lBeeefz7XpsMqCFWn9)KxLpJPrrc)vG)IkMmI)eutYALGMjNSVid2zQ8(WZMoVgysoQi)wgnUpngaw406TixZ5fN8kMkTi92mqODIuOPtgcQAQTajunRbXEBv(F(NPBw0svEPO3LxIl4DiHXRBOPrP5LcPjmVOU0OxaYukIRsMwkbaK2RPVKYEh7KLaZ7Xim)3wMv8UcAomLzdWgkKnGMXgF47Y8s8Q8nzZzmUEj)YRpL)K6UbbQrPCwBSJYa0BlivRZr)nkE9yrAWVHtygovtB7efKiSFMRvMM916PKqdrebVKX5a4P6CqPF(M8Scq7ad2UgVFs4GxXHTMgISUTJswwUTc6)3ccUxRACtTwJdiVKvzxx3YitOJ4sscthtZ5LPRfb8iKd)3YYBfkFCs9gX)bh08MUdZpvOi2oJ6MtBnkqf4ddtp1AiEieuoVSnlx7XGzMjDZwd0zMONKMfCBZUetTi50OMABgQtkza7(dcHuyYVkKvTOJ6Hi1el(Zcp0U4d)oqi5NC57EZBhjJKM7lf2ihBjSsYgzKe5rqk1I)PpYgd8s9Y)O4qqqUyGsQhNZFpOMAfeZijMmpU3zKtAetDcJYeTepA4ZmrJDGms9fTMKysZA8VlKs(jhtsQdJsQTb()sOKAhd(arg56iVH)jYfzoyJVhCr95xyhKs7mzU2cktusMiDKfvWdZy2jY2(QW4GZmNIMjogTWCgGGOpYGEqfda)DCsoHnM)pnjl9FGSK)p2MaXH4fMILoulHudeap5WDJWLDfF0LnJLgA5XaYhQGGQa8aJa8E81D4q825E3FkmTX4MqYDyd7JZyak1NbqEl3zQoLgfS(aJ0WeS2CHW(oIQB7IVF0mOd5OzM6sGK74AFFsR47deUdhtpuy6G4Dav7hKVty7twflgjSXKN5(CIBiqMU47E5h0OrEKOvdSTsFe8yWhfS9aQCXU9gR9cf(oIBhV3yt4xNo4xdjtyie8EcW8XcJ1Of6OSnHOBvJzn81Zhq(P3)Rjy7q5Byar)4qU9ri8uIO76RPLVIrbNFc9c3ZBS77iCEeUH9tEFE18SvRslYanMbFW)LIHngbGzYkD8QUx4EiRF(W0Tdj5qrY6rs)CLRChW(idj4rIKhk9TOK6n5fFjRUcF1OWdd)WRYUoD7k26945VIE6iCZLwBVb2dbMhWytV4pgQtOz77o1Fu3AASbdS31RZO(uNsPBvd3lAMbSlFYtcO)3iNPYnoug4gYG9j4nh0tWepXvRJ3bQ1lSt9eFuCpDRtNMJ5Nd6M2vNZqOdmJyMPg3GaxDrGS9Q5PRbB9SfNxmpJm15Vvrf3Toj1ZMjxXqpOH1uwHypWqUQlRSTBQkXvtMBYYSVcteRtELt8RW1osvtZ7dmIP5Rywg3mFHYDFk7FOayt6I8Tv0lxQ5zTOOMsRH55sMTmGayMKrKnlq0EdyBaxEfU(RyZK8cq8bZ1ZlwXCzAA1Ijw9xpy8jGOHsRQpjFZ8vzkdw3tpkuBW6AnIbl0pacBZxK4s5Wpamt2CB6Q9z8pT14VvKxDV3Aa7a6F0ic7VROU6bg1KIM8dqWvRxb8kv0AdC56lY2mhWvGzbmt2WLVUS27JRkRVeVcEHLzPRQxYVBMXAD5A8oyGEhgynm56siet2OsHzIq5NI43fRU)dxCsfMDVdt(dMD)ArErD2MnBxxNpJPlG5aaA8y84j3i)Zz0FI6tFg0f7)prmkci(ImmnQ318EmzdmxrF9w(k4lKWBIz50Y1aIoRi727rjer7bUoEf6(aaliZKIhNqCUl6)3aEhRx2WL4rR5tF)K3HZQRtNN97hTaWLv)UIE43VnBrE6VZU1FxUGqNmDkkACtUwiSGrdAI8z(K8foCEtsDaZOPCfVsYpamCX7bJqonUJhnzXaR)SQWcCAT(dBVDwgYiQY8nFo2Qm1ixByZvf2C9arsePkav1dGrhB1QEr5DGVo5czTvRb(Q9AuSS1Ghm65MvAJ0WK1PflYUnF(BwbeIRZYwu4rWnDTn)IcDJYfb6j0xunRbQVFfdQKj0iBZz68)VTzv1VVCMQf8P0evQW1m4CjmtRoJde4H8OUeAHFAt6MSxduZzYHntMzPiZE9TRRVxvKznXPrO50iZylns06U5brnjgKrniYz9gkFyRU3gI)gRx2ednZzEy2pvUphIdWjbwYIRIOo1KeQXEehDmzPKOHb6ExXjL3olTUzYg1mzTDdBMU4FtdccLJd5FBjijpLna0MkAvlIBtPnUcAgh6kpqpOr(P9qGl00IV820QJUbIkUz4AjPQIKANaM6XrsZCsgsjOAz3UZ0S69vT60SVfpZVa)Oe4smQiLHs8REk6LomImlq1aeAOarnLl2)SXOMjBlTRqrSp2oaXsFMIqVii9UaDq9z9ErmZ2DVeQGg(KU48lqUytH)pnFteTWrBaAC13Ac3HrJkoSrdlPSI5DyJuRLHNTiAFnGSvGSTe)9m(F3EcC8nTE2ijnGLIPg(3KigTp)Lsm)aDt0ijPBO85SztbAdbGwiYkLbr8aHzEeaPecr8P0j2BcbPAQYSLyxJLKRNHHXRIBuywD0y2PRiSOus9lqsZ2Y8toCEt66c(QNvOO3T1ce6mfN)fGpuiB(2ofGHZI1vFilDZ(lobmxJfXUhbXAOzvZEoxRclJIJZ20m2rA8z8OsKH0f1IfsHIiGfAW6oOoVKMaZUmlDX9ndKyPrORmYmAyaEXM3YFmLgZ0g3VSAhCBEr(mGKPPr9TLK(oEUsqwKNG9Orv3P8QN08tNYU1LPvl)L8ImE8Quq8WeTDCvu40AU9Bgq2(sCAKVseOHuiOoupZPrNYuLxnhBIDys5jJE73yBkfKrgYeBodbkvzbAwgkkmxU)VpRGmbAJgTif3X6)NcBUNPis2rPgXfbt1eusizh)vAaolExZgQChekbJ3kQnPgt8dmDwSW)DVXLeOyYWOMRix8sFzQ9esIVED2cPTuJItQ28LOeJJwUmk)685Sy(zZqLXeiFZ2cP4UA)4a8vJnwr3fPe7IXPEOMwF38h2uCpQ11ryGjjr5M)4D2BhtY83YEskTGtzxvrxT7rJEKV7((9AzSjJMjujUrvdDhkXDY2qlly0CwaSALOhWH3kOn7UMiC9Mu2TZHVsMAVTNEg979HsZ9SJIvtyd7zlxF(Qt3DnGIz38hvQvr7O3giVQEsrRzm66ic4r9Pq2dA7YHvjGtNSZbQJxJK7JGvhV05iTCfvoKRO3vfXH(TX14hy9lgtqFhwODMiUFEkeYHfi44luIHqhhU2j7K7FGqm51wjmCWARiRX1ExXLdl21HQcJXOynudMrfyBpHaDaHOoajANWAo4I5mU4xnx5NbcBvR6t6HdGZTmLsN4QW2BlrYb(njnnCPHgDbGmgIN5ctDqrz3oQxY7NPm2W3VyJMwr6nqjQ6j85dUavhqW(7UUvdhS2HuyRUHc3FeS9hgzGQv5o7wdr9py9YgvWapfHsoqTfhk0TXfeyS29l4sX3ED9MCiU(x8hoNn(c8T)1XUVsboQahpKsdouPgnMP1iJN8GR9y34i7TAK9x)ctrZ(ilULXuQgv9q79DwOGwyIdT8TnuSufp3TiamK66WjvRlc75NONB3gZ9LeuVjPB8D2nM66gRbF(CRHVYp1kc1bQgSIAIPm29G4GEtco2DcvDF6P9Vy09(6smxBNhWKqwwwvNRe(VBSCkidEXk2GSx7DW50n3ukweBFUUzFyD7XmhKCQjb2SmNyZ)Xga2a2)(0YKa8hPyCowJJdsn3B4L8GVoA1QxXiOzjSoagWLD7VgToViRMxiR(OAA9MoXOrf0nJjUI(J6Jjo5U4j2m)dKOjw716FbydHhDnO4osDjhGbKIlmQlHjfmZyhFiOVzaWV9wuLQDEIa)TtcTIHCaL2n3cdMR2STiJwLdOP5xO)Mwbf4cgccRUITqmURCBbF99Nx8L7VA2kmwb8gURAkTSn2uUgmvNYxnDZWLMbB4azpvVCv(FqxaGTGxk8rXYFLsvlnk5oycC92n3ZtfTK3xP3UEv(13tpAeGxQZUkDX)l1WqdDBwDzXnBPvPi7xRslWXaOLUllDDzXvzfZxstgWZlG(GgeAnsrItLJXzY)Tery4jDKdFLbToBEE6QQpuw8o(6jHTFJCsG0BVgYPiBXVXA)xtnp04W0Q(QTvzl0x8oGrAZJCkmX0VtafIQGxLxb5vFp7uBki527RbjjBekFuuQP(SI0RGUPwAaWJmr7QnRWbM5yyYcQZ(gkrrltCTaIcBTtpl8uYcxAshXwooSvb2niB09RZyyp1PyysjA1xFpnHbnZgmYGAGtifMoV)1V6D)67XB7Er2twuKq3OvAmw2THbn0zH8)EtHigA2cdtSxOPJ(iwebzFLVxFXPJC6YgAFvpWv8ouPb5CrnHrrGv1bLoeLnyEaVVTf4XUf4ILDF3x8cx34jrUW)WZDiwt3CMafMm98lOd1eXHcKYLWtfiBRGq2th4ehJhlqmlAiDf2kFe7ck6hvdYtBJUtZNIl3QQVCpdFndEGT1mi1TL13rxBtzXFMXHzBQrGGM1AiRxoVEjyn9(8QkoyXNrZtNwAvQrQ1EmnvFmbb7uUIguL3sy6QLPlkVd68BNs)(1eEDg0JzB(YvudXWRlY(JYRyvwNDAQDpWQuwZ4yyXWFT4EF4bYUxHB8xlYRpfndzYoadctwqCwtvHqUmZyhYs88NDsQYwLnVgbQgGewqJaXwtE65(FyxHNl)Nf2yTRF5m6hqJAUnKLs4oZKrtIM0buB(5IxWxrcIroJCWjXHyny3ee3X5cKNfpVac7PNEbg5h5Ag8)uuZ3kam9N6eaVf1v70syuTspmaJWbfjHiGtFqDcGBM4G9l8PyaniBTuyXvEllqkz9Ye1buD8XU)ysQG2DxWLmN2rv8jrCAQxKQYMOyCq6smVXTKlI8BOXdFuZoM1eXRP(aGEiBZY1sbppmWaEKOSUhRcVqcFMSG5CoFL2yOQEQ8BcvEmBo2vfkNNN2yo9jJKDOfiRQJQ5lsvvx9FQvEV713y46piTrNY8WS52uU0A96h0QFj48OqeJdpQVPSx)JaBKViR1c)gq6lYi4RWeGwUWrnGfKVq83FsKo2S6zSQ1SszTSQaWyYLNaCDCdE7tIMZaohZdSEgBSWw6pIS643ABKGpxtDA(QvYrawyX4M(wOL8CJDS9dTJdIJJiFOOsnIuoUEo2rb84mLw0Acf691iIQF3WFNMPSMXfvql8YGzljSPkV0SYot3wx20FSJHrzrfSFeKx2kO7pPRu7srzX0euXdiIdlnDZVusLcTszBS3HuR7AwWv2Sktih8QhFZ5krm5HxsALvlxj5YAcknQ43OjkkNGoad93are26SeJ0ijWI(Qk)3PcFxSoQI0MTiGa(1MSDqE1iUDFNYALQvMWZ6cdPyd)i8aKYOlthBJ7iR)VDig8MRxqKNBOA9YcHlG7sx34y(1fEW3redsXTg8Aq)sbAqpPHd(ocKoS0qRDdmjwk(1U1iHsqUnS4dqzhXUhTGCAupkG7anec9d8x6ICyQ9c6qTX7kUaYgKIovnmNooMIKWE1XFCZ49Zcp8Tn4Pd61PN1xOtd5K1wiEuWR97UExbHPflWOIMYI4i09j3(LarVyOhoZCqFX6KVcppivLtypcTD6ztJwL0asnczsPfVH0hCdPL0z7ImTxnJQ5K4KbHRn(Clh46unDJZqDxo2kqt7gwAC7gEM5ipjy4(e5jXS0nYtvaO(Onqbz2MiCWqsTKWWMnSDZv4UTI7rX2Y(mqeKHEWeS3EIsjrJK2zrbUCAFZDat(e(YZ6lMx(RxF6YmSUaygybqkPWdwCw)H22eTWrSTqgPorBAUtyl8eLMhYiViCwCwMlHeNNYDSY1i(sU4Ur7RA8XV(dSf)wz9f0AKzu43D4wODKidAVUNbD2nLOoCQJjJh2XMCVjF2BizpN5t0RzYqm6MOg1PNT4fYOtminMbaQkDZxy2UNsCAYtgCuxYsDHtPiQfKdv6x25vD3dcAsFrlnc6)V45c98HaoCTJTITdJd5THne5Xe4cErwq0jrV0qvKEqTqgu1O8N44fh5eabV400sHwUtSdcTcdSTT6RLGjLCibJMj(rUUwro2XX28gkmWdpMSJd89I8yNH3MAi11Pc2uHH4d5574zfYxtlFTioieNZEoHEoX91sIDtqJGk0gNEXoH(ow8G4GPNtq0eq2dZ4il)(AlB1LBrJgZzhASaUME4rqajT8J9HR3RQcRrkky0Ntr(oO4XpWccf1YvmNaWaEEMdjTf7yzEoHnPNGv)C9IXIgfIIMYIfPr7(toT)1YPXFd(yHg0Mu(uq8SjsaFL5ZwX(0jHVkk0qHBoDOc3C6FrfUP)eN(xyHAAfG0FJRrZJOYa)iu(gReLiBvxEgTiT8yzST766ixA9kcp5ABR3uKgBLFEEkKY4RNue7Zjdl0FhUavjBa6s9xYP(QdMrktqhU8XK1SEHO6R(o7YbBp1sQN6T0k35ojI)0wYOHYRFmfpQJ79HRAK5Yo)0u6OHY8CFZZEFkNKW8Q)QjnMO00Q(spH6mYQfXzQA7nOBLGmwdhZ5wFw)1xPViIOLeZX8xpe0SOdMUNcDhuDxEeLjQNAsTFvjAxVMH21w7rxGOwHjgXdt8hQQbnUAF2Uy17FUfdeH9(v2O(RI)dN1pCgcb(kkpsAfK9E(xISPAjy(4F9NJjQzp9AyiCz0j44FCdd2OJG(dyD43bqNOsJ0LpkMBJ(nho4o(rXuvc3y86kHyURxeilGXDfqyS(mI)OC1CpoOgkeS(wFeIhwleOH2Tl8dlTD8cpgImFpJJzNHA4GhGx46D(DflWTctPb1vF5yTR8ZjIxZowJ03wiKMtSjf66PQ31fIv7HpX0Y5EBhQW(48iUtlIJchEeD)q5ejS1M4INABlIoAETFS9DQkX4k1qV7odvdEt7sdXU34bg3bUIdLZQPLSv42u2mtz)lIsoSYJOxeDnwJbvm3SbKcNn(QiS)vnORziR1X1XodnD2WLiyulRSoawnhx7rI8AsXJfoc1uDFu7ZSGwow9Ms)EK9(SNKvLr)r)2BMWTJF6WscTtGQgtsCC5c2kvVN)S6mMU24Ig9PjjUEsPxZTPUbuV1uyO866RuvMsTR)3gUwE)nPH1ci1WU2xDcvYUJitmMD3iY7EptcqBBFZCIOuIigzlpfqjt7tqMGZ6MMmfG0fnENefHSdNwdxJEDC7pnBz7E0SQYnZo9XuklZl2HdVsS7yf6QltMLUJ17r7QCTZQk2xbsAxBSNLAEoq28KKwCiLkwf7073vjrXPnVG1PYxndk50E7I0ev9LnpL)oaNsVii10r7)f70FwqTknJHcXAWzDFR4BJl92ExkXNnuHKmy5BUmmdye2YlKXmLnNbMzkqZrymq6ygdzTNqI7n1nZHd3Pe6MbC7efz(TMzUut9eQ3GVl0wuOuKWQBdo2PN(X0NpBCB(TTcy2ANTMAG2bwY3YzKBtbjMeh6YJJIAJFT1bFSn7yo)cL1)Hxc0VUSo4(Ixy7y7Z2epowXbby)nU9auCieiryyqKLNVxmL4p0(b82p0BsOLLLn9HvVvZVRp742wE2tGrf9zJxCwq86VccvUaCl4)Vqmv8dJOzsKJxOv4ONkora5hmwda(p6LDZMkokIk3jiJzODSvG3OBFVy7jHHHrUHHoErnTFKO9DJbnboaICTT8h7hbE74jEWZ6f4H05(nnV4tm)lc8ztpl3i4MIdhxZZ3nYVpnhTAfnzKpUmpITdcIT8chTXdy7ojW22XY1ZhT9iU9xxmhpEZzq(MXox16gheBZIfCuDKniVXAZf5g4JB0nHSjSr1AhoXooo2h(d7OOXjBEHNJp9Mmoo9gLbnmq9yF38JJSID2T9ylJ)qh)jwUUWe2ZkGx543NpFtPwxegob7H4a7iF3r2fobUOuj0XX2kiMXJeN8r2(ttvjdJJaqQzbOqBh)D2hTK9Hw2t8ISd98avSyjzCrwTsp4e5oXbL(HoH(UXJv6hApbSadC8Jdd8dAuUEIMhiGyg(EalffOZiAE4rzRVjVypMEWNTvkD8BoQ8F9IBYAt6Y)cqGoKWtCRI8BPsQsHhte1kLmYJ8O3KUvho8aTEJQH1eE2snpvRg02W3ba7MuLrxpnWzw7STQ5ZiWRsRtXBGMjR3uY2(5DgvqR9)TnDd7GKJTbOSKdgEnQz79whYJOODyxZMCEtIIo3SBZnRNf7aB12NGtADLVyd(uoaYXH8O(qDw(iCy7HUL1Dh7KWi(OD6R8fuY8XDr6IfnhdpH8mSWyPKNprqIZAFmtu)(WGbXX(Mrat8DNmpmqwHNzUl3uU9MLuXyA9bLHhLd9DH5T5lwKvqbCl)eVW6h(wQpq8871aq5ldf)d)HPpZjuIvkTR27rHgzFKfLpka5hKGnsb9Y5qPs2U6NmHSEpcPmpMKfnw97k8nF1o7vfthJnu7p8oojBxJskqlZWFI6jEliNYk)Jm1dSEIns(Per77hrNVum80xugLY6A3Tmf7AC7jhrAFBuvAETVruK5ERpMJ9)9tc(PwwCnKf2nWp7gWhlQlOxkLF(yqD0s4)(pbJc2NJdLrm9Tfap8F5yX2Jxni7NOPSm(3Fya0hIA7ViaV9Ha3BBG)pAGU4471asxdy3X2SRADyWUzORbQ1PN9JfIoQ5Ze1zJgoR64BG8n7Iemt9Agz3RbUzBX(NdM8u3rPPLi7p5KgpN0bgeY)UyLEzl6hZ4btKs9rD8eqwfKGxydid)GyGYvn9WknEQNE4dhGG7jn8Jw8vYmFFKa9Eer)aG41SYEgW6r)eRBcR3lmD)b6DPQhdexLSXPxiVUdQdcrpa0ThW(ZoIo6hte9HvOGNfCR9prT7YdD)5nycT(xErc(Bos2iD5dQVuMF8WZhIM7NEO)rbR)tp0N9Dax31dT2Rf9NG6deuh)tq9oCGZxJqFFWYdKv()gW0(jF6Ige9JQuFMTY8tUJTkJ8eR1wtvVqFynfFX5l5RxPOxo0uSJK5TNF57(VN)HPh9lN1diJcNV9AV4ro3)lPmNHFpOH5U3gbn8pq5kXP0(jz7aKTrJIS9Njl94iG7lzj1Lu1FZ4I0xSw)nBW3AzG9CZM(ZGA7LND6z)dKN9NzQE23bs1Ur1QUWl)Xdt)dues2pAC7)0Jp6Nvt(7kwU)aKUmB9ttmg)Djr1h4Jv5cI2OPXUwaUG6uS4EBAA2(pxz5cFzwv52nSWGOVlv4UgIlT9bes6cCWRbxzkOJyddnBE3KkCtrl3FSKrPOnEtbTZCLxr0gPSD(lHI8tUoF1QJH7n0LDZD(G(ezhH7hGiBV4Oq7wBKHDVy9J9cMGhGjbUUw(0N0hXC6nSrqJI1Xsz095Ix4JcBWW9Mlz3hTb7yFr)MkBJJ5)MyoECbvmF1pqp0t(X145xlBlcITHC7QRtVjA4lf)EJq(ZCAN6whwk4q8Oc6J5Dm14M0hxY1hQnjPdWg4yU2GGg0XWkFKQQOWgjoG)mVr5hiDly9l6oGOTJ1VlxqW79POQKTdAP9zl1sODJVpPNUjRiBt6QVH3izyi8upeiZc961(iLr3StrnJBxzwNTEt(TPByFFIHz(s4zxcasT4du)YwXdVyUCbZBeWuQ6NNoEtKBwq9d1y1tdLoEyS4FLWATXlTKJ0ljvGYvOXGaI1(xpMBq0dCGTbcfJFbCGfqHKMKJomCARQJp0(CvTdtEU1OH2SXq3V1mrq14OCn8eKjpD15fRUxHZ3rSTi)J8Q8z5RYRVhMXKtMDzxXn5nmWuHan4Kx2yXO9bF0rzioN)LNUTHVyty(mAk2VLNgp)PTT8uoOZ2Bdpo3(yS9c0T9cEwS9SEkT9AzHzsn3Vb0WgEgnViAytwy9yC32id8kLb8UlgIYlaf5hZDoyWOJ)7hXJIFqUphAtxZnphK8RtOgAgB4(xl0YpkYX13j2Z2zhgFbgS9cS9dIcCc98TIPqkyo3jNs6gLkMHUr9zgApSzNxY681N3Vgoc)9FtNHsZctmxTddODLkzP2L9eYBSCUC0fLmFjEKcWeBEylhJD1BvI4ryzBl1NVPqAUQ1k4qjmu9kKWUFIxBp5VCcMcvH7a2OW1HrxZhxs5ism5496XkQ4o4cEy4gWfT87ireXV8b8F))p" },
     { name = "Spin the Wheel", description = "Randomize all settings", exportString = nil },
 }
 
@@ -1450,6 +1755,18 @@ do
             local db = GetProfilesDB()
             local name = db.activeProfile or "Default"
             db.profiles[name] = EllesmereUI.SnapshotAllAddons()
+            -- Track the last active profile that was NOT spec-assigned so
+            -- characters without a spec assignment can fall back to it
+            -- instead of inheriting a spec-specific profile from another char.
+            local isSpecAssigned = false
+            if db.specProfiles then
+                for _, pName in pairs(db.specProfiles) do
+                    if pName == name then isSpecAssigned = true; break end
+                end
+            end
+            if not isSpecAssigned then
+                db.lastNonSpecProfile = name
+            end
         end
     end)
 
@@ -1502,28 +1819,9 @@ do
         end
 
         ---------------------------------------------------------------
-        --  Migration: clean up duplicate spec assignments
-        --  An older version allowed multiple specs to be assigned to
-        --  the same profile. The guardrails now prevent this in the UI,
-        --  but existing corrupted data needs to be fixed. For each
-        --  profile name, only the FIRST specID found is kept; the rest
-        --  are unassigned so the user can reassign them properly.
+        --  Note: multiple specs may intentionally point to the same
+        --  profile. No deduplication is performed here.
         ---------------------------------------------------------------
-        if db.specProfiles and next(db.specProfiles) then
-            local profileToSpec = {}  -- profileName -> first specID seen
-            local toRemove = {}
-            for specID, pName in pairs(db.specProfiles) do
-                if not profileToSpec[pName] then
-                    profileToSpec[pName] = specID
-                else
-                    -- Duplicate: this spec also points to the same profile
-                    toRemove[#toRemove + 1] = specID
-                end
-            end
-            for _, specID in ipairs(toRemove) do
-                db.specProfiles[specID] = nil
-            end
-        end
 
         -- Auto-save active profile when the settings panel closes
         C_Timer.After(1, function()

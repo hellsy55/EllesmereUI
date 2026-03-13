@@ -1764,11 +1764,12 @@ initFrame:SetScript("OnEvent", function(self)
                 if v then DB().friendlyShowDefaultNames = false end
                 if SetCVar then
                     pcall(SetCVar, "nameplateShowFriendlyPlayers", v and 1 or 0)
-                    pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", v and 1 or 0)
-                    pcall(SetCVar, "UnitNameFriendlyPlayerName", v and 1 or 0)
                     pcall(SetCVar, "nameplateShowFriends", v and 1 or 0)
                 end
                 if ns.UpdateFriendlyNameplateSystem then ns.UpdateFriendlyNameplateSystem() end
+                -- Re-assert stacking after friendly CVar changes, since Blizzard
+                -- can reset the stacking bitfield as a side effect.
+                ns.RefreshStackingMotion()
                 EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Make Friendly Nameplates Name Only",
@@ -1950,7 +1951,6 @@ initFrame:SetScript("OnEvent", function(self)
                             DB().showFriendlyPlayers = false
                             if SetCVar then
                                 pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
-                                pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", 0)
                                 pcall(SetCVar, "nameplateShowFriends", 0)
                                 pcall(SetCVar, "UnitNameFriendlyPlayerName", 1)
                             end
@@ -3929,6 +3929,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Width(plate.cast, v)
                     plate:UpdateNameWidth()
                 end
+                if ns.ApplyNamePlateClickArea then ns.ApplyNamePlateClickArea() end
                 UpdatePreview()
               end },
             { type="slider", text="Health Bar Height", min=6, max=30, step=1,
@@ -3936,6 +3937,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 DB().healthBarHeight = v
                 for _, plate in pairs(plates) do PP.Height(plate.health, v) end
+                if ns.ApplyNamePlateClickArea then ns.ApplyNamePlateClickArea() end
                 UpdatePreview()
               end });  y = y - h
 

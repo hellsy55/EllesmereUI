@@ -215,6 +215,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  Buff anchor / growth direction dropdown values
     ---------------------------------------------------------------------------
     local buffAnchorValues = {
+        ["none"]        = "None",
         ["topleft"]     = "Top Left",
         ["topright"]    = "Top Right",
         ["bottomleft"]  = "Bottom Left",
@@ -222,7 +223,7 @@ initFrame:SetScript("OnEvent", function(self)
         ["left"]        = "Left",
         ["right"]       = "Right",
     }
-    local buffAnchorOrder = { "topleft", "topright", "bottomleft", "bottomright", "left", "right" }
+    local buffAnchorOrder = { "none", "topleft", "topright", "bottomleft", "bottomright", "left", "right" }
 
     local buffGrowthValues = {
         ["auto"]  = "Auto",
@@ -4552,10 +4553,58 @@ initFrame:SetScript("OnEvent", function(self)
                     ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
                 end
             end)
-            ddBtn:SetScript("OnClick", function()
+            -- Click-off blocker: fullscreen button that closes the menu when
+            -- clicking anywhere outside it.
+            local blocker
+            local function ShowMenu()
                 EnsureMenu()
-                if menu:IsShown() then menu:Hide() else menu:Show() end
-            end)
+                if menu:IsShown() then
+                    menu:Hide()
+                    return
+                end
+                menu:Show()
+                -- Create blocker behind the menu
+                blocker = CreateFrame("Button", nil, UIParent)
+                blocker:SetFrameStrata("FULLSCREEN")
+                blocker:SetFrameLevel(199)
+                blocker:SetAllPoints(UIParent)
+                blocker:SetScript("OnClick", function() menu:Hide() end)
+                blocker:Show()
+                -- Scroll-out-of-view detection
+                local wasDown = false
+                menu:SetScript("OnUpdate", function(self)
+                    -- Close when the button scrolls out of the visible scroll area
+                    local scrollFrame = EllesmereUI._scrollFrame
+                    if scrollFrame then
+                        if ddBtn._inScrollChild == nil then
+                            local scrollChild = scrollFrame.GetScrollChild and scrollFrame:GetScrollChild()
+                            local found = false
+                            if scrollChild then
+                                local p = ddBtn:GetParent()
+                                while p do
+                                    if p == scrollChild then found = true; break end
+                                    p = p:GetParent()
+                                end
+                            end
+                            ddBtn._inScrollChild = found
+                        end
+                        if ddBtn._inScrollChild then
+                            local sfTop = scrollFrame:GetTop()
+                            local sfBot = scrollFrame:GetBottom()
+                            local btnBot = ddBtn:GetBottom()
+                            if sfTop and sfBot and btnBot then
+                                if btnBot < sfBot or btnBot > sfTop then self:Hide() end
+                            end
+                        end
+                    end
+                end)
+                menu:HookScript("OnHide", function()
+                    menu:SetScript("OnUpdate", nil)
+                    if blocker then blocker:Hide(); blocker:SetParent(nil); blocker = nil end
+                end)
+            end
+
+            ddBtn:SetScript("OnClick", function() ShowMenu() end)
             ddBtn:HookScript("OnHide", function() if menu then menu:Hide() end end)
 
             local function RefreshAll()

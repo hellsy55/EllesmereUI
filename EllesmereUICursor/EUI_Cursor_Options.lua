@@ -167,9 +167,6 @@ initFrame:SetScript("OnEvent", function(self)
                       local p = DB()
                       if not p or p.enabled == false then return 0.15 end
                       return (p.useClassColor) and 0.3 or 1
-                  end,
-                  disabled = function()
-                      local p = DB(); return not p or p.enabled == false
                   end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
@@ -189,12 +186,27 @@ initFrame:SetScript("OnEvent", function(self)
                       local p = DB()
                       if not p or p.enabled == false then return 0.15 end
                       return (p.useClassColor) and 1 or 0.3
-                  end,
-                  disabled = function()
-                      local p = DB(); return not p or p.enabled == false
                   end },
               } }
         );  y = y - h
+        -- Block overlay on the right region when Cursor Circle is disabled
+        do
+            local rightRgn = row._rightRegion
+            local circleBlock = CreateFrame("Frame", nil, rightRgn)
+            circleBlock:SetAllPoints()
+            circleBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
+            circleBlock:EnableMouse(true)
+            circleBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable Cursor Circle"))
+            end)
+            circleBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCircleBlock()
+                local p = DB()
+                circleBlock:SetShown(not p or p.enabled == false)
+            end
+            UpdateCircleBlock()
+            EllesmereUI.RegisterWidgetRefresh(UpdateCircleBlock)
+        end
 
         -- Texture ---- Scale
         _, h = W:DualRow(parent, y,
@@ -286,8 +298,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local g = GCD_DB()
                       if not g.enabled then return 0.15 end
                       return g.useClassColor and 0.3 or 1
-                  end,
-                  disabled = function() return not GCD_DB().enabled end },
+                  end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
                   getValue = function()
@@ -306,10 +317,26 @@ initFrame:SetScript("OnEvent", function(self)
                       local g = GCD_DB()
                       if not g.enabled then return 0.15 end
                       return g.useClassColor and 1 or 0.3
-                  end,
-                  disabled = function() return not GCD_DB().enabled end },
+                  end },
               } }
         );  y = y - h
+        -- Block overlay on the right region when GCD Circle is disabled
+        do
+            local rightRgn = row._rightRegion
+            local gcdBlock = CreateFrame("Frame", nil, rightRgn)
+            gcdBlock:SetAllPoints()
+            gcdBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
+            gcdBlock:EnableMouse(true)
+            gcdBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable GCD Circle"))
+            end)
+            gcdBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateGCDBlock()
+                gcdBlock:SetShown(not GCD_DB().enabled)
+            end
+            UpdateGCDBlock()
+            EllesmereUI.RegisterWidgetRefresh(UpdateGCDBlock)
+        end
 
         -- Ring Texture ---- Scale
         _, h = W:DualRow(parent, y,
@@ -391,8 +418,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local c = Cast_DB()
                       if not c.enabled then return 0.15 end
                       return c.useClassColor and 0.3 or 1
-                  end,
-                  disabled = function() return not Cast_DB().enabled end },
+                  end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
                   getValue = function()
@@ -411,10 +437,26 @@ initFrame:SetScript("OnEvent", function(self)
                       local c = Cast_DB()
                       if not c.enabled then return 0.15 end
                       return c.useClassColor and 1 or 0.3
-                  end,
-                  disabled = function() return not Cast_DB().enabled end },
+                  end },
               } }
         );  y = y - h
+        -- Block overlay on the right region when Cast Bar Circle is disabled
+        do
+            local rightRgn = row._rightRegion
+            local castBlock = CreateFrame("Frame", nil, rightRgn)
+            castBlock:SetAllPoints()
+            castBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
+            castBlock:EnableMouse(true)
+            castBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable Cast Bar Circle"))
+            end)
+            castBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCastBlock()
+                castBlock:SetShown(not Cast_DB().enabled)
+            end
+            UpdateCastBlock()
+            EllesmereUI.RegisterWidgetRefresh(UpdateCastBlock)
+        end
 
         -- Inline cog on Enable Cast Bar Circle for "Show Spark"
         do

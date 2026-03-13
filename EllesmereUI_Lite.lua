@@ -135,6 +135,9 @@ local function DeepMergeDefaults(dest, src)
     end
 end
 
+-- Expose for use by the profile system when applying old snapshots
+EUILite.DeepMergeDefaults = DeepMergeDefaults
+
 local function StripDefaults(db, defaults)
     -- Remove values that match defaults (for clean SavedVariables on logout)
     for k, v in pairs(defaults) do
@@ -151,6 +154,9 @@ local function StripDefaults(db, defaults)
 end
 
 local dbRegistry = {}  -- all db objects, for logout cleanup
+
+-- Expose so the profile system can update db.profile in-place after injection
+EUILite._dbRegistry = dbRegistry
 
 --- Create or open a database. Replaces AceDB:New(svName, defaults, true).
 -- Returns a db object with .profile pointing to the active profile table.
@@ -197,9 +203,14 @@ function EUILite.NewDB(svName, defaults, defaultToCharKey)
         end
     end
 
+    -- Store defaults on the SV table so the profile system can re-apply
+    -- them after loading an old snapshot that may be missing newer keys.
+    sv._defaults = defaults
+
     -- Build the db object
     local db = {
         sv = sv,
+        svName = svName,
         profile = profile,
         _profileName = profileName,
         _defaults = defaults,
@@ -283,6 +294,14 @@ lifecycleFrame:SetScript("OnEvent", function(self, event, arg1)
         -- exists by the time PLAYER_LOGIN fires.
         if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
             EllesmereUI.PP.UpdateMult()
+        end
+        -- Apply spec-assigned profile data into each child SV before any
+        -- OnEnable runs. The spec API is available here (after OnInitialize,
+        -- before OnEnable) so we can resolve the current spec and inject the
+        -- correct profile snapshot. This is the earliest safe point to do
+        -- this -- ADDON_LOADED is too early (spec API not ready yet).
+        if EllesmereUI and EllesmereUI.PreSeedSpecProfile then
+            EllesmereUI.PreSeedSpecProfile()
         end
         while #enableQueue > 0 do
             local addon = tremove(enableQueue, 1)

@@ -1252,10 +1252,12 @@ end
 local function IsTrulyPassive(sid)
     if not sid or sid <= 0 then return false end
     if not (C_Spell.IsSpellPassive and C_Spell.IsSpellPassive(sid)) then return false end
-    -- Spell is flagged passive — check if it also has no cooldown duration.
+    -- Spell is flagged passive -- check if it also has no base cooldown.
     -- If it has a cooldown it's an active ability that happens to be passive-flagged.
-    local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid)
-    if cdInfo and cdInfo.duration and cdInfo.duration > 0 then return false end
+    -- GetSpellBaseCooldown returns a plain number (ms), safe to compare unlike
+    -- GetSpellCooldown which returns a secret value that taints on comparison.
+    local baseCd = C_Spell.GetSpellBaseCooldown and C_Spell.GetSpellBaseCooldown(sid)
+    if baseCd and baseCd > 0 then return false end
     -- Also check charges — a spell with charges is active regardless of passive flag.
     local chargeInfo = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
     if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 0 then return false end
@@ -1376,16 +1378,18 @@ local function LoadSpecProfile(specKey)
                         end
                     end
                 else
-                    -- Bar exists now but wasn't in the saved profile (new bar added since)
+                    -- Bar exists now but wasn't in the saved profile (new bar added since).
+                    -- Main bars: clear so Blizzard snapshot re-captures.
+                    -- Custom bars: leave customSpells untouched -- the user's spells
+                    -- are not spec-specific for a bar that didn't exist when the spec
+                    -- profile was saved, so wiping them would lose their work.
                     if MAIN_BAR_KEYS[barData.key] then
                         barData.trackedSpells = nil  -- will trigger Blizzard snapshot
                         barData.extraSpells = nil
                         barData.removedSpells = nil
                         barData.dormantSpells = nil
-                    elseif barData.barType ~= "trinkets" then
-                        barData.customSpells = {}
-                        barData.dormantSpells = nil
                     end
+                    -- trinket bars and custom bars: no action -- preserve existing state
                 end
             end
         end
@@ -6081,8 +6085,11 @@ RegisterCDMUnlockElements = function()
             local isPlayerFrameAnchored = barData.anchorTo == "playerframe"
             local isMouseAnchored = barData.anchorTo == "mouse"
             if not isPartyAnchored and not isPlayerFrameAnchored and not isMouseAnchored then
-            -- Skip bars with no assigned icons (nothing to position)
+            -- Custom bars are always registered so they can be positioned
+            -- before spells are added. Main bars (mirroring Blizzard viewers)
+            -- are only registered once they have spells to show.
             local bd = barDataByKey[key]
+            local isCustomBar = bd and bd.customSpells ~= nil
             local iconCount = 0
             if bd then
                 if bd.customSpells then
@@ -6100,7 +6107,7 @@ RegisterCDMUnlockElements = function()
                     end
                 end
             end
-            if iconCount > 0 then
+            if isCustomBar or iconCount > 0 then
             -- Collect linked unlock element keys (children anchored to this bar)
             local linked = nil
             if anchorChildren[key] then
@@ -6284,11 +6291,6 @@ function ECME:OnInitialize()
     _G._ECME_AceDB = self.db
     _G._ECME_Apply = function()
         RequestUpdate(); if UpdateBuffBars then UpdateBuffBars() end; BuildAllCDMBars(); ns.BuildTrackedBuffBars()
-        -- Auto-save current spec profile on any change
-        local p = ECME.db.profile
-        if p.activeSpecKey and p.activeSpecKey ~= "0" then
-            SaveCurrentSpecProfile()
-        end
     end
 
     -- Append SharedMedia textures to buff bar runtime tables

@@ -1616,6 +1616,59 @@ initFrame:SetScript("OnEvent", function(self)
                 })
               end });  y = y - h
 
+        -- Inline cog on "Show Damage Text" left region for pet damage sub-settings
+        do
+            local dmgOff = function() return not GetCVarBool("floatingCombatTextCombatDamage_v2") end
+            local leftRgn = showDmgRow._leftRegion
+
+            local _, dmgCogShow = EllesmereUI.BuildCogPopup({
+                title = "Damage Text Settings",
+                rows = {
+                    { type="toggle", label="Show Pet Melee Damage",
+                      get=function() return GetCVarBool("floatingCombatTextPetMeleeDamage_v2") end,
+                      set=function(v) SetCVarSafe("floatingCombatTextPetMeleeDamage_v2", v and "1" or "0") end },
+                    { type="toggle", label="Show Pet Spell Damage",
+                      get=function() return GetCVarBool("floatingCombatTextPetSpellDamage_v2") end,
+                      set=function(v) SetCVarSafe("floatingCombatTextPetSpellDamage_v2", v and "1" or "0") end },
+                },
+            })
+
+            local dmgCogBtn = CreateFrame("Button", nil, leftRgn)
+            dmgCogBtn:SetSize(26, 26)
+            dmgCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = dmgCogBtn
+            dmgCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            dmgCogBtn:SetAlpha(dmgOff() and 0.15 or 0.4)
+            local dmgCogTex = dmgCogBtn:CreateTexture(nil, "OVERLAY")
+            dmgCogTex:SetAllPoints()
+            dmgCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            dmgCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            dmgCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(dmgOff() and 0.15 or 0.4) end)
+            dmgCogBtn:SetScript("OnClick", function(self) dmgCogShow(self) end)
+
+            local dmgCogBlock = CreateFrame("Frame", nil, dmgCogBtn)
+            dmgCogBlock:SetAllPoints()
+            dmgCogBlock:SetFrameLevel(dmgCogBtn:GetFrameLevel() + 10)
+            dmgCogBlock:EnableMouse(true)
+            dmgCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(dmgCogBtn, EllesmereUI.DisabledTooltip("Show Damage Text"))
+            end)
+            dmgCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if dmgOff() then
+                    dmgCogBtn:SetAlpha(0.15)
+                    dmgCogBlock:Show()
+                else
+                    dmgCogBtn:SetAlpha(0.4)
+                    dmgCogBlock:Hide()
+                end
+            end)
+
+            dmgCogBtn:SetAlpha(dmgOff() and 0.15 or 0.4)
+            if dmgOff() then dmgCogBlock:Show() else dmgCogBlock:Hide() end
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -------------------------------------------------------------------
@@ -3341,14 +3394,22 @@ initFrame:SetScript("OnEvent", function(self)
                             itm:SetScript("OnClick", function()
                                 menu:Hide()
                                 EllesmereUI.AutoSaveActiveProfile()
+                                local _, profiles = EllesmereUI.GetProfileList()
+                                local fontWillChange = EllesmereUI.ProfileChangesFont(profiles and profiles[capName])
                                 EllesmereUI.SwitchProfile(capName)
-                                EllesmereUI:ShowConfirmPopup({
-                                    title       = "Reload Required",
-                                    message     = "Profile switched to \"" .. capName .. "\". Reload to apply.",
-                                    confirmText = "Reload Now",
-                                    cancelText  = "Cancel",
-                                    onConfirm   = function() ReloadUI() end,
-                                })
+                                ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                EllesmereUI.RefreshAllAddons()
+                                if fontWillChange then
+                                    EllesmereUI:ShowConfirmPopup({
+                                        title       = "Reload Required",
+                                        message     = "Font changed. A UI reload is needed to apply the new font.",
+                                        confirmText = "Reload Now",
+                                        cancelText  = "Later",
+                                        onConfirm   = function() ReloadUI() end,
+                                    })
+                                else
+                                    EllesmereUI:RefreshPage()
+                                end
                             end)
                             iXBtn:SetScript("OnClick", function()
                                 if capName == "Default" then return end

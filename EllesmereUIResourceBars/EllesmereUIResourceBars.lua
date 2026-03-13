@@ -348,6 +348,7 @@ local DEFAULTS = {
             orientation = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             thresholdEnabled = false,
             thresholdPct     = 30,
+            thresholdPartialOnly = false,
             thresholdR = 1.0, thresholdG = 0.2, thresholdB = 0.2, thresholdA = 1,
         },
         secondary = {
@@ -1774,10 +1775,19 @@ local function UpdatePrimaryBar()
             local pc = POWER_COLORS[cachedPrimary]
             if pc then baseR, baseG, baseB = pc[1], pc[2], pc[3] else baseR, baseG, baseB = 1, 1, 1 end
         end
-        local curve = GetBarThresholdCurve(
-            baseR, baseG, baseB,
-            pp.thresholdR or 1, pp.thresholdG or 0.2, pp.thresholdB or 0.2,
-            pp.thresholdPct or 30)
+        -- thresholdPartialOnly: color at/above threshold (high resource).
+        -- Default (false): color at/below threshold (low resource warning).
+        local tR, tG, tB = pp.thresholdR or 1, pp.thresholdG or 0.2, pp.thresholdB or 0.2
+        local tPct = pp.thresholdPct or 30
+        local curve
+        if pp.thresholdPartialOnly then
+            -- Swap base and threshold colors: threshold color appears at/above pct,
+            -- base color appears below. Achieved by passing thresh as "base" arg
+            -- (which the curve puts above the step) and base as "thresh" arg (below).
+            curve = GetBarThresholdCurve(tR, tG, tB, baseR, baseG, baseB, tPct)
+        else
+            curve = GetBarThresholdCurve(baseR, baseG, baseB, tR, tG, tB, tPct)
+        end
         if curve then
             local ok, colorResult = pcall(UnitPowerPercent, "player", cachedPrimary, false, curve)
             if ok and colorResult and colorResult.GetRGBA then

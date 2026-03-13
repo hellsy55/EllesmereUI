@@ -5097,7 +5097,7 @@ function EAB:OnInitialize()
     -- We use a dedicated flag so "Reset to Defaults" also re-captures.
     local rawDB = EllesmereUIActionBarsDB
     local isFirstInstall = not rawDB or not rawDB.profiles
-        or (rawDB.profiles and not rawDB.profiles.Default)
+        or (rawDB.profiles and not next(rawDB.profiles))
 
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIActionBarsDB", defaults, true)
 
