@@ -114,6 +114,8 @@ local defaults = {
     nameplateOverlapV = 1.05,
     stackSpacingScale = 50,
     stackingEnabled = true,
+    hitboxScaleX = 100,
+    hitboxScaleY = 100,
     nameplateYOffset = 0,
     enemyNameTextSize = 11,
     enemyNameColor = { r = 1, g = 1, b = 1 },
@@ -484,6 +486,17 @@ local function GetHealthBarWidth()
     return BAR_W + extra
 end
 ns.GetHealthBarWidth = GetHealthBarWidth
+
+-- Returns the Y offset to apply to plate content when hitbox Y scale != 100%.
+-- SetNamePlateSize grows/shrinks the frame from its base anchor, so we shift
+-- content to keep the visual bar in the same screen position.
+local function GetHitboxYShift()
+    local db = EllesmereUINameplatesDB or defaults
+    local sy = (db.hitboxScaleY or 100) / 100
+    if sy == 1 then return 0 end
+    return -((GetHealthBarHeight() * sy) - GetHealthBarHeight()) / 2
+end
+ns.GetHitboxYShift = GetHitboxYShift
 -- Slot-based size/offset getters
 local function GetSlotSize(posKey)
     local db = EllesmereUINameplatesDB
@@ -1612,6 +1625,31 @@ function ns.RefreshStackingMotion()
     end
 end
 
+function ns.RefreshHitboxSize()
+    if InCombatLockdown() then return end
+    if not C_NamePlate or not C_NamePlate.SetNamePlateSize then return end
+    local db = EllesmereUINameplatesDB or defaults
+    local sx = (db.hitboxScaleX or 100) / 100
+    local sy = (db.hitboxScaleY or 100) / 100
+    local baseW = GetHealthBarWidth()
+    local baseH = GetHealthBarHeight()
+    local newH  = baseH * sy
+    C_NamePlate.SetNamePlateSize(baseW * sx, newH)
+    -- The frame grows upward from its base, so the extra height is all on top.
+    -- Shift the hit area down by half the extra so it's centered on the bar.
+    if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
+       and Enum and Enum.NamePlateType then
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
+    end
+    -- Shift plate content to compensate for the upward frame growth
+    local yShift = GetHitboxYShift()
+    for _, plate in pairs(ns.plates) do
+        plate:ClearAllPoints()
+        plate:SetPoint("CENTER", plate.nameplate, "CENTER", 0, yShift)
+    end
+end
+
 --- Full visual refresh for all plates called when an entire preset is applied.
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
@@ -1751,8 +1789,13 @@ local function SetupAuraCVars()
     ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
+        local db = EllesmereUINameplatesDB or defaults
+        local sx = (db.hitboxScaleX or 100) / 100
+        local sy = (db.hitboxScaleY or 100) / 100
+        local baseH = GetHealthBarHeight()
+        local newH  = baseH * sy
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
-            C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), GetHealthBarHeight())
+            C_NamePlate.SetNamePlateSize(GetHealthBarWidth() * sx, newH)
         end
         if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets and Enum and Enum.NamePlateType then
             C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
@@ -2827,7 +2870,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     -- Single center anchor: the entire plate moves as one unit when the
     -- nameplate bounces by 1px, preventing individual edges from rounding
     -- independently (the "pixel shimmer" / bouncing-sides issue).
-    self:SetPoint("CENTER", nameplate, "CENTER", 0, 0)
+    self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetSize(1, 1)
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()

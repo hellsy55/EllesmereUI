@@ -59,6 +59,86 @@ ns.TBB_TEXTURES      = TBB_TEXTURES
 ns.TBB_TEXTURE_ORDER = TBB_TEXTURE_ORDER
 ns.TBB_TEXTURE_NAMES = TBB_TEXTURE_NAMES
 
+-------------------------------------------------------------------------------
+--  Popular Buffs: hardcoded entries shown in the spell picker.
+--  spellIDs: list of all spell IDs that represent this buff (any match = active).
+--  customDuration: fixed duration in seconds used to drive the bar fill.
+--  icon: fileID to display (used when no spellID resolves an icon).
+--  name: display name shown in the picker and on the bar.
+-------------------------------------------------------------------------------
+local TBB_POPULAR_BUFFS = {
+    {
+        key            = "bloodlust",
+        name           = "Bloodlust / Heroism",
+        icon           = 132313,
+        spellIDs       = { 2825, 32182, 80353, 264667, 390386, 381301, 444062, 444257 },
+        customDuration = 40,
+    },
+    {
+        key            = "lights_potential",
+        name           = "Light's Potential",
+        icon           = 7548911,
+        spellIDs       = { 1236616, 431932 },
+        customDuration = 30,
+    },
+    {
+        key            = "potion_recklessness",
+        name           = "Potion of Recklessness",
+        icon           = 7548916,
+        spellIDs       = { 1236994 },
+        customDuration = 30,
+    },
+    {
+        key            = "invis_potion",
+        name           = "Invisibility Potion",
+        icon           = 134764,
+        spellIDs       = { 371125, 431424, 371133, 371134, 1236551 },
+        customDuration = 18,
+    },
+}
+ns.TBB_POPULAR_BUFFS = TBB_POPULAR_BUFFS
+
+-- Build a fast lookup: spellID -> popular buff entry (for UNIT_AURA detection)
+local _popularSpellIDMap = {}
+for _, entry in ipairs(TBB_POPULAR_BUFFS) do
+    for _, sid in ipairs(entry.spellIDs) do
+        _popularSpellIDMap[sid] = entry
+    end
+end
+
+-- Forward declaration -- actual table is populated by BuildTrackedBuffBars below
+local tbbFrames
+
+--- Returns true if the user has at least one tracked buff bar configured
+function ns.HasBuffBars()
+    if not ECME or not ECME.db then return false end
+    local tbb = ns.GetTrackedBuffBars()
+    return tbb and tbb.bars and #tbb.bars > 0
+end
+
+-- Listen for spell casts to start duration timers for popular buffs that
+-- don't leave a detectable aura (e.g. potions). Sets bar._customStart so
+-- the fill animation runs for customDuration seconds.
+local tbbCastListener = CreateFrame("Frame")
+tbbCastListener:SetScript("OnEvent", function(_, _, _, _, spellID)
+    if not spellID then return end
+    local entry = _popularSpellIDMap[spellID]
+    if not entry or not entry.customDuration then return end
+    if not ECME or not ECME.db then return end
+    local tbb = ns.GetTrackedBuffBars()
+    if not tbb or not tbb.bars then return end
+    local now = GetTime()
+    for i, cfg in ipairs(tbb.bars) do
+        if cfg.popularKey == entry.key then
+            local bar = tbbFrames[i]
+            if bar and bar._tbbReady then
+                bar._customStart    = now
+                bar._activeDuration = entry.customDuration
+            end
+        end
+    end
+end)
+
 -- Resolve player class color for default fill
 local _tbbClassR, _tbbClassG, _tbbClassB = 0.05, 0.82, 0.62
 do
@@ -110,6 +190,96 @@ function ns.GetTrackedBuffBars()
     return p.trackedBuffBars
 end
 
+--- Snapshot Blizzard's buff viewers to auto-populate TBB bars for a new spec.
+--- Called the first time a spec profile is loaded (trackedBuffBars == nil).
+--- Reads BuffBarCooldownViewer children, creates one
+--- TBB bar per unique spell found, using default settings.
+function ns.SnapshotBlizzardBuffBars()
+    if not ECME or not ECME.db then return end
+    local p = ECME.db.profile
+
+    -- Collect unique spellIDs from the buff bar viewer only (not the icon viewer).
+    -- The icon viewer shows tracked procs/buffs as icons -- those remain available
+    -- in the spell pool but should not be auto-populated as bars.
+    local seen = {}
+    local spells = {}
+    local viewerNames = { "BuffBarCooldownViewer" }
+    for _, vName in ipairs(viewerNames) do
+        local vf = _G[vName]
+        if vf then
+            for i = 1, vf:GetNumChildren() do
+                local child = select(i, vf:GetChildren())
+                if child then
+                    -- Read spellID from cooldownInfo (OOC, no secret value risk)
+                    local sid = nil
+                    local ok, info = pcall(function()
+                        return child.cooldownInfo
+                    end)
+                    if ok and info then
+                        if info.spellID and info.spellID > 0 then
+                            sid = info.spellID
+                        elseif info.overrideSpellID and info.overrideSpellID > 0 then
+                            sid = info.overrideSpellID
+                        end
+                    end
+                    if not sid then
+                        local ok2, cdid = pcall(function() return child.cooldownID end)
+                        if ok2 and cdid and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                            local cinfo = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdid)
+                            if cinfo then
+                                if cinfo.spellID and cinfo.spellID > 0 then
+                                    sid = cinfo.spellID
+                                elseif cinfo.overrideSpellID and cinfo.overrideSpellID > 0 then
+                                    sid = cinfo.overrideSpellID
+                                end
+                            end
+                        end
+                    end
+                    if sid and sid > 0 and not seen[sid] then
+                        seen[sid] = true
+                        spells[#spells + 1] = sid
+                    end
+                end
+            end
+        end
+    end
+
+    if #spells == 0 then
+        -- Nothing found -- initialize empty so we don't re-snapshot next time
+        p.trackedBuffBars = { selectedBar = 1, bars = {} }
+        p._tbbNeedsSnapshot = nil
+        local specKey = p.activeSpecKey
+        if specKey and specKey ~= "0" then
+            if not p.specProfiles then p.specProfiles = {} end
+            if not p.specProfiles[specKey] then p.specProfiles[specKey] = {} end
+            p.specProfiles[specKey]._tbbSnapshotDone = true
+        end
+        return
+    end
+
+    local bars = {}
+    for i, sid in ipairs(spells) do
+        local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+        local spName = (spInfo and spInfo.name) or C_Spell.GetSpellName(sid) or ("Bar " .. i)
+        local newBar = {}
+        for k, v in pairs(TBB_DEFAULT_BAR) do newBar[k] = v end
+        newBar.spellID = sid
+        newBar.name = spName
+        bars[#bars + 1] = newBar
+    end
+
+    p.trackedBuffBars = { selectedBar = 1, bars = bars }
+    p.tbbPositions = {}
+    p._tbbNeedsSnapshot = nil
+    -- Mark this spec as having been snapshotted so we don't re-run on next reload
+    local specKey = p.activeSpecKey
+    if specKey and specKey ~= "0" then
+        if not p.specProfiles then p.specProfiles = {} end
+        if not p.specProfiles[specKey] then p.specProfiles[specKey] = {} end
+        p.specProfiles[specKey]._tbbSnapshotDone = true
+    end
+end
+
 --- Add a new tracked buff bar
 function ns.AddTrackedBuffBar()
     local tbb = ns.GetTrackedBuffBars()
@@ -124,6 +294,40 @@ function ns.AddTrackedBuffBar()
     newBar.name = "Bar " .. (#tbb.bars + 1)
     tbb.bars[#tbb.bars + 1] = newBar
     tbb.selectedBar = #tbb.bars
+
+    -- Auto-position: place new bar adjacent to the previous one
+    -- Horizontal: stack above; Vertical: place to the right
+    local p = ECME and ECME.db and ECME.db.profile
+    if p then
+        if not p.tbbPositions then p.tbbPositions = {} end
+        local prevIdx = #tbb.bars - 1
+        if prevIdx >= 1 then
+            local prevPosKey = tostring(prevIdx)
+            local prevPos = p.tbbPositions[prevPosKey]
+            local prevCfg = tbb.bars[prevIdx]
+            local newPosKey = tostring(#tbb.bars)
+            if prevPos and prevPos.point then
+                local px = prevPos.x or 0
+                local py = prevPos.y or 0
+                if newBar.verticalOrientation then
+                    -- Vertical bars: place to the right of previous
+                    local barW = (prevCfg and prevCfg.height or 24) + 4
+                    p.tbbPositions[newPosKey] = {
+                        point = prevPos.point, relPoint = prevPos.relPoint or prevPos.point,
+                        x = px + barW, y = py,
+                    }
+                else
+                    -- Horizontal bars: place above previous
+                    local barH = (prevCfg and prevCfg.height or 24) + 4
+                    p.tbbPositions[newPosKey] = {
+                        point = prevPos.point, relPoint = prevPos.relPoint or prevPos.point,
+                        x = px, y = py + barH,
+                    }
+                end
+            end
+        end
+    end
+
     ns.BuildTrackedBuffBars()
     return #tbb.bars
 end
@@ -138,7 +342,7 @@ function ns.RemoveTrackedBuffBar(idx)
 end
 
 --- Tracked buff bar frames
-local tbbFrames = {}
+tbbFrames = {}
 local tbbTickFrame
 local _tbbRebuildPending = false
 
@@ -146,136 +350,253 @@ local CDM_FONT_FALLBACK = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Express
 local function GetCDMFont()
     return (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("cdm")) or CDM_FONT_FALLBACK
 end
-local function GetCDMOutline()
+local function GetTBBOutline()
+    if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
+        return EllesmereUI.GetFontOutlineFlag()
+    end
     return "OUTLINE"
 end
-local function GetCDMUseShadow()
-    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+local function GetTBBUseShadow()
+    if EllesmereUI and EllesmereUI.GetFontUseShadow then
+        return EllesmereUI.GetFontUseShadow()
+    end
+    return false
 end
-local function SetCDMFont(fs, font, size)
+local function SetTBBFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    fs:SetFont(font, size, "OUTLINE")
-    fs:SetShadowOffset(0, 0)
+    local outline = GetTBBOutline()
+    fs:SetFont(font, size, outline)
+    if GetTBBUseShadow() then
+        fs:SetShadowColor(0, 0, 0, 1)
+        fs:SetShadowOffset(1, -1)
+    else
+        fs:SetShadowOffset(0, 0)
+    end
 end
 
 local function CreateTrackedBuffBarFrame(parent, idx)
-    local bar = CreateFrame("StatusBar", "ECME_TBB" .. idx, parent)
+    -- wrapFrame is the top-level container for bar + icon + border.
+    -- Positioning, show/hide, and unlock mode all operate on wrapFrame.
+    -- The StatusBar is a child of wrapFrame so the border can use SetAllPoints
+    -- on wrapFrame for a pixel-perfect fit (same pattern as the cast bar).
+    local wrapFrame = CreateFrame("Frame", "ECME_TBBWrap" .. idx, parent)
+    wrapFrame:SetFrameStrata("MEDIUM")
+    wrapFrame:SetFrameLevel(10)
+
+    local bar = CreateFrame("StatusBar", "ECME_TBB" .. idx, wrapFrame)
     if bar.EnableMouseClicks then bar:EnableMouseClicks(false) end
     bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0.65)
+    wrapFrame._bar = bar
 
     local bg = bar:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0, 0, 0, 0.4)
-    bar._bg = bg
+    wrapFrame._bg = bg
 
     -- Spark
     local spark = bar:CreateTexture(nil, "OVERLAY", nil, 2)
     spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
     spark:SetBlendMode("ADD")
     spark:Hide()
-    bar._spark = spark
+    wrapFrame._spark = spark
 
-    -- Gradient overlay
-    local grad = bar:CreateTexture(nil, "ARTWORK", nil, 1)
-    grad:SetAllPoints(bar:GetStatusBarTexture())
-    grad:SetBlendMode("BLEND")
-    grad:Hide()
-    bar._gradient = grad
+    -- Gradient clip frame (full-bar gradient masked to fill width)
+    wrapFrame._gradClip = nil
+    wrapFrame._gradTex = nil
+
+    -- Text overlay: always sits above the fill texture and gradient clip
+    local textOverlay = CreateFrame("Frame", nil, bar)
+    textOverlay:SetAllPoints(bar)
+    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 3)
+    wrapFrame._textOverlay = textOverlay
 
     -- Timer text
-    local timerText = bar:CreateFontString(nil, "OVERLAY")
-    SetCDMFont(timerText, GetCDMFont(), 11)
+    local timerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    SetTBBFont(timerText, GetCDMFont(), 11)
     timerText:SetTextColor(1, 1, 1, 0.9)
     timerText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
     timerText:SetJustifyH("RIGHT")
-    bar._timerText = timerText
+    wrapFrame._timerText = timerText
 
     -- Name text (left side)
-    local nameText = bar:CreateFontString(nil, "OVERLAY")
-    SetCDMFont(nameText, GetCDMFont(), 11)
+    local nameText = textOverlay:CreateFontString(nil, "OVERLAY")
+    SetTBBFont(nameText, GetCDMFont(), 11)
     nameText:SetTextColor(1, 1, 1, 0.9)
     nameText:SetPoint("LEFT", bar, "LEFT", 4, 0)
     nameText:SetJustifyH("LEFT")
-    bar._nameText = nameText
+    wrapFrame._nameText = nameText
 
-    -- Icon (left of bar)
-    local icon = bar:CreateTexture(nil, "ARTWORK")
-    icon:SetTexCoord(0.06, 0.94, 0.06, 0.94)
+    -- Icon: child of wrapFrame so it is part of the combined rect.
+    local icon = CreateFrame("Frame", nil, wrapFrame)
+    icon:SetSize(24, 24)
     icon:Hide()
-    bar._icon = icon
+    local iconTex = icon:CreateTexture(nil, "ARTWORK")
+    iconTex:SetAllPoints()
+    iconTex:SetTexCoord(0.06, 0.94, 0.06, 0.94)
+    icon._tex = iconTex
+    wrapFrame._icon = icon
 
-    -- Icon border frame (4 edge textures)
-    local iconBorder = CreateFrame("Frame", nil, bar)
-    iconBorder:SetFrameLevel(bar:GetFrameLevel() + 3)
-    iconBorder:Hide()
-    bar._iconBorder = iconBorder
+    -- Border: SetAllPoints(wrapFrame) so it covers bar + icon exactly.
+    -- wrapFrame IS the combined rect, so this is always pixel-perfect.
+    local bdrContainer = CreateFrame("Frame", nil, wrapFrame)
+    bdrContainer:SetAllPoints(wrapFrame)
+    bdrContainer:SetFrameLevel(wrapFrame:GetFrameLevel() + 5)
+    bdrContainer:Hide()
+    wrapFrame._barBorder = bdrContainer
 
-    bar:Hide()
-    return bar
+    -- Hidden Cooldown widget for DurationObject mirroring
+    local cd = CreateFrame("Cooldown", nil, bar, "CooldownFrameTemplate")
+    cd:SetAllPoints()
+    cd:SetDrawSwipe(false)
+    cd:SetDrawBling(false)
+    cd:SetDrawEdge(false)
+    cd:SetAlpha(0)
+    cd:Hide()
+    wrapFrame._cooldown = cd
+
+    wrapFrame:Hide()
+    return wrapFrame
 end
 
 local function ApplyTrackedBuffBarSettings(bar, cfg)
+    -- bar = wrapFrame (top-level container). bar._bar = the StatusBar child.
     if not bar or not cfg then return end
+    local sb = bar._bar  -- StatusBar
+    if not sb then return end
     local w = cfg.width or 200
     local h = cfg.height or 18
     local isVert = cfg.verticalOrientation
+    bar._lastVertical = isVert  -- cached for per-frame spark re-anchor in tick
+    local iconMode = cfg.iconDisplay or "none"
+    local hasIcon = iconMode ~= "none"
+    local iSize = h  -- icon always matches bar height
 
-    -- Vertical: swap dimensions so the bar is tall and narrow
+    -- Size wrapFrame to cover bar + icon (same as cast bar's castBarFrame).
+    -- Icon and bar are positioned inside wrapFrame so the border is pixel-perfect.
     if isVert then
-        bar:SetSize(h, w)
+        -- Vertical: bar is h wide x w tall; icon adds iSize to height
+        local totalH = hasIcon and (w + iSize) or w
+        bar:SetSize(h, totalH)
     else
-        bar:SetSize(w, h)
+        -- Horizontal: bar is w wide x h tall; icon adds iSize to width
+        local totalW = hasIcon and (w + iSize) or w
+        bar:SetSize(totalW, h)
+    end
+
+    -- Position StatusBar inside wrapFrame
+    sb:ClearAllPoints()
+    if hasIcon then
+        if isVert then
+            if iconMode == "left" then
+                -- Icon at bottom, bar above it
+                sb:SetPoint("TOPLEFT",     bar, "TOPLEFT",     0, 0)
+                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, iSize)
+            else
+                -- Icon at top, bar below it
+                sb:SetPoint("TOPLEFT",     bar, "TOPLEFT",     0, -iSize)
+                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+            end
+        else
+            if iconMode == "left" then
+                -- Icon on left, bar to the right
+                sb:SetPoint("TOPLEFT",     bar, "TOPLEFT",     iSize, 0)
+                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0,     0)
+            else
+                -- Icon on right, bar to the left
+                sb:SetPoint("TOPLEFT",     bar, "TOPLEFT",     0,      0)
+                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -iSize, 0)
+            end
+        end
+    else
+        sb:SetAllPoints(bar)
     end
 
     -- Orientation
-    bar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+    sb:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
 
     -- Texture (only re-set if changed to avoid fill flash)
     local texPath = TBB_TEXTURES[cfg.texture or "none"] or "Interface\\Buttons\\WHITE8x8"
     if bar._lastTexPath ~= texPath then
-        bar:SetStatusBarTexture(texPath)
+        sb:SetStatusBarTexture(texPath)
         bar._lastTexPath = texPath
     end
 
     -- Fill color (user-defined, defaults to class color)
     local fR, fG, fB, fA = cfg.fillR or _tbbClassR, cfg.fillG or _tbbClassG, cfg.fillB or _tbbClassB, cfg.fillA or 1
-    bar:GetStatusBarTexture():SetVertexColor(fR, fG, fB, fA)
+    sb:GetStatusBarTexture():SetVertexColor(fR, fG, fB, fA)
 
     -- Background color
     if bar._bg then
         bar._bg:SetColorTexture(cfg.bgR or 0, cfg.bgG or 0, cfg.bgB or 0, cfg.bgA or 0.4)
     end
 
-    -- Gradient
-    if cfg.gradientEnabled and bar._gradient then
-        bar._gradient:SetAllPoints(bar:GetStatusBarTexture())
+    -- Gradient (clip frame approach: full-bar texture masked to fill width)
+    local fillTex = sb:GetStatusBarTexture()
+    if cfg.gradientEnabled then
         local dir = cfg.gradientDir or "HORIZONTAL"
-        local r1, g1, b1, a1 = fR, fG, fB, fA
-        local r2, g2, b2, a2 = cfg.gradientR or 0.20, cfg.gradientG or 0.20, cfg.gradientB or 0.80, cfg.gradientA or 1
-        if bar._gradient.SetGradient then
-            bar._gradient:SetGradient(dir, CreateColor(r1, g1, b1, a1), CreateColor(r2, g2, b2, a2))
+
+        fillTex:SetVertexColor(1, 1, 1, 0)
+
+        if not bar._gradClip then
+            local clip = CreateFrame("Frame", nil, sb)
+            clip:SetClipsChildren(true)
+            clip:SetFrameLevel(sb:GetFrameLevel() + 1)
+
+            local tex = clip:CreateTexture(nil, "ARTWORK", nil, 1)
+            tex:SetPoint("TOPLEFT",     sb, "TOPLEFT",     0, 0)
+            tex:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
+
+            bar._gradClip = clip
+            bar._gradTex = tex
         end
-        bar._gradient:Show()
-    elseif bar._gradient then
-        bar._gradient:Hide()
+
+        local clip = bar._gradClip
+        clip:ClearAllPoints()
+        if not isVert then
+            clip:SetPoint("TOPLEFT",    sb, "TOPLEFT",    0, 0)
+            clip:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", 0, 0)
+            clip:SetWidth(0.01)
+        else
+            clip:SetPoint("BOTTOMLEFT",  sb, "BOTTOMLEFT",  0, 0)
+            clip:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
+            clip:SetHeight(0.01)
+        end
+
+        bar._gradTex:SetTexture(texPath)
+        bar._gradTex:SetVertexColor(1, 1, 1, 1)
+        bar._gradTex:SetGradient(dir,
+            CreateColor(fR, fG, fB, fA),
+            CreateColor(cfg.gradientR or 0.20, cfg.gradientG or 0.20, cfg.gradientB or 0.80, cfg.gradientA or 1)
+        )
+
+        clip:Show()
+        bar._gradientActive = true
+    else
+        if bar._gradClip then bar._gradClip:Hide() end
+        bar._gradientActive = nil
+
+        fillTex:SetVertexColor(fR, fG, fB, fA)
     end
 
-    -- Opacity
-    bar:SetAlpha(cfg.opacity or 1.0)
+    -- Opacity (target stored for smooth lerp in tick)
+    bar._opacityTarget = cfg.opacity or 1.0
+    if not bar._tbbReady then
+        bar:SetAlpha(bar._opacityTarget)
+    end
 
     -- Timer
     if cfg.showTimer then
         bar._timerText:Show()
         local tSize = cfg.timerSize or 11
-        SetCDMFont(bar._timerText, GetCDMFont(), tSize)
+        SetTBBFont(bar._timerText, GetCDMFont(), tSize)
         bar._timerText:ClearAllPoints()
         if isVert then
-            bar._timerText:SetPoint("TOP", bar, "TOP", cfg.timerX or 0, -8 + (cfg.timerY or 0))
+            bar._timerText:SetPoint("TOP", sb, "TOP", cfg.timerX or 0, -8 + (cfg.timerY or 0))
             bar._timerText:SetJustifyH("CENTER")
         else
-            bar._timerText:SetPoint("RIGHT", bar, "RIGHT", -8 + (cfg.timerX or 0), cfg.timerY or 0)
+            bar._timerText:SetPoint("RIGHT", sb, "RIGHT", -8 + (cfg.timerX or 0), cfg.timerY or 0)
             bar._timerText:SetJustifyH("RIGHT")
         end
     else
@@ -284,92 +605,72 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
 
     -- Spark
     if cfg.showSpark then
+        local sparkAnchor = (bar._gradientActive and bar._gradClip) or sb:GetStatusBarTexture()
+        bar._spark:SetSize(8, h)
         bar._spark:SetRotation(0)
+        bar._spark:ClearAllPoints()
         if isVert then
-            bar._spark:SetSize(h, 8)
-            bar._spark:SetRotation(math.pi / 2)
-            bar._spark:ClearAllPoints()
-            bar._spark:SetPoint("CENTER", bar:GetStatusBarTexture(), "TOP", 0, 0)
+            bar._spark:SetPoint("CENTER", sparkAnchor, "TOP", 0, 0)
         else
-            bar._spark:SetSize(8, h)
-            bar._spark:ClearAllPoints()
-            bar._spark:SetPoint("CENTER", bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+            bar._spark:SetPoint("CENTER", sparkAnchor, "RIGHT", 0, 0)
         end
         bar._spark:Show()
     else
         bar._spark:Hide()
     end
 
-    -- Name text
-    if cfg.showName ~= false then
+    -- Name text (hidden in vertical orientation)
+    if cfg.showName ~= false and not isVert then
         bar._nameText:Show()
         local nSize = cfg.nameSize or 11
-        SetCDMFont(bar._nameText, GetCDMFont(), nSize)
+        SetTBBFont(bar._nameText, GetCDMFont(), nSize)
         bar._nameText:ClearAllPoints()
-        if isVert then
-            bar._nameText:SetPoint("BOTTOM", bar, "BOTTOM", cfg.nameX or 0, 8 + (cfg.nameY or 0))
-            bar._nameText:SetJustifyH("CENTER")
-            bar._nameText:SetWidth(h - 4)
-        else
-            bar._nameText:SetPoint("LEFT", bar, "LEFT", 8 + (cfg.nameX or 0), cfg.nameY or 0)
-            bar._nameText:SetJustifyH("LEFT")
-            bar._nameText:SetWidth(w - 12 - (cfg.showTimer and 50 or 0))
-        end
+        bar._nameText:SetPoint("LEFT", sb, "LEFT", 8 + (cfg.nameX or 0), cfg.nameY or 0)
+        bar._nameText:SetJustifyH("LEFT")
+        bar._nameText:SetWidth(w - 12 - (cfg.showTimer and 50 or 0))
     else
         bar._nameText:Hide()
     end
 
-    -- Icon
-    local iconMode = cfg.iconDisplay or "none"
-    if iconMode ~= "none" and bar._icon then
-        local iSize = cfg.iconSize or h
+    -- Icon: positioned inside wrapFrame
+    if hasIcon and bar._icon then
         bar._icon:SetSize(iSize, iSize)
         bar._icon:ClearAllPoints()
-        local ix, iy = cfg.iconX or 0, cfg.iconY or 0
         if isVert then
-            -- Vertical: left/right icons go below/above the bar
             if iconMode == "left" then
-                bar._icon:SetPoint("TOP", bar, "BOTTOM", ix, iy)
-            elseif iconMode == "right" then
-                bar._icon:SetPoint("BOTTOM", bar, "TOP", ix, iy)
+                bar._icon:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+            else
+                bar._icon:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
             end
         else
             if iconMode == "left" then
-                bar._icon:SetPoint("RIGHT", bar, "LEFT", ix, iy)
-            elseif iconMode == "right" then
-                bar._icon:SetPoint("LEFT", bar, "RIGHT", ix, iy)
+                bar._icon:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            else
+                bar._icon:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
             end
         end
         bar._icon:Show()
-
-        -- Icon border
-        if bar._iconBorder then
-            local bSz = cfg.iconBorderSize or 0
-            if bSz > 0 then
-                local bR = cfg.borderR or 0
-                local bG = cfg.borderG or 0
-                local bB = cfg.borderB or 0
-                if not bar._iconBorder._ppBorders then
-                    local PP = EllesmereUI and EllesmereUI.PP
-                    if PP then
-                        PP.CreateBorder(bar._iconBorder, bR, bG, bB, 1, bSz)
-                    end
-                else
-                    local PP = EllesmereUI and EllesmereUI.PP
-                    if PP then
-                        PP.UpdateBorder(bar._iconBorder, bSz, bR, bG, bB, 1)
-                    end
-                end
-                bar._iconBorder:ClearAllPoints()
-                bar._iconBorder:SetAllPoints(bar._icon)
-                bar._iconBorder:Show()
-            else
-                bar._iconBorder:Hide()
-            end
-        end
     elseif bar._icon then
         bar._icon:Hide()
-        if bar._iconBorder then bar._iconBorder:Hide() end
+    end
+
+    -- Border: bdrContainer already has SetAllPoints(wrapFrame) from creation.
+    -- wrapFrame IS the combined rect, so the border is always pixel-perfect.
+    if bar._barBorder then
+        local bSz = cfg.borderSize or 0
+        if bSz > 0 then
+            local PP = EllesmereUI and EllesmereUI.PP
+            if PP then
+                if not bar._barBorder._ppBorders then
+                    PP.CreateBorder(bar._barBorder, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1, bSz)
+                else
+                    PP.UpdateBorder(bar._barBorder, bSz, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1)
+                end
+                bar._barBorder:Show()
+            end
+        else
+            bar._barBorder:Hide()
+        end
     end
 end
 
@@ -382,19 +683,26 @@ local function _TBBGetSpellId() return _tbbAura.spellId end
 
 -- Scan player HELPFUL auras by name and return the matching auraData + spellId.
 -- Cleans up _tbbAura after use so callers don't leak stale references.
+-- Skips the scan entirely in combat since aura names are secret values.
 local function _TBBScanByName(name)
+    if InCombatLockdown() then return nil, nil end
     for ai = 1, 40 do
         local aData = C_UnitAuras.GetAuraDataByIndex("player", ai, "HELPFUL")
         if not aData then break end
         _tbbAura = aData
         local nOk, aName = pcall(_TBBGetName)
-        if nOk and aName and aName == name then
-            local sOk, sid = pcall(_TBBGetSpellId)
-            _tbbAura = nil
-            if sOk and sid and sid > 0 then
-                return aData, sid
+        if nOk and aName then
+            -- Guard against secret values that slip through OOC edge cases
+            if issecretvalue and issecretvalue(aName) then
+                -- skip, can't compare
+            elseif aName == name then
+                local sOk, sid = pcall(_TBBGetSpellId)
+                _tbbAura = nil
+                if sOk and sid and not (issecretvalue and issecretvalue(sid)) and sid > 0 then
+                    return aData, sid
+                end
+                return nil, nil
             end
-            return nil, nil
         end
     end
     _tbbAura = nil
@@ -422,6 +730,107 @@ local function RefreshTBBResolvedIDs()
     end
 end
 ns.RefreshTBBResolvedIDs = RefreshTBBResolvedIDs
+
+-- Cache aura start/duration on UNIT_AURA so we always have fresh values
+-- at the moment the buff is applied, before combat taint makes them unreadable.
+local tbbAuraListener = CreateFrame("Frame")
+tbbAuraListener:SetScript("OnEvent", function()
+    if not ECME or not ECME.db then return end
+    local tbb = ns.GetTrackedBuffBars()
+    local bars = tbb.bars
+    if not bars then return end
+    for i, cfg in ipairs(bars) do
+        local bar = tbbFrames[i]
+        if bar and bar._tbbReady and cfg.enabled ~= false then
+            -- Build the list of IDs to check: spellIDs list takes priority over single spellID
+            local idList = cfg.spellIDs
+            local singleID = (cfg.spellID and cfg.spellID > 0) and cfg.spellID or nil
+
+            local function TryGetAura(sid)
+                if not sid or sid == 0 then return nil end
+                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
+                return (ok and result) or nil
+            end
+
+            local result = nil
+            if idList then
+                for _, sid in ipairs(idList) do
+                    result = TryGetAura(sid)
+                    if result then break end
+                end
+            elseif singleID then
+                local resolvedID = bar._resolvedAuraID or singleID
+                result = TryGetAura(resolvedID)
+                if not result and resolvedID ~= singleID then
+                    result = TryGetAura(singleID)
+                end
+            end
+
+            if result then
+                if idList then
+                    -- spellIDs bars: tick reads duration/expirationTime directly, nothing to cache here
+                else
+                    -- Single-ID bar: cache start/duration for the standard CDM child path
+                    local d = result.duration
+                    local e = result.expirationTime
+                    if d and e and d > 0 and e > 0 then
+                        bar._cachedStart = e - d
+                        bar._cachedDuration = d
+                        bar._customStart = nil
+                    elseif d and d == 0 then
+                        -- Permanent buff
+                        bar._cachedStart = 0
+                        bar._cachedDuration = 0
+                        bar._customStart = nil
+                    end
+                end
+            else
+                if idList then
+                    -- spellIDs bars use a cast-triggered timer (_customStart).
+                    -- In combat, aura lookups return nil due to secret values, so we
+                    -- cannot trust a nil result -- only clear when the timer has expired.
+                    -- OOC, a nil result is definitive: the buff is gone, clear immediately.
+                    if not InCombatLockdown() then
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
+                    else
+                        local activeDur = bar._activeDuration or cfg.customDuration
+                        local timerExpired = not bar._customStart
+                            or (activeDur and (GetTime() - bar._customStart) >= activeDur)
+                        if timerExpired then
+                            bar._customStart    = nil
+                            bar._activeDuration = nil
+                        end
+                    end
+                else
+                    -- Single-ID bar: buff faded, clear all cache
+                    bar._cachedStart    = nil
+                    bar._cachedDuration = nil
+                    bar._customStart    = nil
+                    bar._activeDuration = nil
+                    if bar._cooldown then bar._cooldown:Clear() end
+                end
+            end
+        end
+    end
+end)
+
+--- Register or unregister TBB event listeners based on whether any bars are configured.
+--- Call this whenever bars are added or removed.
+function ns.RefreshBuffBarGating()
+    local hasBars = ns.HasBuffBars()
+    if hasBars then
+        if not tbbCastListener:IsEventRegistered("UNIT_SPELLCAST_SUCCEEDED") then
+            tbbCastListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+        end
+        if not tbbAuraListener:IsEventRegistered("UNIT_AURA") then
+            tbbAuraListener:RegisterUnitEvent("UNIT_AURA", "player")
+        end
+    else
+        tbbCastListener:UnregisterAllEvents()
+        tbbAuraListener:UnregisterAllEvents()
+    end
+end
 
 function ns.BuildTrackedBuffBars()
     if not TBB_ENABLED then return end
@@ -455,20 +864,31 @@ function ns.BuildTrackedBuffBars()
             anyEnabled = true
             ApplyTrackedBuffBarSettings(bar, cfg)
 
-            -- Icon texture
-            if cfg.spellID and cfg.spellID > 0 and bar._icon then
-                local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(cfg.spellID)
-                if spInfo then bar._icon:SetTexture(spInfo.iconID) end
+            -- Icon texture: for popular buffs use the hardcoded icon, otherwise resolve from spell info
+            if bar._icon and bar._icon._tex then
+                local iconID = nil
+                if cfg.popularKey then
+                    -- Find the matching popular entry for its hardcoded icon
+                    for _, pe in ipairs(TBB_POPULAR_BUFFS) do
+                        if pe.key == cfg.popularKey then iconID = pe.icon; break end
+                    end
+                end
+                if not iconID and cfg.spellID and cfg.spellID > 0 then
+                    local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(cfg.spellID)
+                    if spInfo then iconID = spInfo.iconID end
+                end
+                if iconID then bar._icon._tex:SetTexture(iconID) end
             end
 
-            -- Name text
+            -- Name text: prefer stored name (preserves custom item/spell names),
+            -- fall back to spell info only when no name was stored.
             if cfg.showName ~= false and bar._nameText then
-                if cfg.spellID and cfg.spellID > 0 then
+                local displayName = cfg.name
+                if (not displayName or displayName == "") and cfg.spellID and cfg.spellID > 0 then
                     local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(cfg.spellID)
-                    bar._nameText:SetText(spInfo and spInfo.name or cfg.name or "")
-                else
-                    bar._nameText:SetText(cfg.name or "")
+                    displayName = spInfo and spInfo.name or ""
                 end
+                bar._nameText:SetText(displayName or "")
             end
 
             -- Saved position
@@ -482,7 +902,10 @@ function ns.BuildTrackedBuffBars()
                 bar:SetPoint("CENTER", UIParent, "CENTER", 0, 200 - (i - 1) * ((cfg.height or 24) + 4))
             end
 
-            bar:Show()
+            -- Mark bar as ready but keep hidden; the tick will show it
+            -- when the tracked buff is actually active on the player.
+            bar._tbbReady = true
+            bar:Hide()
         end
     end
 
@@ -490,9 +913,21 @@ function ns.BuildTrackedBuffBars()
         if not tbbTickFrame then
             tbbTickFrame = CreateFrame("Frame")
             tbbTickFrame:SetScript("OnUpdate", function(self, elapsed)
-                self._elapsed = (self._elapsed or 0) + elapsed
-                if self._elapsed < 0.05 then return end
-                self._elapsed = 0
+                -- Run every frame for smooth bar fill and spark movement,
+                -- same as the cast bar approach.
+                -- Smooth opacity lerp for all active bars
+                local lerpSpeed = elapsed * 8
+                for _, f in ipairs(tbbFrames) do
+                    if f and f._opacityTarget then
+                        local cur = f:GetAlpha()
+                        local tgt = f._opacityTarget
+                        if math.abs(cur - tgt) > 0.005 then
+                            f:SetAlpha(cur + (tgt - cur) * math.min(1, lerpSpeed))
+                        elseif cur ~= tgt then
+                            f:SetAlpha(tgt)
+                        end
+                    end
+                end
                 ns.UpdateTrackedBuffBarTimers()
             end)
         end
@@ -500,6 +935,13 @@ function ns.BuildTrackedBuffBars()
     elseif tbbTickFrame then
         tbbTickFrame:Hide()
     end
+
+    -- Re-register all bars with unlock mode so new/removed bars are reflected
+    if ns.RegisterTBBUnlockElements then
+        ns.RegisterTBBUnlockElements()
+    end
+    -- Gate event listeners based on whether any bars are configured
+    ns.RefreshBuffBarGating()
 end
 
 function ns.UpdateTrackedBuffBarTimers()
@@ -507,69 +949,356 @@ function ns.UpdateTrackedBuffBarTimers()
     local tbb = ns.GetTrackedBuffBars()
     local bars = tbb.bars
     local now = GetTime()
-
+    local activeCache = ns._tickBlizzActiveCache
+    local buffChildCache = ns._tickBlizzBuffChildCache
+    local allChildCache = ns._tickBlizzAllChildCache
+    local IsBufChildActive = ns.IsBufChildCooldownActive
+    local inCombat = InCombatLockdown()
     for i, cfg in ipairs(bars) do
         local bar = tbbFrames[i]
-        if bar and bar:IsShown() and cfg.enabled ~= false and cfg.spellID and cfg.spellID > 0 then
-            local aura
-            local resolvedID = bar._resolvedAuraID or cfg.spellID
-            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, resolvedID)
-            if ok and result then aura = result end
-
-            -- Fallback: if the resolved ID missed (e.g. Inertia proc consumed
-            -- into the active buff), also try the configured spellID directly.
-            if not aura and resolvedID ~= cfg.spellID then
-                ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, cfg.spellID)
+        if not bar or not bar._tbbReady then
+            -- bar not configured or disabled, skip
+        elseif cfg.enabled == false then
+            bar:Hide()
+        elseif cfg.spellIDs then
+            -- Multi-ID bar (popular buffs). Active if any ID matches an active aura.
+            -- Use cfg dimensions so gradient clip sizing is correct before first layout pass.
+            local barW = cfg.verticalOrientation and (cfg.height or 24) or (cfg.width or 270)
+            local barH = cfg.verticalOrientation and (cfg.width or 270) or (cfg.height or 24)
+            local sb = bar._bar  -- StatusBar child of wrapFrame
+            local isActive = false
+            local activeResult = nil
+            for _, sid in ipairs(cfg.spellIDs) do
+                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
                 if ok and result then
-                    aura = result
-                    bar._resolvedAuraID = cfg.spellID
+                    isActive = true
+                    activeResult = result
+                    break
                 end
             end
 
-            -- Last resort: scan by name so that same-name spells with different
-            -- IDs (proc vs active variants) are still tracked.  Throttled to at
-            -- most once per second to avoid a 40-slot scan every tick.
-            if not aura and cfg.name and cfg.name ~= "" then
-                local lastScan = bar._lastNameScan or 0
-                if now - lastScan >= 1.0 then
-                    bar._lastNameScan = now
-                    local aData, sid = _TBBScanByName(cfg.name)
-                    if aData and sid then
-                        aura = aData
-                        bar._resolvedAuraID = sid
+            if isActive and activeResult then
+                if not bar:IsShown() then bar:Show() end
+
+                local dur = activeResult.duration
+                local exp = activeResult.expirationTime
+                if cfg.customDuration and not bar._customStart then
+                    local secretD = issecretvalue and issecretvalue(dur)
+                    local secretE = issecretvalue and issecretvalue(exp)
+                    if not secretD and not secretE and dur and exp and dur > 0 and exp > 0 then
+                        local activeDur = cfg.customDuration
+                        bar._activeDuration = activeDur
+                        bar._customStart = now - (activeDur - math.max(0, exp - now))
                     end
                 end
-            end
+                local useCustomTimer = cfg.customDuration and bar._customStart
+                local secretDur = issecretvalue and (issecretvalue(dur) or issecretvalue(exp))
+                if useCustomTimer or secretDur then
+                    local activeDur = bar._activeDuration or cfg.customDuration
+                    if activeDur and activeDur > 0 and bar._customStart then
+                        local elapsed = now - bar._customStart
+                        local remaining = math.max(0, activeDur - elapsed)
+                        local frac = remaining / activeDur
+                        sb:SetMinMaxValues(0, 1)
+                        sb:SetValue(frac)
+                        if bar._gradientActive and bar._gradClip then
+                            if cfg.verticalOrientation then
+                                bar._gradClip:SetHeight(math.max(0.01, barH * frac))
+                            else
+                                bar._gradClip:SetWidth(math.max(0.01, barW * frac))
+                            end
+                        end
+                        if cfg.showTimer and bar._timerText then
+                            if remaining <= 0 then
+                                bar._timerText:Hide()
+                            else
+                                local t
+                                if remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                                elseif remaining >= 10 then t = format("%d", floor(remaining))
+                                else t = format("%.1f", remaining) end
+                                bar._timerText:SetText(t)
+                                bar._timerText:Show()
+                            end
+                        end
+                    else
+                        sb:SetValue(1)
+                        if cfg.showTimer and bar._timerText then bar._timerText:Hide() end
+                    end
+                elseif dur and exp and dur > 0 and exp > 0 then
+                    local remaining = math.max(0, exp - now)
+                    local frac = remaining / dur
+                    sb:SetMinMaxValues(0, 1)
+                    sb:SetValue(frac)
 
-            if aura then
-                local duration = aura.duration or 0
-                local expiration = aura.expirationTime or 0
-                if duration > 0 and expiration > 0 then
-                    local remaining = expiration - now
-                    if remaining < 0 then remaining = 0 end
-                    bar:SetValue(remaining / duration)
+                    if bar._gradientActive and bar._gradClip then
+                        if cfg.verticalOrientation then
+                            bar._gradClip:SetHeight(math.max(0.01, barH * frac))
+                        else
+                            bar._gradClip:SetWidth(math.max(0.01, barW * frac))
+                        end
+                    end
+
                     if cfg.showTimer and bar._timerText then
-                        local t
-                        if remaining >= 3600 then t = format("%dh", floor(remaining / 3600))
-                        elseif remaining >= 60 then t = format("%dm", floor(remaining / 60))
-                        elseif remaining >= 10 then t = format("%d", floor(remaining))
-                        else t = format("%.1f", remaining) end
-                        bar._timerText:SetText(t)
-                        bar._timerText:Show()
+                        if remaining <= 0 then
+                            bar._timerText:Hide()
+                        else
+                            local t
+                            if remaining >= 3600 then t = format("%dh", floor(remaining / 3600))
+                            elseif remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                            elseif remaining >= 10 then t = format("%d", floor(remaining))
+                            else t = format("%.1f", remaining) end
+                            bar._timerText:SetText(t)
+                            bar._timerText:Show()
+                        end
                     end
                 else
-                    bar:SetValue(1)
-                    if bar._timerText then bar._timerText:Hide() end
+                    -- Permanent / no duration
+                    sb:SetValue(1)
+                    if bar._gradientActive and bar._gradClip then
+                        if cfg.verticalOrientation then
+                            bar._gradClip:SetHeight(math.max(0.01, barH))
+                        else
+                            bar._gradClip:SetWidth(math.max(0.01, barW))
+                        end
+                    end
+                    if cfg.showTimer and bar._timerText then bar._timerText:Hide() end
                 end
             else
-                bar:SetValue(0)
-                if bar._timerText then bar._timerText:SetText(""); bar._timerText:Hide() end
+                -- No aura found. Fall back to cast-triggered timer if available.
+                local activeDur = bar._activeDuration or cfg.customDuration
+                if activeDur and activeDur > 0 and bar._customStart then
+                    local elapsed = now - bar._customStart
+                    local remaining = math.max(0, activeDur - elapsed)
+                    if remaining > 0 then
+                        if not bar:IsShown() then bar:Show() end
+                        local frac = remaining / activeDur
+                        sb:SetMinMaxValues(0, 1)
+                        sb:SetValue(frac)
+                        if bar._gradientActive and bar._gradClip then
+                            if cfg.verticalOrientation then
+                                bar._gradClip:SetHeight(math.max(0.01, barH * frac))
+                            else
+                                bar._gradClip:SetWidth(math.max(0.01, barW * frac))
+                            end
+                        end
+                        if cfg.showTimer and bar._timerText then
+                            local t
+                            if remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                            elseif remaining >= 10 then t = format("%d", floor(remaining))
+                            else t = format("%.1f", remaining) end
+                            bar._timerText:SetText(t)
+                            bar._timerText:Show()
+                        end
+                    else
+                        -- Timer expired
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
+                        if bar:IsShown() then bar:Hide() end
+                    end
+                else
+                    if bar:IsShown() then bar:Hide() end
+                end
+            end
+        elseif not cfg.spellID or cfg.spellID == 0 then
+            bar:Hide()
+        else
+            local spellID = cfg.spellID
+            local resolvedID = bar._resolvedAuraID or spellID
+            local barW = cfg.verticalOrientation and (cfg.height or 24) or (cfg.width or 270)
+            local barH = cfg.verticalOrientation and (cfg.width or 270) or (cfg.height or 24)
+            local sb = bar._bar  -- StatusBar child of wrapFrame
+
+            -- Check active state using the same caches the core CDM builds
+            local isActive = activeCache[resolvedID] or activeCache[spellID]
+            local blzChild = buffChildCache[resolvedID] or buffChildCache[spellID]
+                          or allChildCache[resolvedID] or allChildCache[spellID]
+            if not isActive then
+                if IsBufChildActive and IsBufChildActive(blzChild) then
+                    isActive = true
+                end
+            end
+
+            -- OOC fallback: caches may be empty before first tick, use direct API
+            if not isActive and not inCombat then
+                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, resolvedID)
+                if not ok then result = nil end
+                if not result and resolvedID ~= spellID then
+                    ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+                    if not ok then result = nil end
+                end
+                if result then
+                    isActive = true
+                    if cfg.customDuration and not bar._customStart then
+                        local dur = result.duration
+                        local exp = result.expirationTime
+                        if dur and exp and not (issecretvalue and issecretvalue(dur))
+                           and not (issecretvalue and issecretvalue(exp)) and dur > 0 then
+                            local activeDur = cfg.customDuration
+                            bar._activeDuration = activeDur
+                            bar._customStart = now - (activeDur - math.max(0, exp - now))
+                        end
+                    end
+                else
+                    bar._customStart    = nil
+                    bar._activeDuration = nil
+                end
+            end
+
+            if not isActive and inCombat and (cfg.customDuration or bar._activeDuration) and bar._customStart then
+                local activeDur = bar._activeDuration or cfg.customDuration
+                if activeDur and activeDur > 0 then
+                    local elapsed = now - bar._customStart
+                    if elapsed < activeDur then
+                        isActive = true
+                    else
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
+                    end
+                end
+            end
+
+            if isActive then
+                if not bar:IsShown() then bar:Show() end
+
+                local activeDur = bar._activeDuration or cfg.customDuration
+                if activeDur and activeDur > 0 and bar._customStart then
+                    local elapsed = now - bar._customStart
+                    local remaining = math.max(0, activeDur - elapsed)
+                    local frac = remaining / activeDur
+                    sb:SetMinMaxValues(0, 1)
+                    sb:SetValue(frac)
+
+                    if bar._gradientActive and bar._gradClip then
+                        if cfg.verticalOrientation then
+                            bar._gradClip:SetHeight(math.max(0.01, barH * frac))
+                        else
+                            bar._gradClip:SetWidth(math.max(0.01, barW * frac))
+                        end
+                    end
+
+                    if cfg.showTimer and bar._timerText then
+                        if remaining <= 0 then
+                            bar._timerText:Hide()
+                        else
+                            local t
+                            if remaining >= 3600 then t = format("%dh", floor(remaining / 3600))
+                            elseif remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                            elseif remaining >= 10 then t = format("%d", floor(remaining))
+                            else t = format("%.1f", remaining) end
+                            bar._timerText:SetText(t)
+                            bar._timerText:Show()
+                        end
+                    end
+
+                    if remaining <= 0 then
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
+                        bar:Hide()
+                    end
+                else
+                    -- Standard DurationObject path via Blizzard CDM child
+                    local durObj = nil
+                    if blzChild then
+                        local auraID = blzChild.auraInstanceID
+                        local auraUnit = blzChild.auraDataUnit or "player"
+                        if auraID then
+                            local ok, d = pcall(C_UnitAuras.GetAuraDuration, auraUnit, auraID)
+                            if ok and d then durObj = d end
+                        end
+                    end
+
+                    if durObj then
+                        sb:SetMinMaxValues(0, 1)
+                        sb:SetTimerDuration(durObj, Enum.StatusBarInterpolation.None, Enum.StatusBarTimerDirection.RemainingTime)
+                        sb:SetToTargetValue()
+
+                        if bar._gradientActive and bar._gradClip then
+                            if cfg.verticalOrientation then
+                                local ok, fillH = pcall(function() return sb:GetStatusBarTexture():GetHeight() end)
+                                if ok and fillH and not (issecretvalue and issecretvalue(fillH)) then
+                                    bar._gradClip:SetHeight(math.max(0.01, fillH))
+                                end
+                            else
+                                local ok, fillW = pcall(function() return sb:GetStatusBarTexture():GetWidth() end)
+                                if ok and fillW and not (issecretvalue and issecretvalue(fillW)) then
+                                    bar._gradClip:SetWidth(math.max(0.01, fillW))
+                                end
+                            end
+                        end
+
+                        if cfg.showTimer and bar._timerText then
+                            local ok, remaining = pcall(durObj.GetRemainingDuration, durObj)
+                            if ok and remaining then
+                                local isSecret = issecretvalue and issecretvalue(remaining)
+                                if isSecret then
+                                    local fok, fstr = pcall(format, "%.1f", remaining)
+                                    if fok and fstr then
+                                        bar._timerText:SetText(fstr)
+                                    else
+                                        bar._timerText:SetText(remaining)
+                                    end
+                                else
+                                    local t
+                                    if remaining >= 3600 then t = format("%dh", floor(remaining / 3600))
+                                    elseif remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                                    elseif remaining >= 10 then t = format("%d", floor(remaining))
+                                    else t = format("%.1f", remaining) end
+                                    bar._timerText:SetText(t)
+                                end
+                                bar._timerText:Show()
+                            else
+                                bar._timerText:Hide()
+                            end
+                        end
+                    else
+                        -- Permanent buff or no duration object available
+                        sb:SetValue(1)
+                        if bar._gradientActive and bar._gradClip then
+                            if cfg.verticalOrientation then
+                                bar._gradClip:SetHeight(math.max(0.01, barH))
+                            else
+                                bar._gradClip:SetWidth(math.max(0.01, barW))
+                            end
+                        end
+                        if cfg.showTimer and bar._timerText then bar._timerText:Hide() end
+                    end
+                end
+            else
+                -- Buff not active, hide the bar and clear cached duration
+                if bar:IsShown() then bar:Hide() end
                 bar._resolvedAuraID = nil
+                bar._cachedStart = nil
+                bar._cachedDuration = nil
+                bar._customStart = nil
+                bar._activeDuration = nil
+                if bar._cooldown then bar._cooldown:Clear() end
+            end
+        end
+    end
+
+    -- Re-anchor sparks every frame so they track the fill edge smoothly,
+    -- same as the cast bar approach.
+    for _, bar in ipairs(tbbFrames) do
+        if bar and bar._spark and bar._spark:IsShown() and bar._bar then
+            local sb = bar._bar
+            local cfg_isVert = bar._lastVertical  -- cached from ApplyTrackedBuffBarSettings
+            bar._spark:ClearAllPoints()
+            if bar._gradientActive and bar._gradClip then
+                if cfg_isVert then
+                    bar._spark:SetPoint("CENTER", bar._gradClip, "TOP", 0, 0)
+                else
+                    bar._spark:SetPoint("CENTER", bar._gradClip, "RIGHT", 0, 0)
+                end
+            else
+                if cfg_isVert then
+                    bar._spark:SetPoint("CENTER", sb:GetStatusBarTexture(), "TOP", 0, 0)
+                else
+                    bar._spark:SetPoint("CENTER", sb:GetStatusBarTexture(), "RIGHT", 0, 0)
+                end
             end
         end
     end
 end
-
 function ns.IsTBBRebuildPending()
     return _tbbRebuildPending
 end
@@ -707,7 +1436,7 @@ local function CreateBuffBar(parent, idx)
 
     -- Name text
     local nameText = bar:CreateFontString(nil, "OVERLAY")
-    SetCDMFont(nameText, GetCDMFont(), 11)
+    SetTBBFont(nameText, GetCDMFont(), 11)
     nameText:SetTextColor(1, 1, 1, 0.9)
     nameText:SetPoint("LEFT", icon, "RIGHT", 4, 0)
     nameText:SetJustifyH("LEFT")
@@ -715,7 +1444,7 @@ local function CreateBuffBar(parent, idx)
 
     -- Timer text
     local timerText = bar:CreateFontString(nil, "OVERLAY")
-    SetCDMFont(timerText, GetCDMFont(), 11)
+    SetTBBFont(timerText, GetCDMFont(), 11)
     timerText:SetTextColor(1, 1, 1, 0.9)
     timerText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
     timerText:SetJustifyH("RIGHT")

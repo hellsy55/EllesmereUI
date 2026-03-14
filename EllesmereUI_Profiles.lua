@@ -763,7 +763,7 @@ function EllesmereUI.ApplyProfileData(profileData)
     end
 end
 
---- Trigger live refresh on all loaded addons after a profile apply
+--- Trigger live refresh on all loaded addons after a profile apply.
 function EllesmereUI.RefreshAllAddons()
     -- ResourceBars (full rebuild)
     if _G._ERB_Apply then _G._ERB_Apply() end
@@ -785,6 +785,111 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
     -- Global class/power colors (updates oUF, nameplates, raid frames)
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
+end
+
+-------------------------------------------------------------------------------
+--  Profile Keybinds
+--  Each profile can have a key bound to switch to it instantly.
+--  Stored in EllesmereUIDB.profileKeybinds = { ["Name"] = "CTRL-1", ... }
+--  Uses hidden buttons + SetOverrideBindingClick, same pattern as Party Mode.
+-------------------------------------------------------------------------------
+local _profileBindBtns = {} -- [profileName] = hidden Button
+
+local function GetProfileKeybinds()
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    if not EllesmereUIDB.profileKeybinds then EllesmereUIDB.profileKeybinds = {} end
+    return EllesmereUIDB.profileKeybinds
+end
+
+local function EnsureProfileBindBtn(profileName)
+    if _profileBindBtns[profileName] then return _profileBindBtns[profileName] end
+    local safeName = profileName:gsub("[^%w]", "")
+    local btn = CreateFrame("Button", "EllesmereUIProfileBind_" .. safeName, UIParent)
+    btn:Hide()
+    btn:SetScript("OnClick", function()
+        local active = EllesmereUI.GetActiveProfileName()
+        if active == profileName then return end
+        -- Save outgoing profile
+        local wasLocked = EllesmereUI._profileSaveLocked
+        EllesmereUI._profileSaveLocked = false
+        EllesmereUI.AutoSaveActiveProfile()
+        EllesmereUI._profileSaveLocked = wasLocked
+        local _, profiles = EllesmereUI.GetProfileList()
+        local fontWillChange = EllesmereUI.ProfileChangesFont(profiles and profiles[profileName])
+        EllesmereUI.SwitchProfile(profileName)
+        EllesmereUI.RefreshAllAddons()
+        if fontWillChange then
+            EllesmereUI:ShowConfirmPopup({
+                title       = "Reload Required",
+                message     = "Font changed. A UI reload is needed to apply the new font.",
+                confirmText = "Reload Now",
+                cancelText  = "Later",
+                onConfirm   = function() ReloadUI() end,
+            })
+        else
+            EllesmereUI:RefreshPage()
+        end
+    end)
+    _profileBindBtns[profileName] = btn
+    return btn
+end
+
+function EllesmereUI.SetProfileKeybind(profileName, key)
+    local kb = GetProfileKeybinds()
+    -- Clear old binding for this profile
+    local oldKey = kb[profileName]
+    local btn = EnsureProfileBindBtn(profileName)
+    if oldKey then
+        ClearOverrideBindings(btn)
+    end
+    if key then
+        kb[profileName] = key
+        SetOverrideBindingClick(btn, true, key, btn:GetName())
+    else
+        kb[profileName] = nil
+    end
+end
+
+function EllesmereUI.GetProfileKeybind(profileName)
+    local kb = GetProfileKeybinds()
+    return kb[profileName]
+end
+
+--- Called on login to restore all saved profile keybinds
+function EllesmereUI.RestoreProfileKeybinds()
+    local kb = GetProfileKeybinds()
+    for profileName, key in pairs(kb) do
+        if key then
+            local btn = EnsureProfileBindBtn(profileName)
+            SetOverrideBindingClick(btn, true, key, btn:GetName())
+        end
+    end
+end
+
+--- Update keybind references when a profile is renamed
+function EllesmereUI.OnProfileRenamed(oldName, newName)
+    local kb = GetProfileKeybinds()
+    local key = kb[oldName]
+    if key then
+        local oldBtn = _profileBindBtns[oldName]
+        if oldBtn then ClearOverrideBindings(oldBtn) end
+        _profileBindBtns[oldName] = nil
+        kb[oldName] = nil
+        kb[newName] = key
+        local newBtn = EnsureProfileBindBtn(newName)
+        SetOverrideBindingClick(newBtn, true, key, newBtn:GetName())
+    end
+end
+
+--- Clean up keybind when a profile is deleted
+function EllesmereUI.OnProfileDeleted(profileName)
+    local kb = GetProfileKeybinds()
+    if kb[profileName] then
+        local btn = _profileBindBtns[profileName]
+        if btn then ClearOverrideBindings(btn) end
+        _profileBindBtns[profileName] = nil
+        kb[profileName] = nil
+    end
 end
 
 --- Returns true if applying profileData would change the global font or outline mode.
@@ -1261,6 +1366,7 @@ function EllesmereUI.CreateDefaultProfile(name)
         end
     end
     db.profiles[name] = snap
+    db.profiles[name]._pristine = true
     local found = false
     for _, n in ipairs(db.profileOrder) do
         if n == name then found = true; break end
@@ -1280,6 +1386,8 @@ function EllesmereUI.DeleteProfile(name)
     for specID, pName in pairs(db.specProfiles) do
         if pName == name then db.specProfiles[specID] = nil end
     end
+    -- Clean up keybind
+    EllesmereUI.OnProfileDeleted(name)
     -- If deleted profile was active, fall back to Default
     if db.activeProfile == name then
         db.activeProfile = "Default"
@@ -1300,6 +1408,8 @@ function EllesmereUI.RenameProfile(oldName, newName)
     if db.activeProfile == oldName then
         db.activeProfile = newName
     end
+    -- Update keybind reference
+    EllesmereUI.OnProfileRenamed(oldName, newName)
 end
 
 function EllesmereUI.SwitchProfile(name)
@@ -1344,7 +1454,17 @@ function EllesmereUI.AutoSaveActiveProfile()
     if EllesmereUI._profileSaveLocked then return end
     local db = GetProfilesDB()
     local name = db.activeProfile or "Default"
+    local wasPristine = db.profiles[name] and db.profiles[name]._pristine
     db.profiles[name] = EllesmereUI.SnapshotAllAddons()
+    -- Preserve pristine flag: only cleared explicitly when user modifies settings
+    if wasPristine then db.profiles[name]._pristine = true end
+end
+
+--- Clear the pristine flag on the active profile (called when a setting changes)
+function EllesmereUI.MarkActiveProfileDirty()
+    local db = GetProfilesDB()
+    local name = db.activeProfile or "Default"
+    if db.profiles[name] then db.profiles[name]._pristine = nil end
 end
 
 -------------------------------------------------------------------------------
@@ -2066,6 +2186,8 @@ do
 
         -- Auto-save active profile when the settings panel closes
         C_Timer.After(1, function()
+            -- Restore saved profile keybinds
+            EllesmereUI.RestoreProfileKeybinds()
             if EllesmereUI._mainFrame and not EllesmereUI._profileAutoSaveHooked then
                 EllesmereUI._profileAutoSaveHooked = true
                 EllesmereUI._mainFrame:HookScript("OnHide", function()

@@ -239,10 +239,13 @@ local _tickGCDCache   = {}  -- [spellID] = bool|nil (GCD check result)
 local _tickChargeCache = {} -- [spellID] = charges table or false
 local _tickAuraCache  = {}  -- [spellID] = aura table or false
 local _tickBlizzActiveCache = {}  -- [spellID] = true when Blizzard CDM marks spell as active (wasSetFromAura)
+ns._tickBlizzActiveCache = _tickBlizzActiveCache
 local _tickBlizzOverrideCache = {} -- [baseSpellID] = overrideSpellID, built each tick from all CDM viewer children
 local _tickBlizzChildCache = {}    -- [overrideSpellID] = blizzChild, for direct charge/cooldown reads on activation overrides
 local _tickBlizzAllChildCache = {} -- [resolvedSid] = blizzChild, for all CDM children (used by custom bars)
+ns._tickBlizzAllChildCache = _tickBlizzAllChildCache
 local _tickBlizzBuffChildCache = {} -- [resolvedSid] = blizzChild, only from BuffIcon/BuffBar viewers
+ns._tickBlizzBuffChildCache = _tickBlizzBuffChildCache
 local _tickBlizzCDChildCache   = {} -- [resolvedSid] = blizzChild, only from Essential/Utility viewers
 local _tickBlizzMultiChildCache = {} -- [baseSid] = { ch1, ch2, ... } when multiple CDM children share a base spellID
 local _activeMultiScratch = {}      -- reusable scratch table for active multi-child filtering and companion child mapping
@@ -251,6 +254,26 @@ local _activeMultiScratch = {}      -- reusable scratch table for active multi-c
 local _combinedBuf = {}   -- reused by UpdateTrackedBarIcons for tracked+extra spell list
 local _spellsBuf   = {}   -- reused by UpdateCustomBarIcons for racial-substituted spell list
 
+-- Duration-based active timers for custom buff bars.
+-- Keyed by barKey, then by spellID: [barKey][spellID] = expiryTime (GetTime() + duration)
+-- Used for spells that don't leave an aura (e.g. potions) but have a user-configured duration.
+local _customBarTimers = {}
+
+-- Preset groups for buff bars: each entry is a named group of spellIDs that share
+-- one icon slot and one duration. All variant IDs are stored in customSpells and
+-- customSpellDurations; the first active timer wins for display.
+-- { name, icon, duration, spellIDs }
+ns.BUFF_BAR_PRESETS = {
+    { name = "Bloodlust / Heroism", icon = 132131,  duration = 40,
+      spellIDs = { 2825, 32182, 80353, 264667, 390386, 381301, 444062, 444257 } },
+    { name = "Light's Potential",   icon = 754891,  duration = 30,
+      spellIDs = { 1236616, 431932 } },
+    { name = "Potion of Recklessness", icon = 754891, duration = 30,
+      spellIDs = { 1236994 } },
+    { name = "Invisibility Potion", icon = 241302,  duration = 18,
+      spellIDs = { 1236551, 431424, 371134, 371125, 371133 } },
+}
+
 -- Reusable children buffer for the per-tick viewer scan -- avoids GetChildren vararg allocation
 local _viewerChildBuf = {}
 
@@ -258,10 +281,13 @@ local _viewerChildBuf = {}
 -- ch.isActive and ch._ecmeDurObj etc. are tainted secret values; we track state in our own tables instead.
 local _ecmeChildHasDurObj = {}   -- [ch] = true when we have captured a DurationObject for this child
 local _ecmeDurObjCache = {}      -- [ch] = durObj captured from SetCooldownFromDurationObject hook
+ns._ecmeDurObjCache = _ecmeDurObjCache
 local _ecmeRawStartCache = {}    -- [ch] = start captured from SetCooldown hook
+ns._ecmeRawStartCache = _ecmeRawStartCache
 local _cdmVehicleProxy           -- SecureHandlerStateTemplate proxy for [vehicleui]/[petbattle] hiding
 local _cdmInVehicle = false      -- true when [vehicleui] or [petbattle] is active
 local _ecmeRawDurCache = {}      -- [ch] = dur captured from SetCooldown hook
+ns._ecmeRawDurCache = _ecmeRawDurCache
 local _tickTotemCache = {}       -- [slot] = haveTotem (cached per tick to avoid inconsistent reads)
 local _cdmHoverStates = {}       -- [barKey] = { isHovered=false, fadeDir=nil }
 
@@ -320,6 +346,7 @@ local function IsBufChildCooldownActive(ch)
     if rawDur and (issecretvalue and issecretvalue(rawDur) or rawDur > 0) then return true end
     return false
 end
+ns.IsBufChildCooldownActive = IsBufChildCooldownActive
 
 -- spellID -> cooldownID map built once from C_CooldownViewer.GetCooldownViewerCategorySet (all categories).
 -- Rebuilt on PLAYER_LOGIN and spec change. Used by custom bars to find CDM child frames by spellID.
@@ -1080,6 +1107,7 @@ local DEFAULTS = {
         tbbPositions = {},
         -- Per-spec profiles: spell lists, bar glows, buff bars (keyed by specID string)
         specProfiles = {},
+
     },
 }
 
@@ -1470,14 +1498,25 @@ local function LoadSpecProfile(specKey)
             selectedAssignment = 1,
             assignments = {},
         }
+
+        -- Reset tracked buff bars so the Blizzard viewer snapshot fires on next build
+        p.trackedBuffBars = nil
+        p.tbbPositions = nil
+        p._tbbNeedsSnapshot = true
     end
 
     -- Replace any stale racial spellIDs with the current character's racial
     RefreshRacialSpells()
 end
 
+-- Timestamp of the last spec switch. Used to suppress TalentAwareReconcile
+-- during the transition window where spell data may be stale.
+local _lastSpecSwitchTime = 0
+
 --- Full spec switch: save current, load new, rebuild everything
 local function SwitchSpecProfile(newSpecKey)
+    _lastSpecSwitchTime = GetTime()
+
     local p = ECME.db.profile
     local oldSpecKey = p.activeSpecKey
 
@@ -1496,14 +1535,36 @@ local function SwitchSpecProfile(newSpecKey)
     -- Rebuild all CDM systems (deferred so Blizzard CDM frames are ready)
     C_Timer.After(0.5, function()
         BuildAllCDMBars()
+        -- Mark for snapshot if this spec has no buff bars configured yet
+        do
+            local pp = ECME.db.profile
+            local tbb = pp.trackedBuffBars
+            local hasNoBars = (not tbb) or (not tbb.bars) or (#tbb.bars == 0)
+            local alreadyDone = pp.specProfiles
+                and newSpecKey and newSpecKey ~= "0"
+                and pp.specProfiles[newSpecKey]
+                and pp.specProfiles[newSpecKey]._tbbSnapshotDone
+            if hasNoBars and not alreadyDone then
+                pp._tbbNeedsSnapshot = true
+                pp.trackedBuffBars = nil
+                pp.tbbPositions = nil
+            end
+        end
         ns.BuildTrackedBuffBars()
         RegisterCDMUnlockElements()
         -- Force viewers to populate before reconciling so the viewer is fully
         -- ready when ReconcileMainBarSpells runs. Bare timers are intentionally
-        -- omitted here — a partially-populated viewer causes spells to be dropped.
+        -- omitted here -- a partially-populated viewer causes spells to be dropped.
         ForcePopulateBlizzardViewers(function()
             ForceResnapshotMainBars()
             StartResnapshotRetry()
+            -- Auto-populate buff bars from Blizzard viewers on first use of this spec
+            local pp = ECME.db.profile
+            if pp._tbbNeedsSnapshot and ns.SnapshotBlizzardBuffBars then
+                pp._tbbNeedsSnapshot = nil
+                ns.SnapshotBlizzardBuffBars()
+                ns.BuildTrackedBuffBars()
+            end
         end)
 
         -- Refresh options panel if open
@@ -2153,10 +2214,11 @@ local BLIZZ_CDM_FRAMES = {
     buffs     = "BuffIconCooldownViewer",
 }
 
--- BuffBarCooldownViewer (the Blizzard buff bar) is intentionally NOT included
--- here. We leave it visible and unmodified so Blizzard's buff bars show normally.
--- CDM only hides the icon-based viewers it replaces with its own bars.
+-- BuffBarCooldownViewer is the Blizzard buff bar strip. We hide it alongside
+-- the icon viewer so Blizzard's default buff display is fully suppressed when
+-- the user has CDM hiding enabled. Our Tracked Buff Bars replace it.
 local BLIZZ_CDM_FRAMES_SECONDARY = {
+    buffs = "BuffBarCooldownViewer",
 }
 
 -- CDM category numbers per bar key (for C_CooldownViewer API)
@@ -2230,10 +2292,10 @@ RefreshRacialSpells = function() end
 -- altItemID: alternate quality tier of the same potion (e.g. Artisan quality variant).
 -- When the player has the alt version but not the base, we display the alt instead.
 local HEALTH_ITEMS = {
-    { itemID = 241304, spellID = 1234768, altItemID = 241305 },              -- Silvermoon Health Potion
-    { itemID = 241308, spellID = 1236616, altItemID = 241309 },              -- Light's Potential
-    { itemID = 5512,   spellID = 6262, combatLockout = true },               -- Healthstone
-    { itemID = 224464, spellID = 452930, class = "WARLOCK" },                -- Demonic Healthstone
+    { itemID = 241304, spellID = 1234768, altItemID = 241305, combatLockout = true },  -- Silvermoon Health Potion
+    { itemID = 241308, spellID = 1236616, altItemID = 241309, combatLockout = true },  -- Light's Potential
+    { itemID = 5512,   spellID = 6262, combatLockout = true },                         -- Healthstone
+    { itemID = 224464, spellID = 452930, class = "WARLOCK" },                          -- Demonic Healthstone
 }
 
 -- Reverse lookup: spellID -> HEALTH_ITEMS entry (for item-aware cooldown/count display)
@@ -3803,6 +3865,20 @@ local function UpdateCustomBarIcons(barKey)
                         local blzBufCh = _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
                                       or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
                         if IsBufChildCooldownActive(blzBufCh) then isActive = true end
+                    end
+                    -- Duration-based timer: show if a cast-triggered timer is still running
+                    if not isActive then
+                        local barTimers = _customBarTimers[barKey]
+                        if barTimers then
+                            local expiry = barTimers[spellID] or barTimers[resolvedID]
+                            if expiry and GetTime() < expiry then
+                                isActive = true
+                            elseif expiry then
+                                -- Timer expired, clean up
+                                barTimers[spellID] = nil
+                                barTimers[resolvedID] = nil
+                            end
+                        end
                     end
                     if not isActive then
                         ourIcon:Hide()
@@ -5813,6 +5889,26 @@ function ns.GetCDMSpellsForBar(barKey)
     return spells
 end
 
+--- Returns the full spell pool for Tracked Buff Bars.
+--- Same structure as GetCDMSpellsForBar("buffs") -- categories 2 and 3 treated
+--- as one group. Buckets: displayed (in Blizzard CDM), known (not displayed),
+--- disabled (unlearned). Used by the TBB spell picker in the options UI.
+function ns.GetTBBSpellPool()
+    local spells = ns.GetCDMSpellsForBar("buffs")
+    if not spells then return {}, {}, {} end
+    local displayed, known, disabled = {}, {}, {}
+    for _, sp in ipairs(spells) do
+        if not sp.isKnown then
+            disabled[#disabled + 1] = sp
+        elseif sp.isDisplayed then
+            displayed[#displayed + 1] = sp
+        else
+            known[#known + 1] = sp
+        end
+    end
+    return displayed, known, disabled
+end
+
 --- Check if a cooldownID has a Blizzard CDM child (is "displayed")
 function ns.IsSpellDisplayedInCDM(barKey, cdID)
     local blizzName = BLIZZ_CDM_FRAMES[barKey]
@@ -5990,6 +6086,38 @@ end
 -- Expose for options UI conflict display
 ns.SpellConflictsWithOtherBar = SpellConflictsWithOtherBar
 
+--- Add a preset group to a buff bar.
+--- Only works on custom bars with barType="buffs" (has customSpells).
+--- Duration and group variant mappings are stored in customSpellDurations/customSpellGroups.
+function ns.AddPresetToBar(barKey, preset)
+    local p = ECME.db.profile
+    for _, b in ipairs(p.cdmBars.bars) do
+        if b.key == barKey then
+            if not b.customSpells then return false end
+            local primaryID = preset.spellIDs[1]
+            -- Check not already tracked
+            for _, existing in ipairs(b.customSpells) do
+                if existing == primaryID then return false, "exists" end
+            end
+            -- Add primary ID as the icon slot
+            b.customSpells[#b.customSpells + 1] = primaryID
+            -- Store duration for primary
+            if not b.customSpellDurations then b.customSpellDurations = {} end
+            b.customSpellDurations[primaryID] = preset.duration
+            -- Map all variant IDs -> primary so any cast triggers the timer
+            if not b.customSpellGroups then b.customSpellGroups = {} end
+            for _, sid in ipairs(preset.spellIDs) do
+                b.customSpellGroups[sid] = primaryID
+            end
+            local frame = cdmBarFrames[barKey]
+            if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+            if p.activeSpecKey and p.activeSpecKey ~= "0" then SaveCurrentSpecProfile() end
+            return true
+        end
+    end
+    return false
+end
+
 --- Add a tracked spell (spellID) to a bar
 --- When isExtra is true, id is a spellID (positive) or trinket slot (negative)
 function ns.AddTrackedSpell(barKey, id, isExtra)
@@ -6077,7 +6205,20 @@ function ns.RemoveTrackedSpell(barKey, idx)
             if b.customSpells then
                 local list = b.customSpells
                 if list and idx >= 1 and idx <= #list then
+                    local removedID = list[idx]
                     table.remove(list, idx)
+                    -- Clean up duration entry if present
+                    if removedID and b.customSpellDurations then
+                        b.customSpellDurations[removedID] = nil
+                    end
+                    -- Clean up spell group variant mappings that point to this primary ID
+                    if removedID and b.customSpellGroups then
+                        for variantID, primaryID in pairs(b.customSpellGroups) do
+                            if primaryID == removedID then
+                                b.customSpellGroups[variantID] = nil
+                            end
+                        end
+                    end
                     local frame = cdmBarFrames[barKey]
                     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
                     -- Persist to spec profile immediately so spec switches don't restore removed spells
@@ -6094,6 +6235,17 @@ function ns.RemoveTrackedSpell(barKey, idx)
                     if sid and sid ~= 0 then
                         if not b.removedSpells then b.removedSpells = {} end
                         b.removedSpells[sid] = true
+                    end
+                    -- Clean up duration and group mappings (preset spells on built-in bars)
+                    if sid and b.customSpellDurations then
+                        b.customSpellDurations[sid] = nil
+                    end
+                    if sid and b.customSpellGroups then
+                        for variantID, primaryID in pairs(b.customSpellGroups) do
+                            if primaryID == sid then
+                                b.customSpellGroups[variantID] = nil
+                            end
+                        end
                     end
                     local frame = cdmBarFrames[barKey]
                     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
@@ -6923,7 +7075,7 @@ local function TalentAwareReconcile()
             end
         end
 
-        return (#active > 0 and active or nil), (next(dormant) and dormant or nil)
+        return active, (next(dormant) and dormant or nil)
     end
 
     -- Process each bar
@@ -7075,6 +7227,25 @@ end
 
 function ECME:CDMFinishSetup()
     BuildAllCDMBars()
+    -- Mark for snapshot if this spec has no buff bars configured yet.
+    -- Fires on first load after the feature was added (existing profiles have
+    -- an empty bars table). Uses a per-spec flag so it only runs once.
+    do
+        local pp = ECME.db.profile
+        local specKey = pp.activeSpecKey
+        local tbb = pp.trackedBuffBars
+        local hasNoBars = (not tbb) or (not tbb.bars) or (#tbb.bars == 0)
+        -- Check per-spec "already snapshotted" flag
+        local alreadyDone = pp.specProfiles
+            and specKey and specKey ~= "0"
+            and pp.specProfiles[specKey]
+            and pp.specProfiles[specKey]._tbbSnapshotDone
+        if hasNoBars and not alreadyDone then
+            pp._tbbNeedsSnapshot = true
+            pp.trackedBuffBars = nil
+            pp.tbbPositions = nil
+        end
+    end
     ns.BuildTrackedBuffBars()
 
     -- One-time migration: strip passive spellIDs that may have been stored
@@ -7126,6 +7297,13 @@ function ECME:CDMFinishSetup()
     ForcePopulateBlizzardViewers(function()
         ForceResnapshotMainBars()
         StartResnapshotRetry()
+        -- Auto-populate buff bars from Blizzard viewers on first use of this spec
+        local pp = ECME.db.profile
+        if pp._tbbNeedsSnapshot and ns.SnapshotBlizzardBuffBars then
+            pp._tbbNeedsSnapshot = nil
+            ns.SnapshotBlizzardBuffBars()
+            ns.BuildTrackedBuffBars()
+        end
     end)
 
     -- Save the initial spec profile so switching away and back preserves it
@@ -7189,6 +7367,11 @@ local function ScheduleTalentRebuild()
     local token = _talentRebuildToken
     C_Timer.After(0.5, function()
         if token ~= _talentRebuildToken then return end  -- superseded
+        -- Skip if a spec switch just happened -- SwitchSpecProfile already
+        -- handles the full save/load/rebuild cycle.  TalentAwareReconcile
+        -- running during the transition would see stale spell data and
+        -- incorrectly move the new spec's spells to dormant.
+        if (GetTime() - _lastSpecSwitchTime) < 3 then return end
         -- Wipe per-spell caches that may reference stale override IDs or
         -- stale charge data from spells that changed with the talent swap.
         -- Also wipe the persisted DB entries so CacheMultiChargeSpell
@@ -7245,7 +7428,8 @@ local function ScheduleRosterRebuild()
     end)
 end
 
-local _unitAuraTimer = nil
+-- _unitAuraTimer stored on ECME to stay within the 200 local/upvalue limit.
+ECME._unitAuraTimer = nil
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if not ECME.db then return end
     if event == "PLAYER_LOGOUT" then
@@ -7266,6 +7450,29 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             local hi = HEALTH_ITEM_BY_SPELL[castSpellID]
             if hi and hi.combatLockout and InCombatLockdown() then
                 _healthCombatLockout[castSpellID] = true
+            end
+            -- Duration-based tracking: start a timer for buff bar preset spells
+            -- that have a user-configured duration (e.g. potions with no aura)
+            local p = ECME.db and ECME.db.profile
+            if p and p.cdmBars and p.cdmBars.bars then
+                for _, barData in ipairs(p.cdmBars.bars) do
+                    local isBuffBar = (barData.key == "buffs" or barData.barType == "buffs")
+                    if barData.enabled and isBuffBar and barData.customSpellDurations then
+                        local durations = barData.customSpellDurations
+                        local primaryID = castSpellID
+                        local groups = barData.customSpellGroups
+                        if groups and groups[castSpellID] then
+                            primaryID = groups[castSpellID]
+                        end
+                        local dur = durations[primaryID]
+                        if dur and dur > 0 then
+                            if not _customBarTimers[barData.key] then
+                                _customBarTimers[barData.key] = {}
+                            end
+                            _customBarTimers[barData.key][primaryID] = GetTime() + dur
+                        end
+                    end
+                end
             end
         end
         return
@@ -7380,9 +7587,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "UNIT_AURA" and unit == "player" then
         -- Throttle: buff bars only need ~5fps refresh, not every aura event
-        if not _unitAuraTimer then
-            _unitAuraTimer = C_Timer.NewTimer(0.2, function()
-                _unitAuraTimer = nil
+        if not ECME._unitAuraTimer then
+            ECME._unitAuraTimer = C_Timer.NewTimer(0.2, function()
+                ECME._unitAuraTimer = nil
                 if UpdateBuffBars then UpdateBuffBars() end
             end)
         end

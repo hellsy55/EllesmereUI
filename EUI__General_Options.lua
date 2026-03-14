@@ -3312,6 +3312,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Active Profile dropdown (no X on the field)
             local ddBtn = CreateFrame("Button", nil, rowFrame)
+            EllesmereUI._profileDDBtn = ddBtn
             PP.Size(ddBtn, DD_W, ITEM_H)
             PP.Point(ddBtn, "TOPLEFT", rowFrame, "TOPLEFT", startX, offsetY)
             ddBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
@@ -3336,6 +3337,177 @@ initFrame:SetScript("OnEvent", function(self)
             local menu = MakeDropdownMenu(ddBtn, DD_W)
             local X_SZ = 14
             local menuItems = {}
+
+            -- Format a keybind string for display (e.g. "CTRL-SHIFT-F" -> "Ctrl + Shift + F")
+            local function FormatKey(key)
+                if not key then return "Not Bound" end
+                local parts = {}
+                for mod in key:gmatch("(%u+)%-") do
+                    parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
+                end
+                local actualKey = key:match("[^%-]+$") or key
+                parts[#parts + 1] = actualKey
+                return table.concat(parts, " + ")
+            end
+
+            -- Keybind popup for a profile (same style as party mode keybind)
+            local _kbPopup
+            local function ShowProfileKeybindPopup(profileName)
+                if _kbPopup then _kbPopup:Hide() end
+
+                local POPUP_W, POPUP_H = 320, 130
+
+                -- Full-screen dimmer (click outside to close)
+                local dimmer = CreateFrame("Frame", nil, UIParent)
+                dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+                dimmer:SetFrameLevel(100)
+                dimmer:SetAllPoints(UIParent)
+                dimmer:EnableMouse(true)
+                dimmer:EnableMouseWheel(true)
+                dimmer:SetScript("OnMouseWheel", function() end)
+
+                local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+                dimTex:SetAllPoints()
+                dimTex:SetColorTexture(0, 0, 0, 0.25)
+
+                local popup = CreateFrame("Frame", nil, dimmer)
+                popup:SetFrameStrata("FULLSCREEN_DIALOG")
+                popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+                popup:SetSize(POPUP_W, POPUP_H)
+                popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+                popup:EnableMouse(true)
+                popup:SetClampedToScreen(true)
+                _kbPopup = popup
+                popup._dimmer = dimmer
+
+                dimmer:SetScript("OnMouseDown", function()
+                    if not popup:IsMouseOver() then
+                        dimmer:Hide()
+                    end
+                end)
+
+                local popBg = popup:CreateTexture(nil, "BACKGROUND")
+                popBg:SetAllPoints()
+                popBg:SetColorTexture(0.06, 0.08, 0.10, 0.97)
+                EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.20, PP)
+
+                local title = EllesmereUI.MakeFont(popup, 14, nil, 1, 1, 1)
+                title:SetPoint("TOP", popup, "TOP", 0, -14)
+                title:SetText("Keybind: " .. profileName)
+
+                local KB_W, KB_H = 160, 30
+                local kbBtn = CreateFrame("Button", nil, popup)
+                PP.Size(kbBtn, KB_W, KB_H)
+                kbBtn:SetPoint("CENTER", popup, "CENTER", 0, -2)
+                kbBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
+                kbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                local kbBg = EllesmereUI.SolidTex(kbBtn, "BACKGROUND", EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+                kbBg:SetAllPoints()
+                kbBtn._border = EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+                local kbLbl = EllesmereUI.MakeFont(kbBtn, 13, nil, 1, 1, 1)
+                kbLbl:SetAlpha(EllesmereUI.DD_TXT_A or 0.85)
+                kbLbl:SetPoint("CENTER")
+
+                local function RefreshLabel()
+                    local key = EllesmereUI.GetProfileKeybind(profileName)
+                    kbLbl:SetText(FormatKey(key))
+                end
+                RefreshLabel()
+
+                local hint = EllesmereUI.MakeFont(popup, 10, nil, 1, 1, 1, 0.35)
+                hint:SetPoint("BOTTOM", popup, "BOTTOM", 0, 12)
+                hint:SetText("Left-click to set  |  Right-click to unbind  |  Esc to close")
+
+                local listening = false
+
+                kbBtn:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" then
+                        if listening then
+                            listening = false
+                            self:EnableKeyboard(false)
+                        end
+                        EllesmereUI.SetProfileKeybind(profileName, nil)
+                        RefreshLabel()
+                        return
+                    end
+                    if listening then return end
+                    listening = true
+                    kbLbl:SetText("Press a key...")
+                    kbBtn:EnableKeyboard(true)
+                end)
+
+                kbBtn:SetScript("OnKeyDown", function(self, key)
+                    if not listening then
+                        if key == "ESCAPE" then
+                            self:SetPropagateKeyboardInput(false)
+                            dimmer:Hide()
+                            return
+                        end
+                        self:SetPropagateKeyboardInput(true)
+                        return
+                    end
+                    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
+                       or key == "LALT" or key == "RALT" then
+                        self:SetPropagateKeyboardInput(true)
+                        return
+                    end
+                    self:SetPropagateKeyboardInput(false)
+                    if key == "ESCAPE" then
+                        listening = false
+                        self:EnableKeyboard(false)
+                        RefreshLabel()
+                        return
+                    end
+                    local mods = ""
+                    if IsShiftKeyDown() then mods = mods .. "SHIFT-" end
+                    if IsControlKeyDown() then mods = mods .. "CTRL-" end
+                    if IsAltKeyDown() then mods = mods .. "ALT-" end
+                    local fullKey = mods .. key
+
+                    EllesmereUI.SetProfileKeybind(profileName, fullKey)
+                    listening = false
+                    self:EnableKeyboard(false)
+                    RefreshLabel()
+                end)
+
+                kbBtn:SetScript("OnEnter", function()
+                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA or 0.98)
+                    if kbBtn._border and kbBtn._border.SetColor then
+                        kbBtn._border:SetColor(1, 1, 1, 0.3)
+                    end
+                    EllesmereUI.ShowWidgetTooltip(kbBtn, "Left-click to set a keybind.\nRight-click to unbind.")
+                end)
+                kbBtn:SetScript("OnLeave", function()
+                    if listening then return end
+                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+                    if kbBtn._border and kbBtn._border.SetColor then
+                        kbBtn._border:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A)
+                    end
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+
+                popup:SetScript("OnHide", function()
+                    if listening then
+                        listening = false
+                        kbBtn:EnableKeyboard(false)
+                    end
+                    if popup._dimmer then popup._dimmer:Hide() end
+                    _kbPopup = nil
+                end)
+
+                -- Close on Escape when not listening on the button
+                popup:EnableKeyboard(true)
+                popup:SetScript("OnKeyDown", function(self, key)
+                    if key == "ESCAPE" and not listening then
+                        self:SetPropagateKeyboardInput(false)
+                        dimmer:Hide()
+                    else
+                        self:SetPropagateKeyboardInput(true)
+                    end
+                end)
+
+                dimmer:Show()
+            end
 
             local function RebuildProfileMenu()
                 for _, itm in ipairs(menuItems) do itm:Hide() end
@@ -3362,7 +3534,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local lbl = itm:CreateFontString(nil, "OVERLAY")
                             lbl:SetFont(FONT, 13, EllesmereUI.GetFontOutlineFlag())
                             lbl:SetPoint("LEFT",  itm, "LEFT",  10, 0)
-                            lbl:SetPoint("RIGHT", itm, "RIGHT", -(X_SZ * 2 + 22), 0)
+                            lbl:SetPoint("RIGHT", itm, "RIGHT", -(X_SZ * 3 + 30), 0)
                             lbl:SetJustifyH("LEFT")
                             lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                             itm._lbl = lbl
@@ -3393,54 +3565,76 @@ initFrame:SetScript("OnEvent", function(self)
                             editBtn:SetAlpha(0.4)
                             itm._editBtn = editBtn
 
+                            local kbBtn = CreateFrame("Button", nil, itm)
+                            kbBtn:SetSize(X_SZ, X_SZ)
+                            kbBtn:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
+                            kbBtn:SetFrameLevel(itm:GetFrameLevel() + 2)
+                            local kbIcon = kbBtn:CreateTexture(nil, "OVERLAY")
+                            kbIcon:SetAllPoints()
+                            if kbIcon.SetSnapToPixelGrid then kbIcon:SetSnapToPixelGrid(false); kbIcon:SetTexelSnappingBias(0) end
+                            kbIcon:SetTexture(MEDIA .. "icons\\eui-keybind-2.png")
+                            kbBtn:SetAlpha(0.4)
+                            itm._kbBtn = kbBtn
+
                             local function IsOverInlineBtn()
-                                return xBtn:IsMouseOver() or editBtn:IsMouseOver()
+                                return xBtn:IsMouseOver() or editBtn:IsMouseOver() or kbBtn:IsMouseOver()
+                            end
+
+                            local function SetAllInlineAlpha(a)
+                                xBtn:SetAlpha(a); editBtn:SetAlpha(a); kbBtn:SetAlpha(a)
                             end
 
                             itm:SetScript("OnEnter", function()
                                 lbl:SetTextColor(1, 1, 1, 1)
                                 hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
-                                xBtn:SetAlpha(0.8)
-                                editBtn:SetAlpha(0.8)
+                                SetAllInlineAlpha(0.8)
                             end)
                             itm:SetScript("OnLeave", function()
                                 if IsOverInlineBtn() then return end
                                 lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
-                                xBtn:SetAlpha(0.4)
-                                editBtn:SetAlpha(0.4)
+                                SetAllInlineAlpha(0.4)
                             end)
-                            xBtn:SetScript("OnEnter", function()
+
+                            local function InlineBtnEnter(self)
                                 lbl:SetTextColor(1, 1, 1, 1)
                                 hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
-                                xBtn:SetAlpha(1)
-                                editBtn:SetAlpha(0.8)
-                            end)
-                            xBtn:SetScript("OnLeave", function()
-                                if itm:IsMouseOver() or editBtn:IsMouseOver() then
-                                    xBtn:SetAlpha(0.8)
+                                SetAllInlineAlpha(0.8)
+                                self:SetAlpha(1)
+                            end
+                            local function InlineBtnLeave(hoveredSelf)
+                                if itm:IsMouseOver() or IsOverInlineBtn() then
+                                    hoveredSelf:SetAlpha(0.8)
                                     return
                                 end
                                 lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
-                                xBtn:SetAlpha(0.4)
-                                editBtn:SetAlpha(0.4)
+                                SetAllInlineAlpha(0.4)
+                            end
+
+                            xBtn:SetScript("OnEnter", function(self)
+                                InlineBtnEnter(self)
+                                EllesmereUI.ShowWidgetTooltip(self, "Delete")
                             end)
-                            editBtn:SetScript("OnEnter", function()
-                                lbl:SetTextColor(1, 1, 1, 1)
-                                hl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
-                                editBtn:SetAlpha(1)
-                                xBtn:SetAlpha(0.8)
+                            xBtn:SetScript("OnLeave", function(self)
+                                InlineBtnLeave(self)
+                                EllesmereUI.HideWidgetTooltip()
                             end)
-                            editBtn:SetScript("OnLeave", function()
-                                if itm:IsMouseOver() or xBtn:IsMouseOver() then
-                                    editBtn:SetAlpha(0.8)
-                                    return
-                                end
-                                lbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
-                                hl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
-                                xBtn:SetAlpha(0.4)
-                                editBtn:SetAlpha(0.4)
+                            editBtn:SetScript("OnEnter", function(self)
+                                InlineBtnEnter(self)
+                                EllesmereUI.ShowWidgetTooltip(self, "Rename")
+                            end)
+                            editBtn:SetScript("OnLeave", function(self)
+                                InlineBtnLeave(self)
+                                EllesmereUI.HideWidgetTooltip()
+                            end)
+                            kbBtn:SetScript("OnEnter", function(self)
+                                InlineBtnEnter(self)
+                                EllesmereUI.ShowWidgetTooltip(self, "Keybind")
+                            end)
+                            kbBtn:SetScript("OnLeave", function(self)
+                                InlineBtnLeave(self)
+                                EllesmereUI.HideWidgetTooltip()
                             end)
                             menuItems[idx] = itm
                         end
@@ -3455,10 +3649,11 @@ initFrame:SetScript("OnEvent", function(self)
                         local specLocked = specAssigned and specAssigned ~= capName
 
                         if specLocked then
-                            -- Disable: dim label, hide X and edit, block clicks, show tooltip
+                            -- Disable: dim label, hide X, edit, and keybind, block clicks, show tooltip
                             itm._lbl:SetTextColor(1, 1, 1, 0.25)
                             itm._xBtn:Hide()
                             itm._editBtn:Hide()
+                            itm._kbBtn:Hide()
                             itm:SetScript("OnClick", nil)
                             itm:SetScript("OnEnter", function()
                                 EllesmereUI.ShowWidgetTooltip(itm, "This spec has an assigned profile")
@@ -3467,30 +3662,33 @@ initFrame:SetScript("OnEvent", function(self)
                                 EllesmereUI.HideWidgetTooltip()
                             end)
                         else
-                            local iLbl, iHl, iXBtn, iEditBtn = itm._lbl, itm._hl, itm._xBtn, itm._editBtn
+                            local iLbl, iHl, iXBtn, iEditBtn, iKbBtn = itm._lbl, itm._hl, itm._xBtn, itm._editBtn, itm._kbBtn
                             iLbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                             if capName == "Default" then
                                 iXBtn:Hide()
                                 iEditBtn:Hide()
+                                iKbBtn:Hide()
                             else
                                 iXBtn:Show()
                                 iEditBtn:Show()
+                                iKbBtn:Show()
                             end
                             local function IsOverInline()
-                                return iXBtn:IsMouseOver() or iEditBtn:IsMouseOver()
+                                return iXBtn:IsMouseOver() or iEditBtn:IsMouseOver() or iKbBtn:IsMouseOver()
+                            end
+                            local function SetAllAlpha(a)
+                                iXBtn:SetAlpha(a); iEditBtn:SetAlpha(a); iKbBtn:SetAlpha(a)
                             end
                             itm:SetScript("OnEnter", function()
                                 iLbl:SetTextColor(1, 1, 1, 1)
                                 iHl:SetAlpha(EllesmereUI.DD_ITEM_HL_A)
-                                iXBtn:SetAlpha(0.8)
-                                iEditBtn:SetAlpha(0.8)
+                                SetAllAlpha(0.8)
                             end)
                             itm:SetScript("OnLeave", function()
                                 if IsOverInline() then return end
                                 iLbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
                                 iHl:SetAlpha(itm._isSel and EllesmereUI.DD_ITEM_SEL_A or 0)
-                                iXBtn:SetAlpha(0.4)
-                                iEditBtn:SetAlpha(0.4)
+                                SetAllAlpha(0.4)
                             end)
                             itm:SetScript("OnClick", function()
                                 menu:Hide()
@@ -3520,6 +3718,16 @@ initFrame:SetScript("OnEvent", function(self)
                             end)
                             iXBtn:SetScript("OnClick", function()
                                 if capName == "Default" then return end
+                                -- Skip confirmation for pristine (uncustomized) default profiles
+                                local _, profiles = EllesmereUI.GetProfileList()
+                                local pData = profiles and profiles[capName]
+                                if pData and pData._pristine then
+                                    EllesmereUI.DeleteProfile(capName)
+                                    ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                    -- Rebuild the dropdown in-place so it stays open
+                                    RebuildProfileMenu()
+                                    return
+                                end
                                 menu:Hide()
                                 EllesmereUI:ShowConfirmPopup({
                                     title       = "Delete Profile",
@@ -3551,6 +3759,10 @@ initFrame:SetScript("OnEvent", function(self)
                                         EllesmereUI:RefreshPage(true)
                                     end,
                                 })
+                            end)
+                            iKbBtn:SetScript("OnClick", function()
+                                menu:Hide()
+                                ShowProfileKeybindPopup(capName)
                             end)
                         end
 
@@ -3626,6 +3838,11 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RefreshAllAddons()
                 ddLabel:SetText(newName)
                 EllesmereUI:RefreshPage()
+                -- Flash the (rebuilt) dropdown after the page refresh
+                C_Timer.After(0, function()
+                    local btn = EllesmereUI._profileDDBtn
+                    if btn then EllesmereUI.PlaySyncFlash(btn) end
+                end)
             end)
 
             -- Assign to Spec button

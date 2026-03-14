@@ -1465,7 +1465,7 @@ local function UpdateBordersForScale(frame, unit)
     local btbIsAtt = (btbPos == "top" or btbPos == "bottom")
     local btbH = (settings.bottomTextBar and btbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
 
-    local showPortrait = settings.showPortrait ~= false
+    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
     local isAttached = (db.profile.portraitStyle or "attached") == "attached"
     local pSide = settings.portraitSide or "right"
     local effectiveSide = pSide
@@ -2481,7 +2481,8 @@ local function FrameBorderEnter(self)
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
         local hc = settings.highlightColor or { r = 1, g = 1, b = 1 }
-        PP.SetBorderColor(self.unifiedBorder, hc.r, hc.g, hc.b, 1)
+        local ha = settings.highlightAlpha or 1
+        PP.SetBorderColor(self.unifiedBorder, hc.r, hc.g, hc.b, ha)
     end
 end
 local function FrameBorderLeave(self)
@@ -2490,7 +2491,8 @@ local function FrameBorderLeave(self)
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
         local bc = settings.borderColor or { r = 0, g = 0, b = 0 }
-        PP.SetBorderColor(self.unifiedBorder, bc.r, bc.g, bc.b, 1)
+        local ba = settings.borderAlpha or 1
+        PP.SetBorderColor(self.unifiedBorder, bc.r, bc.g, bc.b, ba)
     end
 end
 

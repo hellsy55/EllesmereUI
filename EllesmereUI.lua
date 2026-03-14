@@ -5180,6 +5180,15 @@ function EllesmereUI:SelectPage(pageName)
         scrollFrame:SetVerticalScroll(0)
         UpdateScrollThumb()
     end
+
+    -- Re-snap all PP borders after tab switch. Cached frames are re-shown
+    -- without going through CreateBorder's built-in 2-frame re-snap, so
+    -- borders can end up misaligned until the panel is closed and reopened.
+    -- Waiting 1 frame ensures the frame hierarchy has finished layout before
+    -- we recalculate effective scales.
+    C_Timer.After(0, function()
+        if PP and PP.ResnapAllBorders then PP.ResnapAllBorders() end
+    end)
 end
 
 -- Rebuild the current page content without resetting scroll position
@@ -5578,7 +5587,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.7.4"
+EllesmereUI.VERSION = "4.7.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

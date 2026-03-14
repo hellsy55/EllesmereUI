@@ -17,9 +17,6 @@ ns.EAB = EAB
 
 local PP = EllesmereUI.PP
 
-local function GetEABOutline() return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "" end
-local function GetEABUseShadow() return EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() or true end
-
 -------------------------------------------------------------------------------
 --  Upvalues
 -------------------------------------------------------------------------------
@@ -77,12 +74,13 @@ for _, info in ipairs(BAR_CONFIG) do BAR_LOOKUP[info.key] = info end
 
 local BAR_DROPDOWN_VALUES = {}
 local BAR_DROPDOWN_ORDER = {}
--- ExtraActionButton and EncounterBar are positioning-only (via Unlock Mode); exclude from settings dropdown
-local _DROPDOWN_EXCLUDE = { ExtraActionButton = true, EncounterBar = true }
-for _, info in ipairs(ALL_BARS) do
-    if not _DROPDOWN_EXCLUDE[info.key] then
-        BAR_DROPDOWN_VALUES[info.key] = info.label
-        BAR_DROPDOWN_ORDER[#BAR_DROPDOWN_ORDER + 1] = info.key
+do
+    local _DROPDOWN_EXCLUDE = { ExtraActionButton = true, EncounterBar = true }
+    for _, info in ipairs(ALL_BARS) do
+        if not _DROPDOWN_EXCLUDE[info.key] then
+            BAR_DROPDOWN_VALUES[info.key] = info.label
+            BAR_DROPDOWN_ORDER[#BAR_DROPDOWN_ORDER + 1] = info.key
+        end
     end
 end
 
@@ -627,21 +625,8 @@ _secureHandler:SetAttribute("_onattributechanged", [=[
         end
     end
 
-    -- Step 6: Set up override keybindings during combat reload.
-    -- SetBindingClick is available in the restricted environment.
-    local bindCount = self:GetAttribute("bind-count") or 0
-    for i = 1, bindCount do
-        local bindData = self:GetAttribute("bind-" .. i)
-        if bindData then
-            local btnName, key1, key2 = strsplit("|", bindData)
-            if key1 and key1 ~= "" then
-                self:SetBindingClick(false, key1, btnName, "LeftButton")
-            end
-            if key2 and key2 ~= "" then
-                self:SetBindingClick(false, key2, btnName, "LeftButton")
-            end
-        end
-    end
+    -- Step 6: Native Blizzard keybinds -- no override bindings needed.
+    -- Blizzard's C-level system routes key presses via MultiActionButtonDown/Up.
 ]=])
 
 -- Register all Blizzard buttons and bar frames as refs on the secure handler.
@@ -733,32 +718,8 @@ local function SecureSetupHandler_Execute(layoutData, barFrameData)
     local mainFrame = barFrames["MainBar"]
     local mainOffset = mainFrame and (mainFrame:GetAttribute("actionOffset") or 0) or 0
     _secureHandler:SetAttribute("mainbar-offset", mainOffset)
-    -- Encode keybind data so the secure snippet can set override bindings
-    -- during combat reload (SetBindingClick is available in restricted env).
-    local bindIdx = 0
-    for _, info in ipairs(BAR_CONFIG) do
-        if not info.isStance and not info.isPetBar then
-            local key = info.key
-            local buttons = barButtons[key]
-            local bindPrefix = BINDING_MAP[key]
-            if buttons and bindPrefix then
-                for i = 1, #buttons do
-                    local btn = buttons[i]
-                    if btn then
-                        local btnName = btn:GetName()
-                        local bindingAction = bindPrefix .. i
-                        local key1, key2 = GetBindingKey(bindingAction)
-                        if btnName and (key1 or key2) then
-                            bindIdx = bindIdx + 1
-                            _secureHandler:SetAttribute("bind-" .. bindIdx,
-                                btnName .. "|" .. (key1 or "") .. "|" .. (key2 or ""))
-                        end
-                    end
-                end
-            end
-        end
-    end
-    _secureHandler:SetAttribute("bind-count", bindIdx)
+    -- Native Blizzard keybinds: no override bind data needed for combat reload.
+    _secureHandler:SetAttribute("bind-count", 0)
     -- Trigger the snippet
     _secureHandler:SetAttribute("do-setup", GetTime())
 end
@@ -814,28 +775,9 @@ local function HideBlizzardBars()
         RegisterAttributeDriver(OverrideActionBar, "state-visibility",
             "[vehicleui][overridebar] show; hide")
     end
-    -- Wipe Blizzard's actionButtons tables so they don't interfere
-    for _, name in ipairs({"MainActionBar", "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7"}) do
-        local bar = _G[name]
-        if bar and bar.actionButtons then
-            wipe(bar.actionButtons)
-        end
-    end
-    -- Replace Blizzard's multi-bar button handlers with no-ops.
-    -- After wiping actionButtons, the original functions would error
-    -- if a Blizzard binding fires before our override bindings are set.
-    if MultiActionButtonDown then _G.MultiActionButtonDown = function() end end
-    if MultiActionButtonUp then _G.MultiActionButtonUp = function() end end
-    -- Also wipe button container references on MainActionBar
-    local mainAB = _G["MainActionBar"]
-    if mainAB then
-        for i = 1, 3 do
-            local container = _G["MainActionBarButtonContainer" .. i]
-            if container and container.actionButtons then
-                wipe(container.actionButtons)
-            end
-        end
-    end
+    -- Native Blizzard keybinds: keep actionButtons tables and
+    -- MultiActionButtonDown/Up intact so Blizzard's C-level binding
+    -- system can route key presses to our (re-skinned) buttons.
 
     -- Force all Blizzard action bars to be "enabled" via CVars so buttons work
     C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_1", "1")
@@ -1310,7 +1252,7 @@ function EABFlyoutFrameMixin:OnFlyoutOpened()
             end
 
             -- Apply pushed/highlight/misc texture animations to match the bar
-            -- Only outside combat â€” SetPushedTexture is restricted on secure buttons in combat.
+            -- Only outside combat SetPushedTexture is restricted on secure buttons in combat.
             -- The textures persist after being set, so this only needs to run once per button.
             if not InCombatLockdown() then
                 self:ApplyFlyoutAnimations(btn, prof)
@@ -1321,7 +1263,7 @@ end
 
 -- Apply pushed/highlight/misc button texture animations to a flyout button,
 -- matching the global animation settings used on all action bar buttons.
--- NOTE: called via CallMethod (restricted env) â€” cannot use file-local upvalues.
+-- NOTE: called via CallMethod (restricted env) cannot use file-local upvalues.
 -- All texture operations are inlined; texture paths are read from the EAB profile.
 function EABFlyoutFrameMixin:ApplyFlyoutAnimations(btn, prof)
     local useCC = prof.pushedUseClassColor
@@ -1667,6 +1609,10 @@ function EABFlyout:GetParent()
     return self._frame and self._frame:GetParent()
 end
 
+-- Forward declaration -- defined fully in the keybind section below.
+-- Allows SetupBar to eagerly create bind buttons while out of combat.
+local GetOrCreateBindButton
+
 -- Get or create an action button for a given slot
 -- skipProtected: if true, skip SetParent/SetID/Show (used during combat reload;
 -- the secure handler will perform those operations instead)
@@ -1931,7 +1877,7 @@ local function SetupBar(info, skipProtected)
     -- Store original button size before any shape/scale modifications.
     -- StanceButtons and PetActionButtons are 30x30; action buttons are 45x45.
     -- Round to nearest integer to eliminate floating-point noise from Blizzard's
-    -- scaling â€” the intended sizes are always whole numbers.
+    -- scaling the intended sizes are always whole numbers.
     local btn1 = buttons[1]
     barBaseSize[key] = {
         w = math.floor((btn1 and btn1:GetWidth() or 45) + 0.5),
@@ -2341,7 +2287,7 @@ local function LayoutBar(key)
                 flyDir = (cy > thirdH * 2) and "DOWN" or "UP"
             end
         else
-            -- Frame not yet on screen â€” safe fallback
+            -- Frame not yet on screen safe fallback
             flyDir = isVertical and "RIGHT" or "UP"
         end
     end
@@ -3222,6 +3168,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if numIcons > info.count then numIcons = info.count end
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
 
+    local clickable = not s.clickThrough
     local lastVisible = 0
     for i = 1, numIcons do
         local btn = buttons[i]
@@ -3241,10 +3188,14 @@ function EAB:ApplyAlwaysShowButtons(barKey)
 
             if not visible then
                 btn:SetAlpha(0)
+                -- Invisible empty slots should not catch mouse events
+                SafeEnableMouse(btn, false)
             else
                 if not s.mouseoverEnabled then
                     btn:SetAlpha(1)
                 end
+                -- Restore mouse state based on bar's click-through setting
+                SafeEnableMouse(btn, clickable)
                 lastVisible = i
             end
         end
@@ -3828,9 +3779,19 @@ function EAB:ApplyClickThroughForBar(barKey)
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
     SafeEnableMouseMotionOnly(frame, enable)
+    local showEmpty = s.alwaysShowButtons
+    if showEmpty == nil then showEmpty = true end
+    local info = BAR_LOOKUP[barKey]
+    if info and info.isStance then showEmpty = false end
     for i = 1, #buttons do
         local btn = buttons[i]
-        if btn then SafeEnableMouse(btn, enable) end
+        if btn then
+            -- Don't re-enable mouse on invisible empty slots
+            local isInvisible = (btn:GetAlpha() == 0) and not showEmpty
+            if not isInvisible then
+                SafeEnableMouse(btn, enable)
+            end
+        end
     end
 end
 
@@ -3985,15 +3946,21 @@ ns.PROC_START_TYPES = PROC_START_TYPES
 -------------------------------------------------------------------------------
 --  Glow Engines provided by shared EllesmereUI_Glows.lua
 -------------------------------------------------------------------------------
-local _G_Glows = EllesmereUI.Glows
-local StartProceduralAnts = _G_Glows.StartProceduralAnts
-local StopProceduralAnts  = _G_Glows.StopProceduralAnts
-local StartButtonGlow     = _G_Glows.StartButtonGlow
-local StopButtonGlow      = _G_Glows.StopButtonGlow
-local StartAutoCastShine  = _G_Glows.StartAutoCastShine
-local StopAutoCastShine   = _G_Glows.StopAutoCastShine
-local StartShapeGlow      = _G_Glows.StartShapeGlow
-local StopShapeGlow       = _G_Glows.StopShapeGlow
+local StartProceduralAnts, StopProceduralAnts
+local StartButtonGlow, StopButtonGlow
+local StartAutoCastShine, StopAutoCastShine
+local StartShapeGlow, StopShapeGlow
+do
+    local g = EllesmereUI.Glows
+    StartProceduralAnts = g.StartProceduralAnts
+    StopProceduralAnts  = g.StopProceduralAnts
+    StartButtonGlow     = g.StartButtonGlow
+    StopButtonGlow      = g.StopButtonGlow
+    StartAutoCastShine  = g.StartAutoCastShine
+    StopAutoCastShine   = g.StopAutoCastShine
+    StartShapeGlow      = g.StartShapeGlow
+    StopShapeGlow       = g.StopShapeGlow
+end
 ns.StartProceduralAnts = StartProceduralAnts
 ns.StopProceduralAnts  = StopProceduralAnts
 ns.StartButtonGlow     = StartButtonGlow
@@ -4597,8 +4564,10 @@ local function IsKeyDownEnabled()
     return GetCVar("ActionButtonUseKeyDown") == "1"
 end
 
-local function GetOrCreateBindButton(btn)
+GetOrCreateBindButton = function(btn)
     if btn._bindBtn then return btn._bindBtn end
+    -- Bind buttons must be created out of combat. If called in combat
+    -- (should not happen after eager creation in SetupBar), bail out.
     if InCombatLockdown() then return nil end
 
     local bind = CreateFrame("Button", btn:GetName() .. "_EABBind", btn, "SecureActionButtonTemplate")
@@ -4662,56 +4631,11 @@ local function ApplyBindButtonMode(bind, keyDownEnabled)
 end
 
 local function UpdateKeybinds()
-    if _vehicleBindsCleared or _housingBindsCleared then return end
-    if InCombatLockdown() then return end
-
-    local keyDownEnabled = IsKeyDownEnabled()
-    local clickType = keyDownEnabled and "HOTKEY" or "LeftButton"
-
-    for _, info in ipairs(BAR_CONFIG) do
-        -- Stance and pet bar buttons use Blizzard's native binding system -- skip them
-        if info.isStance or info.isPetBar then
-            -- Blizzard handles SHAPESHIFTBUTTON/BONUSACTIONBUTTON bindings natively
-        else
-            local key = info.key
-            local buttons = barButtons[key]
-            local bindPrefix = BINDING_MAP[key]
-            if buttons and bindPrefix then
-                for i = 1, #buttons do
-                    local btn = buttons[i]
-                    if btn then
-                        local bindingAction = bindPrefix .. i
-                        local key1, key2 = GetBindingKey(bindingAction)
-                        local bind = GetOrCreateBindButton(btn)
-                        if bind then
-                            ApplyBindButtonMode(bind, keyDownEnabled)
-                            ClearOverrideBindings(bind)
-                            local bindName = bind:GetName()
-                            if bindName then
-                                -- Only override a key if no other addon has already
-                                -- claimed it with an override binding (e.g. OPie rings).
-                                -- GetBindingAction with checkOverride=true returns the
-                                -- current override action; if it's a CLICK on a frame
-                                -- that isn't ours, another addon owns it â€” skip.
-                                if key1 then
-                                    local current = GetBindingAction(key1, true)
-                                    if not current or current == "" or current == bindingAction or current:find(bindName) then
-                                        SetOverrideBindingClick(bind, false, key1, bindName, clickType)
-                                    end
-                                end
-                                if key2 then
-                                    local current = GetBindingAction(key2, true)
-                                    if not current or current == "" or current == bindingAction or current:find(bindName) then
-                                        SetOverrideBindingClick(bind, false, key2, bindName, clickType)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
+    -- Native Blizzard keybinds: Blizzard's C-level binding system handles all
+    -- keybind routing via MultiActionButtonDown/Up. No override bindings needed.
+    -- This gives us press-and-hold casting support (only available through
+    -- Blizzard's native binding path) while cast-on-key-down continues to work
+    -- via the ActionButtonUseKeyDown CVar.
 end
 
 -- Called when ActionButtonUseKeyDown CVar changes. Defers to out-of-combat.
@@ -5299,7 +5223,7 @@ function EAB:OnFirstLogin()
     self.db.sv._capturedOnce = true
     self._needsCapture = false
 
-    -- Stance bar visibility must always be "Always" â€” it manages its own
+    -- Stance bar visibility must always be "Always" it manages its own
     -- show/hide based on shapeshift form availability.
     local sb = self.db.profile.bars["StanceBar"]
     if sb then
@@ -5444,14 +5368,10 @@ function EAB:FinishSetup()
             SecureSetupHandler_Execute(layoutData, barFrameData)
         end
 
-        -- Visual styling and keybinds: defer to out-of-combat if needed
+        -- Visual styling: defer visuals to out-of-combat if needed.
         local combatReloaded = InCombatLockdown()
         local function DoVisuals()
-            if combatReloaded then
-                _secureHandler:SetAttribute("clear-binds", GetTime())
-            end
             ApplyAll()
-            UpdateKeybinds()
             ApplyKeyDownCVar()
             self:HookProcGlow()
             self:ScanExistingProcs()
@@ -6393,7 +6313,21 @@ end
 --  and disables Blizzard's layout management so we can reposition freely.
 --  Overlay sizes are hardcoded (don't affect actual Blizzard frame rendering).
 -------------------------------------------------------------------------------
-local _blizzMovablePendingOOC = {} -- deferred actions for when combat ends
+local _blizzMovablePendingOOC = {} -- deferred reparents for when combat ends
+
+-- Silence a frame's layout participation and mouse interaction permanently.
+-- Does NOT nil OnShow/OnHide -- those drive child frame visibility.
+-- Only kills the OnUpdate repositioning loop and layout system membership.
+local function DisableLayoutFrame(f)
+    if not f then return end
+    f.ignoreInLayout = true
+    f.ignoreFramePositionManager = true
+    f.IsLayoutFrame = nil
+    if f.SetIsLayoutFrame then pcall(f.SetIsLayoutFrame, f, false) end
+    f:SetScript("OnUpdate", nil)
+    f.OnUpdate = nil
+    f:EnableMouse(false)
+end
 
 local function SetupBlizzardMovableFrame(barKey)
     local holder = CreateFrame("Frame", "EllesmereEAB_" .. barKey, UIParent)
@@ -6401,172 +6335,177 @@ local function SetupBlizzardMovableFrame(barKey)
     holder:EnableMouse(false)
     blizzMovableHolders[barKey] = holder
 
-    -- Holder uses the fixed overlay size (only affects unlock mode mover)
     local ov = BLIZZ_MOVABLE_OVERLAY[barKey]
     holder:SetSize(ov and ov.w or 50, ov and ov.h or 50)
 
-    -- blizzFrame = the frame we reparent into our holder
-    -- posSource = the frame we read Blizzard's Edit Mode position from
-    local blizzFrame, blizzContainer, posSource
+    -- Identify which Blizzard frames to manage for this bar key.
+    -- extraFrames = all frames that get reparented into the holder.
+    local primaryFrame   -- the frame we read position from before reparenting
+    local extraFrames = {}
+
     if barKey == "ExtraActionButton" then
-        -- ExtraAbilityContainer is what Blizzard's Edit Mode positions.
-        -- It parents both ExtraActionBarFrame and ZoneAbilityFrame.
-        blizzFrame = ExtraAbilityContainer
-        blizzContainer = ExtraAbilityContainer
-        posSource = ExtraAbilityContainer
+        -- ExtraAbilityContainer is the layout container Blizzard's Edit Mode
+        -- positions. It parents ExtraActionBarFrame and ZoneAbilityFrame.
+        -- We take ownership of the whole container.
+        if ExtraAbilityContainer then
+            primaryFrame = ExtraAbilityContainer
+            extraFrames[#extraFrames + 1] = ExtraAbilityContainer
+        end
+        -- ExtraActionBarFrame itself also needs mouse disabled -- it can absorb
+        -- clicks even when the container has no active ability.
+        if ExtraActionBarFrame and ExtraActionBarFrame:IsMouseEnabled() and not InCombatLockdown() then
+            ExtraActionBarFrame:EnableMouse(false)
+        end
     elseif barKey == "EncounterBar" then
-        -- Encounter bar covers both PlayerPowerBarAlt and UIWidgetPowerBarContainerFrame.
-        -- PlayerPowerBarAlt is the primary frame; UIWidgetPowerBarContainerFrame is used
-        -- by newer encounter mechanics (e.g. Midnight "Prey").
-        blizzFrame = PlayerPowerBarAlt
-        blizzContainer = nil
-        posSource = PlayerPowerBarAlt or UIWidgetPowerBarContainerFrame
+        -- PlayerPowerBarAlt is the classic encounter power bar.
+        -- UIWidgetPowerBarContainerFrame is used by newer mechanics.
+        if PlayerPowerBarAlt then
+            primaryFrame = PlayerPowerBarAlt
+            extraFrames[#extraFrames + 1] = PlayerPowerBarAlt
+        end
+        if UIWidgetPowerBarContainerFrame then
+            if not primaryFrame then primaryFrame = UIWidgetPowerBarContainerFrame end
+            extraFrames[#extraFrames + 1] = UIWidgetPowerBarContainerFrame
+        end
     end
 
-    -- Secondary encounter bar frame (widget-based power bars)
-    local encounterWidgetBar = (barKey == "EncounterBar") and UIWidgetPowerBarContainerFrame or nil
-
-    if not blizzFrame and not encounterWidgetBar then
+    if #extraFrames == 0 then
         holder:Hide()
         return
     end
 
-    -- Restore saved position, or defer capture of Blizzard's Edit Mode position.
-    -- MUST happen BEFORE reparenting so we read the original Blizzard position.
+    -- Restore saved position BEFORE reparenting so we can still read the
+    -- original Blizzard-placed position if no save exists yet.
     local pos = EAB.db.profile.barPositions[barKey]
     if pos and pos.point then
         holder:ClearAllPoints()
         holder:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
     else
-        -- No saved position yet try to capture Blizzard's Edit Mode position
-        -- immediately, or defer if the frame doesn't have valid bounds yet.
-        local src = posSource or blizzFrame
-        local bL, bT = src:GetLeft(), src:GetTop()
-        local bR, bB = src:GetRight(), src:GetBottom()
-        if bL and bT and bR and bB and (bR - bL) > 1 then
-            local bS = src:GetEffectiveScale()
-            local uiS = UIParent:GetEffectiveScale()
-            local cx = (bL + bR) * 0.5 * bS / uiS
-            local cy = (bT + bB) * 0.5 * bS / uiS - UIParent:GetHeight()
-            EAB.db.profile.barPositions[barKey] = {
-                point = "CENTER", relPoint = "TOPLEFT", x = cx, y = cy,
-            }
-            holder:ClearAllPoints()
-            holder:SetPoint("CENTER", UIParent, "TOPLEFT", cx, cy)
-        else
-            -- Frame not positioned yet place temporarily, capture after Edit Mode applies
+        -- Try to capture Blizzard's current Edit Mode position immediately.
+        -- If the frame has no valid bounds yet, defer via OnUpdate.
+        local src = primaryFrame
+        local function TryCapturePosition(self)
+            local bL, bT = src:GetLeft(), src:GetTop()
+            local bR, bB = src:GetRight(), src:GetBottom()
+            if bL and bT and bR and bB and (bR - bL) > 1 then
+                local bS = src:GetEffectiveScale()
+                local uS = UIParent:GetEffectiveScale()
+                local cx = (bL + bR) * 0.5 * bS / uS
+                local cy = (bT + bB) * 0.5 * bS / uS - UIParent:GetHeight()
+                EAB.db.profile.barPositions[barKey] = { point = "CENTER", relPoint = "TOPLEFT", x = cx, y = cy }
+                holder:ClearAllPoints()
+                holder:SetPoint("CENTER", UIParent, "TOPLEFT", cx, cy)
+                if self then self:SetScript("OnUpdate", nil) end
+                return true
+            end
+            return false
+        end
+        if not TryCapturePosition(nil) then
             holder:ClearAllPoints()
             holder:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
             local attempts = 0
             local captureFrame = CreateFrame("Frame")
             captureFrame:SetScript("OnUpdate", function(self)
                 attempts = attempts + 1
-                local cL, cT = src:GetLeft(), src:GetTop()
-                local cR, cB = src:GetRight(), src:GetBottom()
-                if cL and cT and cR and cB and (cR - cL) > 1 then
-                    local cS = src:GetEffectiveScale()
-                    local uS = UIParent:GetEffectiveScale()
-                    local ccx = (cL + cR) * 0.5 * cS / uS
-                    local ccy = (cT + cB) * 0.5 * cS / uS - UIParent:GetHeight()
-                    EAB.db.profile.barPositions[barKey] = {
-                        point = "CENTER", relPoint = "TOPLEFT", x = ccx, y = ccy,
-                    }
-                    holder:ClearAllPoints()
-                    holder:SetPoint("CENTER", UIParent, "TOPLEFT", ccx, ccy)
-                    self:SetScript("OnUpdate", nil)
-                elseif attempts > 300 then
+                if TryCapturePosition(self) or attempts > 300 then
                     self:SetScript("OnUpdate", nil)
                 end
             end)
         end
     end
 
-    -- Reparent the Blizzard frame into our holder
-    local _recentering = false
+    -- Reparent all managed frames into the holder, centered.
+    -- Safe to call multiple times; guards against combat lockdown.
     local function ReparentIntoHolder()
         if InCombatLockdown() then
             _blizzMovablePendingOOC[barKey] = true
             return
         end
-        _recentering = true
-        if blizzFrame then
-            -- Remove from Blizzard's managed layout before reparenting to
-            -- prevent UIParentBottomManagedFrameContainer:SetSize() taint.
-            blizzFrame.ignoreInLayout = true
-            if blizzFrame.SetIsLayoutFrame then
-                pcall(blizzFrame.SetIsLayoutFrame, blizzFrame, false)
-            end
-            blizzFrame:SetParent(holder)
-            blizzFrame:ClearAllPoints()
-            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        for _, f in ipairs(extraFrames) do
+            f.ignoreInLayout = true
+            f.ignoreFramePositionManager = true
+            if f.SetIsLayoutFrame then pcall(f.SetIsLayoutFrame, f, false) end
+            f:SetParent(holder)
+            f:ClearAllPoints()
+            f:SetPoint("CENTER", holder, "CENTER", 0, 0)
         end
-        if encounterWidgetBar then
-            encounterWidgetBar.ignoreInLayout = true
-            if encounterWidgetBar.SetIsLayoutFrame then
-                pcall(encounterWidgetBar.SetIsLayoutFrame, encounterWidgetBar, false)
-            end
-            encounterWidgetBar:SetParent(holder)
-            encounterWidgetBar:ClearAllPoints()
-            encounterWidgetBar:SetPoint("CENTER", holder, "CENTER", 0, 0)
-        end
-        _recentering = false
     end
 
-    -- Disable ExtraAbilityContainer layout repositioning and scripts to prevent
-    -- the container from absorbing mouse events when no extra action is active.
-    if blizzContainer and barKey == "ExtraActionButton" then
-        blizzContainer.ignoreInLayout = true
-        if blizzContainer.SetIsLayoutFrame then
-            blizzContainer:SetIsLayoutFrame(false)
-        end
-        blizzContainer.IsLayoutFrame = nil
-        blizzContainer:SetScript("OnShow", nil)
-        blizzContainer:SetScript("OnUpdate", nil)
-        blizzContainer.OnUpdate = nil
-        blizzContainer:EnableMouse(false)
-    end
+    -- Extra Action Button: silence the container's layout loop and mouse so it
+    -- never absorbs clicks or repositions itself. We keep OnShow/OnHide alive
+    -- because they drive child frame (ExtraActionBarFrame, ZoneAbilityFrame)
+    -- visibility -- but we hook them to re-reparent after they fire, since
+    -- Blizzard's OnShow calls UpdateManagedFramePositions which can steal position.
+    if barKey == "ExtraActionButton" and ExtraAbilityContainer then
+        DisableLayoutFrame(ExtraAbilityContainer)
 
-    -- For encounter bar: mark as user-placed so Blizzard doesn't reposition,
-    -- hook setup functions that fire when the bar activates for a boss fight,
-    -- and also reparent UIWidgetPowerBarContainerFrame.
-    if barKey == "EncounterBar" then
-        if blizzFrame then
-            blizzFrame:SetMovable(true)
-            blizzFrame:SetUserPlaced(true)
-            blizzFrame:SetDontSavePosition(true)
-
-            -- Hook SetupPlayerPowerBarPosition Blizzard calls this to reposition
-            -- the bar when it activates; re-reparent into our holder.
-            if type(blizzFrame.SetupPlayerPowerBarPosition) == "function" then
-                hooksecurefunc(blizzFrame, "SetupPlayerPowerBarPosition", function(bar)
-                    if bar:GetParent() ~= holder then
-                        C_Timer_After(0, ReparentIntoHolder)
-                    end
-                end)
+        -- Re-reparent after Blizzard's OnShow repositions the container.
+        ExtraAbilityContainer:HookScript("OnShow", function()
+            if ExtraAbilityContainer:GetParent() ~= holder then
+                ReparentIntoHolder()
             end
+        end)
 
-            -- Hook UnitPowerBarAlt_SetUp called when the encounter power bar
-            -- is initialized for a fight; re-reparent the player bar.
-            if type(UnitPowerBarAlt_SetUp) == "function" then
-                hooksecurefunc("UnitPowerBarAlt_SetUp", function(bar)
-                    if bar.isPlayerBar and bar:GetParent() ~= holder then
-                        C_Timer_After(0, ReparentIntoHolder)
-                    end
-                end)
-            end
-
-            -- Resize holder when the bar changes size
-            blizzFrame:HookScript("OnSizeChanged", function(self)
-                local w, h = self:GetSize()
-                if w > 1 and h > 1 then
-                    holder:SetSize(w, h)
+        -- Edit Mode calls ApplySystemAnchor to reposition the container.
+        -- Re-reparent back into our holder whenever that fires.
+        if ExtraAbilityContainer.ApplySystemAnchor then
+            hooksecurefunc(ExtraAbilityContainer, "ApplySystemAnchor", function()
+                ReparentIntoHolder()
+                -- Also remove from UIParentBottomManagedFrameContainer if present
+                if UIParentBottomManagedFrameContainer then
+                    UIParentBottomManagedFrameContainer.showingFrames[ExtraAbilityContainer] = nil
                 end
             end)
         end
 
-        -- Also reparent UIWidgetPowerBarContainerFrame (used by newer mechanics)
-        if encounterWidgetBar then
-            encounterWidgetBar:HookScript("OnSizeChanged", function(self)
+        -- Hook AddFrame so newly added ability buttons also get mouse disabled.
+        if ExtraAbilityContainer.AddFrame then
+            hooksecurefunc(ExtraAbilityContainer, "AddFrame", function(_, frame)
+                if frame and frame.EnableMouse then
+                    frame:EnableMouse(true) -- buttons themselves must stay clickable
+                end
+            end)
+        end
+    end
+
+    -- Encounter Bar: mark as user-placed so Blizzard's position manager leaves
+    -- it alone, and hook the setup functions that fire when a fight starts.
+    if barKey == "EncounterBar" then
+        local ppb = PlayerPowerBarAlt
+        if ppb then
+            ppb:SetMovable(true)
+            ppb:SetUserPlaced(true)
+            ppb:SetDontSavePosition(true)
+
+            -- Blizzard calls SetupPlayerPowerBarPosition when the bar activates.
+            if type(ppb.SetupPlayerPowerBarPosition) == "function" then
+                hooksecurefunc(ppb, "SetupPlayerPowerBarPosition", function(bar)
+                    if bar:GetParent() ~= holder then
+                        ReparentIntoHolder()
+                    end
+                end)
+            end
+
+            -- UnitPowerBarAlt_SetUp fires when the encounter bar is initialized.
+            if type(UnitPowerBarAlt_SetUp) == "function" then
+                hooksecurefunc("UnitPowerBarAlt_SetUp", function(bar)
+                    if bar.isPlayerBar and bar:GetParent() ~= holder then
+                        ReparentIntoHolder()
+                    end
+                end)
+            end
+
+            -- Resize holder to match the bar when it changes size.
+            ppb:HookScript("OnSizeChanged", function(self)
+                local w, h = self:GetSize()
+                if w > 1 and h > 1 then holder:SetSize(w, h) end
+            end)
+        end
+
+        local uwb = UIWidgetPowerBarContainerFrame
+        if uwb then
+            DisableLayoutFrame(uwb)
+            uwb:HookScript("OnSizeChanged", function(self)
                 local w, h = self:GetSize()
                 if w > 1 and h > 1 then
                     local hw, hh = holder:GetSize()
@@ -6576,123 +6515,94 @@ local function SetupBlizzardMovableFrame(barKey)
         end
     end
 
+    -- Initial reparent.
     ReparentIntoHolder()
 
-    -- Hook SetParent to re-reparent if Blizzard steals the frame back
-    if blizzFrame then
-        hooksecurefunc(blizzFrame, "SetParent", function(self, newParent)
+    -- Hook SetParent on every managed frame so we re-reparent immediately if
+    -- Blizzard or another addon steals the frame back. No deferred timer --
+    -- act synchronously when out of combat, queue when in combat.
+    for _, f in ipairs(extraFrames) do
+        hooksecurefunc(f, "SetParent", function(self, newParent)
             if newParent ~= holder then
-                C_Timer_After(0, function()
-                    if self:GetParent() ~= holder then
-                        ReparentIntoHolder()
-                    end
-                end)
+                ReparentIntoHolder()
             end
-        end)
-
-        -- Keep Blizzard frame centered in holder even if Blizzard repositions it
-        hooksecurefunc(blizzFrame, "SetPoint", function(self)
-            if _recentering or self:GetParent() ~= holder then return end
-            C_Timer_After(0, function()
-                if _recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
-                local pt = self:GetPoint(1)
-                if pt ~= "CENTER" then
-                    _recentering = true
-                    self:ClearAllPoints()
-                    self:SetPoint("CENTER", holder, "CENTER", 0, 0)
-                    _recentering = false
-                end
-            end)
-        end)
-    end
-
-    -- Hook the widget power bar container the same way
-    if encounterWidgetBar then
-        hooksecurefunc(encounterWidgetBar, "SetParent", function(self, newParent)
-            if newParent ~= holder then
-                C_Timer_After(0, function()
-                    if self:GetParent() ~= holder then
-                        ReparentIntoHolder()
-                    end
-                end)
-            end
-        end)
-
-        hooksecurefunc(encounterWidgetBar, "SetPoint", function(self)
-            if _recentering or self:GetParent() ~= holder then return end
-            C_Timer_After(0, function()
-                if _recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
-                local pt = self:GetPoint(1)
-                if pt ~= "CENTER" then
-                    _recentering = true
-                    self:ClearAllPoints()
-                    self:SetPoint("CENTER", holder, "CENTER", 0, 0)
-                    _recentering = false
-                end
-            end)
         end)
     end
 
     -- Apply visibility settings
     local s = EAB.db.profile.bars[barKey]
-    if s and s.alwaysHidden then
-        holder:Hide()
-    end
+    if s and s.alwaysHidden then holder:Hide() end
 
     return holder
 end
 
--- Deferred combat handler for reparenting
+-- Deferred reparent handler: fires when combat ends.
 local _blizzMovableCombatFrame = CreateFrame("Frame")
 _blizzMovableCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 _blizzMovableCombatFrame:SetScript("OnEvent", function()
+    if InCombatLockdown() then return end
     for barKey in pairs(_blizzMovablePendingOOC) do
         local holder = blizzMovableHolders[barKey] or extraBarHolders[barKey]
-        local blizzFrame
-        if barKey == "ExtraActionButton" then
-            blizzFrame = ExtraAbilityContainer
-        elseif barKey == "EncounterBar" then
-            blizzFrame = PlayerPowerBarAlt
-        else
+        if not holder then
             -- Extra bar holders (MicroBar, BagBar)
             for _, info in ipairs(EXTRA_BARS) do
-                if info.key == barKey and info.frameName then
-                    blizzFrame = _G[info.frameName]
+                if info.key == barKey then
+                    holder = extraBarHolders[barKey]
                     break
                 end
             end
         end
-        if holder and blizzFrame and not InCombatLockdown() then
-            -- Remove from Blizzard's managed layout before reparenting to
-            -- prevent UIParentBottomManagedFrameContainer:SetSize() taint.
-            blizzFrame.ignoreInLayout = true
-            if blizzFrame.SetIsLayoutFrame then
-                pcall(blizzFrame.SetIsLayoutFrame, blizzFrame, false)
+        if barKey == "ExtraActionButton" and holder and ExtraAbilityContainer then
+            ExtraAbilityContainer.ignoreInLayout = true
+            ExtraAbilityContainer.ignoreFramePositionManager = true
+            if ExtraAbilityContainer.SetIsLayoutFrame then
+                pcall(ExtraAbilityContainer.SetIsLayoutFrame, ExtraAbilityContainer, false)
             end
-            blizzFrame:SetParent(holder)
-            blizzFrame:ClearAllPoints()
-            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
-        end
-        -- Also reparent widget power bar for encounter bar
-        if barKey == "EncounterBar" and holder and UIWidgetPowerBarContainerFrame and not InCombatLockdown() then
-            UIWidgetPowerBarContainerFrame.ignoreInLayout = true
-            if UIWidgetPowerBarContainerFrame.SetIsLayoutFrame then
-                pcall(UIWidgetPowerBarContainerFrame.SetIsLayoutFrame, UIWidgetPowerBarContainerFrame, false)
+            ExtraAbilityContainer:SetParent(holder)
+            ExtraAbilityContainer:ClearAllPoints()
+            ExtraAbilityContainer:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        elseif barKey == "EncounterBar" and holder then
+            for _, f in ipairs({ PlayerPowerBarAlt, UIWidgetPowerBarContainerFrame }) do
+                if f then
+                    f.ignoreInLayout = true
+                    f.ignoreFramePositionManager = true
+                    if f.SetIsLayoutFrame then pcall(f.SetIsLayoutFrame, f, false) end
+                    f:SetParent(holder)
+                    f:ClearAllPoints()
+                    f:SetPoint("CENTER", holder, "CENTER", 0, 0)
+                end
             end
-            UIWidgetPowerBarContainerFrame:SetParent(holder)
-            UIWidgetPowerBarContainerFrame:ClearAllPoints()
-            UIWidgetPowerBarContainerFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        elseif holder then
+            for _, info in ipairs(EXTRA_BARS) do
+                if info.key == barKey and info.frameName then
+                    local f = _G[info.frameName]
+                    if f then
+                        f.ignoreInLayout = true
+                        if f.SetIsLayoutFrame then pcall(f.SetIsLayoutFrame, f, false) end
+                        f:SetParent(holder)
+                        f:ClearAllPoints()
+                        f:SetPoint("CENTER", holder, "CENTER", 0, 0)
+                    end
+                    break
+                end
+            end
         end
     end
     wipe(_blizzMovablePendingOOC)
+
+    -- ExtraActionBarFrame is a protected frame that Blizzard re-enables mouse
+    -- on when combat ends. Re-disable it here so it never absorbs clicks OOC.
+    if ExtraActionBarFrame and ExtraActionBarFrame:IsMouseEnabled() then
+        ExtraActionBarFrame:EnableMouse(false)
+    end
 end)
 
--- Revert UserPlaced on logout so Blizzard doesn't save stale positions
+-- Revert UserPlaced on logout so Blizzard doesn't persist our stale position.
 local _blizzMovableLogoutFrame = CreateFrame("Frame")
 _blizzMovableLogoutFrame:RegisterEvent("PLAYER_LOGOUT")
 _blizzMovableLogoutFrame:SetScript("OnEvent", function()
-    if PlayerPowerBarAlt and not InCombatLockdown() then
-        pcall(function() PlayerPowerBarAlt:SetUserPlaced(false) end)
+    if PlayerPowerBarAlt then
+        PlayerPowerBarAlt:SetUserPlaced(false)
     end
 end)
 

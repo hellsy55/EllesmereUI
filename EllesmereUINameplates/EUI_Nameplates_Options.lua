@@ -2272,6 +2272,26 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               tooltip="Adjusts the vertical spacing between stacked nameplates. 100% = default, lower = tighter, higher = more spread." });  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Hitbox Size X",
+              trackWidth=130,
+              min=50, max=250, step=5,
+              getValue=function() return DBVal("hitboxScaleX") or defaults.hitboxScaleX end,
+              setValue=function(v)
+                DB().hitboxScaleX = v
+                ns.RefreshHitboxSize()
+              end,
+              tooltip="Widens the clickable hitbox of enemy nameplates. 100% = matches bar width. Increase to make nameplates easier to click." },
+            { type="slider", text="Hitbox Size Y",
+              trackWidth=130,
+              min=50, max=250, step=5,
+              getValue=function() return DBVal("hitboxScaleY") or defaults.hitboxScaleY end,
+              setValue=function(v)
+                DB().hitboxScaleY = v
+                ns.RefreshHitboxSize()
+              end,
+              tooltip="Increases the clickable hitbox height of enemy nameplates. 100% = matches bar height. Increase to make nameplates easier to click." });  y = y - h
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
