@@ -70,6 +70,7 @@ local defaults = {
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
+    classicTankAggro = false,
     tankLosingAggro = { r = 0.81, g = 0.72, b = 0.19 },
     tankNoAggro = { r = 1.00, g = 0.22, b = 0.17 },
     dpsNearAggro = { r = 0.81, g = 0.72, b = 0.19 },
@@ -113,6 +114,8 @@ local defaults = {
     nameplateOverlapV = 1.05,
     stackSpacingScale = 50,
     stackingEnabled = true,
+    hitboxScaleX = 100,
+    hitboxScaleY = 100,
     nameplateYOffset = 0,
     enemyNameTextSize = 11,
     enemyNameColor = { r = 1, g = 1, b = 1 },
@@ -483,6 +486,17 @@ local function GetHealthBarWidth()
     return BAR_W + extra
 end
 ns.GetHealthBarWidth = GetHealthBarWidth
+
+-- Returns the Y offset to apply to plate content when hitbox Y scale != 100%.
+-- SetNamePlateSize grows/shrinks the frame from its base anchor, so we shift
+-- content to keep the visual bar in the same screen position.
+local function GetHitboxYShift()
+    local db = EllesmereUINameplatesDB or defaults
+    local sy = (db.hitboxScaleY or 100) / 100
+    if sy == 1 then return 0 end
+    return -((GetHealthBarHeight() * sy) - GetHealthBarHeight()) / 2
+end
+ns.GetHitboxYShift = GetHitboxYShift
 -- Slot-based size/offset getters
 local function GetSlotSize(posKey)
     local db = EllesmereUINameplatesDB
@@ -968,6 +982,91 @@ local function PositionArrowsOutsideAuras(plate)
 end
 ns.PositionArrowsOutsideAuras = PositionArrowsOutsideAuras
 
+-------------------------------------------------------------------------------
+--  Lazy-creation helpers for target-only / focus-only UI objects.
+--  These are only needed on 1 plate at a time, so creating them on every
+--  pooled plate wastes memory. Each Ensure* is idempotent (no-ops if
+--  already created on the plate).
+-------------------------------------------------------------------------------
+local GLOW_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\background.png"
+local GLOW_MARGIN = 0.48
+local GLOW_CORNER = 12
+local GLOW_EXTEND = 6
+
+local function EnsureGlow(plate)
+    if plate.glow then return end
+    plate.glowFrame = CreateFrame("Frame", nil, plate)
+    plate.glowFrame:SetFrameStrata("BACKGROUND")
+    plate.glowFrame:SetFrameLevel(1)
+    plate.glowFrame:SetPoint("TOPLEFT", plate.health, "TOPLEFT", -GLOW_EXTEND, GLOW_EXTEND)
+    plate.glowFrame:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", GLOW_EXTEND, -GLOW_EXTEND)
+    local function MkTex()
+        local t = plate.glowFrame:CreateTexture(nil, "BACKGROUND")
+        t:SetTexture(GLOW_TEX)
+        t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
+        t:SetBlendMode("ADD")
+        return t
+    end
+    plate.glowTL = MkTex(); plate.glowTL:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowTL:SetPoint("TOPLEFT"); plate.glowTL:SetTexCoord(0, GLOW_MARGIN, 0, GLOW_MARGIN)
+    plate.glowTR = MkTex(); plate.glowTR:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowTR:SetPoint("TOPRIGHT"); plate.glowTR:SetTexCoord(1 - GLOW_MARGIN, 1, 0, GLOW_MARGIN)
+    plate.glowBL = MkTex(); plate.glowBL:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowBL:SetPoint("BOTTOMLEFT"); plate.glowBL:SetTexCoord(0, GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
+    plate.glowBR = MkTex(); plate.glowBR:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowBR:SetPoint("BOTTOMRIGHT"); plate.glowBR:SetTexCoord(1 - GLOW_MARGIN, 1, 1 - GLOW_MARGIN, 1)
+    plate.glowTop = MkTex(); plate.glowTop:SetHeight(GLOW_CORNER); plate.glowTop:SetPoint("TOPLEFT", plate.glowTL, "TOPRIGHT"); plate.glowTop:SetPoint("TOPRIGHT", plate.glowTR, "TOPLEFT"); plate.glowTop:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 0, GLOW_MARGIN)
+    plate.glowBottom = MkTex(); plate.glowBottom:SetHeight(GLOW_CORNER); plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT"); plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT"); plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
+    plate.glowLeft = MkTex(); plate.glowLeft:SetWidth(GLOW_CORNER); plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT"); plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT"); plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    plate.glowRight = MkTex(); plate.glowRight:SetWidth(GLOW_CORNER); plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT"); plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT"); plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    plate.glow = plate.glowFrame
+    plate.glowFrame:Hide()
+end
+
+local function EnsureArrows(plate)
+    if plate.leftArrow then return end
+    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
+    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
+    local sc = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.targetArrowScale) or 1.0
+    local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
+    PP.Size(plate.leftArrow, aw, ah)
+    PP.Point(plate.leftArrow, "RIGHT", plate.health, "LEFT", -8, 0)
+    plate.leftArrow:Hide()
+    PP.Size(plate.rightArrow, aw, ah)
+    PP.Point(plate.rightArrow, "LEFT", plate.health, "RIGHT", 8, 0)
+    plate.rightArrow:Hide()
+end
+
+local function EnsureFocusOverlay(plate)
+    if plate.focusClipFill then return end
+    local overlayAlpha = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayAlpha) or defaults.focusOverlayAlpha
+    local overlayColor = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayColor) or defaults.focusOverlayColor
+    local STRIPE_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\striped-v2.png"
+    local fillTex = plate.health:GetStatusBarTexture()
+    plate.focusClipFill = CreateFrame("Frame", nil, plate.health)
+    plate.focusClipFill:SetClipsChildren(true)
+    plate.focusClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
+    plate.focusClipFill:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 1)
+    plate.focusClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.focusOverlayFill = plate.focusClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
+    plate.focusOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.focusOverlayFill:SetSize(200, 24)
+    plate.focusOverlayFill:SetTexture(STRIPE_TEX)
+    plate.focusOverlayFill:SetAlpha(overlayAlpha)
+    plate.focusOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.focusClipFill:Hide()
+    plate.focusClipBg = CreateFrame("Frame", nil, plate.health)
+    plate.focusClipBg:SetClipsChildren(true)
+    plate.focusClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
+    plate.focusClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 1)
+    plate.focusClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.focusOverlayBg = plate.focusClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
+    plate.focusOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.focusOverlayBg:SetSize(200, 24)
+    plate.focusOverlayBg:SetTexture(STRIPE_TEX)
+    plate.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
+    plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.focusClipBg:Hide()
+end
+
 local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(plate)
     plate:SetFlattensRenderLayers(true)
     plate.health = CreateFrame("StatusBar", nil, plate)
@@ -986,39 +1085,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.hashLine:SetPoint("TOP", plate.health, "TOP", 0, 0)
     plate.hashLine:SetPoint("BOTTOM", plate.health, "BOTTOM", 0, 0)
     plate.hashLine:Hide()
-    -- Focus target overlay: two non-overlapping textures at the same fixed scale
-    -- Fill overlay: full alpha, clipped to the fill region via a child frame
-    -- Bg overlay: half alpha, covers only the empty region (fill right edge to bar right edge)
-    local overlayAlpha = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayAlpha) or defaults.focusOverlayAlpha
-    local overlayColor = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayColor) or defaults.focusOverlayColor
-    local STRIPE_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\striped-v2.png"
-    local fillTex = plate.health:GetStatusBarTexture()
-    -- Fill overlay: clip frame sized to the fill texture, contains a fixed-size stripe texture
-    plate.focusClipFill = CreateFrame("Frame", nil, plate.health)
-    plate.focusClipFill:SetClipsChildren(true)
-    plate.focusClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
-    plate.focusClipFill:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 1)
-    plate.focusClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
-    plate.focusOverlayFill = plate.focusClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
-    plate.focusOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.focusOverlayFill:SetSize(200, 24)
-    plate.focusOverlayFill:SetTexture(STRIPE_TEX)
-    plate.focusOverlayFill:SetAlpha(overlayAlpha)
-    plate.focusOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
-    plate.focusClipFill:Hide()
-    -- Bg overlay: clip frame covering only the empty region, contains a fixed-size stripe texture
-    plate.focusClipBg = CreateFrame("Frame", nil, plate.health)
-    plate.focusClipBg:SetClipsChildren(true)
-    plate.focusClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
-    plate.focusClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 1)
-    plate.focusClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
-    plate.focusOverlayBg = plate.focusClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
-    plate.focusOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.focusOverlayBg:SetSize(200, 24)
-    plate.focusOverlayBg:SetTexture(STRIPE_TEX)
-    plate.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
-    plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
-    plate.focusClipBg:Hide()
     plate.absorb = CreateFrame("StatusBar", nil, plate.health)
     plate.absorb:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
     plate.absorb:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
@@ -1109,60 +1175,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         for _, tex in ipairs(plate._simpleBorderFrame._texs) do tex:SetVertexColor(cr, cg, cb) end
     end
     plate:ApplyBorderStyle()
-    local GLOW_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\background.png"
-    local GLOW_MARGIN = 0.48
-    local GLOW_CORNER = 12
-    local GLOW_EXTEND = 6
-    plate.glowFrame = CreateFrame("Frame", nil, plate)  
-    plate.glowFrame:SetFrameStrata("BACKGROUND")
-    plate.glowFrame:SetFrameLevel(1)  
-    plate.glowFrame:SetPoint("TOPLEFT", plate.health, "TOPLEFT", -GLOW_EXTEND, GLOW_EXTEND)
-    plate.glowFrame:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", GLOW_EXTEND, -GLOW_EXTEND)
-    local function CreateGlowTex()
-        local t = plate.glowFrame:CreateTexture(nil, "BACKGROUND")
-        t:SetTexture(GLOW_TEX)
-        t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
-        t:SetBlendMode("ADD")
-        return t
-    end
-    plate.glowTL = CreateGlowTex()
-    plate.glowTL:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowTL:SetPoint("TOPLEFT")
-    plate.glowTL:SetTexCoord(0, GLOW_MARGIN, 0, GLOW_MARGIN)
-    plate.glowTR = CreateGlowTex()
-    plate.glowTR:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowTR:SetPoint("TOPRIGHT")
-    plate.glowTR:SetTexCoord(1 - GLOW_MARGIN, 1, 0, GLOW_MARGIN)
-    plate.glowBL = CreateGlowTex()
-    plate.glowBL:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowBL:SetPoint("BOTTOMLEFT")
-    plate.glowBL:SetTexCoord(0, GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
-    plate.glowBR = CreateGlowTex()
-    plate.glowBR:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowBR:SetPoint("BOTTOMRIGHT")
-    plate.glowBR:SetTexCoord(1 - GLOW_MARGIN, 1, 1 - GLOW_MARGIN, 1)
-    plate.glowTop = CreateGlowTex()
-    plate.glowTop:SetHeight(GLOW_CORNER)
-    plate.glowTop:SetPoint("TOPLEFT", plate.glowTL, "TOPRIGHT")
-    plate.glowTop:SetPoint("TOPRIGHT", plate.glowTR, "TOPLEFT")
-    plate.glowTop:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 0, GLOW_MARGIN)
-    plate.glowBottom = CreateGlowTex()
-    plate.glowBottom:SetHeight(GLOW_CORNER)
-    plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT")
-    plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT")
-    plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
-    plate.glowLeft = CreateGlowTex()
-    plate.glowLeft:SetWidth(GLOW_CORNER)
-    plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT")
-    plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT")
-    plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
-    plate.glowRight = CreateGlowTex()
-    plate.glowRight:SetWidth(GLOW_CORNER)
-    plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT")
-    plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT")
-    plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
-    plate.glow = plate.glowFrame
-    plate.glowFrame:Hide()  
+    -- Target glow, target arrows, and focus overlay are lazy-created on
+    -- demand (EnsureGlow / EnsureArrows / EnsureFocusOverlay) since only
+    -- 1 plate at a time ever shows them. This saves ~14 objects per plate.
     -- Text overlay frame: renders above focus stripe overlay (level +1)
     plate.healthTextFrame = CreateFrame("Frame", nil, plate)
     plate.healthTextFrame:SetAllPoints(plate.health)
@@ -1188,20 +1203,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     PP.Width(plate.name, math.max(GetHealthBarWidth(), 20))
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
-    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
-    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
-    do
-        local sc = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.targetArrowScale) or 1.0
-        local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
-        PP.Size(plate.leftArrow,  aw, ah)
-        PP.Point(plate.leftArrow,  "RIGHT", plate.health, "LEFT",  -8, 0)
-        plate.leftArrow:Hide()
-        PP.Size(plate.rightArrow, aw, ah)
-        PP.Point(plate.rightArrow, "LEFT",  plate.health, "RIGHT",  8, 0)
-        plate.rightArrow:Hide()
-    end
     plate.raidFrame = CreateFrame("Frame", nil, plate)
     local rmSize = GetRaidMarkerSize()
     PP.Size(plate.raidFrame, rmSize, rmSize)
@@ -1624,6 +1625,31 @@ function ns.RefreshStackingMotion()
     end
 end
 
+function ns.RefreshHitboxSize()
+    if InCombatLockdown() then return end
+    if not C_NamePlate or not C_NamePlate.SetNamePlateSize then return end
+    local db = EllesmereUINameplatesDB or defaults
+    local sx = (db.hitboxScaleX or 100) / 100
+    local sy = (db.hitboxScaleY or 100) / 100
+    local baseW = GetHealthBarWidth()
+    local baseH = GetHealthBarHeight()
+    local newH  = baseH * sy
+    C_NamePlate.SetNamePlateSize(baseW * sx, newH)
+    -- The frame grows upward from its base, so the extra height is all on top.
+    -- Shift the hit area down by half the extra so it's centered on the bar.
+    if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
+       and Enum and Enum.NamePlateType then
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
+    end
+    -- Shift plate content to compensate for the upward frame growth
+    local yShift = GetHitboxYShift()
+    for _, plate in pairs(ns.plates) do
+        plate:ClearAllPoints()
+        plate:SetPoint("CENTER", plate.nameplate, "CENTER", 0, yShift)
+    end
+end
+
 --- Full visual refresh for all plates called when an entire preset is applied.
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
@@ -1763,8 +1789,13 @@ local function SetupAuraCVars()
     ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
+        local db = EllesmereUINameplatesDB or defaults
+        local sx = (db.hitboxScaleX or 100) / 100
+        local sy = (db.hitboxScaleY or 100) / 100
+        local baseH = GetHealthBarHeight()
+        local newH  = baseH * sy
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
-            C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), GetHealthBarHeight())
+            C_NamePlate.SetNamePlateSize(GetHealthBarWidth() * sx, newH)
         end
         if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets and Enum and Enum.NamePlateType then
             C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
@@ -2383,8 +2414,9 @@ local function RefreshThreatCache()
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
     else
+        local isDelve = C_PartyInfo and C_PartyInfo.IsDelveInProgress and C_PartyInfo.IsDelveInProgress()
         _inThreatContent = (instanceType == "party" or instanceType == "raid"
-                            or difficultyID == 204)  -- delve difficulty
+                            or isDelve)
     end
     -- Role: cache so we don't recalculate on every nameplate update
     local role = UnitGroupRolesAssigned("player")
@@ -2529,7 +2561,16 @@ local function GetReactionColor(unit)
                     end
                     -- Another tank has aggro -- fall through, no warning color
                 end
-                -- Tank has aggro falls through to be handled below focus/caster/miniboss
+                -- Classic tank aggro: has-aggro overrides all mob-type colors
+                if status >= 3 then
+                    local classic = db.classicTankAggro
+                    if classic == nil then classic = defaults.classicTankAggro end
+                    if classic then
+                        local c = C("tankHasAggro")
+                        return c.r, c.g, c.b
+                    end
+                end
+                -- Default: tank has aggro falls through to caster/miniboss colors
             end
         end
     end
@@ -2829,7 +2870,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     -- Single center anchor: the entire plate moves as one unit when the
     -- nameplate bounces by 1px, preventing individual edges from rounding
     -- independently (the "pixel shimmer" / bouncing-sides issue).
-    self:SetPoint("CENTER", nameplate, "CENTER", 0, 0)
+    self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetSize(1, 1)
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
@@ -3122,12 +3163,12 @@ function NameplateFrame:ClearUnit()
         self._interruptTimer = nil
     end
     self._interrupted = nil
-    self.glow:Hide()
+    if self.glow then self.glow:Hide() end
     self.highlight:Hide()
     self.raidFrame:Hide()
     self.classFrame:Hide()
-    self.leftArrow:Hide()
-    self.rightArrow:Hide()
+    if self.leftArrow then self.leftArrow:Hide() end
+    if self.rightArrow then self.rightArrow:Hide() end
     HideClassPowerOnPlate(self)
     self.absorb:Hide()
     if self.absorbOverflow then
@@ -3307,26 +3348,25 @@ function NameplateFrame:UpdateHealthColor()
     self.health:SetStatusBarColor(GetReactionColor(unit))
     -- Focus overlay: show stripe textures on focus target's health bar
     -- Fill clip frame at full alpha, bg clip frame at half alpha
-    if self.focusClipFill then
-        local db = EllesmereUINameplatesDB or defaults
-        local tex = db.focusOverlayTexture or defaults.focusOverlayTexture
-        if tex ~= "none" and UnitIsUnit(unit, "focus") then
-            local MEDIA = "Interface\\AddOns\\EllesmereUINameplates\\Media\\"
-            local texPath = MEDIA .. tex .. ".png"
-            local overlayAlpha = db.focusOverlayAlpha or defaults.focusOverlayAlpha
-            local oc = db.focusOverlayColor or defaults.focusOverlayColor
-            self.focusOverlayFill:SetTexture(texPath)
-            self.focusOverlayFill:SetAlpha(overlayAlpha)
-            self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
-            self.focusClipFill:Show()
-            self.focusOverlayBg:SetTexture(texPath)
-            self.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
-            self.focusOverlayBg:SetVertexColor(oc.r, oc.g, oc.b)
-            self.focusClipBg:Show()
-        else
-            self.focusClipFill:Hide()
-            self.focusClipBg:Hide()
-        end
+    local db2 = EllesmereUINameplatesDB or defaults
+    local focusTex = db2.focusOverlayTexture or defaults.focusOverlayTexture
+    if focusTex ~= "none" and UnitIsUnit(unit, "focus") then
+        EnsureFocusOverlay(self)
+        local MEDIA = "Interface\\AddOns\\EllesmereUINameplates\\Media\\"
+        local texPath = MEDIA .. focusTex .. ".png"
+        local overlayAlpha = db2.focusOverlayAlpha or defaults.focusOverlayAlpha
+        local oc = db2.focusOverlayColor or defaults.focusOverlayColor
+        self.focusOverlayFill:SetTexture(texPath)
+        self.focusOverlayFill:SetAlpha(overlayAlpha)
+        self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
+        self.focusClipFill:Show()
+        self.focusOverlayBg:SetTexture(texPath)
+        self.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
+        self.focusOverlayBg:SetVertexColor(oc.r, oc.g, oc.b)
+        self.focusClipBg:Show()
+    elseif self.focusClipFill then
+        self.focusClipFill:Hide()
+        self.focusClipBg:Hide()
     end
 end
 function NameplateFrame:UpdateHealth()
@@ -3515,8 +3555,9 @@ function NameplateFrame:ApplyTarget()
     local isTarget = UnitIsUnit(self.unit, "target")
     local style = GetTargetGlowStyle()
     if isTarget and style ~= "none" then
+        EnsureGlow(self)
         self.glow:Show()
-    else
+    elseif self.glow then
         self.glow:Hide()
     end
     -- Vibrant: override health bar border to white on selected target
@@ -3528,17 +3569,18 @@ function NameplateFrame:ApplyTarget()
     end
     if EllesmereUINameplatesDB and EllesmereUINameplatesDB.showTargetArrows then
         if isTarget then
+            EnsureArrows(self)
             local sc = EllesmereUINameplatesDB.targetArrowScale or 1.0
             local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
             PP.Size(self.leftArrow,  aw, ah)
             PP.Size(self.rightArrow, aw, ah)
             self.leftArrow:Show()
             self.rightArrow:Show()
-        else
+        elseif self.leftArrow then
             self.leftArrow:Hide()
             self.rightArrow:Hide()
         end
-    else
+    elseif self.leftArrow then
         self.leftArrow:Hide()
         self.rightArrow:Hide()
     end

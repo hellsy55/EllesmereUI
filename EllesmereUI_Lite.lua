@@ -171,11 +171,14 @@ function EUILite.NewDB(svName, defaults, defaultToCharKey)
         _G[svName] = sv
     end
 
-    -- Determine profile key
+    -- Determine profile key.
+    -- The profile system's ADDON_LOADED handler pre-populates profileKeys
+    -- with the correct profile name before NewDB runs. If no entry exists
+    -- (e.g. fresh install), fall back to "Default" -- never create a
+    -- per-character profile name.
     local charKey = UnitName("player") .. " - " .. GetRealmName()
     if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
-    local profileName = sv.profileKeys[charKey]
-        or (defaultToCharKey and charKey or "Default")
+    local profileName = sv.profileKeys[charKey] or "Default"
     sv.profileKeys[charKey] = profileName
 
     -- Get or create the profile table

@@ -2639,19 +2639,25 @@ initFrame:SetScript("OnEvent", function(self)
         else
             pf.bg:SetTexture(nil)
             pf.bg:SetColorTexture(cb.bgR, cb.bgG, cb.bgB, cb.bgA)
+            pf.bg:ClearAllPoints()
+            pf.bg:SetAllPoints(pf.barFrame)
         end
 
-        -- Border (pixel-perfect via PP)
+        -- Border wraps container (bar + icon)
         local PP = EllesmereUI.PP
-        if PP and pf.barFrame._ppBorders then
-            PP.UpdateBorder(pf.barFrame, bs, cb.borderR, cb.borderG, cb.borderB, cb.borderA)
+        if PP and pf.container._border then
+            local bs = cb.borderSize or 0
+            if bs > 0 then
+                PP.UpdateBorder(pf.container._border, bs, cb.borderR, cb.borderG, cb.borderB, cb.borderA)
+                pf.container._border:Show()
+            else
+                pf.container._border:Hide()
+            end
         end
 
-        -- Status bar inset: snap to container's pixel grid
-        local inset = Snap(bs)
+        -- Status bar: full bar frame, no inset
         pf.bar:ClearAllPoints()
-        pf.bar:SetPoint("TOPLEFT", pf.barFrame, "TOPLEFT", inset, -inset)
-        pf.bar:SetPoint("BOTTOMRIGHT", pf.barFrame, "BOTTOMRIGHT", -inset, inset)
+        pf.bar:SetAllPoints(pf.barFrame)
         pf.bar:SetValue(_castBarPreviewFill)
 
         -- Bar texture
@@ -2685,7 +2691,7 @@ initFrame:SetScript("OnEvent", function(self)
             pf.spark:Hide()
         end
 
-        -- Icon: left side of container, flush against the edge (hidden when showIcon is off)
+        -- Icon: left side of container, full size
         do
             local iSize = Snap(h)
             pf.iconFrame:SetSize(iSize, iSize)
@@ -2746,14 +2752,29 @@ initFrame:SetScript("OnEvent", function(self)
         local iconW = hasIcon and Snap(h) or 0
         container:SetSize(w + iconW, h)
 
-        -- Bar frame (holds bg, border, status bar)
+        -- Bar frame (holds bg, status bar)
         local barFrame = CreateFrame("Frame", nil, container)
         barFrame:SetSize(w, h)
         barFrame:SetPoint("LEFT", container, "LEFT", iconW, 0)
         _castBarPreviewFrames.barFrame = barFrame
         _castBarPreviewFrames.container = container
 
-        -- Background
+        local bs = cb.borderSize
+        local PP = EllesmereUI.PP
+
+        -- Border: dedicated child frame covering bar + icon
+        local bdrFrame = CreateFrame("Frame", nil, container)
+        bdrFrame:SetAllPoints(container)
+        bdrFrame:SetFrameLevel(container:GetFrameLevel() + 5)
+        container._border = bdrFrame
+        if bs > 0 then
+            PP.CreateBorder(bdrFrame, cb.borderR, cb.borderG, cb.borderB, cb.borderA, bs)
+        else
+            PP.CreateBorder(bdrFrame, cb.borderR, cb.borderG, cb.borderB, cb.borderA, 1)
+            bdrFrame:Hide()
+        end
+
+        -- Background (full bar area, no inset)
         local bg = barFrame:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         local texKey = cb.texture
@@ -2764,16 +2785,9 @@ initFrame:SetScript("OnEvent", function(self)
         end
         _castBarPreviewFrames.bg = bg
 
-        -- Border (pixel-perfect via PP)
-        local bs = cb.borderSize
-        local PP = EllesmereUI.PP
-        PP.CreateBorder(barFrame, cb.borderR, cb.borderG, cb.borderB, cb.borderA, bs, "BORDER", 7)
-
-        -- Status bar (inset by border size, snapped to container pixel grid)
-        local inset = Snap(bs)
+        -- Status bar (full bar area, no inset)
         local bar = CreateFrame("StatusBar", nil, barFrame)
-        bar:SetPoint("TOPLEFT", barFrame, "TOPLEFT", inset, -inset)
-        bar:SetPoint("BOTTOMRIGHT", barFrame, "BOTTOMRIGHT", -inset, inset)
+        bar:SetAllPoints()
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(_castBarPreviewFill)
 
@@ -2806,7 +2820,7 @@ initFrame:SetScript("OnEvent", function(self)
         if not cb.showSpark then spark:Hide() end
         _castBarPreviewFrames.spark = spark
 
-        -- Icon: left side of container, flush against the edge (hidden when showIcon is off)
+        -- Icon: left side of container, full size
         local iconFrame = CreateFrame("Frame", nil, container)
         local icon = iconFrame:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints()
@@ -3029,21 +3043,19 @@ initFrame:SetScript("OnEvent", function(self)
         local displaySection
         displaySection, h = W:SectionHeader(parent, "DISPLAY", y);  y = y - h
 
-        -- Row 3: Border (cog RESIZE: size) | Show Spark
+        -- Row 3: Border (slider 0-4 + inline swatch) | Show Spark
         local castBorderRow
         castBorderRow, h = W:DualRow(parent, y,
-            { type = "colorpicker", text = "Border", hasAlpha = true,
+            { type = "slider", text = "Border",
+              min = 0, max = 4, step = 1,
               disabled = castOff,
               disabledTooltip = "Enable Player Cast Bar",
               getValue = function()
-                  local p = DB()
-                  if not p then return 0, 0, 0, 1 end
-                  return p.castBar.borderR, p.castBar.borderG, p.castBar.borderB, p.castBar.borderA
+                  local p = DB(); return p and (p.castBar.borderSize or 0) or 0
               end,
-              setValue = function(r, g, b, a)
+              setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.castBar.borderR, p.castBar.borderG, p.castBar.borderB, p.castBar.borderA = r, g, b, a
-                  RefreshCast(); EllesmereUI:RefreshPage()
+                  p.castBar.borderSize = v; RefreshCast(); EllesmereUI:RefreshPage()
               end },
             { type = "toggle", text = "Show Spark",
               disabled = castOff,
@@ -3054,37 +3066,41 @@ initFrame:SetScript("OnEvent", function(self)
                   p.castBar.showSpark = v; RefreshCast()
               end }
         );  y = y - h
-        -- Inline cog (RESIZE) on Border for border size
+        -- Inline border color swatch on Border slider
         do
             local rgn = castBorderRow._leftRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Border Size",
-                rows = {
-                    { type = "slider", label = "Size", min = 0, max = 4, step = 1,
-                      get = function() local p = DB(); return p and p.castBar.borderSize or 1 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.castBar.borderSize = v; RefreshCast()
-                          EllesmereUI:RefreshPage()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.RESIZE_ICON)
-            local cogDis = CreateFrame("Frame", nil, rgn)
-            cogDis:SetAllPoints(cogBtn)
-            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
-            cogDis:EnableMouse(true)
-            cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Player Cast Bar"))
+            local ctrl = rgn._control
+            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, castBorderRow:GetFrameLevel() + 3,
+                function()
+                    local p = DB()
+                    return (p and p.castBar.borderR or 0), (p and p.castBar.borderG or 0),
+                           (p and p.castBar.borderB or 0), (p and p.castBar.borderA or 1)
+                end,
+                function(r, g, b, a)
+                    local p = DB(); if not p then return end
+                    p.castBar.borderR, p.castBar.borderG, p.castBar.borderB, p.castBar.borderA = r, g, b, a
+                    RefreshCast(); EllesmereUI:RefreshPage()
+                end,
+                true, 20)
+            PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            -- Disable swatch when border size is 0
+            local borderSwatchBlock = CreateFrame("Frame", nil, borderSwatch)
+            borderSwatchBlock:SetAllPoints()
+            borderSwatchBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
+            borderSwatchBlock:EnableMouse(true)
+            borderSwatchBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("Set Border above 0"))
             end)
-            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateBorderCogDis()
+            borderSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateBorderSwatchState()
                 local p = DB()
-                if p and not p.castBar.enabled then cogDis:Show() else cogDis:Hide() end
+                local noBorder = not p or (p.castBar.borderSize or 0) == 0
+                if noBorder then borderSwatch:SetAlpha(0.3); borderSwatchBlock:Show()
+                else borderSwatch:SetAlpha(1); borderSwatchBlock:Hide() end
             end
-            cogBtn:HookScript("OnShow", UpdateBorderCogDis)
-            EllesmereUI.RegisterWidgetRefresh(UpdateBorderCogDis)
-            UpdateBorderCogDis()
+            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); UpdateBorderSwatchState() end)
+            UpdateBorderSwatchState()
         end
 
         -- Row 4: Custom Color (multiSwatch + cog: gradient) | Bar Texture

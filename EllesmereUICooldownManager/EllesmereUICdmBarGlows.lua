@@ -90,8 +90,20 @@ end
 --- Check if a spell is active (has an aura on the player)
 function ns.IsSpellAuraActive(spellID)
     if not spellID or spellID <= 0 then return false end
-    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    return aura ~= nil
+    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+    return ok and aura ~= nil
+end
+
+--- Returns true if the user has at least one bar glow assignment configured
+function ns.HasBarGlowAssignments()
+    if not ECME or not ECME.db then return false end
+    local p = ECME.db.profile
+    local bg = p and p.barGlows
+    if not bg or not bg.assignments then return false end
+    for _, buffList in pairs(bg.assignments) do
+        if buffList and #buffList > 0 then return true end
+    end
+    return false
 end
 
 -- RequestUpdate and lastSourceStates are defined in the Bar Glows block below
@@ -241,8 +253,11 @@ end
 ns.HookAllCDMChildren = HookAllCDMChildren
 
 local cdmHookFrame = CreateFrame("Frame")
+cdmHookFrame:Hide()
 local lastChildCount = 0
 cdmHookFrame:SetScript("OnUpdate", function(self, elapsed)
+    -- No assignments -- nothing to do
+    if not ns.HasBarGlowAssignments() then self:Hide(); return end
     self.elapsed = (self.elapsed or 0) + elapsed
     if self.elapsed < 0.5 then return end
     self.elapsed = 0
@@ -407,6 +422,7 @@ local function DoUpdate()
 end
 
 local function RequestUpdate()
+    if not ns.HasBarGlowAssignments() then return end
     wipe(lastSourceStates)
     if updateTimer then updateTimer:Cancel() end
     updatePending = true
@@ -421,6 +437,8 @@ local PACK_THROTTLE = 0.5
 overlayUpdateFrame = CreateFrame("Frame")
 overlayUpdateFrame:Hide()
 overlayUpdateFrame:SetScript("OnUpdate", function(self, elapsed)
+    -- No assignments -- nothing to do
+    if not ns.HasBarGlowAssignments() then self:Hide(); return end
     self.elapsed = (self.elapsed or 0) + elapsed
     if self.elapsed < 1.0 then return end
     self.elapsed = 0

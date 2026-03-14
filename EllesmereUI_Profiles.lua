@@ -201,20 +201,21 @@ local CDM_SPELL_KEYS = {
     customSpells  = true,
 }
 
---- Deep-copy a CDM profile, stripping only spell-layout data.
---- Removes per-bar spell lists and specProfiles (CDM spell profiles).
+--- Deep-copy a CDM profile, stripping only spell-layout data from bars.
+--- Per-bar spell lists (trackedSpells, extraSpells, etc.) are excluded
+--- because they are managed by CDM's internal spec profile system.
+--- specProfiles, barGlows, and trackedBuffBars ARE included so that new
+--- characters seeded from this snapshot receive the correct CDM spell
+--- assignments without needing a fresh Blizzard snapshot.
 --- Positions (cdmBarPositions, tbbPositions) ARE included in the copy
 --- because they belong to the visual/layout profile, not spell assignments.
 local function DeepCopyCDMStyleOnly(src)
     if type(src) ~= "table" then return src end
     local copy = {}
-    -- Keys managed by CDM's internal spec profile system -- never include
-    -- in layout snapshots so they are not overwritten on profile switch.
+    -- Keys that should never appear in layout snapshots because they are
+    -- transient runtime state, not user-facing configuration.
     local CDM_INTERNAL = {
-        specProfiles = true,
         activeSpecKey = true,
-        barGlows = true,
-        trackedBuffBars = true,
         spec = true,
     }
     for k, v in pairs(src) do
@@ -257,18 +258,60 @@ local function ApplyCDMStyleOnly(profile, snap)
     -- from a layout snapshot so spell assignments survive profile switches.
     local CDM_INTERNAL = {
         specProfiles = true,
-        _capturedOnce = true,
         activeSpecKey = true,
         barGlows = true,
         trackedBuffBars = true,
         spec = true,
     }
+
+    -- Seed CDM spec profiles from the snapshot for any spec keys that the
+    -- live profile does not already have. This covers new characters whose
+    -- specProfiles table is empty -- they receive the spell assignments
+    -- stored in the profile snapshot so the correct layout appears on login
+    -- instead of a fresh Blizzard snapshot.
+    if snap.specProfiles and type(snap.specProfiles) == "table" then
+        if not profile.specProfiles then profile.specProfiles = {} end
+        for specKey, specData in pairs(snap.specProfiles) do
+            if not profile.specProfiles[specKey] then
+                profile.specProfiles[specKey] = DeepCopy(specData)
+            end
+        end
+    end
+
+    -- Seed barGlows and trackedBuffBars from the snapshot when the live
+    -- profile has none (new character / fresh profile).
+    if snap.barGlows and type(snap.barGlows) == "table" then
+        if not profile.barGlows or not profile.barGlows.assignments
+           or not next(profile.barGlows.assignments or {}) then
+            profile.barGlows = DeepCopy(snap.barGlows)
+        end
+    end
+    if snap.trackedBuffBars and type(snap.trackedBuffBars) == "table" then
+        if not profile.trackedBuffBars or not profile.trackedBuffBars.bars
+           or not next(profile.trackedBuffBars.bars or {}) then
+            profile.trackedBuffBars = DeepCopy(snap.trackedBuffBars)
+        end
+    end
+
+    -- Wipe non-internal top-level keys so stale values from a previous
+    -- profile (e.g. Spin the Wheel) do not persist when the snapshot is
+    -- missing those keys.
+    for k in pairs(profile) do
+        if not CDM_INTERNAL[k] and k ~= "cdmBars" then
+            profile[k] = nil
+        end
+    end
+
     -- Apply top-level non-spell keys
     for k, v in pairs(snap) do
         if CDM_INTERNAL[k] then
-            -- Skip -- managed by CDM's own spec system
+            -- Skip -- managed by CDM's own spec system (seeded above)
         elseif k == "cdmBars" and type(v) == "table" then
             if not profile.cdmBars then profile.cdmBars = {} end
+            -- Wipe non-bars keys so stale values do not persist
+            for bk in pairs(profile.cdmBars) do
+                if bk ~= "bars" then profile.cdmBars[bk] = nil end
+            end
             for bk, bv in pairs(v) do
                 if bk == "bars" and type(bv) == "table" then
                     if not profile.cdmBars.bars then profile.cdmBars.bars = {} end
@@ -285,6 +328,13 @@ local function ApplyCDMStyleOnly(profile, snap)
                             local liveIdx = liveIdxByKey[snapKey]
                             if liveIdx then
                                 local liveBar = profile.cdmBars.bars[liveIdx]
+                                -- Wipe non-spell keys so stale randomized
+                                -- values do not persist from a previous profile
+                                for fk in pairs(liveBar) do
+                                    if not CDM_SPELL_KEYS[fk] then
+                                        liveBar[fk] = nil
+                                    end
+                                end
                                 for fk, fv in pairs(barSnap) do
                                     if not CDM_SPELL_KEYS[fk] then
                                         liveBar[fk] = DeepCopy(fv)
@@ -389,6 +439,40 @@ do
             if next(specProfiles) then
                 EllesmereUI._profileSaveLocked = true
             end
+            -- If activeProfile is a spec-assigned profile from another
+            -- character, fall back to a safe default so this new character
+            -- does not build its UI with another spec's layout and
+            -- potentially overwrite it on save.
+            local curActive = EllesmereUIDB.activeProfile
+            local safe = curActive  -- default: keep current
+            if curActive and next(specProfiles) then
+                for _, pName in pairs(specProfiles) do
+                    if pName == curActive then
+                        -- Current active profile belongs to a spec assignment.
+                        -- Switch to lastNonSpecProfile or Default.
+                        safe = EllesmereUIDB.lastNonSpecProfile
+                        if not safe or not (EllesmereUIDB.profiles or {})[safe] then
+                            safe = "Default"
+                        end
+                        EllesmereUIDB.activeProfile = safe
+                        break
+                    end
+                end
+            end
+            -- Always write profileKeys so NewDB never creates a
+            -- per-character profile. Use the safe fallback name.
+            if safe then
+                for _, entry in ipairs(ADDON_DB_MAP) do
+                    local sv = _G[entry.svName]
+                    if sv == nil then sv = {} ; _G[entry.svName] = sv end
+                    if type(sv) == "table" then
+                        if type(sv.profileKeys) ~= "table" then
+                            sv.profileKeys = {}
+                        end
+                        sv.profileKeys[charKey] = safe
+                    end
+                end
+            end
             return
         end
 
@@ -491,9 +575,6 @@ function EllesmereUI.PreSeedSpecProfile()
                     if db._profileDefaults then
                         EllesmereUI.Lite.DeepMergeDefaults(db.profile, db._profileDefaults)
                     end
-                    -- _capturedOnce is stripped from snapshots but must be set
-                    -- so addons skip their first-login Blizzard capture.
-                    db.profile._capturedOnce = true
                     -- Keep sv.profiles in sync
                     if type(sv.profiles) ~= "table" then sv.profiles = {} end
                     sv.profiles[targetProfile] = db.profile
@@ -637,10 +718,6 @@ function EllesmereUI.ApplyProfileData(profileData)
                     if db._profileDefaults then
                         EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                     end
-                    -- Ensure _capturedOnce is always set so addons never
-                    -- re-run their first-install Blizzard capture after a
-                    -- profile switch. Old snapshots may not contain this flag.
-                    profile._capturedOnce = true
                     -- Ensure per-unit bg colors are never nil after a profile load
                     if entry.folder == "EllesmereUIUnitFrames" then
                         local UF_UNITS = { "player", "target", "focus", "boss", "pet", "totPet" }
@@ -668,21 +745,25 @@ function EllesmereUI.ApplyProfileData(profileData)
         end
     end
     -- Apply fonts and colors
-    if profileData.fonts then
+    do
         local fontsDB = EllesmereUI.GetFontsDB()
         for k in pairs(fontsDB) do fontsDB[k] = nil end
-        for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
+        if profileData.fonts then
+            for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
+        end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
     end
-    if profileData.customColors then
+    do
         local colorsDB = EllesmereUI.GetCustomColorsDB()
         for k in pairs(colorsDB) do colorsDB[k] = nil end
-        for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
+        if profileData.customColors then
+            for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
+        end
     end
 end
 
---- Trigger live refresh on all loaded addons after a profile apply
+--- Trigger live refresh on all loaded addons after a profile apply.
 function EllesmereUI.RefreshAllAddons()
     -- ResourceBars (full rebuild)
     if _G._ERB_Apply then _G._ERB_Apply() end
@@ -704,6 +785,111 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
     -- Global class/power colors (updates oUF, nameplates, raid frames)
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
+end
+
+-------------------------------------------------------------------------------
+--  Profile Keybinds
+--  Each profile can have a key bound to switch to it instantly.
+--  Stored in EllesmereUIDB.profileKeybinds = { ["Name"] = "CTRL-1", ... }
+--  Uses hidden buttons + SetOverrideBindingClick, same pattern as Party Mode.
+-------------------------------------------------------------------------------
+local _profileBindBtns = {} -- [profileName] = hidden Button
+
+local function GetProfileKeybinds()
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    if not EllesmereUIDB.profileKeybinds then EllesmereUIDB.profileKeybinds = {} end
+    return EllesmereUIDB.profileKeybinds
+end
+
+local function EnsureProfileBindBtn(profileName)
+    if _profileBindBtns[profileName] then return _profileBindBtns[profileName] end
+    local safeName = profileName:gsub("[^%w]", "")
+    local btn = CreateFrame("Button", "EllesmereUIProfileBind_" .. safeName, UIParent)
+    btn:Hide()
+    btn:SetScript("OnClick", function()
+        local active = EllesmereUI.GetActiveProfileName()
+        if active == profileName then return end
+        -- Save outgoing profile
+        local wasLocked = EllesmereUI._profileSaveLocked
+        EllesmereUI._profileSaveLocked = false
+        EllesmereUI.AutoSaveActiveProfile()
+        EllesmereUI._profileSaveLocked = wasLocked
+        local _, profiles = EllesmereUI.GetProfileList()
+        local fontWillChange = EllesmereUI.ProfileChangesFont(profiles and profiles[profileName])
+        EllesmereUI.SwitchProfile(profileName)
+        EllesmereUI.RefreshAllAddons()
+        if fontWillChange then
+            EllesmereUI:ShowConfirmPopup({
+                title       = "Reload Required",
+                message     = "Font changed. A UI reload is needed to apply the new font.",
+                confirmText = "Reload Now",
+                cancelText  = "Later",
+                onConfirm   = function() ReloadUI() end,
+            })
+        else
+            EllesmereUI:RefreshPage()
+        end
+    end)
+    _profileBindBtns[profileName] = btn
+    return btn
+end
+
+function EllesmereUI.SetProfileKeybind(profileName, key)
+    local kb = GetProfileKeybinds()
+    -- Clear old binding for this profile
+    local oldKey = kb[profileName]
+    local btn = EnsureProfileBindBtn(profileName)
+    if oldKey then
+        ClearOverrideBindings(btn)
+    end
+    if key then
+        kb[profileName] = key
+        SetOverrideBindingClick(btn, true, key, btn:GetName())
+    else
+        kb[profileName] = nil
+    end
+end
+
+function EllesmereUI.GetProfileKeybind(profileName)
+    local kb = GetProfileKeybinds()
+    return kb[profileName]
+end
+
+--- Called on login to restore all saved profile keybinds
+function EllesmereUI.RestoreProfileKeybinds()
+    local kb = GetProfileKeybinds()
+    for profileName, key in pairs(kb) do
+        if key then
+            local btn = EnsureProfileBindBtn(profileName)
+            SetOverrideBindingClick(btn, true, key, btn:GetName())
+        end
+    end
+end
+
+--- Update keybind references when a profile is renamed
+function EllesmereUI.OnProfileRenamed(oldName, newName)
+    local kb = GetProfileKeybinds()
+    local key = kb[oldName]
+    if key then
+        local oldBtn = _profileBindBtns[oldName]
+        if oldBtn then ClearOverrideBindings(oldBtn) end
+        _profileBindBtns[oldName] = nil
+        kb[oldName] = nil
+        kb[newName] = key
+        local newBtn = EnsureProfileBindBtn(newName)
+        SetOverrideBindingClick(newBtn, true, key, newBtn:GetName())
+    end
+end
+
+--- Clean up keybind when a profile is deleted
+function EllesmereUI.OnProfileDeleted(profileName)
+    local kb = GetProfileKeybinds()
+    if kb[profileName] then
+        local btn = _profileBindBtns[profileName]
+        if btn then ClearOverrideBindings(btn) end
+        _profileBindBtns[profileName] = nil
+        kb[profileName] = nil
+    end
 end
 
 --- Returns true if applying profileData would change the global font or outline mode.
@@ -1159,6 +1345,37 @@ function EllesmereUI.SaveCurrentAsProfile(name)
     db.activeProfile = name
 end
 
+--- Create a new profile populated with default settings (does not switch to it).
+function EllesmereUI.CreateDefaultProfile(name)
+    local db = GetProfilesDB()
+    -- Reset each addon DB to defaults, snapshot, then restore the live profile
+    local registry = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry or {}
+    local backups = {}
+    for i, ldb in ipairs(registry) do
+        if ldb.profile then
+            backups[i] = DeepCopy(ldb.profile)
+            ldb:ResetProfile()
+        end
+    end
+    local snap = EllesmereUI.SnapshotAllAddons()
+    -- Restore current profile data
+    for i, ldb in ipairs(registry) do
+        if backups[i] then
+            for k in pairs(ldb.profile) do ldb.profile[k] = nil end
+            for k, v in pairs(backups[i]) do ldb.profile[k] = v end
+        end
+    end
+    db.profiles[name] = snap
+    db.profiles[name]._pristine = true
+    local found = false
+    for _, n in ipairs(db.profileOrder) do
+        if n == name then found = true; break end
+    end
+    if not found then
+        table.insert(db.profileOrder, 1, name)
+    end
+end
+
 function EllesmereUI.DeleteProfile(name)
     local db = GetProfilesDB()
     db.profiles[name] = nil
@@ -1169,6 +1386,8 @@ function EllesmereUI.DeleteProfile(name)
     for specID, pName in pairs(db.specProfiles) do
         if pName == name then db.specProfiles[specID] = nil end
     end
+    -- Clean up keybind
+    EllesmereUI.OnProfileDeleted(name)
     -- If deleted profile was active, fall back to Default
     if db.activeProfile == name then
         db.activeProfile = "Default"
@@ -1189,6 +1408,8 @@ function EllesmereUI.RenameProfile(oldName, newName)
     if db.activeProfile == oldName then
         db.activeProfile = newName
     end
+    -- Update keybind reference
+    EllesmereUI.OnProfileRenamed(oldName, newName)
 end
 
 function EllesmereUI.SwitchProfile(name)
@@ -1233,7 +1454,17 @@ function EllesmereUI.AutoSaveActiveProfile()
     if EllesmereUI._profileSaveLocked then return end
     local db = GetProfilesDB()
     local name = db.activeProfile or "Default"
+    local wasPristine = db.profiles[name] and db.profiles[name]._pristine
     db.profiles[name] = EllesmereUI.SnapshotAllAddons()
+    -- Preserve pristine flag: only cleared explicitly when user modifies settings
+    if wasPristine then db.profiles[name]._pristine = true end
+end
+
+--- Clear the pristine flag on the active profile (called when a setting changes)
+function EllesmereUI.MarkActiveProfileDirty()
+    local db = GetProfilesDB()
+    local name = db.activeProfile or "Default"
+    if db.profiles[name] then db.profiles[name]._pristine = nil end
 end
 
 -------------------------------------------------------------------------------
@@ -1245,6 +1476,8 @@ do
     local lastKnownCharKey = nil
     local pendingReload = false
     local pendingFontCheck = nil
+    local specRetryTimer = nil  -- retry handle for new characters
+
     specFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     specFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     specFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1276,7 +1509,67 @@ do
         local specIdx = GetSpecialization and GetSpecialization() or 0
         local specID = specIdx and specIdx > 0
             and GetSpecializationInfo(specIdx) or nil
-        if not specID then return end
+        if not specID then
+            -- Spec info not available yet (common on brand new characters).
+            -- Start a short polling retry so we can re-assign the correct
+            -- profile once the server sends spec data. By the time the
+            -- retry fires, all addons have already built their UI, so we
+            -- do a full SwitchProfile + RefreshAllAddons (not the deferred
+            -- first-login path which skips refresh).
+            if not specRetryTimer and (lastKnownSpecID == nil) then
+                local attempts = 0
+                specRetryTimer = C_Timer.NewTicker(1, function(ticker)
+                    attempts = attempts + 1
+                    local idx = GetSpecialization and GetSpecialization() or 0
+                    local sid = idx and idx > 0
+                        and GetSpecializationInfo(idx) or nil
+                    if sid then
+                        ticker:Cancel()
+                        specRetryTimer = nil
+                        -- Record the spec so future events use the fast path
+                        lastKnownSpecID = sid
+                        local ck = UnitName("player") .. " - " .. GetRealmName()
+                        lastKnownCharKey = ck
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        if not EllesmereUIDB.lastSpecByChar then
+                            EllesmereUIDB.lastSpecByChar = {}
+                        end
+                        EllesmereUIDB.lastSpecByChar[ck] = sid
+                        EllesmereUI._profileSaveLocked = false
+                        -- Resolve the target profile for this spec
+                        local pdb = GetProfilesDB()
+                        local target = pdb.specProfiles[sid]
+                        if target and pdb.profiles[target] then
+                            local cur = pdb.activeProfile or "Default"
+                            if cur ~= target then
+                                local fontChange = EllesmereUI.ProfileChangesFont(
+                                    pdb.profiles[target])
+                                EllesmereUI.SwitchProfile(target)
+                                EllesmereUI.RefreshAllAddons()
+                                if fontChange then
+                                    EllesmereUI:ShowConfirmPopup({
+                                        title       = "Reload Required",
+                                        message     = "Font changed. A UI reload is needed to apply the new font.",
+                                        confirmText = "Reload Now",
+                                        cancelText  = "Later",
+                                        onConfirm   = function() ReloadUI() end,
+                                    })
+                                end
+                            end
+                        end
+                    elseif attempts >= 10 then
+                        ticker:Cancel()
+                        specRetryTimer = nil
+                    end
+                end)
+            end
+            return
+        end
+        -- Spec resolved -- cancel any pending retry
+        if specRetryTimer then
+            specRetryTimer:Cancel()
+            specRetryTimer = nil
+        end
 
         local charKey = UnitName("player") .. " - " .. GetRealmName()
         local isFirstLogin = (lastKnownSpecID == nil)
@@ -1455,16 +1748,6 @@ function EllesmereUI.SpinTheWheel()
         end
     end
 
-    -- Randomize global fonts
-    local fontsDB = EllesmereUI.GetFontsDB()
-    local validFonts = {}
-    for _, name in ipairs(EllesmereUI.FONT_ORDER) do
-        if name ~= "---" then validFonts[#validFonts + 1] = name end
-    end
-    fontsDB.global = pick(validFonts)
-    local outlineModes = { "none", "outline", "shadow" }
-    fontsDB.outlineMode = pick(outlineModes)
-
     -- Randomize class colors
     local colorsDB = EllesmereUI.GetCustomColorsDB()
     colorsDB.class = {}
@@ -1547,12 +1830,25 @@ function EllesmereUI._RandomizeProfile(profile, folderName)
             savedVis.enabledFrames[k] = v
         end
     elseif folderName == "EllesmereUICooldownManager" and profile.cdmBars then
+        -- Save bar visibility and all spell layout data per bar
         savedVis.cdmBars = {}
         if profile.cdmBars.bars then
             for i, bar in ipairs(profile.cdmBars.bars) do
-                savedVis.cdmBars[i] = bar.barVisibility
+                local saved = { barVisibility = bar.barVisibility }
+                for fk, fv in pairs(bar) do
+                    if CDM_SPELL_KEYS[fk] then
+                        saved[fk] = fv  -- shallow ref is fine, we restore before GC
+                    end
+                end
+                savedVis.cdmBars[i] = saved
             end
         end
+        -- Save top-level CDM internal tables that must not be randomized
+        savedVis.specProfiles    = profile.specProfiles
+        savedVis.activeSpecKey   = profile.activeSpecKey
+        savedVis.barGlows        = profile.barGlows
+        savedVis.trackedBuffBars = profile.trackedBuffBars
+        savedVis.spec            = profile.spec
     elseif folderName == "EllesmereUIResourceBars" then
         savedVis.secondary = profile.secondary and profile.secondary.visibility
         savedVis.health    = profile.health    and profile.health.visibility
@@ -1580,12 +1876,23 @@ function EllesmereUI._RandomizeProfile(profile, folderName)
         end
     elseif folderName == "EllesmereUICooldownManager" and savedVis.cdmBars then
         if profile.cdmBars and profile.cdmBars.bars then
-            for i, vis in pairs(savedVis.cdmBars) do
+            for i, saved in pairs(savedVis.cdmBars) do
                 if profile.cdmBars.bars[i] then
-                    profile.cdmBars.bars[i].barVisibility = vis
+                    profile.cdmBars.bars[i].barVisibility = saved.barVisibility
+                    for fk, fv in pairs(saved) do
+                        if CDM_SPELL_KEYS[fk] then
+                            profile.cdmBars.bars[i][fk] = fv
+                        end
+                    end
                 end
             end
         end
+        -- Restore top-level CDM internal tables
+        profile.specProfiles    = savedVis.specProfiles
+        profile.activeSpecKey   = savedVis.activeSpecKey
+        profile.barGlows        = savedVis.barGlows
+        profile.trackedBuffBars = savedVis.trackedBuffBars
+        profile.spec            = savedVis.spec
     elseif folderName == "EllesmereUIResourceBars" then
         if profile.secondary then profile.secondary.visibility = savedVis.secondary end
         if profile.health    then profile.health.visibility    = savedVis.health    end
@@ -1799,6 +2106,34 @@ do
             end
         end
 
+        -- Migration: remap per-character profile keys to named profiles.
+        -- Old versions created profiles named "CharName - Realm" via
+        -- defaultToCharKey. Remap those characters to the activeProfile
+        -- (or Default) and leave the old profile data intact so nothing
+        -- is lost. Also clean up profileKeys in child SVs.
+        if not db._charProfilesMigrated then
+            db._charProfilesMigrated = true
+            local fallback = db.activeProfile or "Default"
+            -- Build a set of "real" named profiles (user-created or presets)
+            local namedSet = {}
+            for _, n in ipairs(db.profileOrder) do namedSet[n] = true end
+            -- Scan child addon SVs for character-keyed profileKeys
+            for _, entry in ipairs(ADDON_DB_MAP) do
+                local sv = _G[entry.svName]
+                if sv and type(sv.profileKeys) == "table" then
+                    for ck, pName in pairs(sv.profileKeys) do
+                        -- A per-character profile is one where the profile
+                        -- name matches the character key pattern and is NOT
+                        -- a named profile the user explicitly created.
+                        if pName == ck and not namedSet[pName] then
+                            -- Remap this character to the fallback profile
+                            sv.profileKeys[ck] = fallback
+                        end
+                    end
+                end
+            end
+        end
+
         -- On first install, create "Default" from current (default) settings
         if not db.activeProfile then
             db.activeProfile = "Default"
@@ -1826,8 +2161,27 @@ do
         --  profile. No deduplication is performed here.
         ---------------------------------------------------------------
 
+        -- Migration: re-save the active profile after all addons have
+        -- initialized so the snapshot includes CDM specProfiles data
+        -- (previously stripped by DeepCopyCDMStyleOnly). This ensures
+        -- new characters seeded from this profile receive CDM spell
+        -- assignments. Only needs to run once; subsequent logouts will
+        -- keep the snapshot up to date via the pre-logout callback.
+        if not db._specProfileSnapshotMigrated then
+            C_Timer.After(2, function()
+                if EllesmereUI._profileSaveLocked then return end
+                db._specProfileSnapshotMigrated = true
+                local name = db.activeProfile or "Default"
+                if db.profiles[name] then
+                    db.profiles[name] = EllesmereUI.SnapshotAllAddons()
+                end
+            end)
+        end
+
         -- Auto-save active profile when the settings panel closes
         C_Timer.After(1, function()
+            -- Restore saved profile keybinds
+            EllesmereUI.RestoreProfileKeybinds()
             if EllesmereUI._mainFrame and not EllesmereUI._profileAutoSaveHooked then
                 EllesmereUI._profileAutoSaveHooked = true
                 EllesmereUI._mainFrame:HookScript("OnHide", function()

@@ -438,7 +438,7 @@ local RefreshAnchoredBarsForUnlockTarget
 -- Forward declarations
 local UpdateCastBar
 local BuildCastBar
-local OnCastStart, OnChannelStart, OnCastStop, OnEmpowerStart, OnEmpowerUpdate
+local OnCastStart, OnChannelStart, OnChannelUpdate, OnCastStop, OnEmpowerStart, OnEmpowerUpdate
 
 -------------------------------------------------------------------------------
 --  Helpers
@@ -1404,7 +1404,7 @@ local function BuildBars()
     if sp.enabled ~= false and cachedSecondary then
         if not secondaryFrame then
             secondaryFrame = CreateFrame("Frame", "ERB_SecondaryFrame", mainFrame)
-            secondaryFrame:SetClipsChildren(false)
+            secondaryFrame:SetClipsChildren(true)
         end
 
         local maxPts = cachedSecondary.max or 5
@@ -2617,15 +2617,13 @@ BuildCastBar = function()
         bg:SetAllPoints()
         castBarFrame._bg = bg
 
-        -- Border (simple 4-edge)
-        local function MkEdge()
-            local t = castBarFrame:CreateTexture(nil, "BORDER", nil, 7)
-            return t
-        end
-        castBarFrame._bT = MkEdge()
-        castBarFrame._bB = MkEdge()
-        castBarFrame._bL = MkEdge()
-        castBarFrame._bR = MkEdge()
+        -- Border frame: child that covers the full cast bar (bar + icon)
+        local bdrFrame = CreateFrame("Frame", nil, castBarFrame)
+        bdrFrame:SetAllPoints(castBarFrame)
+        bdrFrame:SetFrameLevel(castBarFrame:GetFrameLevel() + 5)
+        castBarFrame._border = bdrFrame
+        local PP = EllesmereUI and EllesmereUI.PP
+        if PP then PP.CreateBorder(bdrFrame, 0, 0, 0, 1, 1) end
 
         -- Status bar
         local bar = CreateFrame("StatusBar", "ERB_CastBar", castBarFrame)
@@ -2675,7 +2673,6 @@ BuildCastBar = function()
 
     -- Apply settings
     local w, h = cb.width, cb.height
-    local bs = cb.borderSize
     local hasIcon = cb.showIcon ~= false
     -- Total frame width includes icon (h x h) only when icon is shown
     local totalW = hasIcon and (w + h) or w
@@ -2700,46 +2697,34 @@ BuildCastBar = function()
         castBarFrame:SetPoint("CENTER", UIParent, "CENTER", cb.anchorX, cb.anchorY)
     end
 
-    -- Border (wraps the full container including icon)
-    local br, bg2, bb, ba = cb.borderR, cb.borderG, cb.borderB, cb.borderA
-    for _, edge in ipairs({ castBarFrame._bT, castBarFrame._bB, castBarFrame._bL, castBarFrame._bR }) do
-        edge:SetColorTexture(br, bg2, bb, ba)
+    -- Border: update the dedicated child border frame
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP and castBarFrame._border then
+        local bs = cb.borderSize or 0
+        if bs > 0 then
+            PP.UpdateBorder(castBarFrame._border, bs, cb.borderR, cb.borderG, cb.borderB, cb.borderA)
+            castBarFrame._border:Show()
+        else
+            castBarFrame._border:Hide()
+        end
     end
-    castBarFrame._bT:ClearAllPoints()
-    castBarFrame._bT:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", 0, 0)
-    castBarFrame._bT:SetPoint("TOPRIGHT", castBarFrame, "TOPRIGHT", 0, 0)
-    castBarFrame._bT:SetHeight(bs)
-    castBarFrame._bB:ClearAllPoints()
-    castBarFrame._bB:SetPoint("BOTTOMLEFT", castBarFrame, "BOTTOMLEFT", 0, 0)
-    castBarFrame._bB:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", 0, 0)
-    castBarFrame._bB:SetHeight(bs)
-    castBarFrame._bL:ClearAllPoints()
-    castBarFrame._bL:SetPoint("TOPLEFT", castBarFrame._bT, "BOTTOMLEFT", 0, 0)
-    castBarFrame._bL:SetPoint("BOTTOMLEFT", castBarFrame._bB, "TOPLEFT", 0, 0)
-    castBarFrame._bL:SetWidth(bs)
-    castBarFrame._bR:ClearAllPoints()
-    castBarFrame._bR:SetPoint("TOPRIGHT", castBarFrame._bT, "BOTTOMRIGHT", 0, 0)
-    castBarFrame._bR:SetPoint("BOTTOMRIGHT", castBarFrame._bB, "TOPRIGHT", 0, 0)
-    castBarFrame._bR:SetWidth(bs)
 
-    -- Icon: left side of the container, inset by border size to sit within the border
+    -- Icon: left side, full height, no inset
     local iconFrame = castBarFrame._iconFrame
     if hasIcon then
-        local iSize = h - 2 * bs
-        if iSize < 1 then iSize = 1 end
-        iconFrame:SetSize(iSize, iSize)
+        iconFrame:SetSize(h, h)
         iconFrame:ClearAllPoints()
-        iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", bs, -bs)
+        iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", 0, 0)
         iconFrame:Show()
     else
         iconFrame:Hide()
     end
 
-    -- Bar: right of the icon (or full width when no icon), inset by border
+    -- Bar: right of icon (or full width), full height, no inset
     local bar = castBarFrame._bar
     bar:ClearAllPoints()
-    bar:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", (hasIcon and h or 0) + bs, -bs)
-    bar:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -bs, bs)
+    bar:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", hasIcon and h or 0, 0)
+    bar:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", 0, 0)
 
     -- Bar texture
     local texKey = cb.texture
@@ -3010,6 +2995,17 @@ OnChannelStart = function()
     end
 
     castBarFrame:Show()
+end
+
+OnChannelUpdate = function()
+    if not castBarFrame then return end
+    if not castBarFrame._channeling then return end
+
+    local name, _, _, startTimeMS, endTimeMS = UnitChannelInfo("player")
+    if not name then return end
+
+    castBarFrame._startTime = startTimeMS / 1000
+    castBarFrame._endTime = endTimeMS / 1000
 end
 
 -- Called for UNIT_SPELLCAST_STOP only (normal cast completion).
@@ -3351,6 +3347,9 @@ local function OnEvent(self, event, ...)
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         local unit = ...
         if unit == "player" then OnChannelStart() end
+    elseif event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
+        local unit = ...
+        if unit == "player" then OnChannelUpdate() end
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         -- args: unit, castGUID, spellID, interruptedBy, castID
         local unit, _, _, _, castID = ...
@@ -3417,6 +3416,7 @@ function ERB:OnEnable()
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", "player")

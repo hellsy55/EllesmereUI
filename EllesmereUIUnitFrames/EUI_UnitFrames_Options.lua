@@ -2546,40 +2546,59 @@ initFrame:SetScript("OnEvent", function(self)
 
         local borderRow
         borderRow, h = W:DualRow(parent, y,
-            { type="colorpicker", text="Border Color",
-              getValue=function()
-                local c = settingsTable.borderColor or { r = 0, g = 0, b = 0 }
-                return c.r, c.g, c.b
-              end,
-              setValue=function(r, g, b)
-                settingsTable.borderColor = { r = r, g = g, b = b }
-                ReloadAndUpdate()
+            { type = "slider", text = "Border",
+              min = 0, max = 4, step = 1,
+              getValue = function() return settingsTable.borderSize or 1 end,
+              setValue = function(v)
+                  settingsTable.borderSize = v; ReloadAndUpdate()
               end },
             nil);  y = y - h
 
-        -- Inline cog on Border Color for Border Size
+        -- Double inline swatches on Border slider: left = Highlight, right = Border
         do
             local leftRgn = borderRow._leftRegion
-            local _, borderCogShow = EllesmereUI.BuildCogPopup({
-                title = "Border Settings",
-                rows = {
-                    { type="slider", label="Size", min=0, max=4, step=1,
-                      get=function() return settingsTable.borderSize or 1 end,
-                      set=function(v) settingsTable.borderSize = v; ReloadAndUpdate() end },
-                },
-            })
-            local bCogBtn = CreateFrame("Button", nil, leftRgn)
-            bCogBtn:SetSize(26, 26)
-            bCogBtn:SetPoint("RIGHT", leftRgn._control, "LEFT", -8, 0)
-            leftRgn._lastInline = bCogBtn
-            bCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            bCogBtn:SetAlpha(0.4)
-            local bCogTex = bCogBtn:CreateTexture(nil, "OVERLAY")
-            bCogTex:SetAllPoints()
-            bCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            bCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            bCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            bCogBtn:SetScript("OnClick", function(self) borderCogShow(self) end)
+            local ctrl = leftRgn._control
+            local PP = EllesmereUI.PP
+
+            -- Right swatch: Border color (with alpha)
+            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, borderRow:GetFrameLevel() + 3,
+                function()
+                    local c = settingsTable.borderColor or { r = 0, g = 0, b = 0 }
+                    return c.r, c.g, c.b, settingsTable.borderAlpha or 1
+                end,
+                function(r, g, b, a)
+                    settingsTable.borderColor = { r = r, g = g, b = b }
+                    settingsTable.borderAlpha = a
+                    ReloadAndUpdate()
+                end,
+                true, 20)
+            PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            borderSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(borderSwatch, "Border")
+            end)
+            borderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Left swatch: Highlight color (with alpha)
+            local hlSwatch, updateHlSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, borderRow:GetFrameLevel() + 3,
+                function()
+                    local c = settingsTable.highlightColor or { r = 1, g = 1, b = 1 }
+                    return c.r, c.g, c.b, settingsTable.highlightAlpha or 1
+                end,
+                function(r, g, b, a)
+                    settingsTable.highlightColor = { r = r, g = g, b = b }
+                    settingsTable.highlightAlpha = a
+                    ReloadAndUpdate()
+                end,
+                true, 20)
+            PP.Point(hlSwatch, "RIGHT", borderSwatch, "LEFT", -8, 0)
+            hlSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(hlSwatch, "Highlight")
+            end)
+            hlSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); updateHlSwatch() end)
         end
 
         return y
@@ -2924,42 +2943,43 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 3: Border Color (with Highlight in cog)
+        -- Row 3: Border (slider + double inline swatches: Highlight | Border)
         local sharedBorderRow
         sharedBorderRow, h = W:DualRow(parent, y,
-            { type="colorpicker", text="Border Color",
-              getValue=function()
-                  local c = SGet("borderColor")
-                  if not c then return 0, 0, 0 end
-                  return c.r, c.g, c.b
-              end,
-              setValue=function(r, g, b)
-                  UNIT_DB_MAP[selectedUnit]().borderColor = { r=r, g=g, b=b }
-                  ReloadAndUpdate()
+            { type="slider", text="Border",
+              min=0, max=4, step=1,
+              getValue=function() return SVal("borderSize", 1) end,
+              setValue=function(v)
+                  SSet("borderSize", v); ReloadAndUpdate()
               end },
             { type="label", text="" });  y = y - h
-        -- Sync icon: Border Color (deep compare for table values)
+        -- Sync icon: Border Size
         do
             local rgn = sharedBorderRow._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Border Color to all Frames",
+                tooltip = "Apply Border to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().borderColor
+                    local bs = SVal("borderSize", 1)
+                    local bc = SGet("borderColor")
+                    local ba = SGet("borderAlpha")
+                    local hc = SGet("highlightColor")
+                    local ha = SGet("highlightAlpha")
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit and v then
-                            UNIT_DB_MAP[key]().borderColor = { r=v.r, g=v.g, b=v.b }
+                        if key ~= selectedUnit then
+                            UNIT_DB_MAP[key]().borderSize = bs
+                            if bc then UNIT_DB_MAP[key]().borderColor = { r=bc.r, g=bc.g, b=bc.b } end
+                            if ba then UNIT_DB_MAP[key]().borderAlpha = ba end
+                            if hc then UNIT_DB_MAP[key]().highlightColor = { r=hc.r, g=hc.g, b=hc.b } end
+                            if ha then UNIT_DB_MAP[key]().highlightAlpha = ha end
                         end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().borderColor
+                    local bs = SVal("borderSize", 1)
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        local other = UNIT_DB_MAP[key]().borderColor
-                        if v and other then
-                            if v.r ~= other.r or v.g ~= other.g or v.b ~= other.b then return false end
-                        elseif v ~= other then return false end
+                        if (UNIT_DB_MAP[key]().borderSize or 1) ~= bs then return false end
                     end
                     return true
                 end,
@@ -2969,38 +2989,68 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().borderColor
+                        local bs = SVal("borderSize", 1)
+                        local bc = SGet("borderColor")
+                        local ba = SGet("borderAlpha")
+                        local hc = SGet("highlightColor")
+                        local ha = SGet("highlightAlpha")
                         for _, key in ipairs(checkedKeys) do
-                            if v then UNIT_DB_MAP[key]().borderColor = { r=v.r, g=v.g, b=v.b } end
+                            UNIT_DB_MAP[key]().borderSize = bs
+                            if bc then UNIT_DB_MAP[key]().borderColor = { r=bc.r, g=bc.g, b=bc.b } end
+                            if ba then UNIT_DB_MAP[key]().borderAlpha = ba end
+                            if hc then UNIT_DB_MAP[key]().highlightColor = { r=hc.r, g=hc.g, b=hc.b } end
+                            if ha then UNIT_DB_MAP[key]().highlightAlpha = ha end
                         end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
             })
         end
-        -- Inline cog on Border Color for Highlight Color + Border Size
+        -- Double inline swatches on Border slider: left = Highlight, right = Border (both with alpha)
         do
             local leftRgn = sharedBorderRow._leftRegion
-            local _, borderCogShowRaw = EllesmereUI.BuildCogPopup({
-                title = "Border Settings",
-                rows = {
-                    { type="slider", label="Size", min=0, max=4, step=1,
-                      get=function() return SVal("borderSize", 1) end,
-                      set=function(v) SSet("borderSize", v) end },
-                    { type="colorpicker", label="Highlight Color",
-                      get=function()
-                          local c = SGet("highlightColor")
-                          if not c then return 1, 1, 1 end
-                          return c.r, c.g, c.b
-                      end,
-                      set=function(r, g, b)
-                          UNIT_DB_MAP[selectedUnit]().highlightColor = { r=r, g=g, b=b }
-                          ReloadAndUpdate()
-                      end },
-                },
-            })
-            local borderCogShow = borderCogShowRaw
-            MakeCogBtn(leftRgn, borderCogShow, nil, EllesmereUI.RESIZE_ICON)
+            local ctrl = leftRgn._control
+            local PP = EllesmereUI.PP
+
+            -- Right swatch: Border color (with alpha)
+            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, sharedBorderRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("borderColor") or { r = 0, g = 0, b = 0 }
+                    return c.r, c.g, c.b, SVal("borderAlpha", 1)
+                end,
+                function(r, g, b, a)
+                    UNIT_DB_MAP[selectedUnit]().borderColor = { r=r, g=g, b=b }
+                    UNIT_DB_MAP[selectedUnit]().borderAlpha = a
+                    ReloadAndUpdate()
+                end,
+                true, 20)
+            PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            borderSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(borderSwatch, "Border")
+            end)
+            borderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Left swatch: Highlight color (with alpha)
+            local hlSwatch, updateHlSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, sharedBorderRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("highlightColor") or { r = 1, g = 1, b = 1 }
+                    return c.r, c.g, c.b, SVal("highlightAlpha", 1)
+                end,
+                function(r, g, b, a)
+                    UNIT_DB_MAP[selectedUnit]().highlightColor = { r=r, g=g, b=b }
+                    UNIT_DB_MAP[selectedUnit]().highlightAlpha = a
+                    ReloadAndUpdate()
+                end,
+                true, 20)
+            PP.Point(hlSwatch, "RIGHT", borderSwatch, "LEFT", -8, 0)
+            hlSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(hlSwatch, "Highlight")
+            end)
+            hlSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); updateHlSwatch() end)
         end
 
         _, h = W:Spacer(parent, y, 20); y = y - h

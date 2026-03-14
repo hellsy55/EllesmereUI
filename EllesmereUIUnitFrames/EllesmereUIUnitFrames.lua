@@ -40,6 +40,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             healthDisplay = "both",
             showBuffs = false,
             maxBuffs = 4,
@@ -173,6 +174,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
@@ -299,6 +301,7 @@ local defaults = {
             frameWidth = 101,
             healthHeight = 25,
             frameScale = 100,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitMode = "2d",
             selectedFont = "Expressway",
@@ -317,6 +320,7 @@ local defaults = {
             frameWidth = 101,
             healthHeight = 25,
             frameScale = 100,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitMode = "2d",
             selectedFont = "Expressway",
@@ -349,6 +353,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
@@ -453,6 +458,7 @@ local defaults = {
             powerPercentPowerColor = true,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
             healthDisplay = "perhp",
             showPortrait = false,
@@ -787,10 +793,10 @@ local function EUI_IsSmartPowerPercent()
     if cls == "PRIEST" or cls == "SHAMAN" or cls == "MONK" then
         return true
     end
-    -- Paladin: only Holy
+    -- Paladin: Holy and Protection (mana-based specs)
     if cls == "PALADIN" then
         local spec = GetSpecialization()
-        return spec == 1  -- Holy
+        return spec == 1 or spec == 2  -- Holy, Protection
     end
     -- Mage: only Arcane
     if cls == "MAGE" then
@@ -826,9 +832,9 @@ do
     if not unit or not UnitExists(unit) then return "" end
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
-    local hp, maxHP = UnitHealth(unit), UnitHealthMax(unit)
-    if not hp or not maxHP or maxHP == 0 then return "0" end
-    return tostring(math.floor(hp / maxHP * 100 + 0.5))
+    local pct = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
+    if not pct then return "0" end
+    return string.format("%d", pct)
   end
   oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end
@@ -1459,7 +1465,7 @@ local function UpdateBordersForScale(frame, unit)
     local btbIsAtt = (btbPos == "top" or btbPos == "bottom")
     local btbH = (settings.bottomTextBar and btbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
 
-    local showPortrait = settings.showPortrait ~= false
+    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
     local isAttached = (db.profile.portraitStyle or "attached") == "attached"
     local pSide = settings.portraitSide or "right"
     local effectiveSide = pSide
@@ -2475,7 +2481,8 @@ local function FrameBorderEnter(self)
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
         local hc = settings.highlightColor or { r = 1, g = 1, b = 1 }
-        PP.SetBorderColor(self.unifiedBorder, hc.r, hc.g, hc.b, 1)
+        local ha = settings.highlightAlpha or 1
+        PP.SetBorderColor(self.unifiedBorder, hc.r, hc.g, hc.b, ha)
     end
 end
 local function FrameBorderLeave(self)
@@ -2484,7 +2491,8 @@ local function FrameBorderLeave(self)
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
         local bc = settings.borderColor or { r = 0, g = 0, b = 0 }
-        PP.SetBorderColor(self.unifiedBorder, bc.r, bc.g, bc.b, 1)
+        local ba = settings.borderAlpha or 1
+        PP.SetBorderColor(self.unifiedBorder, bc.r, bc.g, bc.b, ba)
     end
 end
 

@@ -51,6 +51,12 @@ local BUFF_PROC_ICON_OVERRIDES = {
     [400254] = { buffID = 441583, replacementSpellID = 441583 }, -- Raze -> Ravage
 }
 
+--- Talent spell ID -> correct buff aura ID for CDM entries that report the
+--- wrong spell.  Key = talent spellID, value = buff aura spellID.
+local BUFF_SPELLID_CORRECTIONS = {
+    [12950] = 85739,  -- Improved Whirlwind
+}
+
 -------------------------------------------------------------------------------
 --  Shape Constants (shared with action bars)
 -------------------------------------------------------------------------------
@@ -128,7 +134,7 @@ local _zeroStartChargeSpells = {
     [55090]  = true,  -- Scourge Strike
 }
 
-local function CacheMultiChargeSpell(spellID)
+local function CacheMultiChargeSpell(spellID, blizzChild)
     if not spellID or not C_Spell.GetSpellCharges then return end
     if _multiChargeSpells[spellID] ~= nil then return end
     local charges = C_Spell.GetSpellCharges(spellID)
@@ -140,14 +146,20 @@ local function CacheMultiChargeSpell(spellID)
         _multiChargeSpells[spellID] = result or false
         if result then
             _maxChargeCount[spellID] = charges.maxCharges
-            -- Only persist confirmed charge spells ΓÇö never persist false so
+            -- Tag the CDM child so variant swaps in combat can inherit
+            -- charge status without needing API calls (SECRET-proof).
+            if blizzChild then
+                blizzChild._ecmeIsChargeSpell = true
+                blizzChild._ecmeMaxCharges = charges.maxCharges
+            end
+            -- Only persist confirmed charge spells — never persist false so
             -- stale DB entries don't block re-detection on login or talent swap.
             local db = ECME.db
-            if db and db.global then
-                if not db.global.multiChargeSpells then
-                    db.global.multiChargeSpells = {}
+            if db and db.sv then
+                if not db.sv.multiChargeSpells then
+                    db.sv.multiChargeSpells = {}
                 end
-                db.global.multiChargeSpells[spellID] = true
+                db.sv.multiChargeSpells[spellID] = true
             end
         end
     else
@@ -156,10 +168,19 @@ local function CacheMultiChargeSpell(spellID)
         -- and caching false permanently blocks charge detection for the new
         -- spell until the next full cache wipe.
         local db = ECME.db
-        if db and db.global and db.global.multiChargeSpells and db.global.multiChargeSpells[spellID] then
+        if db and db.sv and db.sv.multiChargeSpells and db.sv.multiChargeSpells[spellID] then
             _multiChargeSpells[spellID] = true
         end
-        -- If no DB entry: leave nil so we retry next tick when OOC or after talents settle
+        -- CDM child propagation: for multi-child spells like Eclipse, the
+        -- same CDM child swaps between variant spell IDs (Lunar/Solar).
+        -- If we tagged the child OOC when the previous variant was active,
+        -- inherit that charge status for the new variant.
+        if not _multiChargeSpells[spellID] and blizzChild
+                and blizzChild._ecmeIsChargeSpell then
+            _multiChargeSpells[spellID] = true
+            _maxChargeCount[spellID] = blizzChild._ecmeMaxCharges
+        end
+        -- If no DB entry and no child tag: leave nil so we retry next tick
     end
 end
 -- Expose charge cache to options file for preview rendering
@@ -192,18 +213,18 @@ local function CacheCastCountSpell(spellID)
         if count > 0 then
             _castCountSpells[spellID] = count
             local db = ECME.db
-            if db and db.global then
-                if not db.global.castCountSpells then
-                    db.global.castCountSpells = {}
+            if db and db.sv then
+                if not db.sv.castCountSpells then
+                    db.sv.castCountSpells = {}
                 end
-                db.global.castCountSpells[spellID] = true
+                db.sv.castCountSpells[spellID] = true
             end
         end
         -- Don't cache false here ΓÇö spell may just not have stacks yet
     elseif _castCountSpells[spellID] == nil then
         -- Secret (combat): check DB for whether we've ever seen this spell with stacks
         local db = ECME.db
-        if db and db.global and db.global.castCountSpells and db.global.castCountSpells[spellID] then
+        if db and db.sv and db.sv.castCountSpells and db.sv.castCountSpells[spellID] then
             _castCountSpells[spellID] = true
         end
     end
@@ -218,10 +239,13 @@ local _tickGCDCache   = {}  -- [spellID] = bool|nil (GCD check result)
 local _tickChargeCache = {} -- [spellID] = charges table or false
 local _tickAuraCache  = {}  -- [spellID] = aura table or false
 local _tickBlizzActiveCache = {}  -- [spellID] = true when Blizzard CDM marks spell as active (wasSetFromAura)
+ns._tickBlizzActiveCache = _tickBlizzActiveCache
 local _tickBlizzOverrideCache = {} -- [baseSpellID] = overrideSpellID, built each tick from all CDM viewer children
 local _tickBlizzChildCache = {}    -- [overrideSpellID] = blizzChild, for direct charge/cooldown reads on activation overrides
 local _tickBlizzAllChildCache = {} -- [resolvedSid] = blizzChild, for all CDM children (used by custom bars)
+ns._tickBlizzAllChildCache = _tickBlizzAllChildCache
 local _tickBlizzBuffChildCache = {} -- [resolvedSid] = blizzChild, only from BuffIcon/BuffBar viewers
+ns._tickBlizzBuffChildCache = _tickBlizzBuffChildCache
 local _tickBlizzCDChildCache   = {} -- [resolvedSid] = blizzChild, only from Essential/Utility viewers
 local _tickBlizzMultiChildCache = {} -- [baseSid] = { ch1, ch2, ... } when multiple CDM children share a base spellID
 local _activeMultiScratch = {}      -- reusable scratch table for active multi-child filtering and companion child mapping
@@ -230,6 +254,26 @@ local _activeMultiScratch = {}      -- reusable scratch table for active multi-c
 local _combinedBuf = {}   -- reused by UpdateTrackedBarIcons for tracked+extra spell list
 local _spellsBuf   = {}   -- reused by UpdateCustomBarIcons for racial-substituted spell list
 
+-- Duration-based active timers for custom buff bars.
+-- Keyed by barKey, then by spellID: [barKey][spellID] = expiryTime (GetTime() + duration)
+-- Used for spells that don't leave an aura (e.g. potions) but have a user-configured duration.
+local _customBarTimers = {}
+
+-- Preset groups for buff bars: each entry is a named group of spellIDs that share
+-- one icon slot and one duration. All variant IDs are stored in customSpells and
+-- customSpellDurations; the first active timer wins for display.
+-- { name, icon, duration, spellIDs }
+ns.BUFF_BAR_PRESETS = {
+    { name = "Bloodlust / Heroism", icon = 132131,  duration = 40,
+      spellIDs = { 2825, 32182, 80353, 264667, 390386, 381301, 444062, 444257 } },
+    { name = "Light's Potential",   icon = 754891,  duration = 30,
+      spellIDs = { 1236616, 431932 } },
+    { name = "Potion of Recklessness", icon = 754891, duration = 30,
+      spellIDs = { 1236994 } },
+    { name = "Invisibility Potion", icon = 241302,  duration = 18,
+      spellIDs = { 1236551, 431424, 371134, 371125, 371133 } },
+}
+
 -- Reusable children buffer for the per-tick viewer scan -- avoids GetChildren vararg allocation
 local _viewerChildBuf = {}
 
@@ -237,10 +281,13 @@ local _viewerChildBuf = {}
 -- ch.isActive and ch._ecmeDurObj etc. are tainted secret values; we track state in our own tables instead.
 local _ecmeChildHasDurObj = {}   -- [ch] = true when we have captured a DurationObject for this child
 local _ecmeDurObjCache = {}      -- [ch] = durObj captured from SetCooldownFromDurationObject hook
+ns._ecmeDurObjCache = _ecmeDurObjCache
 local _ecmeRawStartCache = {}    -- [ch] = start captured from SetCooldown hook
+ns._ecmeRawStartCache = _ecmeRawStartCache
 local _cdmVehicleProxy           -- SecureHandlerStateTemplate proxy for [vehicleui]/[petbattle] hiding
 local _cdmInVehicle = false      -- true when [vehicleui] or [petbattle] is active
 local _ecmeRawDurCache = {}      -- [ch] = dur captured from SetCooldown hook
+ns._ecmeRawDurCache = _ecmeRawDurCache
 local _tickTotemCache = {}       -- [slot] = haveTotem (cached per tick to avoid inconsistent reads)
 local _cdmHoverStates = {}       -- [barKey] = { isHovered=false, fadeDir=nil }
 
@@ -299,6 +346,7 @@ local function IsBufChildCooldownActive(ch)
     if rawDur and (issecretvalue and issecretvalue(rawDur) or rawDur > 0) then return true end
     return false
 end
+ns.IsBufChildCooldownActive = IsBufChildCooldownActive
 
 -- spellID -> cooldownID map built once from C_CooldownViewer.GetCooldownViewerCategorySet (all categories).
 -- Rebuilt on PLAYER_LOGIN and spec change. Used by custom bars to find CDM child frames by spellID.
@@ -406,7 +454,9 @@ local _inCombat = false
 -------------------------------------------------------------------------------
 local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha, skipCD, blizzChild, isBuffBar)
     -- Ensure charge cache is populated (cheap: skips if already cached)
-    CacheMultiChargeSpell(spellID)
+    -- Pass blizzChild so in-combat variant swaps can inherit charge status
+    -- from the CDM child tag set OOC (e.g. Eclipse Lunar → Solar).
+    CacheMultiChargeSpell(spellID, blizzChild)
 
     local isChargeSpell = _multiChargeSpells[spellID] == true
 
@@ -1057,6 +1107,7 @@ local DEFAULTS = {
         tbbPositions = {},
         -- Per-spec profiles: spell lists, bar glows, buff bars (keyed by specID string)
         specProfiles = {},
+
     },
 }
 
@@ -1153,17 +1204,19 @@ local TALENT_AWARE_BAR_TYPES = { cooldowns = true, utility = true }
 -------------------------------------------------------------------------------
 local function ResolveInfoSpellID(info)
     if not info then return nil end
+    local sid
     if info.overrideSpellID and info.overrideSpellID > 0 then
-        return info.overrideSpellID
-    end
-    local linked = info.linkedSpellIDs
-    if linked then
-        for i = 1, #linked do
-            if linked[i] and linked[i] > 0 then return linked[i] end
+        sid = info.overrideSpellID
+    else
+        local linked = info.linkedSpellIDs
+        if linked then
+            for i = 1, #linked do
+                if linked[i] and linked[i] > 0 then sid = linked[i]; break end
+            end
         end
+        if not sid and info.spellID and info.spellID > 0 then sid = info.spellID end
     end
-    if info.spellID and info.spellID > 0 then return info.spellID end
-    return nil
+    return sid and (BUFF_SPELLID_CORRECTIONS[sid] or sid) or nil
 end
 
 -------------------------------------------------------------------------------
@@ -1183,7 +1236,7 @@ local function ResolveChildSpellID(child)
         local ok, auraID = pcall(child.GetAuraSpellID, child)
         if ok and auraID then
             local cmpOk, gt = pcall(function() return auraID > 0 end)
-            if cmpOk and gt then return auraID end
+            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[auraID] or auraID end
         end
     end
     -- Then try the frame's own spellID
@@ -1191,7 +1244,7 @@ local function ResolveChildSpellID(child)
         local ok, fid = pcall(child.GetSpellID, child)
         if ok and fid then
             local cmpOk, gt = pcall(function() return fid > 0 end)
-            if cmpOk and gt then return fid end
+            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[fid] or fid end
         end
     end
     -- Fall back to cooldownInfo struct
@@ -1281,11 +1334,27 @@ local function BuildKnownSpellIDSet()
             for _, cdID in ipairs(knownIDs) do
                 local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                 if info then
-                    local sid = ResolveInfoSpellID(info)
-                    if sid and sid > 0 then
-                        local skip = filterPassives and IsTrulyPassive(sid)
-                        if not skip then
-                            known[sid] = true
+                    local primarySid = ResolveInfoSpellID(info)
+                    local skip = filterPassives and primarySid and IsTrulyPassive(primarySid)
+                    if not skip then
+                        -- Store ALL related spell IDs so reconcile can match
+                        -- regardless of whether the bar stores the base ID,
+                        -- override ID, or a linked ID.
+                        if primarySid and primarySid > 0 then
+                            known[primarySid] = true
+                        end
+                        if info.spellID and info.spellID > 0 then
+                            known[info.spellID] = true
+                        end
+                        if info.overrideSpellID and info.overrideSpellID > 0 then
+                            known[info.overrideSpellID] = true
+                        end
+                        if info.linkedSpellIDs then
+                            for _, lsid in ipairs(info.linkedSpellIDs) do
+                                if lsid and lsid > 0 then
+                                    known[lsid] = true
+                                end
+                            end
                         end
                     end
                 end
@@ -1327,14 +1396,14 @@ local function SaveCurrentSpecProfile()
                 entry.extraSpells   = DeepCopy(barData.extraSpells)
                 entry.removedSpells = DeepCopy(barData.removedSpells)
                 entry.dormantSpells = DeepCopy(barData.dormantSpells)
-            elseif barData.barType ~= "trinkets" then
-                -- Custom non-trinket bars: save customSpells
+            elseif barData.barType ~= "misc" then
+                -- Custom non-misc bars: save customSpells
                 entry.customSpells = DeepCopy(barData.customSpells)
                 if TALENT_AWARE_BAR_TYPES[barData.barType] then
                     entry.dormantSpells = DeepCopy(barData.dormantSpells)
                 end
             end
-            -- Trinket/racial/potion bars: nothing to save (refreshed on login)
+            -- Misc bars: nothing to save (spell list is shared across all specs)
             prof.barSpells[key] = entry
         end
     end
@@ -1371,7 +1440,7 @@ local function LoadSpecProfile(specKey)
                         barData.extraSpells   = DeepCopy(saved.extraSpells)
                         barData.removedSpells = DeepCopy(saved.removedSpells)
                         barData.dormantSpells = DeepCopy(saved.dormantSpells)
-                    elseif barData.barType ~= "trinkets" then
+                    elseif barData.barType ~= "misc" then
                         barData.customSpells = DeepCopy(saved.customSpells)
                         if TALENT_AWARE_BAR_TYPES[barData.barType] then
                             barData.dormantSpells = DeepCopy(saved.dormantSpells)
@@ -1389,7 +1458,7 @@ local function LoadSpecProfile(specKey)
                         barData.removedSpells = nil
                         barData.dormantSpells = nil
                     end
-                    -- trinket bars and custom bars: no action -- preserve existing state
+                    -- misc bars and custom bars: no action -- preserve existing state
                 end
             end
         end
@@ -1415,7 +1484,7 @@ local function LoadSpecProfile(specKey)
                 barData.extraSpells = nil
                 barData.removedSpells = nil
                 barData.dormantSpells = nil
-            elseif barData.barType ~= "trinkets" then
+            elseif barData.barType ~= "misc" then
                 barData.customSpells = {}
                 barData.dormantSpells = nil
             end
@@ -1429,37 +1498,25 @@ local function LoadSpecProfile(specKey)
             selectedAssignment = 1,
             assignments = {},
         }
-    end
 
-    -- Fix anchors: if a custom bar is anchored to a bar key that no longer
-    -- has spells (went blank on spec switch), un-anchor it.
-    -- Only applies to trinket/racial/potion bars anchored to custom bars.
-    local barKeySet = {}
-    for _, barData in ipairs(p.cdmBars.bars) do
-        barKeySet[barData.key] = barData
-    end
-    for _, barData in ipairs(p.cdmBars.bars) do
-        if barData.barType == "trinkets" and barData.anchorTo and barData.anchorTo ~= "none" then
-            local anchor = barKeySet[barData.anchorTo]
-            if anchor and anchor.barType ~= "trinkets" and not MAIN_BAR_KEYS[anchor.key] then
-                -- Anchored to a custom bar — check if that bar has spells
-                local spells = anchor.customSpells
-                if not spells or #spells == 0 then
-                    barData.anchorTo = "none"
-                    barData.anchorPosition = "left"
-                    barData.anchorOffsetX = 0
-                    barData.anchorOffsetY = 0
-                end
-            end
-        end
+        -- Reset tracked buff bars so the Blizzard viewer snapshot fires on next build
+        p.trackedBuffBars = nil
+        p.tbbPositions = nil
+        p._tbbNeedsSnapshot = true
     end
 
     -- Replace any stale racial spellIDs with the current character's racial
     RefreshRacialSpells()
 end
 
+-- Timestamp of the last spec switch. Used to suppress TalentAwareReconcile
+-- during the transition window where spell data may be stale.
+local _lastSpecSwitchTime = 0
+
 --- Full spec switch: save current, load new, rebuild everything
 local function SwitchSpecProfile(newSpecKey)
+    _lastSpecSwitchTime = GetTime()
+
     local p = ECME.db.profile
     local oldSpecKey = p.activeSpecKey
 
@@ -1478,14 +1535,36 @@ local function SwitchSpecProfile(newSpecKey)
     -- Rebuild all CDM systems (deferred so Blizzard CDM frames are ready)
     C_Timer.After(0.5, function()
         BuildAllCDMBars()
+        -- Mark for snapshot if this spec has no buff bars configured yet
+        do
+            local pp = ECME.db.profile
+            local tbb = pp.trackedBuffBars
+            local hasNoBars = (not tbb) or (not tbb.bars) or (#tbb.bars == 0)
+            local alreadyDone = pp.specProfiles
+                and newSpecKey and newSpecKey ~= "0"
+                and pp.specProfiles[newSpecKey]
+                and pp.specProfiles[newSpecKey]._tbbSnapshotDone
+            if hasNoBars and not alreadyDone then
+                pp._tbbNeedsSnapshot = true
+                pp.trackedBuffBars = nil
+                pp.tbbPositions = nil
+            end
+        end
         ns.BuildTrackedBuffBars()
         RegisterCDMUnlockElements()
         -- Force viewers to populate before reconciling so the viewer is fully
         -- ready when ReconcileMainBarSpells runs. Bare timers are intentionally
-        -- omitted here — a partially-populated viewer causes spells to be dropped.
+        -- omitted here -- a partially-populated viewer causes spells to be dropped.
         ForcePopulateBlizzardViewers(function()
             ForceResnapshotMainBars()
             StartResnapshotRetry()
+            -- Auto-populate buff bars from Blizzard viewers on first use of this spec
+            local pp = ECME.db.profile
+            if pp._tbbNeedsSnapshot and ns.SnapshotBlizzardBuffBars then
+                pp._tbbNeedsSnapshot = nil
+                ns.SnapshotBlizzardBuffBars()
+                ns.BuildTrackedBuffBars()
+            end
         end)
 
         -- Refresh options panel if open
@@ -2135,10 +2214,11 @@ local BLIZZ_CDM_FRAMES = {
     buffs     = "BuffIconCooldownViewer",
 }
 
--- BuffBarCooldownViewer (the Blizzard buff bar) is intentionally NOT included
--- here. We leave it visible and unmodified so Blizzard's buff bars show normally.
--- CDM only hides the icon-based viewers it replaces with its own bars.
+-- BuffBarCooldownViewer is the Blizzard buff bar strip. We hide it alongside
+-- the icon viewer so Blizzard's default buff display is fully suppressed when
+-- the user has CDM hiding enabled. Our Tracked Buff Bars replace it.
 local BLIZZ_CDM_FRAMES_SECONDARY = {
+    buffs = "BuffBarCooldownViewer",
 }
 
 -- CDM category numbers per bar key (for C_CooldownViewer API)
@@ -2152,8 +2232,11 @@ local CDM_BAR_CATEGORIES = {
 local MAX_CUSTOM_BARS = 6
 
 -------------------------------------------------------------------------------
---  Trinket / Racial / Health Potion data (for "trinkets" bar type)
---  Encoding in customSpells:  positive = spellID,  -13/-14 = trinket slot
+--  Trinket / Racial / Health Potion / On-Use Bag Item data (misc and custom bars)
+--  Encoding in customSpells:
+--    positive        = spellID
+--    -13 / -14       = trinket slot (inventory slot)
+--    <= -100         = on-use bag item (negated itemID)
 -------------------------------------------------------------------------------
 
 -- Racial abilities by internal race name -- list of spellIDs
@@ -2209,10 +2292,10 @@ RefreshRacialSpells = function() end
 -- altItemID: alternate quality tier of the same potion (e.g. Artisan quality variant).
 -- When the player has the alt version but not the base, we display the alt instead.
 local HEALTH_ITEMS = {
-    { itemID = 241304, spellID = 1234768, altItemID = 241305 },              -- Silvermoon Health Potion
-    { itemID = 241308, spellID = 1236616, altItemID = 241309 },              -- Light's Potential
-    { itemID = 5512,   spellID = 6262, combatLockout = true },               -- Healthstone
-    { itemID = 224464, spellID = 452930, class = "WARLOCK" },                -- Demonic Healthstone
+    { itemID = 241304, spellID = 1234768, altItemID = 241305, combatLockout = true },  -- Silvermoon Health Potion
+    { itemID = 241308, spellID = 1236616, altItemID = 241309, combatLockout = true },  -- Light's Potential
+    { itemID = 5512,   spellID = 6262, combatLockout = true },                         -- Healthstone
+    { itemID = 224464, spellID = 452930, class = "WARLOCK" },                          -- Demonic Healthstone
 }
 
 -- Reverse lookup: spellID -> HEALTH_ITEMS entry (for item-aware cooldown/count display)
@@ -3032,11 +3115,8 @@ local function CreateCDMIcon(barKey, index)
     icon._isActive = false
     icon._barKey = barKey
 
-    -- Apply saved icon shape on creation
-    local shape = barData.iconShape or "none"
-    if shape ~= "none" then
-        ApplyShapeToCDMIcon(icon, shape, barData)
-    end
+    -- Apply icon shape on creation (includes "none" for proper cooldown inset)
+    ApplyShapeToCDMIcon(icon, barData.iconShape or "none", barData)
 
     icon:Hide()
     return icon
@@ -3053,7 +3133,15 @@ local _cdmTooltipOnUpdate = function(self)
         local sid = self._spellID
         if sid then
             GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-            GameTooltip:SetSpellByID(sid)
+            -- On-use bag items stored as large negative IDs: show item tooltip
+            if sid <= -100 then
+                GameTooltip:SetItemByID(-sid)
+            elseif sid < 0 and sid > -100 then
+                -- Trinket slot: show equipped item tooltip
+                GameTooltip:SetInventoryItem("player", -sid)
+            else
+                GameTooltip:SetSpellByID(sid)
+            end
             GameTooltip:Show()
             self._tooltipShown = true
         end
@@ -3129,11 +3217,10 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
             end
         end
 
-        -- Restore cooldown
+        -- Restore cooldown (full frame so swipe covers the entire icon)
         if icon._cooldown then
             icon._cooldown:ClearAllPoints()
-            PP.Point(icon._cooldown, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
-            PP.Point(icon._cooldown, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
+            icon._cooldown:SetAllPoints(icon)
             pcall(icon._cooldown.SetSwipeTexture, icon._cooldown, "Interface\\Buttons\\WHITE8x8")
             if icon._cooldown.SetUseCircularEdge then pcall(icon._cooldown.SetUseCircularEdge, icon._cooldown, false) end
         end
@@ -3342,17 +3429,62 @@ local function UpdateCustomBarIcons(barKey)
             -- Skip blank placeholder slots (0 entries from grid reordering)
             if spellID == 0 then
                 ourIcon:Hide()
-            -- Trinket slot entries use negative IDs (-13, -14)
-            elseif spellID < 0 then
+            -- Trinket slot entries use small negative IDs (-13, -14)
+            elseif spellID < 0 and spellID > -100 then
                 local slot = -spellID
                 local itemID = GetInventoryItemID("player", slot)
                 if itemID then
-                    local tex = C_Item.GetItemIconByID(itemID)
-                    if tex and tex ~= ourIcon._lastTex then
+                    -- On misc bars, hide trinkets that have no on-use effect
+                    if barData.barType == "misc" then
+                        local spellName = C_Item.GetItemSpell(itemID)
+                        if not spellName then
+                            ourIcon:Hide()
+                            itemID = nil
+                        end
+                    end
+                    if itemID then
+                        local tex = C_Item.GetItemIconByID(itemID)
+                        if tex and tex ~= ourIcon._lastTex then
+                            ourIcon._tex:SetTexture(tex)
+                            ourIcon._lastTex = tex
+                        end
+                        ourIcon._spellID = spellID
+                        ApplyTrinketCooldown(ourIcon, slot, barData.desaturateOnCD)
+                        ourIcon:Show()
+                        visibleCount = visibleCount + 1
+                    end
+                else
+                    ourIcon:Hide()
+                end
+            -- On-use bag items use large negative IDs (<= -100, negated itemID)
+            elseif spellID <= -100 then
+                local bagItemID = -spellID
+                local tex = C_Item.GetItemIconByID(bagItemID)
+                if tex then
+                    if tex ~= ourIcon._lastTex then
                         ourIcon._tex:SetTexture(tex)
                         ourIcon._lastTex = tex
                     end
-                    ApplyTrinketCooldown(ourIcon, slot, barData.desaturateOnCD)
+                    ourIcon._spellID = spellID
+                    -- Item cooldown
+                    local cdStart, cdDur = C_Container.GetItemCooldown(bagItemID)
+                    if cdStart and cdDur and cdDur > 1.5 then
+                        ourIcon._cooldown:SetCooldown(cdStart, cdDur)
+                        if barData.desaturateOnCD then
+                            ourIcon._tex:SetDesaturation(1)
+                            ourIcon._lastDesat = true
+                        elseif ourIcon._lastDesat then
+                            ourIcon._tex:SetDesaturation(0)
+                            ourIcon._lastDesat = false
+                        end
+                    else
+                        ourIcon._cooldown:Clear()
+                        if ourIcon._lastDesat then
+                            ourIcon._tex:SetDesaturation(0)
+                            ourIcon._lastDesat = false
+                        end
+                    end
+                    ourIcon._chargeText:Hide()
                     ourIcon:Show()
                     visibleCount = visibleCount + 1
                 else
@@ -3440,8 +3572,9 @@ local function UpdateCustomBarIcons(barKey)
             -- Always attempt direct detection on the final resolvedID first ΓÇö it may
             -- have charges even if the base spell doesn't (three-level chain).
             if resolvedID ~= spellID then
+                local propChild = _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
                 -- Always try direct detection on the resolved ID (cheapest path)
-                CacheMultiChargeSpell(resolvedID)
+                CacheMultiChargeSpell(resolvedID, propChild)
                 -- If resolved ID still unknown (secret/combat), check if we have a
                 -- live Blizzard child for it and mark it as a charge spell so
                 -- ApplySpellCooldown uses the charge display path.
@@ -3457,7 +3590,7 @@ local function UpdateCustomBarIcons(barKey)
                     local intermediate = C_SpellBook and C_SpellBook.FindSpellOverrideByID
                         and C_SpellBook.FindSpellOverrideByID(spellID)
                     if intermediate and intermediate ~= 0 and intermediate ~= resolvedID then
-                        CacheMultiChargeSpell(intermediate)
+                        CacheMultiChargeSpell(intermediate, propChild)
                         if _multiChargeSpells[intermediate] == true then
                             _multiChargeSpells[resolvedID] = true
                             if _maxChargeCount[intermediate] then
@@ -3468,7 +3601,7 @@ local function UpdateCustomBarIcons(barKey)
                 end
                 -- If still unknown, propagate from base ΓÇö but only if base is true
                 if _multiChargeSpells[resolvedID] == nil then
-                    CacheMultiChargeSpell(spellID)
+                    CacheMultiChargeSpell(spellID, propChild)
                     if _multiChargeSpells[spellID] == true then
                         _multiChargeSpells[resolvedID] = true
                         if _maxChargeCount[spellID] then
@@ -3732,6 +3865,20 @@ local function UpdateCustomBarIcons(barKey)
                         local blzBufCh = _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
                                       or _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
                         if IsBufChildCooldownActive(blzBufCh) then isActive = true end
+                    end
+                    -- Duration-based timer: show if a cast-triggered timer is still running
+                    if not isActive then
+                        local barTimers = _customBarTimers[barKey]
+                        if barTimers then
+                            local expiry = barTimers[spellID] or barTimers[resolvedID]
+                            if expiry and GetTime() < expiry then
+                                isActive = true
+                            elseif expiry then
+                                -- Timer expired, clean up
+                                barTimers[spellID] = nil
+                                barTimers[resolvedID] = nil
+                            end
+                        end
                     end
                     if not isActive then
                         ourIcon:Hide()
@@ -4076,11 +4223,10 @@ local function RefreshCDMIconAppearance(barKey)
             PP.Point(icon._tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
             icon._tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
-        -- Update cooldown inset
+        -- Update cooldown (full frame so swipe covers the entire icon)
         if icon._cooldown then
             icon._cooldown:ClearAllPoints()
-            PP.Point(icon._cooldown, "TOPLEFT", icon, "TOPLEFT", borderSize, -borderSize)
-            PP.Point(icon._cooldown, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
+            icon._cooldown:SetAllPoints(icon)
             icon._cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
             icon._cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
             -- Mark pending font update (applied in batch after frame renders)
@@ -4153,7 +4299,7 @@ local function BuildCustomBarSpellSet()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return set end
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.customSpells and not MAIN_BAR_KEYS[bd.key] and bd.barType ~= "trinkets" then
+        if bd.customSpells and not MAIN_BAR_KEYS[bd.key] and bd.barType ~= "misc" then
             for _, sid in ipairs(bd.customSpells) do
                 if sid and sid > 0 then set[sid] = true end
             end
@@ -4375,8 +4521,8 @@ local function UpdateTrackedBarIcons(barKey)
         -- Skip blank placeholder slots
         if spellID == 0 then
             ourIcon:Hide()
-        -- Trinket slot entries use negative IDs (-13, -14)
-        elseif spellID < 0 then
+        -- Trinket slot entries use small negative IDs (-13, -14)
+        elseif spellID < 0 and spellID > -100 then
             local slot = -spellID
             local itemID = GetInventoryItemID("player", slot)
             if itemID then
@@ -4385,7 +4531,41 @@ local function UpdateTrackedBarIcons(barKey)
                     ourIcon._tex:SetTexture(tex)
                     ourIcon._lastTex = tex
                 end
+                ourIcon._spellID = spellID
                 ApplyTrinketCooldown(ourIcon, slot, desatOnCD)
+                ourIcon:Show()
+                visCount = visCount + 1
+            else
+                ourIcon:Hide()
+            end
+        -- On-use bag items use large negative IDs (<= -100, negated itemID)
+        elseif spellID <= -100 then
+            local bagItemID = -spellID
+            local tex = C_Item.GetItemIconByID(bagItemID)
+            if tex then
+                if tex ~= ourIcon._lastTex then
+                    ourIcon._tex:SetTexture(tex)
+                    ourIcon._lastTex = tex
+                end
+                ourIcon._spellID = spellID
+                local cdStart, cdDur = C_Container.GetItemCooldown(bagItemID)
+                if cdStart and cdDur and cdDur > 1.5 then
+                    ourIcon._cooldown:SetCooldown(cdStart, cdDur)
+                    if desatOnCD then
+                        ourIcon._tex:SetDesaturation(1)
+                        ourIcon._lastDesat = true
+                    elseif ourIcon._lastDesat then
+                        ourIcon._tex:SetDesaturation(0)
+                        ourIcon._lastDesat = false
+                    end
+                else
+                    ourIcon._cooldown:Clear()
+                    if ourIcon._lastDesat then
+                        ourIcon._tex:SetDesaturation(0)
+                        ourIcon._lastDesat = false
+                    end
+                end
+                ourIcon._chargeText:Hide()
                 ourIcon:Show()
                 visCount = visCount + 1
             else
@@ -4462,7 +4642,8 @@ local function UpdateTrackedBarIcons(barKey)
 
             -- Propagate charge cache from base to override
             if resolvedID ~= spellID then
-                CacheMultiChargeSpell(resolvedID)
+                local propChild = _tickBlizzAllChildCache[resolvedID] or _tickBlizzAllChildCache[spellID]
+                CacheMultiChargeSpell(resolvedID, propChild)
                 if _multiChargeSpells[resolvedID] == nil and _tickBlizzChildCache[resolvedID] then
                     _multiChargeSpells[resolvedID] = true
                 end
@@ -4470,7 +4651,7 @@ local function UpdateTrackedBarIcons(barKey)
                     local intermediate = C_SpellBook and C_SpellBook.FindSpellOverrideByID
                         and C_SpellBook.FindSpellOverrideByID(spellID)
                     if intermediate and intermediate ~= 0 and intermediate ~= resolvedID then
-                        CacheMultiChargeSpell(intermediate)
+                        CacheMultiChargeSpell(intermediate, propChild)
                         if _multiChargeSpells[intermediate] == true then
                             _multiChargeSpells[resolvedID] = true
                             if _maxChargeCount[intermediate] then
@@ -4480,7 +4661,7 @@ local function UpdateTrackedBarIcons(barKey)
                     end
                 end
                 if _multiChargeSpells[resolvedID] == nil then
-                    CacheMultiChargeSpell(spellID)
+                    CacheMultiChargeSpell(spellID, propChild)
                     if _multiChargeSpells[spellID] == true then
                         _multiChargeSpells[resolvedID] = true
                         if _maxChargeCount[spellID] then
@@ -4756,10 +4937,12 @@ local function UpdateTrackedBarIcons(barKey)
         ic:Hide()
     end
 
-    -- Re-layout when visible count changes, or when companion icons are/were
-    -- active (dynamic combined list can change composition without changing
-    -- visible count, leaving newly-created icons unpositioned).
+    -- Re-layout when visible count changes, when companion icons are/were
+    -- active, or when hideBuffsWhenInactive can swap which icons are visible
+    -- without changing the total count (e.g. Eclipse Solar hides while Lunar
+    -- shows — same count but different icons need repositioning).
     local needsLayout = visCount ~= prevCount or hasCompanions or frame._hadCompanions
+        or (isBuffBarForOvr and barData.hideBuffsWhenInactive)
     frame._hadCompanions = hasCompanions
     if needsLayout then
         frame._prevVisibleCount = visCount
@@ -5525,12 +5708,7 @@ function ns.GetCDMSpellsForBar(barKey)
         end
     end
 
-    -- Trinket/racial/potion bars: return only extras
-    if barType == "trinkets" then
-        local extras = GetExtraSpells()
-        table.sort(extras, function(a, b) return a.name < b.name end)
-        return extras
-    end
+    -- Misc bars use the normal custom bar spell picker (no early return)
 
     local cats = CDM_BAR_CATEGORIES[barKey]
         or CDM_BAR_CATEGORIES[barType or "cooldowns"]
@@ -5709,8 +5887,8 @@ function ns.GetCDMSpellsForBar(barKey)
         return a.name < b.name
     end)
 
-    -- Append trinket/racial/potion extras only for the dedicated extras bar
-    if barType == "trinkets" then
+    -- Append trinket/racial/potion extras for misc bars
+    if barType == "misc" then
         local extras = GetExtraSpells()
         table.sort(extras, function(a, b) return a.name < b.name end)
         for _, ex in ipairs(extras) do
@@ -5719,6 +5897,26 @@ function ns.GetCDMSpellsForBar(barKey)
     end
 
     return spells
+end
+
+--- Returns the full spell pool for Tracked Buff Bars.
+--- Same structure as GetCDMSpellsForBar("buffs") -- categories 2 and 3 treated
+--- as one group. Buckets: displayed (in Blizzard CDM), known (not displayed),
+--- disabled (unlearned). Used by the TBB spell picker in the options UI.
+function ns.GetTBBSpellPool()
+    local spells = ns.GetCDMSpellsForBar("buffs")
+    if not spells then return {}, {}, {} end
+    local displayed, known, disabled = {}, {}, {}
+    for _, sp in ipairs(spells) do
+        if not sp.isKnown then
+            disabled[#disabled + 1] = sp
+        elseif sp.isDisplayed then
+            displayed[#displayed + 1] = sp
+        else
+            known[#known + 1] = sp
+        end
+    end
+    return displayed, known, disabled
 end
 
 --- Check if a cooldownID has a Blizzard CDM child (is "displayed")
@@ -5898,6 +6096,38 @@ end
 -- Expose for options UI conflict display
 ns.SpellConflictsWithOtherBar = SpellConflictsWithOtherBar
 
+--- Add a preset group to a buff bar.
+--- Only works on custom bars with barType="buffs" (has customSpells).
+--- Duration and group variant mappings are stored in customSpellDurations/customSpellGroups.
+function ns.AddPresetToBar(barKey, preset)
+    local p = ECME.db.profile
+    for _, b in ipairs(p.cdmBars.bars) do
+        if b.key == barKey then
+            if not b.customSpells then return false end
+            local primaryID = preset.spellIDs[1]
+            -- Check not already tracked
+            for _, existing in ipairs(b.customSpells) do
+                if existing == primaryID then return false, "exists" end
+            end
+            -- Add primary ID as the icon slot
+            b.customSpells[#b.customSpells + 1] = primaryID
+            -- Store duration for primary
+            if not b.customSpellDurations then b.customSpellDurations = {} end
+            b.customSpellDurations[primaryID] = preset.duration
+            -- Map all variant IDs -> primary so any cast triggers the timer
+            if not b.customSpellGroups then b.customSpellGroups = {} end
+            for _, sid in ipairs(preset.spellIDs) do
+                b.customSpellGroups[sid] = primaryID
+            end
+            local frame = cdmBarFrames[barKey]
+            if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+            if p.activeSpecKey and p.activeSpecKey ~= "0" then SaveCurrentSpecProfile() end
+            return true
+        end
+    end
+    return false
+end
+
 --- Add a tracked spell (spellID) to a bar
 --- When isExtra is true, id is a spellID (positive) or trinket slot (negative)
 function ns.AddTrackedSpell(barKey, id, isExtra)
@@ -5985,7 +6215,20 @@ function ns.RemoveTrackedSpell(barKey, idx)
             if b.customSpells then
                 local list = b.customSpells
                 if list and idx >= 1 and idx <= #list then
+                    local removedID = list[idx]
                     table.remove(list, idx)
+                    -- Clean up duration entry if present
+                    if removedID and b.customSpellDurations then
+                        b.customSpellDurations[removedID] = nil
+                    end
+                    -- Clean up spell group variant mappings that point to this primary ID
+                    if removedID and b.customSpellGroups then
+                        for variantID, primaryID in pairs(b.customSpellGroups) do
+                            if primaryID == removedID then
+                                b.customSpellGroups[variantID] = nil
+                            end
+                        end
+                    end
                     local frame = cdmBarFrames[barKey]
                     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
                     -- Persist to spec profile immediately so spec switches don't restore removed spells
@@ -6002,6 +6245,17 @@ function ns.RemoveTrackedSpell(barKey, idx)
                     if sid and sid ~= 0 then
                         if not b.removedSpells then b.removedSpells = {} end
                         b.removedSpells[sid] = true
+                    end
+                    -- Clean up duration and group mappings (preset spells on built-in bars)
+                    if sid and b.customSpellDurations then
+                        b.customSpellDurations[sid] = nil
+                    end
+                    if sid and b.customSpellGroups then
+                        for variantID, primaryID in pairs(b.customSpellGroups) do
+                            if primaryID == sid then
+                                b.customSpellGroups[variantID] = nil
+                            end
+                        end
                     end
                     local frame = cdmBarFrames[barKey]
                     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
@@ -6135,7 +6389,7 @@ function ns.AddCDMBar(barType, name, numRows)
     local typeLabel = barType == "cooldowns" and "Cooldowns"
                    or barType == "utility" and "Utility"
                    or barType == "buffs" and "Buffs"
-                   or barType == "trinkets" and "Trinkets/Racials/Potions"
+                   or barType == "misc" and "Miscellaneous"
                    or "Cooldowns"
     -- Count existing custom bars of this type for numbering
     local typeCount = 0
@@ -6145,7 +6399,7 @@ function ns.AddCDMBar(barType, name, numRows)
     local key = "custom_" .. (#bars + 1) .. "_" .. GetTime()
     key = key:gsub("%.", "_")
     bars[#bars + 1] = {
-        key = key, name = name or ((barType == "trinkets" and "Miscellaneous " or "Custom " .. typeLabel .. " Bar ") .. (typeCount + 1)),
+        key = key, name = name or ((barType == "misc" and "Miscellaneous " or "Custom " .. typeLabel .. " Bar ") .. (typeCount + 1)),
         barType = barType,
         enabled = true, barScale = 1.0, iconSize = 36, numRows = numRows or 1,
         spacing = 2,
@@ -6170,14 +6424,17 @@ function ns.AddCDMBar(barType, name, numRows)
         customSpells = {},
         outOfRangeOverlay = false,
     }
-    -- Auto-populate new trinkets bars with player's current extras
-    if barType == "trinkets" then
+    -- Auto-populate new misc bars with player's current extras
+    if barType == "misc" then
         local newBar = bars[#bars]
         for _, ex in ipairs(GetExtraSpells()) do
             newBar.customSpells[#newBar.customSpells + 1] = ex.spellID
         end
     end
     BuildAllCDMBars()
+    -- Immediately populate icons so the bar is visible without a /reload
+    UpdateCustomBarIcons(key)
+    LayoutCDMBar(key)
     RegisterCDMUnlockElements()
     return key
 end
@@ -6251,7 +6508,8 @@ local function CDMFirstLoginCapture()
         end
     end
 
-    p._capturedOnce = true
+    p._capturedOnce = nil  -- no longer per-profile
+    ECME.db.sv._capturedOnce = true
 end
 
 -------------------------------------------------------------------------------
@@ -6446,6 +6704,25 @@ end
 function ECME:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUICooldownManagerDB", DEFAULTS, true)
 
+    -- Migration: move _capturedOnce from per-profile to per-install (SV root).
+    local sv = self.db.sv
+    if not sv._capturedOnce then
+        if sv.profiles then
+            for _, prof in pairs(sv.profiles) do
+                if type(prof) == "table" and prof._capturedOnce then
+                    sv._capturedOnce = true
+                    break
+                end
+            end
+        end
+    end
+    -- Strip the old per-profile flag from all profiles
+    if sv.profiles then
+        for _, prof in pairs(sv.profiles) do
+            if type(prof) == "table" then prof._capturedOnce = nil end
+        end
+    end
+
     -- Save spec profile before StripDefaults runs on logout
     EllesmereUI.Lite.RegisterPreLogout(function()
         local p = ECME.db and ECME.db.profile
@@ -6479,8 +6756,22 @@ function ECME:OnInitialize()
         end
     end
 
-    -- Check if we need first-login capture
-    self._needsCapture = not self.db.profile._capturedOnce
+    -- Migration: rename barType "trinkets" to "misc" (4.7)
+    -- Runs across ALL profiles so switching profiles later works correctly.
+    if sv.profiles then
+        for _, prof in pairs(sv.profiles) do
+            if type(prof) == "table" and prof.cdmBars and prof.cdmBars.bars then
+                for _, b in ipairs(prof.cdmBars.bars) do
+                    if b.barType == "trinkets" then
+                        b.barType = "misc"
+                    end
+                end
+            end
+        end
+    end
+
+    -- Check if we need first-login capture (per-install flag on SV root)
+    self._needsCapture = not self.db.sv._capturedOnce
 
     -- Expose for options
     _G._ECME_AceDB = self.db
@@ -6758,7 +7049,10 @@ local function TalentAwareReconcile()
 
         -- Phase 3: clean up dormant entries for spells that are no longer in
         -- any CDM category at all (removed from game / different class)
-        -- Keep dormant entries for spells that exist but are just unlearned
+        -- Keep dormant entries for spells that exist but are just unlearned.
+        -- Store ALL related IDs (base, override, linked) so a spell stored
+        -- by its base ID is still recognized even if the viewer resolves it
+        -- to an override ID.
         local allSpellIDs = {}
         if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
             for cat = 0, 3 do
@@ -6767,9 +7061,18 @@ local function TalentAwareReconcile()
                     for _, cdID in ipairs(allIDs) do
                         local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                         if info then
-                            local sid = ResolveInfoSpellID(info)
-                            if sid and sid > 0 then
-                                allSpellIDs[sid] = true
+                            if info.spellID and info.spellID > 0 then
+                                allSpellIDs[info.spellID] = true
+                            end
+                            if info.overrideSpellID and info.overrideSpellID > 0 then
+                                allSpellIDs[info.overrideSpellID] = true
+                            end
+                            if info.linkedSpellIDs then
+                                for _, lsid in ipairs(info.linkedSpellIDs) do
+                                    if lsid and lsid > 0 then
+                                        allSpellIDs[lsid] = true
+                                    end
+                                end
                             end
                         end
                     end
@@ -6782,21 +7085,13 @@ local function TalentAwareReconcile()
             end
         end
 
-        return (#active > 0 and active or nil), (next(dormant) and dormant or nil)
+        return active, (next(dormant) and dormant or nil)
     end
 
     -- Process each bar
     for _, barData in ipairs(p.cdmBars.bars) do
         if MAIN_BAR_KEYS[barData.key] and TALENT_AWARE_BAR_TYPES[barData.key] then
             -- Main bars (cooldowns, utility): reconcile trackedSpells
-            if barData.trackedSpells and #barData.trackedSpells > 0 then
-                barData.trackedSpells, barData.dormantSpells =
-                    ReconcileSpellList(barData.trackedSpells, barData.dormantSpells, barData.removedSpells)
-            end
-        elseif MAIN_BAR_KEYS[barData.key] then
-            -- Buffs bar: use the same dormant/returning approach as other bars.
-            -- Our DB is authoritative -- never re-read from the viewer to
-            -- add or remove spells after the initial snapshot.
             if barData.trackedSpells and #barData.trackedSpells > 0 then
                 barData.trackedSpells, barData.dormantSpells =
                     ReconcileSpellList(barData.trackedSpells, barData.dormantSpells, barData.removedSpells)
@@ -6808,6 +7103,9 @@ local function TalentAwareReconcile()
                     ReconcileSpellList(barData.customSpells, barData.dormantSpells, nil)
             end
         end
+        -- Buffs bar (and other MAIN_BAR_KEYS not in TALENT_AWARE_BAR_TYPES):
+        -- skip entirely. Buff/proc spells are not talent-dependent and should
+        -- never be moved to dormant on talent or level-up events.
     end
 
     BuildAllCDMBars()
@@ -6939,6 +7237,25 @@ end
 
 function ECME:CDMFinishSetup()
     BuildAllCDMBars()
+    -- Mark for snapshot if this spec has no buff bars configured yet.
+    -- Fires on first load after the feature was added (existing profiles have
+    -- an empty bars table). Uses a per-spec flag so it only runs once.
+    do
+        local pp = ECME.db.profile
+        local specKey = pp.activeSpecKey
+        local tbb = pp.trackedBuffBars
+        local hasNoBars = (not tbb) or (not tbb.bars) or (#tbb.bars == 0)
+        -- Check per-spec "already snapshotted" flag
+        local alreadyDone = pp.specProfiles
+            and specKey and specKey ~= "0"
+            and pp.specProfiles[specKey]
+            and pp.specProfiles[specKey]._tbbSnapshotDone
+        if hasNoBars and not alreadyDone then
+            pp._tbbNeedsSnapshot = true
+            pp.trackedBuffBars = nil
+            pp.tbbPositions = nil
+        end
+    end
     ns.BuildTrackedBuffBars()
 
     -- One-time migration: strip passive spellIDs that may have been stored
@@ -6990,6 +7307,13 @@ function ECME:CDMFinishSetup()
     ForcePopulateBlizzardViewers(function()
         ForceResnapshotMainBars()
         StartResnapshotRetry()
+        -- Auto-populate buff bars from Blizzard viewers on first use of this spec
+        local pp = ECME.db.profile
+        if pp._tbbNeedsSnapshot and ns.SnapshotBlizzardBuffBars then
+            pp._tbbNeedsSnapshot = nil
+            ns.SnapshotBlizzardBuffBars()
+            ns.BuildTrackedBuffBars()
+        end
     end)
 
     -- Save the initial spec profile so switching away and back preserves it
@@ -7053,6 +7377,11 @@ local function ScheduleTalentRebuild()
     local token = _talentRebuildToken
     C_Timer.After(0.5, function()
         if token ~= _talentRebuildToken then return end  -- superseded
+        -- Skip if a spec switch just happened -- SwitchSpecProfile already
+        -- handles the full save/load/rebuild cycle.  TalentAwareReconcile
+        -- running during the transition would see stale spell data and
+        -- incorrectly move the new spec's spells to dormant.
+        if (GetTime() - _lastSpecSwitchTime) < 3 then return end
         -- Wipe per-spell caches that may reference stale override IDs or
         -- stale charge data from spells that changed with the talent swap.
         -- Also wipe the persisted DB entries so CacheMultiChargeSpell
@@ -7065,8 +7394,8 @@ local function ScheduleTalentRebuild()
             wipe(_multiChargeSpells)
             wipe(_maxChargeCount)
             local db = ECME.db
-            if db and db.global and db.global.multiChargeSpells then
-                wipe(db.global.multiChargeSpells)
+            if db and db.sv and db.sv.multiChargeSpells then
+                wipe(db.sv.multiChargeSpells)
             end
         end
         -- Reconcile bar spellIDs against the new talent set.
@@ -7089,6 +7418,8 @@ local function ScheduleTalentRebuild()
                         ch._ecmeBaseSpellID = nil
                         ch._ecmeOverrideSid = nil
                         ch._ecmeCachedCdID = nil
+                        ch._ecmeIsChargeSpell = nil
+                        ch._ecmeMaxCharges = nil
                     end
                 end
             end
@@ -7107,7 +7438,8 @@ local function ScheduleRosterRebuild()
     end)
 end
 
-local _unitAuraTimer = nil
+-- _unitAuraTimer stored on ECME to stay within the 200 local/upvalue limit.
+ECME._unitAuraTimer = nil
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if not ECME.db then return end
     if event == "PLAYER_LOGOUT" then
@@ -7128,6 +7460,29 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             local hi = HEALTH_ITEM_BY_SPELL[castSpellID]
             if hi and hi.combatLockout and InCombatLockdown() then
                 _healthCombatLockout[castSpellID] = true
+            end
+            -- Duration-based tracking: start a timer for buff bar preset spells
+            -- that have a user-configured duration (e.g. potions with no aura)
+            local p = ECME.db and ECME.db.profile
+            if p and p.cdmBars and p.cdmBars.bars then
+                for _, barData in ipairs(p.cdmBars.bars) do
+                    local isBuffBar = (barData.key == "buffs" or barData.barType == "buffs")
+                    if barData.enabled and isBuffBar and barData.customSpellDurations then
+                        local durations = barData.customSpellDurations
+                        local primaryID = castSpellID
+                        local groups = barData.customSpellGroups
+                        if groups and groups[castSpellID] then
+                            primaryID = groups[castSpellID]
+                        end
+                        local dur = durations[primaryID]
+                        if dur and dur > 0 then
+                            if not _customBarTimers[barData.key] then
+                                _customBarTimers[barData.key] = {}
+                            end
+                            _customBarTimers[barData.key][primaryID] = GetTime() + dur
+                        end
+                    end
+                end
             end
         end
         return
@@ -7178,6 +7533,12 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
         wipe(_spellIconCache)
+        -- Wipe hook-captured cooldown caches so stale state from a previous
+        -- character doesn't persist after alt switch or reload.
+        wipe(_ecmeChildHasDurObj)
+        wipe(_ecmeDurObjCache)
+        wipe(_ecmeRawStartCache)
+        wipe(_ecmeRawDurCache)
         -- Validate spec on every zone-in (catches auto spec swaps, login, etc.)
         C_Timer.After(0.5, function()
             ValidateSpec()
@@ -7237,9 +7598,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "UNIT_AURA" and unit == "player" then
         -- Throttle: buff bars only need ~5fps refresh, not every aura event
-        if not _unitAuraTimer then
-            _unitAuraTimer = C_Timer.NewTimer(0.2, function()
-                _unitAuraTimer = nil
+        if not ECME._unitAuraTimer then
+            ECME._unitAuraTimer = C_Timer.NewTimer(0.2, function()
+                ECME._unitAuraTimer = nil
                 if UpdateBuffBars then UpdateBuffBars() end
             end)
         end
