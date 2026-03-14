@@ -2560,6 +2560,12 @@ end
 --  grow RIGHT -> near edge = LEFT, grow LEFT -> RIGHT, grow DOWN -> TOP, grow UP -> BOTTOM
 -------------------------------------------------------------------------------
 local function CDMFrameAnchorPoint(anchorSide, grow, centered)
+    if centered ~= false then
+        if anchorSide == "RIGHT"  then return "LEFT"   end
+        if anchorSide == "LEFT"   then return "RIGHT"  end
+        if anchorSide == "BOTTOM" then return "TOP"    end
+        if anchorSide == "TOP"    then return "BOTTOM" end
+    end
     if grow == "RIGHT" then return "LEFT"   end
     if grow == "LEFT"  then return "RIGHT"  end
     if grow == "DOWN"  then return "TOP"    end
