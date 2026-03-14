@@ -1009,6 +1009,11 @@ local DEFAULTS = {
                 anchorOffsetY = 0,
                 barVisibility = "always",
                 housingHideEnabled = true,
+                visHideHousing = true,
+                visOnlyInstances = false,
+                visHideMounted = false,
+                visHideNoTarget = false,
+                visHideNoEnemy = false,
                 hideBuffsWhenInactive = true,
                 showStackCount = false,
                 stackCountSize = 11,
@@ -1042,6 +1047,8 @@ local DEFAULTS = {
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
                     barVisibility = "always", housingHideEnabled = true,
+                    visHideHousing = true, visOnlyInstances = false,
+                    visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     hideBuffsWhenInactive = true,
                     showStackCount = false, stackCountSize = 11,
                     stackCountX = 0, stackCountY = 0,
@@ -1068,6 +1075,8 @@ local DEFAULTS = {
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
                     barVisibility = "always", housingHideEnabled = true,
+                    visHideHousing = true, visOnlyInstances = false,
+                    visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     hideBuffsWhenInactive = true,
                     showStackCount = false, stackCountSize = 11,
                     stackCountX = 0, stackCountY = 0,
@@ -1094,6 +1103,8 @@ local DEFAULTS = {
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
                     barVisibility = "always", housingHideEnabled = true,
+                    visHideHousing = true, visOnlyInstances = false,
+                    visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     hideBuffsWhenInactive = true,
                     showStackCount = false, stackCountSize = 11,
                     stackCountX = 0, stackCountY = 0,
@@ -5301,6 +5312,9 @@ local function UpdateAllCDMBars(dt)
             end
         end
     end
+
+    -- Bar glows: update visuals with fresh cache data (same tick as CDM bars)
+    if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
 end
 
 -------------------------------------------------------------------------------
@@ -5390,27 +5404,31 @@ local function _CDMApplyVisibility()
     local inCombat = _inCombat
     -- Full vehicle UI: hide all bars
     local inVehicle = _cdmInVehicle
-    -- Housing detection
-    local inHousing = false
-    if C_Map and C_Map.GetBestMapForUnit then
-        local mapID = C_Map.GetBestMapForUnit("player")
-        inHousing = mapID and mapID > 2600
-    end
+    -- Group state for mode checks
+    local inRaid = IsInRaid and IsInRaid() or false
+    local inParty = not inRaid and (IsInGroup and IsInGroup() or false)
 
     for _, barData in ipairs(p.cdmBars.bars) do
         local frame = cdmBarFrames[barData.key]
         if frame then
             local vis = barData.barVisibility or "always"
-            local hideHousing = barData.housingHideEnabled ~= false
 
+            -- Migration: convert old housingHideEnabled to new visHideHousing
+            if barData.visHideHousing == nil and barData.housingHideEnabled ~= nil then
+                barData.visHideHousing = (barData.housingHideEnabled ~= false)
+            end
+
+            -- Priority 1: vehicle always hides
             if inVehicle then
                 _CDMStopFade(frame)
                 frame:SetAlpha(0)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-            elseif hideHousing and inHousing then
+            -- Priority 2: visibility options (checkbox dropdown)
+            elseif EllesmereUI.CheckVisibilityOptions(barData) then
                 _CDMStopFade(frame)
                 frame:SetAlpha(0)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+            -- Priority 3: visibility mode dropdown
             elseif vis == "never" then
                 _CDMStopFade(frame)
                 frame:SetAlpha(0)
@@ -5418,6 +5436,33 @@ local function _CDMApplyVisibility()
             elseif vis == "in_combat" then
                 _CDMStopFade(frame)
                 if inCombat then
+                    frame:SetAlpha(barData.barBgAlpha or 1)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                else
+                    frame:SetAlpha(0)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                end
+            elseif vis == "in_raid" then
+                _CDMStopFade(frame)
+                if inRaid then
+                    frame:SetAlpha(barData.barBgAlpha or 1)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                else
+                    frame:SetAlpha(0)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                end
+            elseif vis == "in_party" then
+                _CDMStopFade(frame)
+                if inParty or inRaid then
+                    frame:SetAlpha(barData.barBgAlpha or 1)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                else
+                    frame:SetAlpha(0)
+                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                end
+            elseif vis == "solo" then
+                _CDMStopFade(frame)
+                if not inRaid and not inParty then
                     frame:SetAlpha(barData.barBgAlpha or 1)
                     if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                 else
@@ -6461,6 +6506,8 @@ function ns.AddCDMBar(barType, name, numRows)
         anchorTo = "none", anchorPosition = "left",
         anchorOffsetX = 0, anchorOffsetY = 0,
         barVisibility = "always", housingHideEnabled = true,
+        visHideHousing = true, visOnlyInstances = false,
+        visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
         hideBuffsWhenInactive = true,
         showStackCount = false, stackCountSize = 11,
         stackCountX = 0, stackCountY = 0,
@@ -7435,6 +7482,9 @@ eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
 eventFrame:RegisterEvent("STOP_MOVIE")
+-- Visibility option events: mounted, target, instance zone changes
+eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 
 -- Debounce token for talent-change rebuilds: rapid talent clicks collapse
 -- into a single deferred rebuild rather than firing once per click.
@@ -7566,6 +7616,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "GROUP_ROSTER_UPDATE" then
         ScheduleRosterRebuild()
+        _CDMApplyVisibility()
         return
     end
     if event == "CINEMATIC_STOP" or event == "STOP_MOVIE" then
@@ -7575,6 +7626,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if p and p.cdmBars and p.cdmBars.hideBlizzard then
             C_Timer.After(0, function() HideBlizzardCDM() end)
         end
+        return
+    end
+    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" then
+        _CDMApplyVisibility()
         return
     end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then

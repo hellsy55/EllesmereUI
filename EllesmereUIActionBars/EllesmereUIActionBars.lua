@@ -237,6 +237,12 @@ for _, info in ipairs(BAR_CONFIG) do
         combatShowEnabled = false,
         combatHideEnabled = false,
         housingHideEnabled = false,
+        barVisibility = "always",
+        visHideHousing = false,
+        visOnlyInstances = false,
+        visHideMounted = false,
+        visHideNoTarget = false,
+        visHideNoEnemy = false,
         hideKeybind = false,
         keybindFontSize = 12,
         keybindFontColor = { r = 1, g = 1, b = 1 },
@@ -3574,12 +3580,15 @@ end
 -------------------------------------------------------------------------------
 local function BuildVisibilityString(info, s)
     local key = info.key
+    local vis = s.barVisibility or "always"
 
     -- Pet bar has unique logic: it only shows when a pet is active and
     -- the player is not in a vehicle/override/possess state.
     if info.isPetBar then
         local petShow
-        if s.combatShowEnabled then
+        if vis == "in_combat" then
+            petShow = "[combat] show; hide"
+        elseif s.combatShowEnabled then
             petShow = "[combat] show; hide"
         elseif s.combatHideEnabled then
             petShow = "[combat] hide; show"
@@ -3592,18 +3601,27 @@ local function BuildVisibilityString(info, s)
     -- Build the hide-prefix based on bar type
     local hidePrefix
     if key == "MainBar" then
-        -- MainBar pages to vehicle/override actions -- only hide for pet battle
         hidePrefix = "[petbattle] hide; "
     elseif info.isStance then
-        -- Stance bar: hide in vehicles and pet battles
         hidePrefix = "[vehicleui][petbattle] hide; "
     else
-        -- All other action bars (2-8): hide in vehicles, pet battles, and
-        -- override bar (only bar 1 pages to show those actions)
         hidePrefix = "[vehicleui][petbattle][overridebar] hide; "
     end
 
-    -- Append combat conditions
+    -- Append visibility mode conditions
+    if vis == "never" then
+        return hidePrefix .. "hide"
+    elseif vis == "in_combat" then
+        return hidePrefix .. "[combat] show; hide"
+    elseif vis == "in_raid" then
+        return hidePrefix .. "[group:raid] show; hide"
+    elseif vis == "in_party" then
+        return hidePrefix .. "[group:party] show; [group:raid] show; hide"
+    elseif vis == "solo" then
+        return hidePrefix .. "[nogroup] show; hide"
+    end
+
+    -- Legacy boolean fallback (for any bars not yet migrated)
     if s.combatShowEnabled then
         return hidePrefix .. "[combat] show; hide"
     elseif s.combatHideEnabled then
@@ -3707,7 +3725,9 @@ function EAB:ApplyAlwaysHidden()
         if not s then break end
         local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
         if frame then
-            if s.alwaysHidden then
+            local vis = s.barVisibility or "always"
+            local isHidden = (vis == "never") or s.alwaysHidden
+            if isHidden then
                 if not info.visibilityOnly and not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", "hide")
                 elseif info.visibilityOnly then
@@ -3717,24 +3737,19 @@ function EAB:ApplyAlwaysHidden()
                     SafeEnableMouse(frame, false)
                 end
             else
-                -- Re-register the attribute driver so combat visibility and
-                -- vehicle/pet battle/override hiding work again.
                 if not info.visibilityOnly and not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
                 end
                 if not InCombatLockdown() then
-                    if not s.combatShowEnabled then
+                    if vis ~= "in_combat" and not s.combatShowEnabled then
                         frame:Show()
                     end
-                    -- Action bar frames only need mouse motion (hover detection);
-                    -- clicks pass through to buttons or frames behind.
                     if barFrames[key] and frame == barFrames[key] then
                         SafeEnableMouseMotionOnly(frame, not s.clickThrough)
                     else
                         SafeEnableMouse(frame, not s.clickThrough)
                     end
                 end
-                -- Data bars may need to re-hide (e.g. XP at max level, Rep with no watched faction)
                 if info.isDataBar and frame._updateFunc then
                     frame._updateFunc()
                 end
@@ -3796,33 +3811,25 @@ function EAB:ApplyClickThroughForBar(barKey)
 end
 
 function EAB:UpdateHousingVisibility()
-    local inHousing = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Blizzard_PlayerSpells") and false
-    -- Check if we're in a housing zone
-    local zoneText = GetZoneText and GetZoneText() or ""
-    -- Housing detection: check for the housing map
-    if C_Map and C_Map.GetBestMapForUnit then
-        local mapID = C_Map.GetBestMapForUnit("player")
-        -- Housing maps are typically in the 2000+ range (placeholder check)
-        inHousing = mapID and mapID > 2600
-    end
-    if self._forceHousing then
-        self._forceHousing = nil
-    end
-
-    for _, info in ipairs(ALL_BARS) do
-        local key = info.key
-        local s = self.db.profile.bars[key]
-        if s and s.housingHideEnabled then
-            local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
-            if frame then
-                if inHousing then
-                    frame:Hide()
-                elseif not s.alwaysHidden then
-                    frame:Show()
+    -- Defer to next frame to avoid taint from secure execution paths
+    -- (e.g. CameraOrSelectOrMoveStop triggering PLAYER_MOUNT_DISPLAY_CHANGED)
+    C_Timer.After(0, function()
+        if InCombatLockdown() then return end
+        for _, info in ipairs(ALL_BARS) do
+            local key = info.key
+            local s = self.db.profile.bars[key]
+            if s then
+                local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
+                if frame then
+                    if EllesmereUI.CheckVisibilityOptions(s) then
+                        frame:Hide()
+                    elseif not s.alwaysHidden and (s.barVisibility or "always") ~= "never" then
+                        frame:Show()
+                    end
                 end
             end
         end
-    end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -5148,6 +5155,29 @@ function EAB:OnInitialize()
         -- Old path without EllesmereUI subfolder leave as-is, fonts are at addon root
     end
 
+    -- Migration: convert old boolean visibility flags to unified barVisibility key
+    if p.bars then
+        for _, s in pairs(p.bars) do
+            if type(s) == "table" and s.barVisibility == nil then
+                if s.alwaysHidden then
+                    s.barVisibility = "never"
+                elseif s.mouseoverEnabled then
+                    s.barVisibility = "mouseover"
+                elseif s.combatHideEnabled then
+                    s.barVisibility = "never"  -- hide_combat mapped to in_combat inverse
+                elseif s.combatShowEnabled then
+                    s.barVisibility = "in_combat"
+                else
+                    s.barVisibility = "always"
+                end
+            end
+            -- Migration: convert old housingHideEnabled to new visHideHousing
+            if type(s) == "table" and s.visHideHousing == nil and s.housingHideEnabled ~= nil then
+                s.visHideHousing = s.housingHideEnabled
+            end
+        end
+    end
+
     -- Slash commands
     -- Expose apply hook for PP scale change re-apply
     _G._EAB_Apply = function()
@@ -5637,6 +5667,17 @@ function EAB:FinishSetup()
     self:RegisterEvent("UPDATE_BONUS_ACTIONBAR", QueueAlwaysShowButtonsRefresh)
 
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA", function()
+        self:UpdateHousingVisibility()
+    end)
+
+    -- Visibility option events: mounted, target, group changes
+    self:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED", function()
+        self:UpdateHousingVisibility()
+    end)
+    self:RegisterEvent("PLAYER_TARGET_CHANGED", function()
+        self:UpdateHousingVisibility()
+    end)
+    self:RegisterEvent("GROUP_ROSTER_UPDATE", function()
         self:UpdateHousingVisibility()
     end)
 

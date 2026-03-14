@@ -87,13 +87,6 @@ function ns.GetButtonAssignments(barIdx, btnIdx)
     return bg.assignments[key]
 end
 
---- Check if a spell is active (has an aura on the player)
-function ns.IsSpellAuraActive(spellID)
-    if not spellID or spellID <= 0 then return false end
-    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-    return ok and aura ~= nil
-end
-
 --- Returns true if the user has at least one bar glow assignment configured
 function ns.HasBarGlowAssignments()
     if not ECME or not ECME.db then return false end
@@ -116,7 +109,6 @@ local overlayFrames = {}
 local hasActiveOverlays = false
 local hasHiddenSlots = false
 local lastSourceStates = {}
-local overlayUpdateFrame
 
 local HIDDEN_ALPHA = 0.001
 local PACK_SPACING = 6
@@ -292,7 +284,6 @@ local function SetupOverlays()
     if not bg or not bg.enabled then
         hasActiveOverlays = false
         hasHiddenSlots = false
-        if overlayUpdateFrame then overlayUpdateFrame:Hide() end
         for key, overlay in pairs(overlayFrames) do
             StopNativeGlow(overlay)
             overlay:Hide()
@@ -302,6 +293,13 @@ local function SetupOverlays()
 
     local activeKeys = {}
     local anyActive = false
+
+    local assignCount = 0
+    for assignKey, buffList in pairs(bg.assignments) do
+        if buffList and #buffList > 0 then
+            assignCount = assignCount + 1
+        end
+    end
 
     for assignKey, buffList in pairs(bg.assignments) do
         if buffList and #buffList > 0 then
@@ -352,11 +350,6 @@ local function SetupOverlays()
 
     hasActiveOverlays = anyActive
     hasHiddenSlots = false
-
-    if overlayUpdateFrame then
-        if anyActive then overlayUpdateFrame:Show()
-        else overlayUpdateFrame:Hide() end
-    end
 end
 
 UpdateOverlayVisuals = function()
@@ -366,10 +359,15 @@ UpdateOverlayVisuals = function()
             local spellID = entry.spellID
             local mode = entry.mode or "ACTIVE"
 
+            -- Use the exact same data source as CDM bars: _tickBlizzActiveCache
+            -- This cache is rebuilt every tick in UpdateAllCDMBars from the
+            -- Blizzard CDM viewer children, keyed by both resolvedSid and baseSpellID.
             local auraActive = false
             if spellID and spellID > 0 then
-                local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-                auraActive = ok and aura ~= nil
+                local blizzCache = ns._tickBlizzActiveCache
+                if blizzCache and blizzCache[spellID] then
+                    auraActive = true
+                end
             end
 
             local shouldGlow
@@ -383,22 +381,23 @@ UpdateOverlayVisuals = function()
             if shouldGlow ~= prevState then
                 lastSourceStates[key] = shouldGlow
                 if shouldGlow then
-                    if not overlay._glowActive then
-                        local style = entry.glowStyle or 1
-                        local cr, cg, cb = 1, 0.82, 0.1
-                        if entry.classColor then
-                            local _, ct = UnitClass("player")
-                            if ct then
-                                local cc = RAID_CLASS_COLORS[ct]
-                                if cc then cr, cg, cb = cc.r, cc.g, cc.b end
-                            end
-                        elseif entry.glowColor then
-                            cr = entry.glowColor.r or 1
-                            cg = entry.glowColor.g or 0.82
-                            cb = entry.glowColor.b or 0.1
-                        end
-                        StartNativeGlow(overlay, style, cr, cg, cb)
+                    if overlay._glowActive then
+                        StopNativeGlow(overlay)
                     end
+                    local style = entry.glowStyle or 1
+                    local cr, cg, cb = 1, 0.82, 0.1
+                    if entry.classColor then
+                        local _, ct = UnitClass("player")
+                        if ct then
+                            local cc = RAID_CLASS_COLORS[ct]
+                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                        end
+                    elseif entry.glowColor then
+                        cr = entry.glowColor.r or 1
+                        cg = entry.glowColor.g or 0.82
+                        cb = entry.glowColor.b or 0.1
+                    end
+                    StartNativeGlow(overlay, style, cr, cg, cb)
                 else
                     if overlay._glowActive then
                         StopNativeGlow(overlay)
@@ -409,6 +408,7 @@ UpdateOverlayVisuals = function()
     end
 end
 -- END BAR GLOWS
+ns.UpdateOverlayVisuals = UpdateOverlayVisuals
 
 -- BAR GLOWS MASTER UPDATE
 local updatePending = false
@@ -434,21 +434,7 @@ ns.RequestUpdate = RequestUpdate
 local lastPackTime = 0
 local PACK_THROTTLE = 0.5
 
-overlayUpdateFrame = CreateFrame("Frame")
-overlayUpdateFrame:Hide()
-overlayUpdateFrame:SetScript("OnUpdate", function(self, elapsed)
-    -- No assignments -- nothing to do
-    if not ns.HasBarGlowAssignments() then self:Hide(); return end
-    self.elapsed = (self.elapsed or 0) + elapsed
-    if self.elapsed < 1.0 then return end
-    self.elapsed = 0
-    if hasActiveOverlays then UpdateOverlayVisuals() end
-    if hasHiddenSlots then
-        local now = GetTime()
-        if (now - lastPackTime) >= PACK_THROTTLE then
-            ApplyPerSlotHidingAndPack()
-            lastPackTime = now
-        end
-    end
-end)
+-- Bar glow visuals are updated directly from UpdateAllCDMBars each tick
+-- (same timing as CDM bars, using the same _tickBlizzActiveCache data).
+-- No separate polling frame needed.
 -- END BAR GLOWS MASTER UPDATE

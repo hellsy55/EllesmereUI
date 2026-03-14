@@ -777,7 +777,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
         end -- divider else
     end -- for order
 
-    local totalContentH = mH + 4
+    local totalContentH = mH + 3
     innerContainer:SetHeight(totalContentH)
 
     ---------------------------------------------------------------------------
@@ -2835,6 +2835,18 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
             RegisterWidgetRefresh(function() ApplyDisabledState() end)
             ApplyDisabledState()
 
+        elseif t == "labeledButton" then
+            -- Label on the left (standard), button anchored to the right
+            local btn = CreateFrame("Button", nil, region)
+            PP.Size(btn, cfg.width or 180, 32)
+            PP.Point(btn, "RIGHT", region, "RIGHT", -SIDE_PAD, 0)
+            btn:SetFrameLevel(frame:GetFrameLevel() + 2)
+            MakeStyledButton(btn, cfg.buttonText or cfg.text or "", 13, RB_COLOURS, cfg.onClick)
+            controlFrame = btn
+            controlAnchor = btn
+            RegisterWidgetRefresh(function() ApplyDisabledState() end)
+            ApplyDisabledState()
+
         elseif t == "multiSwatch" then
             -- Label + N color swatches laid out right-to-left from the right edge
             local SWATCH_SZ = 24
@@ -3193,6 +3205,16 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
             PP.Point(btn, "CENTER", region, "CENTER", 0, 0)
             btn:SetFrameLevel(frame:GetFrameLevel() + 2)
             MakeStyledButton(btn, cfg.text or "", 13, RB_COLOURS, cfg.onClick)
+            controlFrame = btn
+            RegisterWidgetRefresh(function() ApplyDisabledState() end)
+            ApplyDisabledState()
+
+        elseif t == "labeledButton" then
+            local btn = CreateFrame("Button", nil, region)
+            PP.Size(btn, cfg.width or 140, 32)
+            PP.Point(btn, "RIGHT", region, "RIGHT", -SIDE_PAD, 0)
+            btn:SetFrameLevel(frame:GetFrameLevel() + 2)
+            MakeStyledButton(btn, cfg.buttonText or cfg.text or "", 13, RB_COLOURS, cfg.onClick)
             controlFrame = btn
             RegisterWidgetRefresh(function() ApplyDisabledState() end)
             ApplyDisabledState()
@@ -4996,3 +5018,208 @@ do
 end
 
 end  -- end deferred init
+
+-------------------------------------------------------------------------------
+--  Shared Visibility Options Checkbox Dropdown
+--  Reusable across CDM, Action Bars, Resource Bars, Unit Frames.
+--  items = EllesmereUI.VIS_OPT_ITEMS (or a subset)
+--  getFn(key) -> bool, setFn(key, bool)
+--  Returns: ddBtn, refreshFn
+-------------------------------------------------------------------------------
+function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, getFn, setFn, onChanged)
+    local PP = EllesmereUI.PP or EllesmereUI.PanelPP
+    local ddBtn = CreateFrame("Button", nil, parentFrame)
+    PP.Size(ddBtn, ddW, 30)
+    ddBtn:SetFrameLevel(fLevel)
+    local ddBg = ddBtn:CreateTexture(nil, "BACKGROUND")
+    ddBg:SetAllPoints()
+    ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+    local ddBrd = EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+    local ddLbl = ddBtn:CreateFontString(nil, "OVERLAY")
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("options") or "Fonts\\FRIZQT__.TTF"
+    ddLbl:SetFont(fontPath, 13, "")
+    ddLbl:SetTextColor(1, 1, 1, 0.7)
+    ddLbl:SetJustifyH("LEFT")
+    ddLbl:SetWordWrap(false)
+    ddLbl:SetMaxLines(1)
+    ddLbl:SetPoint("LEFT", ddBtn, "LEFT", 12, 0)
+    ddLbl:SetPoint("RIGHT", ddBtn, "RIGHT", -24, 0)
+    local arrow = EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+
+    local menu
+    local function SummaryLabel()
+        local names = {}
+        for _, item in ipairs(items) do
+            if getFn(item.key) then names[#names + 1] = item.label end
+        end
+        if #names == 0 then return "None" end
+        if #names == #items then return "All" end
+        return table.concat(names, ", ")
+    end
+    local function UpdateLabel()
+        ddLbl:SetText(SummaryLabel())
+    end
+    UpdateLabel()
+
+    local function EnsureMenu()
+        if menu then return end
+        local ITEM_H = 28
+        local menuH = 4 + #items * ITEM_H + 4
+        menu = CreateFrame("Frame", nil, UIParent)
+        menu:SetFrameStrata("FULLSCREEN_DIALOG")
+        menu:SetFrameLevel(200)
+        menu:SetClampedToScreen(true)
+        menu:EnableMouse(true)
+        menu:SetSize(ddW, menuH)
+        menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+        menu:Hide()
+        local mBg = menu:CreateTexture(nil, "BACKGROUND")
+        mBg:SetAllPoints()
+        mBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA or 0.92)
+        EllesmereUI.MakeBorder(menu, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+        local ppScale = EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale() or 1
+        menu:SetScale(ppScale)
+
+        local yOff = -4
+        for _, item in ipairs(items) do
+            local row = CreateFrame("Button", nil, menu)
+            row:SetHeight(ITEM_H)
+            row:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, yOff)
+            row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -1, yOff)
+            row:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local box = CreateFrame("Frame", nil, row)
+            box:SetSize(16, 16)
+            box:SetPoint("LEFT", row, "LEFT", 10, 0)
+            local boxBg = box:CreateTexture(nil, "BACKGROUND")
+            boxBg:SetAllPoints()
+            boxBg:SetColorTexture(0.12, 0.12, 0.14, 1)
+            local boxBrd = EllesmereUI.MakeBorder(box, 0.4, 0.4, 0.4, 0.6, PP)
+            local chk = box:CreateTexture(nil, "ARTWORK")
+            PP.SetInside(chk, box, 2, 2)
+            chk:SetColorTexture(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 1)
+            chk:SetSnapToPixelGrid(false)
+            local lbl = row:CreateFontString(nil, "OVERLAY")
+            lbl:SetFont(fontPath, 13, "")
+            lbl:SetTextColor(0.75, 0.75, 0.75, 1)
+            lbl:SetPoint("LEFT", box, "RIGHT", 8, 0)
+            lbl:SetText(item.label)
+            local hl = row:CreateTexture(nil, "ARTWORK")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0)
+            local function UpdateCheck()
+                if getFn(item.key) then
+                    chk:Show()
+                    boxBrd:SetColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                else
+                    chk:Hide()
+                    boxBrd:SetColor(0.4, 0.4, 0.4, 0.6)
+                end
+            end
+            UpdateCheck()
+            row._updateCheck = UpdateCheck
+            row:SetScript("OnEnter", function()
+                lbl:SetTextColor(1, 1, 1, 1)
+                hl:SetColorTexture(1, 1, 1, 0.04)
+                if item.tooltip then
+                    EllesmereUI.ShowWidgetTooltip(row, item.tooltip)
+                end
+            end)
+            row:SetScript("OnLeave", function()
+                lbl:SetTextColor(0.75, 0.75, 0.75, 1)
+                hl:SetColorTexture(1, 1, 1, 0)
+                if item.tooltip then
+                    EllesmereUI.HideWidgetTooltip()
+                end
+            end)
+            row:SetScript("OnClick", function()
+                setFn(item.key, not getFn(item.key))
+                UpdateCheck(); UpdateLabel()
+                if onChanged then
+                    -- Anchor menu to absolute screen position BEFORE callback
+                    -- so the page rebuild (which destroys ddBtn) can't shift us
+                    local mScale = menu:GetEffectiveScale()
+                    local uiScale = UIParent:GetEffectiveScale()
+                    local cx, cy = menu:GetCenter()
+                    menu:ClearAllPoints()
+                    menu:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
+                        cx * mScale / uiScale, cy * mScale / uiScale)
+                    onChanged()
+                end
+            end)
+            yOff = yOff - ITEM_H
+        end
+        ddBtn._ddMenu = menu
+    end
+
+    ddBtn:SetScript("OnEnter", function()
+        ddLbl:SetTextColor(1, 1, 1, 1)
+        ddBrd:SetColor(1, 1, 1, EllesmereUI.DD_BRD_HA or 0.25)
+        ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA or 0.92)
+    end)
+    ddBtn:SetScript("OnLeave", function()
+        if not (menu and menu:IsShown()) then
+            ddLbl:SetTextColor(1, 1, 1, 0.7)
+            ddBrd:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A)
+            ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+        end
+    end)
+
+    local blocker
+    local function ShowMenu()
+        EnsureMenu()
+        if menu:IsShown() then
+            menu:Hide()
+            return
+        end
+        menu:Show()
+        blocker = CreateFrame("Button", nil, UIParent)
+        blocker:SetFrameStrata("FULLSCREEN")
+        blocker:SetFrameLevel(199)
+        blocker:SetAllPoints(UIParent)
+        blocker:SetScript("OnClick", function() menu:Hide() end)
+        blocker:Show()
+        local wasDown = false
+        menu:SetScript("OnUpdate", function(self)
+            local scrollFrame = EllesmereUI._scrollFrame
+            if scrollFrame then
+                if ddBtn._inScrollChild == nil then
+                    local scrollChild = scrollFrame.GetScrollChild and scrollFrame:GetScrollChild()
+                    local found = false
+                    if scrollChild then
+                        local p = ddBtn:GetParent()
+                        while p do
+                            if p == scrollChild then found = true; break end
+                            p = p:GetParent()
+                        end
+                    end
+                    ddBtn._inScrollChild = found
+                end
+                if ddBtn._inScrollChild then
+                    local sfTop = scrollFrame:GetTop()
+                    local sfBot = scrollFrame:GetBottom()
+                    local btnBot = ddBtn:GetBottom()
+                    if sfTop and sfBot and btnBot then
+                        if btnBot < sfBot or btnBot > sfTop then self:Hide() end
+                    end
+                end
+            end
+        end)
+        menu:HookScript("OnHide", function()
+            menu:SetScript("OnUpdate", nil)
+            if blocker then blocker:Hide(); blocker:SetParent(nil); blocker = nil end
+        end)
+    end
+
+    ddBtn:SetScript("OnClick", function() ShowMenu() end)
+    ddBtn:HookScript("OnHide", function() if menu then menu:Hide() end end)
+
+    local function RefreshAll()
+        UpdateLabel()
+        if menu then
+            for _, child in pairs({menu:GetChildren()}) do
+                if child._updateCheck then child._updateCheck() end
+            end
+        end
+    end
+    return ddBtn, RefreshAll
+end

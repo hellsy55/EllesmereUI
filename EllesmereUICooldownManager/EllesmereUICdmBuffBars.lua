@@ -731,84 +731,39 @@ local function RefreshTBBResolvedIDs()
 end
 ns.RefreshTBBResolvedIDs = RefreshTBBResolvedIDs
 
--- Cache aura start/duration on UNIT_AURA so we always have fresh values
--- at the moment the buff is applied, before combat taint makes them unreadable.
+-- Cache _customStart for popular buff bars on UNIT_AURA so the fill timer
+-- starts at the right moment. Only needed for multi-ID (popular) bars that
+-- use customDuration. Single-ID bars use the DurationObject path from the
+-- Blizzard CDM child and need no event-driven caching.
 local tbbAuraListener = CreateFrame("Frame")
 tbbAuraListener:SetScript("OnEvent", function()
     if not ECME or not ECME.db then return end
     local tbb = ns.GetTrackedBuffBars()
     local bars = tbb.bars
     if not bars then return end
+    local now = GetTime()
     for i, cfg in ipairs(bars) do
         local bar = tbbFrames[i]
-        if bar and bar._tbbReady and cfg.enabled ~= false then
-            -- Build the list of IDs to check: spellIDs list takes priority over single spellID
-            local idList = cfg.spellIDs
-            local singleID = (cfg.spellID and cfg.spellID > 0) and cfg.spellID or nil
-
-            local function TryGetAura(sid)
-                if not sid or sid == 0 then return nil end
-                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
-                return (ok and result) or nil
-            end
-
-            local result = nil
-            if idList then
-                for _, sid in ipairs(idList) do
-                    result = TryGetAura(sid)
-                    if result then break end
-                end
-            elseif singleID then
-                local resolvedID = bar._resolvedAuraID or singleID
-                result = TryGetAura(resolvedID)
-                if not result and resolvedID ~= singleID then
-                    result = TryGetAura(singleID)
-                end
-            end
-
-            if result then
-                if idList then
-                    -- spellIDs bars: tick reads duration/expirationTime directly, nothing to cache here
-                else
-                    -- Single-ID bar: cache start/duration for the standard CDM child path
-                    local d = result.duration
-                    local e = result.expirationTime
-                    if d and e and d > 0 and e > 0 then
-                        bar._cachedStart = e - d
-                        bar._cachedDuration = d
-                        bar._customStart = nil
-                    elseif d and d == 0 then
-                        -- Permanent buff
-                        bar._cachedStart = 0
-                        bar._cachedDuration = 0
-                        bar._customStart = nil
-                    end
-                end
-            else
-                if idList then
-                    -- spellIDs bars use a cast-triggered timer (_customStart).
-                    -- In combat, aura lookups return nil due to secret values, so we
-                    -- cannot trust a nil result -- only clear when the timer has expired.
-                    -- OOC, a nil result is definitive: the buff is gone, clear immediately.
-                    if not InCombatLockdown() then
-                        bar._customStart    = nil
-                        bar._activeDuration = nil
-                    else
-                        local activeDur = bar._activeDuration or cfg.customDuration
-                        local timerExpired = not bar._customStart
-                            or (activeDur and (GetTime() - bar._customStart) >= activeDur)
-                        if timerExpired then
-                            bar._customStart    = nil
-                            bar._activeDuration = nil
+        if bar and bar._tbbReady and cfg.enabled ~= false and cfg.spellIDs and cfg.customDuration then
+            -- Only initialize _customStart if not already running
+            if not bar._customStart then
+                for _, sid in ipairs(cfg.spellIDs) do
+                    local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
+                    if ok and result then
+                        local dur = result.duration
+                        local exp = result.expirationTime
+                        local secretD = issecretvalue and issecretvalue(dur)
+                        local secretE = issecretvalue and issecretvalue(exp)
+                        if not secretD and not secretE and dur and exp and dur > 0 and exp > 0 then
+                            bar._activeDuration = cfg.customDuration
+                            bar._customStart = now - (cfg.customDuration - math.max(0, exp - now))
+                        else
+                            -- Secret or no duration: start timer from now
+                            bar._activeDuration = cfg.customDuration
+                            bar._customStart = now
                         end
+                        break
                     end
-                else
-                    -- Single-ID bar: buff faded, clear all cache
-                    bar._cachedStart    = nil
-                    bar._cachedDuration = nil
-                    bar._customStart    = nil
-                    bar._activeDuration = nil
-                    if bar._cooldown then bar._cooldown:Clear() end
                 end
             end
         end
@@ -961,75 +916,45 @@ function ns.UpdateTrackedBuffBarTimers()
         elseif cfg.enabled == false then
             bar:Hide()
         elseif cfg.spellIDs then
-            -- Multi-ID bar (popular buffs). Active if any ID matches an active aura.
+            -- Multi-ID bar (popular buffs). Active if any ID is in the CDM active cache.
             -- Use cfg dimensions so gradient clip sizing is correct before first layout pass.
             local barW = cfg.verticalOrientation and (cfg.height or 24) or (cfg.width or 270)
             local barH = cfg.verticalOrientation and (cfg.width or 270) or (cfg.height or 24)
             local sb = bar._bar  -- StatusBar child of wrapFrame
             local isActive = false
-            local activeResult = nil
             for _, sid in ipairs(cfg.spellIDs) do
-                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
-                if ok and result then
+                if activeCache[sid] then
                     isActive = true
-                    activeResult = result
                     break
                 end
             end
 
-            if isActive and activeResult then
-                if not bar:IsShown() then bar:Show() end
-
-                local dur = activeResult.duration
-                local exp = activeResult.expirationTime
-                if cfg.customDuration and not bar._customStart then
-                    local secretD = issecretvalue and issecretvalue(dur)
-                    local secretE = issecretvalue and issecretvalue(exp)
-                    if not secretD and not secretE and dur and exp and dur > 0 and exp > 0 then
-                        local activeDur = cfg.customDuration
-                        bar._activeDuration = activeDur
-                        bar._customStart = now - (activeDur - math.max(0, exp - now))
+            -- Fall back to cast-triggered custom timer (covers potions etc. that
+            -- may not appear in CDM viewers at all)
+            if not isActive and bar._customStart then
+                local activeDur = bar._activeDuration or cfg.customDuration
+                if activeDur and activeDur > 0 then
+                    local elapsed = now - bar._customStart
+                    if elapsed < activeDur then
+                        isActive = true
+                    else
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
                     end
                 end
-                local useCustomTimer = cfg.customDuration and bar._customStart
-                local secretDur = issecretvalue and (issecretvalue(dur) or issecretvalue(exp))
-                if useCustomTimer or secretDur then
-                    local activeDur = bar._activeDuration or cfg.customDuration
-                    if activeDur and activeDur > 0 and bar._customStart then
-                        local elapsed = now - bar._customStart
-                        local remaining = math.max(0, activeDur - elapsed)
-                        local frac = remaining / activeDur
-                        sb:SetMinMaxValues(0, 1)
-                        sb:SetValue(frac)
-                        if bar._gradientActive and bar._gradClip then
-                            if cfg.verticalOrientation then
-                                bar._gradClip:SetHeight(math.max(0.01, barH * frac))
-                            else
-                                bar._gradClip:SetWidth(math.max(0.01, barW * frac))
-                            end
-                        end
-                        if cfg.showTimer and bar._timerText then
-                            if remaining <= 0 then
-                                bar._timerText:Hide()
-                            else
-                                local t
-                                if remaining >= 60 then t = format("%dm", floor(remaining / 60))
-                                elseif remaining >= 10 then t = format("%d", floor(remaining))
-                                else t = format("%.1f", remaining) end
-                                bar._timerText:SetText(t)
-                                bar._timerText:Show()
-                            end
-                        end
-                    else
-                        sb:SetValue(1)
-                        if cfg.showTimer and bar._timerText then bar._timerText:Hide() end
-                    end
-                elseif dur and exp and dur > 0 and exp > 0 then
-                    local remaining = math.max(0, exp - now)
-                    local frac = remaining / dur
+            end
+
+            if isActive then
+                if not bar:IsShown() then bar:Show() end
+
+                -- All multi-ID bars use customDuration for the fill animation
+                local activeDur = bar._activeDuration or cfg.customDuration
+                if activeDur and activeDur > 0 and bar._customStart then
+                    local elapsed = now - bar._customStart
+                    local remaining = math.max(0, activeDur - elapsed)
+                    local frac = remaining / activeDur
                     sb:SetMinMaxValues(0, 1)
                     sb:SetValue(frac)
-
                     if bar._gradientActive and bar._gradClip then
                         if cfg.verticalOrientation then
                             bar._gradClip:SetHeight(math.max(0.01, barH * frac))
@@ -1037,22 +962,25 @@ function ns.UpdateTrackedBuffBarTimers()
                             bar._gradClip:SetWidth(math.max(0.01, barW * frac))
                         end
                     end
-
                     if cfg.showTimer and bar._timerText then
                         if remaining <= 0 then
                             bar._timerText:Hide()
                         else
                             local t
-                            if remaining >= 3600 then t = format("%dh", floor(remaining / 3600))
-                            elseif remaining >= 60 then t = format("%dm", floor(remaining / 60))
+                            if remaining >= 60 then t = format("%dm", floor(remaining / 60))
                             elseif remaining >= 10 then t = format("%d", floor(remaining))
                             else t = format("%.1f", remaining) end
                             bar._timerText:SetText(t)
                             bar._timerText:Show()
                         end
                     end
+                    if remaining <= 0 then
+                        bar._customStart    = nil
+                        bar._activeDuration = nil
+                        bar:Hide()
+                    end
                 else
-                    -- Permanent / no duration
+                    -- Active but no custom timer started yet (or permanent)
                     sb:SetValue(1)
                     if bar._gradientActive and bar._gradClip then
                         if cfg.verticalOrientation then
@@ -1064,40 +992,7 @@ function ns.UpdateTrackedBuffBarTimers()
                     if cfg.showTimer and bar._timerText then bar._timerText:Hide() end
                 end
             else
-                -- No aura found. Fall back to cast-triggered timer if available.
-                local activeDur = bar._activeDuration or cfg.customDuration
-                if activeDur and activeDur > 0 and bar._customStart then
-                    local elapsed = now - bar._customStart
-                    local remaining = math.max(0, activeDur - elapsed)
-                    if remaining > 0 then
-                        if not bar:IsShown() then bar:Show() end
-                        local frac = remaining / activeDur
-                        sb:SetMinMaxValues(0, 1)
-                        sb:SetValue(frac)
-                        if bar._gradientActive and bar._gradClip then
-                            if cfg.verticalOrientation then
-                                bar._gradClip:SetHeight(math.max(0.01, barH * frac))
-                            else
-                                bar._gradClip:SetWidth(math.max(0.01, barW * frac))
-                            end
-                        end
-                        if cfg.showTimer and bar._timerText then
-                            local t
-                            if remaining >= 60 then t = format("%dm", floor(remaining / 60))
-                            elseif remaining >= 10 then t = format("%d", floor(remaining))
-                            else t = format("%.1f", remaining) end
-                            bar._timerText:SetText(t)
-                            bar._timerText:Show()
-                        end
-                    else
-                        -- Timer expired
-                        bar._customStart    = nil
-                        bar._activeDuration = nil
-                        if bar:IsShown() then bar:Hide() end
-                    end
-                else
-                    if bar:IsShown() then bar:Hide() end
-                end
+                if bar:IsShown() then bar:Hide() end
             end
         elseif not cfg.spellID or cfg.spellID == 0 then
             bar:Hide()
@@ -1115,32 +1010,6 @@ function ns.UpdateTrackedBuffBarTimers()
             if not isActive then
                 if IsBufChildActive and IsBufChildActive(blzChild) then
                     isActive = true
-                end
-            end
-
-            -- OOC fallback: caches may be empty before first tick, use direct API
-            if not isActive and not inCombat then
-                local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, resolvedID)
-                if not ok then result = nil end
-                if not result and resolvedID ~= spellID then
-                    ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-                    if not ok then result = nil end
-                end
-                if result then
-                    isActive = true
-                    if cfg.customDuration and not bar._customStart then
-                        local dur = result.duration
-                        local exp = result.expirationTime
-                        if dur and exp and not (issecretvalue and issecretvalue(dur))
-                           and not (issecretvalue and issecretvalue(exp)) and dur > 0 then
-                            local activeDur = cfg.customDuration
-                            bar._activeDuration = activeDur
-                            bar._customStart = now - (activeDur - math.max(0, exp - now))
-                        end
-                    end
-                else
-                    bar._customStart    = nil
-                    bar._activeDuration = nil
                 end
             end
 
@@ -1264,11 +1133,9 @@ function ns.UpdateTrackedBuffBarTimers()
                     end
                 end
             else
-                -- Buff not active, hide the bar and clear cached duration
+                -- Buff not active, hide the bar and clear state
                 if bar:IsShown() then bar:Hide() end
                 bar._resolvedAuraID = nil
-                bar._cachedStart = nil
-                bar._cachedDuration = nil
                 bar._customStart = nil
                 bar._activeDuration = nil
                 if bar._cooldown then bar._cooldown:Clear() end

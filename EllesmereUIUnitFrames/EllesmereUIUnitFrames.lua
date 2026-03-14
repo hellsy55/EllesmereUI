@@ -154,6 +154,12 @@ local defaults = {
             showInRaid = true,
             showInParty = true,
             showSolo = true,
+            barVisibility = "always",
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
         },
         -- NEW: separate target sub-table (migrated from shared playerTarget)
         target = {
@@ -266,6 +272,12 @@ local defaults = {
             showInRaid = true,
             showInParty = true,
             showSolo = true,
+            barVisibility = "always",
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
         },
         playerTarget = {
             frameWidth = 181,
@@ -439,6 +451,12 @@ local defaults = {
             showInRaid = true,
             showInParty = true,
             showSolo = true,
+            barVisibility = "always",
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
         },
         boss = {
             frameWidth = 160,
@@ -6143,6 +6161,7 @@ function InitializeFrames()
     ---------------------------------------------------------------------------
     --  Group visibility: show/hide player/target/focus based on group state
     ---------------------------------------------------------------------------
+    local _ufInCombat = InCombatLockdown()
     local function UpdateFrameVisibility()
         if InCombatLockdown() then return end
         local enabled2 = db.profile.enabledFrames
@@ -6153,9 +6172,28 @@ function InitializeFrames()
             local s = db.profile[unitKey]
             local frame = frames[unitKey]
             if frame and enabled2[unitKey] ~= false and s then
-                local shouldShow = (inRaid and (s.showInRaid ~= false))
-                    or (inParty and (s.showInParty ~= false))
-                    or (solo and (s.showSolo ~= false))
+                -- Check visibility options first
+                local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(s)
+                local shouldShow = true
+                if hiddenByOpts then
+                    shouldShow = false
+                else
+                    local vis = s.barVisibility or "always"
+                    if vis == "never" then
+                        shouldShow = false
+                    elseif vis == "in_combat" then
+                        shouldShow = _ufInCombat
+                    elseif vis == "in_raid" then
+                        shouldShow = inRaid
+                    elseif vis == "in_party" then
+                        shouldShow = inRaid or inParty
+                    elseif vis == "solo" then
+                        shouldShow = solo
+                    else
+                        -- "always" and "mouseover" both show (mouseover handled separately)
+                        shouldShow = true
+                    end
+                end
                 if shouldShow then
                     if not frame:IsShown() and UnitExists(unitKey) then
                         frame:SetAttribute("unit", unitKey)
@@ -6213,8 +6251,24 @@ function InitializeFrames()
         frames._visFrame = CreateFrame("Frame")
         frames._visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
         frames._visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        frames._visFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+        frames._visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        frames._visFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+        frames._visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+        frames._visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
     end
-    frames._visFrame:SetScript("OnEvent", UpdateFrameVisibility)
+    frames._visFrame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" then
+            _ufInCombat = true
+            -- Cannot modify secure frames during lockdown; defer until it lifts
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            _ufInCombat = false
+            UpdateFrameVisibility()
+        else
+            -- Defer to next frame to avoid taint from secure execution paths
+            C_Timer.After(0, UpdateFrameVisibility)
+        end
+    end)
     UpdateFrameVisibility()
 
     ---------------------------------------------------------------------------
@@ -6555,6 +6609,48 @@ end
 function EllesmereUF:OnInitialize()
     db = EllesmereUI.Lite.NewDB("EllesmereUIUnitFramesDB", defaults, true)
     MigratePlayerTarget()
+
+    -- Migrate enabledFrames=false to barVisibility="never"
+    -- (Enable Frame toggle was removed; "Never" visibility now serves that role)
+    do
+        local prof = db.profile
+        local ef = prof.enabledFrames
+        if ef then
+            for _, uKey in ipairs({"player", "target", "focus"}) do
+                if ef[uKey] == false and prof[uKey] then
+                    prof[uKey].barVisibility = "never"
+                end
+            end
+        end
+    end
+
+    -- Migrate old showInRaid/showInParty/showSolo booleans to new barVisibility key
+    do
+        local prof = db.profile
+        for _, uKey in ipairs({"player", "target", "focus"}) do
+            local s = prof[uKey]
+            if s and s.barVisibility == nil then
+                local raid  = s.showInRaid ~= false
+                local party = s.showInParty ~= false
+                local solo  = s.showSolo ~= false
+                if raid and party and solo then
+                    s.barVisibility = "always"
+                elseif not raid and not party and not solo then
+                    s.barVisibility = "never"
+                elseif raid and not party and not solo then
+                    s.barVisibility = "in_raid"
+                elseif raid and party and not solo then
+                    s.barVisibility = "in_party"
+                elseif not raid and not party and solo then
+                    s.barVisibility = "solo"
+                else
+                    -- Mixed combination that does not map cleanly; keep always
+                    s.barVisibility = "always"
+                end
+            end
+        end
+    end
+
     -- Migrate old use3DPortrait boolean to new portraitMode string (one-time)
     do
         local prof = db.profile
