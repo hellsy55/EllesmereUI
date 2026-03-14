@@ -438,7 +438,7 @@ local RefreshAnchoredBarsForUnlockTarget
 -- Forward declarations
 local UpdateCastBar
 local BuildCastBar
-local OnCastStart, OnChannelStart, OnCastStop, OnEmpowerStart, OnEmpowerUpdate
+local OnCastStart, OnChannelStart, OnChannelUpdate, OnCastStop, OnEmpowerStart, OnEmpowerUpdate
 
 -------------------------------------------------------------------------------
 --  Helpers
@@ -3012,6 +3012,17 @@ OnChannelStart = function()
     castBarFrame:Show()
 end
 
+OnChannelUpdate = function()
+    if not castBarFrame then return end
+    if not castBarFrame._channeling then return end
+
+    local name, _, _, startTimeMS, endTimeMS = UnitChannelInfo("player")
+    if not name then return end
+
+    castBarFrame._startTime = startTimeMS / 1000
+    castBarFrame._endTime = endTimeMS / 1000
+end
+
 -- Called for UNIT_SPELLCAST_STOP only (normal cast completion).
 -- Ignores the event if the castID doesn't match the active cast -- this
 -- prevents hiding the bar when a new cast has already started.
@@ -3351,6 +3362,9 @@ local function OnEvent(self, event, ...)
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         local unit = ...
         if unit == "player" then OnChannelStart() end
+    elseif event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
+        local unit = ...
+        if unit == "player" then OnChannelUpdate() end
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         -- args: unit, castGUID, spellID, interruptedBy, castID
         local unit, _, _, _, castID = ...
@@ -3417,6 +3431,7 @@ function ERB:OnEnable()
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", "player")
