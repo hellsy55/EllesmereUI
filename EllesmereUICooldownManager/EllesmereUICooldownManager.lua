@@ -2560,6 +2560,12 @@ end
 --  grow RIGHT -> near edge = LEFT, grow LEFT -> RIGHT, grow DOWN -> TOP, grow UP -> BOTTOM
 -------------------------------------------------------------------------------
 local function CDMFrameAnchorPoint(anchorSide, grow, centered)
+    if centered ~= false then
+        if anchorSide == "RIGHT"  then return "LEFT"   end
+        if anchorSide == "LEFT"   then return "RIGHT"  end
+        if anchorSide == "BOTTOM" then return "TOP"    end
+        if anchorSide == "TOP"    then return "BOTTOM" end
+    end
     if grow == "RIGHT" then return "LEFT"   end
     if grow == "LEFT"  then return "RIGHT"  end
     if grow == "DOWN"  then return "TOP"    end
@@ -3459,6 +3465,7 @@ local function UpdateCustomBarIcons(barKey)
             -- On-use bag items use large negative IDs (<= -100, negated itemID)
             elseif spellID <= -100 then
                 local bagItemID = -spellID
+                local itemCount = C_Item.GetItemCount(bagItemID, false, true) or 0
                 local tex = C_Item.GetItemIconByID(bagItemID)
                 if tex then
                     if tex ~= ourIcon._lastTex then
@@ -3484,7 +3491,12 @@ local function UpdateCustomBarIcons(barKey)
                             ourIcon._lastDesat = false
                         end
                     end
-                    ourIcon._chargeText:Hide()
+                    if barData.showCharges and itemCount > 0 then
+                        ourIcon._chargeText:SetText(tostring(itemCount))
+                        ourIcon._chargeText:Show()
+                    else
+                        ourIcon._chargeText:Hide()
+                    end
                     ourIcon:Show()
                     visibleCount = visibleCount + 1
                 else
