@@ -5719,11 +5719,16 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
               } });  y = y - h
 
-        -- Row 2: Show Special "Has Aggro" Color (left) ---- blank (right)
+        -- Row 2: Show Special "Has Aggro" Color (left) ---- Classic Tank Aggro (right)
         local function isTankHasAggroDisabled()
             local db = DB()
             if db and db.tankHasAggroEnabled ~= nil then return not db.tankHasAggroEnabled end
             return not defaults.tankHasAggroEnabled
+        end
+        local function isClassicTankAggroDisabled()
+            local db = DB()
+            if db and db.classicTankAggro ~= nil then return not db.classicTankAggro end
+            return not defaults.classicTankAggro
         end
 
         local tankDualFrame
@@ -5740,9 +5745,20 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshAllPlates()
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Classic Tank Aggro",
+              tooltip="Enables a three-tier tank aggro system: has aggro, losing aggro, and no aggro colors override all mob-type colors.",
+              getValue=function()
+                local db = DB()
+                if db and db.classicTankAggro ~= nil then return db.classicTankAggro end
+                return defaults.classicTankAggro
+              end,
+              setValue=function(v)
+                DB().classicTankAggro = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
 
-        -- Inline Tank Has Aggro color swatch next to toggle
+        -- Inline "Has Aggro" color swatch next to left toggle
         do
             local leftRgn = tankDualFrame._leftRegion
             local tankAggroColorGet = function() return DBColor("tankHasAggro") end
@@ -5759,6 +5775,27 @@ initFrame:SetScript("OnEvent", function(self)
                 updateSwatch()
             end)
             local off = isTankHasAggroDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle
+        do
+            local rightRgn = tankDualFrame._rightRegion
+            local aggroColorGet = function() return DBColor("tankHasAggro") end
+            local aggroColorSet = function(r, g, b)
+                DB().tankHasAggro = { r = r, g = g, b = b }
+                RefreshAllPlates()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, aggroColorGet, aggroColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isClassicTankAggroDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isClassicTankAggroDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
         end

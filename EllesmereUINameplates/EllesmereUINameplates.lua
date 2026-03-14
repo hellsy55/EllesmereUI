@@ -70,6 +70,7 @@ local defaults = {
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
+    classicTankAggro = false,
     tankLosingAggro = { r = 0.81, g = 0.72, b = 0.19 },
     tankNoAggro = { r = 1.00, g = 0.22, b = 0.17 },
     dpsNearAggro = { r = 0.81, g = 0.72, b = 0.19 },
@@ -2370,8 +2371,9 @@ local function RefreshThreatCache()
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
     else
+        local isDelve = C_PartyInfo and C_PartyInfo.IsDelveInProgress and C_PartyInfo.IsDelveInProgress()
         _inThreatContent = (instanceType == "party" or instanceType == "raid"
-                            or difficultyID == 204)  -- delve difficulty
+                            or isDelve)
     end
     -- Role: cache so we don't recalculate on every nameplate update
     local role = UnitGroupRolesAssigned("player")
@@ -2516,7 +2518,16 @@ local function GetReactionColor(unit)
                     end
                     -- Another tank has aggro -- fall through, no warning color
                 end
-                -- Tank has aggro falls through to be handled below focus/caster/miniboss
+                -- Classic tank aggro: has-aggro overrides all mob-type colors
+                if status >= 3 then
+                    local classic = db.classicTankAggro
+                    if classic == nil then classic = defaults.classicTankAggro end
+                    if classic then
+                        local c = C("tankHasAggro")
+                        return c.r, c.g, c.b
+                    end
+                end
+                -- Default: tank has aggro falls through to caster/miniboss colors
             end
         end
     end
