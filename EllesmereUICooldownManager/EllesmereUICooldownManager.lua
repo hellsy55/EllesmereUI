@@ -11,13 +11,6 @@ ns.ECME = ECME
 
 local PP = EllesmereUI.PP
 
-local function GetCDMOutline() return "OUTLINE" end
-local function SetCDMFont(fs, font, size)
-    if not (fs and fs.SetFont) then return end
-    fs:SetFont(font, size, "OUTLINE")
-    fs:SetShadowOffset(0, 0)
-end
-
 -- Snap a value to a whole number of physical pixels at the bar's effective scale.
 -- Uses the same approach as the border system: convert to physical pixels,
 -- round to nearest integer, convert back.
@@ -33,7 +26,7 @@ local InCombatLockdown = InCombatLockdown
 local GetSpecialization = GetSpecialization
 local GetSpecializationInfo = GetSpecializationInfo
 
-local DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
+ns.DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
 
 local RECONCILE = {
     readyDelay = 2,
@@ -48,7 +41,7 @@ local RECONCILE = {
 
 -- Spells whose buff-bar icon should display a different spell's texture.
 -- Key = tracked spellID, value = texture fileID to use on buff bars only.
-local BUFF_ICON_OVERRIDES = {
+ns.BUFF_ICON_OVERRIDES = {
     [470057] = 135813,  -- Voltaic Blaze: show Flame Shock icon
 }
 
@@ -57,14 +50,14 @@ local BUFF_ICON_OVERRIDES = {
 -- state (IsBufChildCooldownActive) since passive auras are invisible to
 -- C_UnitAuras.GetPlayerAuraBySpellID.
 -- Key = base spellID the user has in their bar, value = { buffID, replacementSpellID }
-local BUFF_PROC_ICON_OVERRIDES = {
+ns.BUFF_PROC_ICON_OVERRIDES = {
     [6807]   = { buffID = 441583, replacementSpellID = 441583 }, -- Maul -> Ravage
     [400254] = { buffID = 441583, replacementSpellID = 441583 }, -- Raze -> Ravage
 }
 
 --- Talent spell ID -> correct buff aura ID for CDM entries that report the
 --- wrong spell.  Key = talent spellID, value = buff aura spellID.
-local BUFF_SPELLID_CORRECTIONS = {
+ns.BUFF_SPELLID_CORRECTIONS = {
     [12950] = 85739,  -- Improved Whirlwind
 }
 
@@ -1188,7 +1181,7 @@ local function EnsureMappings(store)
     if not store.mappings then store.mappings = {} end
     if #store.mappings == 0 then
         store.mappings[1] = {
-            enabled = false, name = DEFAULT_MAPPING_NAME,
+            enabled = false, name = ns.DEFAULT_MAPPING_NAME,
             actionBar = 1, actionButton = 1, cdmSlot = 1,
             hideFromCDM = false, mode = "ACTIVE",
             glowStyle = 1, glowColor = { r = 1, g = 0.82, b = 0.1 },
@@ -1213,7 +1206,6 @@ local function EnsureMappings(store)
 end
 
 -- Expose for options
-ns.DEFAULT_MAPPING_NAME = DEFAULT_MAPPING_NAME
 ns.GetStore = GetStore
 ns.EnsureMappings = EnsureMappings
 
@@ -1248,7 +1240,7 @@ local function ResolveInfoSpellID(info)
         end
         if not sid and info.spellID and info.spellID > 0 then sid = info.spellID end
     end
-    return sid and (BUFF_SPELLID_CORRECTIONS[sid] or sid) or nil
+    return sid and (ns.BUFF_SPELLID_CORRECTIONS[sid] or sid) or nil
 end
 
 -------------------------------------------------------------------------------
@@ -1268,7 +1260,7 @@ local function ResolveChildSpellID(child)
         local ok, auraID = pcall(child.GetAuraSpellID, child)
         if ok and auraID then
             local cmpOk, gt = pcall(function() return auraID > 0 end)
-            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[auraID] or auraID end
+            if cmpOk and gt then return ns.BUFF_SPELLID_CORRECTIONS[auraID] or auraID end
         end
     end
     -- Then try the frame's own spellID
@@ -1276,7 +1268,7 @@ local function ResolveChildSpellID(child)
         local ok, fid = pcall(child.GetSpellID, child)
         if ok and fid then
             local cmpOk, gt = pcall(function() return fid > 0 end)
-            if cmpOk and gt then return BUFF_SPELLID_CORRECTIONS[fid] or fid end
+            if cmpOk and gt then return ns.BUFF_SPELLID_CORRECTIONS[fid] or fid end
         end
     end
     -- Fall back to cooldownInfo struct
@@ -3670,7 +3662,7 @@ local function UpdateCustomBarIcons(barKey)
                 if texID then _spellIconCache[resolvedID] = texID end
             end
             -- Buff bars may have a hardcoded icon override for specific spells.
-            local overrideTex = (barKey == "buffs" or barData.barType == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+            local overrideTex = (barKey == "buffs" or barData.barType == "buffs") and ns.BUFF_ICON_OVERRIDES[spellID]
             -- For buff bars, prefer the CDM child's live Icon texture so
             -- aura-driven icon changes (e.g. Heating Up -> Hot Streak) are
             -- reflected each tick instead of staying stuck on the static cache.
@@ -3691,7 +3683,7 @@ local function UpdateCustomBarIcons(barKey)
             local effectiveTex = overrideTex or texID
             -- Proc-conditional icon override: swap icon while a buff is active
             local procActiveC = false
-            local procEntry = BUFF_PROC_ICON_OVERRIDES[spellID] or BUFF_PROC_ICON_OVERRIDES[resolvedID]
+            local procEntry = ns.BUFF_PROC_ICON_OVERRIDES[spellID] or ns.BUFF_PROC_ICON_OVERRIDES[resolvedID]
             if procEntry then
                 local buffChild = _tickBlizzBuffChildCache[procEntry.buffID]
                 if IsBufChildCooldownActive(buffChild) then
@@ -4056,13 +4048,13 @@ UpdateCDMBarIcons = function(barKey)
             -- internal tracking spellID with a different icon (e.g. spec passives).
             do
                 -- Buff bars may have a hardcoded icon override for specific spells.
-                local overrideTex = (barKey == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+                local overrideTex = (barKey == "buffs") and ns.BUFF_ICON_OVERRIDES[spellID]
                 if overrideTex then
                     ourIcon._tex:SetTexture(overrideTex)
                 else
                     local set = false
                     -- Proc-conditional icon override: swap icon while a buff is active
-                    local procEntryM = BUFF_PROC_ICON_OVERRIDES[spellID] or (resolvedSid and BUFF_PROC_ICON_OVERRIDES[resolvedSid])
+                    local procEntryM = ns.BUFF_PROC_ICON_OVERRIDES[spellID] or (resolvedSid and ns.BUFF_PROC_ICON_OVERRIDES[resolvedSid])
                     if procEntryM then
                         local buffChildM = _tickBlizzBuffChildCache[procEntryM.buffID]
                         if IsBufChildCooldownActive(buffChildM) then
@@ -4734,7 +4726,7 @@ local function UpdateTrackedBarIcons(barKey)
                 end
                 if texID then _spellIconCache[resolvedID] = texID end
             end
-            local overrideTex = (barKey == "buffs") and BUFF_ICON_OVERRIDES[spellID]
+            local overrideTex = (barKey == "buffs") and ns.BUFF_ICON_OVERRIDES[spellID]
             -- For buff bars, prefer the CDM child's live Icon texture so
             -- aura-driven icon changes (e.g. Heating Up -> Hot Streak) are
             -- reflected each tick instead of staying stuck on the static cache.
@@ -4763,7 +4755,7 @@ local function UpdateTrackedBarIcons(barKey)
             local effectiveTex = overrideTex or texID
             -- Proc-conditional icon override: swap icon while a buff is active
             local procActive2 = false
-            local procEntry2 = BUFF_PROC_ICON_OVERRIDES[spellID] or BUFF_PROC_ICON_OVERRIDES[resolvedID]
+            local procEntry2 = ns.BUFF_PROC_ICON_OVERRIDES[spellID] or ns.BUFF_PROC_ICON_OVERRIDES[resolvedID]
             if procEntry2 then
                 local buffChild2 = _tickBlizzBuffChildCache[procEntry2.buffID]
                 if IsBufChildCooldownActive(buffChild2) then
@@ -6855,7 +6847,7 @@ function ECME:OnEnable()
     RefreshRacialSpells()
 
     -- Pre-cache proc replacement spell textures so they are available in combat
-    for _, entry in pairs(BUFF_PROC_ICON_OVERRIDES) do
+    for _, entry in pairs(ns.BUFF_PROC_ICON_OVERRIDES) do
         if not _spellIconCache[entry.replacementSpellID] then
             local info = C_Spell.GetSpellInfo(entry.replacementSpellID)
             if info then _spellIconCache[entry.replacementSpellID] = info.iconID end
