@@ -3045,11 +3045,8 @@ local function CreateCDMIcon(barKey, index)
     icon._isActive = false
     icon._barKey = barKey
 
-    -- Apply saved icon shape on creation
-    local shape = barData.iconShape or "none"
-    if shape ~= "none" then
-        ApplyShapeToCDMIcon(icon, shape, barData)
-    end
+    -- Apply icon shape on creation (includes "none" for proper cooldown inset)
+    ApplyShapeToCDMIcon(icon, barData.iconShape or "none", barData)
 
     icon:Hide()
     return icon
@@ -3150,11 +3147,10 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
             end
         end
 
-        -- Restore cooldown
+        -- Restore cooldown (full frame so swipe covers the entire icon)
         if icon._cooldown then
             icon._cooldown:ClearAllPoints()
-            PP.Point(icon._cooldown, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
-            PP.Point(icon._cooldown, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
+            icon._cooldown:SetAllPoints(icon)
             pcall(icon._cooldown.SetSwipeTexture, icon._cooldown, "Interface\\Buttons\\WHITE8x8")
             if icon._cooldown.SetUseCircularEdge then pcall(icon._cooldown.SetUseCircularEdge, icon._cooldown, false) end
         end
@@ -4143,11 +4139,10 @@ local function RefreshCDMIconAppearance(barKey)
             PP.Point(icon._tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
             icon._tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
-        -- Update cooldown inset
+        -- Update cooldown (full frame so swipe covers the entire icon)
         if icon._cooldown then
             icon._cooldown:ClearAllPoints()
-            PP.Point(icon._cooldown, "TOPLEFT", icon, "TOPLEFT", borderSize, -borderSize)
-            PP.Point(icon._cooldown, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
+            icon._cooldown:SetAllPoints(icon)
             icon._cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
             icon._cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
             -- Mark pending font update (applied in batch after frame renders)
