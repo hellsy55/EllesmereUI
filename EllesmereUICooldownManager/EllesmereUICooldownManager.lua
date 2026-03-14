@@ -5554,6 +5554,16 @@ BuildAllCDMBars = function()
         barDataByKey[barData.key] = barData
         BuildCDMBar(i)
         RefreshCDMIconAppearance(barData.key)
+        -- Reset cached icon state so textures re-evaluate after a character switch
+        local icons = cdmBarIcons[barData.key]
+        if icons then
+            for _, icon in ipairs(icons) do
+                icon._lastTex = nil
+                icon._lastDesat = nil
+                icon._spellID = nil
+                icon._blizzChild = nil
+            end
+        end
         local frame = cdmBarFrames[barData.key]
         if frame then frame._prevVisibleCount = nil end
         LayoutCDMBar(barData.key)
@@ -7522,6 +7532,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
+        wipe(_spellIconCache)
         -- Wipe hook-captured cooldown caches so stale state from a previous
         -- character doesn't persist after alt switch or reload.
         wipe(_ecmeChildHasDurObj)

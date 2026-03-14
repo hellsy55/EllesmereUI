@@ -1612,25 +1612,19 @@ do
                 local function doSwitch()
                     local fontWillChange = EllesmereUI.ProfileChangesFont(db.profiles[targetProfile])
                     EllesmereUI.SwitchProfile(targetProfile)
-                    if not isFirstLogin then
-                        -- Spec switch: apply live without a reload prompt.
-                        -- All addon apply hooks are safe to call mid-session.
-                        if InCombatLockdown() then
-                            -- Defer until combat ends so protected frames can update.
-                            pendingReload = true
-                            pendingFontCheck = fontWillChange
-                        else
-                            EllesmereUI.RefreshAllAddons()
-                            -- Font changes require a reload -- show popup only if font changed.
-                            if fontWillChange then
-                                EllesmereUI:ShowConfirmPopup({
-                                    title       = "Reload Required",
-                                    message     = "Font changed. A UI reload is needed to apply the new font.",
-                                    confirmText = "Reload Now",
-                                    cancelText  = "Later",
-                                    onConfirm   = function() ReloadUI() end,
-                                })
-                            end
+                    if InCombatLockdown() then
+                        pendingReload = true
+                        pendingFontCheck = fontWillChange
+                    else
+                        EllesmereUI.RefreshAllAddons()
+                        if not isFirstLogin and fontWillChange then
+                            EllesmereUI:ShowConfirmPopup({
+                                title       = "Reload Required",
+                                message     = "Font changed. A UI reload is needed to apply the new font.",
+                                confirmText = "Reload Now",
+                                cancelText  = "Later",
+                                onConfirm   = function() ReloadUI() end,
+                            })
                         end
                     end
                 end
