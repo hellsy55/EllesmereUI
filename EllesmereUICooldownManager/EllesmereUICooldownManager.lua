@@ -35,6 +35,17 @@ local GetSpecializationInfo = GetSpecializationInfo
 
 local DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
 
+local RECONCILE = {
+    readyDelay = 2,
+    retryDelay = 1,
+    retryMax = 5,
+    lastSpecChangeAt = 0,
+    lastZoneInAt = 0,
+    pending = false,
+    retries = 0,
+    retryToken = 0,
+}
+
 -- Spells whose buff-bar icon should display a different spell's texture.
 -- Key = tracked spellID, value = texture fileID to use on buff bars only.
 local BUFF_ICON_OVERRIDES = {
@@ -1125,6 +1136,26 @@ end
 -- spec switch. Called from multiple events as a safety net so the CDM can
 -- NEVER show the wrong spec's icons.
 local _specValidated = false
+function ns.IsReconcileReady()
+    local p = ECME.db and ECME.db.profile
+    if not p then return false end
+    if not _specValidated then return false end
+    local realKey = GetCurrentSpecKey()
+    if realKey == "0" then return false end
+    if p.activeSpecKey ~= realKey then return false end
+    local now = GetTime()
+    if RECONCILE.lastSpecChangeAt > 0 and (now - RECONCILE.lastSpecChangeAt) < RECONCILE.readyDelay then return false end
+    if RECONCILE.lastZoneInAt > 0 and (now - RECONCILE.lastZoneInAt) < RECONCILE.readyDelay then return false end
+    if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet) then return false end
+    for cat = 0, 3 do
+        local knownIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, false)
+        if knownIDs and next(knownIDs) then
+            return true
+        end
+    end
+    return true
+end
+
 local function ValidateSpec()
     if not ECME.db then return end
     local realKey = GetCurrentSpecKey()
@@ -1138,6 +1169,7 @@ local function ValidateSpec()
     _specValidated = true
     -- SwitchSpecProfile is defined later; called via ns reference
     if ns.SwitchSpecProfile then
+        RECONCILE.lastSpecChangeAt = GetTime()
         ns.SwitchSpecProfile(realKey)
     end
 end
@@ -1381,6 +1413,14 @@ local function SaveCurrentSpecProfile()
     local specKey = p.activeSpecKey
     if not specKey or specKey == "0" then return end
     if not p.specProfiles then p.specProfiles = {} end
+    local prev = p.specProfiles[specKey]
+
+    local preserveMissing = not (ns.IsReconcileReady and ns.IsReconcileReady())
+    local function CopyLiveOrPrev(live, prevVal)
+        if live ~= nil then return DeepCopy(live) end
+        if preserveMissing and prevVal ~= nil then return DeepCopy(prevVal) end
+        return nil
+    end
 
     local prof = {}
 
@@ -1390,17 +1430,18 @@ local function SaveCurrentSpecProfile()
         local key = barData.key
         if key then
             local entry = {}
+            local prevEntry = prev and prev.barSpells and prev.barSpells[key] or nil
             if MAIN_BAR_KEYS[key] then
                 -- trackedSpells are now stable spellIDs — persist them.
-                entry.trackedSpells = DeepCopy(barData.trackedSpells)
-                entry.extraSpells   = DeepCopy(barData.extraSpells)
-                entry.removedSpells = DeepCopy(barData.removedSpells)
-                entry.dormantSpells = DeepCopy(barData.dormantSpells)
+                entry.trackedSpells = CopyLiveOrPrev(barData.trackedSpells, prevEntry and prevEntry.trackedSpells)
+                entry.extraSpells   = CopyLiveOrPrev(barData.extraSpells,   prevEntry and prevEntry.extraSpells)
+                entry.removedSpells = CopyLiveOrPrev(barData.removedSpells, prevEntry and prevEntry.removedSpells)
+                entry.dormantSpells = CopyLiveOrPrev(barData.dormantSpells, prevEntry and prevEntry.dormantSpells)
             elseif barData.barType ~= "misc" then
                 -- Custom non-misc bars: save customSpells
-                entry.customSpells = DeepCopy(barData.customSpells)
+                entry.customSpells = CopyLiveOrPrev(barData.customSpells, prevEntry and prevEntry.customSpells)
                 if TALENT_AWARE_BAR_TYPES[barData.barType] then
-                    entry.dormantSpells = DeepCopy(barData.dormantSpells)
+                    entry.dormantSpells = CopyLiveOrPrev(barData.dormantSpells, prevEntry and prevEntry.dormantSpells)
                 end
             end
             -- Misc bars: nothing to save (spell list is shared across all specs)
@@ -7111,6 +7152,29 @@ local function TalentAwareReconcile()
     BuildAllCDMBars()
 end
 
+function ns.RequestTalentReconcile(reason)
+    if reason ~= "retry" then
+        RECONCILE.retries = 0
+        RECONCILE.retryToken = RECONCILE.retryToken + 1
+    end
+    if ns.IsReconcileReady() then
+        RECONCILE.pending = false
+        RECONCILE.retries = 0
+        TalentAwareReconcile()
+        return
+    end
+    RECONCILE.pending = true
+    if RECONCILE.retries >= RECONCILE.retryMax then return end
+    RECONCILE.retries = RECONCILE.retries + 1
+    RECONCILE.retryToken = RECONCILE.retryToken + 1
+    local token = RECONCILE.retryToken
+    C_Timer.After(RECONCILE.retryDelay, function()
+        if token ~= RECONCILE.retryToken then return end
+        if not RECONCILE.pending then return end
+        ns.RequestTalentReconcile("retry")
+    end)
+end
+
 -- Initial snapshot for bars that have no trackedSpells yet.
 -- Once a bar has trackedSpells, our DB is authoritative -- we never re-read
 -- from Blizzard's viewer to add/remove/reorder spells.
@@ -7401,7 +7465,7 @@ local function ScheduleTalentRebuild()
         -- Reconcile bar spellIDs against the new talent set.
         -- Unavailable spells are moved to dormant slots (preserving position);
         -- returning spells are re-inserted at their saved slot index.
-        TalentAwareReconcile()
+        ns.RequestTalentReconcile("talent")
         -- Clear spell icon cache so custom bars pick up new textures for
         -- talent-swapped spells
         wipe(_spellIconCache)
@@ -7539,6 +7603,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         wipe(_ecmeDurObjCache)
         wipe(_ecmeRawStartCache)
         wipe(_ecmeRawDurCache)
+        RECONCILE.lastZoneInAt = GetTime()
         -- Validate spec on every zone-in (catches auto spec swaps, login, etc.)
         C_Timer.After(0.5, function()
             ValidateSpec()
@@ -7553,6 +7618,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                 ForcePopulateBlizzardViewers(function()
                     ForceResnapshotMainBars()
                     StartResnapshotRetry()
+                    if RECONCILE.pending then
+                        ns.RequestTalentReconcile("PEW")
+                    end
                 end)
             end
         end)
@@ -7560,6 +7628,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if event == "SPELLS_CHANGED" then
         -- SPELLS_CHANGED fires reliably after spec data is available.
         -- Use it as a safety net to catch spec mismatches that OnEnable missed.
+        local scheduleReconcile = RECONCILE.pending
         if not _specValidated then
             ValidateSpec()
             -- If ValidateSpec just fixed the spec, rebuild bars now.
@@ -7570,9 +7639,20 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                     ForcePopulateBlizzardViewers(function()
                         ForceResnapshotMainBars()
                         StartResnapshotRetry()
+                        if scheduleReconcile and RECONCILE.pending then
+                            ns.RequestTalentReconcile("SPELLS_CHANGED")
+                        end
                     end)
                 end)
+                scheduleReconcile = false
             end
+        end
+        if scheduleReconcile and RECONCILE.pending then
+            C_Timer.After(0.2, function()
+                if RECONCILE.pending then
+                    ns.RequestTalentReconcile("SPELLS_CHANGED")
+                end
+            end)
         end
         return
     end
@@ -7580,11 +7660,19 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if EllesmereUI and EllesmereUI.InvalidateFrameCache then
             EllesmereUI.InvalidateFrameCache()
         end
+        RECONCILE.lastSpecChangeAt = GetTime()
         local newSpecKey = GetCurrentSpecKey()
         local p = ECME.db.profile
         if newSpecKey ~= "0" and newSpecKey ~= p.activeSpecKey then
             SwitchSpecProfile(newSpecKey)
             _specValidated = true
+            if RECONCILE.pending then
+                C_Timer.After(0.6, function()
+                    if RECONCILE.pending then
+                        ns.RequestTalentReconcile("spec")
+                    end
+                end)
+            end
         elseif newSpecKey ~= "0" then
             SetActiveSpec()
             _specValidated = true
@@ -7673,6 +7761,11 @@ SlashCmdList.CDMDEBUG = function()
     local p = function(...) print("|cffff9900[CDM Debug]|r", ...) end
     local profile = ECME.db and ECME.db.profile
     if not profile or not profile.cdmBars then p("No profile"); return end
+    p("Reconcile pending:", tostring(RECONCILE.pending),
+      "retries:", tostring(RECONCILE.retries),
+      "ready:", tostring(ns.IsReconcileReady()))
+    p("lastSpecChangeAt:", tostring(RECONCILE.lastSpecChangeAt),
+      "lastZoneInAt:", tostring(RECONCILE.lastZoneInAt))
     for _, barData in ipairs(profile.cdmBars.bars) do
         if barData.key == "cooldowns" then
             local ts = barData.trackedSpells
