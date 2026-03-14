@@ -1623,6 +1623,9 @@ initFrame:SetScript("OnEvent", function(self)
             local _, dmgCogShow = EllesmereUI.BuildCogPopup({
                 title = "Damage Text Settings",
                 rows = {
+                    { type="toggle", label="Show Periodic Damage",
+                      get=function() return GetCVarBool("floatingCombatTextCombatLogPeriodicSpells_v2") end,
+                      set=function(v) SetCVarSafe("floatingCombatTextCombatLogPeriodicSpells_v2", v and "1" or "0") end },                            
                     { type="toggle", label="Show Pet Melee Damage",
                       get=function() return GetCVarBool("floatingCombatTextPetMeleeDamage_v2") end,
                       set=function(v) SetCVarSafe("floatingCombatTextPetMeleeDamage_v2", v and "1" or "0") end },
