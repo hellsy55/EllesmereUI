@@ -5299,13 +5299,6 @@ function EAB:FinishSetup()
             if OverrideActionBar then
                 RegisterAttributeDriver(OverrideActionBar, "state-visibility", "[vehicleui][overridebar] show; hide")
             end
-            -- Wipe Blizzard's actionButtons tables during combat reload
-            for _, name in ipairs({"MainActionBar", "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7"}) do
-                local bar = _G[name]
-                if bar and bar.actionButtons then wipe(bar.actionButtons) end
-            end
-            if MultiActionButtonDown then _G.MultiActionButtonDown = function() end end
-            if MultiActionButtonUp then _G.MultiActionButtonUp = function() end end
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_1", "1")
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_2", "1")
             C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_3", "1")
