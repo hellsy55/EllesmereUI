@@ -4062,6 +4062,8 @@ ns.StopAutoCastShine   = StopAutoCastShine
 ns.StartShapeGlow      = StartShapeGlow
 ns.StopShapeGlow       = StopShapeGlow
 
+local _G_Glows = EllesmereUI.Glows
+
 local function StopAllProceduralGlows(wrapper)
     _G_Glows.StopAllGlows(wrapper)
 end
