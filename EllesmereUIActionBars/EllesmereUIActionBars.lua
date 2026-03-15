@@ -6610,7 +6610,7 @@ local function SetupBlizzardMovableFrame(barKey)
     if barKey == "ExtraActionButton" and ExtraAbilityContainer then
         -- Disable mouse on ExtraActionBarFrame so it cannot absorb clicks
         -- when no extra action bar is active.
-        if ExtraActionBarFrame and ExtraActionBarFrame:IsMouseEnabled() then
+        if ExtraActionBarFrame and not InCombatLockdown() and ExtraActionBarFrame:IsMouseEnabled() then
             ExtraActionBarFrame:EnableMouse(false)
         end
 
