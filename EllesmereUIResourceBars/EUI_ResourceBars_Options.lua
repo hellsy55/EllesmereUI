@@ -921,11 +921,12 @@ initFrame:SetScript("OnEvent", function(self)
         local generalSection
         generalSection, h = W:SectionHeader(parent, "BAR DISPLAY", y);  y = y - h
 
-        -- Row 1: Visibility | Dark Theme
-        _, h = W:DualRow(parent, y,
+        -- Row 1: Visibility | Visibility Options (checkbox dropdown)
+        local visRow
+        visRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Visibility",
-              values = { always = "Always", combat = "In Combat", target = "When Enemy Targeted" },
-              order = { "always", "combat", "target" },
+              values = EllesmereUI.VIS_VALUES,
+              order = EllesmereUI.VIS_ORDER,
               getValue = function()
                   local p = DB(); if not p then return "always" end
                   return p.secondary.visibility or "always"
@@ -936,7 +937,42 @@ initFrame:SetScript("OnEvent", function(self)
                   p.health.visibility = v
                   p.primary.visibility = v
                   Refresh()
+                  EllesmereUI:RefreshPage()
               end },
+            { type = "dropdown", text = "Visibility Options",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end }
+        );  y = y - h
+
+        -- Replace the dummy right dropdown with our checkbox dropdown
+        do
+            local rightRgn = visRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local visItems = EllesmereUI.VIS_OPT_ITEMS
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                visItems,
+                function(k)
+                    local p = DB(); if not p then return false end
+                    return p.secondary[k] or false
+                end,
+                function(k, v)
+                    local p = DB(); if not p then return end
+                    p.secondary[k] = v
+                    p.health[k] = v
+                    p.primary[k] = v
+                    Refresh()
+                    EllesmereUI:RefreshPage()
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
+
+        -- Row 2: Dark Theme | Background Color
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Dark Theme",
               getValue = function()
                   local p = DB(); if not p then return false end
@@ -953,19 +989,6 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   RebuildHealth(); RebuildPower(); RebuildClass()
                   EllesmereUI:RefreshPage()
-              end }
-        );  y = y - h
-
-        -- Row 2: Texture | Background Color
-        _, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Texture", values = hbtValues, order = hbtOrder,
-              getValue = function()
-                  local p = DB(); if not p then return "none" end
-                  return p.general.barTexture or "none"
-              end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.general.barTexture = v; SmoothRefresh()
               end },
             { type = "colorpicker", text = "Background", hasAlpha = true,
               disabled = function() local p = DB(); return p and p.health.darkTheme end,
@@ -988,6 +1011,20 @@ initFrame:SetScript("OnEvent", function(self)
                   SmoothRefresh()
                   EllesmereUI:RefreshPage()
               end }
+        );  y = y - h
+
+        -- Row 3: Texture | (empty)
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Texture", values = hbtValues, order = hbtOrder,
+              getValue = function()
+                  local p = DB(); if not p then return "none" end
+                  return p.general.barTexture or "none"
+              end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.general.barTexture = v; SmoothRefresh()
+              end },
+            { type = "label", text = "" }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 16);  y = y - h

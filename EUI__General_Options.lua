@@ -3176,10 +3176,6 @@ initFrame:SetScript("OnEvent", function(self)
                             cancelText  = "Cancel",
                             onConfirm   = function() ReloadUI() end,
                         })
-                        EllesmereUI.SaveCurrentAsProfile("Spin the Wheel")
-                        EllesmereUI.RefreshAllAddons()
-                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                        EllesmereUI:RefreshPage()
                     end,
                 }
                 if EllesmereUI.WEEKLY_SPOTLIGHT then
@@ -3735,16 +3731,6 @@ initFrame:SetScript("OnEvent", function(self)
                             end)
                             iXBtn:SetScript("OnClick", function()
                                 if capName == "Default" then return end
-                                -- Skip confirmation for pristine (uncustomized) default profiles
-                                local _, profiles = EllesmereUI.GetProfileList()
-                                local pData = profiles and profiles[capName]
-                                if pData and pData._pristine then
-                                    EllesmereUI.DeleteProfile(capName)
-                                    ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                    -- Rebuild the dropdown in-place so it stays open
-                                    RebuildProfileMenu()
-                                    return
-                                end
                                 menu:Hide()
                                 EllesmereUI:ShowConfirmPopup({
                                     title       = "Delete Profile",
@@ -3819,10 +3805,50 @@ initFrame:SetScript("OnEvent", function(self)
                 else ActiveApplyNormal() end
             end)
 
+            -- Assign to Spec button
+            local assignBtn = CreateFrame("Button", nil, rowFrame)
+            PP.Size(assignBtn, BTN_W, ITEM_H)
+            PP.Point(assignBtn, "LEFT", ddBtn, "RIGHT", GAP, 0)
+            assignBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
+            EllesmereUI.MakeStyledButton(assignBtn, "Assign to Spec", 11, PROF_BTN_COLOURS, function()
+                local db = EllesmereUIDB or {}
+                if not db.specProfiles then db.specProfiles = {} end
+                local tempDB = { _profileSpecs = {} }
+                local order, profiles = EllesmereUI.GetProfileList()
+                for _, pName in ipairs(order) do tempDB._profileSpecs[pName] = {} end
+                for specID, pName in pairs(db.specProfiles) do
+                    if tempDB._profileSpecs[pName] then
+                        tempDB._profileSpecs[pName][specID] = true
+                    end
+                end
+                local activeName = EllesmereUI.GetActiveProfileName()
+                EllesmereUI:ShowSpecAssignPopup({
+                    db = tempDB,
+                    dbKey = "_profileSpecs",
+                    presetKey = activeName,
+                    allPresetKeys = function()
+                        local list = {}
+                        for _, n in ipairs(order) do
+                            if profiles[n] then list[#list + 1] = { key = n, name = n } end
+                        end
+                        return list
+                    end,
+                    onDone = function()
+                        db.specProfiles = {}
+                        for pName, specSet in pairs(tempDB._profileSpecs) do
+                            for specID in pairs(specSet) do
+                                db.specProfiles[specID] = pName
+                            end
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                })
+            end)
+
             -- Copy Profile button
             local saveAsBtn = CreateFrame("Button", nil, rowFrame)
             PP.Size(saveAsBtn, BTN_W, ITEM_H)
-            PP.Point(saveAsBtn, "LEFT", ddBtn, "RIGHT", GAP, 0)
+            PP.Point(saveAsBtn, "LEFT", assignBtn, "RIGHT", GAP, 0)
             saveAsBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
             EllesmereUI.MakeStyledButton(saveAsBtn, "Copy Profile", 11, PROF_BTN_COLOURS, function()
                 EllesmereUI:ShowInputPopup({
@@ -3860,46 +3886,6 @@ initFrame:SetScript("OnEvent", function(self)
                     local btn = EllesmereUI._profileDDBtn
                     if btn then EllesmereUI.PlaySyncFlash(btn) end
                 end)
-            end)
-
-            -- Assign to Spec button
-            local assignBtn = CreateFrame("Button", nil, rowFrame)
-            PP.Size(assignBtn, BTN_W, ITEM_H)
-            PP.Point(assignBtn, "LEFT", createNewBtn, "RIGHT", GAP, 0)
-            assignBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
-            EllesmereUI.MakeStyledButton(assignBtn, "Assign to Spec", 11, PROF_BTN_COLOURS, function()
-                local db = EllesmereUIDB or {}
-                if not db.specProfiles then db.specProfiles = {} end
-                local tempDB = { _profileSpecs = {} }
-                local order, profiles = EllesmereUI.GetProfileList()
-                for _, pName in ipairs(order) do tempDB._profileSpecs[pName] = {} end
-                for specID, pName in pairs(db.specProfiles) do
-                    if tempDB._profileSpecs[pName] then
-                        tempDB._profileSpecs[pName][specID] = true
-                    end
-                end
-                local activeName = EllesmereUI.GetActiveProfileName()
-                EllesmereUI:ShowSpecAssignPopup({
-                    db = tempDB,
-                    dbKey = "_profileSpecs",
-                    presetKey = activeName,
-                    allPresetKeys = function()
-                        local list = {}
-                        for _, n in ipairs(order) do
-                            if profiles[n] then list[#list + 1] = { key = n, name = n } end
-                        end
-                        return list
-                    end,
-                    onDone = function()
-                        db.specProfiles = {}
-                        for pName, specSet in pairs(tempDB._profileSpecs) do
-                            for specID in pairs(specSet) do
-                                db.specProfiles[specID] = pName
-                            end
-                        end
-                        EllesmereUI:RefreshPage()
-                    end,
-                })
             end)
 
             y = y - ROW_H

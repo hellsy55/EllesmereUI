@@ -319,7 +319,12 @@ local DEFAULTS = {
             offsetX     = 0,
             offsetY     = -64,
             barAlpha    = 1.0,
-            visibility  = "always",  -- "always","combat","target"
+            visibility  = "always",  -- "always","combat","target","mouseover","never","in_combat","in_raid","in_party","solo"
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
             orientation = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             thresholdEnabled = false,
             thresholdPct     = 30,
@@ -344,7 +349,12 @@ local DEFAULTS = {
             offsetX     = 0,
             offsetY     = -54,
             barAlpha    = 1.0,
-            visibility  = "always",  -- "always","combat","target"
+            visibility  = "always",  -- "always","combat","target","mouseover","never","in_combat","in_raid","in_party","solo"
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
             orientation = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             thresholdEnabled = false,
             thresholdPct     = 30,
@@ -375,7 +385,12 @@ local DEFAULTS = {
             thresholdPartialOnly = false,
             thresholdR = 0x0c/255, thresholdG = 0xd2/255, thresholdB = 0x9d/255, thresholdA = 1,
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
-            visibility  = "always",  -- "always","combat","target"
+            visibility  = "always",  -- "always","combat","target","mouseover","never","in_combat","in_raid","in_party","solo"
+            visHideHousing = false,
+            visOnlyInstances = false,
+            visHideMounted = false,
+            visHideNoTarget = false,
+            visHideNoEnemy = false,
             oocAlpha    = 1.0,
             offsetX     = 0,
             offsetY     = -38,
@@ -2252,18 +2267,41 @@ end
 --  Visibility & combat fade
 -------------------------------------------------------------------------------
 local function ShouldShowSecondary()
-    local vis = ERB.db.profile.secondary.visibility
+    local sp = ERB.db.profile.secondary
+    -- Check visibility options first
+    if EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(sp) then return false end
+    local vis = sp.visibility
     if vis == "always" then return true end
-    if vis == "combat" then return isInCombat end
+    if vis == "never" then return false end
+    if vis == "combat" or vis == "in_combat" then return isInCombat end
     if vis == "target" then return UnitExists("target") and UnitCanAttack("player", "target") end
+    if vis == "in_raid" then return IsInRaid and IsInRaid() or false end
+    if vis == "in_party" then
+        local inRaid = IsInRaid and IsInRaid() or false
+        return inRaid or (IsInGroup and IsInGroup() or false)
+    end
+    if vis == "solo" then
+        return not (IsInRaid and IsInRaid()) and not (IsInGroup and IsInGroup())
+    end
     return true
 end
 
 local function ShouldShowBar(barProfile)
+    -- Check visibility options first
+    if EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(barProfile) then return false end
     local vis = barProfile.visibility or "always"
     if vis == "always" then return true end
-    if vis == "combat" then return isInCombat end
+    if vis == "never" then return false end
+    if vis == "combat" or vis == "in_combat" then return isInCombat end
     if vis == "target" then return UnitExists("target") and UnitCanAttack("player", "target") end
+    if vis == "in_raid" then return IsInRaid and IsInRaid() or false end
+    if vis == "in_party" then
+        local inRaid = IsInRaid and IsInRaid() or false
+        return inRaid or (IsInGroup and IsInGroup() or false)
+    end
+    if vis == "solo" then
+        return not (IsInRaid and IsInRaid()) and not (IsInGroup and IsInGroup())
+    end
     return true
 end
 
@@ -3279,7 +3317,12 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
         UpdateVisibility()
+    elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
+        UpdateVisibility()
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
+        UpdateVisibility()
     elseif event == "GROUP_ROSTER_UPDATE" then
+        UpdateVisibility()
         ScheduleRosterApply()
     elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         cachedPrimary = GetPrimaryPowerType()
@@ -3390,6 +3433,17 @@ function ERB:OnInitialize()
     _G._ERB_GetPrimaryPowerType = GetPrimaryPowerType
     _G._ERB_PowerColors = POWER_COLORS
 
+    -- Migrate old visibility values: "combat" -> "in_combat", "target" stays as-is
+    do
+        local prof = self.db.profile
+        for _, key in ipairs({"health", "primary", "secondary"}) do
+            local s = prof[key]
+            if s and s.visibility == "combat" then
+                s.visibility = "in_combat"
+            end
+        end
+    end
+
     AppendSharedMediaTextures()
 end
 
@@ -3408,6 +3462,9 @@ function ERB:OnEnable()
     eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
     eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    -- Visibility option events
+    eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")

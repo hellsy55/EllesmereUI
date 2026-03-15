@@ -2793,24 +2793,164 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 1: Enable Frame + Frame Scale
-        local sharedEnableRow
-        sharedEnableRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Frame",
-              getValue=function()
-                  return db.profile.enabledFrames[selectedUnit] ~= false
-              end,
+        -- Row 1: Visibility | Visibility Options (checkbox dropdown)
+        local visRow
+        visRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Visibility",
+              values = EllesmereUI.VIS_VALUES,
+              order = EllesmereUI.VIS_ORDER,
+              getValue=function() return UNIT_DB_MAP[selectedUnit]().barVisibility or "always" end,
               setValue=function(v)
-                  db.profile.enabledFrames[selectedUnit] = v
+                  UNIT_DB_MAP[selectedUnit]().barVisibility = v
+                  -- Sync enabledFrames: "never" disables the frame entirely
+                  db.profile.enabledFrames[selectedUnit] = (v ~= "never")
+                  -- Keep legacy keys in sync for safety
+                  local s = UNIT_DB_MAP[selectedUnit]()
+                  if v == "always" then
+                      s.showInRaid = true; s.showInParty = true; s.showSolo = true
+                  elseif v == "never" then
+                      s.showInRaid = false; s.showInParty = false; s.showSolo = false
+                  elseif v == "in_raid" then
+                      s.showInRaid = true; s.showInParty = false; s.showSolo = false
+                  elseif v == "in_party" then
+                      s.showInRaid = true; s.showInParty = true; s.showSolo = false
+                  elseif v == "solo" then
+                      s.showInRaid = false; s.showInParty = false; s.showSolo = true
+                  end
+                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
                   ReloadAndUpdate()
                   EllesmereUI:RefreshPage()
               end },
+            { type="dropdown", text="Visibility Options",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end });  y = y - h
+
+        -- Replace the dummy right dropdown with our checkbox dropdown
+        do
+            local rightRgn = visRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local visItems = EllesmereUI.VIS_OPT_ITEMS
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                visItems,
+                function(k) return UNIT_DB_MAP[selectedUnit]()[k] or false end,
+                function(k, v)
+                    UNIT_DB_MAP[selectedUnit]()[k] = v
+                    if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                    EllesmereUI:RefreshPage()
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            RegisterWidgetRefresh(cbDDRefresh)
+        end
+
+        -- Sync icon on Visibility (left)
+        do
+            local rgn = visRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Visibility to all Frames",
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().barVisibility or "always") ~= v then return false end
+                    end
+                    return true
+                end,
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        UNIT_DB_MAP[key]().barVisibility = v
+                        db.profile.enabledFrames[key] = (v ~= "never")
+                    end
+                    if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                        for _, key in ipairs(checkedKeys) do
+                            UNIT_DB_MAP[key]().barVisibility = v
+                            db.profile.enabledFrames[key] = (v ~= "never")
+                        end
+                        if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+
+        -- Sync icon on Visibility Options (right)
+        do
+            local rgn = visRow._rightRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Visibility Options to all Frames",
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
+                        local k = item.key
+                        local cur = src[k] or false
+                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                            if (UNIT_DB_MAP[key]()[k] or false) ~= cur then return false end
+                        end
+                    end
+                    return true
+                end,
+                onClick = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
+                        local k = item.key
+                        local v = src[k] or false
+                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                            UNIT_DB_MAP[key]()[k] = v
+                        end
+                    end
+                    if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                    EllesmereUI:RefreshPage()
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local src = UNIT_DB_MAP[selectedUnit]()
+                        for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
+                            local k = item.key
+                            local v = src[k] or false
+                            for _, key in ipairs(checkedKeys) do
+                                UNIT_DB_MAP[key]()[k] = v
+                            end
+                        end
+                        if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                        EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+
+        -- Row 2: Frame Scale | Border (slider + double inline swatches)
+        local sharedScaleBorderRow
+        sharedScaleBorderRow, h = W:DualRow(parent, y,
             { type="slider", text="Frame Scale", min=50, max=200, step=1,
               getValue=function() return SVal("frameScale", 100) end,
-              setValue=function(v) SSet("frameScale", v) end });  y = y - h
-        -- Sync icon: Frame Scale
+              setValue=function(v) SSet("frameScale", v) end },
+            { type="slider", text="Border",
+              min=0, max=4, step=1,
+              getValue=function() return SVal("borderSize", 1) end,
+              setValue=function(v)
+                  SSet("borderSize", v); ReloadAndUpdate()
+              end });  y = y - h
+        -- Sync icon: Frame Scale (left)
         do
-            local rgn = sharedEnableRow._rightRegion
+            local rgn = sharedScaleBorderRow._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Frame Scale to all Frames",
@@ -2845,117 +2985,9 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
-
-        -- Inline cog on Enable Frames for group visibility (player/target/focus only)
+        -- Sync icon: Border Size (right)
         do
-            local rgn = sharedEnableRow._leftRegion
-            local function VisSet(key, v)
-                UNIT_DB_MAP[selectedUnit]()[key] = v
-                if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-            end
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Frame Display Options",
-                rows = {
-                    { type = "toggle", label = "In Raid Group",
-                      get = function() local v = SGet("showInRaid"); if v == nil then return true end; return v ~= false end,
-                      set = function(v) VisSet("showInRaid", v) end },
-                    { type = "toggle", label = "In Party",
-                      get = function() local v = SGet("showInParty"); if v == nil then return true end; return v ~= false end,
-                      set = function(v) VisSet("showInParty", v) end },
-                    { type = "toggle", label = "Solo",
-                      get = function() local v = SGet("showSolo"); if v == nil then return true end; return v ~= false end,
-                      set = function(v) VisSet("showSolo", v) end },
-                },
-            })
-            local visCogBtn = MakeCogBtn(rgn, cogShow)
-
-            -- Blocking overlay: disabled when Enable Frame is off
-            local visCogBlock = CreateFrame("Frame", nil, visCogBtn)
-            visCogBlock:SetAllPoints()
-            visCogBlock:SetFrameLevel(visCogBtn:GetFrameLevel() + 10)
-            visCogBlock:EnableMouse(true)
-            visCogBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(visCogBtn, EllesmereUI.DisabledTooltip("Enable Frame"))
-            end)
-            visCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateVisCogDisabled()
-                local frameEnabled = db.profile.enabledFrames[selectedUnit] ~= false
-                if frameEnabled then
-                    visCogBtn:SetAlpha(0.4)
-                    visCogBlock:Hide()
-                else
-                    visCogBtn:SetAlpha(0.15)
-                    visCogBlock:Show()
-                end
-            end
-            UpdateVisCogDisabled()
-            RegisterWidgetRefresh(UpdateVisCogDisabled)
-        end
-
-        -- Row 2: Dark Mode + Bar Texture
-        local sharedDarkTexRow
-        sharedDarkTexRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Dark Mode",
-              getValue=function() return db.profile.darkTheme end,
-              setValue=function(v)
-                  db.profile.darkTheme = v
-                  ReloadAndUpdate(); UpdatePreview()
-                  EllesmereUI:RefreshPage()
-              end },
-            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
-              getValue=function() return SVal("healthBarTexture", "none") end,
-              setValue=function(v) SSet("healthBarTexture", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Sync icon: Health Bar Texture
-        do
-            local rgn = sharedDarkTexRow._rightRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Bar Texture to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then
-                            UNIT_DB_MAP[key]().healthBarTexture = v
-                        end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().healthBarTexture or "none") ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                        for _, key in ipairs(checkedKeys) do
-                            UNIT_DB_MAP[key]().healthBarTexture = v
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
-
-        -- Row 3: Border (slider + double inline swatches: Highlight | Border)
-        local sharedBorderRow
-        sharedBorderRow, h = W:DualRow(parent, y,
-            { type="slider", text="Border",
-              min=0, max=4, step=1,
-              getValue=function() return SVal("borderSize", 1) end,
-              setValue=function(v)
-                  SSet("borderSize", v); ReloadAndUpdate()
-              end },
-            { type="label", text="" });  y = y - h
-        -- Sync icon: Border Size
-        do
-            local rgn = sharedBorderRow._leftRegion
+            local rgn = sharedScaleBorderRow._rightRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Border to all Frames",
@@ -3006,15 +3038,15 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
-        -- Double inline swatches on Border slider: left = Highlight, right = Border (both with alpha)
+        -- Double inline swatches on Border slider (right region): left = Highlight, right = Border
         do
-            local leftRgn = sharedBorderRow._leftRegion
-            local ctrl = leftRgn._control
+            local rightRgn = sharedScaleBorderRow._rightRegion
+            local ctrl = rightRgn._control
             local PP = EllesmereUI.PP
 
             -- Right swatch: Border color (with alpha)
             local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, sharedBorderRow:GetFrameLevel() + 3,
+                rightRgn, sharedScaleBorderRow:GetFrameLevel() + 3,
                 function()
                     local c = SGet("borderColor") or { r = 0, g = 0, b = 0 }
                     return c.r, c.g, c.b, SVal("borderAlpha", 1)
@@ -3033,7 +3065,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Left swatch: Highlight color (with alpha)
             local hlSwatch, updateHlSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, sharedBorderRow:GetFrameLevel() + 3,
+                rightRgn, sharedScaleBorderRow:GetFrameLevel() + 3,
                 function()
                     local c = SGet("highlightColor") or { r = 1, g = 1, b = 1 }
                     return c.r, c.g, c.b, SVal("highlightAlpha", 1)
@@ -3051,6 +3083,57 @@ initFrame:SetScript("OnEvent", function(self)
             hlSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); updateHlSwatch() end)
+        end
+
+        -- Row 3: Bar Texture | Dark Mode
+        local sharedTexDarkRow
+        sharedTexDarkRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
+              getValue=function() return SVal("healthBarTexture", "none") end,
+              setValue=function(v) SSet("healthBarTexture", v); ReloadAndUpdate(); UpdatePreview() end },
+            { type="toggle", text="Dark Mode",
+              getValue=function() return db.profile.darkTheme end,
+              setValue=function(v)
+                  db.profile.darkTheme = v
+                  ReloadAndUpdate(); UpdatePreview()
+                  EllesmereUI:RefreshPage()
+              end });  y = y - h
+        -- Sync icon: Health Bar Texture (left)
+        do
+            local rgn = sharedTexDarkRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Texture to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then
+                            UNIT_DB_MAP[key]().healthBarTexture = v
+                        end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().healthBarTexture or "none") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
+                        for _, key in ipairs(checkedKeys) do
+                            UNIT_DB_MAP[key]().healthBarTexture = v
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
         end
 
         _, h = W:Spacer(parent, y, 20); y = y - h

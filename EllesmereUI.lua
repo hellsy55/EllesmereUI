@@ -5587,7 +5587,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.7.5"
+EllesmereUI.VERSION = "4.8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6212,9 +6212,11 @@ initFrame:SetScript("OnEvent", function(self, event)
         local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         btn:SetSize(200, 35)
         btn:SetScript("OnClick", function()
-            if not InCombatLockdown() then
-                HideUIPanel(GameMenuFrame)
+            if InCombatLockdown() then
+                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                return
             end
+            HideUIPanel(GameMenuFrame)
             EllesmereUI:Toggle()
         end)
         GameMenuFrame.EllesmereUI = btn
@@ -6337,7 +6339,10 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetPoint("CENTER", panel, "CENTER", 0, 0)
         btn:SetText("Open EllesmereUI")
         btn:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                return
+            end
             -- Close Blizzard settings first, then open ours on next frame to avoid taint
             if SettingsPanel and SettingsPanel:IsShown() then
                 HideUIPanel(SettingsPanel)
@@ -6471,3 +6476,92 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
     end
 end)
+
+-------------------------------------------------------------------------------
+--  Shared Visibility System
+--  Unified visibility dropdown values, checkbox dropdown items, and runtime
+--  checks used by CDM, Action Bars, Resource Bars, and Unit Frames.
+-------------------------------------------------------------------------------
+
+-- Dropdown 1: Visibility mode
+EllesmereUI.VIS_VALUES = {
+    never      = "Never",
+    always     = "Always",
+    mouseover  = "Mouseover",
+    in_combat  = "In Combat",
+    in_raid    = "In Raid Group",
+    in_party   = "In Party",
+    solo       = "Solo",
+}
+EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "---", "in_raid", "in_party", "solo" }
+
+-- Checkbox dropdown 2: Visibility Options (keys match DB fields)
+EllesmereUI.VIS_OPT_ITEMS = {
+    { key = "visOnlyInstances",    label = "Only Show in Instances" },
+    { key = "visHideHousing",      label = "Hide in Housing" },
+    { key = "visHideMounted",      label = "Hide when Mounted" },
+    { key = "visHideNoTarget",     label = "Hide without Target",
+      tooltip = "This bar will only show if you have a target" },
+    { key = "visHideNoEnemy",      label = "Hide without Enemy Target",
+      tooltip = "This bar will only show if you have an enemy targeted" },
+}
+
+-- Runtime check: returns true if the element should be HIDDEN by visibility options.
+-- `opts` is the settings table containing the vis option booleans.
+function EllesmereUI.CheckVisibilityOptions(opts)
+    if not opts then return false end
+
+    -- Only Show in Instances
+    if opts.visOnlyInstances then
+        local _, iType, diffID = GetInstanceInfo()
+        diffID = tonumber(diffID) or 0
+        local inInstance = false
+        if diffID > 0 then
+            if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
+                inInstance = false
+            elseif iType == "party" or iType == "raid" or iType == "scenario" or iType == "arena" or iType == "pvp" then
+                inInstance = true
+            end
+        end
+        if not inInstance then return true end
+    end
+
+    -- Hide in Housing
+    if opts.visHideHousing then
+        if C_Map and C_Map.GetBestMapForUnit then
+            local mapID = C_Map.GetBestMapForUnit("player")
+            if mapID and mapID > 2600 then return true end
+        end
+    end
+
+    -- Hide when Mounted
+    if opts.visHideMounted then
+        if IsMounted and IsMounted() then return true end
+    end
+
+    -- Hide without Target
+    if opts.visHideNoTarget then
+        if not UnitExists("target") then return true end
+    end
+
+    -- Hide without Enemy Target
+    if opts.visHideNoEnemy then
+        if not (UnitExists("target") and UnitCanAttack("player", "target")) then return true end
+    end
+
+    return false
+end
+
+-- Runtime check: returns true if the element should be SHOWN based on the
+-- visibility mode dropdown value. Caller provides combat/group state.
+-- `mode` is the string from the visibility dropdown.
+-- `state` is a table: { inCombat, inRaid, inParty }
+function EllesmereUI.CheckVisibilityMode(mode, state)
+    if mode == "never" then return false end
+    if mode == "in_combat" then return state.inCombat end
+    if mode == "in_raid" then return state.inRaid end
+    if mode == "in_party" then return state.inParty or state.inRaid end
+    if mode == "solo" then return not state.inRaid and not state.inParty end
+    -- "always" and "mouseover" both return true (mouseover handled separately)
+    return true
+end

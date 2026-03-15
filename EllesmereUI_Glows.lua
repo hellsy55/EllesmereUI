@@ -59,19 +59,24 @@ local function _EdgeAndOffset(dist, w, h)
     return 3, dist - w
 end
 
-local function _PlaceOnEdge(tex, parent, edge, startOff, endOff, w, h, th)
+local function _PlaceOnEdge(tex, parent, edge, startOff, endOff, w, h, sTh, onePixel)
     local len = endOff - startOff
     if len < 0.5 then tex:Hide(); return end
-    len = floor(len + 0.5)
+    -- Snap length and offset to physical pixels (onePixel and sTh precomputed by caller)
+    local sLen = floor(len / onePixel + 0.5) * onePixel
+    if sLen < onePixel then tex:Hide(); return end
+    local sOff = floor(startOff / onePixel + 0.5) * onePixel
     tex:ClearAllPoints()
     if edge == 0 then
-        tex:SetSize(len, th); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", floor(startOff + 0.5), 0)
+        tex:SetSize(sLen, sTh); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", sOff, 0)
     elseif edge == 1 then
-        tex:SetSize(th, len); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", w - th, -floor(startOff + 0.5))
+        tex:SetSize(sTh, sLen); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", w - sTh, -sOff)
     elseif edge == 2 then
-        tex:SetSize(len, th); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", floor(w - endOff + 0.5), -(h - th))
+        local sEnd = floor(endOff / onePixel + 0.5) * onePixel
+        tex:SetSize(sLen, sTh); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", w - sEnd, -(h - sTh))
     else
-        tex:SetSize(th, len); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -floor(h - endOff + 0.5))
+        local sEnd = floor(endOff / onePixel + 0.5) * onePixel
+        tex:SetSize(sTh, sLen); tex:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(h - sEnd))
     end
     tex:Show()
 end
@@ -86,18 +91,29 @@ local function _AntsOnUpdate(self, elapsed)
     d.timer = d.timer + elapsed
     if d.timer >= d.period then d.timer = d.timer - d.period end
     d._accum = (d._accum or 0) + elapsed
-    if d._accum < 0.033 then return end
+    if d._accum < 0.016 then return end
     d._accum = 0
     local w, h = d.w, d.h
+    local onePixel = d.onePixel
     if w * h == 0 then
         w, h = self:GetSize()
         if w * h == 0 then return end
-        d.w = w; d.h = h
+        local PP = EllesmereUI.PP
+        local es = self:GetEffectiveScale()
+        onePixel = PP.perfect / es
+        -- Snap dimensions to physical pixels
+        w = floor(w / onePixel + 0.5) * onePixel
+        h = floor(h / onePixel + 0.5) * onePixel
+        -- Snap thickness once (constant while glow is active)
+        local sTh = floor(d.th / onePixel + 0.5) * onePixel
+        if sTh < onePixel then sTh = onePixel end
+        d.w = w; d.h = h; d.onePixel = onePixel; d.sTh = sTh
     end
     local perim = 2 * (w + h)
     if perim <= 0 then return end
     local progress = d.timer / d.period
     local step = 1 / d.N
+    local sTh = d.sTh
     for i = 1, d.N do
         local headDist = ((progress + (i - 1) * step) % 1) * perim
         local tailDist = headDist - d.lineLen
@@ -107,11 +123,11 @@ local function _AntsOnUpdate(self, elapsed)
         local primary  = d.lines[i]
         local overflow = d.lines[i + d.N]
         if headEdge == tailEdge then
-            _PlaceOnEdge(primary, self, headEdge, tailOff, headOff, w, h, d.th)
+            _PlaceOnEdge(primary, self, headEdge, tailOff, headOff, w, h, sTh, onePixel)
             overflow:Hide()
         else
-            _PlaceOnEdge(primary,  self, headEdge, 0,       headOff,                      w, h, d.th)
-            _PlaceOnEdge(overflow, self, tailEdge, tailOff, _EdgeLen(tailEdge, w, h), w, h, d.th)
+            _PlaceOnEdge(primary,  self, headEdge, 0,       headOff,                      w, h, sTh, onePixel)
+            _PlaceOnEdge(overflow, self, tailEdge, tailOff, _EdgeLen(tailEdge, w, h), w, h, sTh, onePixel)
         end
     end
 end
@@ -122,7 +138,7 @@ local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, 
     end
     local d = wrapper._euiAntsData
     d.N = N; d.th = th; d.period = period; d.lineLen = lineLen
-    d.w = sz or 0; d.h = sz or 0
+    d.w = 0; d.h = 0; d.onePixel = nil  -- reset so OnUpdate re-snaps to physical pixels
     local totalTex = N * 2
     for i = 1, totalTex do
         if not d.lines[i] then
@@ -196,9 +212,11 @@ end
 local function _AutoCastOnUpdate(self, elapsed)
     local d = self._euiAcData
     if not d then return end
+    local timers = d.timers
+    local pK1 = d.period
     for k = 1, 4 do
-        d.timers[k] = d.timers[k] + elapsed / (d.period * k)
-        if d.timers[k] > 1 then d.timers[k] = d.timers[k] - 1 end
+        timers[k] = timers[k] + elapsed / (pK1 * k)
+        if timers[k] > 1 then timers[k] = timers[k] - 1 end
     end
     d._accum = (d._accum or 0) + elapsed
     if d._accum < 0.033 then return end
@@ -208,22 +226,34 @@ local function _AutoCastOnUpdate(self, elapsed)
         w, h = self:GetSize()
         if w * h == 0 then return end
         d.w = w; d.h = h
-        d.perim = 2 * (w + h)
+        local perim = 2 * (w + h)
+        d.perim = perim
         d.rightLim = h + w
         d.bottomLim = h * 2 + w
-        d.space = d.perim / d.N
+        d.space = perim / d.N
+        -- Precompute per-dot base offsets (space * i) to avoid multiplication each frame
+        local offsets = d.offsets
+        if not offsets then offsets = {}; d.offsets = offsets end
+        for i = 1, d.N do offsets[i] = d.space * i end
     end
+    local perim = d.perim
+    local rightLim = d.rightLim
+    local bottomLim = d.bottomLim
+    local offsets = d.offsets
+    local dots = d.dots
+    local N = d.N
     local texIdx = 0
     for k = 1, 4 do
-        for i = 1, d.N do
+        local tK = timers[k] * perim
+        for i = 1, N do
             texIdx = texIdx + 1
-            local pos = (d.space * i + d.perim * d.timers[k]) % d.perim
-            local dot = d.dots[texIdx]
+            local pos = (offsets[i] + tK) % perim
+            local dot = dots[texIdx]
             dot:ClearAllPoints()
-            if pos > d.bottomLim then
-                dot:SetPoint("CENTER", self, "BOTTOMRIGHT", -(pos - d.bottomLim), 0)
-            elseif pos > d.rightLim then
-                dot:SetPoint("CENTER", self, "TOPRIGHT", 0, -(pos - d.rightLim))
+            if pos > bottomLim then
+                dot:SetPoint("CENTER", self, "BOTTOMRIGHT", -(pos - bottomLim), 0)
+            elseif pos > rightLim then
+                dot:SetPoint("CENTER", self, "TOPRIGHT", 0, -(pos - rightLim))
             elseif pos > h then
                 dot:SetPoint("CENTER", self, "TOPLEFT", pos - h, 0)
             else
@@ -280,15 +310,16 @@ end
 local function _ShapeGlowOnUpdate(self, elapsed)
     local d = self._euiSgData
     if not d then return end
-    d.timer = d.timer + elapsed * d.speed
-    if d.timer > 6.2832 then d.timer = d.timer - 6.2832 end
-    local alpha = 0.25 + 0.25 * (0.5 + 0.5 * sin(d.timer))
-    d.glow:SetAlpha(alpha)
-    if d.bright then
-        d.bTimer = (d.bTimer or 0) + elapsed * d.speed * 0.50
-        if d.bTimer > 6.2832 then d.bTimer = d.bTimer - 6.2832 end
-        local bAlpha = 0.35 + 0.10 * (0.5 + 0.5 * sin(d.bTimer))
-        d.bright:SetAlpha(bAlpha)
+    local timer = d.timer + elapsed * d.speed
+    if timer > 6.2832 then timer = timer - 6.2832 end
+    d.timer = timer
+    d.glow:SetAlpha(0.25 + 0.25 * (0.5 + 0.5 * sin(timer)))
+    local bright = d.bright
+    if bright then
+        local bTimer = (d.bTimer or 0) + elapsed * d.speed * 0.50
+        if bTimer > 6.2832 then bTimer = bTimer - 6.2832 end
+        d.bTimer = bTimer
+        bright:SetAlpha(0.35 + 0.10 * (0.5 + 0.5 * sin(bTimer)))
     end
 end
 
