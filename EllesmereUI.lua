@@ -6508,6 +6508,60 @@ EllesmereUI.VIS_OPT_ITEMS = {
 
 -- Runtime check: returns true if the element should be HIDDEN by visibility options.
 -- `opts` is the settings table containing the vis option booleans.
+local DRUID_MOUNT_FORM_IDS = {
+    [3] = true,   -- travel form
+    [4] = true,   -- aquatic form
+    [27] = true,  -- flight form
+    [29] = true,  -- flight form variant
+}
+
+local DRUID_MOUNT_FORM_SPELLS = {
+    [783] = true,    -- Travel Form
+    [1066] = true,   -- Aquatic Form
+    [33943] = true,  -- Flight Form
+    [40120] = true,  -- Swift Flight Form
+    [165962] = true, -- Mount Form
+    [210053] = true, -- Mount Form (variant)
+}
+
+function EllesmereUI.IsPlayerMountedLike()
+    -- Fast path for regular mounts.
+    if IsMounted and IsMounted() then return true end
+
+    -- Druid travel/flight/aquatic forms are mount-like for visibility checks.
+    local _, classFile = UnitClass("player")
+    if classFile ~= "DRUID" then return false end
+
+    if GetShapeshiftFormID then
+        local formID = GetShapeshiftFormID()
+        if formID and DRUID_MOUNT_FORM_IDS[formID] then
+            return true
+        end
+    end
+
+    -- Spell fallback to catch mount-form variants when form IDs differ.
+    if GetShapeshiftForm and GetShapeshiftFormInfo then
+        local form = GetShapeshiftForm()
+        if form and form > 0 then
+            local _, a2, a3, a4, a5 = GetShapeshiftFormInfo(form)
+            local active
+            local spellID
+            if type(a2) == "boolean" then
+                active = a2
+                spellID = (type(a4) == "number" and a4) or (type(a5) == "number" and a5) or nil
+            elseif type(a3) == "boolean" then
+                active = a3
+                spellID = (type(a5) == "number" and a5) or (type(a4) == "number" and a4) or nil
+            end
+            if active and spellID and DRUID_MOUNT_FORM_SPELLS[spellID] then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 function EllesmereUI.CheckVisibilityOptions(opts)
     if not opts then return false end
 
@@ -6536,7 +6590,7 @@ function EllesmereUI.CheckVisibilityOptions(opts)
 
     -- Hide when Mounted
     if opts.visHideMounted then
-        if IsMounted and IsMounted() then return true end
+        if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
     end
 
     -- Hide without Target

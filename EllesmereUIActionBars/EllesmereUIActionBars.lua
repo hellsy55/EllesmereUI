@@ -3894,9 +3894,9 @@ function EAB:UpdateHousingVisibility()
     -- (e.g. CameraOrSelectOrMoveStop triggering PLAYER_MOUNT_DISPLAY_CHANGED)
     C_Timer.After(0, function()
         if InCombatLockdown() then return end
-        -- Check only housing and instance-only options here. Mounted, target,
-        -- and enemy options are handled by the secure state driver via
-        -- BuildVisibilityString and re-evaluate automatically.
+        -- Check non-macro visibility options here. Secure frames still use the
+        -- state driver for target/enemy conditions, but mounted-like druid
+        -- forms are also handled here to cover cases [mounted] does not match.
         local function ShouldHideNonMacro(s)
             if not s then return false end
             if s.visOnlyInstances then
@@ -3918,6 +3918,14 @@ function EAB:UpdateHousingVisibility()
                     if mapID and mapID > 2600 then return true end
                 end
             end
+            -- Mounted is normally handled by secure [mounted] state conditions.
+            -- Also check the shared runtime mounted-like helper here so druid
+            -- travel/flight/aquatic forms hide correctly on non-macro refreshes.
+            if s.visHideMounted then
+                if EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
+                    return true
+                end
+            end
             return false
         end
 
@@ -3927,8 +3935,9 @@ function EAB:UpdateHousingVisibility()
             if s then
                 local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
                 if frame then
-                    -- Secure action bar frames use the state driver for mounted/
-                    -- target/enemy options, so only check housing/instances here.
+                    -- Secure action bar frames use the state driver for
+                    -- target/enemy options; mounted-like druid forms are
+                    -- additionally handled in ShouldHideNonMacro().
                     -- Non-secure frames (data bars, extra bars, visibility-only)
                     -- need the full check since they have no state driver.
                     local isSecure = not info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable and barFrames[key]
@@ -5847,6 +5856,9 @@ function EAB:FinishSetup()
 
     -- Visibility option events: mounted, target, group changes
     self:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED", function()
+        self:UpdateHousingVisibility()
+    end)
+    self:RegisterEvent("UPDATE_SHAPESHIFT_FORM", function()
         self:UpdateHousingVisibility()
     end)
     self:RegisterEvent("PLAYER_TARGET_CHANGED", function()

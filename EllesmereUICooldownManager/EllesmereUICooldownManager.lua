@@ -7459,6 +7459,7 @@ eventFrame:RegisterEvent("STOP_MOVIE")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 
 -- Debounce token for talent-change rebuilds: rapid talent clicks collapse
 -- into a single deferred rebuild rather than firing once per click.
@@ -7602,7 +7603,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end
         return
     end
-    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" then
+    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
         _CDMApplyVisibility()
         return
     end
