@@ -1078,6 +1078,10 @@ function ns.BuildTrackedBuffBars()
             -- Mark bar as ready but keep hidden; the tick will show it
             -- when the tracked buff is actually active on the player.
             bar._tbbReady = true
+            bar._isPassive = nil
+            bar._resolvedAuraID = nil
+            bar._customStart = nil
+            bar._activeDuration = nil
             bar:Hide()
         end
     end
