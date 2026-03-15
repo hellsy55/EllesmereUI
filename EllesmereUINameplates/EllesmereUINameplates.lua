@@ -4326,16 +4326,39 @@ local function UpdateFactionFrameForZone()
     end
 end
 
+local function RefreshThreatContextAndPlateColors()
+    RefreshThreatCache()
+    -- Unit tokens are recycled across zone/instance transitions; clear any
+    -- stale quest-mob decisions that were made under a different context.
+    wipe(questMobCache)
+    for _, plate in pairs(ns.plates) do
+        plate:UpdateHealthColor()
+    end
+end
+
 factionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+factionFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+factionFrame:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
 factionFrame:RegisterEvent("ROLE_CHANGED_INFORM")
+factionFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 factionFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 factionFrame:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_ENTERING_WORLD"
+    or event == "ZONE_CHANGED_NEW_AREA"
+    or event == "PLAYER_DIFFICULTY_CHANGED"
     or event == "ROLE_CHANGED_INFORM"
+    or event == "PLAYER_ROLES_ASSIGNED"
     or event == "GROUP_ROSTER_UPDATE" then
-        RefreshThreatCache()
-        if event == "PLAYER_ENTERING_WORLD" then
+        RefreshThreatContextAndPlateColors()
+        if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
             UpdateFactionFrameForZone()
+        end
+        if event == "PLAYER_ENTERING_WORLD" then
+            -- Initial PEW can fire before difficulty/instance data settles.
+            C_Timer.After(0.6, function()
+                RefreshThreatContextAndPlateColors()
+                UpdateFactionFrameForZone()
+            end)
         end
         return
     end
