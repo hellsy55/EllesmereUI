@@ -82,7 +82,7 @@ initFrame:SetScript("OnEvent", function(self)
         { "SpellQueueWindow",                               "300" },
         { "floatingCombatTextCombatHealing_v2",             "1"   },
         { "WorldTextScale_v2",                              "0.5" },
-        { "floatingCombatTextCombatLogPeriodicSpells_v2",   "0"   },
+        { "floatingCombatTextCombatLogPeriodicSpells_v2",   "1"   },
         { "floatingCombatTextCombatDamage_v2",              "1"   },
     }
 
