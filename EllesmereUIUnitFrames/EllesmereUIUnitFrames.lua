@@ -6335,6 +6335,10 @@ function InitializeFrames()
             end
         end
     end)
+
+    -- Apply all settings (cast bar colors, text, sizes, etc.) now that
+    -- frames are spawned and anchored.
+    ReloadFrames()
 end
 
 

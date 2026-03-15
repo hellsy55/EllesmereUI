@@ -591,11 +591,17 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
     end
 
     -- Resource check: desaturate if spell is off CD but not usable (insufficient power)
+    -- Skip for charge spells that have charges available -- they are always
+    -- castable. IsSpellUsable can briefly return false after zoning while
+    -- spell data reloads, which would incorrectly gray out the icon.
     if desatOnCD and not desatApplied and not skipCD then
-        local usable = C_Spell.IsSpellUsable(spellID)
-        if not usable then
-            icon._tex:SetDesaturation(1)
-            icon._lastDesat = true
+        local skipResourceCheck = isChargeSpell and not isOnCooldown
+        if not skipResourceCheck then
+            local usable = C_Spell.IsSpellUsable(spellID)
+            if not usable then
+                icon._tex:SetDesaturation(1)
+                icon._lastDesat = true
+            end
         end
     end
 
@@ -2983,7 +2989,10 @@ LayoutCDMBar = function(barKey)
     for i, icon in ipairs(visibleIcons) do
         icon:SetSize(iconW, iconH)
         if icon._glowOverlay then
-            icon._glowOverlay:SetSize(iconW + SnapForScale(6, barScale), iconH + SnapForScale(6, barScale))
+            -- Keep glow overlay square (based on full icon width) so glow
+            -- engines render correctly even when the icon is cropped.
+            local glowSz = iconW + SnapForScale(6, barScale)
+            icon._glowOverlay:SetSize(glowSz, glowSz)
         end
         icon:ClearAllPoints()
 
@@ -3093,9 +3102,8 @@ local function CreateCDMIcon(barKey, index)
 
     -- Glow overlay: above cooldown swipe, below text so numbers stay readable
     local glowOverlay = CreateFrame("Frame", nil, icon)
-    glowOverlay:ClearAllPoints()
-    glowOverlay:SetPoint("TOPLEFT",     icon, "TOPLEFT",     -3,  3)
-    glowOverlay:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",  3, -3)
+    glowOverlay:SetPoint("CENTER", icon, "CENTER")
+    glowOverlay:SetSize(1, 1)  -- sized properly during layout
     glowOverlay:SetFrameLevel(icon:GetFrameLevel() + 2)
     glowOverlay:SetAlpha(0)
     glowOverlay:EnableMouse(false)

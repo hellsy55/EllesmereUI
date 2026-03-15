@@ -5587,7 +5587,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "4.8.4"
+EllesmereUI.VERSION = "4.8.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6524,14 +6524,17 @@ local DRUID_MOUNT_FORM_SPELLS = {
     [210053] = true, -- Mount Form (variant)
 }
 
+-- Cache player class once at load time (never changes).
+local _, _playerClass = UnitClass("player")
+
 function EllesmereUI.IsPlayerMountedLike()
     -- Fast path for regular mounts.
     if IsMounted and IsMounted() then return true end
 
-    -- Druid travel/flight/aquatic forms are mount-like for visibility checks.
-    local _, classFile = UnitClass("player")
-    if classFile ~= "DRUID" then return false end
+    -- Only druids have mount-like shapeshift forms.
+    if _playerClass ~= "DRUID" then return false end
 
+    -- Primary check: form ID lookup (covers the common cases).
     if GetShapeshiftFormID then
         local formID = GetShapeshiftFormID()
         if formID and DRUID_MOUNT_FORM_IDS[formID] then
@@ -6539,23 +6542,13 @@ function EllesmereUI.IsPlayerMountedLike()
         end
     end
 
-    -- Spell fallback to catch mount-form variants when form IDs differ.
-    if GetShapeshiftForm and GetShapeshiftFormInfo then
-        local form = GetShapeshiftForm()
-        if form and form > 0 then
-            local _, a2, a3, a4, a5 = GetShapeshiftFormInfo(form)
-            local active
-            local spellID
-            if type(a2) == "boolean" then
-                active = a2
-                spellID = (type(a4) == "number" and a4) or (type(a5) == "number" and a5) or nil
-            elseif type(a3) == "boolean" then
-                active = a3
-                spellID = (type(a5) == "number" and a5) or (type(a4) == "number" and a4) or nil
-            end
-            if active and spellID and DRUID_MOUNT_FORM_SPELLS[spellID] then
-                return true
-            end
+    -- Spell fallback for mount-form variants whose form IDs may differ.
+    -- GetShapeshiftFormInfo returns: icon, active, castable, spellID
+    local form = GetShapeshiftForm and GetShapeshiftForm()
+    if form and form > 0 and GetShapeshiftFormInfo then
+        local _, active, _, spellID = GetShapeshiftFormInfo(form)
+        if active and spellID and DRUID_MOUNT_FORM_SPELLS[spellID] then
+            return true
         end
     end
 

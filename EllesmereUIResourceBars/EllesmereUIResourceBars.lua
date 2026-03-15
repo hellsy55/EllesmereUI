@@ -19,6 +19,8 @@ local UnitClass = UnitClass
 local GetSpecialization = GetSpecialization
 local InCombatLockdown = InCombatLockdown
 local GetShapeshiftFormID = GetShapeshiftFormID
+local IsPlayerSpell = IsPlayerSpell
+local UnitSpellHaste = UnitSpellHaste
 
 -------------------------------------------------------------------------------
 --  Constants
@@ -2947,6 +2949,18 @@ ShowChannelTicks = function(spellID)
     if not cb.showChannelTicks then return end
 
     local tickData = CHANNEL_TICK_DATA[spellID]
+    local wantTicks = tickData and (cb.showTickMarks or cb.showLastTick)
+    local wantGCD = cb.showGCDBoundary
+
+    -- Nothing to draw: hide stale marks and bail
+    if not wantTicks and not wantGCD then
+        for i = 1, #castBarFrame._ticks do
+            castBarFrame._ticks[i]:Hide()
+        end
+        castBarFrame._numTicks = 0
+        if castBarFrame._gcdMark then castBarFrame._gcdMark:Hide() end
+        return
+    end
 
     local bar = castBarFrame._bar
     local barWidth = bar:GetWidth()
@@ -2958,12 +2972,12 @@ ShowChannelTicks = function(spellID)
     local pixelSize = 1 / effectiveScale
     local tickWidth = max(pixelSize, floor(2 * effectiveScale + 0.5) / effectiveScale)
     local highlightWidth = max(pixelSize, floor(3 * effectiveScale + 0.5) / effectiveScale)
+    local snappedHeight = floor(barHeight * effectiveScale + 0.5) / effectiveScale
 
-    -- Tick marks — only for spells with known tick data
-    if tickData and (cb.showTickMarks or cb.showLastTick) then
+    -- Tick marks
+    if wantTicks then
         local numTicks
         if tickData.tickInterval then
-            -- Haste-extends-duration spells: compute ticks from actual channel duration
             local channelDuration = castBarFrame._endTime - castBarFrame._startTime
             if channelDuration > 0 then
                 numTicks = floor(channelDuration / tickData.tickInterval)
@@ -2977,17 +2991,16 @@ ShowChannelTicks = function(spellID)
             end
         end
 
-        -- Place a mark at each tick boundary.
-        -- The channel bar drains from 1→0 (fill shrinks from right to left).
-        -- Tick i fires at (i/numTicks) of the duration elapsed, at which point
-        -- the bar progress = (numTicks - i) / numTicks.  That fraction of the
-        -- bar width from the LEFT is where the mark sits.
-        -- We skip the last tick (i == numTicks) since it's the bar's zero edge.
+        -- Pre-read colors once outside the loop
+        local showTickMarks = cb.showTickMarks
+        local showLastTick = cb.showLastTick
+        local tmR, tmG, tmB, tmA = cb.tickMarksR or 1.0, cb.tickMarksG or 1.0, cb.tickMarksB or 1.0, cb.tickMarksA or 0.7
+        local ltR, ltG, ltB, ltA = cb.lastTickR or 1.0, cb.lastTickG or 0.82, cb.lastTickB or 0.0, cb.lastTickA or 0.95
+
         for i = 1, numTicks - 1 do
             local isLastTick = (i == numTicks - 1)
 
-            -- If only Last Tick is on (no Tick Marks), skip non-last ticks
-            if not cb.showTickMarks and not isLastTick then
+            if not showTickMarks and not isLastTick then
                 if castBarFrame._ticks[i] then castBarFrame._ticks[i]:Hide() end
             else
                 local tick = castBarFrame._ticks[i]
@@ -2996,15 +3009,13 @@ ShowChannelTicks = function(spellID)
                     castBarFrame._ticks[i] = tick
                 end
 
-                local rawOffset = barWidth * (numTicks - i) / numTicks
-                local snappedOffset = floor(rawOffset * effectiveScale + 0.5) / effectiveScale
-                local snappedHeight = floor(barHeight * effectiveScale + 0.5) / effectiveScale
+                local snappedOffset = floor(barWidth * (numTicks - i) / numTicks * effectiveScale + 0.5) / effectiveScale
 
-                if isLastTick and cb.showLastTick then
-                    tick:SetColorTexture(cb.lastTickR or 1.0, cb.lastTickG or 0.82, cb.lastTickB or 0.0, cb.lastTickA or 0.95)
+                if isLastTick and showLastTick then
+                    tick:SetColorTexture(ltR, ltG, ltB, ltA)
                     tick:SetSize(highlightWidth, snappedHeight)
                 else
-                    tick:SetColorTexture(cb.tickMarksR or 1.0, cb.tickMarksG or 1.0, cb.tickMarksB or 1.0, cb.tickMarksA or 0.7)
+                    tick:SetColorTexture(tmR, tmG, tmB, tmA)
                     tick:SetSize(tickWidth, snappedHeight)
                 end
 
@@ -3021,17 +3032,14 @@ ShowChannelTicks = function(spellID)
 
         castBarFrame._numTicks = numTicks
     else
-        -- No tick data or ticks disabled — hide any stale tick textures
         for i = 1, #castBarFrame._ticks do
             castBarFrame._ticks[i]:Hide()
         end
         castBarFrame._numTicks = 0
     end
 
-    -- GCD boundary mark — a separate mark at the exact GCD time position,
-    -- computed from real haste so it's accurate even above the GCD floor.
-    -- Shown for ALL channeled spells (not gated on CHANNEL_TICK_DATA).
-    if cb.showGCDBoundary then
+    -- GCD boundary mark
+    if wantGCD then
         local gcdMark = castBarFrame._gcdMark
         if not gcdMark then
             gcdMark = bar:CreateTexture(nil, "OVERLAY", nil, 4)
@@ -3045,9 +3053,7 @@ ShowChannelTicks = function(spellID)
             local gcdFraction = currentGCD / channelDuration
 
             if gcdFraction > 0 and gcdFraction < 1 then
-                local gcdOffset = barWidth * (1 - gcdFraction)
-                local snappedGcdOffset = floor(gcdOffset * effectiveScale + 0.5) / effectiveScale
-                local snappedHeight = floor(barHeight * effectiveScale + 0.5) / effectiveScale
+                local snappedGcdOffset = floor(barWidth * (1 - gcdFraction) * effectiveScale + 0.5) / effectiveScale
 
                 gcdMark:SetColorTexture(cb.gcdBoundaryR or 1.0, cb.gcdBoundaryG or 0.82, cb.gcdBoundaryB or 0.0, cb.gcdBoundaryA or 0.95)
                 gcdMark:SetSize(highlightWidth, snappedHeight)
