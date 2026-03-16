@@ -6542,12 +6542,13 @@ EllesmereUI.VIS_VALUES = {
     never      = "Never",
     always     = "Always",
     mouseover  = "Mouseover",
-    in_combat  = "In Combat",
-    in_raid    = "In Raid Group",
+    in_combat      = "In Combat",
+    out_of_combat  = "Out of Combat",
+    in_raid        = "In Raid Group",
     in_party   = "In Party",
     solo       = "Solo",
 }
-EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "---", "in_raid", "in_party", "solo" }
+EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
 -- Checkbox dropdown 2: Visibility Options (keys match DB fields)
 EllesmereUI.VIS_OPT_ITEMS = {
@@ -6660,6 +6661,7 @@ end
 function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "never" then return false end
     if mode == "in_combat" then return state.inCombat end
+    if mode == "out_of_combat" then return not state.inCombat end
     if mode == "in_raid" then return state.inRaid end
     if mode == "in_party" then return state.inParty or state.inRaid end
     if mode == "solo" then return not state.inRaid and not state.inParty end
