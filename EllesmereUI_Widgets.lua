@@ -3833,9 +3833,27 @@ local function BuildCogPopup(opts)
                 lbl:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, curY - ROW_H / 2 - 1)
 
                 local inputW = row.inputWidth or 80
+                local APPLY_W = 40
+                local APPLY_GAP = 4
+
+                -- Apply button (right-most)
+                local applyBtn = CreateFrame("Button", nil, pf)
+                applyBtn:SetSize(APPLY_W, ROW_H - 4)
+                applyBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                applyBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
+                local applyBg = SolidTex(applyBtn, "BACKGROUND", 0.20, 0.20, 0.20, 0.85)
+                applyBg:SetAllPoints()
+                local applyLbl = MakeFont(applyBtn, 10, nil, 1, 1, 1)
+                applyLbl:SetAlpha(0.6)
+                applyLbl:SetText("Apply")
+                applyLbl:SetPoint("CENTER")
+                applyBtn:SetScript("OnEnter", function(self) applyBg:SetColorTexture(0.30, 0.30, 0.30, 0.9); applyLbl:SetAlpha(1) end)
+                applyBtn:SetScript("OnLeave", function(self) applyBg:SetColorTexture(0.20, 0.20, 0.20, 0.85); applyLbl:SetAlpha(0.6) end)
+
+                -- Input box (left of apply button)
                 local box = CreateFrame("EditBox", nil, pf)
                 box:SetSize(inputW, ROW_H - 4)
-                box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                box:SetPoint("RIGHT", applyBtn, "LEFT", -APPLY_GAP, 0)
                 box:SetAutoFocus(false)
                 box:SetFont(EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
                 box:SetTextColor(1, 1, 1, POPUP_INPUT_A)
@@ -3843,15 +3861,19 @@ local function BuildCogPopup(opts)
                 local boxBg = SolidTex(box, "BACKGROUND", 0.12, 0.12, 0.12, 0.8)
                 boxBg:SetAllPoints()
                 box:SetText(row.get and row.get() or "")
-                box:SetScript("OnEnterPressed", function(self)
-                    self:ClearFocus()
-                    if row.set then row.set(self:GetText()) end
+
+                local function ApplyInput()
+                    box:ClearFocus()
+                    if row.set then row.set(box:GetText()) end
                     if pf._refresh then pf._refresh() end
-                end)
+                end
+
+                box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
                 box:SetScript("OnEscapePressed", function(self)
                     self:ClearFocus()
                     self:SetText(row.get and row.get() or "")
                 end)
+                applyBtn:SetScript("OnClick", function() ApplyInput() end)
 
                 -- Disabled overlay for input
                 local inputDis
