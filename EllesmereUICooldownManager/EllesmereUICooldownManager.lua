@@ -3790,7 +3790,16 @@ local function UpdateCustomBarIcons(barKey)
                             auraHandled = false
                         else
                             local isChargeSid = _multiChargeSpells[resolvedID] == true
-                            if auraID and (not isChargeSid or isBuffBarForOverride) then
+                            -- Charge spells: prefer recharge timer unless the
+                            -- buff-viewer is actively tracking this spell.
+                            local chargeShowsAura = not isChargeSid or isBuffBarForOverride
+                            if isChargeSid and not isBuffBarForOverride then
+                                local bufCh = _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
+                                if IsBufChildCooldownActive(bufCh) then
+                                    chargeShowsAura = true
+                                end
+                            end
+                            if auraID and chargeShowsAura then
                                 local ok, auraDurObj = pcall(C_UnitAuras.GetAuraDuration, auraUnit, auraID)
                                 if ok and auraDurObj then
                                     ourIcon._cooldown:Clear()
@@ -4147,11 +4156,19 @@ UpdateCDMBarIcons = function(barKey)
             local skipCDDisplay = false
 
             if isAura and activeAnim ~= "hideActive" then
-                local isChargeSid = resolvedSid and _multiChargeSpells[resolvedSid] == true
-                -- Buff bars always show buff duration; other bars skip aura duration for charge spells
                 local isBuffBar = (barKey == "buffs")
+                local isChargeSid = resolvedSid and _multiChargeSpells[resolvedSid] == true
+                -- Charge spells: prefer recharge timer unless the
+                -- buff-viewer is actively tracking this spell.
+                local chargeShowsAura = not isChargeSid or isBuffBar
+                if isChargeSid and not isBuffBar then
+                    local bufCh = _tickBlizzBuffChildCache[resolvedSid] or (spellID and _tickBlizzBuffChildCache[spellID])
+                    if IsBufChildCooldownActive(bufCh) then
+                        chargeShowsAura = true
+                    end
+                end
                 local auraID = blizzIcon.auraInstanceID
-                if auraID and (not isChargeSid or isBuffBar) then
+                if auraID and chargeShowsAura then
                     -- Show buff duration on the cooldown frame
                     local unit = blizzIcon.auraDataUnit or "player"
                     local ok, auraDurObj = pcall(C_UnitAuras.GetAuraDuration, unit, auraID)
@@ -4184,7 +4201,6 @@ UpdateCDMBarIcons = function(barKey)
                         end
                     end
                 else
-                    -- Charge spell on non-buff bar: mark active for glow, show charge CD
                     auraHandled = true
                 end
             end
@@ -4939,7 +4955,16 @@ local function UpdateTrackedBarIcons(barKey)
                             auraHandled = false
                         else
                             local isChargeSid = _multiChargeSpells[resolvedID] == true
-                            if auraID and (not isChargeSid or isBuffBarForOvr) then
+                            -- Charge spells: prefer recharge timer unless the
+                            -- buff-viewer is actively tracking this spell.
+                            local chargeShowsAura = not isChargeSid or isBuffBarForOvr
+                            if isChargeSid and not isBuffBarForOvr then
+                                local bufCh = _tickBlizzBuffChildCache[resolvedID] or _tickBlizzBuffChildCache[spellID]
+                                if IsBufChildCooldownActive(bufCh) then
+                                    chargeShowsAura = true
+                                end
+                            end
+                            if auraID and chargeShowsAura then
                                 local ok, auraDurObj = pcall(C_UnitAuras.GetAuraDuration, auraUnit, auraID)
                                 if ok and auraDurObj then
                                     ourIcon._cooldown:Clear()
