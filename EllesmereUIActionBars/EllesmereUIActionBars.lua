@@ -3476,30 +3476,20 @@ function EAB:ApplyExtraBarVisibility()
                     elseif info.isBlizzardMovable then
                         frame = blizzMovableHolders[key]
                     else
-                        -- MicroBar, BagBar, QueueStatus: target the Blizzard frame
                         frame = _G[info.frameName]
                     end
                     if frame then
                         if shouldHide then
-                            -- For blizzOwnedVisibility, save state so we only
-                            -- restore if it was shown before the pet battle
-                            -- (Blizzard manages its own Show/Hide for queues).
                             if info.blizzOwnedVisibility then
                                 frame._eabWasShownBeforePetBattle = frame:IsShown()
                             end
                             frame:Hide()
                         else
-                            -- blizzOwnedVisibility: only re-show if it was
-                            -- visible before pet battle (don't force-show an
-                            -- eye that Blizzard has hidden because no queue).
                             if info.blizzOwnedVisibility then
-                                if not frame._eabWasShownBeforePetBattle then
-                                    frame._eabWasShownBeforePetBattle = nil
-                                    -- skip Show() — let Blizzard manage
-                                else
-                                    frame._eabWasShownBeforePetBattle = nil
+                                if frame._eabWasShownBeforePetBattle then
                                     frame:Show()
                                 end
+                                frame._eabWasShownBeforePetBattle = nil
                             else
                                 frame:Show()
                             end
@@ -3569,8 +3559,6 @@ function EAB:ApplyAlwaysHidden()
                     RegisterAttributeDriver(frame, "state-visibility", "hide")
                 elseif info.visibilityOnly then
                     frame:Hide()
-                    -- blizzOwnedVisibility frames are not children of the
-                    -- holder, so also hide the Blizzard frame directly.
                     if info.blizzOwnedVisibility then
                         local bf = _G[info.frameName]
                         if bf then bf:Hide() end
@@ -3594,7 +3582,6 @@ function EAB:ApplyAlwaysHidden()
                     if barFrames[key] and frame == barFrames[key] then
                         SafeEnableMouseMotionOnly(frame, not s.clickThrough)
                     elseif info.isBlizzardMovable or info.blizzOwnedVisibility then
-                        -- Blizzard movable/owned holders must never eat clicks.
                         SafeEnableMouse(frame, false)
                     else
                         SafeEnableMouse(frame, not s.clickThrough)
@@ -3628,8 +3615,6 @@ function EAB:ApplyClickThroughForBar(barKey)
     -- Extra bars (MicroBar, BagBar, QueueStatus)
     for _, info in ipairs(EXTRA_BARS) do
         if info.key == barKey and not info.isDataBar and not info.isBlizzardMovable then
-            -- Blizzard-owned visibility frames: keep holder mouse-off,
-            -- but ensure the Blizzard frame itself stays clickable.
             if info.blizzOwnedVisibility then
                 local holder = extraBarHolders[barKey]
                 if holder then SafeEnableMouse(holder, false) end
@@ -6949,32 +6934,21 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
 
     local _recentering = false
 
-    -- Blizzard-owned visibility frames (e.g. QueueStatusButton): do NOT
-    -- reparent. Reparenting a protected Blizzard button into an addon-owned
-    -- frame taints its secure context, silently blocking click handlers.
-    -- Instead, anchor the Blizzard frame to the holder's position so EUI
-    -- can move it via unlock mode while Blizzard retains full control of
-    -- its visibility and click behaviour.
+    -- blizzOwnedVisibility: anchor to holder without reparenting so the
+    -- Blizzard frame keeps its secure context (clicks still work).
     if barInfo and barInfo.blizzOwnedVisibility then
         SafeEnableMouse(holder, false)
 
-        -- Prevent Blizzard layout system from repositioning
         blizzFrame.ignoreInLayout = true
         if blizzFrame.SetIsLayoutFrame then
             blizzFrame:SetIsLayoutFrame(false)
         end
         blizzFrame.IsLayoutFrame = nil
 
-        -- Ensure the Blizzard frame is clickable — Blizzard may disable
-        -- mouse on it during initialisation, and since we don't reparent
-        -- we need to explicitly re-enable it.
         SafeEnableMouse(blizzFrame, true)
-
-        -- Raise strata so the eye sits above action bar holders
         blizzFrame:SetFrameStrata("MEDIUM")
         blizzFrame:SetFrameLevel(100)
 
-        -- Anchor the Blizzard frame to the holder (no reparent)
         local function AnchorToHolder()
             if InCombatLockdown() then
                 _blizzMovablePendingOOC[barKey] = true
@@ -6987,7 +6961,6 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         end
         AnchorToHolder()
 
-        -- Re-anchor if Blizzard repositions
         hooksecurefunc(blizzFrame, "SetPoint", function(self)
             if _recentering then return end
             C_Timer_After(0, function()
@@ -6996,7 +6969,6 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
             end)
         end)
 
-        -- Hook UpdatePosition (Blizzard repositions relative to MicroMenu)
         if blizzFrame.UpdatePosition then
             hooksecurefunc(blizzFrame, "UpdatePosition", function()
                 if _recentering then return end
@@ -7010,7 +6982,6 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         return holder
     end
 
-    -- Regular extra bars (MicroBar, BagBar): reparent into holder
     local function ReparentIntoHolder()
         if InCombatLockdown() then
             _blizzMovablePendingOOC[barKey] = true
