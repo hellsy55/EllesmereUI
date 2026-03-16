@@ -3628,11 +3628,13 @@ function EAB:ApplyClickThroughForBar(barKey)
     -- Extra bars (MicroBar, BagBar, QueueStatus)
     for _, info in ipairs(EXTRA_BARS) do
         if info.key == barKey and not info.isDataBar and not info.isBlizzardMovable then
-            -- Blizzard-owned visibility frames manage their own mouse state;
-            -- only adjust click-through on the holder (which should stay off).
+            -- Blizzard-owned visibility frames: keep holder mouse-off,
+            -- but ensure the Blizzard frame itself stays clickable.
             if info.blizzOwnedVisibility then
                 local holder = extraBarHolders[barKey]
                 if holder then SafeEnableMouse(holder, false) end
+                local bf = _G[info.frameName]
+                if bf then SafeEnableMouse(bf, true) end
             else
                 local frame = _G[info.frameName]
                 if frame then SafeEnableMouse(frame, not s.clickThrough) end
@@ -6962,6 +6964,15 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
             blizzFrame:SetIsLayoutFrame(false)
         end
         blizzFrame.IsLayoutFrame = nil
+
+        -- Ensure the Blizzard frame is clickable — Blizzard may disable
+        -- mouse on it during initialisation, and since we don't reparent
+        -- we need to explicitly re-enable it.
+        SafeEnableMouse(blizzFrame, true)
+
+        -- Raise strata so the eye sits above action bar holders
+        blizzFrame:SetFrameStrata("MEDIUM")
+        blizzFrame:SetFrameLevel(100)
 
         -- Anchor the Blizzard frame to the holder (no reparent)
         local function AnchorToHolder()
