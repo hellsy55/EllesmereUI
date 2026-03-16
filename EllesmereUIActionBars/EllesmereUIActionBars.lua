@@ -59,7 +59,7 @@ end
 local EXTRA_BARS = {
     { key = "MicroBar", label = "Micro Menu Bar", frameName = "MicroMenuContainer", hoverFrame = "MicroMenu", visibilityOnly = true },
     { key = "BagBar",   label = "Bag Bar",        frameName = "BagsBar", visibilityOnly = true },
-    { key = "QueueStatus", label = "Queue Status", frameName = "QueueStatusButton", visibilityOnly = true },
+    { key = "QueueStatus", label = "Queue Status", frameName = "QueueStatusButton", visibilityOnly = true, blizzOwnedVisibility = true },
     { key = "XPBar",    label = "XP Bar",         visibilityOnly = true, isDataBar = true },
     { key = "RepBar",   label = "Reputation Bar",  visibilityOnly = true, isDataBar = true },
     { key = "ExtraActionButton", label = "Extra Action Button", visibilityOnly = true, isBlizzardMovable = true },
@@ -3433,14 +3433,23 @@ function EAB:ApplyExtraBarVisibility()
                     elseif info.isBlizzardMovable then
                         frame = blizzMovableHolders[key]
                     else
-                        -- MicroBar, BagBar: hide the Blizzard frame directly
                         frame = _G[info.frameName]
                     end
                     if frame then
                         if shouldHide then
+                            if info.blizzOwnedVisibility then
+                                frame._eabWasShownBeforePetBattle = frame:IsShown()
+                            end
                             frame:Hide()
                         else
-                            frame:Show()
+                            if info.blizzOwnedVisibility then
+                                if frame._eabWasShownBeforePetBattle then
+                                    frame:Show()
+                                end
+                                frame._eabWasShownBeforePetBattle = nil
+                            else
+                                frame:Show()
+                            end
                             -- Restore correct alpha: mouseover bars fade to 0 when not hovered,
                             -- so Show() alone leaves them invisible after a pet battle ends.
                             if s.mouseoverEnabled then
@@ -3507,6 +3516,10 @@ function EAB:ApplyAlwaysHidden()
                     RegisterAttributeDriver(frame, "state-visibility", "hide")
                 elseif info.visibilityOnly then
                     frame:Hide()
+                    if info.blizzOwnedVisibility then
+                        local bf = _G[info.frameName]
+                        if bf then bf:Hide() end
+                    end
                 end
                 if not InCombatLockdown() then
                     SafeEnableMouse(frame, false)
@@ -3519,14 +3532,13 @@ function EAB:ApplyAlwaysHidden()
                     if vis ~= "in_combat" and not s.combatShowEnabled then
                         -- ExtraActionButton and EncounterBar holders manage
                         -- their own visibility based on active content.
-                        if not info.isBlizzardMovable then
+                        if not info.isBlizzardMovable and not info.blizzOwnedVisibility then
                             frame:Show()
                         end
                     end
                     if barFrames[key] and frame == barFrames[key] then
                         SafeEnableMouseMotionOnly(frame, not s.clickThrough)
-                    elseif info.isBlizzardMovable then
-                        -- Blizzard movable holders must never eat clicks.
+                    elseif info.isBlizzardMovable or info.blizzOwnedVisibility then
                         SafeEnableMouse(frame, false)
                     else
                         SafeEnableMouse(frame, not s.clickThrough)
@@ -3557,11 +3569,18 @@ function EAB:ApplyClickThroughForBar(barKey)
         return
     end
 
-    -- Extra bars (MicroBar, BagBar)
+    -- Extra bars (MicroBar, BagBar, QueueStatus)
     for _, info in ipairs(EXTRA_BARS) do
         if info.key == barKey and not info.isDataBar and not info.isBlizzardMovable then
-            local frame = _G[info.frameName]
-            if frame then SafeEnableMouse(frame, not s.clickThrough) end
+            if info.blizzOwnedVisibility then
+                local holder = extraBarHolders[barKey]
+                if holder then SafeEnableMouse(holder, false) end
+                local bf = _G[info.frameName]
+                if bf then SafeEnableMouse(bf, true) end
+            else
+                local frame = _G[info.frameName]
+                if frame then SafeEnableMouse(frame, not s.clickThrough) end
+            end
             return
         end
     end
@@ -3648,12 +3667,24 @@ function EAB:UpdateHousingVisibility()
                     if shouldHide then
                         if isSecure then
                             RegisterAttributeDriver(frame, "state-visibility", "hide")
+                        elseif info.blizzOwnedVisibility then
+                            local bf = _G[info.frameName]
+                            if bf then
+                                bf._eabVisWasShown = bf:IsShown()
+                                bf:Hide()
+                            end
                         else
                             frame:Hide()
                         end
                     elseif not s.alwaysHidden and (s.barVisibility or "always") ~= "never" then
                         if isSecure then
                             RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
+                        elseif info.blizzOwnedVisibility then
+                            local bf = _G[info.frameName]
+                            if bf and bf._eabVisWasShown then
+                                bf:Show()
+                            end
+                            if bf then bf._eabVisWasShown = nil end
                         elseif not info.isBlizzardMovable then
                             frame:Show()
                         end
@@ -6796,7 +6827,7 @@ AttachExtraBarHoverHooks = function(info)
     end
 end
 
-local function SetupExtraBarHolder(barKey, frameName)
+local function SetupExtraBarHolder(barKey, frameName, barInfo)
     local blizzFrame = _G[frameName]
     if not blizzFrame then return end
 
@@ -6858,8 +6889,56 @@ local function SetupExtraBarHolder(barKey, frameName)
         end
     end
 
-    -- Reparent Blizzard frame into holder
     local _recentering = false
+
+    -- blizzOwnedVisibility: anchor to holder without reparenting so the
+    -- Blizzard frame keeps its secure context (clicks still work).
+    if barInfo and barInfo.blizzOwnedVisibility then
+        SafeEnableMouse(holder, false)
+
+        blizzFrame.ignoreInLayout = true
+        if blizzFrame.SetIsLayoutFrame then
+            blizzFrame:SetIsLayoutFrame(false)
+        end
+        blizzFrame.IsLayoutFrame = nil
+
+        SafeEnableMouse(blizzFrame, true)
+        blizzFrame:SetFrameStrata("MEDIUM")
+        blizzFrame:SetFrameLevel(100)
+
+        local function AnchorToHolder()
+            if InCombatLockdown() then
+                _blizzMovablePendingOOC[barKey] = true
+                return
+            end
+            _recentering = true
+            blizzFrame:ClearAllPoints()
+            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+            _recentering = false
+        end
+        AnchorToHolder()
+
+        hooksecurefunc(blizzFrame, "SetPoint", function(self)
+            if _recentering then return end
+            C_Timer_After(0, function()
+                if _recentering or InCombatLockdown() then return end
+                AnchorToHolder()
+            end)
+        end)
+
+        if blizzFrame.UpdatePosition then
+            hooksecurefunc(blizzFrame, "UpdatePosition", function()
+                if _recentering then return end
+                C_Timer_After(0, function()
+                    if _recentering or InCombatLockdown() then return end
+                    AnchorToHolder()
+                end)
+            end)
+        end
+
+        return holder
+    end
+
     local function ReparentIntoHolder()
         if InCombatLockdown() then
             _blizzMovablePendingOOC[barKey] = true
@@ -6929,7 +7008,7 @@ end
 local function SetupExtraBarHolders()
     for _, info in ipairs(EXTRA_BARS) do
         if not info.isDataBar and not info.isBlizzardMovable and info.frameName then
-            SetupExtraBarHolder(info.key, info.frameName)
+            SetupExtraBarHolder(info.key, info.frameName, info)
         end
     end
 end
