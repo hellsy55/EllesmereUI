@@ -2247,6 +2247,17 @@ local function UpdateSecondaryResource()
         local useThresh = sp.thresholdEnabled and cur >= sp.thresholdCount
         local tr, tg, tb = sp.thresholdR, sp.thresholdG, sp.thresholdB
 
+        -- Fractional resource detection (e.g. Destro warlock soul shards)
+        local frac = 0
+        local preciseCur = cur
+        if powerType == PT.SOUL_SHARDS then
+            local raw = UnitPower("player", powerType, true)
+            if raw and (not issecretvalue or not issecretvalue(raw)) then
+                preciseCur = raw / 10
+                frac = preciseCur - cur
+            end
+        end
+
         -- Charged combo points (e.g. Supercharger talent)
         local chargedSet
         if powerType == PT.COMBO then
@@ -2279,11 +2290,39 @@ local function UpdateSecondaryResource()
                 else
                     pips[i]:SetActive(active, r, g, b, a)
                 end
+                -- Hide any leftover partial-fill overlay on non-fractional pips
+                if pips[i]._rechargeBar then pips[i]._rechargeBar:Hide() end
             end
         end
+
+        -- Partial pip fill for fractional resources (reuses DK rune recharge pattern)
+        if frac > 0 and cur < maxPts and pips[cur + 1] and pips[cur + 1]:IsShown() then
+            local nextPip = pips[cur + 1]
+            if not nextPip._rechargeBar then
+                local sb = CreateFrame("StatusBar", nil, nextPip)
+                sb:SetAllPoints(nextPip)
+                sb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                sb:SetFrameLevel(nextPip:GetFrameLevel())
+                sb:SetMinMaxValues(0, 1)
+                if nextPip._texKey then
+                    local texLookup = _G._ERB_BarTextures
+                    local path = texLookup and texLookup[nextPip._texKey]
+                    if path then sb:SetStatusBarTexture(path) end
+                end
+                nextPip._rechargeBar = sb
+            end
+            nextPip._rechargeBar:SetValue(frac)
+            nextPip._rechargeBar:SetStatusBarColor(r * 0.5, g * 0.5, b * 0.5, a)
+            nextPip._rechargeBar:Show()
+        end
+
         -- Count text
         if sp.showText and secondaryFrame._countText then
-            secondaryFrame._countText:SetText(tostring(cur))
+            if frac > 0 then
+                secondaryFrame._countText:SetText(format("%.1f", preciseCur))
+            else
+                secondaryFrame._countText:SetText(tostring(cur))
+            end
         end
     end
 end
