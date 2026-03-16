@@ -1446,6 +1446,7 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local btn = _G["StanceButton" .. i]
             if btn then
+                btn._skipFlyout = true
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "stance")
@@ -1459,6 +1460,7 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local btn = _G["PetActionButton" .. i]
             if btn then
+                btn._skipFlyout = true
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "pet")
@@ -4353,8 +4355,12 @@ GetOrCreateBindButton = function(btn)
 
     -- Register with our custom flyout system (intercepts flyout clicks
     -- in the secure env so they never reach Blizzard's taint-prone path).
-    -- The owner ref lets the flyout frame reparent to the visible button.
-    GetEABFlyout():RegisterButton(bind, btn)
+    -- Stance and pet bar buttons never have flyout actions, and the
+    -- flyout WrapScript calls GetActionInfo which requires an "action"
+    -- attribute that these buttons lack.  Skip registration for them.
+    if not btn._skipFlyout then
+        GetEABFlyout():RegisterButton(bind, btn)
+    end
 
     -- Translate HOTKEY virtual click into LeftButton inside the secure env.
     -- Only active when keys are bound with "HOTKEY" click type (key-down mode).
@@ -4407,17 +4413,33 @@ local function UpdateKeybinds()
         if prefix and btns then
             for i, btn in ipairs(btns) do
                 if btn then
-                    local bind = GetOrCreateBindButton(btn)
-                    if bind then
-                        ApplyBindButtonMode(bind, keyDown)
-                        ClearOverrideBindings(bind)
+                    if info.isStance or info.isPetBar then
+                        -- Stance and pet buttons are native secure buttons
+                        -- that handle their own click actions.  Bind keys
+                        -- directly to clicking them instead of going through
+                        -- a bind button (which would need an "action" attr).
+                        ClearOverrideBindings(btn)
                         local cmd = prefix .. i
                         local k1, k2 = GetBindingKey(cmd)
                         if k1 then
-                            SetOverrideBindingClick(bind, false, k1, bind:GetName(), "HOTKEY")
+                            SetOverrideBindingClick(btn, false, k1, btn:GetName(), "LeftButton")
                         end
                         if k2 then
-                            SetOverrideBindingClick(bind, false, k2, bind:GetName(), "HOTKEY")
+                            SetOverrideBindingClick(btn, false, k2, btn:GetName(), "LeftButton")
+                        end
+                    else
+                        local bind = GetOrCreateBindButton(btn)
+                        if bind then
+                            ApplyBindButtonMode(bind, keyDown)
+                            ClearOverrideBindings(bind)
+                            local cmd = prefix .. i
+                            local k1, k2 = GetBindingKey(cmd)
+                            if k1 then
+                                SetOverrideBindingClick(bind, false, k1, bind:GetName(), "HOTKEY")
+                            end
+                            if k2 then
+                                SetOverrideBindingClick(bind, false, k2, bind:GetName(), "HOTKEY")
+                            end
                         end
                     end
                 end
@@ -4455,8 +4477,12 @@ local function ClearKeybindsForVehicle()
         local btns = barButtons[info.key]
         if btns then
             for _, btn in ipairs(btns) do
-                if btn and btn._bindBtn then
-                    ClearOverrideBindings(btn._bindBtn)
+                if btn then
+                    if info.isStance or info.isPetBar then
+                        ClearOverrideBindings(btn)
+                    elseif btn._bindBtn then
+                        ClearOverrideBindings(btn._bindBtn)
+                    end
                 end
             end
         end
@@ -4585,8 +4611,12 @@ if IsHouseEditorActive then
                     local btns = barButtons[info.key]
                     if btns then
                         for _, btn in ipairs(btns) do
-                            if btn and btn._bindBtn then
-                                ClearOverrideBindings(btn._bindBtn)
+                            if btn then
+                                if info.isStance or info.isPetBar then
+                                    ClearOverrideBindings(btn)
+                                elseif btn._bindBtn then
+                                    ClearOverrideBindings(btn._bindBtn)
+                                end
                             end
                         end
                     end

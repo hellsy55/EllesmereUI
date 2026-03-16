@@ -2718,7 +2718,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         ---- Melee spell for indicator (accounts for hitbox, unlike items) --
         -- Keyed by spec ID (GetSpecializationInfo).  One spell per melee
-        -- spec; ranged specs are absent → indicator hides automatically.
+        -- spec; ranged specs are absent -- indicator hides automatically.
         -- Recached on PLAYER_SPECIALIZATION_CHANGED.
         local MELEE_SPELL_BY_SPEC = {
             -- Death Knight (all melee)
@@ -2855,13 +2855,25 @@ initFrame:SetScript("OnEvent", function(self)
             local showDist  = EllesmereUIDB and EllesmereUIDB.showDistanceText
             local showMelee = EllesmereUIDB and EllesmereUIDB.showMeleeIndicator
 
+            -- Early out: nothing to do
+            if not showDist and not showMelee then
+                if distFrame  then distFrame:Hide()  end
+                if meleeFrame then meleeFrame:Hide() end
+                return
+            end
+
             if not UnitExists("target") then
                 if distFrame  then distFrame:Hide()  end
                 if meleeFrame then meleeFrame:Hide() end
                 return
             end
 
-            local minRange, maxRange = GetRangeEstimate("target")
+            -- Only run the expensive item-based range scan when distance
+            -- text is enabled.  The melee indicator uses spell range only.
+            local minRange, maxRange
+            if showDist then
+                minRange, maxRange = GetRangeEstimate("target")
+            end
 
             -- Snap to 5-yard increments for cleaner display
             local dispMin = minRange and (floor(minRange / 5) * 5) or nil
@@ -2891,6 +2903,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local th = distText:GetStringHeight() + 4
                 distFrame:SetSize(max(tw, 40), max(th, 20))
                 distFrame:Show()
+            elseif distFrame then
+                distFrame:Hide()
             end
 
             -- Melee indicator (combat-only, melee specs only)
@@ -2900,16 +2914,15 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     local meleeResult = CheckMeleeRange("target")
                     if meleeResult == nil then
-                        -- No usable melee spell (ranged spec/form): hide
                         meleeFrame:Hide()
                     elseif meleeResult then
-                        -- In melee range: hide indicator
                         meleeFrame:Hide()
                     else
-                        -- Out of melee range: show indicator
                         meleeFrame:Show()
                     end
                 end
+            elseif meleeFrame then
+                meleeFrame:Hide()
             end
         end
 
@@ -3065,7 +3078,7 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
 
-    -- Register Distance Text as an unlock mode element
+    -- Register Distance Text and Melee Indicator as unlock mode elements
     C_Timer.After(1.5, function()
         if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
         EllesmereUI:RegisterUnlockElements({
@@ -3113,13 +3126,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end,
             },
-        })
-    end)
-
-    -- Register Melee Indicator as an unlock mode element
-    C_Timer.After(1.5, function()
-        if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
-        EllesmereUI:RegisterUnlockElements({
             {
                 key = "EUI_MeleeIndicator",
                 label = "Melee Indicator",
@@ -5140,7 +5146,7 @@ initFrame:SetScript("OnEvent", function(self)
 end)
 
 -------------------------------------------------------------------------------
---  /scanrange — temporary item range scanner (remove when done)
+--  /scanrange -- temporary item range scanner (remove when done)
 --
 --  Usage: target a unit, stand at a known distance, type /scanrange
 --  Items showing IN have a range >= your current distance.
@@ -5187,16 +5193,16 @@ SlashCmdList["EUISCANRANGE"] = function(msg)
         end
         if i >= nextReport and i <= endID then
             local pct = math.floor((i - startID) / total * 100)
-            print("|cff0CD29DEllesmereUI:|r " .. pct .. "% — scanned to " .. i .. " (" .. #found .. " found so far)")
+            print("|cff0CD29DEllesmereUI:|r " .. pct .. "% -- scanned to " .. i .. " (" .. #found .. " found so far)")
             nextReport = nextReport + reportStep
         end
         if i > endID then
             f:SetScript("OnUpdate", nil)
-            print("|cff0CD29DEllesmereUI:|r Scan complete — " .. #found .. " items with range data")
+            print("|cff0CD29DEllesmereUI:|r Scan complete -- " .. #found .. " items with range data")
             for _, item in ipairs(found) do
                 local tag = item.inRange and "|cff00ff00IN |r" or "|cffff0000OUT|r"
                 local name = C_Item.GetItemNameByID(item.id) or "?"
-                print("  " .. tag .. " " .. item.id .. " — " .. name)
+                print("  " .. tag .. " " .. item.id .. " -- " .. name)
             end
         end
     end)
