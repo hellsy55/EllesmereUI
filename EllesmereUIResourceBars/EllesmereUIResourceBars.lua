@@ -402,6 +402,7 @@ local DEFAULTS = {
             thresholdCount   = 3,
             thresholdPartialOnly = false,
             thresholdR = 0x0c/255, thresholdG = 0xd2/255, thresholdB = 0x9d/255, thresholdA = 1,
+            tickValues  = "",   -- comma-separated absolute resource values for tick marks (bar-type only)
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
             visibility  = "always",  -- "always","combat","target","mouseover","never","in_combat","in_raid","in_party","solo"
             visHideHousing = false,
@@ -466,6 +467,7 @@ local healthBar
 local primaryBar
 local secondaryFrame
 local secondaryBar  -- bar-style secondary (e.g. Devourer soul fragments, Elemental maelstrom)
+local secondaryBarTicks = {}  -- tick mark texture cache for bar-type secondary
 local castBarFrame
 local isInCombat = false
 local currentAlpha = 1
@@ -1246,6 +1248,59 @@ RefreshAnchoredBarsForUnlockTarget = function(unlockKey)
 end
 
 -------------------------------------------------------------------------------
+--  Resource bar tick marks (bar-type secondary only)
+-------------------------------------------------------------------------------
+
+-- Parse comma-separated tick values string into a table of numbers.
+local function ParseTickValues(str)
+    if not str or str == "" then return nil end
+    local vals = {}
+    for s in str:gmatch("[^,]+") do
+        local n = tonumber(s:match("^%s*(.-)%s*$"))
+        if n and n > 0 then vals[#vals + 1] = n end
+    end
+    if #vals == 0 then return nil end
+    return vals
+end
+
+-- Apply tick marks to the bar-type secondary resource bar.
+-- sb: the StatusBar, maxVal: max resource value, tickStr: comma-separated values,
+-- tickCache: table to store tick textures
+local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache)
+    local vals = ParseTickValues(tickStr)
+
+    for i = 1, #tickCache do tickCache[i]:Hide() end
+
+    if not vals or not sb or maxVal <= 0 then return end
+
+    local PP = EllesmereUI and EllesmereUI.PP
+
+    -- Create tick textures as needed
+    while #tickCache < #vals do
+        local t = sb:CreateTexture(nil, "OVERLAY", nil, 7)
+        t:SetColorTexture(1, 1, 1, 1)
+        t:SetSnapToPixelGrid(false)
+        t:SetTexelSnappingBias(0)
+        tickCache[#tickCache + 1] = t
+    end
+
+    local onePx = PP and PP.Scale(1) or 1
+    local barW = sb:GetWidth()
+    local barH = sb:GetHeight()
+    for i, v in ipairs(vals) do
+        if v <= maxVal then
+            local t = tickCache[i]
+            local frac = v / maxVal
+            t:ClearAllPoints()
+            local off = PP and PP.Scale(barW * frac) or (barW * frac)
+            t:SetSize(onePx, barH)
+            t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, 0)
+            t:Show()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
 --  BuildBars -- applies per-element scale, border, colors, text positioning
 -------------------------------------------------------------------------------
 
@@ -1559,6 +1614,7 @@ local function BuildBars()
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             end
             secondaryBar:ApplyBorder(0, 0, 0, 0, 0)
+            ApplyResourceBarTicks(secondaryBar, maxPts, sp.tickValues, secondaryBarTicks)
             secondaryBar:Show()
         elseif cachedSecondary.type == "runes" then
             local numPips = 6
@@ -1611,6 +1667,7 @@ local function BuildBars()
             end
             for i = 7, #pips do if pips[i] then pips[i]:Hide() end end
             if secondaryBar then secondaryBar:Hide() end
+            for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
         else
             local slots = CalcPipGeometry(totalW, maxPts, pipSp, secondaryFrame)
             for i = 1, maxPts do
@@ -1657,6 +1714,7 @@ local function BuildBars()
             for i = maxPts + 1, #pips do if pips[i] then pips[i]:Hide() end end
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
             if secondaryBar then secondaryBar:Hide() end
+            for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
         end
 
         -- Full-bar border (wraps the entire class resource bar)

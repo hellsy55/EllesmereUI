@@ -291,6 +291,43 @@ initFrame:SetScript("OnEvent", function(self)
                     pc._barFill:Show()
                 end
 
+                -- Tick marks on bar preview
+                if not pc._previewTicks then pc._previewTicks = {} end
+                do
+                    local tickStr = sp.tickValues or ""
+                    local ticks = pc._previewTicks
+                    for i = 1, #ticks do ticks[i]:Hide() end
+                    local vals = {}
+                    for s in tickStr:gmatch("[^,]+") do
+                        local n = tonumber(s:match("^%s*(.-)%s*$"))
+                        if n and n > 0 then vals[#vals + 1] = n end
+                    end
+                    -- Use the actual resource max for tick positioning
+                    local gsr = _G._ERB_GetSecondaryResource
+                    local secInfo = gsr and gsr()
+                    local previewMax = (secInfo and secInfo.max) or 100
+                    local PP = EllesmereUI and EllesmereUI.PP
+                    local onePx = PP and PP.Scale(1) or 1
+                    for i, v in ipairs(vals) do
+                        if v <= previewMax then
+                            if not ticks[i] then
+                                local t = pc:CreateTexture(nil, "OVERLAY", nil, 7)
+                                t:SetColorTexture(1, 1, 1, 1)
+                                t:SetSnapToPixelGrid(false)
+                                t:SetTexelSnappingBias(0)
+                                ticks[i] = t
+                            end
+                            local t = ticks[i]
+                            t:ClearAllPoints()
+                            local frac = v / previewMax
+                            local off = PP and PP.Scale(totalW * frac) or (totalW * frac)
+                            t:SetSize(onePx, pipH)
+                            t:SetPoint("TOPLEFT", pc, "TOPLEFT", off, 0)
+                            t:Show()
+                        end
+                    end
+                end
+
                 -- Hide pips if any exist from a previous build
                 for _, pip in ipairs(_previewFrames.pips) do pip:Hide() end
             else
@@ -419,8 +456,11 @@ initFrame:SetScript("OnEvent", function(self)
                     _previewFrames.pips[i]:Hide()
                 end
 
-                -- Hide bar fill if it exists from a previous build
+                -- Hide bar fill and tick marks if they exist from a previous build
                 if pc._barFill then pc._barFill:Hide() end
+                if pc._previewTicks then
+                    for i = 1, #pc._previewTicks do pc._previewTicks[i]:Hide() end
+                end
             end
 
             -- Full-bar border on container
@@ -1463,10 +1503,11 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateSwDis2)
             UpdateSwDis2()
         end
-        -- Inline cog on Threshold Count for partial coloring toggle
+        -- Inline cog on Threshold Count: partial coloring (pip-type) or tick marks (bar-type)
         do
             local rgn = threshRow._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
+            -- Build two cog popups: one for pip-type, one for bar-type
+            local _, cogShowPips = EllesmereUI.BuildCogPopup({
                 title = "Threshold Coloring",
                 rows = {
                     { type = "toggle", label = "Only Color At/Above Threshold",
@@ -1477,22 +1518,47 @@ initFrame:SetScript("OnEvent", function(self)
                       end },
                 },
             })
-            local cogBtn = MakeCogBtn(rgn, cogShow)
+            local _, cogShowBar = EllesmereUI.BuildCogPopup({
+                title = "Tick Marks",
+                rows = {
+                    { type = "input", label = "Ticks at Values (Ex: 25,50,75)", inputWidth = 100,
+                      get = function() local p = DB(); return p and p.secondary.tickValues or "" end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.tickValues = v; RebuildClass()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, function()
+                if IsBarTypeSecondary() then
+                    cogShowBar()
+                else
+                    cogShowPips()
+                end
+            end)
             local cogDis = CreateFrame("Frame", nil, rgn)
             cogDis:SetAllPoints(cogBtn)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                if IsBarTypeSecondary() then
-                    EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option is not available for your spec"))
-                else
+                if not IsBarTypeSecondary() and not (DB() and DB().secondary.thresholdEnabled) then
                     EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option requires Threshold Color to be enabled"))
                 end
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisThresh()
                 local p = DB()
-                if p and (not p.secondary.enabled or not p.secondary.thresholdEnabled or IsBarTypeSecondary()) then cogDis:Show() else cogDis:Hide() end
+                -- For bar-type: cog is available whenever class resource is enabled
+                -- For pip-type: cog requires threshold to be enabled
+                if p and not p.secondary.enabled then
+                    cogDis:Show()
+                elseif IsBarTypeSecondary() then
+                    cogDis:Hide()
+                elseif p and not p.secondary.thresholdEnabled then
+                    cogDis:Show()
+                else
+                    cogDis:Hide()
+                end
             end
             cogBtn:HookScript("OnShow", UpdateCogDisThresh)
             EllesmereUI.RegisterWidgetRefresh(UpdateCogDisThresh)
