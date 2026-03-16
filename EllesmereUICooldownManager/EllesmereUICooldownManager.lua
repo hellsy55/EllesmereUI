@@ -519,17 +519,13 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
         -- Feed SCD shadow: clear during GCD, feed real SCD outside GCD
         if isGCD then
             icon._scdShadow:SetCooldown(0, 0)
+        elseif scd then
+            icon._scdShadow:SetCooldownFromDurationObject(scd, true)
         else
-            icon._scdShadow:Clear()
-            if scd then
-                icon._scdShadow:SetCooldownFromDurationObject(scd, true)
-            else
-                icon._scdShadow:SetCooldown(0, 0)
-            end
+            icon._scdShadow:SetCooldown(0, 0)
         end
 
         -- Feed CCD shadow live every tick
-        icon._ccdShadow:Clear()
         if ccd then
             icon._ccdShadow:SetCooldownFromDurationObject(ccd, true)
         else
@@ -595,7 +591,7 @@ local function ApplySpellCooldown(icon, spellID, desatOnCD, showCharges, swAlpha
     -- castable. IsSpellUsable can briefly return false after zoning while
     -- spell data reloads, which would incorrectly gray out the icon.
     if desatOnCD and not desatApplied and not skipCD then
-        local skipResourceCheck = isChargeSpell and not isOnCooldown
+        local skipResourceCheck = isChargeSpell and (isOnCooldown or isRecharging)
         if not skipResourceCheck then
             local usable = C_Spell.IsSpellUsable(spellID)
             if not usable then
@@ -3630,7 +3626,7 @@ local function UpdateCustomBarIcons(barKey)
                 -- live Blizzard child for it and mark it as a charge spell so
                 -- ApplySpellCooldown uses the charge display path.
                 if _multiChargeSpells[resolvedID] == nil and _tickBlizzChildCache[resolvedID] then
-                    -- We have a live Blizzard child ΓÇö treat as charge spell so the
+                    -- We have a live Blizzard child -- treat as charge spell so the
                     -- charge display path runs. ApplySpellCooldown will call
                     -- GetSpellCharges which may still be secret, but the shadow
                     -- cooldown frames will correctly reflect the charge state.
