@@ -3836,19 +3836,23 @@ local function BuildCogPopup(opts)
                 local SAVE_W = 34
                 local SAVE_GAP = 4
 
-                -- Save button (always visible, right of input)
+                -- Save button (always visible, right of input) — primary color
+                local EG = ELLESMERE_GREEN
                 local saveBtn = CreateFrame("Button", nil, pf)
                 saveBtn:SetSize(SAVE_W, ROW_H - 4)
                 saveBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
                 saveBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
-                local saveBg = SolidTex(saveBtn, "BACKGROUND", 0.20, 0.20, 0.20, 0.85)
+                local saveBg = SolidTex(saveBtn, "BACKGROUND", EG.r, EG.g, EG.b, 0.85)
                 saveBg:SetAllPoints()
                 local saveLbl = MakeFont(saveBtn, 10, nil, 1, 1, 1)
-                saveLbl:SetAlpha(0.6)
+                saveLbl:SetAlpha(0.9)
                 saveLbl:SetText("Save")
                 saveLbl:SetPoint("CENTER")
-                saveBtn:SetScript("OnEnter", function() saveBg:SetColorTexture(0.30, 0.30, 0.30, 0.9); saveLbl:SetAlpha(1) end)
-                saveBtn:SetScript("OnLeave", function() saveBg:SetColorTexture(0.20, 0.20, 0.20, 0.85); saveLbl:SetAlpha(0.6) end)
+                local hoverR = EG.r + (1 - EG.r) * 0.25
+                local hoverG = EG.g + (1 - EG.g) * 0.25
+                local hoverB = EG.b + (1 - EG.b) * 0.25
+                saveBtn:SetScript("OnEnter", function() saveBg:SetColorTexture(hoverR, hoverG, hoverB, 0.95); saveLbl:SetAlpha(1) end)
+                saveBtn:SetScript("OnLeave", function() saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85); saveLbl:SetAlpha(0.9) end)
 
                 -- Input box (left of save button)
                 local box = CreateFrame("EditBox", nil, pf)
@@ -3866,6 +3870,13 @@ local function BuildCogPopup(opts)
                     box:ClearFocus()
                     if row.set then row.set(box:GetText()) end
                     if pf._refresh then pf._refresh() end
+                    -- Brief white flash on save button as confirmation
+                    saveBg:SetColorTexture(1, 1, 1, 0.9)
+                    saveLbl:SetText("Saved")
+                    C_Timer.After(0.4, function()
+                        saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85)
+                        saveLbl:SetText("Save")
+                    end)
                 end
 
                 box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
