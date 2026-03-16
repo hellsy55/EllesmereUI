@@ -1521,7 +1521,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShowBar = EllesmereUI.BuildCogPopup({
                 title = "Tick Marks",
                 rows = {
-                    { type = "input", label = "Ticks at Values (Ex: 25,50,75)", inputWidth = 100,
+                    { type = "input", label = "Ticks at Values (Ex: 25,50,75)", inputWidth = 70,
                       get = function() local p = DB(); return p and p.secondary.tickValues or "" end,
                       set = function(v)
                           local p = DB(); if not p then return end
