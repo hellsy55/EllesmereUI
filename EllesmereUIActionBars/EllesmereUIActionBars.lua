@@ -59,7 +59,7 @@ end
 local EXTRA_BARS = {
     { key = "MicroBar", label = "Micro Menu Bar", frameName = "MicroMenuContainer", hoverFrame = "MicroMenu", visibilityOnly = true },
     { key = "BagBar",   label = "Bag Bar",        frameName = "BagsBar", visibilityOnly = true },
-    { key = "QueueStatus", label = "Queue Status", frameName = "QueueStatusButton", visibilityOnly = true },
+    { key = "QueueStatus", label = "Queue Status", frameName = "QueueStatusButton", visibilityOnly = true, blizzOwnedVisibility = true },
     { key = "XPBar",    label = "XP Bar",         visibilityOnly = true, isDataBar = true },
     { key = "RepBar",   label = "Reputation Bar",  visibilityOnly = true, isDataBar = true },
     { key = "ExtraActionButton", label = "Extra Action Button", visibilityOnly = true, isBlizzardMovable = true },
@@ -3475,6 +3475,10 @@ function EAB:ApplyExtraBarVisibility()
                         frame = dataBarFrames[key]
                     elseif info.isBlizzardMovable then
                         frame = blizzMovableHolders[key]
+                    elseif info.blizzOwnedVisibility then
+                        -- QueueStatus: show/hide the holder so Blizzard's own
+                        -- visibility management on the child frame is untouched.
+                        frame = extraBarHolders[key]
                     else
                         -- MicroBar, BagBar: hide the Blizzard frame directly
                         frame = _G[info.frameName]
@@ -3486,16 +3490,19 @@ function EAB:ApplyExtraBarVisibility()
                             frame:Show()
                             -- Restore correct alpha: mouseover bars fade to 0 when not hovered,
                             -- so Show() alone leaves them invisible after a pet battle ends.
+                            -- For blizzOwnedVisibility, alpha targets the Blizzard frame
+                            -- (hover hooks operate on it), not the holder.
+                            local alphaTarget = info.blizzOwnedVisibility and _G[info.frameName] or frame
                             if s.mouseoverEnabled then
                                 local hstate = hoverStates[key]
                                 local isHovered = hstate and hstate.isHovered
                                 if not isHovered then
-                                    frame:SetAlpha(0)
+                                    alphaTarget:SetAlpha(0)
                                 else
-                                    frame:SetAlpha(s.mouseoverAlpha or 1)
+                                    alphaTarget:SetAlpha(s.mouseoverAlpha or 1)
                                 end
                             else
-                                frame:SetAlpha(s.mouseoverAlpha or 1)
+                                alphaTarget:SetAlpha(s.mouseoverAlpha or 1)
                             end
                             -- Data bars may need to re-evaluate (XP at max, etc.)
                             if info.isDataBar then
@@ -3562,14 +3569,14 @@ function EAB:ApplyAlwaysHidden()
                     if vis ~= "in_combat" and not s.combatShowEnabled then
                         -- ExtraActionButton and EncounterBar holders manage
                         -- their own visibility based on active content.
-                        if not info.isBlizzardMovable then
+                        if not info.isBlizzardMovable and not info.blizzOwnedVisibility then
                             frame:Show()
                         end
                     end
                     if barFrames[key] and frame == barFrames[key] then
                         SafeEnableMouseMotionOnly(frame, not s.clickThrough)
-                    elseif info.isBlizzardMovable then
-                        -- Blizzard movable holders must never eat clicks.
+                    elseif info.isBlizzardMovable or info.blizzOwnedVisibility then
+                        -- Blizzard movable/owned holders must never eat clicks.
                         SafeEnableMouse(frame, false)
                     else
                         SafeEnableMouse(frame, not s.clickThrough)
@@ -3600,11 +3607,18 @@ function EAB:ApplyClickThroughForBar(barKey)
         return
     end
 
-    -- Extra bars (MicroBar, BagBar)
+    -- Extra bars (MicroBar, BagBar, QueueStatus)
     for _, info in ipairs(EXTRA_BARS) do
         if info.key == barKey and not info.isDataBar and not info.isBlizzardMovable then
-            local frame = _G[info.frameName]
-            if frame then SafeEnableMouse(frame, not s.clickThrough) end
+            -- Blizzard-owned visibility frames manage their own mouse state;
+            -- only adjust click-through on the holder (which should stay off).
+            if info.blizzOwnedVisibility then
+                local holder = extraBarHolders[barKey]
+                if holder then SafeEnableMouse(holder, false) end
+            else
+                local frame = _G[info.frameName]
+                if frame then SafeEnableMouse(frame, not s.clickThrough) end
+            end
             return
         end
     end
@@ -3697,7 +3711,7 @@ function EAB:UpdateHousingVisibility()
                     elseif not s.alwaysHidden and (s.barVisibility or "always") ~= "never" then
                         if isSecure then
                             RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
-                        elseif not info.isBlizzardMovable then
+                        elseif not info.isBlizzardMovable and not info.blizzOwnedVisibility then
                             frame:Show()
                         end
                         -- Data bars may need to re-hide (max level, max renown, etc.)
@@ -6839,9 +6853,15 @@ AttachExtraBarHoverHooks = function(info)
     end
 end
 
-local function SetupExtraBarHolder(barKey, frameName)
+local function SetupExtraBarHolder(barKey, frameName, barInfo)
     local blizzFrame = _G[frameName]
     if not blizzFrame then return end
+
+    -- Capture visibility BEFORE reparenting.  A frame whose own IsShown()
+    -- is true but whose parent is hidden will become visible once we move
+    -- it into our always-shown holder.  We restore the original state later
+    -- for blizzOwnedVisibility frames (e.g. QueueStatusButton).
+    local _blizzOwnedWasVisible = barInfo and barInfo.blizzOwnedVisibility and blizzFrame:IsVisible()
 
     local holder = CreateFrame("Frame", "EllesmereEAB_" .. barKey, UIParent)
     holder:SetClampedToScreen(true)
@@ -6966,13 +6986,25 @@ local function SetupExtraBarHolder(barKey, frameName)
         end)
     end
 
+    -- Blizzard-owned visibility frames (e.g. QueueStatusButton): the Blizzard
+    -- frame manages its own Show/Hide based on game state (queue active, etc.).
+    -- The holder must never intercept mouse clicks, and the button's visibility
+    -- must be restored to its pre-reparent state so a hidden button doesn't
+    -- become visible just because the new parent (holder) is shown.
+    if barInfo and barInfo.blizzOwnedVisibility then
+        SafeEnableMouse(holder, false)
+        if not _blizzOwnedWasVisible then
+            blizzFrame:Hide()
+        end
+    end
+
     return holder
 end
 
 local function SetupExtraBarHolders()
     for _, info in ipairs(EXTRA_BARS) do
         if not info.isDataBar and not info.isBlizzardMovable and info.frameName then
-            SetupExtraBarHolder(info.key, info.frameName)
+            SetupExtraBarHolder(info.key, info.frameName, info)
         end
     end
 end
