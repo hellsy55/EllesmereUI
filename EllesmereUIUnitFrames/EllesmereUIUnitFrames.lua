@@ -1429,6 +1429,29 @@ local function ApplyFramePosition(frame, unit)
     frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 end
 
+-- Clip container for health + power bars — prevents sub-pixel overflow at
+-- certain UI scales where independent pixel-snapping pushes edges 1px out.
+local function EnsureBarClip(frame)
+    if frame._barClip then return frame._barClip end
+    local clip = CreateFrame("Frame", nil, frame)
+    clip:SetAllPoints(frame)
+    clip:SetClipsChildren(true)
+    clip:SetFrameLevel(frame:GetFrameLevel())
+    clip:EnableMouse(false)
+    frame._barClip = clip
+    return clip
+end
+
+local function ReparentBarsToClip(frame)
+    local clip = EnsureBarClip(frame)
+    if frame.Health and frame.Health:GetParent() ~= clip then
+        frame.Health:SetParent(clip)
+    end
+    if frame.Power and frame.Power:GetParent() ~= clip then
+        frame.Power:SetParent(clip)
+    end
+end
+
 -- Recalculate all element sizes after frame scale changes so everything remains
 -- pixel-perfect within the border.  PixelUtil rounds each element independently,
 -- which can cause their sum to exceed the frame's snapped total by 1px at certain
@@ -2656,6 +2679,7 @@ local function StyleFullFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
+    ReparentBarsToClip(frame)
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
     local textOverlay = CreateFrame("Frame", nil, frame)
@@ -2872,6 +2896,7 @@ local function StyleFocusFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
+    ReparentBarsToClip(frame)
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
     local textOverlay = CreateFrame("Frame", nil, frame.Health)
@@ -3046,6 +3071,7 @@ local function StyleSimpleFrame(frame, unit)
     frame.Health = health
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
+    ReparentBarsToClip(frame)
 
     -- Text overlay frame
     local textOverlay = CreateFrame("Frame", nil, health)
@@ -3202,6 +3228,7 @@ local function StylePetFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
+    ReparentBarsToClip(frame)
 
     -- Text overlay frame
     local textOverlay = CreateFrame("Frame", nil, health)
@@ -3336,6 +3363,7 @@ local function StyleBossFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
+    ReparentBarsToClip(frame)
 
     -- Text overlay frame
     local textOverlay = CreateFrame("Frame", nil, frame.Health)
@@ -4453,6 +4481,7 @@ local function ReloadFrames()
                     end
 
                     UpdateBordersForScale(frame, unit)
+                    ReparentBarsToClip(frame)
 
                 elseif unit == "target" then
                     local pSide = settings.portraitSide or "right"
@@ -4782,6 +4811,7 @@ local function ReloadFrames()
                     end
 
                     UpdateBordersForScale(frame, unit)
+                    ReparentBarsToClip(frame)
                 end
 
                 -- (health tag re-tagging now handled by _applyTextTags above)
@@ -5027,6 +5057,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
+                ReparentBarsToClip(frame)
 
             elseif unit == "pet" or unit == "targettarget" or unit == "focustarget" then
                 if unit == "pet" then
@@ -5066,6 +5097,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
+                ReparentBarsToClip(frame)
 
             elseif unit:match("^boss%d$") then
                 local bPpPos = settings.powerPosition or "below"
@@ -5157,6 +5189,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
+                ReparentBarsToClip(frame)
             end
 
             -- Determine if this is a mini frame that inherits border/texture/font
