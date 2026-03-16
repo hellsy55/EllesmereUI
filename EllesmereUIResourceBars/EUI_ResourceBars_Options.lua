@@ -1529,11 +1529,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end },
                 },
             })
-            local cogBtn = MakeCogBtn(rgn, function()
+            local cogBtn = MakeCogBtn(rgn, function(anchor)
                 if IsBarTypeSecondary() then
-                    cogShowBar()
+                    cogShowBar(anchor)
                 else
-                    cogShowPips()
+                    cogShowPips(anchor)
                 end
             end)
             local cogDis = CreateFrame("Frame", nil, rgn)
