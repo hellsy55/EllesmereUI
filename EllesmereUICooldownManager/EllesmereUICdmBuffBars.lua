@@ -1081,6 +1081,8 @@ function ns.BuildTrackedBuffBars()
             bar._blizzChild = nil
             bar._customStart = nil
             bar._activeDuration = nil
+            bar._lastLiveIcon = nil
+            bar._lastLiveName = nil
             bar:Hide()
         end
     end
@@ -1517,6 +1519,31 @@ function ns.UpdateTrackedBuffBarTimers()
                 if not bar:IsShown() then bar:Show() end
                 UpdateTBBStacks(bar, cfg)
 
+                -- Dynamically update icon from Blizzard CDM child's live texture
+                -- so aura-driven icon changes (e.g. Roll the Bones sub-buffs) are
+                -- reflected each tick instead of staying on the static config icon.
+                if blzChild and bar._icon and bar._icon._tex and blzChild.Icon and blzChild.Icon.GetTexture then
+                    local liveIconTex = blzChild.Icon:GetTexture()
+                    if liveIconTex and liveIconTex ~= bar._lastLiveIcon then
+                        bar._icon._tex:SetTexture(liveIconTex)
+                        bar._lastLiveIcon = liveIconTex
+                    end
+                end
+
+                -- Dynamically update name text from the actual active aura so
+                -- spells like Roll the Bones show the specific roll name instead
+                -- of the generic parent spell name.
+                if bar._nameText and bar._nameText:IsShown() and blzChild and blzChild.auraInstanceID then
+                    local nOk, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, blzChild.auraDataUnit or "player", blzChild.auraInstanceID)
+                    if nOk and ad and ad.name then
+                        local isSecret = issecretvalue and issecretvalue(ad.name)
+                        if not isSecret and ad.name ~= bar._lastLiveName then
+                            bar._nameText:SetText(ad.name)
+                            bar._lastLiveName = ad.name
+                        end
+                    end
+                end
+
                 local activeDur = bar._activeDuration or cfg.customDuration
                 if activeDur and activeDur > 0 and bar._customStart then
                     local elapsed = now - bar._customStart
@@ -1732,6 +1759,8 @@ function ns.UpdateTrackedBuffBarTimers()
                 bar._customStart = nil
                 bar._activeDuration = nil
                 bar._isPassive = nil
+                bar._lastLiveIcon = nil
+                bar._lastLiveName = nil
                 if bar._cooldown then bar._cooldown:Clear() end
             end
         end
