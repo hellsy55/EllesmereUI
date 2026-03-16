@@ -3833,35 +3833,6 @@ local function BuildCogPopup(opts)
                 lbl:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, curY - ROW_H / 2 - 1)
 
                 local inputW = row.inputWidth or 80
-                local ICO_SZ = 16
-                local ICO_GAP = 3
-
-                -- Confirm (tick) and discard (cross) buttons, hidden until text changes
-                local confirmBtn = CreateFrame("Button", nil, pf)
-                confirmBtn:SetSize(ICO_SZ, ICO_SZ)
-                confirmBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
-                confirmBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
-                local confirmLbl = MakeFont(confirmBtn, 14, nil, 0.3, 0.9, 0.3)
-                confirmLbl:SetText("\226\156\148") -- checkmark ✔
-                confirmLbl:SetPoint("CENTER")
-                confirmBtn:SetScript("OnEnter", function() confirmLbl:SetAlpha(1) end)
-                confirmBtn:SetScript("OnLeave", function() confirmLbl:SetAlpha(0.7) end)
-                confirmLbl:SetAlpha(0.7)
-                confirmBtn:Hide()
-
-                local discardBtn = CreateFrame("Button", nil, pf)
-                discardBtn:SetSize(ICO_SZ, ICO_SZ)
-                discardBtn:SetPoint("RIGHT", confirmBtn, "LEFT", -ICO_GAP, 0)
-                discardBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
-                local discardLbl = MakeFont(discardBtn, 14, nil, 0.9, 0.3, 0.3)
-                discardLbl:SetText("\226\156\150") -- cross ✖
-                discardLbl:SetPoint("CENTER")
-                discardBtn:SetScript("OnEnter", function() discardLbl:SetAlpha(1) end)
-                discardBtn:SetScript("OnLeave", function() discardLbl:SetAlpha(0.7) end)
-                discardLbl:SetAlpha(0.7)
-                discardBtn:Hide()
-
-                -- Input box
                 local box = CreateFrame("EditBox", nil, pf)
                 box:SetSize(inputW, ROW_H - 4)
                 box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
@@ -3871,47 +3842,16 @@ local function BuildCogPopup(opts)
                 box:SetJustifyH("CENTER")
                 local boxBg = SolidTex(box, "BACKGROUND", 0.12, 0.12, 0.12, 0.8)
                 boxBg:SetAllPoints()
-                local savedText = row.get and row.get() or ""
-                box:SetText(savedText)
-
-                local function ShowDirtyButtons()
-                    confirmBtn:Show(); discardBtn:Show()
-                    box:ClearAllPoints()
-                    box:SetPoint("RIGHT", discardBtn, "LEFT", -ICO_GAP, 0)
-                end
-
-                local function HideDirtyButtons()
-                    confirmBtn:Hide(); discardBtn:Hide()
-                    box:ClearAllPoints()
-                    box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
-                end
-
-                local function ApplyInput()
-                    box:ClearFocus()
-                    if row.set then row.set(box:GetText()) end
-                    savedText = box:GetText()
-                    HideDirtyButtons()
+                box:SetText(row.get and row.get() or "")
+                box:SetScript("OnEnterPressed", function(self)
+                    self:ClearFocus()
+                    if row.set then row.set(self:GetText()) end
                     if pf._refresh then pf._refresh() end
-                end
-
-                local function DiscardInput()
-                    box:ClearFocus()
-                    box:SetText(savedText)
-                    HideDirtyButtons()
-                end
-
-                box:SetScript("OnTextChanged", function(self, userInput)
-                    if not userInput then return end
-                    if self:GetText() ~= savedText then
-                        ShowDirtyButtons()
-                    else
-                        HideDirtyButtons()
-                    end
                 end)
-                box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
-                box:SetScript("OnEscapePressed", function(self) DiscardInput() end)
-                confirmBtn:SetScript("OnClick", function() ApplyInput() end)
-                discardBtn:SetScript("OnClick", function() DiscardInput() end)
+                box:SetScript("OnEscapePressed", function(self)
+                    self:ClearFocus()
+                    self:SetText(row.get and row.get() or "")
+                end)
 
                 -- Disabled overlay for input
                 local inputDis
