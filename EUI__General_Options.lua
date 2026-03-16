@@ -1443,7 +1443,7 @@ initFrame:SetScript("OnEvent", function(self)
             if ssInitOff then ssCogBlock:Show() else ssCogBlock:Hide() end
         end
 
-        -- Row 5: Character Crosshair (left, with inline swatch) | empty (right)
+        -- Row 5: Character Crosshair (left, with inline swatch) | Rested Indicator (right)
         local crosshairRow
         crosshairRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Character Crosshair",
@@ -1459,7 +1459,21 @@ initFrame:SetScript("OnEvent", function(self)
                 if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" }
+            { type="toggle", text="Rested Indicator",
+              tooltip="Displays a ZZZ indicator on your player frame when you are in a resting area.",
+              getValue=function()
+                if not EllesmereUIDB then return true end
+                return EllesmereUIDB.showRestedIndicator ~= false
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.showRestedIndicator = v
+                local pf = _G["EllesmereUIUnitFrames_Player"]
+                if pf and pf._restIndicator then
+                    if v and IsResting() then pf._restIndicator:Show() else pf._restIndicator:Hide() end
+                end
+                EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
 
         -- Inline color swatch on the crosshair dropdown (left region)
