@@ -90,18 +90,29 @@ end
 --  Instance / Difficulty helpers
 --  Cached per-frame: call CacheInstanceInfo() at the start of Refresh()
 -------------------------------------------------------------------------------
-local _cachedIType, _cachedDiffID
+local _cachedIType, _cachedDiffID, _cachedMapID
 
 local function CacheInstanceInfo()
     local _, iType, diffID = GetInstanceInfo()
     _cachedIType = iType
     _cachedDiffID = tonumber(diffID) or 0
+    _cachedMapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
 end
 
 local function InRealInstancedContent()
-    if _cachedDiffID == 0 then return false end
-    if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then return false end
-    if _cachedIType == "party" or _cachedIType == "raid" or _cachedIType == "scenario" then return true end
+    if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
+        return false
+    end
+
+    if _cachedIType == "party"
+    or _cachedIType == "raid"
+    or _cachedIType == "scenario"
+    or _cachedIType == "arena"
+    or _cachedIType == "pvp"
+    then
+        return true
+    end
+
     return false
 end
 
@@ -109,7 +120,7 @@ local function InMythicPlusKey()
     return C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
 end
 
--- Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
+--Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
 local function InMythicZeroDungeonOrMythicRaid()
     if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
     if _cachedIType == "raid" and _cachedDiffID == 16 then return true end
@@ -123,25 +134,67 @@ local function InHeroicOrMythicContent()
     return false
 end
 
+local function InPvPInstance()
+    return _cachedIType == "pvp" or _cachedIType == "arena"
+end
+
 -------------------------------------------------------------------------------
---  Midnight Season 1 Dungeon & Raid Instance Names
+--  Midnight Season 1 Dungeon, Raid & PvP Instance Names
 -------------------------------------------------------------------------------
 local TALENT_REMINDER_ZONES = {
-    { name="The Voidspire",              type="raid" },
-    { name="Magister's Terrace",         type="dungeon", mapID=2515 },
-    { name="Maisara Caverns",            type="dungeon", mapID=2501 },
-    { name="Nexus-Point Xenas",          type="dungeon", mapID=2556 },
-    { name="Windrunner Spire",           type="dungeon", mapID=2492 },
-    { name="Algeth'ar Academy",          type="dungeon", mapID=2097 },
-    { name="Seat of the Triumvirate",    type="dungeon", mapID=8910 },
-    { name="Skyreach",                   type="dungeon", mapID=601  },
-    { name="Pit of Saron",               type="dungeon", mapID=184  },
+    { name="The Voidspire",           type="raid", },
+    { name="The Dreamrift",           type="raid", },
+    { name="March on Quel'Danas",     type="raid", },
+
+    { name="Magister's Terrace",      type="dungeon", mapID=2515 },
+    { name="Maisara Caverns",         type="dungeon", mapID=2501 },
+    { name="Nexus-Point Xenas",       type="dungeon", mapID=2556 },
+    { name="Windrunner Spire",        type="dungeon", mapID=2492 },
+    { name="Algeth'ar Academy",       type="dungeon", mapID=2097 },
+    { name="Seat of the Triumvirate", type="dungeon", mapID=8910 },
+    { name="Skyreach",                type="dungeon", mapID=601  },
+    { name="Pit of Saron",            type="dungeon", mapID=184  },
+-------------------------------------------------------------------------------
+--  PvP Maps - MapID are all nill due to how Blizzard does map detection for PvP and they are secret values so return nil.
+-------------------------------------------------------------------------------
+    { name="Nagrand Arena",           type="pvp",     mapID=nil },
+    { name="Blade's Edge Arena",      type="pvp",     mapID=nil },
+    { name="Ruins of Lordaeron",      type="pvp",     mapID=nil },
+    { name="Dalaran Sewers",          type="pvp",     mapID=nil },
+    { name="The Ring of Valor",       type="pvp",     mapID=nil },
+    { name="Tol'viron Arena",         type="pvp",     mapID=nil },
+    { name="Tiger's Peak",            type="pvp",     mapID=nil },
+    { name="Black Rook Hold Arena",   type="pvp",     mapID=nil },
+    { name="Ashamane's Fall",         type="pvp",     mapID=nil },
+    { name="Mugambala",               type="pvp",     mapID=nil },
+    { name="Hook Point",              type="pvp",     mapID=nil },
+    { name="Empyrean Domain",         type="pvp",     mapID=nil },
+    { name="Warsong Gulch",           type="pvp",     mapID=nil },
+    { name="Arathi Basin",            type="pvp",     mapID=nil },
+    { name="Eye of the Storm",        type="pvp",     mapID=nil },
+    { name="Strand of the Ancients",  type="pvp",     mapID=nil },
+    { name="Isle of Conquest",        type="pvp",     mapID=nil },
+    { name="Twin Peaks",              type="pvp",     mapID=nil },
+    { name="Silvershard Mines",       type="pvp",     mapID=nil },
+    { name="Battle for Gilneas",      type="pvp",     mapID=nil },
+    { name="Temple of Kotmogu",       type="pvp",     mapID=nil },
+    { name="Deepwind Gorge",          type="pvp",     mapID=nil },
+    { name="Ashran",                  type="pvp",     mapID=nil },
+    { name="Seething Shore",          type="pvp",     mapID=nil },
+    { name="Wintergrasp",             type="pvp",     mapID=nil },
+    { name="Slayer's Rise",           type="pvp",     mapID=nil },
 }
 
 -- mapID to zone entry for fast ID-based matching
 local TALENT_REMINDER_ZONE_BY_MAPID = {}
 for _, z in ipairs(TALENT_REMINDER_ZONES) do
-    if z.mapID then TALENT_REMINDER_ZONE_BY_MAPID[z.mapID] = z end
+    if z.mapID then
+        TALENT_REMINDER_ZONE_BY_MAPID[z.mapID] = z
+    end
+end
+
+local function GetCurrentTalentReminderZone()
+    return TALENT_REMINDER_ZONE_BY_MAPID[_cachedMapID]
 end
 
 -------------------------------------------------------------------------------
@@ -693,6 +746,8 @@ local FLASK_ITEMS = {
       items={241326, 241327, 245929, 245928} },
     { key="thalassian_resistance", buffID=1235057, name="Flask of Thalassian Resistance",
       items={241320, 241321, 245926, 245927} },
+    { key="thalassian_horror", buffID=1239355, name="Vicious Thalassian Flask of Honor",
+      items={241334} },
 }
 local FLASK_BUFF_IDS = {}
 local FLASK_BUFF_ID_SET = {}
