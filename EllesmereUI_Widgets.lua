@@ -3833,25 +3833,33 @@ local function BuildCogPopup(opts)
                 lbl:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, curY - ROW_H / 2 - 1)
 
                 local inputW = row.inputWidth or 80
-                local APPLY_W = 40
-                local APPLY_GAP = 4
+                local ICO_SZ = 16
+                local ICO_GAP = 3
 
-                -- Apply button (right-most, hidden until text changes)
-                local APPLY_W = 40
-                local APPLY_GAP = 4
-                local applyBtn = CreateFrame("Button", nil, pf)
-                applyBtn:SetSize(APPLY_W, ROW_H - 4)
-                applyBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
-                applyBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
-                local applyBg = SolidTex(applyBtn, "BACKGROUND", 0.20, 0.20, 0.20, 0.85)
-                applyBg:SetAllPoints()
-                local applyLbl = MakeFont(applyBtn, 10, nil, 1, 1, 1)
-                applyLbl:SetAlpha(0.6)
-                applyLbl:SetText("Apply")
-                applyLbl:SetPoint("CENTER")
-                applyBtn:SetScript("OnEnter", function(self) applyBg:SetColorTexture(0.30, 0.30, 0.30, 0.9); applyLbl:SetAlpha(1) end)
-                applyBtn:SetScript("OnLeave", function(self) applyBg:SetColorTexture(0.20, 0.20, 0.20, 0.85); applyLbl:SetAlpha(0.6) end)
-                applyBtn:Hide()
+                -- Confirm (tick) and discard (cross) buttons, hidden until text changes
+                local confirmBtn = CreateFrame("Button", nil, pf)
+                confirmBtn:SetSize(ICO_SZ, ICO_SZ)
+                confirmBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                confirmBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
+                local confirmLbl = MakeFont(confirmBtn, 14, nil, 0.3, 0.9, 0.3)
+                confirmLbl:SetText("\226\156\148") -- checkmark ✔
+                confirmLbl:SetPoint("CENTER")
+                confirmBtn:SetScript("OnEnter", function() confirmLbl:SetAlpha(1) end)
+                confirmBtn:SetScript("OnLeave", function() confirmLbl:SetAlpha(0.7) end)
+                confirmLbl:SetAlpha(0.7)
+                confirmBtn:Hide()
+
+                local discardBtn = CreateFrame("Button", nil, pf)
+                discardBtn:SetSize(ICO_SZ, ICO_SZ)
+                discardBtn:SetPoint("RIGHT", confirmBtn, "LEFT", -ICO_GAP, 0)
+                discardBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
+                local discardLbl = MakeFont(discardBtn, 14, nil, 0.9, 0.3, 0.3)
+                discardLbl:SetText("\226\156\150") -- cross ✖
+                discardLbl:SetPoint("CENTER")
+                discardBtn:SetScript("OnEnter", function() discardLbl:SetAlpha(1) end)
+                discardBtn:SetScript("OnLeave", function() discardLbl:SetAlpha(0.7) end)
+                discardLbl:SetAlpha(0.7)
+                discardBtn:Hide()
 
                 -- Input box
                 local box = CreateFrame("EditBox", nil, pf)
@@ -3866,38 +3874,44 @@ local function BuildCogPopup(opts)
                 local savedText = row.get and row.get() or ""
                 box:SetText(savedText)
 
+                local function ShowDirtyButtons()
+                    confirmBtn:Show(); discardBtn:Show()
+                    box:ClearAllPoints()
+                    box:SetPoint("RIGHT", discardBtn, "LEFT", -ICO_GAP, 0)
+                end
+
+                local function HideDirtyButtons()
+                    confirmBtn:Hide(); discardBtn:Hide()
+                    box:ClearAllPoints()
+                    box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                end
+
                 local function ApplyInput()
                     box:ClearFocus()
                     if row.set then row.set(box:GetText()) end
                     savedText = box:GetText()
-                    applyBtn:Hide()
-                    box:ClearAllPoints()
-                    box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                    HideDirtyButtons()
                     if pf._refresh then pf._refresh() end
                 end
 
-                local function CheckDirty()
-                    if box:GetText() ~= savedText then
-                        applyBtn:Show()
-                        box:ClearAllPoints()
-                        box:SetPoint("RIGHT", applyBtn, "LEFT", -APPLY_GAP, 0)
-                    else
-                        applyBtn:Hide()
-                        box:ClearAllPoints()
-                        box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
-                    end
+                local function DiscardInput()
+                    box:ClearFocus()
+                    box:SetText(savedText)
+                    HideDirtyButtons()
                 end
 
                 box:SetScript("OnTextChanged", function(self, userInput)
-                    if userInput then CheckDirty() end
+                    if not userInput then return end
+                    if self:GetText() ~= savedText then
+                        ShowDirtyButtons()
+                    else
+                        HideDirtyButtons()
+                    end
                 end)
                 box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
-                box:SetScript("OnEscapePressed", function(self)
-                    self:ClearFocus()
-                    self:SetText(savedText)
-                    CheckDirty()
-                end)
-                applyBtn:SetScript("OnClick", function() ApplyInput() end)
+                box:SetScript("OnEscapePressed", function(self) DiscardInput() end)
+                confirmBtn:SetScript("OnClick", function() ApplyInput() end)
+                discardBtn:SetScript("OnClick", function() DiscardInput() end)
 
                 -- Disabled overlay for input
                 local inputDis
