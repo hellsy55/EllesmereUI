@@ -3836,7 +3836,9 @@ local function BuildCogPopup(opts)
                 local APPLY_W = 40
                 local APPLY_GAP = 4
 
-                -- Apply button (right-most)
+                -- Apply button (right-most, hidden until text changes)
+                local APPLY_W = 40
+                local APPLY_GAP = 4
                 local applyBtn = CreateFrame("Button", nil, pf)
                 applyBtn:SetSize(APPLY_W, ROW_H - 4)
                 applyBtn:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
@@ -3849,29 +3851,51 @@ local function BuildCogPopup(opts)
                 applyLbl:SetPoint("CENTER")
                 applyBtn:SetScript("OnEnter", function(self) applyBg:SetColorTexture(0.30, 0.30, 0.30, 0.9); applyLbl:SetAlpha(1) end)
                 applyBtn:SetScript("OnLeave", function(self) applyBg:SetColorTexture(0.20, 0.20, 0.20, 0.85); applyLbl:SetAlpha(0.6) end)
+                applyBtn:Hide()
 
-                -- Input box (left of apply button)
+                -- Input box
                 local box = CreateFrame("EditBox", nil, pf)
                 box:SetSize(inputW, ROW_H - 4)
-                box:SetPoint("RIGHT", applyBtn, "LEFT", -APPLY_GAP, 0)
+                box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
                 box:SetAutoFocus(false)
                 box:SetFont(EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
                 box:SetTextColor(1, 1, 1, POPUP_INPUT_A)
                 box:SetJustifyH("CENTER")
                 local boxBg = SolidTex(box, "BACKGROUND", 0.12, 0.12, 0.12, 0.8)
                 boxBg:SetAllPoints()
-                box:SetText(row.get and row.get() or "")
+                local savedText = row.get and row.get() or ""
+                box:SetText(savedText)
 
                 local function ApplyInput()
                     box:ClearFocus()
                     if row.set then row.set(box:GetText()) end
+                    savedText = box:GetText()
+                    applyBtn:Hide()
+                    box:ClearAllPoints()
+                    box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
                     if pf._refresh then pf._refresh() end
                 end
 
+                local function CheckDirty()
+                    if box:GetText() ~= savedText then
+                        applyBtn:Show()
+                        box:ClearAllPoints()
+                        box:SetPoint("RIGHT", applyBtn, "LEFT", -APPLY_GAP, 0)
+                    else
+                        applyBtn:Hide()
+                        box:ClearAllPoints()
+                        box:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, curY - ROW_H / 2)
+                    end
+                end
+
+                box:SetScript("OnTextChanged", function(self, userInput)
+                    if userInput then CheckDirty() end
+                end)
                 box:SetScript("OnEnterPressed", function(self) ApplyInput() end)
                 box:SetScript("OnEscapePressed", function(self)
                     self:ClearFocus()
-                    self:SetText(row.get and row.get() or "")
+                    self:SetText(savedText)
+                    CheckDirty()
                 end)
                 applyBtn:SetScript("OnClick", function() ApplyInput() end)
 
