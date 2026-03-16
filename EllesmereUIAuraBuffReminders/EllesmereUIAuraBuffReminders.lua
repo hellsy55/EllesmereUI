@@ -2062,12 +2062,10 @@ local function ApplyUnlockPos()
     if not iconAnchor or not db then return end
     local pos = db.profile.unlockPos
     if pos and pos.point then
-        if pos.scale then pcall(function() iconAnchor:SetScale(pos.scale) end) end
         iconAnchor:ClearAllPoints()
         iconAnchor:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
     else
         local d = db.profile.display
-        pcall(function() iconAnchor:SetScale(1) end)
         iconAnchor:ClearAllPoints()
         iconAnchor:SetPoint("CENTER", UIParent, "CENTER", d.xOffset or 0, d.yOffset or 0)
     end
@@ -2075,8 +2073,9 @@ end
 
 local function RegisterUnlockElements()
     if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+    local MK = EllesmereUI.MakeUnlockElement
     EllesmereUI:RegisterUnlockElements({
-        {
+        MK({
             key = "EABR_Reminders",
             label = "AuraBuff Reminders",
             group = "AuraBuff Reminders",
@@ -2087,36 +2086,50 @@ local function RegisterUnlockElements()
                 local baseScale = p.scale or 1.0
                 local sz = floor(ICON_SIZE * baseScale + 0.5)
                 local spacing = p.iconSpacing or 8
-                -- Size to fit 3 icons wide (typical max visible)
                 local count = max(#activeIcons, 3)
                 local w = count * sz + (count - 1) * spacing
-                -- Height: icon + gap + text line
                 local textH = 0
                 if p.showText then
                     textH = (p.textSize or 11) + abs(p.textYOffset or -2)
                 end
                 local h = sz + textH
-                -- Offset mover center down by half the text overhang
                 return w, h, -(textH / 2)
             end,
-            savePosition = function(key, point, relPoint, x, y, scale)
-                db.profile.unlockPos = {point=point, relPoint=relPoint, x=x, y=y, scale=scale}
+            linkedDimensions = true,
+            setWidth = function(_, newW)
+                local p = db.profile.display
+                local spacing = p.iconSpacing or 8
+                local count = max(#activeIcons, 3)
+                local sz = (newW - (count - 1) * spacing) / count
+                if sz < 8 then sz = 8 end
+                p.scale = sz / ICON_SIZE
+                if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
+            end,
+            setHeight = function(_, newH)
+                local p = db.profile.display
+                local textH = 0
+                if p.showText then
+                    textH = (p.textSize or 11) + abs(p.textYOffset or -2)
+                end
+                local sz = newH - textH
+                if sz < 8 then sz = 8 end
+                p.scale = sz / ICON_SIZE
+                if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
+            end,
+            savePos = function(key, point, relPoint, x, y)
+                db.profile.unlockPos = {point=point, relPoint=relPoint, x=x, y=y}
                 ApplyUnlockPos()
             end,
-            loadPosition = function()
+            loadPos = function()
                 return db.profile.unlockPos
             end,
-            getScale = function()
-                local pos = db.profile.unlockPos
-                return pos and pos.scale or 1.0
-            end,
-            clearPosition = function()
+            clearPos = function()
                 db.profile.unlockPos = nil
             end,
-            applyPosition = function()
+            applyPos = function()
                 ApplyUnlockPos()
             end,
-        },
+        }),
     })
 end
 
@@ -2404,17 +2417,6 @@ local mainFrame = CreateFrame("Frame")
 mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     if e == "PLAYER_LOGIN" then
         db = EllesmereUI.Lite.NewDB("EllesmereUIAuraBuffRemindersDB", defaults, true)
-
-        -- Migration: Source of Magic moved from raidBuffs to auras
-        if db.profile.raidBuffs and db.profile.raidBuffs.enabled and db.profile.raidBuffs.enabled.som ~= nil then
-            if db.profile.auras and db.profile.auras.enabled then
-                if db.profile.auras.enabled.som == nil then
-                    db.profile.auras.enabled.som = db.profile.raidBuffs.enabled.som
-                end
-            end
-            db.profile.raidBuffs.enabled.som = nil
-        end
-
 
         -- Expose globals for options
         _G._EABR_AceDB = db

@@ -1,4 +1,4 @@
--------------------------------------------------------------------------------
+﻿-------------------------------------------------------------------------------
 --  EllesmereUIResourceBars.lua
 --  Custom class resource, health, and mana bar display
 --  Features: Health bar, primary resource bar (mana/rage/energy/etc),
@@ -323,7 +323,6 @@ local DEFAULTS = {
             enabled     = false,
             width       = 214,
             height      = 16,
-            scale       = 1.0,
             borderSize  = 0,
             borderR     = 0, borderG = 0, borderB = 0, borderA = 1,
             darkTheme   = false,
@@ -352,7 +351,6 @@ local DEFAULTS = {
             enabled     = true,
             width       = 214,
             height      = 14,
-            scale       = 1.0,
             borderSize  = 1,
             borderR     = 0, borderG = 0, borderB = 0, borderA = 1,
             darkTheme   = false,
@@ -381,7 +379,6 @@ local DEFAULTS = {
         },
         secondary = {
             enabled     = true,
-            scale       = 1.0,
             pipWidth    = 214,
             pipHeight   = 20,
             pipSpacing  = 1,
@@ -437,7 +434,6 @@ local DEFAULTS = {
             spellTextSize = 11,
             spellTextX    = 0,
             spellTextY    = 0,
-            scale         = 1.0,
             unlockPos     = nil,
             showChannelTicks  = true,
             showTickMarks     = true,
@@ -450,7 +446,6 @@ local DEFAULTS = {
         general = {
             anchorX     = 0,
             anchorY     = -100,
-            unlocked    = false,
             orientation = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             barTexture  = "none",
         },
@@ -778,229 +773,163 @@ end
 -------------------------------------------------------------------------------
 local function RegisterUnlockElements()
     if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+    local MK = EllesmereUI.MakeUnlockElement
+
+    -- Shared helper: save position to a settings sub-table and apply to frame
+    local function MakePosHelpers(getSettings, frame_fn, defaultOffX, defaultOffY)
+        local function savePos(key, point, relPoint, x, y)
+            if not point then return end
+            local s = getSettings()
+            s.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y }
+            local f = frame_fn()
+            if f then
+                f:ClearAllPoints()
+                f:SetPoint(point, UIParent, relPoint or point, x, y)
+            end
+        end
+        local function loadPos()
+            local pos = getSettings().unlockPos
+            if not pos then return nil end
+            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+        end
+        local function clearPos()
+            local s = getSettings()
+            s.unlockPos = nil
+            if defaultOffX then s.offsetX = defaultOffX end
+            if defaultOffY then s.offsetY = defaultOffY end
+        end
+        local function applyPos()
+            local s = getSettings()
+            if s.anchorTo and s.anchorTo ~= "none" then return end
+            local pos = s.unlockPos
+            if not pos then return end
+            local f = frame_fn()
+            if f then
+                f:ClearAllPoints()
+                f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+            end
+        end
+        return savePos, loadPos, clearPos, applyPos
+    end
+
+    local function Rebuild() ERB:ApplyAll() end
+    local function LiveMove(key)
+        if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
+    end
 
     local elements = {}
 
     -- Health Bar
-    elements[#elements + 1] = {
-        key = "ERB_Health",
-        label = "Health Bar",
-        group = "Resource Bars",
-        order = 500,
-        getFrame = function() return healthBar end,
-        getSize = function()
-            local hp = ERB.db.profile.health
-            return hp.width, hp.height
-        end,
-        getScale = function()
-            return ERB.db.profile.health.scale or 1.0
-        end,
-        savePosition = function(_, point, relPoint, x, y, scale)
-            if not point then return end
-            local hp = ERB.db.profile.health
-            hp.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y, scale = scale }
-            if scale then hp.scale = scale end
-            if healthBar then
-                if scale then pcall(function() healthBar:SetScale(scale) end) end
-                healthBar:ClearAllPoints()
-                healthBar:SetPoint(point, UIParent, relPoint or point, x, y)
-            end
-        end,
-        loadPosition = function()
-            local pos = ERB.db.profile.health.unlockPos
-            if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y, scale = pos.scale }
-        end,
-        clearPosition = function()
-            local hp = ERB.db.profile.health
-            hp.unlockPos = nil
-            hp.offsetX = 0; hp.offsetY = -65
-        end,
-        isAnchored = function()
-            local hp = ERB.db.profile.health
-            return hp.anchorTo and hp.anchorTo ~= "none"
-        end,
-        applyPosition = function()
-            local hp = ERB.db.profile.health
-            if hp.anchorTo and hp.anchorTo ~= "none" then return end
-            local pos = hp.unlockPos
-            if not pos then return end
-            if healthBar then
-                local sc = pos.scale or hp.scale or 1
-                pcall(function() healthBar:SetScale(sc) end)
-                healthBar:ClearAllPoints()
-                healthBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
-            end
-        end,
-        onLiveMove = function(key)
-            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
-        end,
-    }
+    do
+        local function S() return ERB.db.profile.health end
+        local save, load, clear, apply = MakePosHelpers(S, function() return healthBar end, 0, -65)
+        elements[#elements + 1] = MK({
+            key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
+            getFrame = function() return healthBar end,
+            getSize  = function() local s = S(); return s.width, s.height end,
+            setWidth = function(_, w) S().width = w; Rebuild() end,
+            setHeight = function(_, h) S().height = h; Rebuild() end,
+            isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            onLiveMove = LiveMove,
+            savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
+        })
+    end
 
     -- Power Bar
-    elements[#elements + 1] = {
-        key = "ERB_Power",
-        label = "Power Bar",
-        group = "Resource Bars",
-        order = 501,
-        getFrame = function() return primaryBar end,
-        getSize = function()
-            local pp = ERB.db.profile.primary
-            return pp.width, pp.height
-        end,
-        getScale = function()
-            return ERB.db.profile.primary.scale or 1.0
-        end,
-        savePosition = function(_, point, relPoint, x, y, scale)
-            if not point then return end
-            local pp = ERB.db.profile.primary
-            pp.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y, scale = scale }
-            if scale then pp.scale = scale end
-            if primaryBar then
-                if scale then pcall(function() primaryBar:SetScale(scale) end) end
-                primaryBar:ClearAllPoints()
-                primaryBar:SetPoint(point, UIParent, relPoint or point, x, y)
-            end
-        end,
-        loadPosition = function()
-            local pos = ERB.db.profile.primary.unlockPos
-            if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y, scale = pos.scale }
-        end,
-        clearPosition = function()
-            local pp = ERB.db.profile.primary
-            pp.unlockPos = nil
-            pp.offsetX = 0; pp.offsetY = -74
-        end,
-        isAnchored = function()
-            local pp = ERB.db.profile.primary
-            return pp.anchorTo and pp.anchorTo ~= "none"
-        end,
-        applyPosition = function()
-            local pp = ERB.db.profile.primary
-            if pp.anchorTo and pp.anchorTo ~= "none" then return end
-            local pos = pp.unlockPos
-            if not pos then return end
-            if primaryBar then
-                local sc = pos.scale or pp.scale or 1
-                pcall(function() primaryBar:SetScale(sc) end)
-                primaryBar:ClearAllPoints()
-                primaryBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
-            end
-        end,
-        onLiveMove = function(key)
-            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
-        end,
-    }
+    do
+        local function S() return ERB.db.profile.primary end
+        local save, load, clear, apply = MakePosHelpers(S, function() return primaryBar end, 0, -74)
+        elements[#elements + 1] = MK({
+            key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
+            getFrame = function() return primaryBar end,
+            getSize  = function() local s = S(); return s.width, s.height end,
+            setWidth = function(_, w) S().width = w; Rebuild() end,
+            setHeight = function(_, h) S().height = h; Rebuild() end,
+            isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            onLiveMove = LiveMove,
+            savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
+        })
+    end
 
     -- Class Resource (pips/runes)
-    elements[#elements + 1] = {
-        key = "ERB_ClassResource",
-        label = "Class Resource",
-        group = "Resource Bars",
-        order = 502,
-        getFrame = function() return secondaryFrame end,
-        getSize = function()
-            local sp = ERB.db.profile.secondary
-            if cachedSecondary and cachedSecondary.type == "bar" then
-                local totalW = ERB.db.profile.primary.width or 214
-                return totalW, sp.pipHeight
-            end
-            return sp.pipWidth, sp.pipHeight
-        end,
-        getScale = function()
-            return ERB.db.profile.secondary.scale or 1.0
-        end,
-        savePosition = function(_, point, relPoint, x, y, scale)
-            if not point then return end
-            local sp = ERB.db.profile.secondary
-            sp.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y, scale = scale }
-            if scale then sp.scale = scale end
-            if secondaryFrame then
-                if scale then pcall(function() secondaryFrame:SetScale(scale) end) end
-                secondaryFrame:ClearAllPoints()
-                secondaryFrame:SetPoint(point, UIParent, relPoint or point, x, y)
-            end
-        end,
-        loadPosition = function()
-            local pos = ERB.db.profile.secondary.unlockPos
-            if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y, scale = pos.scale }
-        end,
-        clearPosition = function()
-            local sp = ERB.db.profile.secondary
-            sp.unlockPos = nil
-            sp.offsetX = 0; sp.offsetY = -38
-        end,
-        isAnchored = function()
-            local sp = ERB.db.profile.secondary
-            return sp.anchorTo and sp.anchorTo ~= "none"
-        end,
-        applyPosition = function()
-            local sp = ERB.db.profile.secondary
-            if sp.anchorTo and sp.anchorTo ~= "none" then return end
-            local pos = sp.unlockPos
-            if not pos then return end
-            if secondaryFrame then
-                local sc = pos.scale or sp.scale or 1
-                pcall(function() secondaryFrame:SetScale(sc) end)
-                secondaryFrame:ClearAllPoints()
-                secondaryFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-            end
-        end,
-        onLiveMove = function(key)
-            if RefreshAnchoredBarsForUnlockTarget then RefreshAnchoredBarsForUnlockTarget(key) end
-        end,
-    }
+    do
+        local function S() return ERB.db.profile.secondary end
+        local save, load, clear, apply = MakePosHelpers(S, function() return secondaryFrame end, 0, -38)
+        elements[#elements + 1] = MK({
+            key = "ERB_ClassResource", label = "Class Resource", group = "Resource Bars", order = 502,
+            getFrame = function() return secondaryFrame end,
+            getSize  = function()
+                local s = S()
+                if cachedSecondary and cachedSecondary.type == "bar" then
+                    return (ERB.db.profile.primary.width or 214), s.pipHeight
+                end
+                return s.pipWidth, s.pipHeight
+            end,
+            setWidth = function(_, w)
+                local s = S()
+                if cachedSecondary and cachedSecondary.type == "bar" then
+                    ERB.db.profile.primary.width = w
+                else
+                    s.pipWidth = w
+                end
+                Rebuild()
+            end,
+            setHeight = function(_, h) S().pipHeight = h; Rebuild() end,
+            isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            onLiveMove = LiveMove,
+            savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
+        })
+    end
 
     -- Cast Bar
-    elements[#elements + 1] = {
-        key = "ERB_CastBar",
-        label = "Cast Bar",
-        group = "Resource Bars",
-        order = 504,
-        getFrame = function() return castBarFrame end,
-        getSize = function()
-            local cb = ERB.db.profile.castBar
-            local iconW = (cb.showIcon ~= false) and cb.height or 0
-            return cb.width + iconW, cb.height
-        end,
-        getScale = function()
-            return ERB.db.profile.castBar.scale or 1.0
-        end,
-        savePosition = function(_, point, relPoint, x, y, scale)
+    do
+        local function S() return ERB.db.profile.castBar end
+        local function castSave(key, point, relPoint, x, y)
             if not point then return end
-            local cb = ERB.db.profile.castBar
-            cb.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y, scale = scale }
-            if scale then cb.scale = scale end
+            local cb = S()
+            cb.unlockPos = { point = point, relPoint = relPoint or point, x = x, y = y }
             if castBarFrame then
-                if scale then pcall(function() castBarFrame:SetScale(scale) end) end
                 castBarFrame:ClearAllPoints()
                 castBarFrame:SetPoint(point, UIParent, relPoint or point, x, y)
             end
-        end,
-        loadPosition = function()
-            local pos = ERB.db.profile.castBar.unlockPos
+        end
+        local function castLoad()
+            local pos = S().unlockPos
             if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y, scale = pos.scale }
-        end,
-        clearPosition = function()
-            local cb = ERB.db.profile.castBar
+            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+        end
+        local function castClear()
+            local cb = S()
             cb.unlockPos = nil
             cb.anchorX = 0; cb.anchorY = -54
-        end,
-        applyPosition = function()
-            local cb = ERB.db.profile.castBar
-            local pos = cb.unlockPos
+        end
+        local function castApply()
+            local pos = S().unlockPos
             if not pos then return end
             if castBarFrame then
-                local sc = pos.scale or cb.scale or 1
-                pcall(function() castBarFrame:SetScale(sc) end)
                 castBarFrame:ClearAllPoints()
                 castBarFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
             end
-        end,
-    }
+        end
+        elements[#elements + 1] = MK({
+            key = "ERB_CastBar", label = "Cast Bar", group = "Resource Bars", order = 504,
+            getFrame = function() return castBarFrame end,
+            getSize  = function()
+                local cb = S()
+                local iconW = (cb.showIcon ~= false) and cb.height or 0
+                return cb.width + iconW, cb.height
+            end,
+            setWidth = function(_, w)
+                local cb = S()
+                local iconW = (cb.showIcon ~= false) and cb.height or 0
+                cb.width = math.max(w - iconW, 10)
+                Rebuild()
+            end,
+            setHeight = function(_, h) S().height = h; Rebuild() end,
+            savePos = castSave, loadPos = castLoad, clearPos = castClear, applyPos = castApply,
+        })
+    end
+
     EllesmereUI:RegisterUnlockElements(elements)
 end
 
@@ -1178,11 +1107,10 @@ local function GetAnchorOffsets(settings)
     return offsetX or 0, offsetY or 0
 end
 
-local function ApplyFreeBarPosition(frame, settings, defaultX, defaultY, width, height, scale)
+local function ApplyFreeBarPosition(frame, settings, defaultX, defaultY, width, height)
     if not frame then return end
 
     local pos = settings and settings.unlockPos
-    frame:SetScale(scale or 1)
     frame:SetSize(width, height)
     frame:ClearAllPoints()
 
@@ -1273,7 +1201,7 @@ local function BuildBars()
         end
     end
 
-    -- Fallback defaults for nil-safe reads (protects against sparse SavedVariables from migration)
+    -- Fallback defaults for nil-safe reads
     local FALLBACK = DEFAULTS.profile
 
     -- Health bar
@@ -1288,17 +1216,15 @@ local function BuildBars()
         if healthAnchorKey ~= "none" then
             local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
             local offsetX, offsetY = GetAnchorOffsets(hp)
-            healthBar:SetScale(hp.scale)
             healthBar:SetSize(ow, oh)
             if not ApplyBarAnchor(healthBar, healthAnchorKey, hp.anchorPosition, offsetX, offsetY, hp.growthDirection, hp.growCentered) then
-                ApplyFreeBarPosition(healthBar, hp, 0, -64, ow, oh, hp.scale)
+                ApplyFreeBarPosition(healthBar, hp, 0, -64, ow, oh)
             end
         elseif hp.unlockPos and hp.unlockPos.point then
             -- Position fully managed by unlock mode -- no animations, just apply directly
             local rp = hp.unlockPos.relPoint or hp.unlockPos.point
             local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
             ApplyBarAnchor(healthBar, "none")
-            healthBar:SetScale(hp.scale)
             healthBar:SetSize(ow, oh)
             healthBar:ClearAllPoints()
             healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
@@ -1306,7 +1232,6 @@ local function BuildBars()
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(healthBar, "none")
             local function ApplyHealthBarTransform()
-                local s = healthBar["_barAnim_scale"] or hp.scale or 1
                 local ox = healthBar["_barAnim_ox"] or hp.offsetX or 0
                 local oy = healthBar["_barAnim_oy"] or hp.offsetY or -64
                 local w = healthBar["_barAnim_w"] or hp.width or 214
@@ -1314,10 +1239,8 @@ local function BuildBars()
                 local ow, oh = OrientedSize(w, h2, hpOri)
                 healthBar:ClearAllPoints()
                 healthBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy)
-                healthBar:SetScale(s)
                 healthBar:SetSize(ow, oh)
             end
-            SmoothBarAnimate(healthBar, "scale", hp.scale or 1, function() ApplyHealthBarTransform() end)
             SmoothBarAnimate(healthBar, "ox", hp.offsetX or 0, function() ApplyHealthBarTransform() end)
             SmoothBarAnimate(healthBar, "oy", hp.offsetY or -64, function() ApplyHealthBarTransform() end)
             SmoothBarAnimate(healthBar, "w", hp.width or 214, function() ApplyHealthBarTransform() end)
@@ -1370,17 +1293,15 @@ local function BuildBars()
         if primaryAnchorKey ~= "none" then
             local ow, oh = OrientedSize(pp.width, pp.height, ppOri)
             local offsetX, offsetY = GetAnchorOffsets(pp)
-            primaryBar:SetScale(pp.scale)
             primaryBar:SetSize(ow, oh)
             if not ApplyBarAnchor(primaryBar, primaryAnchorKey, pp.anchorPosition, offsetX, offsetY, pp.growthDirection, pp.growCentered) then
-                ApplyFreeBarPosition(primaryBar, pp, 0, -54, ow, oh, pp.scale)
+                ApplyFreeBarPosition(primaryBar, pp, 0, -54, ow, oh)
             end
         elseif pp.unlockPos and pp.unlockPos.point then
             -- Position fully managed by unlock mode -- no animations, just apply directly
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
             local ow, oh = OrientedSize(pp.width, pp.height, ppOri)
             ApplyBarAnchor(primaryBar, "none")
-            primaryBar:SetScale(pp.scale)
             primaryBar:SetSize(ow, oh)
             primaryBar:ClearAllPoints()
             primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
@@ -1388,7 +1309,6 @@ local function BuildBars()
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(primaryBar, "none")
             local function ApplyPowerBarTransform()
-                local s = primaryBar["_barAnim_scale"] or pp.scale or 1
                 local ox = primaryBar["_barAnim_ox"] or pp.offsetX or 0
                 local oy = primaryBar["_barAnim_oy"] or pp.offsetY or -54
                 local w = primaryBar["_barAnim_w"] or pp.width or 214
@@ -1396,10 +1316,8 @@ local function BuildBars()
                 local ow, oh = OrientedSize(w, h2, ppOri)
                 primaryBar:ClearAllPoints()
                 primaryBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy)
-                primaryBar:SetScale(s)
                 primaryBar:SetSize(ow, oh)
             end
-            SmoothBarAnimate(primaryBar, "scale", pp.scale or 1, function() ApplyPowerBarTransform() end)
             SmoothBarAnimate(primaryBar, "ox", pp.offsetX or 0, function() ApplyPowerBarTransform() end)
             SmoothBarAnimate(primaryBar, "oy", pp.offsetY or -54, function() ApplyPowerBarTransform() end)
             SmoothBarAnimate(primaryBar, "w", pp.width or 214, function() ApplyPowerBarTransform() end)
@@ -1486,31 +1404,26 @@ local function BuildBars()
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
         if secondaryAnchorKey ~= "none" then
             local offsetX, offsetY = GetAnchorOffsets(sp)
-            secondaryFrame:SetScale(sp.scale or 1)
             secondaryFrame:SetSize(frameW, frameH)
             if not ApplyBarAnchor(secondaryFrame, secondaryAnchorKey, sp.anchorPosition, offsetX, offsetY, sp.growthDirection, sp.growCentered) then
-                ApplyFreeBarPosition(secondaryFrame, sp, 0, -38, frameW, frameH, sp.scale or 1)
+                ApplyFreeBarPosition(secondaryFrame, sp, 0, -38, frameW, frameH)
             end
         elseif sp.unlockPos and sp.unlockPos.point then
             ApplyBarAnchor(secondaryFrame, "none")
-            secondaryFrame:SetScale(sp.scale or 1)
             secondaryFrame:SetSize(frameW, frameH)
             secondaryFrame:ClearAllPoints()
             secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
         else
             ApplyBarAnchor(secondaryFrame, "none")
             local function ApplySecondaryBarTransform()
-                local s  = secondaryFrame["_barAnim_scale"] or sp.scale or 1
                 local ox = secondaryFrame["_barAnim_ox"] or sp.offsetX or 0
                 local oy = secondaryFrame["_barAnim_oy"] or sp.offsetY or -38
                 local w  = secondaryFrame["_barAnim_w"] or frameW
                 local h2 = secondaryFrame["_barAnim_h"] or frameH
                 secondaryFrame:ClearAllPoints()
                 secondaryFrame:SetPoint("CENTER", mainFrame, "CENTER", ox, oy)
-                secondaryFrame:SetScale(s)
                 secondaryFrame:SetSize(w, h2)
             end
-            SmoothBarAnimate(secondaryFrame, "scale", sp.scale or 1, function() ApplySecondaryBarTransform() end)
             SmoothBarAnimate(secondaryFrame, "ox", sp.offsetX or 0, function() ApplySecondaryBarTransform() end)
             SmoothBarAnimate(secondaryFrame, "oy", sp.offsetY or -38, function() ApplySecondaryBarTransform() end)
             SmoothBarAnimate(secondaryFrame, "w", frameW, function() ApplySecondaryBarTransform() end)
@@ -2749,7 +2662,6 @@ BuildCastBar = function()
         local function ApplyCastUnlockTransform()
             local aw = castBarFrame["_barAnim_w"] or totalW
             local ah = castBarFrame["_barAnim_h"] or h
-            castBarFrame:SetScale(cb.scale or 1)
             castBarFrame:SetSize(aw, ah)
             castBarFrame:ClearAllPoints()
             castBarFrame:SetPoint(cb.unlockPos.point, UIParent, rp, px, py)
@@ -2757,7 +2669,6 @@ BuildCastBar = function()
         SmoothBarAnimate(castBarFrame, "w", totalW, function() ApplyCastUnlockTransform() end)
         SmoothBarAnimate(castBarFrame, "h", h, function() ApplyCastUnlockTransform() end)
     else
-        castBarFrame:SetScale(cb.scale or 1)
         castBarFrame:SetSize(totalW, h)
         castBarFrame:ClearAllPoints()
         castBarFrame:SetPoint("CENTER", UIParent, "CENTER", cb.anchorX, cb.anchorY)
@@ -3597,32 +3508,11 @@ end
 function ERB:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIResourceBarsDB", DEFAULTS, true)
 
-    -- One-time migration from AceDB to Lite: reset the profile to ensure
-    -- all defaults are properly applied.  AceDB used metatables for defaults
-    -- which left the raw SavedVariables sparse; Lite writes defaults directly.
-    -- This flag persists in the SV root so it only fires once per character.
-    local sv = _G["EllesmereUIResourceBarsDB"]
-    if sv and not sv._liteMigrated then
-        self.db:ResetProfile()
-        sv._liteMigrated = true
-    end
-
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end
     _G._ERB_GetSecondaryResource = GetSecondaryResource
     _G._ERB_GetPrimaryPowerType = GetPrimaryPowerType
     _G._ERB_PowerColors = POWER_COLORS
-
-    -- Migrate old visibility values: "combat" -> "in_combat", "target" stays as-is
-    do
-        local prof = self.db.profile
-        for _, key in ipairs({"health", "primary", "secondary"}) do
-            local s = prof[key]
-            if s and s.visibility == "combat" then
-                s.visibility = "in_combat"
-            end
-        end
-    end
 
     AppendSharedMediaTextures()
 end

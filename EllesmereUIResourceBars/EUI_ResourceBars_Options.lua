@@ -245,7 +245,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Static center -- no y-offset interaction with preview
 
-            local pScale = sp.scale or 1.0
+            local pScale = 1.0
             local function ApplyPipTransform()
                 local s = pc["_anim_scale"] or pScale
                 pc:SetScale(s)
@@ -1499,92 +1499,6 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateCogDisThresh()
         end
 
-        -- Row 6: Anchored To | Anchor Position (inline DIRECTIONS cog)
-        local classAnchorRow
-        classAnchorRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Anchored To",
-              disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
-              values = {
-                  none = "None", erb_powerbar = "Power Bar", erb_health = "Health Bar",
-                  erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
-                  partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
-              },
-              order = { "none", "erb_powerbar", "erb_health", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.secondary.anchorTo) end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.secondary.anchorTo = v
-                  if v ~= "none" then p.secondary.unlockPos = nil end
-                  SmoothRefresh()
-              end },
-            { type = "dropdown", text = "Anchor Position",
-              disabled = function() local p = DB(); return p and (not p.secondary.enabled or (p.secondary.anchorTo or "none") == "none") end,
-              disabledTooltip = "Set Anchored To first",
-              values = { left = "Left", right = "Right", top = "Top", bottom = "Bottom" },
-              order = { "left", "right", "top", "bottom" },
-              getValue = function() local p = DB(); return p and p.secondary.anchorPosition or "left" end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.secondary.anchorPosition = v; SmoothRefresh()
-              end }
-        );  y = y - h
-        -- Inline DIRECTIONS cog on Anchor Position for growth + x/y
-        do
-            local rgn = classAnchorRow._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Class Resource Anchor",
-                rows = {
-                    { type = "dropdown", label = "Growth",
-                      values = { UP = "Up", DOWN = "Down", LEFT = "Left", RIGHT = "Right" },
-                      order = { "UP", "DOWN", "LEFT", "RIGHT" },
-                      disabled = function() local p = DB(); return p and (p.secondary.anchorTo or "none") == "mouse" end,
-                      disabledTooltip = EllesmereUI.DisabledTooltip("Not available for Mouse Cursor anchor"),
-                      get = function() local p = DB(); return p and p.secondary.growthDirection or "UP" end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.growthDirection = v; SmoothRefresh()
-                      end },
-                    { type = "toggle", label = "Grow Centered",
-                      disabled = function() local p = DB(); return p and (p.secondary.anchorTo or "none") == "mouse" end,
-                      disabledTooltip = EllesmereUI.DisabledTooltip("Not available for Mouse Cursor anchor"),
-                      get = function() local p = DB(); return p and p.secondary.growCentered ~= false end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.growCentered = v; SmoothRefresh()
-                      end },
-                    { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.secondary.anchorX or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.anchorX = v; SmoothRefresh()
-                      end },
-                    { type = "slider", label = "Y Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.secondary.anchorY or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.anchorY = v; SmoothRefresh()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
-            local cogDis = CreateFrame("Frame", nil, rgn)
-            cogDis:SetAllPoints(cogBtn)
-            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
-            cogDis:EnableMouse(true)
-            cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Anchored To first"))
-            end)
-            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateClassAnchorCogDis()
-                local p = DB()
-                if p and (not p.secondary.enabled or (p.secondary.anchorTo or "none") == "none") then cogDis:Show() else cogDis:Hide() end
-            end
-            cogBtn:HookScript("OnShow", UpdateClassAnchorCogDis)
-            EllesmereUI.RegisterWidgetRefresh(UpdateClassAnchorCogDis)
-            UpdateClassAnchorCogDis()
-        end
-
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -2037,81 +1951,6 @@ initFrame:SetScript("OnEvent", function(self)
             UpdatePowerThreshCogDis()
         end
 
-        -- Row 6: Anchored To | Anchor Position (inline DIRECTIONS cog)
-        local powerAnchorRow
-        powerAnchorRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Anchored To",
-              disabled = powerOff,
-              disabledTooltip = powerDisTip,
-              values = {
-                  none = "None", erb_classresource = "Class Resource", erb_health = "Health Bar",
-                  erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
-                  partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
-              },
-              order = { "none", "erb_classresource", "erb_health", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.primary.anchorTo) end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.primary.anchorTo = v
-                  if v ~= "none" then p.primary.unlockPos = nil end
-                  SmoothRefresh()
-              end },
-            { type = "dropdown", text = "Anchor Position",
-              disabled = function()
-                  if noPrimaryPower then return true end
-                  local p = DB(); return p and (not p.primary.enabled or (p.primary.anchorTo or "none") == "none")
-              end,
-              disabledTooltip = function()
-                  if noPrimaryPower then return SPEC_DIS end
-                  return "Set Anchored To first"
-              end,
-              values = { left = "Left", right = "Right", top = "Top", bottom = "Bottom" },
-              order = { "left", "right", "top", "bottom" },
-              getValue = function() local p = DB(); return p and p.primary.anchorPosition or "left" end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.primary.anchorPosition = v; SmoothRefresh()
-              end }
-        );  y = y - h
-        -- Inline DIRECTIONS cog on Anchor Position for x/y
-        do
-            local rgn = powerAnchorRow._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Power Bar Anchor",
-                rows = {
-                    { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.primary.anchorX or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.primary.anchorX = v; SmoothRefresh()
-                      end },
-                    { type = "slider", label = "Y Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.primary.anchorY or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.primary.anchorY = v; SmoothRefresh()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
-            local cogDis = CreateFrame("Frame", nil, rgn)
-            cogDis:SetAllPoints(cogBtn)
-            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
-            cogDis:EnableMouse(true)
-            cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(noPrimaryPower and SPEC_DIS or "Set Anchored To first"))
-            end)
-            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdatePowerAnchorCogDis()
-                if noPrimaryPower then cogDis:Show(); return end
-                local p = DB()
-                if p and (not p.primary.enabled or (p.primary.anchorTo or "none") == "none") then cogDis:Show() else cogDis:Hide() end
-            end
-            cogBtn:HookScript("OnShow", UpdatePowerAnchorCogDis)
-            EllesmereUI.RegisterWidgetRefresh(UpdatePowerAnchorCogDis)
-            UpdatePowerAnchorCogDis()
-        end
-
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -2494,74 +2333,6 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateHealthThreshSwDis()
         end
 
-        -- Row 6: Anchored To | Anchor Position (inline DIRECTIONS cog)
-        local healthAnchorRow
-        healthAnchorRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Anchored To",
-              disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
-              values = {
-                  none = "None", erb_classresource = "Class Resource", erb_powerbar = "Power Bar",
-                  erb_cdm = "CDM Cooldowns", mouse = "Mouse Cursor",
-                  partyframe = "Party Frame", playerframe = "Player Frame", erb_castbar = "Cast Bar",
-              },
-              order = { "none", "erb_classresource", "erb_powerbar", "---", "erb_cdm", "mouse", "partyframe", "playerframe", "erb_castbar" },
-              getValue = function() local p = DB(); return GetAnchorDropdownValue(p and p.health.anchorTo) end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.health.anchorTo = v
-                  if v ~= "none" then p.health.unlockPos = nil end
-                  SmoothRefresh()
-              end },
-            { type = "dropdown", text = "Anchor Position",
-              disabled = function() local p = DB(); return p and (not p.health.enabled or (p.health.anchorTo or "none") == "none") end,
-              disabledTooltip = "Set Anchored To first",
-              values = { left = "Left", right = "Right", top = "Top", bottom = "Bottom" },
-              order = { "left", "right", "top", "bottom" },
-              getValue = function() local p = DB(); return p and p.health.anchorPosition or "left" end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.health.anchorPosition = v; SmoothRefresh()
-              end }
-        );  y = y - h
-        -- Inline DIRECTIONS cog on Anchor Position for x/y
-        do
-            local rgn = healthAnchorRow._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Health Bar Anchor",
-                rows = {
-                    { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.health.anchorX or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.health.anchorX = v; SmoothRefresh()
-                      end },
-                    { type = "slider", label = "Y Offset", min = -125, max = 125, step = 1,
-                      get = function() local p = DB(); return p and p.health.anchorY or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.health.anchorY = v; SmoothRefresh()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
-            local cogDis = CreateFrame("Frame", nil, rgn)
-            cogDis:SetAllPoints(cogBtn)
-            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
-            cogDis:EnableMouse(true)
-            cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Anchored To first"))
-            end)
-            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateHealthAnchorCogDis()
-                local p = DB()
-                if p and (not p.health.enabled or (p.health.anchorTo or "none") == "none") then cogDis:Show() else cogDis:Hide() end
-            end
-            cogBtn:HookScript("OnShow", UpdateHealthAnchorCogDis)
-            EllesmereUI.RegisterWidgetRefresh(UpdateHealthAnchorCogDis)
-            UpdateHealthAnchorCogDis()
-        end
-
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -- Wire up click mappings for preview hit overlays
@@ -2602,15 +2373,15 @@ initFrame:SetScript("OnEvent", function(self)
             function() return false end,
             function()
                 local p = DB(); if not p then return end
-                p.health.offsetX = 0;   p.health.offsetY = -64;   p.health.unlockPos = nil; p.health.scale = 1.0
-                p.primary.offsetX = 0;  p.primary.offsetY = -52; p.primary.unlockPos = nil; p.primary.scale = 1.0
-                p.secondary.offsetX = 0; p.secondary.offsetY = -38; p.secondary.unlockPos = nil; p.secondary.scale = 1.0
+                p.health.offsetX = 0;   p.health.offsetY = -64;   p.health.unlockPos = nil
+                p.primary.offsetX = 0;  p.primary.offsetY = -52; p.primary.unlockPos = nil
+                p.secondary.offsetX = 0; p.secondary.offsetY = -38; p.secondary.unlockPos = nil
                 p.secondary.countTextUnlockPos = nil
                 p.castBar.unlockPos = nil; p.castBar.anchorX = 0; p.castBar.anchorY = -50
                 Refresh()
             end,
             nil,
-            "Click to reset all element positions and scales to defaults"
+            "Click to reset all element positions to defaults"
         );  y = y - h
 
         return math.abs(y)
@@ -3023,12 +2794,6 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local p = DB(); if not p then return end
                           p.castBar.anchorY = v; RefreshCast()
-                      end },
-                    { type = "slider", label = "Scale", min = 0.5, max = 3, step = 0.05,
-                      get = function() local p = DB(); return p and p.castBar.scale or 1.0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.castBar.scale = v; RefreshCast()
                       end },
                 },
                 footer = { unlockKey = "ERB_CastBar" },

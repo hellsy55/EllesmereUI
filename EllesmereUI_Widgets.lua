@@ -1404,15 +1404,6 @@ EllesmereUI.GetActiveTheme = function()
     return EllesmereUIDB and EllesmereUIDB.activeTheme or "EllesmereUI"
 end
 
---- Backwards compat helpers (some options files may still reference these)
-EllesmereUI.IsCustomThemeEnabled = function()
-    local t = EllesmereUI.GetActiveTheme()
-    return t ~= "EllesmereUI"
-end
-EllesmereUI.IsClassColoredTheme = function()
-    return EllesmereUI.GetActiveTheme() == "Class Colored"
-end
-
 --- Internal: resolve the accent color for a given theme name
 local function ResolveThemeColor(theme)
     theme = EllesmereUI._ResolveFactionTheme(theme)
@@ -1593,26 +1584,8 @@ EllesmereUI.ResetTheme = function()
     if not EllesmereUIDB then return end
     EllesmereUIDB.accentColor   = nil
     EllesmereUIDB.activeTheme   = nil
-    -- Clean up legacy keys
-    EllesmereUIDB.customThemeEnabled = nil
-    EllesmereUIDB.classColoredTheme  = nil
 end
 
---- Backwards compat stubs
-EllesmereUI.SetCustomThemeEnabled = function(enabled)
-    if enabled then
-        EllesmereUI.SetActiveTheme("Custom Color")
-    else
-        EllesmereUI.SetActiveTheme("EllesmereUI")
-    end
-end
-EllesmereUI.SetClassColoredTheme = function(enabled)
-    if enabled then
-        EllesmereUI.SetActiveTheme("Class Colored")
-    else
-        EllesmereUI.SetActiveTheme("EllesmereUI")
-    end
-end
 EllesmereUI.DD_STYLE = {
     BG_R = DD_BG_R, BG_G = DD_BG_G, BG_B = DD_BG_B, BG_A = DD_BG_A, BG_HA = DD_BG_HA,
     BRD_A = DD_BRD_A, BRD_HA = DD_BRD_HA,
