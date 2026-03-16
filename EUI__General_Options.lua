@@ -3189,6 +3189,7 @@ initFrame:SetScript("OnEvent", function(self)
                         onApply = function()
                             if not spot.exportString then return end
                             local spotPayload = EllesmereUI.DecodeImportString(spot.exportString)
+                            local spotScaleWarn = BuildScaleWarning(spotPayload)
                             local ok, err, status = EllesmereUI.ImportProfile(spot.exportString, UniquePresetName("Weekly: " .. spot.name))
                             if ok and status == "spec_locked" then
                                 EllesmereUI:ShowInfoPopup({
@@ -3201,11 +3202,20 @@ initFrame:SetScript("OnEvent", function(self)
                                 ddLabel:SetText(EllesmereUI.GetActiveProfileName())
                                 if fontWillChange then
                                     EllesmereUI:ShowConfirmPopup({
-                                        title       = "Reload Required",
-                                        message     = "Font changed. A UI reload is needed to apply the new font.",
-                                        confirmText = "Reload Now",
-                                        cancelText  = "Later",
-                                        onConfirm   = function() ReloadUI() end,
+                                        title        = "Reload Required",
+                                        message      = "Font changed. A UI reload is needed to apply the new font.",
+                                        confirmText  = "Reload Now",
+                                        cancelText   = "Later",
+                                        scaleWarning = spotScaleWarn,
+                                        onConfirm    = function() ReloadUI() end,
+                                    })
+                                elseif spotScaleWarn then
+                                    EllesmereUI:ShowConfirmPopup({
+                                        title        = "Preset Applied",
+                                        message      = "\"Weekly: " .. spot.name .. "\" has been applied.",
+                                        confirmText  = "OK",
+                                        cancelText   = "Close",
+                                        scaleWarning = spotScaleWarn,
                                     })
                                 else
                                     EllesmereUI:RefreshPage()
@@ -3220,6 +3230,8 @@ initFrame:SetScript("OnEvent", function(self)
                         presetEntries[#presetEntries + 1] = {
                             label = p.name,
                             onApply = function()
+                                local pPayload = EllesmereUI.DecodeImportString(p.exportString)
+                                local pScaleWarn = BuildScaleWarning(pPayload)
                                 local ok, err, status = EllesmereUI.ImportProfile(p.exportString, UniquePresetName(p.name))
                                 if ok and status == "spec_locked" then
                                     EllesmereUI:ShowInfoPopup({
@@ -3227,17 +3239,25 @@ initFrame:SetScript("OnEvent", function(self)
                                         content = "Profile was saved but cannot be loaded because this spec has an assigned profile.",
                                     })
                                 elseif ok then
-                                    local pPayload = EllesmereUI.DecodeImportString(p.exportString)
                                     local fontWillChange = EllesmereUI.ProfileChangesFont(pPayload and pPayload.data)
                                     EllesmereUI.RefreshAllAddons()
                                     ddLabel:SetText(EllesmereUI.GetActiveProfileName())
                                     if fontWillChange then
                                         EllesmereUI:ShowConfirmPopup({
-                                            title       = "Reload Required",
-                                            message     = "Font changed. A UI reload is needed to apply the new font.",
-                                            confirmText = "Reload Now",
-                                            cancelText  = "Later",
-                                            onConfirm   = function() ReloadUI() end,
+                                            title        = "Reload Required",
+                                            message      = "Font changed. A UI reload is needed to apply the new font.",
+                                            confirmText  = "Reload Now",
+                                            cancelText   = "Later",
+                                            scaleWarning = pScaleWarn,
+                                            onConfirm    = function() ReloadUI() end,
+                                        })
+                                    elseif pScaleWarn then
+                                        EllesmereUI:ShowConfirmPopup({
+                                            title        = "Preset Applied",
+                                            message      = "\"" .. p.name .. "\" has been applied.",
+                                            confirmText  = "OK",
+                                            cancelText   = "Close",
+                                            scaleWarning = pScaleWarn,
                                         })
                                     else
                                         EllesmereUI:RefreshPage()
