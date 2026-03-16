@@ -3179,6 +3179,14 @@ end
 --  When disabled, the OnUpdate is nil -- zero performance cost.
 -------------------------------------------------------------------------------
 local _cdmTooltipOnUpdate = function(self)
+    -- Suppress tooltips while in edit / unlock mode
+    if EllesmereUI and EllesmereUI._unlockActive then
+        if self._tooltipShown then
+            GameTooltip:Hide()
+            self._tooltipShown = false
+        end
+        return
+    end
     local over = self:IsMouseOver()
     if over and not self._tooltipShown then
         local sid = self._spellID
