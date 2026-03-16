@@ -3848,10 +3848,10 @@ local function BuildCogPopup(opts)
                 saveLbl:SetAlpha(0.9)
                 saveLbl:SetText("Save")
                 saveLbl:SetPoint("CENTER")
-                local hoverR = EG.r + (1 - EG.r) * 0.25
-                local hoverG = EG.g + (1 - EG.g) * 0.25
-                local hoverB = EG.b + (1 - EG.b) * 0.25
-                saveBtn:SetScript("OnEnter", function() saveBg:SetColorTexture(hoverR, hoverG, hoverB, 0.95); saveLbl:SetAlpha(1) end)
+                saveBtn:SetScript("OnEnter", function()
+                    saveBg:SetColorTexture(EG.r + (1 - EG.r) * 0.25, EG.g + (1 - EG.g) * 0.25, EG.b + (1 - EG.b) * 0.25, 0.95)
+                    saveLbl:SetAlpha(1)
+                end)
                 saveBtn:SetScript("OnLeave", function() saveBg:SetColorTexture(EG.r, EG.g, EG.b, 0.85); saveLbl:SetAlpha(0.9) end)
 
                 -- Input box (left of save button)
@@ -3907,7 +3907,7 @@ local function BuildCogPopup(opts)
                     inputDis:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
                 end
 
-                rowWidgets[#rowWidgets + 1] = { type = 'input', box = box, get = row.get, disOverlay = inputDis, disCheck = row.disabled }
+                rowWidgets[#rowWidgets + 1] = { type = 'input', box = box, get = row.get, disOverlay = inputDis, disCheck = row.disabled, saveBg = saveBg }
                 curY = curY - ROW_H
 
             elseif row.type == 'button' then
@@ -4004,6 +4004,10 @@ local function BuildCogPopup(opts)
                     end
                     if rw.box and rw.get and not rw.box:HasFocus() then
                         rw.box:SetText(rw.get())
+                    end
+                    -- Refresh save button color to match current theme
+                    if rw.saveBg then
+                        rw.saveBg:SetColorTexture(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 0.85)
                     end
                 end
             end
