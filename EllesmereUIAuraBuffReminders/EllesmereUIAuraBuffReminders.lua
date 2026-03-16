@@ -120,7 +120,7 @@ local function InMythicPlusKey()
     return C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
 end
 
--- Mythic 0 dungeon or Mythic raid
+--Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
 local function InMythicZeroDungeonOrMythicRaid()
     if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
     if _cachedIType == "raid" and _cachedDiffID == 16 then return true end
