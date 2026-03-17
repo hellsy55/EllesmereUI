@@ -248,6 +248,20 @@ initFrame:SetScript("OnEvent", function(self)
     -- Refresh the preview every time the panel is reopened
     EllesmereUI:RegisterOnShow(UpdatePreview)
 
+    -- Rebuild the preview when spec changes (new talent group)
+    -- Register a local event frame to detect spec changes and rebuild the preview
+    do
+        local specChangeFrame = CreateFrame("Frame")
+        specChangeFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+        specChangeFrame:SetScript("OnEvent", function(self, event)
+            if event == "ACTIVE_TALENT_GROUP_CHANGED" then
+                -- Force a full rebuild of the preview on next show
+                activePreview = nil
+                UpdatePreviewAndResize()
+            end
+        end)
+    end
+
 
 
 
@@ -614,8 +628,15 @@ initFrame:SetScript("OnEvent", function(self)
             local scaledCTSize = math.max(6, floor(ctSize * totalScale + 0.5))
 
             -- Multi-row grid layout (vertical swaps cols/rows)
-            local gridCols = isVertical and numRows or stride
-            local gridRows = isVertical and stride or numRows
+            -- For vertical: calculate actual columns used (not all numRows may be filled)
+            local gridCols, gridRows
+            if isVertical then
+                gridCols = math.ceil(numVisible / stride)
+                gridRows = stride
+            else
+                gridCols = stride
+                gridRows = numRows
+            end
             local gridW = gridCols * scaledBtnW + (gridCols - 1) * scaledPad
             local gridH = gridRows * scaledBtnH + (gridRows - 1) * scaledPad
             local gridStartX = Snap(math.max(0, (self:GetWidth() - gridW) / 2))
