@@ -6261,12 +6261,15 @@ do
             statsText:SetPoint("TOPLEFT")
             statsText:SetJustifyH("LEFT")
         end
-        -- Apply saved position
+        -- Apply saved position and scale
         local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
         if pos then
             if pos.point then
                 statsFrame:ClearAllPoints()
                 statsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+            end
+            if pos.scale then
+                statsFrame:SetScale(pos.scale)
             end
         end
         statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
