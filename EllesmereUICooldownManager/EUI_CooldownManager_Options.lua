@@ -5228,11 +5228,13 @@ initFrame:SetScript("OnEvent", function(self)
                 totalH = (numRows * iconH) + ((numRows - 1) * spacing)
             end
 
-            -- Scale down to fit when the preview bar is wider than the panel
+            -- Scale down to fit when the preview bar is wider than the panel.
+            -- Cap at 0.6 so icon scale changes remain visually distinct;
+            -- SetClipsChildren on the content header catches any remaining overflow.
             local baseParentW = (parent:GetWidth() - PAD * 2) / previewScale
             local fitScale = 1
             if totalW > baseParentW and totalW > 0 and baseParentW > 0 then
-                fitScale = baseParentW / totalW
+                fitScale = math.max(0.6, baseParentW / totalW)
             end
             local combinedScale = previewScale * fitScale
             self:SetScale(combinedScale)
