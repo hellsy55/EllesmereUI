@@ -255,8 +255,9 @@ initFrame:SetScript("OnEvent", function(self)
         specChangeFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
         specChangeFrame:SetScript("OnEvent", function(self, event)
             if event == "ACTIVE_TALENT_GROUP_CHANGED" then
-                -- Force a full rebuild of the preview on next show
+                -- Force a full rebuild of the preview and header on spec change
                 activePreview = nil
+                EllesmereUI:SetContentHeader(_barsHeaderBuilder)
                 UpdatePreviewAndResize()
             end
         end)
@@ -1372,7 +1373,6 @@ initFrame:SetScript("OnEvent", function(self)
                         EAB:ApplyCombatVisibility()
                         EllesmereUI:RefreshPage()
                     end)
-                local PP = EllesmereUI.PanelPP
                 PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
                 rightRgn._control = cbDD
                 rightRgn._lastInline = nil
