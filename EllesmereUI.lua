@@ -3873,6 +3873,7 @@ local function CreateMainFrame()
     contentHeaderFrame:SetScript("OnMouseWheel", function(_, delta)
         if scrollFrame then scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta) end
     end)
+    contentHeaderFrame:SetClipsChildren(true)
     contentHeaderFrame:Hide()
     EllesmereUI._contentHeader = contentHeaderFrame
     local contentHeaderH = 0   -- current header height

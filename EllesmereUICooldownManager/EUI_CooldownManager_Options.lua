@@ -5228,7 +5228,16 @@ initFrame:SetScript("OnEvent", function(self)
                 totalH = (numRows * iconH) + ((numRows - 1) * spacing)
             end
 
-            local curParentW = (parent:GetWidth() - PAD * 2) / previewScale
+            -- Scale down to fit when the preview bar is wider than the panel
+            local baseParentW = (parent:GetWidth() - PAD * 2) / previewScale
+            local fitScale = 1
+            if totalW > baseParentW and totalW > 0 and baseParentW > 0 then
+                fitScale = baseParentW / totalW
+            end
+            local combinedScale = previewScale * fitScale
+            self:SetScale(combinedScale)
+
+            local curParentW = (parent:GetWidth() - PAD * 2) / combinedScale
             if curParentW > 0 then
                 self:SetWidth(curParentW)
             end
