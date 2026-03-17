@@ -5237,6 +5237,10 @@ initFrame:SetScript("OnEvent", function(self)
             local combinedScale = previewScale * fitScale
             self:SetScale(combinedScale)
 
+            -- Re-anchor so the visual Y offset stays constant regardless of scale
+            self:ClearAllPoints()
+            PP.Point(self, "TOPLEFT", parent, "TOPLEFT", PAD / combinedScale, yOff / combinedScale)
+
             local curParentW = (parent:GetWidth() - PAD * 2) / combinedScale
             if curParentW > 0 then
                 self:SetWidth(curParentW)
