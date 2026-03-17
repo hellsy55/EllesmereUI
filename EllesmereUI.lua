@@ -6258,6 +6258,7 @@ do
             statsText = statsFrame:CreateFontString(nil, "OVERLAY")
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
             statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag())
+            if EllesmereUI.GetFontUseShadow() then statsText:SetShadowOffset(1, -1) else statsText:SetShadowOffset(0, 0) end
             statsText:SetPoint("TOPLEFT")
             statsText:SetJustifyH("LEFT")
         end
