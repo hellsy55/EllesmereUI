@@ -122,6 +122,39 @@ local TBB_POPULAR_BUFFS = {
         },
         customDuration = 10,
     },
+    ---------------------------------------------------------------------------
+    --  Demonology Warlock Guardians
+    --  These summons have no player aura; detection relies on the Blizzard CDM
+    --  active-state / buff-viewer fallback (see EllesmereUICooldownManager.lua).
+    ---------------------------------------------------------------------------
+    {
+        key            = "call_dreadstalkers",
+        name           = "Call Dreadstalkers",
+        icon           = 1378282,
+        spellIDs       = { 104316 },
+        customDuration = 12,
+    },
+    {
+        key            = "demonic_tyrant",
+        name           = "Summon Demonic Tyrant",
+        icon           = 2065628,
+        spellIDs       = { 265187 },
+        customDuration = 15,
+    },
+    {
+        key            = "summon_vilefiend",
+        name           = "Summon Vilefiend",
+        icon           = 1616211,
+        spellIDs       = { 264119 },
+        customDuration = 15,
+    },
+    {
+        key            = "grimoire_felguard",
+        name           = "Grimoire: Felguard",
+        icon           = 136216,
+        spellIDs       = { 111898 },
+        customDuration = 17,
+    },
 }
 ns.TBB_POPULAR_BUFFS = TBB_POPULAR_BUFFS
 
