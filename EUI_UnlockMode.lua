@@ -340,6 +340,29 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
     end
 end
 
+-- Propagate width/height matches when a target element's size changes.
+-- Called from external modules (e.g. CDM) after resizing a bar that other
+-- elements may be width/height-matched to.
+function EllesmereUI.PropagateWidthMatch(targetKey)
+    local db = MatchH.GetWidthMatchDB()
+    if not db then return end
+    for childKey, tKey in pairs(db) do
+        if tKey == targetKey then
+            MatchH.ApplyWidthMatch(childKey, targetKey)
+        end
+    end
+end
+
+function EllesmereUI.PropagateHeightMatch(targetKey)
+    local db = MatchH.GetHeightMatchDB()
+    if not db then return end
+    for childKey, tKey in pairs(db) do
+        if tKey == targetKey then
+            MatchH.ApplyHeightMatch(childKey, targetKey)
+        end
+    end
+end
+
 -- Smoothly fade the background overlay between normal and select-element alpha
 local function FadeOverlayForSelectElement(entering)
     if not unlockFrame or not unlockFrame._overlay then return end

@@ -2843,6 +2843,16 @@ LayoutCDMBar = function(barKey)
     end
     frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
 
+    -- Propagate width/height matches to any bars linked to this CDM bar
+    -- (e.g. unit frame power/resource bars matched via unlock mode).
+    local unlockKey = "CDM_" .. barKey
+    if EllesmereUI.PropagateWidthMatch then
+        EllesmereUI.PropagateWidthMatch(unlockKey)
+    end
+    if EllesmereUI.PropagateHeightMatch then
+        EllesmereUI.PropagateHeightMatch(unlockKey)
+    end
+
     -- Bar opacity (affects entire bar, but respect visibility overrides)
     local vis = barData.barVisibility or "always"
     if _cdmInVehicle or EllesmereUI.CheckVisibilityOptions(barData) then
