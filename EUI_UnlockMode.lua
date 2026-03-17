@@ -282,6 +282,9 @@ local _mouseHeld = false       -- true while left mouse button is held down anyw
 -- Forward declarations for functions defined later but referenced by anchor helpers
 local GetBarFrame
 local GetBarLabel
+local PropagateAnchorChain
+local SaveBarPosition
+local ApplyAnchorPosition
 
 local function GetAnchorDB()
     if not EllesmereUIDB then return nil end
@@ -382,7 +385,33 @@ function MatchH.ApplyWidthMatch(sourceKey, targetKey)
     if targetW and targetW > 0 then
         local sourceElem = registeredElements[sourceKey]
         if sourceElem and sourceElem.setWidth then
+            -- Capture center before resize so we can preserve it
+            local sourceBar = GetBarFrame(sourceKey)
+            local oldCX
+            if sourceBar then
+                local l, r = sourceBar:GetLeft(), sourceBar:GetRight()
+                if l and r then oldCX = (l + r) / 2 end
+            end
             sourceElem.setWidth(sourceKey, targetW)
+            -- Reposition to keep the same center X
+            if oldCX and sourceBar then
+                local newL, newR = sourceBar:GetLeft(), sourceBar:GetRight()
+                if newL and newR then
+                    local newCX = (newL + newR) / 2
+                    local drift = newCX - oldCX
+                    if math.abs(drift) > 0.5 then
+                        local p, rel, rp, px, py = sourceBar:GetPoint(1)
+                        if p then
+                            sourceBar:ClearAllPoints()
+                            sourceBar:SetPoint(p, rel, rp, (px or 0) - drift, py or 0)
+                            -- Update saved unlock position so it persists
+                            if sourceElem.savePos then
+                                sourceElem.savePos(sourceKey, p, rp, (px or 0) - drift, py or 0)
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
 end
@@ -399,9 +428,74 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
     if targetH and targetH > 0 then
         local sourceElem = registeredElements[sourceKey]
         if sourceElem and sourceElem.setHeight then
+            -- Capture center before resize so we can preserve it
+            local sourceBar = GetBarFrame(sourceKey)
+            local oldCY
+            if sourceBar then
+                local t, b = sourceBar:GetTop(), sourceBar:GetBottom()
+                if t and b then oldCY = (t + b) / 2 end
+            end
             sourceElem.setHeight(sourceKey, targetH)
+            -- Reposition to keep the same center Y
+            if oldCY and sourceBar then
+                local newT, newB = sourceBar:GetTop(), sourceBar:GetBottom()
+                if newT and newB then
+                    local newCY = (newT + newB) / 2
+                    local drift = newCY - oldCY
+                    if math.abs(drift) > 0.5 then
+                        local p, rel, rp, px, py = sourceBar:GetPoint(1)
+                        if p then
+                            sourceBar:ClearAllPoints()
+                            sourceBar:SetPoint(p, rel, rp, px or 0, (py or 0) - drift)
+                            if sourceElem.savePos then
+                                sourceElem.savePos(sourceKey, p, rp, px or 0, (py or 0) - drift)
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
+end
+
+-- Pending anchor propagation keys -- batched into a single deferred frame
+local _pendingAnchorKeys = {}
+local _anchorBatchScheduled = false
+
+local function ScheduleAnchorBatch()
+    if _anchorBatchScheduled then return end
+    _anchorBatchScheduled = true
+    C_Timer.After(0, function()
+        _anchorBatchScheduled = false
+        if isUnlocked then return end  -- unlock mode handles its own saves
+        local keys = _pendingAnchorKeys
+        _pendingAnchorKeys = {}
+        for k in pairs(keys) do
+            -- If this element itself is anchored, re-apply its own position
+            -- first (handles the case where the element resized and needs to
+            -- reposition relative to its anchor target).
+            local anchorDB = GetAnchorDB()
+            if anchorDB then
+                local ownInfo = anchorDB[k]
+                if ownInfo and ownInfo.target then
+                    ApplyAnchorPosition(k, ownInfo.target, ownInfo.side)
+                end
+            end
+            PropagateAnchorChain(k)
+        end
+        -- Persist any positions that were updated by the propagation.
+        -- Set a flag so savePos callbacks that trigger full rebuilds
+        -- (e.g. CDM's BuildAllCDMBars) can skip the rebuild -- the bar
+        -- is already in the correct position from ApplyAnchorPosition.
+        EllesmereUI._propagatingSave = true
+        for childKey, pos in pairs(pendingPositions) do
+            if type(pos) == "table" and pos.point then
+                SaveBarPosition(childKey, pos.point, pos.relPoint, pos.x, pos.y)
+            end
+        end
+        EllesmereUI._propagatingSave = false
+        wipe(pendingPositions)
+    end)
 end
 
 function EllesmereUI.PropagateWidthMatch(key)
@@ -412,12 +506,22 @@ function EllesmereUI.PropagateWidthMatch(key)
     if ownTarget then
         MatchH.ApplyWidthMatch(key, ownTarget)
     end
-    -- Push to any elements that follow this one
-    for childKey, tKey in pairs(db) do
-        if tKey == key then
-            MatchH.ApplyWidthMatch(childKey, key)
+    -- Push to any elements that follow this one, then recurse
+    -- so chained matches (A -> B -> C) propagate fully.
+    local visited = { [key] = true }
+    local function pushChildren(parentKey)
+        for childKey, tKey in pairs(db) do
+            if tKey == parentKey and not visited[childKey] then
+                visited[childKey] = true
+                MatchH.ApplyWidthMatch(childKey, parentKey)
+                _pendingAnchorKeys[childKey] = true
+                pushChildren(childKey)
+            end
         end
     end
+    pushChildren(key)
+    _pendingAnchorKeys[key] = true
+    ScheduleAnchorBatch()
 end
 
 function EllesmereUI.PropagateHeightMatch(key)
@@ -427,11 +531,20 @@ function EllesmereUI.PropagateHeightMatch(key)
     if ownTarget then
         MatchH.ApplyHeightMatch(key, ownTarget)
     end
-    for childKey, tKey in pairs(db) do
-        if tKey == key then
-            MatchH.ApplyHeightMatch(childKey, key)
+    local visited = { [key] = true }
+    local function pushChildren(parentKey)
+        for childKey, tKey in pairs(db) do
+            if tKey == parentKey and not visited[childKey] then
+                visited[childKey] = true
+                MatchH.ApplyHeightMatch(childKey, parentKey)
+                _pendingAnchorKeys[childKey] = true
+                pushChildren(childKey)
+            end
         end
     end
+    pushChildren(key)
+    _pendingAnchorKeys[key] = true
+    ScheduleAnchorBatch()
 end
 
 -- Smoothly fade the background overlay between normal and select-element alpha
@@ -513,8 +626,8 @@ end
 
 -- Apply an anchor relationship: position the child element relative to the target
 -- side: "LEFT", "RIGHT", "TOP", "BOTTOM" -- child is placed on that side of the target
--- offsetX/offsetY: if present, position child relative to target center by these offsets
-local function ApplyAnchorPosition(childKey, targetKey, side, noMark, noMove)
+-- offsetX/offsetY: if present, position child relative to the anchor edge
+ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
     if not childBar or not targetBar then return end
@@ -540,9 +653,31 @@ local function ApplyAnchorPosition(childKey, targetKey, side, noMark, noMove)
     local cx, cy
     local ai = GetAnchorInfo(childKey)
     if ai and ai.offsetX ~= nil and ai.offsetY ~= nil then
-        -- Free offset mode: child center = target center + stored offset
-        cx = tCX + ai.offsetX
-        cy = tCY + ai.offsetY
+        -- Edge-to-edge offset mode: offset is stored from the child's
+        -- near edge to the target's anchor edge. This means when the
+        -- child resizes, the near edge stays fixed relative to the target.
+        local edgeX, edgeY
+        if side == "LEFT" then
+            edgeX = tL; edgeY = tCY
+            cx = edgeX + ai.offsetX - cW / 2
+            cy = edgeY + ai.offsetY
+        elseif side == "RIGHT" then
+            edgeX = tR; edgeY = tCY
+            cx = edgeX + ai.offsetX + cW / 2
+            cy = edgeY + ai.offsetY
+        elseif side == "TOP" then
+            edgeX = tCX; edgeY = tT
+            cx = edgeX + ai.offsetX
+            cy = edgeY + ai.offsetY + cH / 2
+        elseif side == "BOTTOM" then
+            edgeX = tCX; edgeY = tB
+            cx = edgeX + ai.offsetX
+            cy = edgeY + ai.offsetY - cH / 2
+        else
+            edgeX = tCX; edgeY = tCY
+            cx = edgeX + ai.offsetX
+            cy = edgeY + ai.offsetY
+        end
     else
         -- Side-snap mode (initial placement or legacy)
         if side == "LEFT" then
@@ -561,10 +696,30 @@ local function ApplyAnchorPosition(childKey, targetKey, side, noMark, noMove)
             cx = tCX
             cy = tCY
         end
-        -- Store the computed offset so future drags use free-offset mode
+        -- Store the computed offset as edge-to-edge
         if ai then
-            ai.offsetX = cx - tCX
-            ai.offsetY = cy - tCY
+            local edgeX, edgeY
+            if side == "LEFT" then
+                edgeX = tL; edgeY = tCY
+                ai.offsetX = (cx + cW / 2) - edgeX
+                ai.offsetY = cy - edgeY
+            elseif side == "RIGHT" then
+                edgeX = tR; edgeY = tCY
+                ai.offsetX = (cx - cW / 2) - edgeX
+                ai.offsetY = cy - edgeY
+            elseif side == "TOP" then
+                edgeX = tCX; edgeY = tT
+                ai.offsetX = cx - edgeX
+                ai.offsetY = (cy - cH / 2) - edgeY
+            elseif side == "BOTTOM" then
+                edgeX = tCX; edgeY = tB
+                ai.offsetX = cx - edgeX
+                ai.offsetY = (cy + cH / 2) - edgeY
+            else
+                edgeX = tCX; edgeY = tCY
+                ai.offsetX = cx - edgeX
+                ai.offsetY = cy - edgeY
+            end
         end
     end
 
@@ -592,8 +747,25 @@ local function ApplyAnchorPosition(childKey, targetKey, side, noMark, noMove)
         local actualCX = (bL + bR) / 2
         local actualCY = (bT + bB) / 2
         if ai then
-            ai.offsetX = actualCX - tCX
-            ai.offsetY = actualCY - tCY
+            -- Store offset as edge-to-edge (child near edge to target edge)
+            local actualHW = (bR - bL) / 2
+            local actualHH = (bT - bB) / 2
+            if side == "LEFT" then
+                ai.offsetX = (actualCX + actualHW) - tL
+                ai.offsetY = actualCY - tCY
+            elseif side == "RIGHT" then
+                ai.offsetX = (actualCX - actualHW) - tR
+                ai.offsetY = actualCY - tCY
+            elseif side == "TOP" then
+                ai.offsetX = actualCX - tCX
+                ai.offsetY = (actualCY - actualHH) - tT
+            elseif side == "BOTTOM" then
+                ai.offsetX = actualCX - tCX
+                ai.offsetY = (actualCY + actualHH) - tB
+            else
+                ai.offsetX = actualCX - tCX
+                ai.offsetY = actualCY - tCY
+            end
         end
     end
 
@@ -619,6 +791,8 @@ local function ApplyAnchorPosition(childKey, targetKey, side, noMark, noMove)
         m:ClearAllPoints()
         m:SetPoint("CENTER", UIParent, "TOPLEFT", mX, mY)
         if m._setCenterXY then m._setCenterXY(mX, mY) end
+        -- Re-anchor mover to bar for pixel-perfect alignment
+        if m.ReanchorToBar then m:ReanchorToBar() end
     end
 
     -- Store in pending positions (skip when only syncing movers)
@@ -644,7 +818,7 @@ end
 
 -- Recursively propagate anchor repositioning from a moved parent down the chain.
 -- visited guards against circular anchor loops.
-local function PropagateAnchorChain(parentKey, visited)
+PropagateAnchorChain = function(parentKey, visited)
     visited = visited or {}
     if visited[parentKey] then return end
     visited[parentKey] = true
@@ -661,6 +835,36 @@ local function PropagateAnchorChain(parentKey, visited)
     end
 end
 
+-- Expose so child addons (CDM) can trigger anchor updates after resize
+EllesmereUI.PropagateAnchorChain = function(key)
+    _pendingAnchorKeys[key] = true
+    ScheduleAnchorBatch()
+end
+
+-- Synchronous self-anchor reapply: if this element is anchored to something,
+-- reposition it immediately (no deferred frame). Eliminates the one-frame
+-- blink when a bar resizes and needs to snap back to its anchor edge.
+EllesmereUI.ReapplyOwnAnchor = function(key)
+    local anchorDB = GetAnchorDB()
+    if not anchorDB then return end
+    local info = anchorDB[key]
+    if info and info.target then
+        ApplyAnchorPosition(key, info.target, info.side)
+    end
+end
+
+-- Reapply ALL unlock-mode anchors. Called after a full profile import/switch
+-- so that every anchored element repositions against its (now-rebuilt) target.
+EllesmereUI.ReapplyAllUnlockAnchors = function()
+    local db = GetAnchorDB()
+    if not db then return end
+    for childKey, info in pairs(db) do
+        if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
+            ApplyAnchorPosition(childKey, info.target, info.side)
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Saved position helpers
 -------------------------------------------------------------------------------
@@ -672,7 +876,7 @@ local function GetPositionDB()
     return EAB.db.profile.barPositions
 end
 
-local function SaveBarPosition(barKey, point, relPoint, x, y)
+SaveBarPosition = function(barKey, point, relPoint, x, y)
     -- Registered element?
     local elem = registeredElements[barKey]
     if elem and elem.savePosition then
@@ -1449,18 +1653,33 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
     else
         -- Find closest by true 2D edge-to-edge distance (no limit)
         local closestMinDist = math.huge
-        -- Build a set of keys that are anchored TO the dragged mover (its children)
-        local dragAnchorChildren = {}
+        -- Build a set of keys to exclude from snap: direct children (anchored
+        -- to us) and our own anchor parent chain. Snapping to an anchor
+        -- parent causes feedback with PropagateAnchorChain on drag stop.
+        local dragExcluded = {}
         local anchorDB = GetAnchorDB()
         if anchorDB then
             for childKey, info in pairs(anchorDB) do
                 if info.target == dragKey then
-                    dragAnchorChildren[childKey] = true
+                    dragExcluded[childKey] = true
+                end
+            end
+            -- Exclude our anchor parent (and its chain upward)
+            local cur = dragKey
+            local visited = {}
+            while cur and not visited[cur] do
+                visited[cur] = true
+                local info = anchorDB[cur]
+                if info and info.target then
+                    dragExcluded[info.target] = true
+                    cur = info.target
+                else
+                    break
                 end
             end
         end
         for key, mover in pairs(movers) do
-            if key ~= dragKey and not dragAnchorChildren[key] and mover:IsShown() then
+            if key ~= dragKey and not dragExcluded[key] and mover:IsShown() then
                 local oL = mover:GetLeft()   or 0
                 local oR = mover:GetRight()  or 0
                 local oT = mover:GetTop()    or 0
@@ -1706,21 +1925,52 @@ local function NudgeMover(dx, dy)
         }
         hasChanges = true
     end
+
+    -- Update anchor offset if this element is anchored to something
+    local ai = GetAnchorInfo(m._barKey)
+    if ai and ai.target then
+        local targetBar = GetBarFrame(ai.target)
+        if targetBar then
+            local uiS = UIParent:GetEffectiveScale()
+            local tS = targetBar:GetEffectiveScale()
+            local tL = (targetBar:GetLeft() or 0) * tS / uiS
+            local tR = (targetBar:GetRight() or 0) * tS / uiS
+            local tT = (targetBar:GetTop() or 0) * tS / uiS
+            local tB = (targetBar:GetBottom() or 0) * tS / uiS
+            local tCX = (tL + tR) / 2
+            local tCY = (tT + tB) / 2
+            -- Store offset as edge-to-edge (child near edge to target edge)
+            local sd = ai.side
+            if sd == "LEFT" then
+                ai.offsetX = (clampCX + baseHW) - tL
+                ai.offsetY = clampCY - tCY
+            elseif sd == "RIGHT" then
+                ai.offsetX = (clampCX - baseHW) - tR
+                ai.offsetY = clampCY - tCY
+            elseif sd == "TOP" then
+                ai.offsetX = clampCX - tCX
+                ai.offsetY = (clampCY - baseHH) - tT
+            elseif sd == "BOTTOM" then
+                ai.offsetX = clampCX - tCX
+                ai.offsetY = (clampCY + baseHH) - tB
+            else
+                ai.offsetX = clampCX - tCX
+                ai.offsetY = clampCY - tCY
+            end
+        end
+    end
+
     -- Update coordinate readout after nudge
     if m.UpdateCoordText then m:UpdateCoordText() end
 
     -- Anchor chain: propagate recursively down the chain
     PropagateAnchorChain(m._barKey)
+
+    -- Re-anchor mover to bar for pixel-perfect alignment
+    if m.ReanchorToBar then m:ReanchorToBar() end
 end
 
--- Arrow key repeat state
-local NUDGE_INITIAL_DELAY = 0.35   -- seconds before repeat starts
-local NUDGE_INITIAL_RATE  = 0.08   -- seconds per repeat at start
-local NUDGE_MIN_RATE      = 0.015  -- fastest repeat rate
-local NUDGE_ACCEL_TIME    = 2.0    -- seconds to reach max speed
-
-local arrowHeld = {}  -- { key = { elapsed, repeatAccum, repeating } }
-
+-- Arrow key nudge: single press only, no hold-to-repeat
 local function SetupArrowKeyFrame()
     if arrowKeyFrame then return end
     arrowKeyFrame = CreateFrame("Frame", nil, UIParent)
@@ -1742,57 +1992,16 @@ local function SetupArrowKeyFrame()
         local dir = ARROW_DIRS[key]
         if not dir then return end
         self:SetPropagateKeyboardInput(false)
-        -- Shift+arrow = 100px jump (no repeat)
+        -- Shift+arrow = 100px jump
         if IsShiftKeyDown() then
             NudgeMover(dir[1] * 100, dir[2] * 100)
-            return
-        end
-        if not arrowHeld[key] then
-            -- First press: immediate single nudge
+        else
             NudgeMover(dir[1], dir[2])
-            arrowHeld[key] = { elapsed = 0, repeatAccum = 0, repeating = false }
         end
     end)
 
     arrowKeyFrame:SetScript("OnKeyUp", function(self, key)
-        if arrowHeld[key] then
-            arrowHeld[key] = nil
-            -- Re-enable propagation if no arrows held
-            local anyHeld = false
-            for _ in pairs(arrowHeld) do anyHeld = true; break end
-            if not anyHeld then
-                self:SetPropagateKeyboardInput(true)
-            end
-        end
-    end)
-
-    arrowKeyFrame:SetScript("OnUpdate", function(self, dt)
-        if not selectedMover or not isUnlocked then
-            wipe(arrowHeld)
-            self:SetPropagateKeyboardInput(true)
-            return
-        end
-        local ARROW_DIRS = { UP = {0,1}, DOWN = {0,-1}, LEFT = {-1,0}, RIGHT = {1,0} }
-        for key, state in pairs(arrowHeld) do
-            state.elapsed = state.elapsed + dt
-            if not state.repeating then
-                if state.elapsed >= NUDGE_INITIAL_DELAY then
-                    state.repeating = true
-                    state.repeatAccum = 0
-                end
-            else
-                -- Accelerate: lerp from initial rate to min rate over ACCEL_TIME
-                local holdTime = state.elapsed - NUDGE_INITIAL_DELAY
-                local t = min(holdTime / NUDGE_ACCEL_TIME, 1)
-                local rate = NUDGE_INITIAL_RATE + (NUDGE_MIN_RATE - NUDGE_INITIAL_RATE) * t
-                state.repeatAccum = state.repeatAccum + dt
-                while state.repeatAccum >= rate do
-                    state.repeatAccum = state.repeatAccum - rate
-                    local dir = ARROW_DIRS[key]
-                    if dir then NudgeMover(dir[1], dir[2]) end
-                end
-            end
-        end
+        self:SetPropagateKeyboardInput(true)
     end)
 end
 
@@ -2088,6 +2297,39 @@ local function CreateMover(barKey)
     local moverCX, moverCY = 0, 0  -- stored center in UIParent-TOPLEFT coords (set by Sync)
     mover._setCenterXY = function(cx, cy) moverCX = cx; moverCY = cy end
     mover._getCenterXY = function() return moverCX, moverCY end
+
+    -- Re-anchor the mover directly to the bar frame so both share the
+    -- exact same screen position with zero coordinate math (pixel-perfect).
+    -- Deferred one frame so the bar's layout has flushed after a move/resize.
+    function mover:ReanchorToBar()
+        local bk = self._barKey
+        local self2 = self
+        C_Timer.After(0, function()
+            if self2._dragging then return end
+            local b = GetBarFrame(bk)
+            if not b then return end
+            local s = b:GetEffectiveScale()
+            local uiS = UIParent:GetEffectiveScale()
+            local elemScale = s / uiS
+            -- Update size from bar
+            local w = (b:GetWidth() or 50) * elemScale
+            local h = (b:GetHeight() or 50) * elemScale
+            if w > 10 then baseW = w end
+            if h > 10 then baseH = h end
+            self2:SetSize(baseW, baseH)
+            self2:ClearAllPoints()
+            self2:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+            -- Recompute moverCX/moverCY for snap/drag logic
+            local bL = b:GetLeft()
+            local bT = b:GetTop()
+            if bL and bT then
+                local cx = bL * elemScale
+                local cy = bT * elemScale - UIParent:GetHeight()
+                moverCX = cx + baseW * 0.5
+                moverCY = cy - baseH * 0.5
+            end
+        end)
+    end
 
     -- Refresh link button text/color based on active matches
     local function RefreshLinkStates()
@@ -2573,6 +2815,9 @@ local function CreateMover(barKey)
         local uiS = UIParent:GetEffectiveScale()
         local w, h
         local elemScale = s / uiS
+        -- Read size directly from the bar frame. Since the mover is anchored
+        -- to the bar, we need the size in the mover's coordinate space.
+        -- elemScale converts from bar space to UIParent (mover parent) space.
         w = (b:GetWidth() or 50) * elemScale
         h = (b:GetHeight() or 50) * elemScale
         -- For action bars, compute visual size from button grid (accounts for
@@ -2633,12 +2878,13 @@ local function CreateMover(barKey)
                 self:SetPoint("TOPLEFT", UIParent, "TOPLEFT", cx, cy)
                 moverCX, moverCY = cx + w * 0.5, cy - h * 0.5
             else
-                -- Align mover TOPLEFT to bar TOPLEFT -- same anchor, no averaging drift.
-                local cx = bL * s / uiS
-                local cy = bT * s / uiS - UIParent:GetHeight()
-                if PP then cx = PP.Scale(cx); cy = PP.Scale(cy) end
+                -- Anchor mover directly to the bar frame so both share the
+                -- exact same screen position with zero coordinate math.
                 self:ClearAllPoints()
-                self:SetPoint("TOPLEFT", UIParent, "TOPLEFT", cx, cy)
+                self:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+                -- Compute moverCX/moverCY for snap/drag logic
+                local cx = bL * elemScale
+                local cy = bT * elemScale - UIParent:GetHeight()
                 moverCX, moverCY = cx + w * 0.5, cy - h * 0.5
             end
         else
@@ -2680,6 +2926,8 @@ local function CreateMover(barKey)
             moverCY = mT - UIParent:GetHeight() - baseH * 0.5
         end
         ApplyHoverState(hoverState)
+        -- Re-anchor to bar for pixel-perfect alignment after size change
+        self:ReanchorToBar()
     end
 
     -- Drag handlers: manual cursor-based positioning for live snap + live bar movement
@@ -2722,6 +2970,8 @@ local function CreateMover(barKey)
         -- Snap mover to cursor immediately so there's no one-frame lag
         local halfW0 = round(self:GetWidth() / 2)
         local halfH0 = round(self:GetHeight() / 2)
+        self._dragHalfW = halfW0
+        self._dragHalfH = halfH0
         local snap0X, snap0Y = SnapPosition(self._barKey, cx, cy, halfW0, halfH0)
         local f0X = snap0X - halfW0
         local f0Y = snap0Y + halfH0 - UIParent:GetHeight()
@@ -2758,8 +3008,8 @@ local function CreateMover(barKey)
                 s._shiftAxis = nil  -- release shift = unlock axis
             end
 
-            local halfW = round(s:GetWidth() / 2)
-            local halfH = round(s:GetHeight() / 2)
+            local halfW = s._dragHalfW
+            local halfH = s._dragHalfH
 
             -- Apply snap
             local snapCX, snapCY = SnapPosition(s._barKey, rawCX, rawCY, halfW, halfH)
@@ -2916,8 +3166,26 @@ local function CreateMover(barKey)
                     tB = tB * tS / uiScale
                     local tCX = (tL + tR) / 2
                     local tCY = (tT + tB) / 2
-                    ai.offsetX = cx - tCX
-                    ai.offsetY = cy - tCY
+                    -- Store offset as edge-to-edge (child near edge to target edge)
+                    local halfW = baseW > 0 and baseW / 2 or (self:GetWidth() / 2)
+                    local halfH = baseH > 0 and baseH / 2 or (self:GetHeight() / 2)
+                    local sd = ai.side
+                    if sd == "LEFT" then
+                        ai.offsetX = (cx + halfW) - tL
+                        ai.offsetY = cy - tCY
+                    elseif sd == "RIGHT" then
+                        ai.offsetX = (cx - halfW) - tR
+                        ai.offsetY = cy - tCY
+                    elseif sd == "TOP" then
+                        ai.offsetX = cx - tCX
+                        ai.offsetY = (cy - halfH) - tT
+                    elseif sd == "BOTTOM" then
+                        ai.offsetX = cx - tCX
+                        ai.offsetY = (cy + halfH) - tB
+                    else
+                        ai.offsetX = cx - tCX
+                        ai.offsetY = cy - tCY
+                    end
                 end
             end
         end
@@ -2930,11 +3198,14 @@ local function CreateMover(barKey)
             pcall(elem.onLiveMove, self._barKey)
         end
 
-        -- Always deselect after drag so the mover drops back to base frame level
-        -- and stops blocking clicks on elements beneath it.
-        if selectedMover == self then
-            DeselectMover()
+        -- Keep the mover selected after drag so arrow keys can nudge it.
+        -- Drop frame level back to normal so it doesn't block other movers.
+        if self._selected then
+            self:SetFrameLevel(self._baseLevel or self:GetFrameLevel())
         end
+
+        -- Re-anchor mover to bar for pixel-perfect alignment
+        self:ReanchorToBar()
     end)
 
     -- Hover effects
@@ -4452,6 +4723,8 @@ local function CreateMover(barKey)
             end
             -- Update coordinate readout after centering
             if mover.UpdateCoordText then mover:UpdateCoordText() end
+            -- Re-anchor mover to bar for pixel-perfect alignment
+            mover:ReanchorToBar()
         end)
 
         -- Toggle Orientation (hidden for vis-only bars)
@@ -5309,7 +5582,7 @@ local function DoClose()
     -- Clean up arrow key nudge state
     selectedMover = nil
     selectElementPicker = nil
-    if arrowKeyFrame then wipe(arrowHeld); arrowKeyFrame:Hide() end
+    if arrowKeyFrame then arrowKeyFrame:Hide() end
 
     -- Reset session state
     wipe(pendingPositions)
@@ -5428,7 +5701,7 @@ function ns.RequestClose(save, afterFn)
             CommitPositions()
             DoClose()
         end,
-        -- Dismiss (ESC / click-off) does nothing — user stays in unlock mode,
+        -- Dismiss (ESC / click-off) does nothing -- user stays in unlock mode,
         -- and any pending close callback is cleared since the close was abandoned
         onDismiss = function() pendingAfterClose = nil end,
     })
@@ -5820,7 +6093,6 @@ function ns.OpenUnlockMode()
 
     -- Setup and show arrow key frame for nudge support
     SetupArrowKeyFrame()
-    wipe(arrowHeld)
     arrowKeyFrame:Show()
 
     -- Play unlock sound
@@ -5970,6 +6242,50 @@ function ns.OpenUnlockMode()
                         movers[bk]:RefreshAnchoredText()
                     end
                 end
+
+                -- Retry ticker: some addons (CDM) may not have their bar
+                -- frames ready yet. Poll briefly to catch late arrivals.
+                local retryAttempts = 0
+                local retryTicker
+                retryTicker = C_Timer.NewTicker(0.5, function()
+                    retryAttempts = retryAttempts + 1
+                    if not isUnlocked then retryTicker:Cancel(); return end
+                    RebuildRegisteredOrder()
+                    local spawned = false
+                    local missing = false
+                    for _, rk in ipairs(registeredOrder) do
+                        if not movers[rk] then
+                            local rm = CreateMover(rk)
+                            if rm then
+                                rm:Sync()
+                                rm:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
+                                rm:Show()
+                                spawned = true
+                            else
+                                missing = true
+                            end
+                        elseif not movers[rk]:IsShown() then
+                            -- Mover exists but bar frame was not ready on
+                            -- first Sync -- re-sync now that it may be available
+                            local rm = movers[rk]
+                            rm:Sync()
+                            if rm:IsShown() then
+                                rm:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
+                                spawned = true
+                            else
+                                missing = true
+                            end
+                        end
+                    end
+                    if spawned then
+                        SortMoverFrameLevels()
+                        ReapplyAllAnchors()
+                    end
+                    -- Stop once every mover is visible, or after timeout
+                    if not missing or retryAttempts >= 20 then
+                        retryTicker:Cancel()
+                    end
+                end)
             end
 
             local glitchT = elapsed - GRID_START
@@ -6307,7 +6623,7 @@ local function SuspendForCombat()
     DeselectMover()
     for _, m in pairs(movers) do m:Hide() end
     HideAllGuidesAndHighlight()
-    if arrowKeyFrame then wipe(arrowHeld); arrowKeyFrame:Hide() end
+    if arrowKeyFrame then arrowKeyFrame:Hide() end
     selectedMover = nil
     selectElementPicker = nil
 
@@ -6351,7 +6667,7 @@ local function ResumeAfterCombat()
     if _G._EABR_BeaconRefresh then pcall(_G._EABR_BeaconRefresh) end
 
     -- Re-show unlock UI
-    if arrowKeyFrame then wipe(arrowHeld); arrowKeyFrame:Show() end
+    if arrowKeyFrame then arrowKeyFrame:Show() end
     if unlockFrame then unlockFrame:Show(); unlockFrame:SetAlpha(1) end
     if gridFrame and gridMode ~= "disabled" then gridFrame:Show() end
     if hudFrame then hudFrame:Show() end

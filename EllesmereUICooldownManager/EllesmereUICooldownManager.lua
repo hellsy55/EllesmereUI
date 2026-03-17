@@ -2403,7 +2403,7 @@ HideBlizzardCDM = function()
                 -- The hook fires after the original call, so we re-apply our
                 -- off-screen position and zero alpha on top of whatever Blizzard set.
                 hooksecurefunc(frame, "SetPoint", function(self)
-                    if self._ecmeHidden and not self._ecmeRestoring and not self._ecmeSuppressing then
+                    if self._ecmeHidden and not self._ecmeRestoring and not self._ecmeSuppressing and not InCombatLockdown() then
                         self._ecmeSuppressing = true
                         self:ClearAllPoints()
                         self:SetPoint("CENTER", UIParent, "CENTER", 0, 10000)
@@ -2419,8 +2419,10 @@ HideBlizzardCDM = function()
                 end)
             end
             frame:SetAlpha(0)
-            frame:ClearAllPoints()
-            frame:SetPoint("CENTER", UIParent, "CENTER", 0, 10000)
+            if not InCombatLockdown() then
+                frame:ClearAllPoints()
+                frame:SetPoint("CENTER", UIParent, "CENTER", 0, 10000)
+            end
         end
     end
 end
@@ -2843,6 +2845,12 @@ LayoutCDMBar = function(barKey)
     end
     frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
 
+    -- Immediately reposition this bar if it's anchored to something,
+    -- before the frame renders, to avoid a one-frame blink.
+    if EllesmereUI.ReapplyOwnAnchor then
+        EllesmereUI.ReapplyOwnAnchor("CDM_" .. barKey)
+    end
+
     if not frame._propagatingMatch then
         frame._propagatingMatch = true
         local unlockKey = "CDM_" .. barKey
@@ -2851,6 +2859,9 @@ LayoutCDMBar = function(barKey)
         end
         if EllesmereUI.PropagateHeightMatch then
             EllesmereUI.PropagateHeightMatch(unlockKey)
+        end
+        if EllesmereUI.PropagateAnchorChain then
+            EllesmereUI.PropagateAnchorChain(unlockKey)
         end
         frame._propagatingMatch = false
     end
@@ -4019,7 +4030,7 @@ UpdateCDMBarIcons = function(barKey)
     -- Update each icon to mirror the Blizzard CDM icon
     for i, blizzIcon in ipairs(blizzIcons) do
         local ourIcon = icons[i]
-        if ourIcon then
+        if ourIcon and ourIcon._tex then
             -- Store mapping so proc glow hooks can find our icon from the Blizzard child
             ourIcon._blizzChild = blizzIcon
 
@@ -5736,6 +5747,15 @@ BuildAllCDMBars = function()
             ApplyCDMTooltipState(barData.key)
         end
     end
+    -- Second pass: reapply unlock-mode anchors now that ALL bars are
+    -- positioned and sized.  The first pass (inside LayoutCDMBar) may
+    -- have run ReapplyOwnAnchor before the target bar was repositioned
+    -- (e.g. cooldowns processed before utility).  This corrects that.
+    if EllesmereUI.ReapplyOwnAnchor then
+        for _, barData in ipairs(p.cdmBars.bars) do
+            EllesmereUI.ReapplyOwnAnchor("CDM_" .. barData.key)
+        end
+    end
     _CDMApplyVisibility()
     UpdateCDMKeybinds()
 
@@ -6835,7 +6855,12 @@ RegisterCDMUnlockElements = function()
                     else
                         p.cdmBarPositions[key] = { point = point, relPoint = relPoint, x = x, y = y }
                     end
-                    BuildAllCDMBars()
+                    -- Skip rebuild when called from anchor propagation --
+                    -- the bar is already positioned correctly and rebuilding
+                    -- would re-trigger propagation in an infinite loop.
+                    if not EllesmereUI._propagatingSave then
+                        BuildAllCDMBars()
+                    end
                 end,
                 loadPos = function()
                     return ECME.db.profile.cdmBarPositions[key]
@@ -7421,11 +7446,9 @@ function ECME:CDMFinishSetup()
     end
     self._cdmTickFrame:Show()
 
-    -- Register with unlock mode after a short delay (EllesmereUI may not be ready yet)
-    C_Timer.After(0.5, function()
-        RegisterCDMUnlockElements()
-        ns.RegisterTBBUnlockElements()
-    end)
+    -- Register with unlock mode
+    RegisterCDMUnlockElements()
+    ns.RegisterTBBUnlockElements()
 end
 
 -- Event frame

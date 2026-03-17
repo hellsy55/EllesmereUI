@@ -2364,7 +2364,7 @@ do
 --  see the reset popup. Fresh installs are stamped at PLAYER_LOGIN and
 --  never see it.
 -------------------------------------------------------------------------------
-local REQUIRED_RESET_VERSION = 1
+local REQUIRED_RESET_VERSION = 2
 
 function EllesmereUI.NeedsBetaReset()
     if not EllesmereUIDB then return false end
@@ -2394,7 +2394,7 @@ do
     local function CreateWelcomePopup()
         if welcomePopup then return welcomePopup, welcomeDimmer end
 
-        local POPUP_W, POPUP_H = 420, 230
+        local POPUP_W, POPUP_H = 525, 310
 
         -- Dimmer
         welcomeDimmer = CreateFrame("Frame", "EUIWelcomeDimmer", UIParent)
@@ -2423,9 +2423,9 @@ do
 
         -- Title
         local EG = ELLESMERE_GREEN
-        local title = MakeFont(welcomePopup, 16, "", EG.r, EG.g, EG.b)
+        local title = MakeFont(welcomePopup, 22, "", EG.r, EG.g, EG.b)
         title:SetPoint("TOP", welcomePopup, "TOP", 0, -22)
-        title:SetText("Welcome to EllesmereUI")
+        title:SetText("EllesmereUI Beta Ending")
 
         -- Message
         local msg = MakeFont(welcomePopup, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
@@ -2434,17 +2434,17 @@ do
         msg:SetJustifyH("CENTER")
         msg:SetWordWrap(true)
         msg:SetSpacing(4)
-        msg:SetText("EllesmereUI has exited beta. All saved settings must be reset to ensure a clean experience.\n\nThis only needs to happen once.")
+        msg:SetText("EllesmereUI has exited beta! Thank you all so much for helping with testing. During the two weeks of beat, EUI had a huge amount of systemic changes. These were necessary to build the systems that will make the addon stable, flexible, and maintainable long-term. \n\nBecause beta development moved so fast, many profiles were created during early unstable or bugged builds. Those profiles can carry forward issues that are hard to resolve and can cause ongoing problems for both users and development. This means that with beta ending, ALL BETA TESTERS must do a ONE TIME wipe of their settings.")
 
         -- Disclaimer
         local disc = welcomePopup:CreateFontString(nil, "OVERLAY")
-        disc:SetFont(EXPRESSWAY, 10, "")
+        disc:SetFont(EXPRESSWAY, 16, "")
         disc:SetTextColor(1, 0.35, 0.35, 0.8)
-        disc:SetPoint("TOP", msg, "BOTTOM", 0, -8)
+        disc:SetPoint("TOP", msg, "BOTTOM", 0, -20)
         disc:SetWidth(POPUP_W - 60)
         disc:SetJustifyH("CENTER")
         disc:SetWordWrap(true)
-        disc:SetText("This will reset all EllesmereUI settings to defaults.")
+        disc:SetText("This will reset all EllesmereUI settings and Profiles to defaults.")
 
         -- Inline button builder (self-contained so the popup works even if
         -- EllesmereUI_Widgets.lua failed to load)
@@ -2473,28 +2473,57 @@ do
             return btn
         end
 
-        -- Reset button (left) and Close button (right)
-        local resetBtn = WelcomeBtn(welcomePopup, "Reset Settings", function()
-            local svNames = {
-                "EllesmereUIDB",
-                "EllesmereUIActionBarsDB",
-                "EllesmereUIAuraBuffRemindersDB",
-                "EllesmereUICooldownManagerDB",
-                "EllesmereUICursorDB",
-                "EllesmereUINameplatesDB",
-                "EllesmereUIResourceBarsDB",
-                "EllesmereUIUnitFramesDB",
-            }
-            for _, name in ipairs(svNames) do
-                if _G[name] then wipe(_G[name]) end
-            end
-            EllesmereUIDB = { _resetVersion = 1 }
-            ReloadUI()
-        end)
-        resetBtn:SetPoint("BOTTOMRIGHT", welcomePopup, "BOTTOM", -8, 14)
+        -- Reset button (large, accent-colored)
+        local resetBtn = CreateFrame("Button", nil, welcomePopup)
+        resetBtn:SetSize(228, 32)
+        resetBtn:SetFrameLevel(welcomePopup:GetFrameLevel() + 2)
+        do
+            local eg = ELLESMERE_GREEN
+            local rbg = SolidTex(resetBtn, "BACKGROUND", BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_A)
+            rbg:SetAllPoints()
+            local rbrd = MakeBorder(resetBtn, eg.r, eg.g, eg.b, 0.8)
+            local rlbl = MakeFont(resetBtn, 13, nil, eg.r, eg.g, eg.b)
+            rlbl:SetAlpha(0.8)
+            rlbl:SetPoint("CENTER")
+            rlbl:SetText("Reset Settings")
+            resetBtn:SetScript("OnEnter", function()
+                rlbl:SetAlpha(1)
+                rbrd:SetColor(eg.r, eg.g, eg.b, 1)
+                rbg:SetColorTexture(BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_HA)
+            end)
+            resetBtn:SetScript("OnLeave", function()
+                rlbl:SetAlpha(0.8)
+                rbrd:SetColor(eg.r, eg.g, eg.b, 0.8)
+                rbg:SetColorTexture(BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_A)
+            end)
+            resetBtn:SetScript("OnClick", function()
+                local svNames = {
+                    "EllesmereUIDB",
+                    "EllesmereUIActionBarsDB",
+                    "EllesmereUIAuraBuffRemindersDB",
+                    "EllesmereUICooldownManagerDB",
+                    "EllesmereUICursorDB",
+                    "EllesmereUINameplatesDB",
+                    "EllesmereUIResourceBarsDB",
+                    "EllesmereUIUnitFramesDB",
+                }
+                for _, name in ipairs(svNames) do
+                    if _G[name] then wipe(_G[name]) end
+                end
+                EllesmereUIDB = { _resetVersion = 2 }
+                ReloadUI()
+            end)
+        end
 
+        -- Close button (small)
         local closeBtn = WelcomeBtn(welcomePopup, "Close", function() welcomeDimmer:Hide() end)
-        closeBtn:SetPoint("BOTTOMLEFT", welcomePopup, "BOTTOM", 8, 14)
+        closeBtn:SetSize(76, 32)
+
+        -- Center both buttons as a group with 8px gap
+        local totalW = 228 + 8 + 76
+        local startX = -totalW / 2
+        resetBtn:SetPoint("BOTTOMLEFT", welcomePopup, "BOTTOM", startX, 29)
+        closeBtn:SetPoint("BOTTOMLEFT", resetBtn, "BOTTOMRIGHT", 8, 0)
 
         -- Escape or dimmer click to close
         WirePopupEscape(welcomePopup, welcomeDimmer)
@@ -5890,7 +5919,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.0"
+EllesmereUI.VERSION = "5.0.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
