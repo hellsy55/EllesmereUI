@@ -5228,22 +5228,9 @@ initFrame:SetScript("OnEvent", function(self)
                 totalH = (numRows * iconH) + ((numRows - 1) * spacing)
             end
 
-            -- Scale down to fit when the preview bar is wider than the panel.
-            -- Cap at 0.6 so icon scale changes remain visually distinct;
-            -- SetClipsChildren on the content header catches any remaining overflow.
-            local baseParentW = (parent:GetWidth() - PAD * 2) / previewScale
-            local fitScale = 1
-            if totalW > baseParentW and totalW > 0 and baseParentW > 0 then
-                fitScale = math.max(0.6, baseParentW / totalW)
-            end
-            local combinedScale = previewScale * fitScale
-            self:SetScale(combinedScale)
-
-            -- Re-anchor so the visual Y offset stays constant regardless of scale
-            self:ClearAllPoints()
-            PP.Point(self, "TOPLEFT", parent, "TOPLEFT", PAD / combinedScale, yOff / combinedScale)
-
-            local curParentW = (parent:GetWidth() - PAD * 2) / combinedScale
+            -- CDM preview: no scale-to-fit — SetClipsChildren on the content
+            -- header clips any overflow so icon scale remains accurate.
+            local curParentW = (parent:GetWidth() - PAD * 2) / previewScale
             if curParentW > 0 then
                 self:SetWidth(curParentW)
             end
