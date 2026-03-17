@@ -5228,6 +5228,8 @@ initFrame:SetScript("OnEvent", function(self)
                 totalH = (numRows * iconH) + ((numRows - 1) * spacing)
             end
 
+            -- CDM preview: no scale-to-fit — SetClipsChildren on the content
+            -- header clips any overflow so icon scale remains accurate.
             local curParentW = (parent:GetWidth() - PAD * 2) / previewScale
             if curParentW > 0 then
                 self:SetWidth(curParentW)
