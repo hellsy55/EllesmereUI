@@ -2843,12 +2843,16 @@ LayoutCDMBar = function(barKey)
     end
     frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
 
-    local unlockKey = "CDM_" .. barKey
-    if EllesmereUI.PropagateWidthMatch then
-        EllesmereUI.PropagateWidthMatch(unlockKey)
-    end
-    if EllesmereUI.PropagateHeightMatch then
-        EllesmereUI.PropagateHeightMatch(unlockKey)
+    if not frame._propagatingMatch then
+        frame._propagatingMatch = true
+        local unlockKey = "CDM_" .. barKey
+        if EllesmereUI.PropagateWidthMatch then
+            EllesmereUI.PropagateWidthMatch(unlockKey)
+        end
+        if EllesmereUI.PropagateHeightMatch then
+            EllesmereUI.PropagateHeightMatch(unlockKey)
+        end
+        frame._propagatingMatch = false
     end
 
     -- Bar opacity (affects entire bar, but respect visibility overrides)
