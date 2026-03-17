@@ -6570,7 +6570,7 @@ local function SetupBlizzardMovableFrame(barKey)
         -- Hook AddFrame so newly added ability buttons stay clickable.
         if ExtraAbilityContainer.AddFrame then
             hooksecurefunc(ExtraAbilityContainer, "AddFrame", function(_, frame)
-                if frame and frame.EnableMouse then
+                if frame and frame.EnableMouse and not InCombatLockdown() then
                     frame:EnableMouse(true)
                 end
             end)
