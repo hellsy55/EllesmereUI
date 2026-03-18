@@ -2364,7 +2364,7 @@ do
 --  see the reset popup. Fresh installs are stamped at PLAYER_LOGIN and
 --  never see it.
 -------------------------------------------------------------------------------
-local REQUIRED_RESET_VERSION = 2
+local REQUIRED_RESET_VERSION = 3
 
 function EllesmereUI.NeedsBetaReset()
     if not EllesmereUIDB then return false end
@@ -2497,8 +2497,12 @@ do
                 rbg:SetColorTexture(BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_A)
             end)
             resetBtn:SetScript("OnClick", function()
+                -- Replace every saved variable global with a fresh empty table.
+                -- Using wipe() only empties the table but addons still hold
+                -- references and pre-logout hooks re-populate them before
+                -- ReloadUI serializes to disk.  Replacing the global severs
+                -- the reference so stale data is never written back.
                 local svNames = {
-                    "EllesmereUIDB",
                     "EllesmereUIActionBarsDB",
                     "EllesmereUIAuraBuffRemindersDB",
                     "EllesmereUICooldownManagerDB",
@@ -2508,9 +2512,10 @@ do
                     "EllesmereUIUnitFramesDB",
                 }
                 for _, name in ipairs(svNames) do
-                    if _G[name] then wipe(_G[name]) end
+                    _G[name] = {}
                 end
-                EllesmereUIDB = { _resetVersion = 2 }
+                _G["EllesmereUIDB"] = { _resetVersion = 3 }
+                EllesmereUIDB = _G["EllesmereUIDB"]
                 ReloadUI()
             end)
         end
@@ -5919,7 +5924,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.0.6"
+EllesmereUI.VERSION = "5.0.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
