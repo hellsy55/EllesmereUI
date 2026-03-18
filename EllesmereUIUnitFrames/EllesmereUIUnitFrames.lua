@@ -1429,8 +1429,10 @@ local function ApplyFramePosition(frame, unit)
     frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 end
 
--- Clip container for health + power bars — prevents sub-pixel overflow at
+-- Clip container for health + power bars -- prevents sub-pixel overflow at
 -- certain UI scales where independent pixel-snapping pushes edges 1px out.
+-- The clip frame is inset by the border thickness so the GPU physically
+-- cannot render bar pixels outside the border, regardless of rounding.
 local function EnsureBarClip(frame)
     if frame._barClip then return frame._barClip end
     local clip = CreateFrame("Frame", nil, frame)
@@ -1542,11 +1544,6 @@ local function UpdateBordersForScale(frame, unit)
             local snappedPortW = frame.Portrait.backdrop:GetWidth()
             local newXOff = (effectiveSide == "left") and snappedPortW or 0
             local newRightInset = (effectiveSide == "right") and snappedPortW or 0
-            local topOff = frame.Health._topOffset or 0
-            frame.Health:ClearAllPoints()
-            PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", newXOff, -topOff)
-            PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -newRightInset, 0)
-            PP.Height(frame.Health, settings.healthHeight)
             frame.Health._xOffset = newXOff
             frame.Health._rightInset = newRightInset
         end
@@ -1617,6 +1614,25 @@ local function UpdateBordersForScale(frame, unit)
                 PP.Point(frame.Castbar, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
             end
         end
+    end
+
+    -- 9) Inset the clip container by half a physical pixel. This is
+    -- sub-pixel and invisible, but guarantees the GPU clips any StatusBar
+    -- texture rounding that pushes the fill past the frame edge.
+    if frame._barClip and frame.Health then
+        local es = frame:GetEffectiveScale()
+        local halfPixel = es > 0 and (PP.perfect / es) * 0.5 or PP.mult * 0.5
+        frame._barClip:ClearAllPoints()
+        frame._barClip:SetPoint("TOPLEFT", frame, "TOPLEFT", halfPixel, -halfPixel)
+        frame._barClip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -halfPixel, halfPixel)
+        -- Re-anchor health bar to clip so coordinates are consistent
+        local xOff = frame.Health._xOffset or 0
+        local rInset = frame.Health._rightInset or 0
+        local topOff = frame.Health._topOffset or 0
+        frame.Health:ClearAllPoints()
+        PP.Point(frame.Health, "TOPLEFT", frame._barClip, "TOPLEFT", xOff, -topOff)
+        PP.Point(frame.Health, "RIGHT", frame._barClip, "RIGHT", -rInset, 0)
+        PP.Height(frame.Health, settings.healthHeight)
     end
 end
 
