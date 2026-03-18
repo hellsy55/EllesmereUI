@@ -5,7 +5,7 @@
 --  desaturation, active state animations, and per-spec profiles.
 --  Does NOT parse secret values works around restricted APIs.
 -------------------------------------------------------------------------------
-local ADDON_NAME, ns = ...
+local _, ns = ...
 local ECME = EllesmereUI.Lite.NewAddon("EllesmereUICooldownManager")
 ns.ECME = ECME
 
@@ -24,7 +24,6 @@ local floor = math.floor
 local GetTime = GetTime
 local InCombatLockdown = InCombatLockdown
 local GetSpecialization = GetSpecialization
-local GetSpecializationInfo = GetSpecializationInfo
 
 ns.DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
 
@@ -733,6 +732,45 @@ local function ApplyTrinketCooldown(icon, slot, desatOnCD)
 end
 
 -------------------------------------------------------------------------------
+--  Pandemic glow helper (buff bars only)
+--  Shows pixel glow (or shape glow for shaped icons) when the Blizzard CDM
+--  child frame's PandemicIcon is visible, indicating the buff is refreshable.
+-------------------------------------------------------------------------------
+local function ApplyPandemicGlow(icon, blizzChild, barData)
+    if not barData.pandemicGlow then
+        if icon._pandemicGlowActive then
+            -- Only stop if no other glow owns the overlay
+            if not icon._procGlowActive and not icon._isActive then
+                StopNativeGlow(icon._glowOverlay)
+            end
+            icon._pandemicGlowActive = false
+        end
+        return
+    end
+    local isPandemic = blizzChild
+        and blizzChild.PandemicIcon
+        and blizzChild.PandemicIcon.IsShown
+        and blizzChild.PandemicIcon:IsShown()
+    if isPandemic then
+        if not icon._pandemicGlowActive
+           and not icon._procGlowActive
+           and not (icon._glowOverlay and icon._glowOverlay._glowActive) then
+            local style = (icon._shapeApplied and icon._shapeName) and 2 or 1
+            local cr = barData.pandemicR or 1
+            local cg = barData.pandemicG or 1
+            local cb = barData.pandemicB or 0
+            StartNativeGlow(icon._glowOverlay, style, cr, cg, cb)
+            icon._pandemicGlowActive = true
+        end
+    elseif icon._pandemicGlowActive then
+        if not icon._procGlowActive and not icon._isActive then
+            StopNativeGlow(icon._glowOverlay)
+        end
+        icon._pandemicGlowActive = false
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Active state animation helper (aura glow / swipe color)
 --  Handles transition between active and inactive visual states.
 -------------------------------------------------------------------------------
@@ -1072,6 +1110,8 @@ local DEFAULTS = {
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                     outOfRangeOverlay = false,
+                    pandemicGlow = true,
+                    pandemicR = 1, pandemicG = 1, pandemicB = 0,
                 },
             },
         },
@@ -1091,7 +1131,7 @@ local DEFAULTS = {
 local function GetCurrentSpecKey()
     local specIndex = GetSpecialization and GetSpecialization()
     if not specIndex then return "0" end
-    local specID = select(1, GetSpecializationInfo(specIndex))
+    local specID = select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex))
     return tostring(specID or 0)
 end
 
@@ -2680,6 +2720,14 @@ BuildCDMBar = function(barIndex)
         frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", 0, 0)
         frame._mouseTrack = true
         frame:SetScript("OnUpdate", function()
+            -- Hide cursor-anchored bar while EUI options panel or unlock mode is open
+            if (EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown())
+               or EllesmereUI._unlockActive then
+                if frame:GetAlpha() > 0 then frame:SetAlpha(0) end
+                return
+            elseif frame:GetAlpha() == 0 then
+                frame:SetAlpha(barData.barBgAlpha or 1)
+            end
             local s = UIParent:GetEffectiveScale()
             local cx, cy = GetCursorPosition()
             cx = floor(cx / s + 0.5)
@@ -3187,56 +3235,12 @@ local function HideUntrackedTooltip()
     if _untrackedTooltip then _untrackedTooltip:Hide() end
 end
 
-local _UNTRACKED_OV_VER = 2
 local function ApplyUntrackedOverlay(ourIcon, spellID, isUntracked)
-    if isUntracked then
-        if ourIcon._untrackedOverlay and not ourIcon._untrackedOverlay._ver3 then
-            ourIcon._untrackedOverlay:ClearAllPoints()
-            ourIcon._untrackedOverlay:Hide()
-            ourIcon._untrackedOverlay = nil
-        end
-        if not ourIcon._untrackedOverlay then
-            local ov = CreateFrame("Button", nil, ourIcon)
-            ov:SetAllPoints(ourIcon._tex)
-            ov:SetFrameLevel(ourIcon:GetFrameLevel() + 4)
-            local ovTex = ov:CreateTexture(nil, "OVERLAY", nil, 6)
-            ovTex:SetAllPoints()
-            ovTex:SetColorTexture(0.6, 0.075, 0.075, 0.8)
-            -- "Click to Track" label
-            local label = ov:CreateFontString(nil, "OVERLAY")
-            local outFlag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
-            label:SetFont(GetCDMFont(), 10, outFlag)
-            if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
-                label:SetShadowOffset(1, -1)
-            else
-                label:SetShadowOffset(0, 0)
-            end
-            label:SetPoint("CENTER", ov, "CENTER", 0, 0)
-            label:SetText("Click to\nTrack")
-            label:SetTextColor(1, 1, 1, 0.9)
-            label:SetJustifyH("CENTER")
-            ov._label = label
-            ov:SetScript("OnClick", function()
-                if CooldownViewerSettings and CooldownViewerSettings.Show then
-                    CooldownViewerSettings:Show()
-                end
-            end)
-            ov:SetScript("OnEnter", function(self)
-                local sid = self._displaySpellID
-                local name = sid and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
-                local coloredName = "|cff0cd29d" .. (name or "this spell") .. "|r"
-                ShowUntrackedTooltip(self,
-                    "Click to enable tracking by adding " .. coloredName .. " to your Blizzard CDM")
-            end)
-            ov:SetScript("OnLeave", function() HideUntrackedTooltip() end)
-            ourIcon._untrackedOverlay = ov
-            ov._ver3 = true
-        end
-        ourIcon._untrackedOverlay._displaySpellID = spellID
-        ourIcon._untrackedOverlay:EnableMouse(true)
-        ourIcon._untrackedOverlay:Show()
-        ourIcon._isUntracked = true
-    elseif ourIcon._untrackedOverlay then
+    -- DISABLED: click-to-track feature temporarily disabled
+    -- if isUntracked then
+    --     ...
+    -- end
+    if ourIcon._untrackedOverlay then
         ourIcon._untrackedOverlay:Hide()
         ourIcon._isUntracked = false
     end
@@ -4022,6 +4026,16 @@ local function UpdateCustomBarIcons(barKey)
 
                 ApplyActiveAnimation(ourIcon, auraHandled, barData, barKey, activeAnim, animR, animG, animB, swAlpha)
 
+                -- Pandemic glow (buff bars only)
+                if isBuffBarForOverride then
+                    ApplyPandemicGlow(ourIcon, ourIcon._blizzChild, barData)
+                elseif ourIcon._pandemicGlowActive then
+                    if not ourIcon._procGlowActive and not ourIcon._isActive then
+                        StopNativeGlow(ourIcon._glowOverlay)
+                    end
+                    ourIcon._pandemicGlowActive = false
+                end
+
                 -- Out-of-range overlay (skip buff bars -- buffs don't target enemies)
                 if not isBuffBarForOverride then
                     ApplyRangeOverlay(ourIcon, resolvedID, barData.outOfRangeOverlay)
@@ -4093,6 +4107,7 @@ local function UpdateCustomBarIcons(barKey)
             StopNativeGlow(ic._glowOverlay)
             ic._procGlowActive = false
         end
+        ic._pandemicGlowActive = false
         ic:Hide()
     end
 
@@ -4392,6 +4407,16 @@ UpdateCDMBarIcons = function(barKey)
             -- Active state animation (consolidated)
             ApplyActiveAnimation(ourIcon, auraHandled, barData, barKey, activeAnim, animR, animG, animB, swAlpha)
 
+            -- Pandemic glow (buff bars only)
+            if isBuffBar then
+                ApplyPandemicGlow(ourIcon, blizzIcon, barData)
+            elseif ourIcon._pandemicGlowActive then
+                if not ourIcon._procGlowActive and not ourIcon._isActive then
+                    StopNativeGlow(ourIcon._glowOverlay)
+                end
+                ourIcon._pandemicGlowActive = false
+            end
+
             -- Out-of-range overlay (skip buff bars)
             if not isBuffBar then
                 ApplyRangeOverlay(ourIcon, resolvedSid, barData.outOfRangeOverlay)
@@ -4432,6 +4457,7 @@ UpdateCDMBarIcons = function(barKey)
             StopNativeGlow(ic._glowOverlay)
             ic._procGlowActive = false
         end
+        ic._pandemicGlowActive = false
         if ic:IsShown() then
             if not ic._hideGraceStart then
                 ic._hideGraceStart = GetTime()
@@ -4462,7 +4488,6 @@ end
 --  CDM Bar Update Tick (mirrors Blizzard CDM state to our bars)
 -------------------------------------------------------------------------------
 local cdmUpdateThrottle = 0
-local CDM_UPDATE_INTERVAL = 0.1  -- 10fps
 
 -- Refresh visual properties of existing icons (called when settings change)
 local function RefreshCDMIconAppearance(barKey)
@@ -5224,6 +5249,16 @@ local function UpdateTrackedBarIcons(barKey)
                 -- Store Blizzard child mapping so proc glow hooks can find our icon
                 ourIcon._blizzChild = blizzChild
 
+                -- Pandemic glow (buff bars only)
+                if isBuffBarForOvr then
+                    ApplyPandemicGlow(ourIcon, blizzChild, barData)
+                elseif ourIcon._pandemicGlowActive then
+                    if not ourIcon._procGlowActive and not ourIcon._isActive then
+                        StopNativeGlow(ourIcon._glowOverlay)
+                    end
+                    ourIcon._pandemicGlowActive = false
+                end
+
                 -- Untracked overlay: red tint for spells not in Blizzard CDM
                 -- Only applies to spells that exist in the CDM category system (have a cdID).
                 -- Extras (racials, trinkets, health items) have no cdID and are never overlaid.
@@ -5273,6 +5308,7 @@ local function UpdateTrackedBarIcons(barKey)
             StopNativeGlow(ic._glowOverlay)
             ic._procGlowActive = false
         end
+        ic._pandemicGlowActive = false
         if ic._untrackedOverlay then ic._untrackedOverlay:Hide() end
         ic._isUntracked = false
         ic:Hide()
@@ -5298,7 +5334,7 @@ ns.UpdateTrackedBarIcons = UpdateTrackedBarIcons
 
 local function UpdateAllCDMBars(dt)
     cdmUpdateThrottle = cdmUpdateThrottle + dt
-    if cdmUpdateThrottle < CDM_UPDATE_INTERVAL then return end
+    if cdmUpdateThrottle < 0.1 then return end
     cdmUpdateThrottle = 0
 
     -- Wipe per-tick caches (GCD, charges, auras, totem info)
@@ -6841,6 +6877,8 @@ function ns.AddCDMBar(barType, name, numRows)
         -- Custom bars use a spell list instead of mirroring Blizzard
         customSpells = {},
         outOfRangeOverlay = false,
+        pandemicGlow = (barType == "buffs") or false,
+        pandemicR = 1, pandemicG = 1, pandemicB = 0,
     }
     BuildAllCDMBars()
     -- Immediately populate icons so the bar is visible without a /reload
@@ -7201,10 +7239,12 @@ function ECME:OnEnable()
     local oldSpecKey = p.activeSpecKey
     local newSpecKey = GetCurrentSpecKey()
     if newSpecKey ~= "0" and oldSpecKey and oldSpecKey ~= "0" and oldSpecKey ~= newSpecKey then
-        -- Spec changed (different character or respec while offline)
-        -- Save old spec data BEFORE updating activeSpecKey
-        SaveCurrentSpecProfile()
-        -- Now update to the new spec and load its profile
+        -- Spec changed (different character or respec while offline).
+        -- Do NOT re-save the old spec here -- the pre-logout hook already
+        -- saved it correctly. The live bar data at this point belongs to
+        -- the OLD spec key but may have been repointed by a profile switch
+        -- on a different character, so saving it again would corrupt the
+        -- old spec's saved profile with wrong data.
         SetActiveSpec()
         LoadSpecProfile(newSpecKey)
         _specValidated = true
