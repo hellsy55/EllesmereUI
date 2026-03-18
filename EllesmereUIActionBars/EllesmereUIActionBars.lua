@@ -2030,15 +2030,8 @@ local function LayoutBar(key)
                 btn.AutoCastOverlay:SetAllPoints(btn)
             end
 
-            -- Scale the proc glow overlay to match the actual button size.
-            -- Blizzard creates SpellActivationAlert at a fixed size based on
-            -- the default button dimensions; we scale it to fit our custom size.
-            if btn.SpellActivationAlert then
-                local defaultSz = 45
-                local actualSz = min(btnW, btnH)
-                local glowRatio = actualSz / defaultSz
-                btn.SpellActivationAlert:SetScale(glowRatio)
-            end
+            -- Blizzard creates SpellActivationAlert proportional to the
+            -- button's current size, so no manual scaling is needed.
 
             if not showEmpty and not _gridState.shown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
@@ -3862,6 +3855,43 @@ local function UpdateFlipbook(btn)
     local p = EAB.db and EAB.db.profile
     if not p then return end
 
+    -- Resolve button size from profile settings rather than btn:GetWidth().
+    -- On initial login the button frame may not have been sized yet by
+    -- LayoutBar, so GetWidth returns the default 45.  Profile values are
+    -- always correct.  Replicates LayoutBar's shape expansion / cropped
+    -- logic so the ratio matches the actual rendered size.
+    local _ufBtnW, _ufBtnH
+    do
+        local bk = btn._eabBarKey
+        if not bk then
+            local bi = buttonToBar[btn]
+            if bi then bk = bi.barKey end
+        end
+        local resolved
+        if bk and p.bars and p.bars[bk] then
+            local s = p.bars[bk]
+            local base = barBaseSize[bk]
+            local bW = base and base.w or 45
+            local bH = base and base.h or 45
+            local w = (s.buttonWidth and s.buttonWidth > 0) and s.buttonWidth or bW
+            local h = (s.buttonHeight and s.buttonHeight > 0) and s.buttonHeight or bH
+            local shape = s.buttonShape or "none"
+            if shape ~= "none" and shape ~= "cropped" then
+                w = w + SHAPE_BTN_EXPAND
+                h = h + SHAPE_BTN_EXPAND
+            end
+            if shape == "cropped" then
+                h = h * 0.80
+            end
+            _ufBtnW, _ufBtnH = w, h
+            resolved = true
+        end
+        if not resolved then
+            _ufBtnW = btn:GetWidth() or 45
+            _ufBtnH = btn:GetHeight() or 45
+        end
+    end
+
     if p.procGlowEnabled == false then
         -- Custom shapes always use Shape Glow even if custom proc glow is "off"
         if not (btn._eabShapeMask and btn._eabShapeApplied) then
@@ -3869,9 +3899,8 @@ local function UpdateFlipbook(btn)
                 StopAllProceduralGlows(btn._eabGlowWrapper)
                 btn._eabGlowWrapper:Hide()
             end
-            -- Scale the default Blizzard glow to match actual button size
-            local defSz = min(btn:GetWidth(), btn:GetHeight()) or 45
-            local defRatio = defSz / 45
+            -- Blizzard sizes the overlay proportional to the button, so
+            -- no manual scaling is needed for the default glow.
             if region.ProcLoopFlipbook then
                 region.ProcLoopFlipbook:Show()
                 region.ProcLoopFlipbook:SetDesaturated(false)
@@ -3884,7 +3913,6 @@ local function UpdateFlipbook(btn)
                 region.ProcStartFlipbook:SetVertexColor(1, 1, 1)
                 region.ProcStartFlipbook:SetScale(1)
             end
-            region:SetScale(defRatio)
             if region.ProcLoop then
                 local loopFlip = GetFlipBookAnim(region.ProcLoop)
                 if loopFlip then loopFlip:SetDuration(1.0) end
@@ -3988,15 +4016,12 @@ local function UpdateFlipbook(btn)
 
         StopAllProceduralGlows(wrapper)
         wrapper:Show()
-        -- Scale the Blizzard overlay to match actual button size
-        local btnSzP = min(btn:GetWidth(), btn:GetHeight()) or 45
-        region:SetScale(btnSzP / 45)
         if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
         if region.ProcStartFlipbook then region.ProcStartFlipbook:Hide() end
         if btn._eabAntsGroup then btn._eabAntsGroup:Stop() end
         if btn._eabAntsOverlay then btn._eabAntsOverlay:Hide() end
 
-        local sz = min(btn:GetWidth(), btn:GetHeight()) or 36
+        local sz = min(_ufBtnW, _ufBtnH)
         local userScale = p.procGlowScale or 1.0
 
         if loopEntry.procedural then
@@ -4051,10 +4076,7 @@ local function UpdateFlipbook(btn)
             end
             local baseScale = loopEntry.scale or 1
             local userScale = p.procGlowScale or 1.0
-            -- Scale the overlay to match actual button size relative to default
-            local btnSz = min(btn:GetWidth(), btn:GetHeight()) or 45
-            local sizeRatio = btnSz / 45
-            local finalScale = baseScale * userScale * sizeRatio
+            local finalScale = baseScale * userScale
             region:SetScale(finalScale)
             region.ProcLoopFlipbook:SetDesaturated(true)
             region.ProcLoopFlipbook:SetVertexColor(cr, cg, cb)

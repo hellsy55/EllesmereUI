@@ -6758,9 +6758,6 @@ RegisterCDMUnlockElements = function()
             local isMouseAnchored = barData.anchorTo == "mouse"
             if not isPartyAnchored and not isPlayerFrameAnchored and not isMouseAnchored then
             local bd = barDataByKey[key]
-            local isCustomBar = bd and bd.customSpells ~= nil
-            local iconCount = bd and CountBarSpells(bd) or 0
-            if isCustomBar or iconCount > 0 then
             -- Collect linked unlock element keys (children anchored to this bar)
             local linked = nil
             if anchorChildren[key] then
@@ -6876,7 +6873,6 @@ RegisterCDMUnlockElements = function()
                     return bd2 and bd2.anchorTo and bd2.anchorTo ~= "none"
                 end,
             })
-            end -- iconCount > 0
             end -- not isPartyAnchored
         end
     end
@@ -6886,6 +6882,7 @@ RegisterCDMUnlockElements = function()
     end
 end
 ns.RegisterCDMUnlockElements = RegisterCDMUnlockElements
+_G._ECME_RegisterUnlock = RegisterCDMUnlockElements
 
 -- RequestUpdate delegates to ns.RequestUpdate (defined in EllesmereUICdmBarGlows.lua).
 -- Falls back to no-op if bar glows module hasn't loaded yet.

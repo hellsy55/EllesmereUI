@@ -1566,7 +1566,8 @@ function ns.UpdateTrackedBuffBarTimers()
                 -- reflected each tick instead of staying on the static config icon.
                 if blzChild and bar._icon and bar._icon._tex and blzChild.Icon and blzChild.Icon.GetTexture then
                     local liveIconTex = blzChild.Icon:GetTexture()
-                    if liveIconTex and liveIconTex ~= bar._lastLiveIcon then
+                    local isSecret = issecretvalue and issecretvalue(liveIconTex)
+                    if not isSecret and liveIconTex and liveIconTex ~= bar._lastLiveIcon then
                         bar._icon._tex:SetTexture(liveIconTex)
                         bar._lastLiveIcon = liveIconTex
                     end
@@ -1904,5 +1905,6 @@ function ns.RegisterTBBUnlockElements()
         EllesmereUI:RegisterUnlockElements(elements)
     end
 end
+_G._ECME_RegisterTBBUnlock = ns.RegisterTBBUnlockElements
 
 

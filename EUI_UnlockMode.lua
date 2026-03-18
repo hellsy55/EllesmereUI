@@ -6250,6 +6250,12 @@ function ns.OpenUnlockMode()
                 retryTicker = C_Timer.NewTicker(0.5, function()
                     retryAttempts = retryAttempts + 1
                     if not isUnlocked then retryTicker:Cancel(); return end
+                    -- Ask addons to re-register elements they may not have
+                    -- registered yet (CDM bars that were still building, etc.)
+                    if EllesmereUI._unlockRegistrationDirty or retryAttempts <= 3 then
+                        if _G._ECME_RegisterUnlock then _G._ECME_RegisterUnlock() end
+                        if _G._ECME_RegisterTBBUnlock then _G._ECME_RegisterTBBUnlock() end
+                    end
                     RebuildRegisteredOrder()
                     local spawned = false
                     local missing = false
