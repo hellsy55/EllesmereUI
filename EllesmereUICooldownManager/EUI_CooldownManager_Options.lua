@@ -2802,6 +2802,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Active state preview on first icon
     local _cdmActivePreviewOn = false
     local _cdmActivePreviewOverlay = nil  -- glow overlay frame on first preview slot
+    local _cdmActivePreviewToken = 0     -- incremented each start to invalidate stale timers
 
     local function StopActiveStatePreview()
         if _cdmActivePreviewOverlay then
@@ -2819,6 +2820,8 @@ initFrame:SetScript("OnEvent", function(self)
 
     local function StartActiveStatePreview()
         if not _cdmActivePreviewOn then return end
+        _cdmActivePreviewToken = _cdmActivePreviewToken + 1
+        local myToken = _cdmActivePreviewToken
         local bd = SelectedCDMBar()
         if not bd then return end
         local anim = bd.activeStateAnim or "blizzard"
@@ -2854,12 +2857,10 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end)
 
-        -- Ensure glow overlay exists (extended 3px like real icons)
+        -- Ensure glow overlay exists
         if not slot._glowOverlay then
             local ov = CreateFrame("Frame", nil, slot)
-            ov:ClearAllPoints()
-            ov:SetPoint("TOPLEFT",     slot, "TOPLEFT",     -3,  3)
-            ov:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT",  3, -3)
+            ov:SetAllPoints(slot)
             ov:SetFrameLevel(slot:GetFrameLevel() + 3)
             ov:SetAlpha(0)
             slot._glowOverlay = ov
@@ -2900,6 +2901,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Auto-stop glow after preview duration ends
         C_Timer.After(PREVIEW_DURATION, function()
+            if myToken ~= _cdmActivePreviewToken then return end
             if _cdmActivePreviewOverlay then
                 ns.StopNativeGlow(_cdmActivePreviewOverlay)
             end
@@ -5444,8 +5446,60 @@ initFrame:SetScript("OnEvent", function(self)
                 end
 
                 if i <= count then
+                    -- Untracked overlay for preview: show red tint + "Click to Track"
+                    local sid = slot._previewSpellID
+                    local isUntracked = sid and sid > 0 and not ns.IsSpellInBlizzCDM(sid)
+                    if isUntracked then
+                        if not slot._untrackedOverlay then
+                            local ov = CreateFrame("Button", nil, slot)
+                            ov:SetAllPoints(slot._icon)
+                            ov:SetFrameLevel(slot:GetFrameLevel() + 4)
+                            local ovTex = ov:CreateTexture(nil, "OVERLAY", nil, 6)
+                            ovTex:SetAllPoints()
+                            ovTex:SetColorTexture(0.6, 0.075, 0.075, 0.8)
+                            local label = ov:CreateFontString(nil, "OVERLAY")
+                            local outFlag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
+                            label:SetFont(FONT_PATH, 10, outFlag)
+                            if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+                                label:SetShadowOffset(1, -1)
+                            else
+                                label:SetShadowOffset(0, 0)
+                            end
+                            label:SetPoint("CENTER")
+                            label:SetText("Click to\nTrack")
+                            label:SetTextColor(1, 1, 1, 0.9)
+                            label:SetJustifyH("CENTER")
+                            ov._label = label
+                            ov:SetScript("OnClick", function()
+                                if CooldownViewerSettings and CooldownViewerSettings.Show then
+                                    CooldownViewerSettings:Show()
+                                end
+                            end)
+                            ov:SetScript("OnEnter", function(self)
+                                local ovSid = self._displaySpellID
+                                local name = ovSid and C_Spell.GetSpellName and C_Spell.GetSpellName(ovSid)
+                                local coloredName = "|cff0cd29d" .. (name or "this spell") .. "|r"
+                                local msg = "Click to enable tracking by adding " .. coloredName .. " to your Blizzard CDM"
+                                local swt = EllesmereUI and EllesmereUI.ShowWidgetTooltip
+                                if not swt then swt = EllesmereUI and rawget(EllesmereUI, "ShowWidgetTooltip") end
+                                if swt then swt(self, msg) end
+                            end)
+                            ov:SetScript("OnLeave", function()
+                                local hwt = EllesmereUI and EllesmereUI.HideWidgetTooltip
+                                if not hwt then hwt = EllesmereUI and rawget(EllesmereUI, "HideWidgetTooltip") end
+                                if hwt then hwt() end
+                            end)
+                            slot._untrackedOverlay = ov
+                        end
+                        slot._untrackedOverlay._displaySpellID = sid
+                        slot._untrackedOverlay:EnableMouse(true)
+                        slot._untrackedOverlay:Show()
+                    elseif slot._untrackedOverlay then
+                        slot._untrackedOverlay:Hide()
+                    end
                     slot:Show()
                 else
+                    if slot._untrackedOverlay then slot._untrackedOverlay:Hide() end
                     slot:Hide()
                 end
             end
@@ -5877,6 +5931,7 @@ initFrame:SetScript("OnEvent", function(self)
         parent._showRowDivider = true
 
         if barData.key == "buffs" then
+            --[[ DISABLED: Use Blizzard Buff Bar feature temporarily removed
             _, h = W:Toggle(parent, "Use Blizzard Buff Bar", y,
                 function() return DB().cdmBars.useBlizzardBuffBars == true end,
                 function(v)
@@ -5889,6 +5944,7 @@ initFrame:SetScript("OnEvent", function(self)
             if DB().cdmBars.useBlizzardBuffBars then
                 return math.abs(y)
             end
+            --]]
         end
 
         -------------------------------------------------------------------
