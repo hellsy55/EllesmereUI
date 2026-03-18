@@ -2041,10 +2041,23 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     PP.Point(texClass, "TOPLEFT", backdrop, "TOPLEFT", classInset, -classInset)
     PP.Point(texClass, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", -classInset, classInset)
     texClass:SetAlpha(0.8)
-    local _, classToken = UnitClass("player")
+    local _, classToken = UnitClass(unit)
     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
     ApplyClassIconTexture(texClass, classToken or "WARRIOR", classStyle)
     texClass:Hide()
+
+    texClass.Override = function(self, event, unit)
+        local f = self.__owner
+        if not f then return end
+        local evUnit = (event == "OnUpdate" and f.unit) or unit
+        if not evUnit or not UnitIsUnit(f.unit, evUnit) then return end
+        local targetUnit = f.unit
+        local _, ct = UnitClass(targetUnit)
+        local uS = db.profile[UnitToSettingsKey(targetUnit)] or db.profile.player
+        local cStyle = (uS and uS.classThemeStyle) or "modern"
+        ApplyClassIconTexture(self, ct or "WARRIOR", cStyle)
+        self:Show()
+    end
 
     backdrop._3d = model3D
     backdrop._2d = tex2D
@@ -2059,17 +2072,11 @@ local function CreatePortrait(frame, side, frameHeight, unit)
             return nil
         end
     end
-    -- Class theme only applies to the player frame; others fall back to 2D
-    if mode == "class" and unit ~= "player" then
-        mode = "2d"
-    end
     local active
     if mode == "class" then
         texClass:Show()
-        -- Use tex2D as the oUF element (hidden) so oUF doesn't overwrite texClass
         tex2D:Hide()
-        active = tex2D
-        active.is2D = true
+        active = texClass
         active.isClass = true
     elseif mode == "2d" then
         tex2D:Show()
@@ -3504,11 +3511,7 @@ local function SwapPortraitMode(frame)
         wantMode = (s and s.portraitMode) or db.profile.portraitMode or "2d"
     end
 
-    -- Class theme only applies to the player frame; others fall back to 2D
     local unit = frame.unit or frame:GetAttribute("unit")
-    if wantMode == "class" and unit ~= "player" then
-        wantMode = "2d"
-    end
 
     local curMode
     if portrait.isClass then curMode = "class"
@@ -3532,17 +3535,13 @@ local function SwapPortraitMode(frame)
         local uKey2 = UnitToSettingsKey(unit)
         local s2 = uKey2 and db.profile[uKey2]
         local classStyle = (s2 and s2.classThemeStyle) or "modern"
-        local _, ct = UnitClass("player")
+        local _, ct = UnitClass(unit)
         ApplyClassIconTexture(bd._class, ct or "WARRIOR", classStyle)
         bd._class:Show()
-        -- Keep tex2D as the oUF element (hidden) so oUF doesn't overwrite texClass
         bd._2d:Hide()
-        bd._2d.backdrop = bd
-        bd._2d.is2D = true
-        bd._2d.isClass = true
-        frame.Portrait = bd._2d
-        -- Class theme is static -- no oUF element needed, skip re-enable
-        return
+        bd._class.backdrop = bd
+        bd._class.isClass = true
+        frame.Portrait = bd._class
     elseif wantMode == "3d" then
         -- Lazily create the PlayerModel on first switch to 3D
         if bd._ensureModel3D then bd._ensureModel3D() end
@@ -4092,9 +4091,9 @@ local function ReloadFrames()
                 local uKey = UnitToSettingsKey(unit) or unit
                 local uSettings = uKey and db.profile[uKey]
                 local isClassMode = ((uSettings and uSettings.portraitMode) or "2d") == "class"
-                if isClassMode and unit == "player" then
+                if isClassMode then
                     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
-                    local _, ct = UnitClass("player")
+                    local _, ct = UnitClass(unit)
                     ApplyClassIconTexture(frame.Portrait.backdrop._class, ct or "WARRIOR", classStyle)
                 end
             end
@@ -4104,15 +4103,9 @@ local function ReloadFrames()
                 local uKey = UnitToSettingsKey(unit) or unit
                 local uSettings = uKey and db.profile[uKey]
                 local isClassMode = ((uSettings and uSettings.portraitMode) or "2d") == "class"
-                local unitForClass = unit
                 if showPortrait then
                     frame.Portrait.backdrop:Show()
-                    if isClassMode and unitForClass == "player" then
-                        -- Class theme is static -- keep oUF Portrait disabled (player only)
-                        if frame:IsElementEnabled("Portrait") then
-                            frame:DisableElement("Portrait")
-                        end
-                    elseif not frame:IsElementEnabled("Portrait") then
+                    if not frame:IsElementEnabled("Portrait") then
                         frame:EnableElement("Portrait")
                         frame.Portrait:ForceUpdate()
                     end
