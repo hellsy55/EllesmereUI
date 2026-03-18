@@ -5202,7 +5202,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local spacing  = bd.spacing or 2
             local zoom     = bd.iconZoom or 0.08
-            local grow     = "RIGHT"  -- preview always horizontal to save space
+            local grow     = bd.growDirection or "RIGHT"
             local numRows  = bd.numRows or 1
             if numRows < 1 then numRows = 1 end
 
@@ -6053,7 +6053,7 @@ initFrame:SetScript("OnEvent", function(self)
             MakeCogBtn(leftRgn, bgCogShow, ctrl)
         end
 
-        -- Row 3: Number of Rows | Grow Direction
+        -- Row 3: Number of Rows | Vertical Orientation
         _, h = W:DualRow(parent, y,
             { type="slider", text="Number of Rows",
               min=1, max=6, step=1,
@@ -6062,17 +6062,11 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().numRows = v
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end },
-            { type="dropdown", text="Grow Direction",
-              values={ RIGHT="Horizontal", DOWN="Vertical" },
-              order={ "RIGHT", "DOWN" },
-              getValue=function()
-                  local bd = BD()
-                  if bd.growDirection then return bd.growDirection end
-                  return bd.verticalOrientation and "DOWN" or "RIGHT"
-              end,
+            { type="toggle", text="Vertical Orientation",
+              getValue=function() return BD().verticalOrientation end,
               setValue=function(v)
-                  BD().growDirection = v
-                  BD().verticalOrientation = (v == "DOWN")
+                  BD().verticalOrientation = v
+                  BD().growDirection = v and "DOWN" or "RIGHT"
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
