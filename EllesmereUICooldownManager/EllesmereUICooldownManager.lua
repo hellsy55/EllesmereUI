@@ -1357,6 +1357,33 @@ local function BuildKnownSpellIDSet()
             end
         end
     end
+    -- Fallback: also check the full CDM category set (cat, true) which
+    -- includes ALL spells for the class regardless of talent selection.
+    -- Spells that exist in the full set AND pass IsPlayerSpell are known
+    -- even if the viewer hasn't updated yet after a talent swap.
+    local _IsPlayerSpell = IsPlayerSpell
+    if _IsPlayerSpell then
+        for cat = 0, 3 do
+            local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+            if allIDs then
+                for _, cdID in ipairs(allIDs) do
+                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                    if info then
+                        local sid = ResolveInfoSpellID(info)
+                        if sid and sid > 0 and not known[sid] and _IsPlayerSpell(sid) then
+                            known[sid] = true
+                        end
+                        if info.spellID and info.spellID > 0 and not known[info.spellID] and _IsPlayerSpell(info.spellID) then
+                            known[info.spellID] = true
+                        end
+                        if info.overrideSpellID and info.overrideSpellID > 0 and not known[info.overrideSpellID] and _IsPlayerSpell(info.overrideSpellID) then
+                            known[info.overrideSpellID] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
     return known
 end
 
@@ -3992,7 +4019,9 @@ local function UpdateCustomBarIcons(barKey)
                 visibleCount = visibleCount + 1
 
                 -- Untracked overlay for custom bars
-                local isUntrackedC = not _tickBlizzAllChildCache[resolvedID]
+                -- Only applies to spells in the CDM category system (have a cdID).
+                local isUntrackedC = _spellToCooldownID[spellID]
+                    and not _tickBlizzAllChildCache[resolvedID]
                     and not _tickBlizzAllChildCache[spellID]
                     and not _tickBlizzChildCache[resolvedID]
                     and not _tickBlizzChildCache[spellID]
@@ -5181,7 +5210,10 @@ local function UpdateTrackedBarIcons(barKey)
                 ourIcon._blizzChild = blizzChild
 
                 -- Untracked overlay: red tint for spells not in Blizzard CDM
-                local isUntracked = not blizzChild
+                -- Only applies to spells that exist in the CDM category system (have a cdID).
+                -- Extras (racials, trinkets, health items) have no cdID and are never overlaid.
+                local isUntracked = _spellToCooldownID[spellID]
+                    and not blizzChild
                     and not _tickBlizzAllChildCache[resolvedID]
                     and not _tickBlizzAllChildCache[spellID]
                     and not _tickBlizzChildCache[resolvedID]
@@ -7343,25 +7375,47 @@ local function TalentAwareReconcile()
         if not dormant then dormant = {} end
 
         -- Phase 1: separate active list into still-known and newly-dormant
+        -- Also check IsPlayerSpell as a fallback for spells the CDM viewer
+        -- hasn't updated yet (e.g. choice-node talent swaps).
+        local _IPS = IsPlayerSpell
         local active = {}
+        local seenInActive = {}
         for i, sid in ipairs(spellList) do
             if sid and sid ~= 0 then
-                if knownSet[sid] then
+                if seenInActive[sid] then
+                    -- Duplicate already in active list -- skip silently
+                elseif knownSet[sid] or (_IPS and _IPS(sid)) then
                     active[#active + 1] = sid
+                    seenInActive[sid] = true
                 else
-                    -- Spell is no longer known — save its slot index and move to dormant
+                    -- Spell is no longer known -- save its slot index and move to dormant
                     dormant[sid] = i
                 end
             end
         end
 
-        -- Phase 2: check dormant spells — any that are now known get re-inserted
+        -- Build a set of spells already in the active list for dedup
+        local activeSet = seenInActive
+
+        -- Phase 2: check dormant spells -- any that are now known get re-inserted
         -- Collect returning spells sorted by their saved slot index (lowest first)
-        -- so insertions don't shift each other's target positions
+        -- so insertions don't shift each other's target positions.
+        -- Also check IsPlayerSpell directly on dormant spells as a fallback --
+        -- the CDM viewer may not have updated its entries yet after a talent
+        -- swap (e.g. choice-node spells like Bladestorm/Avatar share a viewer
+        -- slot and the viewer may still report the old spell's ID).
         local returning = {}
         for sid, savedSlot in pairs(dormant) do
-            if knownSet[sid] and not (removed and removed[sid]) then
-                returning[#returning + 1] = { sid = sid, slot = savedSlot }
+            local isKnown = knownSet[sid]
+                or (_IPS and _IPS(sid))
+            if isKnown and not (removed and removed[sid]) then
+                -- Only return spells that aren't already in the active list
+                if not activeSet[sid] then
+                    returning[#returning + 1] = { sid = sid, slot = savedSlot }
+                else
+                    -- Already active -- just clean it from dormant
+                    dormant[sid] = nil
+                end
             end
         end
         table.sort(returning, function(a, b) return a.slot < b.slot end)

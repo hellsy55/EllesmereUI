@@ -2038,6 +2038,17 @@ local function LayoutBar(key)
                 btn.SpellActivationAlert:SetAllPoints(btn)
             end
 
+            -- Hide profession quality diamond overlays (added in Dragonflight)
+            if btn.ProfessionQualityOverlayFrame then
+                btn.ProfessionQualityOverlayFrame:SetShown(false)
+                if not btn._eabQualityHooked then
+                    btn.ProfessionQualityOverlayFrame:HookScript("OnShow", function(self)
+                        self:SetShown(false)
+                    end)
+                    btn._eabQualityHooked = true
+                end
+            end
+
             if not showEmpty and not _gridState.shown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
             else
