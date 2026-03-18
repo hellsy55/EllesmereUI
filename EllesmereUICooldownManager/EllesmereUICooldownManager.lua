@@ -2842,6 +2842,21 @@ BuildCDMBar = function(barIndex)
     frame:Show()
 end
 
+-- Compute stride respecting topRowCount override (only for numRows == 2)
+local function ComputeTopRowStride(barData, count)
+    local numRows = barData.numRows or 1
+    if numRows < 1 then numRows = 1 end
+    if numRows == 2 and barData.topRowCount and barData.topRowCount > 0 then
+        local topCount = math.min(barData.topRowCount, count)
+        local bottomCount = count - topCount
+        return math.max(topCount, bottomCount), numRows, topCount
+    end
+    local stride = math.ceil(count / numRows)
+    local topCount = count - (numRows - 1) * stride
+    if topCount < 0 then topCount = 0 end
+    return stride, numRows, topCount
+end
+
 -------------------------------------------------------------------------------
 --  Layout icons within a CDM bar
 -------------------------------------------------------------------------------
@@ -2881,7 +2896,7 @@ LayoutCDMBar = function(barKey)
     end
 
     local isHoriz = (grow == "RIGHT" or grow == "LEFT")
-    local stride = math.ceil(count / numRows)
+    local stride, _, customTopCount = ComputeTopRowStride(barData, count)
 
     -- Container size (already snapped values)
     local totalW, totalH
@@ -2948,8 +2963,8 @@ LayoutCDMBar = function(barKey)
     local stepW = iconW + spacing
     local stepH = iconH + spacing
 
-    -- How many icons on the top row (remainder goes top, full rows on bottom)
-    local topRowCount = count - (numRows - 1) * stride
+    -- How many icons on the top row
+    local topRowCount = customTopCount
     if topRowCount < 0 then topRowCount = 0 end
     local topRowHasLess = (topRowCount > 0 and topRowCount < stride)
 
@@ -6557,16 +6572,12 @@ function ns.AddTrackedSpell(barKey, id, isExtra)
                 local numRows = b.numRows or 1
                 if numRows < 1 then numRows = 1 end
                 local curCount = #b.customSpells
-                local stride = math.ceil(curCount / numRows)
+                local stride, _, topRowCount = ComputeTopRowStride(b, curCount)
                 if stride < 1 then stride = 1 end
-                local topRowCount = curCount - (numRows - 1) * stride
-                if topRowCount < 0 then topRowCount = 0 end
                 -- New count after insert
                 local newCount = curCount + 1
-                local newStride = math.ceil(newCount / numRows)
+                local newStride, _, newTopRow = ComputeTopRowStride(b, newCount)
                 if newStride < 1 then newStride = 1 end
-                local newTopRow = newCount - (numRows - 1) * newStride
-                if newTopRow < 0 then newTopRow = 0 end
                 -- If stride didn't change, insert at end of top row section
                 if newStride == stride and newTopRow > topRowCount then
                     table.insert(b.customSpells, topRowCount + 1, id)
@@ -6589,15 +6600,11 @@ function ns.AddTrackedSpell(barKey, id, isExtra)
                 local numRows = b.numRows or 1
                 if numRows < 1 then numRows = 1 end
                 local curCount = #b.trackedSpells
-                local stride = math.ceil(curCount / numRows)
+                local stride, _, topRowCount = ComputeTopRowStride(b, curCount)
                 if stride < 1 then stride = 1 end
-                local topRowCount = curCount - (numRows - 1) * stride
-                if topRowCount < 0 then topRowCount = 0 end
                 local newCount = curCount + 1
-                local newStride = math.ceil(newCount / numRows)
+                local newStride, _, newTopRow = ComputeTopRowStride(b, newCount)
                 if newStride < 1 then newStride = 1 end
-                local newTopRow = newCount - (numRows - 1) * newStride
-                if newTopRow < 0 then newTopRow = 0 end
                 if newStride == stride and newTopRow > topRowCount then
                     table.insert(b.trackedSpells, topRowCount + 1, id)
                 else
@@ -6956,7 +6963,7 @@ RegisterCDMUnlockElements = function()
         local sp = SnapForScale(bd.spacing or 2, 1)
         local rows = bd.numRows or 1
         if rows < 1 then rows = 1 end
-        local stride = math.ceil(count / rows)
+        local stride = ComputeTopRowStride(bd, count)
         local grow = bd.growDirection or "RIGHT"
         local isH = (grow == "RIGHT" or grow == "LEFT")
         if isH then
@@ -7017,7 +7024,7 @@ RegisterCDMUnlockElements = function()
                     if count == 0 then return end
                     local rows = bd2.numRows or 1
                     if rows < 1 then rows = 1 end
-                    local stride = math.ceil(count / rows)
+                    local stride = ComputeTopRowStride(bd2, count)
                     local grow = bd2.growDirection or "RIGHT"
                     local isH = (grow == "RIGHT" or grow == "LEFT")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
@@ -7039,7 +7046,7 @@ RegisterCDMUnlockElements = function()
                     if count == 0 then return end
                     local rows = bd2.numRows or 1
                     if rows < 1 then rows = 1 end
-                    local stride = math.ceil(count / rows)
+                    local stride = ComputeTopRowStride(bd2, count)
                     local grow = bd2.growDirection or "RIGHT"
                     local isH = (grow == "RIGHT" or grow == "LEFT")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
