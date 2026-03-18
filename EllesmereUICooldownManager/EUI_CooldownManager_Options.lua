@@ -5964,7 +5964,51 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Bar Opacity | Show Tooltip on Hover
+        -- Row 2: Anchor to Cursor | Cursor Position (cog: X + Y)
+        local cursorRow
+        cursorRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Anchor to Cursor",
+              getValue=function() return BD().anchorTo == "mouse" end,
+              setValue=function(v)
+                  BD().anchorTo = v and "mouse" or "none"
+                  ns.BuildAllCDMBars(); ns.RegisterCDMUnlockElements()
+                  Refresh(); EllesmereUI:RefreshPage(true)
+              end },
+            { type="dropdown", text="Cursor Position",
+              values={ left="Left", right="Right", top="Top", bottom="Bottom" },
+              order={ "left", "right", "top", "bottom" },
+              disabled=function() return BD().anchorTo ~= "mouse" end,
+              disabledTooltip=EllesmereUI.DisabledTooltip("Anchor to Cursor"),
+              getValue=function() return BD().anchorPosition or "right" end,
+              setValue=function(v)
+                  BD().anchorPosition = v
+                  ns.BuildAllCDMBars(); Refresh()
+              end });  y = y - h
+
+        -- Inline cog on Cursor Position (right) — X + Y offsets
+        do
+            local rightRgn = cursorRow._rightRegion
+            local _, cursorCogShow = EllesmereUI.BuildCogPopup({
+                title = "Cursor Offset",
+                rows = {
+                    { type="slider", label="X Offset", min=-125, max=125, step=1,
+                      get=function() return BD().anchorOffsetX or 0 end,
+                      set=function(v)
+                          BD().anchorOffsetX = v
+                          ns.BuildAllCDMBars(); Refresh()
+                      end },
+                    { type="slider", label="Y Offset", min=-125, max=125, step=1,
+                      get=function() return BD().anchorOffsetY or 0 end,
+                      set=function(v)
+                          BD().anchorOffsetY = v
+                          ns.BuildAllCDMBars(); Refresh()
+                      end },
+                },
+            })
+            MakeCogBtn(rightRgn, cursorCogShow)
+        end
+
+        -- Row 3: Bar Opacity | Show Tooltip on Hover
         local opacityRow
         opacityRow, h = W:DualRow(parent, y,
             { type="slider", text="Bar Opacity",
