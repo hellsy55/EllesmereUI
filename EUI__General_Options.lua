@@ -1511,18 +1511,32 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             -- Manual cog button (no MakeCogBtn in this file)
+            local function restOff()
+                return not EllesmereUIDB or EllesmereUIDB.showRestedIndicator ~= true
+            end
             local restCogBtn = CreateFrame("Button", nil, rightRgn)
             restCogBtn:SetSize(26, 26)
             restCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
             rightRgn._lastInline = restCogBtn
             restCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-            restCogBtn:SetAlpha(0.4)
+            restCogBtn:SetAlpha(restOff() and 0.15 or 0.4)
             local restCogTex = restCogBtn:CreateTexture(nil, "OVERLAY")
             restCogTex:SetAllPoints()
             restCogTex:SetTexture(EllesmereUI.COGS_ICON)
             restCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            restCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            restCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(restOff() and 0.15 or 0.4) end)
             restCogBtn:SetScript("OnClick", function(self) restCogShow(self) end)
+
+            -- Blocking overlay when Rested Indicator is off
+            local restCogBlock = CreateFrame("Frame", nil, restCogBtn)
+            restCogBlock:SetAllPoints()
+            restCogBlock:SetFrameLevel(restCogBtn:GetFrameLevel() + 10)
+            restCogBlock:EnableMouse(true)
+            restCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(restCogBtn, EllesmereUI.DisabledTooltip("Rested Indicator"))
+            end)
+            restCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            if restOff() then restCogBlock:Show() else restCogBlock:Hide() end
         end
 
         -- Inline color swatch on the crosshair dropdown (left region)
