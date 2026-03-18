@@ -2364,7 +2364,7 @@ do
 --  see the reset popup. Fresh installs are stamped at PLAYER_LOGIN and
 --  never see it.
 -------------------------------------------------------------------------------
-local REQUIRED_RESET_VERSION = 3
+local REQUIRED_RESET_VERSION = 2
 
 function EllesmereUI.NeedsBetaReset()
     if not EllesmereUIDB then return false end
@@ -2514,7 +2514,7 @@ do
                 for _, name in ipairs(svNames) do
                     _G[name] = {}
                 end
-                _G["EllesmereUIDB"] = { _resetVersion = 3 }
+                _G["EllesmereUIDB"] = { _resetVersion = 2 }
                 EllesmereUIDB = _G["EllesmereUIDB"]
                 ReloadUI()
             end)
@@ -5924,7 +5924,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.0.7"
+EllesmereUI.VERSION = "5.0.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
