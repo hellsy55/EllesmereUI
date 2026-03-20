@@ -427,6 +427,10 @@ local defaults = {
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
             maxDebuffs = 10,
+            showBuffs = false,
+            buffAnchor = "topleft",
+            buffGrowth = "auto",
+            maxBuffs = 4,
             textSize = 12,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
@@ -460,12 +464,29 @@ local defaults = {
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
+            showCastbar = true,
+            showCastIcon = true,
+            castbarHideWhenInactive = false,
+            castSpellNameSize = 11,
+            castSpellNameColor = { r = 1, g = 1, b = 1 },
+            castDurationSize = 11,
+            castDurationColor = { r = 1, g = 1, b = 1 },
+            castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
+            castbarClassColored = false,
             healthDisplay = "perhp",
             showPortrait = false,
             portraitMode = "2d",
             healthBarTexture = "none",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
+            onlyPlayerDebuffs = true,
+            debuffAnchor = "bottomleft",
+            debuffGrowth = "auto",
+            maxDebuffs = 10,
+            showBuffs = false,
+            buffAnchor = "topleft",
+            buffGrowth = "auto",
+            maxBuffs = 4,
             textSize = 12,
             leftTextContent = "name",
             rightTextContent = "perhp",
@@ -2917,6 +2938,8 @@ local function StyleFocusFrame(frame, unit)
 
     SetupShowOnCastBar(frame, "focus")
 
+    CreateTargetAuras(frame, unit)
+
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame)
@@ -3383,6 +3406,11 @@ local function StyleBossFrame(frame, unit)
     end
 
     PP.Size(frame, totalWidth, bossBarHeight)
+
+    frame.Castbar = CreateCastBar(frame, unit, settings)
+    SetupShowOnCastBar(frame, unit)
+
+    CreateTargetAuras(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
@@ -5069,6 +5097,88 @@ local function ReloadFrames()
                     end
                 end
 
+                -- Debuffs (focus)
+                if frame.Debuffs then
+                    local dAnc = settings.debuffAnchor or "bottomleft"
+                    if dAnc == "none" then
+                        if frame:IsElementEnabled("Debuffs") then
+                            frame:DisableElement("Debuffs")
+                        end
+                        frame.Debuffs:Hide()
+                        frame.Debuffs.num = 0
+                    else
+                        if not frame:IsElementEnabled("Debuffs") then
+                            frame:EnableElement("Debuffs")
+                        end
+                        frame.Debuffs:Show()
+                        frame.Debuffs.num = settings.maxDebuffs or 10
+                        frame.Debuffs.onlyShowPlayer = settings.onlyPlayerDebuffs and true or nil
+                        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings.debuffGrowth or "auto")
+                        local focusDbCbOff = 0
+                        if settings.showCastbar ~= false then
+                            if dAnc == "bottomleft" or dAnc == "bottomright" then
+                                local cbH = settings.castbarHeight or 14
+                                if cbH <= 0 then cbH = 14 end
+                                focusDbCbOff = -cbH
+                            end
+                        end
+                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. focusDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        if frame.Debuffs._lastDebuffKey ~= debuffKey then
+                            frame.Debuffs._lastDebuffKey = debuffKey
+                            frame.Debuffs:ClearAllPoints()
+                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1, doy * 1 + focusDbCbOff)
+                            frame.Debuffs.initialAnchor = dia
+                            frame.Debuffs.growthX = dgx
+                            frame.Debuffs.growthY = dgy
+                            if frame.Debuffs.ForceUpdate then
+                                frame.Debuffs:ForceUpdate()
+                            end
+                        end
+                    end
+                end
+
+                -- Buffs (focus)
+                if frame.Buffs then
+                    local showBuffs = settings.showBuffs ~= false
+                    if showBuffs then
+                        if not frame:IsElementEnabled("Buffs") then
+                            frame:EnableElement("Buffs")
+                        end
+                        frame.Buffs:Show()
+                        frame.Buffs.num = settings.maxBuffs or 4
+                        local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
+                            settings.buffAnchor, settings.buffGrowth
+                        )
+                        local focusBfCbOff = 0
+                        if settings.showCastbar ~= false then
+                            local bAnc = settings.buffAnchor or "topleft"
+                            if bAnc == "bottomleft" or bAnc == "bottomright" then
+                                local cbH = settings.castbarHeight or 14
+                                if cbH <= 0 then cbH = 14 end
+                                focusBfCbOff = -cbH
+                            end
+                        end
+                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. focusBfCbOff
+                        if frame.Buffs._lastBuffKey ~= buffKey then
+                            frame.Buffs._lastBuffKey = buffKey
+                            frame.Buffs:ClearAllPoints()
+                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + focusBfCbOff)
+                            frame.Buffs.initialAnchor = bia
+                            frame.Buffs.growthX = bgx
+                            frame.Buffs.growthY = bgy
+                            if frame.Buffs.ForceUpdate then
+                                frame.Buffs:ForceUpdate()
+                            end
+                        end
+                    else
+                        if frame:IsElementEnabled("Buffs") then
+                            frame:DisableElement("Buffs")
+                        end
+                        frame.Buffs:Hide()
+                        frame.Buffs.num = 0
+                    end
+                end
+
                 UpdateBordersForScale(frame, unit)
                 ReparentBarsToClip(frame)
 
@@ -5198,6 +5308,149 @@ local function ReloadFrames()
                         else
                             frame.Power._grayedOut = false
                         end
+                    end
+                end
+
+                -- Castbar (boss)
+                if frame.Castbar then
+                    local castbarBg = frame.Castbar:GetParent()
+                    if castbarBg then
+                        if settings.showCastbar ~= false then
+                            if not frame:IsElementEnabled("Castbar") then
+                                frame:EnableElement("Castbar")
+                            end
+                            local castBarOffset = 0
+                            if showPortrait then
+                                castBarOffset = -(bossBarHeight / 2)
+                            end
+                            castbarBg:SetSize(totalWidth, settings.castbarHeight or 14)
+                            if frame.Castbar._iconFrame then
+                                local cbH = settings.castbarHeight or 14
+                                frame.Castbar._iconFrame:SetSize(cbH + 1, cbH + 1)
+                                if not frame.Castbar:IsShown() then
+                                    frame.Castbar._iconFrame:Hide()
+                                elseif settings.showCastIcon == false then
+                                    frame.Castbar._iconFrame:Hide()
+                                else
+                                    frame.Castbar._iconFrame:Show()
+                                end
+                            end
+                            castbarBg:ClearAllPoints()
+                            local bPpIsAtt2 = (bPpPos == "below" or bPpPos == "above")
+                            local cbAnchor = (bPpIsAtt2 and frame.Power) or frame.Health
+                            castbarBg:SetPoint("TOP", cbAnchor, "BOTTOM", castBarOffset, 0)
+                            if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
+                                castbarBg:Hide()
+                            else
+                                castbarBg:Show()
+                            end
+                        else
+                            if frame:IsElementEnabled("Castbar") then
+                                frame:DisableElement("Castbar")
+                            end
+                            frame.Castbar:Hide()
+                            castbarBg:Hide()
+                        end
+                    end
+                    frame.Castbar._eufSettings = settings
+                    local bCbColor = castbarColor
+                    if settings.castbarFillColor then
+                        bCbColor = settings.castbarFillColor
+                    end
+                    frame.Castbar:SetStatusBarColor(bCbColor.r, bCbColor.g, bCbColor.b, castbarOpacity)
+                    if frame.Castbar.Text then
+                        local snSz = settings.castSpellNameSize or 11
+                        SetFSFont(frame.Castbar.Text, snSz)
+                        local snC = settings.castSpellNameColor or { r=1, g=1, b=1 }
+                        frame.Castbar.Text:SetTextColor(snC.r, snC.g, snC.b)
+                    end
+                    if frame.Castbar.Time then
+                        local dtSz = settings.castDurationSize or 11
+                        SetFSFont(frame.Castbar.Time, dtSz)
+                        local dtC = settings.castDurationColor or { r=1, g=1, b=1 }
+                        frame.Castbar.Time:SetTextColor(dtC.r, dtC.g, dtC.b)
+                    end
+                end
+
+                -- Debuffs (boss)
+                if frame.Debuffs then
+                    local dAnc = settings.debuffAnchor or "bottomleft"
+                    if dAnc == "none" then
+                        if frame:IsElementEnabled("Debuffs") then
+                            frame:DisableElement("Debuffs")
+                        end
+                        frame.Debuffs:Hide()
+                        frame.Debuffs.num = 0
+                    else
+                        if not frame:IsElementEnabled("Debuffs") then
+                            frame:EnableElement("Debuffs")
+                        end
+                        frame.Debuffs:Show()
+                        frame.Debuffs.num = settings.maxDebuffs or 10
+                        frame.Debuffs.onlyShowPlayer = settings.onlyPlayerDebuffs and true or nil
+                        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings.debuffGrowth or "auto")
+                        local liveDbCbOff = 0
+                        if settings.showCastbar ~= false then
+                            if dAnc == "bottomleft" or dAnc == "bottomright" then
+                                local cbH = settings.castbarHeight or 14
+                                if cbH <= 0 then cbH = 14 end
+                                liveDbCbOff = -cbH
+                            end
+                        end
+                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. liveDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        if frame.Debuffs._lastDebuffKey ~= debuffKey then
+                            frame.Debuffs._lastDebuffKey = debuffKey
+                            frame.Debuffs:ClearAllPoints()
+                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1, doy * 1 + liveDbCbOff)
+                            frame.Debuffs.initialAnchor = dia
+                            frame.Debuffs.growthX = dgx
+                            frame.Debuffs.growthY = dgy
+                            if frame.Debuffs.ForceUpdate then
+                                frame.Debuffs:ForceUpdate()
+                            end
+                        end
+                    end
+                end
+
+                -- Buffs (boss)
+                if frame.Buffs then
+                    local showBuffs = settings.showBuffs ~= false
+                    if showBuffs then
+                        if not frame:IsElementEnabled("Buffs") then
+                            frame:EnableElement("Buffs")
+                        end
+                        frame.Buffs:Show()
+                        frame.Buffs.num = settings.maxBuffs or 4
+                        local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
+                            settings.buffAnchor, settings.buffGrowth
+                        )
+                        local bossBfCbOff = 0
+                        if settings.showCastbar ~= false then
+                            local bAnc = settings.buffAnchor or "topleft"
+                            if bAnc == "bottomleft" or bAnc == "bottomright" then
+                                local cbH = settings.castbarHeight or 14
+                                if cbH <= 0 then cbH = 14 end
+                                bossBfCbOff = -cbH
+                            end
+                        end
+                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. bossBfCbOff
+                        if frame.Buffs._lastBuffKey ~= buffKey then
+                            frame.Buffs._lastBuffKey = buffKey
+                            frame.Buffs:ClearAllPoints()
+                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + bossBfCbOff)
+                            frame.Buffs.initialAnchor = bia
+                            frame.Buffs.growthX = bgx
+                            frame.Buffs.growthY = bgy
+                            if frame.Buffs.ForceUpdate then
+                                frame.Buffs:ForceUpdate()
+                            end
+                        end
+                    else
+                        if frame:IsElementEnabled("Buffs") then
+                            frame:DisableElement("Buffs")
+                        end
+                        frame.Buffs:Hide()
+                        frame.Buffs.num = 0
                     end
                 end
 
