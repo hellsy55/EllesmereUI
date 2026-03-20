@@ -905,8 +905,8 @@ local function RegisterUnlockElements()
                         h = h + expandDelta
                     end
                 end
-                -- 3rd return: centerYOff shifts the mover up to match the bar's upward growth
-                return s.width, h, expandDelta * 0.5
+                -- Centralized grow system handles positioning; no mover offset needed
+                return s.width, h
             end,
             setWidth = function(_, w) S().width = w; Rebuild() end,
             setHeight = function(_, h) S().height = h; Rebuild() end,
@@ -1341,13 +1341,16 @@ local function BuildBars()
                 ApplyFreeBarPosition(healthBar, hp, 0, -64, ow, oh)
             end
         elseif hp.unlockPos and hp.unlockPos.point then
-            -- Position fully managed by unlock mode -- no animations, just apply directly
+            -- Position fully managed by unlock mode -- only apply size; skip reposition
+            -- during unlock mode so resize does not snap the bar back to stored position.
             local rp = hp.unlockPos.relPoint or hp.unlockPos.point
             local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
             ApplyBarAnchor(healthBar, "none")
             healthBar:SetSize(ow, oh)
-            healthBar:ClearAllPoints()
-            healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
+            if not EllesmereUI._unlockActive then
+                healthBar:ClearAllPoints()
+                healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
+            end
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(healthBar, "none")
@@ -1397,7 +1400,7 @@ local function BuildBars()
         healthBar:SetAlpha(hp.barAlpha or 1)
         ApplyBarOrientation(healthBar, hpOri)
     elseif healthBar then
-        healthBar:Hide()
+        EllesmereUI.SetElementVisibility(healthBar, false)
     end
 
     -- Power bar (primary resource)
@@ -1431,14 +1434,16 @@ local function BuildBars()
                 ApplyFreeBarPosition(primaryBar, pp, 0, -54, ow, oh)
             end
         elseif pp.unlockPos and pp.unlockPos.point then
-            -- Position fully managed by unlock mode -- no animations, just apply directly
+            -- Position fully managed by unlock mode -- only apply size; skip reposition
+            -- during unlock mode so resize does not snap the bar back to stored position.
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
             local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
             ApplyBarAnchor(primaryBar, "none")
             primaryBar:SetSize(ow, oh)
-            primaryBar:ClearAllPoints()
-            -- Shift up by expand delta so the bar grows upward (bottom edge stays fixed)
-            primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, (pp.unlockPos.y or 0) + ppExpandDelta)
+            if not EllesmereUI._unlockActive then
+                primaryBar:ClearAllPoints()
+                primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
+            end
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
             ApplyBarAnchor(primaryBar, "none")
@@ -1449,7 +1454,7 @@ local function BuildBars()
                 local h2 = primaryBar["_barAnim_h"] or ppHeight or 4
                 local ow, oh = OrientedSize(w, h2, ppOri)
                 primaryBar:ClearAllPoints()
-                -- Shift up by half the expand delta so growth goes upward from center
+                -- Internal layout: shift up by half expand delta within mainFrame
                 primaryBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy + ppExpandDelta * 0.5)
                 primaryBar:SetSize(ow, oh)
             end
@@ -1488,7 +1493,7 @@ local function BuildBars()
         primaryBar:SetAlpha(pp.barAlpha or 1)
         ApplyBarOrientation(primaryBar, ppOri)
     elseif primaryBar then
-        primaryBar:Hide()
+        EllesmereUI.SetElementVisibility(primaryBar, false)
     end
 
 
@@ -1550,8 +1555,10 @@ local function BuildBars()
         elseif sp.unlockPos and sp.unlockPos.point then
             ApplyBarAnchor(secondaryFrame, "none")
             secondaryFrame:SetSize(frameW, frameH)
-            secondaryFrame:ClearAllPoints()
-            secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+            if not EllesmereUI._unlockActive then
+                secondaryFrame:ClearAllPoints()
+                secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+            end
         else
             ApplyBarAnchor(secondaryFrame, "none")
             local function ApplySecondaryBarTransform()
@@ -1765,7 +1772,7 @@ local function BuildBars()
         secondaryFrame:Show()
         secondaryFrame:SetAlpha(sp.barAlpha or 1)
     elseif secondaryFrame then
-        secondaryFrame:Hide()
+        EllesmereUI.SetElementVisibility(secondaryFrame, false)
     end
 
     ReapplyInternalBarAnchors()
@@ -2462,9 +2469,10 @@ local function UpdateVisibility()
         local hp = ERB.db.profile.health
         if hp and hp.enabled and ShouldShowBar(hp) and not inVehicle then
             healthBar:Show()
+            EllesmereUI.SetElementVisibility(healthBar, true)
             healthBar:SetAlpha(hp.barAlpha or 1)
         else
-            healthBar:Hide()
+            EllesmereUI.SetElementVisibility(healthBar, false)
         end
     end
 
@@ -2473,9 +2481,10 @@ local function UpdateVisibility()
         local pp = ERB.db.profile.primary
         if pp and pp.enabled ~= false and ShouldShowBar(pp) and not inVehicle then
             primaryBar:Show()
+            EllesmereUI.SetElementVisibility(primaryBar, true)
             primaryBar:SetAlpha(pp.barAlpha or 1)
         else
-            primaryBar:Hide()
+            EllesmereUI.SetElementVisibility(primaryBar, false)
         end
     end
 
@@ -2484,11 +2493,12 @@ local function UpdateVisibility()
         local sp = ERB.db.profile.secondary
         if sp and sp.enabled ~= false and cachedSecondary and ShouldShowSecondary() and not inVehicle then
             secondaryFrame:Show()
+            EllesmereUI.SetElementVisibility(secondaryFrame, true)
             local base = sp.barAlpha or 1
             local ooc = isInCombat and 1 or (sp.oocAlpha or 1)
             secondaryFrame:SetAlpha(base * ooc)
         else
-            secondaryFrame:Hide()
+            EllesmereUI.SetElementVisibility(secondaryFrame, false)
         end
     end
 end
@@ -2784,7 +2794,7 @@ BuildCastBar = function()
     end
 
     if not cb.enabled then
-        if castBarFrame then castBarFrame:Hide() end
+        if castBarFrame then EllesmereUI.SetElementVisibility(castBarFrame, false) end
         return
     end
 
@@ -2860,18 +2870,23 @@ BuildCastBar = function()
     -- Total frame width includes icon (h x h) only when icon is shown
     local totalW = hasIcon and (w + h) or w
     if cb.unlockPos and cb.unlockPos.point then
-        -- Position managed by unlock mode -- only animate size changes
+        -- Position managed by unlock mode -- only animate size changes.
+        -- Skip reposition during unlock mode so resize does not snap the bar.
         local rp = cb.unlockPos.relPoint or cb.unlockPos.point
         local px, py = cb.unlockPos.x or 0, cb.unlockPos.y or 0
-        local function ApplyCastUnlockTransform()
-            local aw = castBarFrame["_barAnim_w"] or totalW
-            local ah = castBarFrame["_barAnim_h"] or h
-            castBarFrame:SetSize(aw, ah)
-            castBarFrame:ClearAllPoints()
-            castBarFrame:SetPoint(cb.unlockPos.point, UIParent, rp, px, py)
+        if EllesmereUI._unlockActive then
+            castBarFrame:SetSize(totalW, h)
+        else
+            local function ApplyCastUnlockTransform()
+                local aw = castBarFrame["_barAnim_w"] or totalW
+                local ah = castBarFrame["_barAnim_h"] or h
+                castBarFrame:SetSize(aw, ah)
+                castBarFrame:ClearAllPoints()
+                castBarFrame:SetPoint(cb.unlockPos.point, UIParent, rp, px, py)
+            end
+            SmoothBarAnimate(castBarFrame, "w", totalW, function() ApplyCastUnlockTransform() end)
+            SmoothBarAnimate(castBarFrame, "h", h, function() ApplyCastUnlockTransform() end)
         end
-        SmoothBarAnimate(castBarFrame, "w", totalW, function() ApplyCastUnlockTransform() end)
-        SmoothBarAnimate(castBarFrame, "h", h, function() ApplyCastUnlockTransform() end)
     else
         castBarFrame:SetSize(totalW, h)
         castBarFrame:ClearAllPoints()
@@ -3036,9 +3051,10 @@ end
 
     -- Hide when not casting
     if not castBarFrame._casting and not castBarFrame._channeling and not castBarFrame._empowering then
-        castBarFrame:Hide()
+        EllesmereUI.SetElementVisibility(castBarFrame, false)
     else
         castBarFrame:Show()
+        EllesmereUI.SetElementVisibility(castBarFrame, true)
     end
 end
 
@@ -3280,6 +3296,7 @@ OnCastStart = function()
     end
 
     castBarFrame:Show()
+    EllesmereUI.SetElementVisibility(castBarFrame, true)
 end
 
 OnChannelStart = function()
@@ -3322,6 +3339,7 @@ OnChannelStart = function()
     ShowChannelTicks(spellID)
 
     castBarFrame:Show()
+    EllesmereUI.SetElementVisibility(castBarFrame, true)
 end
 
 OnChannelUpdate = function()
@@ -3347,7 +3365,7 @@ local function OnCastComplete(eventCastID)
     if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
     castBarFrame._casting = false
     castBarFrame._castID = nil
-    castBarFrame:Hide()
+    EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
 -- Called for UNIT_SPELLCAST_FAILED / INTERRUPTED.
@@ -3360,7 +3378,7 @@ local function OnCastFailed(eventCastID)
     if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
     castBarFrame._casting = false
     castBarFrame._castID = nil
-    castBarFrame:Hide()
+    EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
 -- Called for UNIT_SPELLCAST_CHANNEL_STOP.
@@ -3371,7 +3389,7 @@ local function OnChannelStop(eventCastID)
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     HideChannelTicks()
-    castBarFrame:Hide()
+    EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
 -- Called for UNIT_SPELLCAST_EMPOWER_STOP.
@@ -3387,7 +3405,7 @@ local function OnEmpowerStop(eventCastID)
         end
     end
     castBarFrame._numStages = 0
-    castBarFrame:Hide()
+    EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
 OnCastStop = function()
@@ -3404,7 +3422,7 @@ OnCastStop = function()
     end
     castBarFrame._numStages = 0
     HideChannelTicks()
-    castBarFrame:Hide()
+    EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
 
@@ -3484,6 +3502,7 @@ OnEmpowerStart = function()
     end
 
     castBarFrame:Show()
+    EllesmereUI.SetElementVisibility(castBarFrame, true)
 end
 
 OnEmpowerUpdate = function()

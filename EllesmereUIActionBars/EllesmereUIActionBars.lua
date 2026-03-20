@@ -1873,7 +1873,7 @@ local function ComputeBarLayout(key)
     numRows = ceil(numIcons / stride)
     local padding = SnapForScale(s.buttonPadding or 2, 1)
     local isVertical = (s.orientation == "vertical")
-    local growUp = (s.growDirection or "up") == "up"
+    local growDir = (s.growDirection or "up"):upper()
     local shape = s.buttonShape or "none"
 
     local base = barBaseSize[key]
@@ -1910,17 +1910,29 @@ local function ComputeBarLayout(key)
                 col = (i - 1) % stride
                 row = floor((i - 1) / stride)
             end
-            local xOff = col * stepW
-            local yOff
-            if isVertical then
+            local xOff, yOff
+            if growDir == "LEFT" then
+                xOff = -(col * stepW)
                 yOff = -(row * stepH)
+            elseif growDir == "RIGHT" then
+                xOff = col * stepW
+                yOff = -(row * stepH)
+            elseif growDir == "DOWN" then
+                xOff = col * stepW
+                yOff = -(row * stepH)
+            elseif growDir == "UP" then
+                xOff = col * stepW
+                yOff = row * stepH
+            elseif growDir == "CENTER" then
+                local totalCols = isVertical and numRows or stride
+                local totalW = totalCols * stepW - padding
+                local totalRowsN = isVertical and stride or numRows
+                local totalH = totalRowsN * stepH - padding
+                xOff = col * stepW - totalW / 2
+                yOff = -(row * stepH) + totalH / 2
             else
-                if growUp then
-                    local flippedRow = (numRows - 1) - row
-                    yOff = -(flippedRow * stepH)
-                else
-                    yOff = -(row * stepH)
-                end
+                xOff = col * stepW
+                yOff = -(row * stepH)
             end
             local show = true
             if not showEmpty and not _gridState.shown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
@@ -1961,7 +1973,7 @@ local function LayoutBar(key)
     numRows = ceil(numIcons / stride)
     local padding = SnapForScale(s.buttonPadding or 2, 1)
     local isVertical = (s.orientation == "vertical")
-    local growUp = (s.growDirection or "up") == "up"
+    local growDir = (s.growDirection or "up"):upper()
     local shape = s.buttonShape or "none"
 
     -- Button size: use explicit width/height if set, otherwise base size.
@@ -2014,19 +2026,42 @@ local function LayoutBar(key)
             end
 
             btn:ClearAllPoints()
-            local xOff = col * stepW
-            local yOff
-            if isVertical then
+            local xOff, yOff, anchor
+            if growDir == "LEFT" then
+                -- Icon 1 at right edge, grows leftward
+                xOff = -(col * stepW)
                 yOff = -(row * stepH)
+                anchor = "TOPRIGHT"
+            elseif growDir == "RIGHT" then
+                -- Icon 1 at left edge, grows rightward
+                xOff = col * stepW
+                yOff = -(row * stepH)
+                anchor = "TOPLEFT"
+            elseif growDir == "DOWN" then
+                -- Icon 1 at top, grows downward
+                xOff = col * stepW
+                yOff = -(row * stepH)
+                anchor = "TOPLEFT"
+            elseif growDir == "UP" then
+                -- Icon 1 at bottom, grows upward
+                xOff = col * stepW
+                yOff = row * stepH
+                anchor = "BOTTOMLEFT"
+            elseif growDir == "CENTER" then
+                local totalCols = isVertical and numRows or stride
+                local totalW = totalCols * stepW - padding
+                local totalRowsN = isVertical and stride or numRows
+                local totalH = totalRowsN * stepH - padding
+                xOff = col * stepW - totalW / 2
+                yOff = -(row * stepH) + totalH / 2
+                anchor = "CENTER"
             else
-                if growUp then
-                    local flippedRow = (numRows - 1) - row
-                    yOff = -(flippedRow * stepH)
-                else
-                    yOff = -(row * stepH)
-                end
+                -- Fallback (treat as RIGHT)
+                xOff = col * stepW
+                yOff = -(row * stepH)
+                anchor = "TOPLEFT"
             end
-            btn:SetPoint("TOPLEFT", frame, "TOPLEFT", xOff, yOff)
+            btn:SetPoint(anchor, frame, anchor, xOff, yOff)
             btn:SetSize(btnW, btnH)
 
             -- Resize the autocast overlay to match the button size
@@ -2068,6 +2103,45 @@ local function LayoutBar(key)
     local totalRows = isVertical and stride or numRows
     local frameW = totalCols * btnW + (totalCols - 1) * padding
     local frameH = totalRows * btnH + (totalRows - 1) * padding
+
+    -- Capture the fixed edge position BEFORE SetSize changes the frame bounds.
+    -- When the frame is anchored at CENTER, SetSize expands both sides equally.
+    -- We need to preserve the fixed edge so only the grow side expands.
+    -- Only do this for non-default grow directions (UP is the default for
+    -- action bars and behaves as centered growth).
+    local preEdgeX, preEdgeY, preGrowAnchor
+    local hasCustomGrow = (growDir == "LEFT" or growDir == "RIGHT" or growDir == "DOWN")
+    if hasCustomGrow and not (EllesmereUI and EllesmereUI._unlockActive) then
+        local fL = frame:GetLeft()
+        local fR = frame:GetRight()
+        local fT = frame:GetTop()
+        local fB = frame:GetBottom()
+        if fL and fR and fT and fB then
+            local uiS = UIParent:GetEffectiveScale()
+            local fS = frame:GetEffectiveScale()
+            local ratio = fS / uiS
+            local uiW, uiH = UIParent:GetSize()
+            if growDir == "RIGHT" then
+                preGrowAnchor = "LEFT"
+                preEdgeX = fL * ratio - uiW / 2
+                preEdgeY = ((fT + fB) / 2) * ratio - uiH / 2
+            elseif growDir == "LEFT" then
+                preGrowAnchor = "RIGHT"
+                preEdgeX = fR * ratio - uiW / 2
+                preEdgeY = ((fT + fB) / 2) * ratio - uiH / 2
+            elseif growDir == "DOWN" then
+                preGrowAnchor = "TOP"
+                preEdgeX = ((fL + fR) / 2) * ratio - uiW / 2
+                preEdgeY = fT * ratio - uiH / 2
+            end
+        end
+    end
+
+    -- Tell NotifyElementResized to skip during our resize + re-anchor
+    if preGrowAnchor then
+        EllesmereUI._layoutBarResizing = key
+    end
+
     frame:SetSize(max(frameW, 1), max(frameH, 1))
 
     -- Set flyoutDirection on every button based on bar orientation and actual
@@ -2105,6 +2179,38 @@ local function LayoutBar(key)
         if btn and not InCombatLockdown() then
             btn:SetAttribute("flyoutDirection", flyDir)
         end
+    end
+
+    -- Re-anchor from the fixed edge captured BEFORE SetSize.
+    -- This prevents the frame from expanding equally on both sides.
+    if preGrowAnchor and preEdgeX and preEdgeY then
+        pcall(function()
+            frame:ClearAllPoints()
+            frame:SetPoint(preGrowAnchor, UIParent, "CENTER", preEdgeX, preEdgeY)
+        end)
+        -- Save the updated position (converted to CENTER/CENTER) so
+        -- NotifyElementResized reads the correct center offset.
+        if EllesmereUI and EllesmereUI.SaveBarPosition then
+            local pt, _, rpt, ox, oy = frame:GetPoint(1)
+            if pt then
+                EllesmereUI.SaveBarPosition(key, pt, rpt, ox, oy)
+            end
+        end
+    end
+
+    -- Clear the resize guard so NotifyElementResized works normally again
+    if EllesmereUI then
+        EllesmereUI._layoutBarResizing = nil
+    end
+
+    -- Notify the position system for width/height match propagation and anchor chains
+    if EllesmereUI and EllesmereUI.NotifyElementResized then
+        EllesmereUI.NotifyElementResized(key)
+    end
+
+    -- Propagate anchor chain so anything anchored to this bar follows the resize
+    if EllesmereUI and EllesmereUI.PropagateAnchorChain then
+        EllesmereUI.PropagateAnchorChain(key)
     end
 end
 
@@ -2774,6 +2880,13 @@ function EAB:SetOrientationForBar(barKey, isHorizontal)
     local s = self.db.profile.bars[barKey]
     if not s then return end
     s.orientation = isHorizontal and "horizontal" or "vertical"
+    LayoutBar(barKey)
+end
+
+function EAB:SetGrowDirectionForBar(barKey, dir)
+    local s = self.db.profile.bars[barKey]
+    if not s then return end
+    s.growDirection = dir or "up"
     LayoutBar(barKey)
 end
 
@@ -5990,15 +6103,8 @@ local function ApplyDataBarLayout(barKey)
     local h = s.height or 18
     local orient = s.orientation or "HORIZONTAL"
 
-    -- Preserve center position when resizing so growth is centered
-    local oldW, oldH = frame:GetWidth(), frame:GetHeight()
-    local cx, cy
-    local left, top = frame:GetLeft(), frame:GetTop()
-    if left and top then
-        cx = left + oldW * 0.5
-        cy = top - oldH * 0.5
-    end
-
+    -- Centered growth on resize is handled by the centralized unlock mode
+    -- position system (NotifyElementResized re-applies CENTER anchor).
     local PP = EllesmereUI and EllesmereUI.PP
     if PP then
         PP.Size(frame, w, h)
@@ -6011,15 +6117,6 @@ local function ApplyDataBarLayout(barKey)
     if frame._restedBar then
         frame._restedBar:SetOrientation(orient)
         frame._restedBar:SetRotatesTexture(orient ~= "HORIZONTAL")
-    end
-
-    -- Re-center after resize if we had a valid position
-    if cx and cy then
-        local newHalfW = frame:GetWidth() * 0.5
-        local newHalfH = frame:GetHeight() * 0.5
-        local uiH = UIParent:GetHeight()
-        frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", cx - newHalfW, cy + newHalfH - uiH)
     end
 
     if frame._updateFunc then frame._updateFunc() end
@@ -6574,11 +6671,12 @@ local function SetupBlizzardMovableFrame(barKey)
             if bL and bT and bR and bB and (bR - bL) > 1 then
                 local bS = src:GetEffectiveScale()
                 local uS = UIParent:GetEffectiveScale()
-                local cx = (bL + bR) * 0.5 * bS / uS
-                local cy = (bT + bB) * 0.5 * bS / uS - UIParent:GetHeight()
-                EAB.db.profile.barPositions[barKey] = { point = "CENTER", relPoint = "TOPLEFT", x = cx, y = cy }
+                local uiW, uiH = UIParent:GetSize()
+                local cx = (bL + bR) * 0.5 * bS / uS - uiW / 2
+                local cy = (bT + bB) * 0.5 * bS / uS - uiH / 2
+                EAB.db.profile.barPositions[barKey] = { point = "CENTER", relPoint = "CENTER", x = cx, y = cy }
                 holder:ClearAllPoints()
-                holder:SetPoint("CENTER", UIParent, "TOPLEFT", cx, cy)
+                holder:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
                 if self then self:SetScript("OnUpdate", nil) end
                 return true
             end
@@ -6920,13 +7018,14 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         if bL and bT and bR and bB and (bR - bL) > 1 then
             local bS = blizzFrame:GetEffectiveScale()
             local uiS = UIParent:GetEffectiveScale()
-            local cx = (bL + bR) * 0.5 * bS / uiS
-            local cy = (bT + bB) * 0.5 * bS / uiS - UIParent:GetHeight()
+            local uiW, uiH = UIParent:GetSize()
+            local cx = (bL + bR) * 0.5 * bS / uiS - uiW / 2
+            local cy = (bT + bB) * 0.5 * bS / uiS - uiH / 2
             EAB.db.profile.barPositions[barKey] = {
-                point = "CENTER", relPoint = "TOPLEFT", x = cx, y = cy,
+                point = "CENTER", relPoint = "CENTER", x = cx, y = cy,
             }
             holder:ClearAllPoints()
-            holder:SetPoint("CENTER", UIParent, "TOPLEFT", cx, cy)
+            holder:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
         else
             -- Defer capture
             holder:ClearAllPoints()
@@ -6940,13 +7039,14 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
                 if cL and cT and cR and cB and (cR - cL) > 1 then
                     local cS = blizzFrame:GetEffectiveScale()
                     local uS = UIParent:GetEffectiveScale()
-                    local ccx = (cL + cR) * 0.5 * cS / uS
-                    local ccy = (cT + cB) * 0.5 * cS / uS - UIParent:GetHeight()
+                    local uiW, uiH = UIParent:GetSize()
+                    local ccx = (cL + cR) * 0.5 * cS / uS - uiW / 2
+                    local ccy = (cT + cB) * 0.5 * cS / uS - uiH / 2
                     EAB.db.profile.barPositions[barKey] = {
-                        point = "CENTER", relPoint = "TOPLEFT", x = ccx, y = ccy,
+                        point = "CENTER", relPoint = "CENTER", x = ccx, y = ccy,
                     }
                     holder:ClearAllPoints()
-                    holder:SetPoint("CENTER", UIParent, "TOPLEFT", ccx, ccy)
+                    holder:SetPoint("CENTER", UIParent, "CENTER", ccx, ccy)
                     self:SetScript("OnUpdate", nil)
                 elseif attempts > 300 then
                     self:SetScript("OnUpdate", nil)

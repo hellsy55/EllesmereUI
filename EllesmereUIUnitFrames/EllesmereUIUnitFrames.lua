@@ -484,15 +484,15 @@ local defaults = {
             boss = true,
         },
         positions = {
-            player = { point = "CENTER", x = -317, y = -193.5 },
-            target = { point = "CENTER", x = 317, y = -201 },
-            focus = { point = "CENTER", x = 0, y = -285 },
-            pet = { point = "CENTER", x = -300, y = -260 },
-            targettarget = { point = "CENTER", x = 383, y = -152.5 },
-            focustarget = { point = "CENTER", x = 50, y = -261 },
-            boss = { point = "RIGHT", x = -326, y = 251 },
-            playerCastbar = { point = "CENTER", x = 0, y = -250 },
-            classPower = { point = "CENTER", x = 0, y = -220 },
+            player = { point = "CENTER", relPoint = "CENTER", x = -317, y = -193.5 },
+            target = { point = "CENTER", relPoint = "CENTER", x = 317, y = -201 },
+            focus = { point = "CENTER", relPoint = "CENTER", x = 0, y = -285 },
+            pet = { point = "CENTER", relPoint = "CENTER", x = -300, y = -260 },
+            targettarget = { point = "CENTER", relPoint = "CENTER", x = 383, y = -152.5 },
+            focustarget = { point = "CENTER", relPoint = "CENTER", x = 50, y = -261 },
+            boss = { point = "CENTER", relPoint = "CENTER", x = 661, y = 251 },
+            playerCastbar = { point = "CENTER", relPoint = "CENTER", x = 0, y = -250 },
+            classPower = { point = "CENTER", relPoint = "CENTER", x = 0, y = -220 },
         },
         bossSpacing = 60,
     }
@@ -4084,12 +4084,14 @@ local function ReloadFrames()
                 local bossPos = db.profile.positions.boss
                 local bossSpacing = db.profile.bossSpacing or 60
                 local bossIdx = tonumber(unit:match("(%d+)$"))
-                if bossPos and bossIdx then
+                if bossPos and bossIdx and not (EllesmereUI and EllesmereUI._unlockActive) then
                     frame:ClearAllPoints()
                     frame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y - ((bossIdx - 1) * bossSpacing))
                 end
             else
-                ApplyFramePosition(frame, unit)
+                if not (EllesmereUI and EllesmereUI._unlockActive) then
+                    ApplyFramePosition(frame, unit)
+                end
             end
             local settings = GetSettingsForUnit(unit)
             local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false

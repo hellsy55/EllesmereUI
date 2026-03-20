@@ -2651,7 +2651,7 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rightRgn, kbSizeCogShow, nil, EllesmereUI.RESIZE_ICON)
             end
 
-            -- Row 2: Charges Text colorpicker (left) | empty (right)
+            -- Row 2: Charges Text colorpicker (left) | Cooldown Text colorpicker (right)
             chargesRow, h = W:DualRow(parent, y,
                 { type="colorpicker", text="Charges Text",
                   getValue=function()
@@ -2664,7 +2664,17 @@ initFrame:SetScript("OnEvent", function(self)
                       SUpdatePreview()
                   end,
                   hasAlpha=false },
-                { type="label", text="" });  y = y - h
+                { type="colorpicker", text="Cooldown Text",
+                  getValue=function()
+                      local c = SGet("cooldownTextColor")
+                      if not c then return 1, 1, 1, 1 end
+                      return c.r, c.g, c.b, 1
+                  end,
+                  setValue=function(r, g, b)
+                      SSetColor("cooldownTextColor", r, g, b, nil, function(k) EAB:ApplyCooldownFontsForBar(k) end)
+                      SUpdatePreview()
+                  end,
+                  hasAlpha=false });  y = y - h
             -- Sync icon: Charges Text (left region)
             do
                 local rgn = chargesRow._leftRegion
@@ -2748,25 +2758,9 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(leftRgn, ctSizeCogShow, nil, EllesmereUI.RESIZE_ICON)
             end
 
-            -- Row 3: Cooldown Text colorpicker (left) | empty (right)
-            local cdTextRow
-            cdTextRow, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Cooldown Text",
-                  getValue=function()
-                      local c = SGet("cooldownTextColor")
-                      if not c then return 1, 1, 1, 1 end
-                      return c.r, c.g, c.b, 1
-                  end,
-                  setValue=function(r, g, b)
-                      SSetColor("cooldownTextColor", r, g, b, nil, function(k) EAB:ApplyCooldownFontsForBar(k) end)
-                      SUpdatePreview()
-                  end,
-                  hasAlpha=false },
-                { type="label", text="" });  y = y - h
-
-            -- Sync icon: Cooldown Text (left region)
+            -- Sync icon: Cooldown Text (right region of row 2)
             do
-                local rgn = cdTextRow._leftRegion
+                local rgn = chargesRow._rightRegion
                 EllesmereUI.BuildSyncIcon({
                     region  = rgn,
                     tooltip = "Apply Cooldown Text Settings to all Bars",
@@ -2817,9 +2811,9 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
-            -- Inline cog on Cooldown Text (left) for Size + X/Y offsets
+            -- Inline cog on Cooldown Text (right region of row 2) for Size + X/Y offsets
             do
-                local leftRgn = cdTextRow._leftRegion
+                local rightRgn = chargesRow._rightRegion
                 local _, cdSizeCogShowRaw = EllesmereUI.BuildCogPopup({
                     title = "Cooldown Text Settings",
                     rows = {
@@ -2844,7 +2838,7 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
                 local cdSizeCogShow = cdSizeCogShowRaw
-                MakeCogBtn(leftRgn, cdSizeCogShow, nil, EllesmereUI.RESIZE_ICON)
+                MakeCogBtn(rightRgn, cdSizeCogShow, nil, EllesmereUI.RESIZE_ICON)
             end
 
             _, h = W:Spacer(parent, y, 20);  y = y - h
