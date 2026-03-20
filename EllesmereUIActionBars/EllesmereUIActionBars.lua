@@ -249,6 +249,7 @@ for _, info in ipairs(BAR_CONFIG) do
         overrideNumRows  = nil,
         growDirection    = "up",
         alwaysShowButtons = true,
+        showPagingArrows = false,
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         outOfRangeColoring = false,
@@ -1494,7 +1495,7 @@ local function LayoutPagingFrame()
     local s = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["MainBar"]
     if not s then f:Hide(); return end
 
-    if s.alwaysHidden or s.enabled == false then
+    if s.alwaysHidden or s.enabled == false or not s.showPagingArrows then
         f:Hide()
         return
     end
@@ -1541,6 +1542,7 @@ local function LayoutPagingFrame()
 
     f:Show()
 end
+ns.LayoutPagingFrame = LayoutPagingFrame
 
 -------------------------------------------------------------------------------
 --  Secure Bar Frame Creation

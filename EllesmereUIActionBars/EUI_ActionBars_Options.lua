@@ -3013,6 +3013,18 @@ initFrame:SetScript("OnEvent", function(self)
         if SelectedKey() == "MainBar" then
             _, h = W:SectionHeader(parent, "PAGING", y);  y = y - h
 
+            -- Row: Show Paging Arrows toggle
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Show Paging Arrows",
+                  getValue=function() return SGet("showPagingArrows") or false end,
+                  setValue=function(v)
+                      SSet("showPagingArrows", v, function(k)
+                          if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
+                      end)
+                  end,
+                  tooltip="Show page up/down arrows next to Action Bar 1 for cycling through action bar pages 1-6." },
+                nil);  y = y - h
+
             local function BuildPagingKeybindRow(par, yOff, labelText, dbKey, bindBtnName)
                 local ROW_H = 50
                 local SIDE_PAD = 20
