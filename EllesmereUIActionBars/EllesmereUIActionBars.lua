@@ -1403,6 +1403,19 @@ local function EAB_CyclePage(delta)
     end
 end
 
+-- Hidden buttons for keybind targets (page up/down)
+if not _G["EABPageUpBindBtn"] then
+    local btn = CreateFrame("Button", "EABPageUpBindBtn", UIParent)
+    btn:Hide()
+    btn:SetScript("OnClick", function() EAB_CyclePage(1) end)
+end
+
+if not _G["EABPageDownBindBtn"] then
+    local btn = CreateFrame("Button", "EABPageDownBindBtn", UIParent)
+    btn:Hide()
+    btn:SetScript("OnClick", function() EAB_CyclePage(-1) end)
+end
+
 local function SetupPagingFrame()
     if _pagingFrame then return _pagingFrame end
 
@@ -7432,6 +7445,14 @@ extraBarFrame:RegisterEvent("PLAYER_LOGIN")
 extraBarFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     C_Timer_After(0.5, SetupExtraBars)
+
+    -- Restore action bar paging keybinds
+    if EllesmereUIDB and EllesmereUIDB.actionBarPageUpKey then
+        SetOverrideBindingClick(EABPageUpBindBtn, true, EllesmereUIDB.actionBarPageUpKey, "EABPageUpBindBtn")
+    end
+    if EllesmereUIDB and EllesmereUIDB.actionBarPageDownKey then
+        SetOverrideBindingClick(EABPageDownBindBtn, true, EllesmereUIDB.actionBarPageDownKey, "EABPageDownBindBtn")
+    end
 end)
 
 -------------------------------------------------------------------------------
