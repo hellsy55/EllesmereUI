@@ -1390,6 +1390,119 @@ local function GetClassPagingConditions()
 end
 
 -------------------------------------------------------------------------------
+--  Action Bar 1 Paging Arrows + Page Number
+-------------------------------------------------------------------------------
+local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
+local _pagingFrame   -- forward ref
+
+local function EAB_CyclePage(delta)
+    local cur = GetActionBarPage and GetActionBarPage() or 1
+    local next = ((cur - 1 + delta) % NUM_AB_PAGES) + 1
+    if ChangeActionBarPage then
+        ChangeActionBarPage(next)
+    end
+end
+
+local function SetupPagingFrame()
+    if _pagingFrame then return _pagingFrame end
+
+    local f = CreateFrame("Frame", "EABPagingFrame", UIParent)
+    f:SetSize(20, 52)
+    f:SetFrameStrata("MEDIUM")
+    f:SetFrameLevel(10)
+
+    -- Page number text
+    local pageText = f:CreateFontString(nil, "OVERLAY")
+    pageText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+    pageText:SetTextColor(1, 1, 1, 0.9)
+    pageText:SetText("1")
+    f._pageText = pageText
+
+    -- Up arrow
+    local upBtn = CreateFrame("Button", "EABPagingUp", f)
+    upBtn:SetSize(18, 18)
+    upBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Up")
+    upBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Down")
+    upBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    upBtn:SetScript("OnClick", function() EAB_CyclePage(1) end)
+    f._upBtn = upBtn
+
+    -- Down arrow
+    local downBtn = CreateFrame("Button", "EABPagingDown", f)
+    downBtn:SetSize(18, 18)
+    downBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+    downBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Down")
+    downBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    downBtn:SetScript("OnClick", function() EAB_CyclePage(-1) end)
+    f._downBtn = downBtn
+
+    -- Update page number on events
+    f:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+    f:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    f:SetScript("OnEvent", function()
+        local page = GetActionBarPage and GetActionBarPage() or 1
+        pageText:SetText(tostring(page))
+    end)
+
+    -- Initial text
+    local initPage = GetActionBarPage and GetActionBarPage() or 1
+    pageText:SetText(tostring(initPage))
+
+    _pagingFrame = f
+    return f
+end
+
+local function LayoutPagingFrame()
+    local f = _pagingFrame
+    if not f then return end
+    local mainFrame = barFrames and barFrames["MainBar"]
+    if not mainFrame then f:Hide(); return end
+
+    local s = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["MainBar"]
+    if not s then f:Hide(); return end
+
+    if s.alwaysHidden or s.enabled == false then
+        f:Hide()
+        return
+    end
+
+    local isVertical = (s.orientation == "vertical")
+    local base = barBaseSize and barBaseSize["MainBar"]
+    local btnH = (s.buttonHeight and s.buttonHeight > 0) and s.buttonHeight or (base and base.h or 45)
+    local arrowSize = math.max(14, math.floor(btnH * 0.4))
+    local textSize = math.max(10, math.floor(arrowSize * 0.7))
+    local gap = 2
+
+    f._upBtn:SetSize(arrowSize, arrowSize)
+    f._downBtn:SetSize(arrowSize, arrowSize)
+    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, "OUTLINE")
+
+    f._upBtn:ClearAllPoints()
+    f._downBtn:ClearAllPoints()
+    f._pageText:ClearAllPoints()
+
+    if isVertical then
+        local totalW = arrowSize + gap + textSize * 2 + gap + arrowSize
+        f:SetSize(totalW, arrowSize)
+        f:ClearAllPoints()
+        f:SetPoint("BOTTOM", mainFrame, "TOP", 0, 4)
+        f._downBtn:SetPoint("LEFT", f, "LEFT", 0, 0)
+        f._pageText:SetPoint("CENTER", f, "CENTER", 0, 0)
+        f._upBtn:SetPoint("RIGHT", f, "RIGHT", 0, 0)
+    else
+        local totalH = arrowSize + gap + textSize + gap + arrowSize
+        f:SetSize(arrowSize, totalH)
+        f:ClearAllPoints()
+        f:SetPoint("RIGHT", mainFrame, "LEFT", -4, 0)
+        f._upBtn:SetPoint("TOP", f, "TOP", 0, 0)
+        f._pageText:SetPoint("CENTER", f, "CENTER", 0, 0)
+        f._downBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 0)
+    end
+
+    f:Show()
+end
+
+-------------------------------------------------------------------------------
 --  Secure Bar Frame Creation
 --  Each bar gets a SecureHandlerStateTemplate frame that manages paging.
 --  Paging uses the _childupdate-offset pattern: the parent frame
@@ -2218,6 +2331,12 @@ local function LayoutBar(key)
     -- Propagate anchor chain so anything anchored to this bar follows the resize
     if EllesmereUI and EllesmereUI.PropagateAnchorChain then
         EllesmereUI.PropagateAnchorChain(key)
+    end
+
+    -- Position paging arrows after MainBar layout
+    if key == "MainBar" then
+        if not _pagingFrame then SetupPagingFrame() end
+        LayoutPagingFrame()
     end
 end
 
