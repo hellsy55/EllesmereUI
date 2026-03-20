@@ -220,9 +220,216 @@ if not EllesmereUI.IsUnlockAnchored then
     end
 end
 
+-------------------------------------------------------------------------------
+--  Pure-data position migration for profile import
+--
+--  Converts ALL position fields in a raw profile data table from any legacy
+--  format to CENTER/CENTER. Uses only arithmetic on stored values -- no
+--  frames, no WoW API beyond UIParent:GetSize(). Safe to call at import
+--  time before ReloadUI() and at ADDON_LOADED time for migration.
+--
+--  Handles:
+--    CENTER/CENTER   -> pass through (already correct)
+--    CENTER/TOPLEFT  -> subtract uiW/2 from x, add uiH/2 to y
+--    TOPLEFT/TOPLEFT -> offset by half element size, then TOPLEFT->CENTER
+--    LEFT/CENTER     -> offset by half element width
+--    RIGHT/RIGHT     -> convert using uiW and element width
+--    RIGHT/CENTER    -> offset by half element width (negative)
+--    Any other       -> best-effort TOPLEFT assumption
+-------------------------------------------------------------------------------
+function EllesmereUI.MigrateProfilePositions(profileData)
+    if not profileData or not profileData.addons then return end
+    local uiW, uiH = UIParent:GetSize()
+    local halfW, halfH = uiW / 2, uiH / 2
+
+    -- Convert a single position table in-place.
+    -- ew/eh = estimated element width/height (for TOPLEFT conversion).
+    local function ConvertPos(pos, ew, eh)
+        if not pos then return end
+        -- No point field means it was saved by 5.2.0+ code that only
+        -- writes CENTER/CENTER but the field was omitted. Stamp it.
+        if not pos.point then
+            pos.point = "CENTER"
+            pos.relPoint = "CENTER"
+            return
+        end
+        local pt = pos.point
+        local rp = pos.relPoint or pt
+        -- Already CENTER/CENTER: nothing to do
+        if pt == "CENTER" and rp == "CENTER" then return end
+
+        local x, y = pos.x or 0, pos.y or 0
+        local cx, cy
+
+        if pt == "CENTER" and rp == "TOPLEFT" then
+            cx = x - halfW
+            cy = y + halfH
+        elseif pt == "TOPLEFT" and rp == "TOPLEFT" then
+            local hw, hh = (ew or 0) / 2, (eh or 0) / 2
+            cx = x + hw - halfW
+            cy = y - hh + halfH
+        elseif pt == "LEFT" and rp == "CENTER" then
+            cx = x + (ew or 0) / 2
+            cy = y
+        elseif pt == "RIGHT" and rp == "RIGHT" then
+            cx = halfW + x - (ew or 0) / 2
+            cy = y
+        elseif pt == "RIGHT" and rp == "CENTER" then
+            cx = x - (ew or 0) / 2
+            cy = y
+        elseif rp == "CENTER" then
+            cx = x
+            cy = y
+        else
+            local hw, hh = (ew or 0) / 2, (eh or 0) / 2
+            cx = x + hw - halfW
+            cy = y - hh + halfH
+        end
+
+        pos.point = "CENTER"
+        pos.relPoint = "CENTER"
+        pos.x = cx
+        pos.y = cy
+    end
+
+    local function EstimateUFSize(ufProfile, unitKey)
+        local s = ufProfile[unitKey]
+        if not s then return 160, 46 end
+        local fw = s.frameWidth or 160
+        local hh = s.healthHeight or 34
+        local powerPos = s.powerPosition or "below"
+        local powerH = 0
+        if powerPos == "below" or powerPos == "above" then
+            powerH = s.powerHeight or 6
+        end
+        local btbH = 0
+        if s.bottomTextBar then
+            local btbPos = s.btbPosition or "bottom"
+            if btbPos == "top" or btbPos == "bottom" then
+                btbH = s.bottomTextBarHeight or 16
+            end
+        end
+        local totalH = hh + powerH + btbH
+        local portraitStyle = ufProfile.portraitStyle or "attached"
+        local showPortrait = s.showPortrait ~= false
+        local totalW = fw
+        if showPortrait and portraitStyle == "attached" then
+            totalW = fw + totalH + (s.portraitSize or 0)
+        end
+        return totalW, totalH
+    end
+
+    -- 1. Action bar barPositions
+    local ab = profileData.addons["EllesmereUIActionBars"]
+    if ab and ab.barPositions then
+        for barKey, pos in pairs(ab.barPositions) do
+            local ew, eh = 200, 40
+            if ab.bars and ab.bars[barKey] then
+                local bs = ab.bars[barKey]
+                local bw = bs.buttonWidth or bs.buttonHeight or 36
+                local bh = bs.buttonHeight or bs.buttonWidth or 36
+                local numIcons = bs.overrideNumIcons or 12
+                local numRows = bs.overrideNumRows or 1
+                local spacing = bs.spacing or 2
+                local cols = math.ceil(numIcons / numRows)
+                ew = cols * bw + (cols - 1) * spacing
+                eh = numRows * bh + (numRows - 1) * spacing
+            end
+            ConvertPos(pos, ew, eh)
+        end
+    end
+
+    -- 2. UF positions
+    local uf = profileData.addons["EllesmereUIUnitFrames"]
+    if uf and uf.positions then
+        for unitKey, pos in pairs(uf.positions) do
+            local ew, eh = EstimateUFSize(uf, unitKey)
+            if unitKey == "boss" then
+                ew, eh = EstimateUFSize(uf, "boss")
+            elseif unitKey == "playerCastbar" then
+                local pw, _ = EstimateUFSize(uf, "player")
+                local cbH = uf.player and uf.player.playerCastbarHeight or 14
+                if cbH <= 0 then cbH = 14 end
+                ew, eh = pw, cbH
+            elseif unitKey == "classPower" then
+                ew, eh = 120, 14
+            end
+            ConvertPos(pos, ew, eh)
+        end
+    end
+
+    -- 3. CDM barPositions
+    local cdm = profileData.addons["EllesmereUICooldownManager"]
+    if cdm and cdm.cdmBarPositions then
+        for barKey, pos in pairs(cdm.cdmBarPositions) do
+            local ew = 200
+            local eh = 40
+            if cdm.cdmBars and cdm.cdmBars.bars then
+                for _, bar in ipairs(cdm.cdmBars.bars) do
+                    if bar.key == barKey then
+                        local iconSz = bar.iconSize or 36
+                        local numSpells = bar.trackedSpells and #bar.trackedSpells or 3
+                        local numRows = bar.numRows or 1
+                        local spacing = bar.spacing or 2
+                        local cols = math.ceil(numSpells / numRows)
+                        ew = cols * iconSz + (cols - 1) * spacing
+                        eh = numRows * iconSz + (numRows - 1) * spacing
+                        break
+                    end
+                end
+            end
+            ConvertPos(pos, ew, eh)
+        end
+    end
+
+    -- 4. Resource bar unlockPos
+    local rb = profileData.addons["EllesmereUIResourceBars"]
+    if rb then
+        local sections = { "health", "primary", "castBar" }
+        for _, section in ipairs(sections) do
+            local s = rb[section]
+            if s and s.unlockPos then
+                local ew = s.width or 214
+                local eh = s.height or 16
+                ConvertPos(s.unlockPos, ew, eh)
+            end
+        end
+        if rb.secondary and rb.secondary.unlockPos then
+            local s = rb.secondary
+            local ew = s.pipWidth or 214
+            local eh = s.pipHeight or 20
+            ConvertPos(s.unlockPos, ew, eh)
+        end
+    end
+
+    -- 5. EABR unlockPos
+    local eabr = profileData.addons["EllesmereUIAuraBuffReminders"]
+    if eabr and eabr.unlockPos then
+        local disp = eabr.display or {}
+        local scale = disp.scale or 1.0
+        local iconSz = math.floor(32 * scale + 0.5)
+        local spacing = disp.iconSpacing or 8
+        local count = 2
+        local ew = count * iconSz + (count - 1) * spacing
+        local textH = 0
+        if disp.showText then
+            textH = (disp.textSize or 11) + math.abs(disp.textYOffset or -2)
+        end
+        local eh = iconSz + textH
+        ConvertPos(eabr.unlockPos, ew, eh)
+    end
+
+    -- 6. Cursor unlockPos
+    local cursor = profileData.addons["EllesmereUICursor"]
+    if cursor and cursor.unlockPos then
+        local scale = cursor.scale or 1
+        local sz = math.floor(40 * scale + 0.5)
+        ConvertPos(cursor.unlockPos, sz, sz)
+    end
+end
+
 -- DEFERRED: heavy body (4900+ lines) runs on first EnsureLoaded() call.
 EllesmereUI._deferredInits[#EllesmereUI._deferredInits + 1] = function()
-
 local floor = math.floor
 local abs   = math.abs
 local min   = math.min
@@ -1821,225 +2028,6 @@ function EllesmereUI.IsUnlockAnchored(unlockKey)
     local adb = GetAnchorDB()
     local ai = adb and adb[unlockKey]
     return ai and ai.target and true or false
-end
-
--------------------------------------------------------------------------------
---  Pure-data position migration for profile import
---
---  Converts ALL position fields in a raw profile data table from any legacy
---  format to CENTER/CENTER. Uses only arithmetic on stored values -- no
---  frames, no WoW API beyond UIParent:GetSize(). Safe to call at import
---  time before ReloadUI().
---
---  Handles:
---    CENTER/CENTER   -> pass through (already correct)
---    CENTER/TOPLEFT  -> subtract uiW/2 from x, add uiH/2 to y
---    TOPLEFT/TOPLEFT -> offset by half element size, then TOPLEFT->CENTER
---    LEFT/CENTER     -> offset by half element width
---    RIGHT/RIGHT     -> convert using uiW and element width
---    RIGHT/CENTER    -> offset by half element width (negative)
---    Any other       -> best-effort TOPLEFT assumption
--------------------------------------------------------------------------------
-function EllesmereUI.MigrateProfilePositions(profileData)
-    if not profileData or not profileData.addons then return end
-    local uiW, uiH = UIParent:GetSize()
-    local halfW, halfH = uiW / 2, uiH / 2
-
-    -- Convert a single position table in-place.
-    -- ew/eh = estimated element width/height (for TOPLEFT conversion).
-    local function ConvertPos(pos, ew, eh)
-        if not pos or not pos.point then return end
-        local pt = pos.point
-        local rp = pos.relPoint or pt
-        -- Already CENTER/CENTER: nothing to do
-        if pt == "CENTER" and rp == "CENTER" then return end
-
-        local x, y = pos.x or 0, pos.y or 0
-        local cx, cy
-
-        if pt == "CENTER" and rp == "TOPLEFT" then
-            -- Hybrid: point is element center, relPoint is UIParent TOPLEFT
-            cx = x - halfW
-            cy = y + halfH
-        elseif pt == "TOPLEFT" and rp == "TOPLEFT" then
-            -- Both TOPLEFT: x,y is top-left corner from UIParent top-left
-            local hw, hh = (ew or 0) / 2, (eh or 0) / 2
-            cx = x + hw - halfW
-            cy = y - hh + halfH
-        elseif pt == "LEFT" and rp == "CENTER" then
-            -- CDM format: left edge from UIParent center
-            cx = x + (ew or 0) / 2
-            cy = y
-        elseif pt == "RIGHT" and rp == "RIGHT" then
-            -- Right-anchored: right edge from UIParent right edge
-            -- Frame center = rightEdge + x - frameWidth/2
-            -- In CENTER coords: halfW + x - (ew or 0) / 2
-            cx = halfW + x - (ew or 0) / 2
-            cy = y
-        elseif pt == "RIGHT" and rp == "CENTER" then
-            cx = x - (ew or 0) / 2
-            cy = y
-        elseif rp == "CENTER" then
-            -- Generic point/CENTER: approximate as center
-            cx = x
-            cy = y
-        else
-            -- Unknown: best-effort TOPLEFT assumption
-            local hw, hh = (ew or 0) / 2, (eh or 0) / 2
-            cx = x + hw - halfW
-            cy = y - hh + halfH
-        end
-
-        pos.point = "CENTER"
-        pos.relPoint = "CENTER"
-        pos.x = cx
-        pos.y = cy
-    end
-
-    -- Helper: estimate UF frame dimensions from profile settings
-    local function EstimateUFSize(ufProfile, unitKey)
-        local s = ufProfile[unitKey]
-        if not s then return 160, 46 end  -- fallback
-        local fw = s.frameWidth or 160
-        local hh = s.healthHeight or 34
-        local powerPos = s.powerPosition or "below"
-        local powerH = 0
-        if powerPos == "below" or powerPos == "above" then
-            powerH = s.powerHeight or 6
-        end
-        local btbH = 0
-        if s.bottomTextBar then
-            local btbPos = s.btbPosition or "bottom"
-            if btbPos == "top" or btbPos == "bottom" then
-                btbH = s.bottomTextBarHeight or 16
-            end
-        end
-        local totalH = hh + powerH + btbH
-        -- Portrait adds width if attached
-        local portraitStyle = ufProfile.portraitStyle or "attached"
-        local showPortrait = s.showPortrait ~= false
-        local totalW = fw
-        if showPortrait and portraitStyle == "attached" then
-            totalW = fw + totalH + (s.portraitSize or 0)
-        end
-        return totalW, totalH
-    end
-
-    -- 1. Action bar barPositions
-    local ab = profileData.addons["EllesmereUIActionBars"]
-    if ab and ab.barPositions then
-        for barKey, pos in pairs(ab.barPositions) do
-            -- Estimate bar size from bar settings
-            local ew, eh = 200, 40  -- fallback for extra bars
-            if ab.bars and ab.bars[barKey] then
-                local bs = ab.bars[barKey]
-                local bw = bs.buttonWidth or bs.buttonHeight or 36
-                local bh = bs.buttonHeight or bs.buttonWidth or 36
-                local numIcons = bs.overrideNumIcons or 12
-                local numRows = bs.overrideNumRows or 1
-                local spacing = bs.spacing or 2
-                local cols = math.ceil(numIcons / numRows)
-                ew = cols * bw + (cols - 1) * spacing
-                eh = numRows * bh + (numRows - 1) * spacing
-            end
-            ConvertPos(pos, ew, eh)
-        end
-    end
-
-    -- 2. UF positions
-    local uf = profileData.addons["EllesmereUIUnitFrames"]
-    if uf and uf.positions then
-        for unitKey, pos in pairs(uf.positions) do
-            local ew, eh = EstimateUFSize(uf, unitKey)
-            -- Boss uses boss settings, not "boss1"
-            if unitKey == "boss" then
-                ew, eh = EstimateUFSize(uf, "boss")
-            elseif unitKey == "playerCastbar" then
-                -- Cast bar width matches player frame width
-                local pw, _ = EstimateUFSize(uf, "player")
-                local cbH = uf.player and uf.player.playerCastbarHeight or 14
-                if cbH <= 0 then cbH = 14 end
-                ew, eh = pw, cbH
-            elseif unitKey == "classPower" then
-                ew, eh = 120, 14  -- reasonable default
-            end
-            ConvertPos(pos, ew, eh)
-        end
-    end
-
-    -- 3. CDM barPositions
-    local cdm = profileData.addons["EllesmereUICooldownManager"]
-    if cdm and cdm.cdmBarPositions then
-        for barKey, pos in pairs(cdm.cdmBarPositions) do
-            -- Estimate CDM bar size from bar settings
-            local ew = 200  -- fallback
-            local eh = 40
-            if cdm.cdmBars and cdm.cdmBars.bars then
-                for _, bar in ipairs(cdm.cdmBars.bars) do
-                    if bar.key == barKey then
-                        local iconSz = bar.iconSize or 36
-                        local numSpells = bar.trackedSpells and #bar.trackedSpells or 3
-                        local numRows = bar.numRows or 1
-                        local spacing = bar.spacing or 2
-                        local cols = math.ceil(numSpells / numRows)
-                        ew = cols * iconSz + (cols - 1) * spacing
-                        eh = numRows * iconSz + (numRows - 1) * spacing
-                        break
-                    end
-                end
-            end
-            ConvertPos(pos, ew, eh)
-        end
-    end
-
-    -- 4. Resource bar unlockPos (health, primary, secondary, castBar)
-    local rb = profileData.addons["EllesmereUIResourceBars"]
-    if rb then
-        local sections = { "health", "primary", "castBar" }
-        for _, section in ipairs(sections) do
-            local s = rb[section]
-            if s and s.unlockPos then
-                local ew = s.width or 214
-                local eh = s.height or 16
-                ConvertPos(s.unlockPos, ew, eh)
-            end
-        end
-        -- Secondary uses pipWidth/pipHeight
-        if rb.secondary and rb.secondary.unlockPos then
-            local s = rb.secondary
-            local ew = s.pipWidth or 214
-            local eh = s.pipHeight or 20
-            ConvertPos(s.unlockPos, ew, eh)
-        end
-    end
-
-    -- 5. EABR unlockPos
-    local eabr = profileData.addons["EllesmereUIAuraBuffReminders"]
-    if eabr and eabr.unlockPos then
-        -- EABR size is dynamic (icon count * scale). Use a reasonable
-        -- estimate: 2 icons at default size with default spacing.
-        local disp = eabr.display or {}
-        local scale = disp.scale or 1.0
-        local iconSz = math.floor(32 * scale + 0.5)
-        local spacing = disp.iconSpacing or 8
-        local count = 2  -- minimum display count
-        local ew = count * iconSz + (count - 1) * spacing
-        local textH = 0
-        if disp.showText then
-            textH = (disp.textSize or 11) + math.abs(disp.textYOffset or -2)
-        end
-        local eh = iconSz + textH
-        ConvertPos(eabr.unlockPos, ew, eh)
-    end
-
-    -- 6. Cursor unlockPos (if present)
-    local cursor = profileData.addons["EllesmereUICursor"]
-    if cursor and cursor.unlockPos then
-        -- Cursor is a small ring, ~40x40 default
-        local scale = cursor.scale or 1
-        local sz = math.floor(40 * scale + 0.5)
-        ConvertPos(cursor.unlockPos, sz, sz)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -7379,28 +7367,9 @@ local function DoClose()
     if growDropdownFrame then growDropdownFrame:Hide() end
     if growDropdownCatcher then growDropdownCatcher:Hide() end
 
-    -- Restore action bar alpha and scale (MainBar may have been hidden by OnWorld)
-    if EAB and EAB.db and not InCombatLockdown() then
-        for _, barKey in ipairs(ALL_BAR_ORDER) do
-            local barInfo = BAR_LOOKUP[barKey]
-            if barInfo then
-                local s = EAB.db.profile.bars[barKey]
-                if s and not s.alwaysHidden then
-                    local bar = _G[barInfo.frameName]
-                    if not bar and barInfo.fallbackFrame then bar = _G[barInfo.fallbackFrame] end
-                    if bar and bar:GetAlpha() == 0 and not s.mouseoverEnabled then
-                        bar:SetAlpha(1)
-                    end
-                    -- Also restore parent frame alpha (MainBar has MainMenuBar as parent)
-                    if barInfo.fallbackFrame then
-                        local pf = _G[barInfo.fallbackFrame]
-                        if pf and pf ~= bar and pf:GetAlpha() == 0 and not s.mouseoverEnabled then
-                            pf:SetAlpha(1)
-                        end
-                    end
-                end
-            end
-        end
+    -- Restore action bar alpha from saved settings
+    if EAB and EAB.RefreshMouseover and not InCombatLockdown() then
+        EAB:RefreshMouseover()
     end
 
     -- Restore panel scale and show options
@@ -8137,20 +8106,6 @@ function ns.OpenUnlockMode()
                 end
                 -- Registered elements (unit frames, etc.)
                 RebuildRegisteredOrder()
-                -- Restore alpha-zero-hidden elements so movers can display them.
-                -- Skip frames hidden by SetElementVisibility (gameplay state,
-                -- e.g. cast bar not casting) -- those stay hidden and the
-                -- mover overlay is sufficient.
-                for _, key in ipairs(registeredOrder) do
-                    local elem = registeredElements[key]
-                    if elem and elem.getFrame then
-                        local barFrame = elem.getFrame(key)
-                        if barFrame and not barFrame._euiRestoreAlpha then
-                            barFrame:SetAlpha(1)
-                            barFrame:EnableMouse(true)
-                        end
-                    end
-                end
                 for _, key in ipairs(registeredOrder) do
                     local m = CreateMover(key)
                     if m then m:Sync(); m:SetAlpha(0) end
@@ -8559,21 +8514,9 @@ local function SuspendForCombat()
     selectedMover = nil
     selectElementPicker = nil
 
-    -- Restore action bar alpha (so bars are usable during combat)
-    if EAB and EAB.db then
-        for _, barKey in ipairs(ALL_BAR_ORDER) do
-            local barInfo = BAR_LOOKUP[barKey]
-            if barInfo then
-                local s = EAB.db.profile.bars[barKey]
-                if s and not s.alwaysHidden then
-                    local bar = _G[barInfo.frameName]
-                    if not bar and barInfo.fallbackFrame then bar = _G[barInfo.fallbackFrame] end
-                    if bar and bar:GetAlpha() == 0 and not s.mouseoverEnabled then
-                        bar:SetAlpha(1)
-                    end
-                end
-            end
-        end
+    -- Restore action bar alpha from saved settings (so bars are usable during combat)
+    if EAB and EAB.RefreshMouseover then
+        EAB:RefreshMouseover()
     end
 end
 

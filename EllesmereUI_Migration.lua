@@ -41,11 +41,54 @@ local function MigrateV1()
             "EllesmereUIAuraBuffRemindersDB",
             "EllesmereUICursorDB",
         }
+        -- Before wiping, rescue any old profile data that the per-addon
+        -- NewDB flat-SV migration missed (it only handles the active
+        -- profile). Copy ALL old profiles into the centralized store so
+        -- users updating from 5.1.8 keep every profile, not just Default.
+        local db = EllesmereUIDB
+        if db and db.profiles then
+            for _, svName in ipairs(staleNames) do
+                local sv = _G[svName]
+                if sv and type(sv) == "table" and sv.profiles and type(sv.profiles) == "table" then
+                    local folder = svName:match("^(.+)DB$") or svName
+                    for profName, profData in pairs(sv.profiles) do
+                        if type(profData) == "table" then
+                            -- Ensure the centralized profile exists
+                            if type(db.profiles[profName]) ~= "table" then
+                                db.profiles[profName] = {}
+                            end
+                            if not db.profiles[profName].addons then
+                                db.profiles[profName].addons = {}
+                            end
+                            -- Only copy if the centralized slot is still empty
+                            -- (NewDB may have already migrated the active one)
+                            local slot = db.profiles[profName].addons[folder]
+                            if type(slot) ~= "table" or not next(slot) then
+                                db.profiles[profName].addons[folder] = DeepCopy(profData)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- Now safe to wipe stale keys from child SVs
         for _, svName in ipairs(staleNames) do
             local sv = _G[svName]
             if sv and type(sv) == "table" then
                 sv.profileKeys = nil
                 sv.profiles = nil
+            end
+        end
+        -- Run position migration on any rescued profiles. V8-V10 ran at
+        -- ADDON_LOADED before child data was available, so rescued profiles
+        -- still have old TOPLEFT positions. This is safe to re-run since
+        -- MigrateProfilePositions is idempotent (CENTER/CENTER passes through).
+        local migrate = EllesmereUI and EllesmereUI.MigrateProfilePositions
+        if migrate and db and db.profiles then
+            for _, profileData in pairs(db.profiles) do
+                if profileData and profileData.addons then
+                    migrate(profileData)
+                end
             end
         end
     end)
@@ -253,22 +296,38 @@ end
 --  Positions already in CENTER/CENTER format are passed through unchanged,
 --  so profiles created in 5.2.0+ are unaffected.
 --
---  NOTE: This runs at ADDON_LOADED time. All TOC files (including
---  EUI_UnlockMode.lua which defines MigrateProfilePositions) have been
---  executed by then, so the function is available on the EllesmereUI table.
+--  V9 re-runs the same migration because V8 in 5.2.3 silently failed:
+--  MigrateProfilePositions was inside a deferred block and did not exist
+--  at ADDON_LOADED time. The function has been moved to file scope so it
+--  is now available when the migration runner executes.
 --------------------------------------------------------------------------------
-local function MigrateV8()
+local function MigratePositions()
     local db = EllesmereUIDB
     if not db or not db.profiles then return end
 
     local migrate = EllesmereUI and EllesmereUI.MigrateProfilePositions
-    if not migrate then return end  -- safety: function not loaded yet
+    if not migrate then return end
 
     for _, profileData in pairs(db.profiles) do
         if profileData and profileData.addons then
             migrate(profileData)
         end
     end
+end
+
+local function MigrateV8()
+    MigratePositions()
+end
+
+local function MigrateV9()
+    MigratePositions()
+end
+
+--  V10 re-runs position migration with updated ConvertPos that stamps
+--  CENTER/CENTER on positions missing a point field (saved by 5.2.0+
+--  code that omitted the field). V8/V9 skipped these entries.
+local function MigrateV10()
+    MigratePositions()
 end
 
 --------------------------------------------------------------------------------
@@ -317,6 +376,16 @@ local function RunMigration()
     if ver < 8 then
         MigrateV8()
         EllesmereUIDB._migrationVersion = 8
+    end
+
+    if ver < 9 then
+        MigrateV9()
+        EllesmereUIDB._migrationVersion = 9
+    end
+
+    if ver < 10 then
+        MigrateV10()
+        EllesmereUIDB._migrationVersion = 10
     end
 end
 

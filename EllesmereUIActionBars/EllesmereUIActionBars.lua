@@ -5042,7 +5042,8 @@ function EAB.AnchorVehicleButton()
                 and EAB.db.profile.barPositions["VehicleExit"]
     btn:ClearAllPoints()
     if pos then
-        btn:SetPoint(pos.point, UIParent, pos.relPoint or pos.point,
+        local pt = pos.point or "CENTER"
+        btn:SetPoint(pt, UIParent, pos.relPoint or pt,
                      pos.x, pos.y)
     else
         local bar1 = barFrames["MainBar"]
@@ -5276,8 +5277,9 @@ local function RestoreBarPositions()
             -- Skip for unlock-anchored bars (anchor system is authority)
             local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key)
             if not anchored or not frame:GetLeft() then
+                local pt = pos.point or "CENTER"
                 frame:ClearAllPoints()
-                frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+                frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
             end
         end
     end
@@ -5375,7 +5377,8 @@ local function RegisterWithUnlockMode()
             loadPos = function()
                 local pos = EAB.db.profile.barPositions[info.key]
                 if not pos then return nil end
-                return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                local pt = pos.point or "CENTER"
+                return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
             end,
             clearPos = function()
                 EAB.db.profile.barPositions[info.key] = nil
@@ -5384,8 +5387,9 @@ local function RegisterWithUnlockMode()
                 local pos = EAB.db.profile.barPositions[info.key]
                 local frame = barFrames[info.key]
                 if pos and frame then
+                    local pt = pos.point or "CENTER"
                     frame:ClearAllPoints()
-                    frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+                    frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
                 end
             end,
         })
@@ -5424,7 +5428,8 @@ local function RegisterWithUnlockMode()
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions[bk]
                     if not pos then return nil end
-                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                    local pt = pos.point or "CENTER"
+                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
                     EAB.db.profile.barPositions[bk] = nil
@@ -5435,7 +5440,8 @@ local function RegisterWithUnlockMode()
                     if not holder or InCombatLockdown() then return end
                     holder:ClearAllPoints()
                     if pos then
-                        holder:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                        local pt = pos.point or "CENTER"
+                        holder:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
                     else
                         holder:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
                     end
@@ -5471,7 +5477,8 @@ local function RegisterWithUnlockMode()
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions["VehicleExit"]
                     if not pos then return nil end
-                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                    local pt = pos.point or "CENTER"
+                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
                     EAB.db.profile.barPositions["VehicleExit"] = nil
@@ -6751,7 +6758,8 @@ local function RegisterDataBarsWithUnlockMode()
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions[bk]
                     if not pos then return nil end
-                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                    local pt = pos.point or "CENTER"
+                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
                     EAB.db.profile.barPositions[bk] = nil

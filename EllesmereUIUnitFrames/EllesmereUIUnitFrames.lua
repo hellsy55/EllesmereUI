@@ -1425,8 +1425,10 @@ end
 local function ApplyFramePosition(frame, unit)
     if not frame or not db.profile.positions[unit] then return end
     local pos = db.profile.positions[unit]
+    local pt = pos.point or "CENTER"
+    local rp = pos.relPoint or pt
     frame:ClearAllPoints()
-    frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+    frame:SetPoint(pt, UIParent, rp, pos.x, pos.y)
 end
 
 -- Clip container for health + power bars -- prevents sub-pixel overflow at
@@ -6336,7 +6338,8 @@ function SetupOptionsPanel()
                 loadPos = function(k)
                     local pos = db.profile.positions[k]
                     if not pos then return nil end
-                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                    local pt = pos.point or "CENTER"
+                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 savePos = function(k, point, relPoint, x, y)
                     db.profile.positions[k] = { point = point, relPoint = relPoint, x = x, y = y }
@@ -6368,24 +6371,26 @@ function SetupOptionsPanel()
                 applyPos = function(k)
                     local pos = db.profile.positions[k]
                     if not pos then return end
+                    local pt = pos.point or "CENTER"
+                    local rp = pos.relPoint or pt
                     if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
                         for i = 1, 5 do
                             if frames["boss" .. i] then
                                 frames["boss" .. i]:ClearAllPoints()
-                                frames["boss" .. i]:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y - ((i - 1) * spacing))
+                                frames["boss" .. i]:SetPoint(pt, UIParent, rp, pos.x, pos.y - ((i - 1) * spacing))
                             end
                         end
                     elseif k == "classPower" then
                         if frames._classPowerBar then
                             frames._classPowerBar:ClearAllPoints()
-                            frames._classPowerBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            frames._classPowerBar:SetPoint(pt, UIParent, rp, pos.x, pos.y)
                         end
                     else
                         local fr = frames[k]
                         if fr then
                             fr:ClearAllPoints()
-                            fr:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            fr:SetPoint(pt, UIParent, rp, pos.x, pos.y)
                         end
                     end
                 end,

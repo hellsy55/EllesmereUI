@@ -841,7 +841,8 @@ local function RegisterUnlockElements()
         local function loadPos()
             local pos = getSettings().unlockPos
             if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+            local pt = pos.point or "CENTER"
+            return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
         end
         local function clearPos()
             local s = getSettings()
@@ -856,8 +857,9 @@ local function RegisterUnlockElements()
             if not pos then return end
             local f = frame_fn()
             if f then
+                local pt = pos.point or "CENTER"
                 f:ClearAllPoints()
-                f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                f:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
             end
         end
         return savePos, loadPos, clearPos, applyPos
@@ -961,7 +963,8 @@ local function RegisterUnlockElements()
         local function castLoad()
             local pos = S().unlockPos
             if not pos then return nil end
-            return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+            local pt = pos.point or "CENTER"
+            return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
         end
         local function castClear()
             local cb = S()
@@ -972,8 +975,9 @@ local function RegisterUnlockElements()
             local pos = S().unlockPos
             if not pos then return end
             if castBarFrame then
+                local pt = pos.point or "CENTER"
                 castBarFrame:ClearAllPoints()
-                castBarFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                castBarFrame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
             end
         end
         elements[#elements + 1] = MK({
