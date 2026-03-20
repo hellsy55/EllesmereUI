@@ -241,6 +241,37 @@ local function MigrateV7()
 end
 
 --------------------------------------------------------------------------------
+--  V8: Convert all existing profile positions from TOPLEFT to CENTER format
+--
+--  v5.2.0 changed all position storage from TOPLEFT/TOPLEFT-relative to
+--  CENTER/CENTER-relative. MigrateProfilePositions() was written for this
+--  but only called during profile IMPORT. Users updating from 5.1.8 had
+--  their old TOPLEFT positions interpreted as CENTER offsets, causing
+--  everything to shift dramatically ("whole UI exploded").
+--
+--  This migration calls MigrateProfilePositions on every stored profile.
+--  Positions already in CENTER/CENTER format are passed through unchanged,
+--  so profiles created in 5.2.0+ are unaffected.
+--
+--  NOTE: This runs at ADDON_LOADED time. All TOC files (including
+--  EUI_UnlockMode.lua which defines MigrateProfilePositions) have been
+--  executed by then, so the function is available on the EllesmereUI table.
+--------------------------------------------------------------------------------
+local function MigrateV8()
+    local db = EllesmereUIDB
+    if not db or not db.profiles then return end
+
+    local migrate = EllesmereUI and EllesmereUI.MigrateProfilePositions
+    if not migrate then return end  -- safety: function not loaded yet
+
+    for _, profileData in pairs(db.profiles) do
+        if profileData and profileData.addons then
+            migrate(profileData)
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
 --  Migration runner (idempotent, version-stamped)
 --------------------------------------------------------------------------------
 local function RunMigration()
@@ -281,6 +312,11 @@ local function RunMigration()
     if ver < 7 then
         MigrateV7()
         EllesmereUIDB._migrationVersion = 7
+    end
+
+    if ver < 8 then
+        MigrateV8()
+        EllesmereUIDB._migrationVersion = 8
     end
 end
 

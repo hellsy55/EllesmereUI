@@ -257,22 +257,16 @@ local function RepointAllDBs(profileName)
     end
     -- Restore unlock layout from the profile.
     -- If the profile has no unlockLayout yet (e.g. created before this key
-    -- existed), migrate the current live values into the profile so they are
-    -- not lost, then use them as-is.
+    -- existed), leave the live unlock data untouched so the current
+    -- positions are preserved. Only restore when the profile explicitly
+    -- contains layout data from a previous save.
     local ul = profileData.unlockLayout
-    if not ul then
-        profileData.unlockLayout = {
-            anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
-            widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),
-            heightMatch   = DeepCopy(EllesmereUIDB.unlockHeightMatch or {}),
-            phantomBounds = DeepCopy(EllesmereUIDB.phantomBounds     or {}),
-        }
-        ul = profileData.unlockLayout
+    if ul then
+        EllesmereUIDB.unlockAnchors     = DeepCopy(ul.anchors      or {})
+        EllesmereUIDB.unlockWidthMatch  = DeepCopy(ul.widthMatch   or {})
+        EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
+        EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
     end
-    EllesmereUIDB.unlockAnchors     = DeepCopy(ul.anchors      or {})
-    EllesmereUIDB.unlockWidthMatch  = DeepCopy(ul.widthMatch   or {})
-    EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
-    EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
     -- Restore fonts and custom colors from the profile
     if profileData.fonts then
         local fontsDB = EllesmereUI.GetFontsDB()
@@ -512,20 +506,13 @@ function EllesmereUI.ApplyProfileData(profileData)
     -- Restore unlock mode layout data
     if EllesmereUIDB then
         local ul = profileData.unlockLayout
-        if not ul then
-            -- Profile predates unlockLayout -- migrate live values in rather than wiping
-            profileData.unlockLayout = {
-                anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
-                widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),
-                heightMatch   = DeepCopy(EllesmereUIDB.unlockHeightMatch or {}),
-                phantomBounds = DeepCopy(EllesmereUIDB.phantomBounds     or {}),
-            }
-            ul = profileData.unlockLayout
+        if ul then
+            EllesmereUIDB.unlockAnchors     = DeepCopy(ul.anchors      or {})
+            EllesmereUIDB.unlockWidthMatch  = DeepCopy(ul.widthMatch   or {})
+            EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
+            EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
         end
-        EllesmereUIDB.unlockAnchors     = DeepCopy(ul.anchors      or {})
-        EllesmereUIDB.unlockWidthMatch  = DeepCopy(ul.widthMatch   or {})
-        EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
-        EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
+        -- If profile predates unlockLayout, leave live data untouched
     end
 end
 

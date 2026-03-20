@@ -209,6 +209,17 @@ if not EllesmereUI.NotifyElementResized then
     end
 end
 
+-- Early stub: IsUnlockAnchored
+-- Returns true if the given unlock key has an anchor target in the DB.
+-- The deferred block overwrites this with the full implementation.
+if not EllesmereUI.IsUnlockAnchored then
+    EllesmereUI.IsUnlockAnchored = function(unlockKey)
+        if not EllesmereUIDB or not EllesmereUIDB.unlockAnchors then return false end
+        local ai = EllesmereUIDB.unlockAnchors[unlockKey]
+        return ai and ai.target and true or false
+    end
+end
+
 -- DEFERRED: heavy body (4900+ lines) runs on first EnsureLoaded() call.
 EllesmereUI._deferredInits[#EllesmereUI._deferredInits + 1] = function()
 

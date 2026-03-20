@@ -1717,8 +1717,21 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rightRgn, growCogShow)
             end
 
-            -- Row 3: Vertical Orientation | (empty)
+            -- Row 3: Vertical Orientation | Show Paging Arrows (MainBar only)
             do
+                local rightWidget
+                if SelectedKey() == "MainBar" then
+                    rightWidget = { type="toggle", text="Show Paging Arrows",
+                      getValue=function() return SGet("showPagingArrows") or false end,
+                      setValue=function(v)
+                          SSet("showPagingArrows", v, function(k)
+                              if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
+                          end)
+                      end,
+                      tooltip="Show page up/down arrows next to Action Bar 1 for cycling through action bar pages 1-6." }
+                else
+                    rightWidget = { type="label", text="" }
+                end
                 local orientRow
                 orientRow, h = W:DualRow(parent, y,
                     { type="toggle", text="Vertical Orientation",
@@ -1736,7 +1749,7 @@ initFrame:SetScript("OnEvent", function(self)
                           EllesmereUI:RefreshPage()
                       end,
                       tooltip="Toggle between horizontal and vertical bar layout." },
-                    { type="label", text="" });  y = y - h
+                    rightWidget);  y = y - h
                 -- Sync icon: Orientation (left)
                 do
                     local rgn = orientRow._leftRegion
@@ -1775,6 +1788,62 @@ initFrame:SetScript("OnEvent", function(self)
                             end,
                         },
                     })
+                end
+
+                -- Inline cog: Paging Arrows settings (right region, MainBar only)
+                if SelectedKey() == "MainBar" then
+                    local rRgn = orientRow._rightRegion
+                    local pagingOff = function() return not (SGet("showPagingArrows") or false) end
+
+                    local _, pagingCogShow = EllesmereUI.BuildCogPopup({
+                        title = "Paging Arrow Settings",
+                        rows = {
+                            { type="toggle", label="Show Arrows on Right",
+                              get=function() return SGet("pagingArrowsRight") or false end,
+                              set=function(v)
+                                  SSet("pagingArrowsRight", v, function()
+                                      if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
+                                  end)
+                              end },
+                        },
+                    })
+                    local pagingCogBtn = CreateFrame("Button", nil, rRgn)
+                    pagingCogBtn:SetSize(26, 26)
+                    pagingCogBtn:SetPoint("RIGHT", rRgn._lastInline or rRgn._control, "LEFT", -9, 0)
+                    rRgn._lastInline = pagingCogBtn
+                    pagingCogBtn:SetFrameLevel(rRgn:GetFrameLevel() + 5)
+                    pagingCogBtn:SetAlpha(pagingOff() and 0.15 or 0.4)
+                    local pagingCogTex = pagingCogBtn:CreateTexture(nil, "OVERLAY")
+                    pagingCogTex:SetAllPoints()
+                    pagingCogTex:SetTexture(EllesmereUI.COGS_ICON)
+                    pagingCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                    pagingCogBtn:SetScript("OnLeave", function(self)
+                        self:SetAlpha(pagingOff() and 0.15 or 0.4)
+                    end)
+                    pagingCogBtn:SetScript("OnClick", function(self) pagingCogShow(self) end)
+
+                    local pagingCogBlock = CreateFrame("Frame", nil, pagingCogBtn)
+                    pagingCogBlock:SetAllPoints()
+                    pagingCogBlock:SetFrameLevel(pagingCogBtn:GetFrameLevel() + 10)
+                    pagingCogBlock:EnableMouse(true)
+                    pagingCogBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(pagingCogBtn, EllesmereUI.DisabledTooltip("Show Paging Arrows"))
+                    end)
+                    pagingCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        local off = pagingOff()
+                        if off then
+                            pagingCogBtn:SetAlpha(0.15)
+                            pagingCogBlock:Show()
+                        else
+                            pagingCogBtn:SetAlpha(0.4)
+                            pagingCogBlock:Hide()
+                        end
+                    end)
+                    local pagingCogInitOff = pagingOff()
+                    pagingCogBtn:SetAlpha(pagingCogInitOff and 0.15 or 0.4)
+                    if pagingCogInitOff then pagingCogBlock:Show() else pagingCogBlock:Hide() end
                 end
             end
 
@@ -3006,139 +3075,6 @@ initFrame:SetScript("OnEvent", function(self)
                 pv._textOverlays = textOverlays
             end
         end  -- if not visOnly
-
-        -----------------------------------------------------------------------
-        --  PAGING  (MainBar only)
-        -----------------------------------------------------------------------
-        if SelectedKey() == "MainBar" then
-            _, h = W:SectionHeader(parent, "PAGING", y);  y = y - h
-
-            -- Row: Show Paging Arrows toggle
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Paging Arrows",
-                  getValue=function() return SGet("showPagingArrows") or false end,
-                  setValue=function(v)
-                      SSet("showPagingArrows", v, function(k)
-                          if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
-                      end)
-                  end,
-                  tooltip="Show page up/down arrows next to Action Bar 1 for cycling through action bar pages 1-6." },
-                nil);  y = y - h
-
-            local function BuildPagingKeybindRow(par, yOff, labelText, dbKey, bindBtnName)
-                local ROW_H = 50
-                local SIDE_PAD = 20
-                local kbFrame = CreateFrame("Frame", nil, par)
-                local totalW = par:GetWidth() - EllesmereUI.CONTENT_PAD * 2
-                PP.Size(kbFrame, totalW, ROW_H)
-                PP.Point(kbFrame, "TOPLEFT", par, "TOPLEFT", EllesmereUI.CONTENT_PAD, yOff)
-                EllesmereUI.RowBg(kbFrame, par)
-
-                local label = EllesmereUI.MakeFont(kbFrame, 14, nil, EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
-                PP.Point(label, "LEFT", kbFrame, "LEFT", SIDE_PAD, 0)
-                label:SetText(labelText)
-
-                local KB_W, KB_H = 140, 30
-                local kbBtn = CreateFrame("Button", nil, kbFrame)
-                PP.Size(kbBtn, KB_W, KB_H)
-                PP.Point(kbBtn, "RIGHT", kbFrame, "RIGHT", -SIDE_PAD, 0)
-                kbBtn:SetFrameLevel(kbFrame:GetFrameLevel() + 2)
-                kbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-                local kbBg = EllesmereUI.SolidTex(kbBtn, "BACKGROUND", EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                kbBg:SetAllPoints()
-                kbBtn._border = EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, EllesmereUI.PanelPP)
-                local kbLbl = EllesmereUI.MakeFont(kbBtn, 13, nil, 1, 1, 1)
-                kbLbl:SetAlpha(EllesmereUI.DD_TXT_A)
-                kbLbl:SetPoint("CENTER")
-
-                local bindBtn = _G[bindBtnName]
-
-                local function FormatKey(key)
-                    if not key then return "Not Bound" end
-                    local parts = {}
-                    for mod in key:gmatch("(%u+)%-") do
-                        parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
-                    end
-                    local actualKey = key:match("[^%-]+$") or key
-                    parts[#parts + 1] = actualKey
-                    return table.concat(parts, " + ")
-                end
-
-                local function RefreshLabel()
-                    local key = EllesmereUIDB and EllesmereUIDB[dbKey]
-                    kbLbl:SetText(FormatKey(key))
-                end
-                RefreshLabel()
-
-                local listening = false
-
-                kbBtn:SetScript("OnClick", function(self, button)
-                    if button == "RightButton" then
-                        if listening then listening = false; self:EnableKeyboard(false) end
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        if EllesmereUIDB[dbKey] then
-                            ClearOverrideBindings(bindBtn)
-                        end
-                        EllesmereUIDB[dbKey] = nil
-                        RefreshLabel()
-                        return
-                    end
-                    if listening then return end
-                    listening = true
-                    kbLbl:SetText("Press a key...")
-                    kbBtn:EnableKeyboard(true)
-                end)
-
-                kbBtn:SetScript("OnKeyDown", function(self, key)
-                    if not listening then self:SetPropagateKeyboardInput(true); return end
-                    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
-                       or key == "LALT" or key == "RALT" then
-                        self:SetPropagateKeyboardInput(true); return
-                    end
-                    self:SetPropagateKeyboardInput(false)
-                    if key == "ESCAPE" then
-                        listening = false; self:EnableKeyboard(false); RefreshLabel(); return
-                    end
-                    local mods = ""
-                    if IsShiftKeyDown() then mods = mods .. "SHIFT-" end
-                    if IsControlKeyDown() then mods = mods .. "CTRL-" end
-                    if IsAltKeyDown() then mods = mods .. "ALT-" end
-                    local fullKey = mods .. key
-                    if not EllesmereUIDB then EllesmereUIDB = {} end
-                    ClearOverrideBindings(bindBtn)
-                    SetOverrideBindingClick(bindBtn, true, fullKey, bindBtnName)
-                    EllesmereUIDB[dbKey] = fullKey
-                    listening = false; self:EnableKeyboard(false); RefreshLabel()
-                end)
-
-                kbBtn:SetScript("OnEnter", function(self)
-                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
-                    if kbBtn._border and kbBtn._border.SetColor then kbBtn._border:SetColor(1, 1, 1, 0.3) end
-                    EllesmereUI.ShowWidgetTooltip(self, "Left-click to set a keybind.\nRight-click to unbind.")
-                end)
-                kbBtn:SetScript("OnLeave", function()
-                    if listening then return end
-                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
-                    if kbBtn._border and kbBtn._border.SetColor then kbBtn._border:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A) end
-                    EllesmereUI.HideWidgetTooltip()
-                end)
-
-                EllesmereUI.RegisterWidgetRefresh(RefreshLabel)
-                return ROW_H
-            end
-
-            -- Page Up keybind row
-            do
-                local rowH = BuildPagingKeybindRow(parent, y, "Page Up Keybind", "actionBarPageUpKey", "EABPageUpBindBtn")
-                y = y - rowH
-            end
-
-            -- Page Down keybind row
-            do
-                local rowH = BuildPagingKeybindRow(parent, y, "Page Down Keybind", "actionBarPageDownKey", "EABPageDownBindBtn")
-                y = y - rowH
-            end
-        end  -- if MainBar (PAGING)
 
         return y
     end

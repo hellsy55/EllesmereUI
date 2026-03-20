@@ -250,6 +250,7 @@ for _, info in ipairs(BAR_CONFIG) do
         growDirection    = "up",
         alwaysShowButtons = true,
         showPagingArrows = false,
+        pagingArrowsRight = false,
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         outOfRangeColoring = false,
@@ -1109,6 +1110,40 @@ local function HideBlizzardBars()
     end
     if MainMenuBarPageNumber then MainMenuBarPageNumber:Hide() end
 
+    -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
+    -- read the current page from our state driver. The stock versions
+    -- call ChangeActionBarPage (a C function) which uses
+    -- GetActionBarPage() internally. Something in the stock pipeline
+    -- resets the page back to 1 after each change because we disabled
+    -- MainMenuBar. Our replacements read state-page from the MainBar
+    -- frame and call SetActionBarPage directly.
+    ActionBar_PageUp = function()
+        local mainFrame = barFrames and barFrames["MainBar"]
+        local curPage
+        if mainFrame then
+            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
+        else
+            curPage = GetActionBarPage and GetActionBarPage() or 1
+        end
+        local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local newPage = curPage + 1
+        if newPage > maxPages then newPage = 1 end
+        ChangeActionBarPage(newPage)
+    end
+    ActionBar_PageDown = function()
+        local mainFrame = barFrames and barFrames["MainBar"]
+        local curPage
+        if mainFrame then
+            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
+        else
+            curPage = GetActionBarPage and GetActionBarPage() or 1
+        end
+        local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local newPage = curPage - 1
+        if newPage < 1 then newPage = maxPages end
+        ChangeActionBarPage(newPage)
+    end
+
     -- Hide status tracking bar manager (unless user wants Blizzard data bars)
     if not (EAB.db and EAB.db.profile.useBlizzardDataBars) then
         if StatusTrackingBarManager then
@@ -1347,6 +1382,8 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
     return btn
 end
 
+local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
+
 -------------------------------------------------------------------------------
 --  Paging State Conditions (class-specific)
 --  Format: "[condition] pageNumber; ..."
@@ -1377,9 +1414,8 @@ local function GetClassPagingConditions()
     conditions = conditions .. "[bonusbar:5] 11; "
 
     -- Manual page switching (pages 2-6)
-    -- [bar:N] checks WoW's internal action bar page set by ChangeActionBarPage().
-    -- This allows the state driver to respond to manual page cycling.
-    local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
+    -- [bar:N] responds to WoW's internal page set by ChangeActionBarPage().
+    -- The built-in keybinds and our paging arrows trigger this securely.
     for i = 2, NUM_AB_PAGES do
         conditions = conditions .. "[bar:" .. i .. "] " .. i .. "; "
     end
@@ -1393,28 +1429,29 @@ end
 -------------------------------------------------------------------------------
 --  Action Bar 1 Paging Arrows + Page Number
 -------------------------------------------------------------------------------
-local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
-local _pagingFrame   -- forward ref
+local _pagingFrame    -- forward ref
+local LayoutPagingFrame  -- forward ref (used inside SetupPagingFrame closure)
 
-local function EAB_CyclePage(delta)
-    local cur = GetActionBarPage and GetActionBarPage() or 1
-    local next = ((cur - 1 + delta) % NUM_AB_PAGES) + 1
-    if ChangeActionBarPage then
-        ChangeActionBarPage(next)
-    end
+-- Sync the paging frame alpha with the MainBar frame.
+-- Called from mouseover, drag, combat, and refresh code paths.
+local function SyncPagingAlpha(alpha)
+    if _pagingFrame then _pagingFrame:SetAlpha(alpha) end
 end
 
--- Hidden buttons for keybind targets (page up/down)
-if not _G["EABPageUpBindBtn"] then
-    local btn = CreateFrame("Button", "EABPageUpBindBtn", UIParent)
-    btn:Hide()
-    btn:SetScript("OnClick", function() EAB_CyclePage(1) end)
+-- Paging arrows and keybind buttons use SecureActionButtonTemplate with
+-- type "macro". The macro uses [bar:N] conditionals to cycle through
+-- pages statically, so no dynamic attribute changes are needed.
+-- This runs in the protected execution path on hardware click.
+local _macroNext = "/changeactionbar [bar:6] 1"
+local _macroPrev = "/changeactionbar [bar:1] 6"
+for i = 1, NUM_AB_PAGES - 1 do
+    _macroNext = _macroNext .. "; [bar:" .. i .. "] " .. (i + 1)
+    _macroPrev = _macroPrev .. "; [bar:" .. (i + 1) .. "] " .. i
 end
 
-if not _G["EABPageDownBindBtn"] then
-    local btn = CreateFrame("Button", "EABPageDownBindBtn", UIParent)
-    btn:Hide()
-    btn:SetScript("OnClick", function() EAB_CyclePage(-1) end)
+local function WireSecurePagingButton(btn, delta)
+    btn:SetAttribute("type", "macro")
+    btn:SetAttribute("macrotext", delta > 0 and _macroNext or _macroPrev)
 end
 
 local function SetupPagingFrame()
@@ -1432,25 +1469,27 @@ local function SetupPagingFrame()
     pageText:SetText("1")
     f._pageText = pageText
 
-    -- Up arrow
-    local upBtn = CreateFrame("Button", "EABPagingUp", f)
+    -- Up arrow (clicks Blizzard's ActionBarUpButton securely)
+    local upBtn = CreateFrame("Button", "EABPagingUp", f, "SecureActionButtonTemplate")
     upBtn:SetSize(18, 18)
-    upBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Up")
-    upBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Down")
-    upBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    upBtn:SetScript("OnClick", function() EAB_CyclePage(1) end)
+    upBtn:RegisterForClicks("AnyUp", "AnyDown")
+    upBtn:SetNormalAtlas("UI-HUD-ActionBar-PageUpArrow-Up")
+    upBtn:SetPushedAtlas("UI-HUD-ActionBar-PageUpArrow-Down")
+    upBtn:SetDisabledAtlas("UI-HUD-ActionBar-PageUpArrow-Disabled")
+    upBtn:SetHighlightAtlas("UI-HUD-ActionBar-PageUpArrow-Mouseover")
     f._upBtn = upBtn
 
-    -- Down arrow
-    local downBtn = CreateFrame("Button", "EABPagingDown", f)
+    -- Down arrow (clicks Blizzard's ActionBarDownButton securely)
+    local downBtn = CreateFrame("Button", "EABPagingDown", f, "SecureActionButtonTemplate")
     downBtn:SetSize(18, 18)
-    downBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-    downBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Down")
-    downBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    downBtn:SetScript("OnClick", function() EAB_CyclePage(-1) end)
+    downBtn:RegisterForClicks("AnyUp", "AnyDown")
+    downBtn:SetNormalAtlas("UI-HUD-ActionBar-PageDownArrow-Up")
+    downBtn:SetPushedAtlas("UI-HUD-ActionBar-PageDownArrow-Down")
+    downBtn:SetDisabledAtlas("UI-HUD-ActionBar-PageDownArrow-Disabled")
+    downBtn:SetHighlightAtlas("UI-HUD-ActionBar-PageDownArrow-Mouseover")
     f._downBtn = downBtn
 
-    -- Update page number on events; hide during vehicle/override; combat sync
+    -- Update page text and handle combat visibility / vehicle state
     f:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     f:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
     f:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
@@ -1482,11 +1521,15 @@ local function SetupPagingFrame()
     local initPage = GetActionBarPage and GetActionBarPage() or 1
     pageText:SetText(tostring(initPage))
 
+    -- Wire arrow buttons to cycle pages via secure macro
+    WireSecurePagingButton(upBtn, 1)
+    WireSecurePagingButton(downBtn, -1)
+
     _pagingFrame = f
     return f
 end
 
-local function LayoutPagingFrame()
+LayoutPagingFrame = function()
     local f = _pagingFrame
     if not f then return end
     local mainFrame = barFrames and barFrames["MainBar"]
@@ -1522,11 +1565,17 @@ local function LayoutPagingFrame()
     f._downBtn:ClearAllPoints()
     f._pageText:ClearAllPoints()
 
+    local onRight = s.pagingArrowsRight
+
     if isVertical then
         local totalW = arrowSize + gap + textSize * 2 + gap + arrowSize
         f:SetSize(totalW, arrowSize)
         f:ClearAllPoints()
-        f:SetPoint("BOTTOM", mainFrame, "TOP", 0, 4)
+        if onRight then
+            f:SetPoint("TOP", mainFrame, "BOTTOM", 0, -4)
+        else
+            f:SetPoint("BOTTOM", mainFrame, "TOP", 0, 4)
+        end
         f._downBtn:SetPoint("LEFT", f, "LEFT", 0, 0)
         f._pageText:SetPoint("CENTER", f, "CENTER", 0, 0)
         f._upBtn:SetPoint("RIGHT", f, "RIGHT", 0, 0)
@@ -1534,7 +1583,11 @@ local function LayoutPagingFrame()
         local totalH = arrowSize + gap + textSize + gap + arrowSize
         f:SetSize(arrowSize, totalH)
         f:ClearAllPoints()
-        f:SetPoint("RIGHT", mainFrame, "LEFT", -4, 0)
+        if onRight then
+            f:SetPoint("LEFT", mainFrame, "RIGHT", 4, 0)
+        else
+            f:SetPoint("RIGHT", mainFrame, "LEFT", -4, 0)
+        end
         f._upBtn:SetPoint("TOP", f, "TOP", 0, 0)
         f._pageText:SetPoint("CENTER", f, "CENTER", 0, 0)
         f._downBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 0)
@@ -2379,6 +2432,49 @@ local function LayoutBar(key)
     if key == "MainBar" then
         if not _pagingFrame then SetupPagingFrame() end
         LayoutPagingFrame()
+        -- Set up secure paging keybind overrides (once, out of combat).
+        -- Redirects NEXTACTIONPAGE / PREVIOUSACTIONPAGE to hidden secure
+        -- buttons so page cycling works in combat without taint.
+        if _pagingFrame and not _pagingFrame._pageBindsSet and not InCombatLockdown() then
+            _pagingFrame._pageBindsSet = true
+            local nextBtn = CreateFrame("Button", "EABPageNext", UIParent, "SecureActionButtonTemplate")
+            nextBtn:SetSize(1, 1)
+            nextBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -200, 200)
+            nextBtn:SetAlpha(0)
+            nextBtn:RegisterForClicks("AnyUp", "AnyDown")
+            WireSecurePagingButton(nextBtn, 1)
+
+            local prevBtn = CreateFrame("Button", "EABPagePrev", UIParent, "SecureActionButtonTemplate")
+            prevBtn:SetSize(1, 1)
+            prevBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -200, 200)
+            prevBtn:SetAlpha(0)
+            prevBtn:RegisterForClicks("AnyUp", "AnyDown")
+            WireSecurePagingButton(prevBtn, -1)
+
+            local function ApplyPageBindings()
+                if InCombatLockdown() then return end
+                ClearOverrideBindings(_pagingFrame)
+                local nextKeys = { GetBindingKey("NEXTACTIONPAGE") }
+                local prevKeys = { GetBindingKey("PREVIOUSACTIONPAGE") }
+                for _, k in ipairs(nextKeys) do
+                    SetOverrideBindingClick(_pagingFrame, true, k, "EABPageNext")
+                end
+                for _, k in ipairs(prevKeys) do
+                    SetOverrideBindingClick(_pagingFrame, true, k, "EABPagePrev")
+                end
+            end
+            ApplyPageBindings()
+            -- Re-apply if user changes keybinds
+            _pagingFrame:RegisterEvent("UPDATE_BINDINGS")
+            local origOnEvent = _pagingFrame:GetScript("OnEvent")
+            _pagingFrame:SetScript("OnEvent", function(self, event, ...)
+                if event == "UPDATE_BINDINGS" then
+                    if not InCombatLockdown() then ApplyPageBindings() end
+                    return
+                end
+                if origOnEvent then origOnEvent(self, event, ...) end
+            end)
+        end
     end
 end
 
@@ -3031,9 +3127,7 @@ function EAB:ApplyBarOpacity(barKey)
     if not frame then return end
     if not s.mouseoverEnabled then
         frame:SetAlpha(s.mouseoverAlpha or 1)
-        if barKey == "MainBar" and _pagingFrame then
-            _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
-        end
+        if barKey == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
     end
 end
 
@@ -3607,9 +3701,7 @@ local function AttachHoverHooks(barKey)
             state.fadeDir = "in"
             StopFade(frame)
             FadeTo(frame, 1, s.mouseoverSpeed or 0.15)
-            if barKey == "MainBar" and _pagingFrame then
-                _pagingFrame:SetAlpha(1)
-            end
+            if barKey == "MainBar" then SyncPagingAlpha(1) end
         end
     end
 
@@ -3623,9 +3715,7 @@ local function AttachHoverHooks(barKey)
             if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                 state.fadeDir = "out"
                 FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
-                if barKey == "MainBar" and _pagingFrame then
-                    _pagingFrame:SetAlpha(0)
-                end
+                if barKey == "MainBar" then SyncPagingAlpha(0) end
             end
         end)
     end
@@ -3640,9 +3730,7 @@ local function AttachHoverHooks(barKey)
                 if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                     state.fadeDir = "out"
                     FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
-                    if barKey == "MainBar" and _pagingFrame then
-                        _pagingFrame:SetAlpha(0)
-                    end
+                    if barKey == "MainBar" then SyncPagingAlpha(0) end
                 end
             end)
         end
@@ -3682,17 +3770,13 @@ function EAB:RefreshMouseover()
                 frame:SetAlpha(0)
                 local state = hoverStates[key]
                 if state then state.fadeDir = "out" end
-                if key == "MainBar" and _pagingFrame then
-                    _pagingFrame:SetAlpha(0)
-                end
+                if key == "MainBar" then SyncPagingAlpha(0) end
             else
                 StopFade(frame)
                 frame:SetAlpha(s.mouseoverAlpha or 1)
                 local state = hoverStates[key]
                 if state then state.fadeDir = nil end
-                if key == "MainBar" and _pagingFrame then
-                    _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
-                end
+                if key == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
             end
         end
     end
@@ -5829,9 +5913,7 @@ function EAB:FinishSetup()
                         if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                             state.fadeDir = "out"
                             FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15)
-                            if key == "MainBar" and _pagingFrame then
-                                _pagingFrame:SetAlpha(0)
-                            end
+                            if key == "MainBar" then SyncPagingAlpha(0) end
                         end
                     end
                 end
@@ -5948,9 +6030,7 @@ function EAB:FinishSetup()
                         StopFade(frame)
                         frame:SetAlpha(s.mouseoverAlpha or 1)
                         if state then state.fadeDir = "in" end
-                        if key == "MainBar" and _pagingFrame then
-                            _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
-                        end
+                        if key == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
                     end
                 else
                     -- Restore original strata (only if we changed it)
@@ -5967,9 +6047,7 @@ function EAB:FinishSetup()
                             StopFade(frame)
                             FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
                             if state then state.fadeDir = "out" end
-                            if key == "MainBar" and _pagingFrame then
-                                _pagingFrame:SetAlpha(0)
-                            end
+                            if key == "MainBar" then SyncPagingAlpha(0) end
                         end
                     end
                 end
@@ -7501,14 +7579,6 @@ extraBarFrame:RegisterEvent("PLAYER_LOGIN")
 extraBarFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     C_Timer_After(0.5, SetupExtraBars)
-
-    -- Restore action bar paging keybinds
-    if EllesmereUIDB and EllesmereUIDB.actionBarPageUpKey then
-        SetOverrideBindingClick(EABPageUpBindBtn, true, EllesmereUIDB.actionBarPageUpKey, "EABPageUpBindBtn")
-    end
-    if EllesmereUIDB and EllesmereUIDB.actionBarPageDownKey then
-        SetOverrideBindingClick(EABPageDownBindBtn, true, EllesmereUIDB.actionBarPageDownKey, "EABPageDownBindBtn")
-    end
 end)
 
 -------------------------------------------------------------------------------

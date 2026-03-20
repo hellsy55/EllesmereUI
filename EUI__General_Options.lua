@@ -113,6 +113,7 @@ initFrame:SetScript("OnEvent", function(self)
     local errorPopup
 
     local function ShowErrorPopup(id, err)
+        EllesmereUI:EnsureLoaded()
         if not errorPopup then
             local POPUP_W, POPUP_H = 520, 340
             local FONT = EllesmereUI.EXPRESSWAY
