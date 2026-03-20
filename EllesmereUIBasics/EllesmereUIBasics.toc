@@ -2,15 +2,19 @@
 ## Title: |cff0cd29fEllesmereUI|r Basics
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Chat, Minimap, and Friends List skinning
+## Notes: Chat, Minimap, Friends List, Quest Tracker, and Cursor skinning
 ## Author: Ellesmere
 ## Version: 5.2.2
 ## Dependencies: EllesmereUI
-## SavedVariables: EllesmereUIBasicsDB
+## SavedVariables: EllesmereUIBasicsDB, EllesmereUICursorDB, EllesmereUIQuestTrackerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 
 # Main Lua
 EllesmereUIBasics.lua
+EllesmereUIBasics_QuestTracker.lua
+EllesmereUIBasics_Cursor.lua
 
 # Options
+EUI_Basics_QuestTracker_Options.lua
+EUI_Basics_Cursor_Options.lua
 EUI_Basics_Options.lua

@@ -155,11 +155,39 @@ end
 
 local tabFlashHooked = false
 
+local function UnskinChatFrame(chatFrame)
+    if not chatFrame then return end
+    if chatFrame._ebsBg then chatFrame._ebsBg:SetAlpha(0) end
+    if chatFrame._ppBorders then PP.SetBorderColor(chatFrame, 0, 0, 0, 0) end
+
+    local name = chatFrame:GetName()
+    if name then
+        local editBox = _G[name .. "EditBox"]
+        if editBox then
+            if editBox._ebsBg then editBox._ebsBg:SetAlpha(0) end
+            if editBox._ppBorders then PP.SetBorderColor(editBox, 0, 0, 0, 0) end
+        end
+    end
+end
+
 local function ApplyChat()
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.chat
-    if not p.enabled then return end
+
+    if not p.enabled then
+        -- Revert all skinned chat frames
+        for chatFrame in pairs(skinnedChatFrames) do
+            UnskinChatFrame(chatFrame)
+        end
+        -- Restore buttons
+        if chatButtonsHidden then
+            local buttons = { ChatFrameMenuButton, ChatFrameChannelButton, QuickJoinToastButton }
+            for _, btn in ipairs(buttons) do ShowChatButton(btn) end
+            chatButtonsHidden = false
+        end
+        return
+    end
 
     local numWindows = NUM_CHAT_WINDOWS or 10
     for i = 1, numWindows do
@@ -262,10 +290,33 @@ local function ApplyMinimap()
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.minimap
-    if not p.enabled then return end
 
     local minimap = Minimap
     if not minimap then return end
+
+    if not p.enabled then
+        -- Restore default decorations
+        for _, name in ipairs(minimapDecorations) do
+            local frame = _G[name]
+            if frame then frame:Show() end
+        end
+        -- Restore circular mask
+        minimap:SetMaskTexture("Textures\\MinimapMask")
+        -- Hide our background & border
+        if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
+        if minimap._ppBorders then PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        -- Reset scale
+        minimap:SetScale(1.0)
+        -- Restore buttons
+        if minimapButtonsHidden then
+            for _, name in ipairs(minimapButtons) do ShowMinimapButton(name) end
+            minimapButtonsHidden = false
+        end
+        -- Restore zone text
+        local zoneBtn = MinimapZoneTextButton
+        if zoneBtn then zoneBtn:Show() end
+        return
+    end
 
     -- Hide default decorations
     for _, name in ipairs(minimapDecorations) do
@@ -360,11 +411,26 @@ local function ApplyFriends()
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.friends
-    if not p.enabled then return end
+
+    if not p.enabled then
+        if FriendsFrame and friendsSkinned then
+            if FriendsFrame._ebsBg then FriendsFrame._ebsBg:SetAlpha(0) end
+            if FriendsFrame._ppBorders then PP.SetBorderColor(FriendsFrame, 0, 0, 0, 0) end
+            if FriendsFrame.NineSlice then FriendsFrame.NineSlice:Show() end
+            for i = 1, 4 do
+                local tab = _G["FriendsFrameTab" .. i]
+                if tab and tab._ppBorders then PP.SetBorderColor(tab, 0, 0, 0, 0) end
+            end
+        end
+        return
+    end
 
     -- FriendsFrame is load-on-demand — ensure structural setup first
     if not FriendsFrame then return end
     SkinFriendsFrame()
+
+    -- Re-show our elements in case they were hidden by disable
+    if FriendsFrame.NineSlice then FriendsFrame.NineSlice:Hide() end
 
     local r, g, b, a = GetBorderColor(p)
     PP.SetBorderColor(FriendsFrame, r, g, b, a)

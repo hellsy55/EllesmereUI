@@ -5,9 +5,11 @@
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
-local PAGE_CHAT    = "Chat"
-local PAGE_MINIMAP = "Minimap"
-local PAGE_FRIENDS = "Friends List"
+local PAGE_CHAT          = "Chat"
+local PAGE_MINIMAP       = "Minimap"
+local PAGE_FRIENDS       = "Friends List"
+local PAGE_QUEST_TRACKER = "Quest Tracker"
+local PAGE_CURSOR        = "Cursor Circle"
 
 local SECTION_CHAT    = "CHAT"
 local SECTION_MINIMAP = "MINIMAP"
@@ -309,17 +311,25 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     EllesmereUI:RegisterModule("EllesmereUIBasics", {
         title       = "Basics",
-        description = "Chat, Minimap, and Friends List skinning.",
-        pages       = { PAGE_CHAT, PAGE_MINIMAP, PAGE_FRIENDS },
+        description = "Chat, Minimap, Friends List, Quest Tracker, and Cursor.",
+        pages       = { PAGE_CHAT, PAGE_MINIMAP, PAGE_FRIENDS, PAGE_QUEST_TRACKER, PAGE_CURSOR },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_CHAT    then return BuildChatPage(pageName, parent, yOffset) end
             if pageName == PAGE_MINIMAP then return BuildMinimapPage(pageName, parent, yOffset) end
             if pageName == PAGE_FRIENDS then return BuildFriendsPage(pageName, parent, yOffset) end
+            if pageName == PAGE_QUEST_TRACKER and _G._EBS_BuildQuestTrackerPage then
+                return _G._EBS_BuildQuestTrackerPage(pageName, parent, yOffset)
+            end
+            if pageName == PAGE_CURSOR and _G._EBS_BuildCursorPage then
+                return _G._EBS_BuildCursorPage(pageName, parent, yOffset)
+            end
         end,
         onReset = function()
             if _G._EBS_AceDB then
                 _G._EBS_AceDB:ResetProfile()
             end
+            if _G._EBS_ResetCursor then _G._EBS_ResetCursor() end
+            if _G._EBS_ResetQuestTracker then _G._EBS_ResetQuestTracker() end
             EllesmereUI:InvalidatePageCache()
             RefreshAll()
         end,
