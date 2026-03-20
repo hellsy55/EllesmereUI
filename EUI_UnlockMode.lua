@@ -1573,6 +1573,18 @@ ApplyCenterPosition = function(barKey, pos)
     end
 
     pcall(function()
+        if InCombatLockdown() and frame:IsProtected() then
+            local deferFrame = CreateFrame("Frame")
+            deferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            deferFrame:SetScript("OnEvent", function(self)
+                self:UnregisterAllEvents()
+                pcall(function()
+                    frame:ClearAllPoints()
+                    frame:SetPoint(anchor, UIParent, "CENTER", adjX, adjY)
+                end)
+            end)
+            return
+        end
         frame:ClearAllPoints()
         frame:SetPoint(anchor, UIParent, "CENTER", adjX, adjY)
     end)

@@ -7631,7 +7631,11 @@ local function TalentAwareReconcile()
     -- Helper: reconcile a single spell list (trackedSpells or customSpells)
     -- Returns the new active list with dormant spells removed and returning
     -- spells re-inserted at their saved positions.
-    local function ReconcileSpellList(spellList, dormant, removed)
+    -- classSpellSet: optional set of ALL class spellIDs (from the full CDM
+    -- category set). When provided, spells in this set are never moved to
+    -- dormant -- they are permanent class abilities that may appear missing
+    -- from the "currently known" set during API timing gaps.
+    local function ReconcileSpellList(spellList, dormant, removed, classSpellSet)
         if not spellList then return nil, dormant end
         if not dormant then dormant = {} end
 
@@ -7645,7 +7649,8 @@ local function TalentAwareReconcile()
             if sid and sid ~= 0 then
                 if seenInActive[sid] then
                     -- Duplicate already in active list -- skip silently
-                elseif knownSet[sid] or (_IPS and _IPS(sid)) then
+                elseif knownSet[sid] or (_IPS and _IPS(sid))
+                       or (classSpellSet and classSpellSet[sid]) then
                     active[#active + 1] = sid
                     seenInActive[sid] = true
                 else
@@ -7669,6 +7674,7 @@ local function TalentAwareReconcile()
         for sid, savedSlot in pairs(dormant) do
             local isKnown = knownSet[sid]
                 or (_IPS and _IPS(sid))
+                or (classSpellSet and classSpellSet[sid])
             if isKnown and not (removed and removed[sid]) then
                 -- Only return spells that aren't already in the active list
                 if not activeSet[sid] then
@@ -7732,6 +7738,36 @@ local function TalentAwareReconcile()
         return active, (next(dormant) and dormant or nil)
     end
 
+    -- Build a set of ALL class spellIDs (regardless of current talents).
+    -- Used for custom bars so permanent class abilities (e.g. Stampeding Roar)
+    -- are never moved to dormant due to API timing gaps during talent swaps.
+    local classSpellSet = {}
+    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
+        for cat = 0, 3 do
+            local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+            if allIDs then
+                for _, cdID in ipairs(allIDs) do
+                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                    if info then
+                        if info.spellID and info.spellID > 0 then
+                            classSpellSet[info.spellID] = true
+                        end
+                        if info.overrideSpellID and info.overrideSpellID > 0 then
+                            classSpellSet[info.overrideSpellID] = true
+                        end
+                        if info.linkedSpellIDs then
+                            for _, lsid in ipairs(info.linkedSpellIDs) do
+                                if lsid and lsid > 0 then
+                                    classSpellSet[lsid] = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Process each bar
     for _, barData in ipairs(p.cdmBars.bars) do
         local sd = ns.GetBarSpellData(barData.key)
@@ -7740,12 +7776,12 @@ local function TalentAwareReconcile()
         elseif MAIN_BAR_KEYS[barData.key] and TALENT_AWARE_BAR_TYPES[barData.key] then
             if sd.trackedSpells and #sd.trackedSpells > 0 then
                 sd.trackedSpells, sd.dormantSpells =
-                    ReconcileSpellList(sd.trackedSpells, sd.dormantSpells, sd.removedSpells)
+                    ReconcileSpellList(sd.trackedSpells, sd.dormantSpells, sd.removedSpells, nil)
             end
         elseif TALENT_AWARE_BAR_TYPES[barData.barType] then
             if sd.customSpells and #sd.customSpells > 0 then
                 sd.customSpells, sd.dormantSpells =
-                    ReconcileSpellList(sd.customSpells, sd.dormantSpells, nil)
+                    ReconcileSpellList(sd.customSpells, sd.dormantSpells, nil, classSpellSet)
             end
         end
     end
