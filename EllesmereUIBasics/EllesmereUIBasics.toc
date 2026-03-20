@@ -1,0 +1,16 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Basics
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Chat, Minimap, and Friends List skinning
+## Author: Ellesmere
+## Version: 5.2.2
+## Dependencies: EllesmereUI
+## SavedVariables: EllesmereUIBasicsDB
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+# Main Lua
+EllesmereUIBasics.lua
+
+# Options
+EUI_Basics_Options.lua
