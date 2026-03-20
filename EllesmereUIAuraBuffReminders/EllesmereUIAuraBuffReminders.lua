@@ -2186,6 +2186,9 @@ end
 -------------------------------------------------------------------------------
 local function ApplyUnlockPos()
     if not iconAnchor or not db then return end
+    -- Skip for unlock-anchored elements (anchor system is authority)
+    local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("EABR_Reminders")
+    if anchored and iconAnchor:GetLeft() then return end
     local pos = db.profile.unlockPos
     if pos and pos.point then
         iconAnchor:ClearAllPoints()

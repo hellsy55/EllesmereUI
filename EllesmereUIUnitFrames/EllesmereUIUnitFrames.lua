@@ -4084,13 +4084,18 @@ local function ReloadFrames()
                 local bossPos = db.profile.positions.boss
                 local bossSpacing = db.profile.bossSpacing or 60
                 local bossIdx = tonumber(unit:match("(%d+)$"))
-                if bossPos and bossIdx and not (EllesmereUI and EllesmereUI._unlockActive) then
+                local bossAnchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("boss")
+                if bossPos and bossIdx and not (EllesmereUI and EllesmereUI._unlockActive) and (not bossAnchored or not frame:GetLeft()) then
                     frame:ClearAllPoints()
                     frame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y - ((bossIdx - 1) * bossSpacing))
                 end
             else
                 if not (EllesmereUI and EllesmereUI._unlockActive) then
-                    ApplyFramePosition(frame, unit)
+                    -- Skip for unlock-anchored elements (anchor system is authority)
+                    local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unit)
+                    if not anchored or not frame:GetLeft() then
+                        ApplyFramePosition(frame, unit)
+                    end
                 end
             end
             local settings = GetSettingsForUnit(unit)

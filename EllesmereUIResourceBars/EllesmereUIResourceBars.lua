@@ -2880,9 +2880,8 @@ BuildCastBar = function()
         if EllesmereUI._unlockActive then
             castBarFrame:SetSize(totalW, h)
         elseif anchored and castBarFrame:GetLeft() then
-            -- Anchor system owns position; only animate size
-            SmoothBarAnimate(castBarFrame, "w", totalW, nil)
-            SmoothBarAnimate(castBarFrame, "h", h, nil)
+            -- Anchor system owns position; just set size directly
+            castBarFrame:SetSize(totalW, h)
         else
             local function ApplyCastUnlockTransform()
                 local aw = castBarFrame["_barAnim_w"] or totalW

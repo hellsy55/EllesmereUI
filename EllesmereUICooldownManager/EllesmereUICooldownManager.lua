@@ -1147,6 +1147,22 @@ function ns.GetBarSpellData(barKey)
         bs = {}
         prof.barSpells[barKey] = bs
     end
+    -- Custom bars must always have a customSpells list so all code paths
+    -- (AddTrackedSpell, UpdateCustomBarIcons, reconcile, etc.) use the
+    -- correct field. Without this, spells added on a spec where the bar
+    -- was not originally created would land in trackedSpells instead,
+    -- making them invisible on reload.
+    if barKey ~= "cooldowns" and barKey ~= "utility" and barKey ~= "buffs" then
+        if not bs.customSpells then
+            -- Migrate any spells that were incorrectly stored as trackedSpells
+            if bs.trackedSpells and #bs.trackedSpells > 0 then
+                bs.customSpells = bs.trackedSpells
+                bs.trackedSpells = nil
+            else
+                bs.customSpells = {}
+            end
+        end
+    end
     return bs
 end
 
@@ -1157,7 +1173,20 @@ function ns.GetBarSpellDataForSpec(barKey, specKey)
     local prof = sp[specKey]
     if not prof then return nil end
     if not prof.barSpells then return nil end
-    return prof.barSpells[barKey]
+    local bs = prof.barSpells[barKey]
+    if not bs then return nil end
+    -- Same custom-bar migration as GetBarSpellData
+    if barKey ~= "cooldowns" and barKey ~= "utility" and barKey ~= "buffs" then
+        if not bs.customSpells then
+            if bs.trackedSpells and #bs.trackedSpells > 0 then
+                bs.customSpells = bs.trackedSpells
+                bs.trackedSpells = nil
+            else
+                bs.customSpells = {}
+            end
+        end
+    end
+    return bs
 end
 
 -------------------------------------------------------------------------------
@@ -2937,7 +2966,12 @@ BuildCDMBar = function(barIndex)
     else
         local pos = p.cdmBarPositions[key]
         if pos and pos.point then
-            ApplyBarPositionCentered(frame, pos, key)
+            -- Skip for unlock-anchored bars (anchor system is authority)
+            local unlockKey = "CDM_" .. key
+            local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
+            if not anchored or not frame:GetLeft() then
+                ApplyBarPositionCentered(frame, pos, key)
+            end
         else
             -- Default fallback positions
             frame:ClearAllPoints()
@@ -6197,6 +6231,12 @@ BuildAllCDMBars = function()
         return
     end
 
+    -- Hide ALL existing bar frames before rebuilding. This ensures bars
+    -- from a previous spec that are not in the current spec get hidden.
+    for key, frame in pairs(cdmBarFrames) do
+        EllesmereUI.SetElementVisibility(frame, false)
+    end
+
     -- Hide Blizzard CDM
     if p.cdmBars.hideBlizzard then
         HideBlizzardCDM()
@@ -6246,7 +6286,12 @@ BuildAllCDMBars = function()
                 local frame = cdmBarFrames[barData.key]
                 local pos = p.cdmBarPositions[barData.key]
                 if frame and pos and pos.point then
-                    ApplyBarPositionCentered(frame, pos, barData.key)
+                    -- Skip for unlock-anchored bars (anchor system is authority)
+                    local unlockKey = "CDM_" .. barData.key
+                    local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
+                    if not anchored or not frame:GetLeft() then
+                        ApplyBarPositionCentered(frame, pos, barData.key)
+                    end
                 end
             end
         end
@@ -7223,6 +7268,12 @@ RegisterCDMUnlockElements = function()
                 group = "Cooldown Manager",
                 order = 600,
                 linkedKeys = linked,
+                isHidden = function()
+                    -- If this bar key is no longer in the current profile's
+                    -- barDataByKey, it is a stale registration from a previous
+                    -- profile and should not get a mover.
+                    return not barDataByKey[key]
+                end,
                 getFrame = function() return cdmBarFrames[key] end,
                 getSize = function()
                     local f = cdmBarFrames[key]
@@ -7940,8 +7991,8 @@ do
         if mapSize == 0 then return end
 
         -- Check each main bar's trackedSpells against the spec set.
-        -- A single miss means corruption.
-        local corrupted = false
+        -- Track which specific bars have corrupted spells.
+        local corruptedBars = {}
         local corruptBar = nil
         local corruptSpell = nil
         for _, barData in ipairs(pp.cdmBars.bars) do
@@ -7951,8 +8002,8 @@ do
                 for _, sid in ipairs(sd.trackedSpells) do
                     if sid and sid > 0 then
                         if not specSpells[sid] then
-                            if not corrupted then
-                                corrupted = true
+                            corruptedBars[barData.key] = true
+                            if not corruptBar then
                                 corruptBar = barData.key
                                 corruptSpell = sid
                             end
@@ -7963,10 +8014,22 @@ do
             end
         end
 
-        if corrupted then
-            -- Wipe the entire spec profile from the global store
+        if corruptBar then
+            -- Only wipe bars that actually contain corrupted spells.
+            -- Custom bar customSpells are user-curated and must never be
+            -- destroyed by main-bar corruption recovery.
             local specProfiles = SpellStore.GetSpecProfiles()
-            specProfiles[specKey] = nil
+            local prof = specProfiles[specKey]
+            if prof and prof.barSpells then
+                for bk, _ in pairs(corruptedBars) do
+                    local sd = prof.barSpells[bk]
+                    if sd then
+                        sd.trackedSpells = nil
+                        sd.extraSpells = nil
+                        -- Keep removedSpells -- those are user intent
+                    end
+                end
+            end
 
             local function DoCorruptionRecovery()
                 BuildAllCDMBars()

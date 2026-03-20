@@ -5003,8 +5003,12 @@ local function RestoreBarPositions()
         local pos = positions[key]
         local frame = barFrames[key]
         if pos and frame then
-            frame:ClearAllPoints()
-            frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+            -- Skip for unlock-anchored bars (anchor system is authority)
+            local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key)
+            if not anchored or not frame:GetLeft() then
+                frame:ClearAllPoints()
+                frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+            end
         end
     end
 end

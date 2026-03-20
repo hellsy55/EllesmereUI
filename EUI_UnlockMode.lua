@@ -1750,10 +1750,37 @@ local function ApplySavedPositions()
     -- Reapply all anchor positions (anchored elements need to follow their targets)
     local adb = GetAnchorDB()
     if adb then
+        local unresolved = {}
         for childKey, info in pairs(adb) do
             if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
                 ApplyAnchorPosition(childKey, info.target, info.side)
+                -- Check if it actually resolved (target had valid bounds)
+                local target = GetBarFrame(info.target)
+                if not target:GetLeft() then
+                    unresolved[childKey] = info
+                end
             end
+        end
+        -- Retry unresolved anchors until all targets have valid layout
+        if next(unresolved) then
+            local retries = 0
+            local function RetryAnchors()
+                retries = retries + 1
+                local still = {}
+                for childKey, info in pairs(unresolved) do
+                    local target = GetBarFrame(info.target)
+                    if target and target:GetLeft() then
+                        ApplyAnchorPosition(childKey, info.target, info.side)
+                    else
+                        still[childKey] = info
+                    end
+                end
+                unresolved = still
+                if next(unresolved) and retries < 20 then
+                    C_Timer.After(0.1, RetryAnchors)
+                end
+            end
+            C_Timer.After(0, RetryAnchors)
         end
     end
 end
@@ -7094,6 +7121,9 @@ end
 
 -- Commit pending positions to SavedVariables
 local function CommitPositions()
+    -- Suppress per-save rebuilds (e.g. CDM's BuildAllCDMBars) so that
+    -- all positions are written first, then a single rebuild runs at the end.
+    EllesmereUI._propagatingSave = true
     for barKey, pos in pairs(pendingPositions) do
         if pos == "RESET" then
             ClearBarPosition(barKey)
@@ -7119,6 +7149,20 @@ local function CommitPositions()
                 local bar = GetBarFrame(barKey)
                 if bar then InstallAnchorGuard(bar, barKey) end
             end
+        end
+    end
+    EllesmereUI._propagatingSave = false
+
+    -- Single rebuild now that all positions are committed.
+    -- CDM savePos normally calls BuildAllCDMBars per save, but we
+    -- suppressed that above to avoid partial-state rebuilds.
+    for barKey in pairs(pendingPositions) do
+        if type(barKey) == "string" and barKey:sub(1, 4) == "CDM_" then
+            local elem = registeredElements[barKey]
+            if elem and elem.applyPosition then
+                pcall(elem.applyPosition, barKey)
+            end
+            break  -- one rebuild is enough, it rebuilds all bars
         end
     end
 
