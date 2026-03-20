@@ -121,15 +121,13 @@ if not EllesmereUI.ReapplyOwnAnchor then
             end
         end
 
-        local ratio = uiS / cS
-        local barHW = (childBar:GetWidth() or 0) * 0.5
-        local barHH = (childBar:GetHeight() or 0) * 0.5
-        local barX = cx * ratio - barHW
-        local barY = (cy - UIParent:GetHeight()) * ratio + barHH
+        local uiW, uiH = UIParent:GetSize()
+        local centerX = cx - uiW / 2
+        local centerY = cy - uiH / 2
 
         pcall(function()
             childBar:ClearAllPoints()
-            childBar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", barX, barY)
+            childBar:SetPoint("CENTER", UIParent, "CENTER", centerX, centerY)
         end)
     end
 end
@@ -313,7 +311,7 @@ function EllesmereUI.RecenterBarAnchor(barKey)
     local uiCY = bT * elemScale - h * 0.5
 
     -- Pick anchor based on grow direction so the fixed edge stays put
-    local growDir = GetBarGrowDir(barKey)
+    local growDir = GetBarGrowDirActual(barKey)
     local anchor, aX, aY
     if growDir == "RIGHT" then
         anchor = "LEFT"
@@ -562,6 +560,34 @@ local SaveBarPosition
 local ApplyAnchorPosition
 local ApplyCenterPosition
 local GetPositionDB
+
+-------------------------------------------------------------------------------
+--  Actual grow direction -- always returns the real direction (never nil).
+--  Used for position calculations where we need the true anchor edge.
+-------------------------------------------------------------------------------
+local function GetBarGrowDirActual(barKey)
+    if barKey:sub(1, 4) == "CDM_" then
+        local rawKey = barKey:sub(5)
+        local cdm = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
+        local cdmBars = cdm and cdm.db and cdm.db.profile and cdm.db.profile.cdmBars
+        if cdmBars and cdmBars.bars then
+            for _, bar in ipairs(cdmBars.bars) do
+                if bar.key == rawKey then
+                    return bar.growDirection or "RIGHT"
+                end
+            end
+        end
+        return "RIGHT"
+    else
+        local eab = EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
+        local s = eab and eab.db and eab.db.profile and eab.db.profile.bars
+                  and eab.db.profile.bars[barKey]
+        if s then
+            return (s.growDirection or "up"):upper()
+        end
+        return "UP"
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Grow direction helper -- reads from the bar's per-profile settings
@@ -846,6 +872,7 @@ function EllesmereUI.PropagateHeightMatch(key)
     ScheduleAnchorBatch()
 end
 
+-- DEBUG: confirm propagation functions are defined at file-load time
 -------------------------------------------------------------------------------
 --  Centralized resize notification
 --  Any addon can call EllesmereUI.NotifyElementResized(key) after changing
@@ -883,6 +910,7 @@ function EllesmereUI.NotifyElementResized(key)
     local prev = _resizeLastSize[key]
     local widthChanged = not prev or math.abs(curW - prev.w) > 0.5
     local heightChanged = not prev or math.abs(curH - prev.h) > 0.5
+
     _resizeLastSize[key] = { w = curW, h = curH }
 
     -- Reapply own anchor first (if this element is anchored to something,
@@ -1199,10 +1227,6 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
 
     -- Only move the actual bar frame when noMove is not set
     if not noMove then
-        -- ApplyAnchorPosition already computed the exact visual center
-        -- accounting for edge-to-edge offsets, so use a plain CENTER
-        -- SetPoint here (no grow-direction shift needed -- the anchor
-        -- system is the sole authority for this frame's position).
         pcall(function()
             childBar:ClearAllPoints()
             childBar:SetPoint("CENTER", UIParent, "CENTER", centerX, centerY)
@@ -1266,8 +1290,9 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
         if m.ReanchorToBar then m:ReanchorToBar() end
     end
 
-    -- Store in pending positions (skip when only syncing movers)
-    if not noMove then
+    -- Store in pending positions only during unlock mode (skip at login
+    -- so anchor-computed positions don't pollute saved positions)
+    if not noMove and EllesmereUI._unlockActive then
         pendingPositions[childKey] = {
             point = "CENTER", relPoint = "CENTER",
             x = centerX, y = centerY,
@@ -1491,10 +1516,15 @@ ApplyCenterPosition = function(barKey, pos)
     local frame = GetBarFrame(barKey)
     if not frame then return false end
 
+    -- Skip elements anchored via the unlock anchor system -- their position
+    -- is owned by ApplyAnchorPosition, not by the grow-direction logic here.
+    local anchorDB = GetAnchorDB()
+    local anchorInfo = anchorDB and anchorDB[barKey]
+    if anchorInfo and anchorInfo.target then return true end
+
     local cx, cy = pos.x or 0, pos.y or 0
 
     -- Determine grow anchor from unlock-mode anchor relationship
-    local anchorDB = GetAnchorDB()
     local anchorInfo = anchorDB and anchorDB[barKey]
     local anchor = "CENTER"
     local adjX, adjY = cx, cy
@@ -1518,7 +1548,7 @@ ApplyCenterPosition = function(barKey, pos)
         end
     else
         -- No anchor relationship -- use grow direction to pick fixed edge
-        local growDir = GetBarGrowDir(barKey)
+        local growDir = GetBarGrowDirActual(barKey)
         if growDir and growDir ~= "CENTER" then
             local fw = (frame:GetWidth() or 0)
             local fh = (frame:GetHeight() or 0)
@@ -1694,7 +1724,14 @@ local function ApplySavedPositions()
             -- Skip centralized override for addon-internally-anchored elements
             -- (e.g. Resource Bars anchored to each other via anchorTo setting)
             local addonAnchored = elem.isAnchored and elem.isAnchored(key)
+            -- Also skip elements anchored via the unlock mode anchor system
+            local unlockAnchored = false
             if not addonAnchored then
+                local adb = GetAnchorDB()
+                local ai = adb and adb[key]
+                if ai and ai.target then unlockAnchored = true end
+            end
+            if not addonAnchored and not unlockAnchored then
                 -- Override position with centralized grow-direction logic
                 local pos = elem.loadPosition and elem.loadPosition(key)
                 if pos then
@@ -1727,6 +1764,14 @@ EllesmereUI._applySavedPositions = ApplySavedPositions
 -- Expose so child addons (CDM, resource bars) can re-apply matches after
 -- their bars finish populating and have correct dimensions.
 EllesmereUI.ApplyAllWidthHeightMatches = ApplyAllWidthHeightMatches
+
+-- Global check: is this unlock key anchored to another element?
+-- Any addon can call this to decide whether to skip positioning in BuildBars.
+function EllesmereUI.IsUnlockAnchored(unlockKey)
+    local adb = GetAnchorDB()
+    local ai = adb and adb[unlockKey]
+    return ai and ai.target and true or false
+end
 
 -------------------------------------------------------------------------------
 --  Pure-data position migration for profile import
@@ -2785,8 +2830,7 @@ local function SelectMover(m)
         -- Expand the mover if not already expanded
         if m._showOverlayText then m._showOverlayText() end
 
-        -- Show coordinates on selection
-        if m.UpdateCoordText then m:UpdateCoordText() end
+        -- Coordinates will show when expand animation completes
 
         -- Pulse the snap target if this mover has a specific one assigned
         local tgt = m._snapTarget
@@ -3554,6 +3598,10 @@ local function CreateMover(barKey)
                 if hoverState == 0 and mover.ReanchorToBar then
                     mover:ReanchorToBar()
                 end
+                -- Show coordinates when fully expanded
+                if hoverState == 1 and mover._coordFS then
+                    if mover.UpdateCoordText then mover:UpdateCoordText() end
+                end
             end
             ApplyHoverState(hoverState)
         end)
@@ -3616,6 +3664,8 @@ local function CreateMover(barKey)
 
     local function HideOverlayText()
         mover._hoverConfirmed = false
+        -- Hide coordinates when collapsing (unless coords-always-on)
+        if mover._coordFS and not coordsEnabled then mover._coordFS:Hide() end
         AnimateHoverTo(0)
     end
 
@@ -3649,6 +3699,7 @@ local function CreateMover(barKey)
         hoverState = 0
         hoverTarget = 0
         mover._hoverConfirmed = false
+        if mover._coordFS and not coordsEnabled then mover._coordFS:Hide() end
         animFrame:SetScript("OnUpdate", nil)
         ApplyHoverState(0)
         if mover.ReanchorToBar then mover:ReanchorToBar() end
@@ -4539,8 +4590,11 @@ local function CreateMover(barKey)
 
         -- Check if the mover actually moved (avoids false dirty flag from
         -- click-and-hold without movement)
-        local cx = (self:GetLeft() + self:GetRight()) / 2
-        local cy = (self:GetTop() + self:GetBottom()) / 2
+        local cxL, cxR = self:GetLeft(), self:GetRight()
+        local cyT, cyB = self:GetTop(), self:GetBottom()
+        if not cxL or not cxR or not cyT or not cyB then return end
+        local cx = (cxL + cxR) / 2
+        local cy = (cyT + cyB) / 2
         local startCX = self._dragStartCX or cx
         local startCY = self._dragStartCY or cy
         local moved = (abs(cx - startCX) > 0.5) or (abs(cy - startCY) > 0.5)
@@ -6322,7 +6376,6 @@ local function CreateMover(barKey)
             cogClickCatcher:RegisterForClicks("AnyUp")
             cogClickCatcher:SetScript("OnClick", function()
                 CloseCogMenu()
-                DeselectMover()
             end)
         end
         cogClickCatcher:Show()
@@ -7967,42 +8020,6 @@ function ns.OpenUnlockMode()
                 end
             end
             EllesmereUI._unlockCursorX = nx; EllesmereUI._unlockCursorY = ny
-        end
-
-        -- Click-to-deselect: detect left mouse down outside any mover
-        do
-            local lmbDown = IsMouseButtonDown("LeftButton")
-            if lmbDown and not self._lmbWasDown and selectedMover then
-                -- Check if cursor is over the selected mover or its children
-                local overAny = false
-                if selectedMover:IsMouseOver() then
-                    overAny = true
-                elseif selectedMover._cogBtn and selectedMover._cogBtn:IsMouseOver() then
-                    overAny = true
-                elseif selectedMover._linkBtns then
-                    for _, b in ipairs(selectedMover._linkBtns) do
-                        if b:IsMouseOver() then overAny = true; break end
-                    end
-                end
-                -- Also check if clicking on a different mover (that will handle its own select)
-                if not overAny then
-                    for _, m in pairs(movers) do
-                        if m:IsShown() and m:IsMouseOver() then
-                            overAny = true; break
-                        end
-                    end
-                end
-                -- Also skip if cog menu or anchor dropdown is open
-                if not overAny then
-                    if selectedMover._menuOpen then overAny = true end
-                    if anchorDropdownFrame and anchorDropdownFrame:IsShown() then overAny = true end
-                    if growDropdownFrame and growDropdownFrame:IsShown() then overAny = true end
-                end
-                if not overAny then
-                    DeselectMover()
-                end
-            end
-            self._lmbWasDown = lmbDown
         end
 
         -- Re-expand selected mover when no other mover is being hovered

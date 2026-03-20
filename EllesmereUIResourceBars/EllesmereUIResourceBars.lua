@@ -1341,15 +1341,15 @@ local function BuildBars()
                 ApplyFreeBarPosition(healthBar, hp, 0, -64, ow, oh)
             end
         elseif hp.unlockPos and hp.unlockPos.point then
-            -- Position fully managed by unlock mode -- only apply size; skip reposition
-            -- during unlock mode so resize does not snap the bar back to stored position.
             local rp = hp.unlockPos.relPoint or hp.unlockPos.point
             local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
             ApplyBarAnchor(healthBar, "none")
             healthBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
-                healthBar:ClearAllPoints()
-                healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
+                if not EllesmereUI.IsUnlockAnchored("ERB_Health") or not healthBar:GetLeft() then
+                    healthBar:ClearAllPoints()
+                    healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
+                end
             end
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
@@ -1434,15 +1434,15 @@ local function BuildBars()
                 ApplyFreeBarPosition(primaryBar, pp, 0, -54, ow, oh)
             end
         elseif pp.unlockPos and pp.unlockPos.point then
-            -- Position fully managed by unlock mode -- only apply size; skip reposition
-            -- during unlock mode so resize does not snap the bar back to stored position.
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
             local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
             ApplyBarAnchor(primaryBar, "none")
             primaryBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
-                primaryBar:ClearAllPoints()
-                primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
+                if not EllesmereUI.IsUnlockAnchored("ERB_Power") or not primaryBar:GetLeft() then
+                    primaryBar:ClearAllPoints()
+                    primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
+                end
             end
         else
             -- Clear any mouse-tracking OnUpdate from a previous anchor
@@ -1556,8 +1556,10 @@ local function BuildBars()
             ApplyBarAnchor(secondaryFrame, "none")
             secondaryFrame:SetSize(frameW, frameH)
             if not EllesmereUI._unlockActive then
-                secondaryFrame:ClearAllPoints()
-                secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+                if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") or not secondaryFrame:GetLeft() then
+                    secondaryFrame:ClearAllPoints()
+                    secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+                end
             end
         else
             ApplyBarAnchor(secondaryFrame, "none")
@@ -2874,8 +2876,13 @@ BuildCastBar = function()
         -- Skip reposition during unlock mode so resize does not snap the bar.
         local rp = cb.unlockPos.relPoint or cb.unlockPos.point
         local px, py = cb.unlockPos.x or 0, cb.unlockPos.y or 0
+        local anchored = EllesmereUI.IsUnlockAnchored("ERB_CastBar")
         if EllesmereUI._unlockActive then
             castBarFrame:SetSize(totalW, h)
+        elseif anchored and castBarFrame:GetLeft() then
+            -- Anchor system owns position; only animate size
+            SmoothBarAnimate(castBarFrame, "w", totalW, nil)
+            SmoothBarAnimate(castBarFrame, "h", h, nil)
         else
             local function ApplyCastUnlockTransform()
                 local aw = castBarFrame["_barAnim_w"] or totalW

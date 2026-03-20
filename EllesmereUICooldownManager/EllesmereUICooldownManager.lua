@@ -1497,6 +1497,35 @@ local RefreshRacialSpells
 
 --- Save the current spec's non-spell per-spec data (barGlows, trackedBuffBars).
 --- Spell data lives directly in the global store via ns.GetBarSpellData()
+-------------------------------------------------------------------------------
+--  Cached bar sizes -- purely cosmetic hint for pre-sizing frames on login
+--  so anchored elements don't jump. Has zero impact on spell logic or icons.
+--  Stored in EllesmereUIDB.cdmCachedBarSizes[charKey][specKey][barKey] = count
+-------------------------------------------------------------------------------
+function ns.SaveCachedBarSizes()
+    if not EllesmereUIDB then return end
+    local charKey = ns.GetCharKey()
+    local specKey = ns.GetActiveSpecKey()
+    if not specKey or specKey == "0" then return end
+    if not EllesmereUIDB.cdmCachedBarSizes then EllesmereUIDB.cdmCachedBarSizes = {} end
+    if not EllesmereUIDB.cdmCachedBarSizes[charKey] then EllesmereUIDB.cdmCachedBarSizes[charKey] = {} end
+    local frames = ns.cdmBarFrames
+    local iconsByKey = ns.cdmBarIcons
+    if not frames or not iconsByKey then return end
+    local counts = {}
+    for key, frame in pairs(frames) do
+        local icons = iconsByKey[key]
+        if icons then
+            local vis = 0
+            for _, icon in ipairs(icons) do
+                if icon:IsShown() then vis = vis + 1 end
+            end
+            if vis > 0 then counts[key] = vis end
+        end
+    end
+    EllesmereUIDB.cdmCachedBarSizes[charKey][specKey] = counts
+end
+
 --- and never needs copying.
 local function SaveCurrentSpecProfile()
     local p = ECME.db.profile
@@ -1516,6 +1545,9 @@ local function SaveCurrentSpecProfile()
     if p.tbbPositions then
         prof.tbbPositions = DeepCopy(p.tbbPositions)
     end
+
+    -- Snapshot visible icon counts for pre-sizing on next login
+    ns.SaveCachedBarSizes()
 end
 
 --- Restore non-spell per-spec data (barGlows, trackedBuffBars) for a spec.
@@ -2542,10 +2574,37 @@ end
 -------------------------------------------------------------------------------
 --  CDM Bar Position Helpers
 -------------------------------------------------------------------------------
-local function ApplyBarPositionCentered(frame, pos, w, h, scale)
+local function ApplyBarPositionCentered(frame, pos, barKey)
     if not pos or not pos.point then return end
+    local px, py = pos.x or 0, pos.y or 0
+    local anchor = pos.point
+
+    -- If stored as CENTER/CENTER, convert to grow-direction-aware anchor
+    -- so the fixed edge stays put when bar width changes across specs.
+    if pos.point == "CENTER" and (pos.relPoint == "CENTER" or not pos.relPoint) then
+        local bd = barKey and barDataByKey[barKey]
+        local grow = bd and bd.growDirection or "RIGHT"
+        local fw = frame:GetWidth() or 0
+        local fh = frame:GetHeight() or 0
+
+        if grow == "RIGHT" then
+            anchor = "LEFT"
+            px = px - fw / 2
+        elseif grow == "LEFT" then
+            anchor = "RIGHT"
+            px = px + fw / 2
+        elseif grow == "DOWN" then
+            anchor = "TOP"
+            py = py + fh / 2
+        elseif grow == "UP" then
+            anchor = "BOTTOM"
+            py = py - fh / 2
+        end
+        -- CENTER grow: keep anchor as CENTER (no adjustment needed)
+    end
+
     frame:ClearAllPoints()
-    frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+    frame:SetPoint(anchor, UIParent, pos.relPoint or anchor, px, py)
 end
 
 local function SaveCDMBarPosition(barKey, frame)
@@ -2795,7 +2854,7 @@ BuildCDMBar = function(barIndex)
             -- No party frame found  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
-                ApplyBarPositionCentered(frame, pos, 1, 1, scale)
+                ApplyBarPositionCentered(frame, pos, key)
             else
                 frame:ClearAllPoints()
                 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2826,7 +2885,7 @@ BuildCDMBar = function(barIndex)
             -- No player frame found  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
-                ApplyBarPositionCentered(frame, pos, 1, 1, scale)
+                ApplyBarPositionCentered(frame, pos, key)
             else
                 frame:ClearAllPoints()
                 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2869,7 +2928,7 @@ BuildCDMBar = function(barIndex)
             -- Resource Bars frame not available  fall back to saved position
             local pos = p.cdmBarPositions[key]
             if pos and pos.point then
-                ApplyBarPositionCentered(frame, pos, 1, 1, scale)
+                ApplyBarPositionCentered(frame, pos, key)
             else
                 frame:ClearAllPoints()
                 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2878,7 +2937,7 @@ BuildCDMBar = function(barIndex)
     else
         local pos = p.cdmBarPositions[key]
         if pos and pos.point then
-            ApplyBarPositionCentered(frame, pos, 1, 1, scale)
+            ApplyBarPositionCentered(frame, pos, key)
         else
             -- Default fallback positions
             frame:ClearAllPoints()
@@ -2997,6 +3056,7 @@ LayoutCDMBar = function(barKey)
         if not frame._propagatingMatch then
             frame._propagatingMatch = true
             local unlockKey = "CDM_" .. barKey
+
             if EllesmereUI.PropagateWidthMatch then
                 EllesmereUI.PropagateWidthMatch(unlockKey)
             end
@@ -6176,6 +6236,21 @@ BuildAllCDMBars = function()
             ApplyCDMTooltipState(barData.key)
         end
     end
+    -- Re-apply saved positions now that LayoutCDMBar has set correct frame
+    -- sizes. The initial BuildCDMBar call used stale dimensions for the
+    -- grow-direction anchor conversion, causing position drift.
+    for _, barData in ipairs(p.cdmBars.bars) do
+        if barData.enabled then
+            local ak = barData.anchorTo
+            if not ak or ak == "none" then
+                local frame = cdmBarFrames[barData.key]
+                local pos = p.cdmBarPositions[barData.key]
+                if frame and pos and pos.point then
+                    ApplyBarPositionCentered(frame, pos, barData.key)
+                end
+            end
+        end
+    end
     -- Second pass: reapply unlock-mode anchors now that ALL bars are
     -- positioned and sized.  The first pass (inside LayoutCDMBar) may
     -- have run ReapplyOwnAnchor before the target bar was repositioned
@@ -7938,6 +8013,75 @@ do
 end
 
 function ECME:CDMFinishSetup()
+    -- Load the full unlock mode body early so anchor/propagation functions
+    -- (ApplyAnchorPosition, PropagateWidthMatch, etc.) are available for
+    -- the initial build pass. CDM SavedVariables are ready by this point.
+    EllesmereUI:EnsureLoaded()
+
+    -- Pre-size CDM bar frames using cached icon counts from last session.
+    -- Purely cosmetic: gives anchored elements correct dimensions to compute
+    -- against before the real spell data populates. BuildAllCDMBars below
+    -- overwrites everything with real data.
+    do
+        local p = ECME.db and ECME.db.profile
+        if p and p.cdmBars and p.cdmBars.enabled and EllesmereUIDB then
+            local charKey = ns.GetCharKey()
+            local specKey = ns.GetActiveSpecKey()
+            local cache = EllesmereUIDB.cdmCachedBarSizes
+            local counts = cache and cache[charKey] and cache[charKey][specKey]
+            if counts then
+                for i, barData in ipairs(p.cdmBars.bars) do
+                    if barData.enabled then
+                        local cachedCount = counts[barData.key]
+                        if cachedCount and cachedCount > 0 then
+                            local key = barData.key
+                            local frame = cdmBarFrames[key]
+                            if not frame then
+                                frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
+                                frame:SetFrameStrata("LOW")
+                                frame:SetFrameLevel(5)
+                                if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
+                                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                                frame._barKey = key
+                                frame._barIndex = i
+                                cdmBarFrames[key] = frame
+                                cdmBarIcons[key] = {}
+                            end
+                            local iconW = SnapForScale(barData.iconSize or 36, 1)
+                            local iconH = iconW
+                            if (barData.iconShape or "none") == "cropped" then
+                                iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
+                            end
+                            local spacing = SnapForScale(barData.spacing or 2, 1)
+                            local grow = barData.growDirection or "RIGHT"
+                            local numRows = barData.numRows or 1
+                            if numRows < 1 then numRows = 1 end
+                            local stride = ComputeTopRowStride(barData, cachedCount)
+                            local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
+                            local totalW, totalH
+                            if isHoriz then
+                                totalW = stride * iconW + (stride - 1) * spacing
+                                totalH = numRows * iconH + (numRows - 1) * spacing
+                            else
+                                totalW = numRows * iconW + (numRows - 1) * spacing
+                                totalH = stride * iconH + (stride - 1) * spacing
+                            end
+                            frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
+                            frame._prevLayoutW = SnapForScale(totalW, 1)
+                            frame._prevLayoutH = SnapForScale(totalH, 1)
+                            local pos = p.cdmBarPositions and p.cdmBarPositions[key]
+                            if pos and pos.point then
+                                frame:ClearAllPoints()
+                                frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                            end
+                            frame:Show()
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     BuildAllCDMBars()
     -- Mark for snapshot if this spec has no buff bars configured yet.
     -- Fires on first load after the feature was added (existing profiles have
@@ -7999,7 +8143,21 @@ function ECME:CDMFinishSetup()
     -- frame, icon visibility has settled and a rebuild produces correct sizes
     -- and anchor positions.
     C_Timer.After(0, function()
+        -- Ensure the full unlock mode body is loaded so propagation
+        -- functions (PropagateWidthMatch, PropagateAnchorChain, etc.)
+        -- are available. CDM data is ready by this point.
+        EllesmereUI:EnsureLoaded()
         BuildAllCDMBars()
+        -- Defer one frame so WoW flushes layout after the final bar sizes,
+        -- then re-propagate width/height matches and anchor positions.
+        C_Timer.After(0, function()
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
+            end
+            if EllesmereUI._applySavedPositions then
+                EllesmereUI._applySavedPositions()
+            end
+        end)
     end)
 end
 
@@ -8104,6 +8262,7 @@ end
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if not ECME.db then return end
     if event == "PLAYER_LOGOUT" then
+        ns.SaveCachedBarSizes()
         return
     end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then

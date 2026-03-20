@@ -5924,7 +5924,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.1.9"
+EllesmereUI.VERSION = "5.2.0"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6977,7 +6977,7 @@ function EllesmereUI.SetElementVisibility(frame, visible)
     if not frame then return end
     if visible then
         frame:SetAlpha(frame._euiRestoreAlpha or 1)
-        frame:EnableMouse(frame._euiRestoreMouse ~= false)
+        frame:EnableMouse(frame._euiRestoreMouse or false)
     else
         if frame:GetAlpha() > 0 then
             frame._euiRestoreAlpha = frame:GetAlpha()
