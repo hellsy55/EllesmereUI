@@ -181,6 +181,11 @@ local defaults = {
             castDurationColor = { r = 1, g = 1, b = 1 },
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
+            detachCastbar = false,
+            detachedCastbarWidth = 200,
+            detachedCastbarHeight = 20,
+            detachedCastbarX = 0,
+            detachedCastbarY = -100,
             healthDisplay = "both",
             showBuffs = true,
             onlyPlayerDebuffs = false,
@@ -360,6 +365,11 @@ local defaults = {
             castDurationColor = { r = 1, g = 1, b = 1 },
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
+            detachCastbar = false,
+            detachedCastbarWidth = 200,
+            detachedCastbarHeight = 20,
+            detachedCastbarX = 0,
+            detachedCastbarY = -150,
             healthDisplay = "perhp",
             leftTextContent = "name",
             rightTextContent = "perhp",
@@ -492,6 +502,8 @@ local defaults = {
             focustarget = { point = "CENTER", relPoint = "CENTER", x = 50, y = -261 },
             boss = { point = "CENTER", relPoint = "CENTER", x = 661, y = 251 },
             playerCastbar = { point = "CENTER", relPoint = "CENTER", x = 0, y = -250 },
+            targetCastbar = { point = "CENTER", relPoint = "CENTER", x = 0, y = -100 },
+            focusCastbar = { point = "CENTER", relPoint = "CENTER", x = 0, y = -150 },
             classPower = { point = "CENTER", relPoint = "CENTER", x = 0, y = -220 },
         },
         bossSpacing = 60,
@@ -1425,10 +1437,8 @@ end
 local function ApplyFramePosition(frame, unit)
     if not frame or not db.profile.positions[unit] then return end
     local pos = db.profile.positions[unit]
-    local pt = pos.point or "CENTER"
-    local rp = pos.relPoint or pt
     frame:ClearAllPoints()
-    frame:SetPoint(pt, UIParent, rp, pos.x, pos.y)
+    frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 end
 
 -- Clip container for health + power bars -- prevents sub-pixel overflow at
@@ -2145,9 +2155,13 @@ local function CreatePortrait(frame, side, frameHeight, unit)
 end
 
 local function CreateCastBar(frame, unit, settings)
-    local castbarBg = CreateFrame("Frame", nil, frame)
-    local totalWidth = 0
     local settings = GetSettingsForUnit(unit)
+    local isDetached = (unit == "target" or unit == "focus") and settings.detachCastbar
+    
+    -- Always create castbarBg as child of frame (for oUF compatibility)
+    local castbarBg = CreateFrame("Frame", "EUI_" .. unit .. "_CastbarBg", frame)
+    
+    local totalWidth = 0
     local isAttached = (db.profile.portraitStyle or "attached") == "attached"
     local showPortraitCB = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
     local powerHeightTotal = 0
@@ -2175,24 +2189,54 @@ local function CreateCastBar(frame, unit, settings)
             castBarOffset = adjPH / 2
         end
     end
-    PP.Size(castbarBg, totalWidth, settings.castbarHeight or 14)
+    
+    -- Determine size based on detached or attached mode
+    local castbarWidth, castbarHeight
+    if isDetached then
+        castbarWidth = settings.detachedCastbarWidth or 200
+        castbarHeight = settings.detachedCastbarHeight or 20
+    else
+        castbarWidth = totalWidth
+        castbarHeight = settings.castbarHeight or 14
+    end
 
     local ppPos2 = settings.powerPosition or "below"
     local ppHasHeight = (settings.powerHeight or 0) > 0
     local anchorFrame = (ppPos2 == "below" and ppHasHeight and frame.Power) or frame.Health
     local pcbX = 0
     local pcbY = 0
-    if unit == "player" then
+    
+    if isDetached then
+        -- For detached: set higher frame strata and level, anchor to UIParent
+        castbarBg:SetFrameStrata("HIGH")
+        castbarBg:SetFrameLevel(100)
+        PP.Size(castbarBg, castbarWidth, castbarHeight)
+        
+        -- Position detached castbar using saved position or defaults
+        local posKey = unit .. "Castbar"
+        local pos = db.profile.positions and db.profile.positions[posKey]
+        if pos then
+            castbarBg:ClearAllPoints()
+            castbarBg:SetPoint(pos.point or "CENTER", UIParent, pos.relPoint or "CENTER", pos.x or 0, pos.y or 0)
+        else
+            local defaultY = (unit == "target") and -100 or -150
+            castbarBg:ClearAllPoints()
+            castbarBg:SetPoint("CENTER", UIParent, "CENTER", settings.detachedCastbarX or 0, settings.detachedCastbarY or defaultY)
+        end
+        castbarBg._isDetached = true
+        castbarBg._unit = unit
+    elseif unit == "player" then
         local owH = db.profile.player.playerCastbarHeight or 0
         if owH > 0 then
             PP.Size(castbarBg, totalWidth, owH)
         else
             PP.Size(castbarBg, totalWidth, settings.castbarHeight or 14)
         end
-        -- Player castbar is always locked to frame ? anchor from left edge of frame
+        -- Player castbar is always locked to frame - anchor from left edge of frame
         local healthOff = (frame.Health and frame.Health._xOffset) or 0
         castbarBg:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", -healthOff, 0)
     else
+        PP.Size(castbarBg, castbarWidth, castbarHeight)
         local healthOff = (frame.Health and frame.Health._xOffset) or 0
         castbarBg:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", -healthOff + pcbX, pcbY)
     end
@@ -6251,6 +6295,8 @@ function SetupOptionsPanel()
             pet = "Pet", targettarget = "Target of Target",
             focustarget = "Focus Target", boss = "Boss Frames",
             classPower = "Class Resource",
+            targetCastbar = "Target Cast Bar",
+            focusCastbar = "Focus Cast Bar",
         }
         local elements = {}
         local orderBase = 100
@@ -6271,6 +6317,20 @@ function SetupOptionsPanel()
                         end
                         return nil
                     end
+                    if k == "targetCastbar" then
+                        if frames.target and frames.target.Castbar then
+                            local cbBg = frames.target.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then return cbBg end
+                        end
+                        return nil
+                    end
+                    if k == "focusCastbar" then
+                        if frames.focus and frames.focus.Castbar then
+                            local cbBg = frames.focus.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then return cbBg end
+                        end
+                        return nil
+                    end
                     if k == "classPower" then return frames._classPowerBar end
                     return frames[k]
                 end,
@@ -6284,6 +6344,14 @@ function SetupOptionsPanel()
                         local cbH = db.profile.player.playerCastbarHeight
                         if not cbH or cbH <= 0 then cbH = 14 end
                         return cbW, cbH
+                    end
+                    if k == "targetCastbar" then
+                        local s = GetSettingsForUnit("target")
+                        return s.detachedCastbarWidth or 200, s.detachedCastbarHeight or 20
+                    end
+                    if k == "focusCastbar" then
+                        local s = GetSettingsForUnit("focus")
+                        return s.detachedCastbarWidth or 200, s.detachedCastbarHeight or 20
                     end
                     if k == "classPower" then
                         if frames._classPowerBar then
@@ -6300,6 +6368,18 @@ function SetupOptionsPanel()
                 end,
                 setWidth = function(k, w)
                     if k == "classPower" or k == "playerCastbar" then return end
+                    if k == "targetCastbar" then
+                        local s = GetSettingsForUnit("target")
+                        s.detachedCastbarWidth = math.max(math.floor(w + 0.5), 50)
+                        Rebuild()
+                        return
+                    end
+                    if k == "focusCastbar" then
+                        local s = GetSettingsForUnit("focus")
+                        s.detachedCastbarWidth = math.max(math.floor(w + 0.5), 50)
+                        Rebuild()
+                        return
+                    end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
@@ -6322,6 +6402,18 @@ function SetupOptionsPanel()
                 end,
                 setHeight = function(k, h)
                     if k == "classPower" or k == "playerCastbar" then return end
+                    if k == "targetCastbar" then
+                        local s = GetSettingsForUnit("target")
+                        s.detachedCastbarHeight = math.max(math.floor(h + 0.5), 8)
+                        Rebuild()
+                        return
+                    end
+                    if k == "focusCastbar" then
+                        local s = GetSettingsForUnit("focus")
+                        s.detachedCastbarHeight = math.max(math.floor(h + 0.5), 8)
+                        Rebuild()
+                        return
+                    end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
@@ -6338,8 +6430,7 @@ function SetupOptionsPanel()
                 loadPos = function(k)
                     local pos = db.profile.positions[k]
                     if not pos then return nil end
-                    local pt = pos.point or "CENTER"
-                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
+                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
                 end,
                 savePos = function(k, point, relPoint, x, y)
                     db.profile.positions[k] = { point = point, relPoint = relPoint, x = x, y = y }
@@ -6357,6 +6448,22 @@ function SetupOptionsPanel()
                             frames._classPowerBar:ClearAllPoints()
                             frames._classPowerBar:SetPoint(point, UIParent, relPoint, x, y)
                         end
+                    elseif k == "targetCastbar" then
+                        if frames.target and frames.target.Castbar then
+                            local cbBg = frames.target.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then
+                                cbBg:ClearAllPoints()
+                                cbBg:SetPoint(point, UIParent, relPoint, x, y)
+                            end
+                        end
+                    elseif k == "focusCastbar" then
+                        if frames.focus and frames.focus.Castbar then
+                            local cbBg = frames.focus.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then
+                                cbBg:ClearAllPoints()
+                                cbBg:SetPoint(point, UIParent, relPoint, x, y)
+                            end
+                        end
                     else
                         fr = frames[k]
                         if fr then
@@ -6371,26 +6478,40 @@ function SetupOptionsPanel()
                 applyPos = function(k)
                     local pos = db.profile.positions[k]
                     if not pos then return end
-                    local pt = pos.point or "CENTER"
-                    local rp = pos.relPoint or pt
                     if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
                         for i = 1, 5 do
                             if frames["boss" .. i] then
                                 frames["boss" .. i]:ClearAllPoints()
-                                frames["boss" .. i]:SetPoint(pt, UIParent, rp, pos.x, pos.y - ((i - 1) * spacing))
+                                frames["boss" .. i]:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y - ((i - 1) * spacing))
                             end
                         end
                     elseif k == "classPower" then
                         if frames._classPowerBar then
                             frames._classPowerBar:ClearAllPoints()
-                            frames._classPowerBar:SetPoint(pt, UIParent, rp, pos.x, pos.y)
+                            frames._classPowerBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                        end
+                    elseif k == "targetCastbar" then
+                        if frames.target and frames.target.Castbar then
+                            local cbBg = frames.target.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then
+                                cbBg:ClearAllPoints()
+                                cbBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            end
+                        end
+                    elseif k == "focusCastbar" then
+                        if frames.focus and frames.focus.Castbar then
+                            local cbBg = frames.focus.Castbar:GetParent()
+                            if cbBg and cbBg._isDetached then
+                                cbBg:ClearAllPoints()
+                                cbBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            end
                         end
                     else
                         local fr = frames[k]
                         if fr then
                             fr:ClearAllPoints()
-                            fr:SetPoint(pt, UIParent, rp, pos.x, pos.y)
+                            fr:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
                         end
                     end
                 end,
@@ -6409,6 +6530,16 @@ function SetupOptionsPanel()
         -- Conditional elements
         if db.profile.player.showClassPowerBar and not db.profile.player.lockClassPowerToFrame then
             elements[#elements + 1] = MakeUFElement("classPower", 9)
+        end
+        
+        -- Detached Target Castbar
+        if db.profile.target and db.profile.target.detachCastbar and db.profile.target.showCastbar ~= false then
+            elements[#elements + 1] = MakeUFElement("targetCastbar", 10)
+        end
+        
+        -- Detached Focus Castbar
+        if db.profile.focus and db.profile.focus.detachCastbar and db.profile.focus.showCastbar ~= false then
+            elements[#elements + 1] = MakeUFElement("focusCastbar", 11)
         end
 
         EllesmereUI:RegisterUnlockElements(elements)
