@@ -1449,10 +1449,30 @@ local function SetupPagingFrame()
     downBtn:SetScript("OnClick", function() EAB_CyclePage(-1) end)
     f._downBtn = downBtn
 
-    -- Update page number on events
+    -- Update page number on events; hide during vehicle/override; combat sync
     f:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     f:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
-    f:SetScript("OnEvent", function()
+    f:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
+    f:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
+    f:RegisterEvent("PLAYER_REGEN_DISABLED")
+    f:RegisterEvent("PLAYER_REGEN_ENABLED")
+    f:SetScript("OnEvent", function(_, event)
+        if event == "UPDATE_OVERRIDE_ACTIONBAR" or event == "UPDATE_VEHICLE_ACTIONBAR" then
+            LayoutPagingFrame()
+            return
+        end
+        if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+            local s = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["MainBar"]
+            if s then
+                local inCombat = (event == "PLAYER_REGEN_DISABLED")
+                if s.combatShowEnabled then
+                    if inCombat then f:Show() else f:Hide() end
+                elseif s.combatHideEnabled then
+                    if inCombat then f:Hide() else f:Show() end
+                end
+            end
+            return
+        end
         local page = GetActionBarPage and GetActionBarPage() or 1
         pageText:SetText(tostring(page))
     end)
@@ -1475,6 +1495,13 @@ local function LayoutPagingFrame()
     if not s then f:Hide(); return end
 
     if s.alwaysHidden or s.enabled == false then
+        f:Hide()
+        return
+    end
+
+    -- Hide during vehicle/override (paging doesn't apply)
+    local overridePage = mainFrame:GetAttribute("state-overridepage") or 0
+    if overridePage > 0 then
         f:Hide()
         return
     end
@@ -3002,6 +3029,9 @@ function EAB:ApplyBarOpacity(barKey)
     if not frame then return end
     if not s.mouseoverEnabled then
         frame:SetAlpha(s.mouseoverAlpha or 1)
+        if barKey == "MainBar" and _pagingFrame then
+            _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
+        end
     end
 end
 
@@ -3575,6 +3605,9 @@ local function AttachHoverHooks(barKey)
             state.fadeDir = "in"
             StopFade(frame)
             FadeTo(frame, 1, s.mouseoverSpeed or 0.15)
+            if barKey == "MainBar" and _pagingFrame then
+                _pagingFrame:SetAlpha(1)
+            end
         end
     end
 
@@ -3588,6 +3621,9 @@ local function AttachHoverHooks(barKey)
             if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                 state.fadeDir = "out"
                 FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
+                if barKey == "MainBar" and _pagingFrame then
+                    _pagingFrame:SetAlpha(0)
+                end
             end
         end)
     end
@@ -3602,6 +3638,9 @@ local function AttachHoverHooks(barKey)
                 if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                     state.fadeDir = "out"
                     FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
+                    if barKey == "MainBar" and _pagingFrame then
+                        _pagingFrame:SetAlpha(0)
+                    end
                 end
             end)
         end
@@ -3641,11 +3680,17 @@ function EAB:RefreshMouseover()
                 frame:SetAlpha(0)
                 local state = hoverStates[key]
                 if state then state.fadeDir = "out" end
+                if key == "MainBar" and _pagingFrame then
+                    _pagingFrame:SetAlpha(0)
+                end
             else
                 StopFade(frame)
                 frame:SetAlpha(s.mouseoverAlpha or 1)
                 local state = hoverStates[key]
                 if state then state.fadeDir = nil end
+                if key == "MainBar" and _pagingFrame then
+                    _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
+                end
             end
         end
     end
@@ -5782,6 +5827,9 @@ function EAB:FinishSetup()
                         if s and s.mouseoverEnabled and state.fadeDir ~= "out" then
                             state.fadeDir = "out"
                             FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15)
+                            if key == "MainBar" and _pagingFrame then
+                                _pagingFrame:SetAlpha(0)
+                            end
                         end
                     end
                 end
@@ -5898,6 +5946,9 @@ function EAB:FinishSetup()
                         StopFade(frame)
                         frame:SetAlpha(s.mouseoverAlpha or 1)
                         if state then state.fadeDir = "in" end
+                        if key == "MainBar" and _pagingFrame then
+                            _pagingFrame:SetAlpha(s.mouseoverAlpha or 1)
+                        end
                     end
                 else
                     -- Restore original strata (only if we changed it)
@@ -5914,6 +5965,9 @@ function EAB:FinishSetup()
                             StopFade(frame)
                             FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
                             if state then state.fadeDir = "out" end
+                            if key == "MainBar" and _pagingFrame then
+                                _pagingFrame:SetAlpha(0)
+                            end
                         end
                     end
                 end
