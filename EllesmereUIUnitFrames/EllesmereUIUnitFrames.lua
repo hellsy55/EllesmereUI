@@ -2007,12 +2007,8 @@ end
 
 local function CreatePortrait(frame, side, frameHeight, unit)
     local portraitHeight = frameHeight or 46
-    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
-
-    -- Check if portrait is hidden via portraitStyle == "none"
-    if (db.profile.portraitStyle or "attached") == "none" then
-        return nil
-    end
+    local portraitStyle = db.profile.portraitStyle or "attached"
+    local isAttached = (portraitStyle == "attached")
 
     -- Per-unit size/offset adjustments
     local uKey = UnitToSettingsKey(unit)
@@ -2021,7 +2017,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local pXOff = (uSettings and uSettings.portraitX) or 0
     local pYOff = (uSettings and uSettings.portraitY) or 0
     local baseHeight = portraitHeight
-    if not isAttached then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
+    if not isAttached and portraitStyle ~= "none" then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
     local adjustedHeight = baseHeight + pSizeAdj
     if adjustedHeight < 8 then adjustedHeight = 8 end
 
@@ -2043,7 +2039,11 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     bgTex:SetColorTexture(0.1, 0.1, 0.1, 1)
     backdrop._bg = bgTex
 
-    if isAttached then
+    if portraitStyle == "none" then
+        -- Portrait disabled: anchor backdrop to frame corner (it stays hidden).
+        -- Avoids any dependency on frame.Health which may not exist yet.
+        PP.Point(backdrop, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+    elseif isAttached then
         if effectiveSide == "left" then
             PP.Point(backdrop, "TOPLEFT", frame, "TOPLEFT", 0, 0)
         else
@@ -2115,11 +2115,16 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local mode
     do
         mode = (uSettings and uSettings.portraitMode) or db.profile.portraitMode or "2d"
-        -- "none" means portrait is disabled
-        if mode == "none" then
-            backdrop:Hide()
-            return nil
-        end
+    end
+    -- If portraitStyle or portraitMode is "none", hide the backdrop but keep
+    -- the structure alive so ReloadFrames can show it again without a /reload.
+    if portraitStyle == "none" or mode == "none" then
+        backdrop:Hide()
+        -- Return tex2D as a minimal placeholder so frame.Portrait is non-nil
+        -- and has a backdrop reference. It stays hidden (backdrop is hidden).
+        tex2D.backdrop = backdrop
+        tex2D.is2D = true
+        return tex2D
     end
     local active
     if mode == "class" then
@@ -6456,8 +6461,38 @@ function InitializeFrames()
         local backdrop = frame.Portrait.backdrop
         if not backdrop then return end
         local uSettings = db.profile[unitKey]
+        -- Refresh detached portrait border class color
         if uSettings and uSettings.detachedPortraitClassColor then
             ApplyDetachedPortraitShape(backdrop, uSettings, unitKey)
+        end
+        -- Refresh class icon texture so it shows the actual unit class (not WARRIOR fallback)
+        if backdrop._class and uSettings and (uSettings.portraitMode or "2d") == "class" then
+            local _, ct = UnitClass(unitKey)
+            if ct then
+                local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
+                ApplyClassIconTexture(backdrop._class, ct, classStyle)
+            end
+        end
+    end)
+
+    -- Deferred class portrait fix: at frame creation time UnitClass() may return nil
+    -- for dynamic units (target, focus) because no unit is selected yet on login/reload.
+    -- This causes the WARRIOR fallback. Re-apply the correct class icon once the
+    -- client has finished loading and unit data is available.
+    C_Timer.After(0, function()
+        for _, unitKey in ipairs({"player", "target", "focus"}) do
+            local frame = frames[unitKey]
+            if not frame or not frame.Portrait then return end
+            local backdrop = frame.Portrait and frame.Portrait.backdrop
+            if not backdrop or not backdrop._class then return end
+            local uSettings = db.profile[unitKey]
+            if uSettings and (uSettings.portraitMode or "2d") == "class" then
+                local _, ct = UnitClass(unitKey)
+                if ct then
+                    local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
+                    ApplyClassIconTexture(backdrop._class, ct, classStyle)
+                end
+            end
         end
     end)
 
