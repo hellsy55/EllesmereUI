@@ -3664,12 +3664,14 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("healthClassColored", true) and 1 or 0.3
                   end },
               } },
-            { type="slider", text="Bar Opacity", min=10, max=100, step=1,
-              getValue=function() return SVal("healthBarOpacity", 90) end,
-              setValue=function(v)
-                  SSet("healthBarOpacity", v)
-                  UpdatePreview()
-              end });  y = y - h
+                        { type="slider", text="Bar Opacity", min=10, max=100, step=1,
+                            disabled=function() return db.profile.darkTheme end,
+                              disabledTooltip="Bar Opacity is disabled in Dark Mode.",
+                            getValue=function() return SVal("healthBarOpacity", 90) end,
+                            setValue=function(v)
+                                    SSet("healthBarOpacity", v)
+                                    UpdatePreview()
+                            end });  y = y - h
         -- Sync icons: Bar Color (left) and Bar Opacity (right)
         do
             local rgn = sharedHealthColorRow._leftRegion
