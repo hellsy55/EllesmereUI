@@ -308,6 +308,11 @@ initFrame:SetScript("OnEvent", function(self)
     -- getDataFn: returns the settings table; refreshFn: called after changes
     local _sharedPgPopup, _sharedPgPopupOwner
     local function ShowPandemicPixelGlowPopup(anchorBtn, getDataFn, refreshFn)
+        -- Bind data source before popup creation so slider getValue callbacks work
+        if _sharedPgPopup then
+            _sharedPgPopup._getData = getDataFn
+            _sharedPgPopup._refresh = refreshFn
+        end
         if not _sharedPgPopup then
             local SolidTex   = EllesmereUI.SolidTex
             local MakeBorder = EllesmereUI.MakeBorder
@@ -326,6 +331,9 @@ initFrame:SetScript("OnEvent", function(self)
             local pf = CreateFrame("Frame", nil, UIParent)
             pf:SetSize(260, totalH); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(200)
             pf:EnableMouse(true); pf:Hide()
+            -- Bind data source before sliders are built so getValue callbacks work
+            pf._getData = getDataFn
+            pf._refresh = refreshFn
 
             local bg = SolidTex(pf, "BACKGROUND", 0.06, 0.08, 0.10, 0.95); bg:SetAllPoints()
             MakeBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
