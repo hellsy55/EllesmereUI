@@ -225,3 +225,143 @@ tsFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     C_Timer.After(0.5, ApplyTimestamps)
 end)
+
+-------------------------------------------------------------------------------
+--  Copy Chat
+-------------------------------------------------------------------------------
+local function StripHyperlinks(text)
+    -- Remove texture escapes
+    text = text:gsub("|T.-|t", "")
+    -- Remove atlas escapes
+    text = text:gsub("|A.-|a", "")
+    -- Convert hyperlinks to plain text: |Htype:data|h[text]|h → text
+    text = text:gsub("|H.-|h%[?(.-)]?|h", "%1")
+    -- Remove color codes
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", "")
+    text = text:gsub("|r", "")
+    -- Remove any remaining escape sequences
+    text = text:gsub("|n", "\n")
+    return text
+end
+
+local function GetChatMessages(chatFrame, numLines)
+    local messages = {}
+    local total = chatFrame:GetNumMessages()
+    local start = math.max(1, total - numLines + 1)
+    for i = start, total do
+        local msg = chatFrame:GetMessageInfo(i)
+        if msg then
+            messages[#messages + 1] = StripHyperlinks(msg)
+        end
+    end
+    return table.concat(messages, "\n")
+end
+
+local copyFrame
+
+local function ShowCopyDialog(chatFrame)
+    local p = GetChatDB()
+    local numLines = (p and p.copyLines) or 200
+
+    if not copyFrame then
+        copyFrame = CreateFrame("Frame", "EBS_CopyChatDialog", UIParent, "BackdropTemplate")
+        copyFrame:SetSize(600, 400)
+        copyFrame:SetPoint("CENTER")
+        copyFrame:SetFrameStrata("DIALOG")
+        copyFrame:SetBackdrop({
+            bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        copyFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+        copyFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+        copyFrame:EnableMouse(true)
+        copyFrame:SetMovable(true)
+        copyFrame:RegisterForDrag("LeftButton")
+        copyFrame:SetScript("OnDragStart", copyFrame.StartMoving)
+        copyFrame:SetScript("OnDragStop", copyFrame.StopMovingOrSizing)
+        tinsert(UISpecialFrames, "EBS_CopyChatDialog")
+
+        -- Title
+        local title = copyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOPLEFT", 12, -12)
+        title:SetText("Copy Chat")
+        title:SetTextColor(0.8, 0.8, 0.8)
+
+        -- Close button
+        local close = CreateFrame("Button", nil, copyFrame, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -2, -2)
+
+        -- Scroll frame
+        local scroll = CreateFrame("ScrollFrame", "EBS_CopyChatScroll", copyFrame, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", 12, -36)
+        scroll:SetPoint("BOTTOMRIGHT", -30, 12)
+
+        local editBox = CreateFrame("EditBox", nil, scroll)
+        editBox:SetMultiLine(true)
+        editBox:SetFontObject("ChatFontNormal")
+        editBox:SetWidth(540)
+        editBox:SetAutoFocus(false)
+        editBox:SetScript("OnEscapePressed", function() copyFrame:Hide() end)
+        scroll:SetScrollChild(editBox)
+        copyFrame._editBox = editBox
+    end
+
+    local text = GetChatMessages(chatFrame or ChatFrame1, numLines)
+    copyFrame._editBox:SetText(text)
+    copyFrame:Show()
+    copyFrame._editBox:HighlightText()
+    copyFrame._editBox:SetFocus()
+end
+
+_G._EBS_ShowCopyDialog = ShowCopyDialog
+
+-- Slash command
+SLASH_EUICOPY1 = "/copy"
+SlashCmdList["EUICOPY"] = function()
+    local chatFrame = SELECTED_CHAT_FRAME or ChatFrame1
+    ShowCopyDialog(chatFrame)
+end
+
+-------------------------------------------------------------------------------
+--  Copy Button (optional, shown on chat frame toolbar)
+-------------------------------------------------------------------------------
+local copyButtons = {}
+
+local function CreateCopyButton(chatFrame)
+    if copyButtons[chatFrame] then return copyButtons[chatFrame] end
+    local btn = CreateFrame("Button", nil, chatFrame)
+    btn:SetSize(20, 20)
+    btn:SetPoint("TOPRIGHT", chatFrame, "TOPRIGHT", -2, -2)
+    btn:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+    btn:GetHighlightTexture():SetAlpha(0.3)
+    btn:SetScript("OnClick", function()
+        ShowCopyDialog(chatFrame)
+    end)
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Copy Chat", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", GameTooltip_Hide)
+    copyButtons[chatFrame] = btn
+    return btn
+end
+
+-- Called from ApplyChat or options refresh
+function _G._EBS_UpdateCopyButtons()
+    local p = GetChatDB()
+    if not p or not p.enabled then return end
+    for i = 1, NUM_CHAT_WINDOWS or 10 do
+        local cf = _G["ChatFrame" .. i]
+        if cf then
+            if p.copyButton then
+                local btn = CreateCopyButton(cf)
+                btn:Show()
+            elseif copyButtons[cf] then
+                copyButtons[cf]:Hide()
+            end
+        end
+    end
+end
