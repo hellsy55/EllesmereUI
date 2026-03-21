@@ -24,6 +24,21 @@ local defaults = {
             visHideMounted   = false,
             visHideNoTarget  = false,
             visHideNoEnemy   = false,
+            -- New fields
+            fontFace           = nil,          -- nil = preserve current, else LSM font name
+            fontOutline        = "",           -- "", "OUTLINE", "THICKOUTLINE"
+            fontShadow         = true,         -- toggle shadow on/off
+            classColorNames    = true,         -- color player names by class
+            clickableURLs      = true,         -- detect and linkify URLs
+            shortenChannels    = "off",        -- "off", "short", "minimal"
+            timestamps         = "none",       -- "none","HH:MM","HH:MM:SS","HH:MM AP","HH:MM:SS AP"
+            timestampSeparator = false,        -- vertical bar between timestamp and message
+            messageFadeEnabled = true,         -- enable message fading
+            messageFadeTime    = 120,          -- seconds before fade (5-240)
+            messageSpacing     = 0,            -- line spacing (0-10)
+            copyButton         = false,        -- show copy button on chat frame
+            copyLines          = 200,          -- lines to include in copy (50-500)
+            showSearchButton   = true,         -- show search button on chat frame
         },
         minimap = {
             enabled       = true,
