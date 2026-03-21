@@ -389,6 +389,13 @@ local function ApplyChat()
         end
     end
 
+    -- Apply timestamps (from EllesmereUIBasics_Chat.lua)
+    if _G._EBS_ApplyTimestamps then _G._EBS_ApplyTimestamps() end
+
+    -- Update copy/search buttons (from EllesmereUIBasics_Chat.lua)
+    if _G._EBS_UpdateCopyButtons then _G._EBS_UpdateCopyButtons() end
+    if _G._EBS_UpdateSearchButtons then _G._EBS_UpdateSearchButtons() end
+
 end
 
 -------------------------------------------------------------------------------
