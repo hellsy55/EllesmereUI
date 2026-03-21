@@ -227,12 +227,48 @@ local function SkinChatFrame(chatFrame, p)
         end
     end
 
-    -- Font size
-    local fontString = chatFrame:GetFontObject()
-    if fontString then
-        local font, _, flags = fontString:GetFont()
-        if font then
-            chatFrame:SetFont(font, p.fontSize, flags)
+    -- Font: face, size, outline, shadow
+    do
+        local fontObj = chatFrame:GetFontObject()
+        if fontObj then
+            local curFont, _, curFlags = fontObj:GetFont()
+            -- Face: use configured LSM font or preserve current
+            local face = curFont
+            if p.fontFace then
+                local lsm = LibStub and LibStub("LibSharedMedia-3.0", true)
+                if lsm then
+                    local lsmPath = lsm:Fetch("font", p.fontFace)
+                    if lsmPath then face = lsmPath end
+                end
+            end
+            -- Outline
+            local outline = p.fontOutline or ""
+            -- Apply
+            chatFrame:SetFont(face, p.fontSize, outline)
+            -- Shadow
+            if p.fontShadow then
+                chatFrame:SetShadowOffset(1, -1)
+                chatFrame:SetShadowColor(0, 0, 0, 1)
+            else
+                chatFrame:SetShadowOffset(0, 0)
+                chatFrame:SetShadowColor(0, 0, 0, 0)
+            end
+        end
+    end
+
+    -- Message spacing
+    if chatFrame.SetSpacing then
+        chatFrame:SetSpacing(p.messageSpacing or 0)
+    end
+
+    -- Message fade
+    if chatFrame.SetTimeVisible then
+        if p.messageFadeEnabled then
+            chatFrame:SetTimeVisible(p.messageFadeTime or 120)
+            chatFrame:SetFadeDuration(3)
+        else
+            chatFrame:SetTimeVisible(9999)
+            chatFrame:SetFadeDuration(0)
         end
     end
 
