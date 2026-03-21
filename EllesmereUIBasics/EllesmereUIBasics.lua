@@ -11,43 +11,42 @@ local PP = EllesmereUI.PP
 local defaults = {
     profile = {
         chat = {
-            enabled       = true,
+            enabled       = false,
             bgAlpha       = 0.6,
             borderR       = 0.05, borderG = 0.05, borderB = 0.05, borderA = 1,
             useClassColor = false,
             fontSize      = 14,
             hideButtons   = false,
             hideTabFlash  = false,
+            position      = nil,
             visibility    = "always",
             visOnlyInstances = false,
             visHideHousing   = false,
             visHideMounted   = false,
             visHideNoTarget  = false,
             visHideNoEnemy   = false,
-            -- New fields
-            fontFace           = nil,          -- nil = preserve current, else LSM font name
-            fontOutline        = "",           -- "", "OUTLINE", "THICKOUTLINE"
-            fontShadow         = true,         -- toggle shadow on/off
-            classColorNames    = true,         -- color player names by class
-            clickableURLs      = true,         -- detect and linkify URLs
-            shortenChannels    = "off",        -- "off", "short", "minimal"
-            timestamps         = "none",       -- "none","HH:MM","HH:MM:SS","HH:MM AP","HH:MM:SS AP"
-            timestampSeparator = false,        -- vertical bar between timestamp and message
-            messageFadeEnabled = true,         -- enable message fading
-            messageFadeTime    = 120,          -- seconds before fade (5-240)
-            messageSpacing     = 0,            -- line spacing (0-10)
-            copyButton         = false,        -- show copy button on chat frame
-            copyLines          = 200,          -- lines to include in copy (50-500)
-            showSearchButton   = true,         -- show search button on chat frame
+            fontFace           = nil,
+            fontOutline        = "",
+            fontShadow         = true,
+            classColorNames    = true,
+            clickableURLs      = true,
+            shortenChannels    = "off",
+            timestamps         = "none",
+            messageFadeEnabled = true,
+            messageFadeTime    = 120,
+            messageSpacing     = 0,
+            copyButton         = false,
+            copyLines          = 200,
+            showSearchButton   = true,
         },
         minimap = {
-            enabled       = true,
+            enabled       = false,
             shape         = "square",
             borderSize    = 1,
             showCoords    = false,
-            coordPrecision = 1,
+            coordPrecision = 0,
             scale         = 1.0,
-            borderR       = 0.05, borderG = 0.05, borderB = 0.05, borderA = 1,
+            borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             useClassColor = false,
             hideZoneText  = false,
             scrollZoom    = true,
@@ -126,7 +125,7 @@ local defaults = {
             enabled              = true,
             pos                  = nil,
             width                = 220,
-            bgAlpha              = 0.6,
+            bgAlpha              = 0.7,
             bgR                  = 0,
             bgG                  = 0,
             bgB                  = 0,
@@ -146,6 +145,8 @@ local defaults = {
             secColor             = { r=0.047, g=0.824, b=0.624 },
             delveCollapsed       = false,
             questsCollapsed      = false,
+            showPreyQuests       = true,
+            preyCollapsed        = false,
             questItemHotkey      = nil,
             autoAccept           = false,
             autoTurnIn           = false,
@@ -204,10 +205,75 @@ end)
 -------------------------------------------------------------------------------
 local skinnedChatFrames = {}
 
+local function StripBlizzardChat(chatFrame)
+    if chatFrame._ebsStripped then return end
+    chatFrame._ebsStripped = true
+    local name = chatFrame:GetName()
+    if not name then return end
+
+    -- Strip tab textures
+    local tab = _G[name .. "Tab"]
+    if tab then
+        local tabTexSuffixes = {
+            "Left", "Middle", "Right",
+            "SelectedLeft", "SelectedMiddle", "SelectedRight",
+            "ActiveLeft", "ActiveMiddle", "ActiveRight",
+            "HighlightLeft", "HighlightMiddle", "HighlightRight",
+        }
+        for _, suffix in ipairs(tabTexSuffixes) do
+            local tex = _G[name .. "Tab" .. suffix] or (tab[suffix])
+            if tex and tex.SetTexture then tex:SetTexture(nil) end
+        end
+        -- Strip tab glow/flash textures
+        if tab.glow then tab.glow:SetTexture(nil) end
+        if tab.leftGlow then tab.leftGlow:SetTexture(nil) end
+        if tab.rightGlow then tab.rightGlow:SetTexture(nil) end
+    end
+
+    -- Strip edit box Blizzard borders
+    local editBox = _G[name .. "EditBox"]
+    if editBox then
+        for _, suffix in ipairs({"Left", "Mid", "Right"}) do
+            local tex = _G[name .. "EditBox" .. suffix]
+            if tex then tex:SetTexture(nil); tex:SetAlpha(0) end
+        end
+        if editBox.focusLeft then editBox.focusLeft:SetAlpha(0) end
+        if editBox.focusRight then editBox.focusRight:SetAlpha(0) end
+        if editBox.focusMid then editBox.focusMid:SetAlpha(0) end
+        -- Also try named focus textures
+        local fl = _G[name .. "EditBoxFocusLeft"]
+        local fr = _G[name .. "EditBoxFocusRight"]
+        local fm = _G[name .. "EditBoxFocusMid"]
+        if fl then fl:SetAlpha(0) end
+        if fr then fr:SetAlpha(0) end
+        if fm then fm:SetAlpha(0) end
+    end
+
+    -- Strip button frame background
+    local btnBg = _G[name .. "ButtonFrameBackground"]
+    if btnBg then btnBg:SetAlpha(0) end
+    local btnFrame = _G[name .. "ButtonFrame"]
+    if btnFrame then btnFrame:SetAlpha(0) end
+
+    -- Hide scroll bar and scroll-to-bottom button
+    if chatFrame.ScrollBar then chatFrame.ScrollBar:SetAlpha(0) end
+    if chatFrame.ScrollToBottomButton then chatFrame.ScrollToBottomButton:SetAlpha(0) end
+
+    -- Strip any remaining frame background textures
+    local bg = _G[name .. "Background"]
+    if bg then bg:SetAlpha(0) end
+
+    -- Disable chat frame clamping so unlock mode can position freely
+    chatFrame:SetClampedToScreen(false)
+end
+
 local function SkinChatFrame(chatFrame, p)
     if not chatFrame then return end
     local name = chatFrame:GetName()
     if not name then return end
+
+    -- Strip all Blizzard decoration first
+    StripBlizzardChat(chatFrame)
 
     -- Dark background
     if not chatFrame._ebsBg then
@@ -413,6 +479,13 @@ local function ApplyChat()
     if _G._EBS_UpdateCopyButtons then _G._EBS_UpdateCopyButtons() end
     if _G._EBS_UpdateSearchButtons then _G._EBS_UpdateSearchButtons() end
 
+    -- Restore saved position (managed by unlock mode)
+    local cf1 = ChatFrame1
+    if cf1 and p.position then
+        cf1:SetUserPlaced(true)
+        cf1:ClearAllPoints()
+        cf1:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -421,6 +494,10 @@ end
 local minimapDecorations = {
     "MinimapBorder",
     "MinimapBorderTop",
+    "MinimapBackdrop",
+    "MinimapNorthTag",
+    "MinimapCompassTexture",
+    "TimeManagerClockButton",
 }
 
 local minimapButtonMap = {
@@ -465,12 +542,276 @@ local function ShowMinimapButton(name)
     btn:Show()
 end
 
+-- Forward declarations for flyout system
+local addonButtonPoll = nil
+local cachedAddonButtons = {}
+local flyoutOwnedFrames = {}
+
+-------------------------------------------------------------------------------
+--  Minimap Button Flyout
+-------------------------------------------------------------------------------
+local flyoutToggle = nil   -- the square trigger button
+local flyoutPanel  = nil   -- the popup grid container
+local flyoutSavedParents = {}  -- original parent/point data for restore
+local flyoutSavedRegions = {}  -- original region states for restore
+
+local FLYOUT_BTN_SIZE = 21
+local FLYOUT_PADDING  = 4
+local FLYOUT_COLS     = 4
+
+-- Textures that are decorative borders/backgrounds on minimap buttons
+local MINIMAP_BTN_JUNK = {
+    [136467] = true,  -- UI-Minimap-Background
+    [136430] = true,  -- MiniMap-TrackingBorder
+    [136477] = true,  -- UI-Minimap-ZoomButton-Highlight (used on some buttons)
+}
+local MINIMAP_BTN_JUNK_PATH = {
+    ["Interface\\Minimap\\MiniMap%-TrackingBorder"] = true,
+    ["Interface\\Minimap\\UI%-Minimap%-Background"] = true,
+    ["Interface\\Minimap\\UI%-Minimap%-ZoomButton%-Highlight"] = true,
+}
+
+local function IsJunkTexture(region)
+    if not region or not region.IsObjectType or not region:IsObjectType("Texture") then
+        return false
+    end
+    local texID = region.GetTextureFileID and region:GetTextureFileID()
+    if texID and MINIMAP_BTN_JUNK[texID] then return true end
+    local texPath = region:GetTexture()
+    if texPath and type(texPath) == "string" then
+        for pattern in pairs(MINIMAP_BTN_JUNK_PATH) do
+            if texPath:match(pattern) then return true end
+        end
+    end
+    return false
+end
+
+local function StripButtonDecorations(btn)
+    local saved = {}
+    for _, region in ipairs({ btn:GetRegions() }) do
+        if IsJunkTexture(region) then
+            saved[#saved + 1] = { region = region, alpha = region:GetAlpha(), shown = region:IsShown() }
+            region:SetAlpha(0)
+            region:Hide()
+        end
+    end
+    -- Also hide highlight/pushed overlays that have junk textures
+    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if hl and IsJunkTexture(hl) then
+        saved[#saved + 1] = { region = hl, alpha = hl:GetAlpha(), shown = hl:IsShown() }
+        hl:SetAlpha(0)
+        hl:Hide()
+    end
+    flyoutSavedRegions[btn] = saved
+end
+
+local function RestoreButtonDecorations(btn)
+    local saved = flyoutSavedRegions[btn]
+    if not saved then return end
+    for _, info in ipairs(saved) do
+        info.region:SetAlpha(info.alpha)
+        if info.shown then info.region:Show() end
+    end
+    flyoutSavedRegions[btn] = nil
+end
+
+local function CollectFlyoutButtons()
+    -- Return all collected minimap buttons (populated by GatherMinimapButtons)
+    local collected = {}
+    for _, btn in ipairs(cachedAddonButtons) do
+        collected[#collected + 1] = btn
+    end
+    return collected
+end
+
+local function LayoutFlyoutButtons()
+    if not flyoutPanel then return end
+    local buttons = CollectFlyoutButtons()
+    local count = #buttons
+    if count == 0 then
+        flyoutPanel:SetSize(1, 1)
+        return
+    end
+
+    local cols = math.min(count, FLYOUT_COLS)
+    local rows = math.ceil(count / cols)
+    local pw = FLYOUT_PADDING + cols * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
+    local ph = FLYOUT_PADDING + rows * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
+    flyoutPanel:SetSize(pw, ph)
+
+    for i, btn in ipairs(buttons) do
+        -- Save original parent/points for restore
+        if not flyoutSavedParents[btn] then
+            local p1, rel, p2, ox, oy = btn:GetPoint(1)
+            flyoutSavedParents[btn] = {
+                parent = btn:GetParent(),
+                strata = btn:GetFrameStrata(),
+                point = p1, relTo = rel, relPoint = p2, x = ox, y = oy,
+            }
+        end
+
+        local col = (i - 1) % cols
+        local row = math.floor((i - 1) / cols)
+        local xOff = FLYOUT_PADDING + col * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
+        local yOff = -(FLYOUT_PADDING + row * (FLYOUT_BTN_SIZE + FLYOUT_PADDING))
+
+        btn:SetParent(flyoutPanel)
+        -- Unlock fixed strata/level first (LibDBIcon locks these)
+        if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
+        if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
+        btn:SetFrameStrata("DIALOG")
+        if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(true) end
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", flyoutPanel, "TOPLEFT", xOff, yOff)
+        btn:SetSize(FLYOUT_BTN_SIZE, FLYOUT_BTN_SIZE)
+        btn:SetAlpha(1)
+        btn:Show()
+        btn:SetFrameLevel(flyoutPanel:GetFrameLevel() + 5)
+        if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(true) end
+        -- Strip decorative border/background textures
+        StripButtonDecorations(btn)
+        -- Also force all child frames up to the same strata/level
+        for _, child in ipairs({ btn:GetChildren() }) do
+            child:SetFrameStrata("DIALOG")
+            child:SetFrameLevel(flyoutPanel:GetFrameLevel() + 6)
+        end
+        -- Normalize icon region to fill the button cleanly
+        local icon = btn.icon or btn.Icon
+        if not icon then
+            for _, region in ipairs({ btn:GetRegions() }) do
+                if region:IsObjectType("Texture") and region:IsShown()
+                   and region:GetAlpha() > 0 and not IsJunkTexture(region) then
+                    icon = region
+                    break
+                end
+            end
+        end
+        if icon then
+            icon:ClearAllPoints()
+            icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+            icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+            icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+        end
+        -- Add atlas ring border overlay
+        if not btn._flyoutRing then
+            local ring = btn:CreateTexture(nil, "OVERLAY", nil, 7)
+            ring:SetAtlas("AdventureMap-combatally-ring")
+            ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
+            ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
+            btn._flyoutRing = ring
+        end
+        btn._flyoutRing:Show()
+    end
+end
+
+local function RestoreFlyoutButtons()
+    for btn, saved in pairs(flyoutSavedParents) do
+        RestoreButtonDecorations(btn)
+        if btn._flyoutRing then btn._flyoutRing:Hide() end
+        if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
+        if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
+        btn:SetParent(saved.parent)
+        btn:SetFrameStrata(saved.strata)
+        btn:ClearAllPoints()
+        if saved.point and saved.relTo then
+            btn:SetPoint(saved.point, saved.relTo, saved.relPoint, saved.x, saved.y)
+        end
+        -- Re-hide on the minimap surface
+        btn:Hide()
+        btn:SetAlpha(0)
+    end
+    wipe(flyoutSavedParents)
+end
+
+local function ShowFlyoutPanel()
+    if not flyoutPanel then
+        flyoutPanel = CreateFrame("Frame", nil, Minimap, "BackdropTemplate")
+        flyoutPanel:SetFrameStrata("DIALOG")
+        flyoutPanel:SetBackdrop({
+            bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeSize = 1,
+        })
+        flyoutPanel:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+        flyoutPanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+        flyoutPanel:SetPoint("BOTTOMLEFT", flyoutToggle, "TOPLEFT", 0, 2)
+        flyoutPanel:SetClampedToScreen(true)
+        flyoutOwnedFrames[flyoutPanel] = true
+    end
+    LayoutFlyoutButtons()
+    flyoutPanel:Show()
+end
+
+local function HideFlyoutPanel()
+    if flyoutPanel then
+        flyoutPanel:Hide()
+        RestoreFlyoutButtons()
+    end
+end
+
+local function ToggleFlyoutPanel()
+    if flyoutPanel and flyoutPanel:IsShown() then
+        HideFlyoutPanel()
+    else
+        ShowFlyoutPanel()
+    end
+end
+
+local function CreateFlyoutToggle()
+    if flyoutToggle then return flyoutToggle end
+
+    local btn = CreateFrame("Button", nil, Minimap)
+    btn:SetSize(24, 24)
+    btn:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", 4, 4)
+    btn:SetFrameLevel(Minimap:GetFrameLevel() + 10)
+
+    local norm = btn:CreateTexture(nil, "ARTWORK")
+    norm:SetAllPoints()
+    norm:SetAtlas("Map-Filter-Button")
+    btn:SetNormalTexture(norm)
+
+    local pushed = btn:CreateTexture(nil, "ARTWORK")
+    pushed:SetAllPoints()
+    pushed:SetAtlas("Map-Filter-Button-down")
+    btn:SetPushedTexture(pushed)
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetAtlas("Map-Filter-Button")
+    hl:SetAlpha(0.3)
+    btn:SetHighlightTexture(hl)
+
+    btn:SetScript("OnClick", ToggleFlyoutPanel)
+
+    flyoutToggle = btn
+    flyoutOwnedFrames[btn] = true
+    return btn
+end
+
 local coordFrame, coordTicker
-local clockFrame, clockTicker
+local clockFrame, clockTicker, clockBg
+local locationFrame, locationBg
+
+local function GetMinimapFont()
+    local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
+    return path, flag
+end
+
+local function ApplyMinimapFont(fs, size)
+    local path, flag = GetMinimapFont()
+    fs:SetFont(path, size, flag)
+    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+        fs:SetShadowOffset(1, -1)
+        fs:SetShadowColor(0, 0, 0, 0.8)
+    else
+        fs:SetShadowOffset(0, 0)
+    end
+end
 
 local function UpdateClock()
     if not clockFrame then return end
-    local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    local p = EBS.db and EBS.db.profile.minimap
     local fmt = (p and p.clockFormat == "24h") and "%H:%M" or "%I:%M %p"
     clockFrame:SetText(date(fmt))
 end
@@ -482,10 +823,25 @@ local function UpdateCoords()
     local pos = C_Map.GetPlayerMapPosition(mapID, "player")
     if not pos then coordFrame:SetText(""); return end
     local x, y = pos:GetXY()
-    local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    local p = EBS.db and EBS.db.profile.minimap
     local prec = p and p.coordPrecision or 1
-    local fmt = "%." .. prec .. "f, %." .. prec .. "f"
-    coordFrame:SetText(format(fmt, x * 100, y * 100))
+    local fmtStr = format("%%.%df, %%.%df", prec, prec)
+    coordFrame:SetText(format(fmtStr, x * 100, y * 100))
+end
+
+local function UpdateLocation()
+    if not locationFrame then return end
+    if InCombatLockdown() then return end
+    local sub = GetSubZoneText()
+    if sub and sub ~= "" then
+        locationFrame:SetText(sub)
+    else
+        locationFrame:SetText(GetZoneText() or "")
+    end
+    if locationBg then
+        local tw = locationFrame:GetStringWidth() or 0
+        locationBg:SetSize(tw + 20, 18)
+    end
 end
 
 local autoZoomTimer = nil
@@ -508,24 +864,69 @@ local function ScheduleAutoZoom()
     end)
 end
 
-local addonButtonPoll = nil
-local cachedAddonButtons = {}
+-- Blizzard structural frames that should NOT go into the flyout
+local flyoutBlacklist = {
+    MinimapZoomIn    = true,
+    MinimapZoomOut   = true,
+    MinimapBackdrop  = true,
+}
 
-local function RefreshAddonButtonCache()
+-- Persistently hide a minimap button via Show hook
+local addonButtonHooks = {}
+
+local function HideMinimapChild(btn)
+    btn:Hide()
+    btn:SetAlpha(0)
+    if not addonButtonHooks[btn] then
+        hooksecurefunc(btn, "Show", function(self)
+            -- Allow showing when parented to the flyout panel
+            if self:GetParent() == flyoutPanel then return end
+            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+            if mp and mp.enabled and not flyoutOwnedFrames[self] then
+                self:Hide()
+                self:SetAlpha(0)
+            end
+        end)
+        addonButtonHooks[btn] = true
+    end
+end
+
+local function ShowMinimapChild(btn)
+    btn:SetAlpha(1)
+    btn:Show()
+end
+
+-- Gather all minimap buttons (Blizzard + addon) into cachedAddonButtons
+local function GatherMinimapButtons()
     wipe(cachedAddonButtons)
     if not Minimap then return end
     for _, child in ipairs({ Minimap:GetChildren() }) do
-        local name = child:GetName()
-        if name and name:match("^LibDBIcon10_") then
-            cachedAddonButtons[#cachedAddonButtons + 1] = child
+        if not flyoutOwnedFrames[child] then
+            local name = child:GetName()
+            -- Only collect actual buttons, skip blacklisted structural frames
+            if child:IsObjectType("Button") and name and not flyoutBlacklist[name] then
+                cachedAddonButtons[#cachedAddonButtons + 1] = child
+            elseif not child:IsObjectType("Button") and name and name:match("^LibDBIcon10_") then
+                -- LibDBIcon sometimes uses Frame instead of Button
+                cachedAddonButtons[#cachedAddonButtons + 1] = child
+            end
         end
     end
 end
 
-local function SetAddonButtonsAlpha(alpha)
+-- Hide all collected minimap buttons from the map surface
+local function HideAllMinimapButtons()
+    GatherMinimapButtons()
     for _, btn in ipairs(cachedAddonButtons) do
-        btn:SetAlpha(alpha)
+        HideMinimapChild(btn)
     end
+end
+
+local function ShowAllMinimapButtons()
+    for _, btn in ipairs(cachedAddonButtons) do
+        ShowMinimapChild(btn)
+    end
+    wipe(cachedAddonButtons)
 end
 
 local function ApplyMinimap()
@@ -542,31 +943,42 @@ local function ApplyMinimap()
             local frame = _G[name]
             if frame then frame:Show() end
         end
+        -- Restore cluster header
+        if MinimapCluster and MinimapCluster.BorderTop then
+            MinimapCluster.BorderTop:Show()
+        end
+        if MinimapCluster and MinimapCluster.Tracking then
+            MinimapCluster.Tracking:Show()
+        end
         -- Restore circular mask
-        minimap:SetMaskTexture("Textures\\MinimapMask")
+        minimap:SetMaskTexture(186178)
         -- Hide our background & border
         if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
         if minimap._ppBorders then PP.SetBorderColor(minimap, 0, 0, 0, 0) end
         -- Reset scale
         minimap:SetScale(1.0)
-        -- Restore buttons
-        for _, entry in ipairs(minimapButtonMap) do
-            for _, btnName in ipairs(entry.names) do
-                ShowMinimapButton(btnName)
-            end
+        -- Tear down flyout and restore all buttons
+        HideFlyoutPanel()
+        if flyoutToggle then flyoutToggle:Hide() end
+        ShowAllMinimapButtons()
+        if addonButtonPoll then
+            addonButtonPoll:Hide()
+            addonButtonPoll:UnregisterAllEvents()
         end
-        -- Restore addon buttons
-        if addonButtonPoll then addonButtonPoll:Hide() end
-        RefreshAddonButtonCache()
-        SetAddonButtonsAlpha(1)
         -- Restore zone text
         local zoneBtn = MinimapZoneTextButton
         if zoneBtn then zoneBtn:Show() end
+        if MinimapCluster and MinimapCluster.ZoneTextButton then
+            MinimapCluster.ZoneTextButton:Show()
+        end
+        if MinimapZoneText then MinimapZoneText:Show() end
         if coordFrame then coordFrame:Hide() end
         if coordTicker then coordTicker:Hide() end
         if clockFrame then clockFrame:Hide() end
+        if clockBg then clockBg:Hide() end
         if clockTicker then clockTicker:Hide() end
-        minimap:SetMovable(false)
+        if locationFrame then locationFrame:Hide() end
+        if locationBg then locationBg:Hide() end
         minimap:EnableMouseWheel(false)
         CancelAutoZoom()
         return
@@ -578,93 +990,89 @@ local function ApplyMinimap()
         if frame then frame:Hide() end
     end
 
-    -- Shape mask
+    -- Hide cluster header bar (zone text + time + tracking above minimap)
+    if MinimapCluster and MinimapCluster.BorderTop then
+        MinimapCluster.BorderTop:Hide()
+    end
+    if MinimapCluster and MinimapCluster.Tracking then
+        MinimapCluster.Tracking:Hide()
+    end
+
+    -- Shape mask (retail texture IDs: 130937 = square, 186178 = circle)
     if p.shape == "square" then
-        minimap:SetMaskTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        minimap:SetMaskTexture(130937)
     else
-        minimap:SetMaskTexture("Textures\\MinimapMask")
+        minimap:SetMaskTexture(186178)
     end
 
-    -- Dark background
-    if not minimap._ebsBg then
-        minimap._ebsBg = minimap:CreateTexture(nil, "BACKGROUND", nil, -7)
-        minimap._ebsBg:SetColorTexture(0, 0, 0)
-    end
-    local inset = (p.borderSize or 1) + 1
-    minimap._ebsBg:ClearAllPoints()
-    minimap._ebsBg:SetPoint("TOPLEFT", -inset, inset)
-    minimap._ebsBg:SetPoint("BOTTOMRIGHT", inset, -inset)
+    -- Hide background (no black bg behind minimap)
+    if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
 
-    -- Border
-    local r, g, b, a = GetBorderColor(p)
+    -- Border (pixel perfect)
+    local r, g, b = GetBorderColor(p)
+    local bs = p.borderSize or 1
     if not minimap._ppBorders then
-        PP.CreateBorder(minimap, r, g, b, a, 1, "OVERLAY", 7)
+        PP.CreateBorder(minimap, r, g, b, 1, bs, "OVERLAY", 7)
     else
-        PP.SetBorderColor(minimap, r, g, b, a)
+        PP.SetBorderColor(minimap, r, g, b, 1)
     end
-
-    -- Border size
-    PP.SetBorderSize(minimap, p.borderSize or 1)
+    PP.SetBorderSize(minimap, bs)
 
     -- Scale
     minimap:SetScale(p.scale)
 
-    -- Individual button toggles
-    for _, entry in ipairs(minimapButtonMap) do
-        local hide = p[entry.key]
-        for _, btnName in ipairs(entry.names) do
-            if hide then
-                HideMinimapButton(btnName)
-            else
-                ShowMinimapButton(btnName)
-            end
-        end
-    end
+    -- Flyout toggle button (bottom-left corner) -- create before hiding children
+    CreateFlyoutToggle()
+    flyoutToggle:Show()
 
-    -- Addon button mouseover
-    if p.hideAddonButtons then
-        RefreshAddonButtonCache()
-        SetAddonButtonsAlpha(0)
-        if not addonButtonPoll then
-            addonButtonPoll = CreateFrame("Frame")
-            addonButtonPoll:RegisterEvent("ADDON_LOADED")
-            addonButtonPoll:SetScript("OnEvent", function()
-                RefreshAddonButtonCache()
-                local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
-                if mp and mp.hideAddonButtons and not Minimap:IsMouseOver() then
-                    SetAddonButtonsAlpha(0)
-                end
-            end)
-            local abElapsed = 0
-            local wasOver = false
-            addonButtonPoll:SetScript("OnUpdate", function(_, dt)
-                abElapsed = abElapsed + dt
-                if abElapsed < 0.15 then return end
-                abElapsed = 0
-                local over = Minimap:IsMouseOver()
-                if over and not wasOver then
-                    wasOver = true
-                    SetAddonButtonsAlpha(1)
-                elseif not over and wasOver then
-                    wasOver = false
-                    SetAddonButtonsAlpha(0)
-                end
-            end)
-        end
-        addonButtonPoll:Show()
-    else
-        if addonButtonPoll then addonButtonPoll:Hide() end
-        SetAddonButtonsAlpha(1)
-    end
+    -- Hide ALL minimap child frames from the map surface
+    HideAllMinimapButtons()
 
-    -- Clock
+    -- Poll for late-loading addons that attach buttons after ADDON_LOADED
+    if not addonButtonPoll then
+        addonButtonPoll = CreateFrame("Frame")
+        addonButtonPoll:RegisterEvent("ADDON_LOADED")
+        addonButtonPoll:SetScript("OnEvent", function()
+            HideAllMinimapButtons()
+        end)
+    end
+    addonButtonPoll:Show()
+
+    -- Close the flyout if it was open (layout may have changed)
+    HideFlyoutPanel()
+
+    -- Hide Blizzard zone text (we use our own location bar)
+    local zoneBtn = MinimapZoneTextButton
+    if zoneBtn then zoneBtn:Hide() end
+    if MinimapCluster and MinimapCluster.ZoneTextButton then
+        MinimapCluster.ZoneTextButton:Hide()
+    end
+    if MinimapZoneText then MinimapZoneText:Hide() end
+
+    -- Clock -- top center, text vertically centered on the top edge
     if p.showClock then
+        if not clockBg then
+            clockBg = CreateFrame("Button", nil, minimap, "BackdropTemplate")
+            clockBg:SetSize(80, 16)
+            clockBg:SetPoint("TOP", minimap, "TOP", 0, 7)
+            clockBg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+            clockBg:SetFrameLevel(minimap:GetFrameLevel() + 5)
+            clockBg:RegisterForClicks("AnyUp")
+            clockBg:SetScript("OnClick", function()
+                if ToggleTimeManager then ToggleTimeManager() end
+            end)
+        end
         if not clockFrame then
-            clockFrame = minimap:CreateFontString(nil, "OVERLAY")
-            clockFrame:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
-            clockFrame:SetPoint("TOP", minimap, "BOTTOM", 0, -6)
+            clockFrame = clockBg:CreateFontString(nil, "OVERLAY")
+            ApplyMinimapFont(clockFrame, 10)
+            clockFrame:SetPoint("CENTER", clockBg, "CENTER", 0, 0)
             clockFrame:SetTextColor(1, 1, 1, 0.9)
         end
+        do
+            local ar, ag, ab = GetBorderColor(p)
+            clockBg:SetBackdropColor(ar, ag, ab, 1)
+        end
+        clockBg:Show()
         clockFrame:Show()
         if not clockTicker then
             clockTicker = CreateFrame("Frame")
@@ -679,29 +1087,52 @@ local function ApplyMinimap()
         clockTicker:Show()
         UpdateClock()
     else
+        if clockBg then clockBg:Hide() end
         if clockFrame then clockFrame:Hide() end
         if clockTicker then clockTicker:Hide() end
     end
 
-    -- Zone text
-    local zoneBtn = MinimapZoneTextButton
-    if zoneBtn then
-        if p.hideZoneText then
-            zoneBtn:Hide()
-        else
-            zoneBtn:Show()
+    -- Location bar -- bottom center, shows subzone/zone name
+    if not p.hideZoneText then
+        if not locationBg then
+            locationBg = CreateFrame("Frame", nil, minimap, "BackdropTemplate")
+            locationBg:SetSize(120, 18)
+            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, -7)
+            locationBg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+            locationBg:SetFrameLevel(minimap:GetFrameLevel() + 5)
+            locationBg:RegisterEvent("ZONE_CHANGED")
+            locationBg:RegisterEvent("ZONE_CHANGED_INDOORS")
+            locationBg:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+            locationBg:RegisterEvent("PLAYER_REGEN_ENABLED")
+            locationBg:SetScript("OnEvent", function() UpdateLocation() end)
         end
+        if not locationFrame then
+            locationFrame = locationBg:CreateFontString(nil, "OVERLAY")
+            ApplyMinimapFont(locationFrame, 10)
+            locationFrame:SetPoint("CENTER", locationBg, "CENTER", 0, 0)
+            locationFrame:SetTextColor(1, 1, 1, 0.9)
+        end
+        do
+            local ar, ag, ab = GetBorderColor(p)
+            locationBg:SetBackdropColor(ar, ag, ab, 1)
+        end
+        locationBg:Show()
+        locationFrame:Show()
+        UpdateLocation()
+    else
+        if locationBg then locationBg:Hide() end
+        if locationFrame then locationFrame:Hide() end
     end
 
-    -- Coordinates
+    -- Coordinates -- top-right, only visible on hover
     if p.showCoords then
         if not coordFrame then
             coordFrame = minimap:CreateFontString(nil, "OVERLAY")
-            coordFrame:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
-            coordFrame:SetPoint("BOTTOM", minimap, "BOTTOM", 0, 4)
+            ApplyMinimapFont(coordFrame, 11)
+            coordFrame:SetPoint("TOPRIGHT", minimap, "TOPRIGHT", -4, -4)
             coordFrame:SetTextColor(1, 1, 1, 0.9)
         end
-        coordFrame:Show()
+        coordFrame:Hide()  -- hidden by default, shown on hover
         if not coordTicker then
             coordTicker = CreateFrame("Frame")
             local elapsed = 0
@@ -714,6 +1145,16 @@ local function ApplyMinimap()
         end
         coordTicker:Show()
         UpdateCoords()
+        -- Hover scripts on minimap to show/hide coords
+        if not minimap._ebsCoordsHooked then
+            minimap:HookScript("OnEnter", function()
+                if coordFrame then coordFrame:Show() end
+            end)
+            minimap:HookScript("OnLeave", function()
+                if coordFrame then coordFrame:Hide() end
+            end)
+            minimap._ebsCoordsHooked = true
+        end
     else
         if coordFrame then coordFrame:Hide() end
         if coordTicker then coordTicker:Hide() end
@@ -746,29 +1187,7 @@ local function ApplyMinimap()
         CancelAutoZoom()
     end
 
-    -- Drag to reposition
-    minimap:SetClampedToScreen(true)
-    minimap:SetMovable(not p.lock)
-    if not minimap._ebsDragHooked then
-        minimap._ebsDragHooked = true
-        minimap:RegisterForDrag("LeftButton")
-        minimap:SetScript("OnDragStart", function(self)
-            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
-            if mp and not mp.lock then
-                self:StartMoving()
-            end
-        end)
-        minimap:SetScript("OnDragStop", function(self)
-            self:StopMovingOrSizing()
-            local point, _, relPoint, x, y = self:GetPoint()
-            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
-            if mp then
-                mp.position = { point = point, relPoint = relPoint, x = x, y = y }
-            end
-        end)
-    end
-
-    -- Restore saved position
+    -- Restore saved position (managed by unlock mode)
     if p.position then
         minimap:ClearAllPoints()
         minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
@@ -1022,7 +1441,7 @@ end
 function EBS:OnInitialize()
     EBS.db = EllesmereUI.Lite.NewDB("EllesmereUIBasicsDB", defaults)
 
-    -- Migrate old hideButtons → individual keys
+    -- Migrate old hideButtons to individual keys
     local mp = EBS.db.profile.minimap
     if mp.hideButtons ~= nil then
         if mp.hideButtons == true then
@@ -1037,7 +1456,7 @@ function EBS:OnInitialize()
         mp.hideButtons = nil
     end
 
-    -- Global bridge for options ↔ main communication
+    -- Global bridge for options <-> main communication
     _G._EBS_AceDB        = EBS.db
     _G._EBS_ApplyAll     = ApplyAll
     _G._EBS_ApplyChat    = ApplyChat
@@ -1076,5 +1495,80 @@ function EBS:OnEnable()
         end
     else
         SkinFriendsFrame()
+    end
+
+    -- Register minimap with unlock mode
+    if EllesmereUI and EllesmereUI.RegisterUnlockElements then
+        local MK = EllesmereUI.MakeUnlockElement
+        local function MDB() return EBS.db and EBS.db.profile.minimap end
+        local function CDB() return EBS.db and EBS.db.profile.chat end
+        EllesmereUI:RegisterUnlockElements({
+            MK({
+                key   = "EBS_Minimap",
+                label = "Minimap",
+                group = "Basics",
+                order = 500,
+                noResize = true,
+                getFrame = function() return Minimap end,
+                getSize  = function()
+                    local s = Minimap:GetScale()
+                    return Minimap:GetWidth() * s, Minimap:GetHeight() * s
+                end,
+                isHidden = function()
+                    local m = MDB()
+                    return not m or not m.enabled
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    local m = MDB(); if not m then return end
+                    m.position = { point = point, relPoint = relPoint, x = x, y = y }
+                    if not EllesmereUI._unlockActive then
+                        ApplyMinimap()
+                    end
+                end,
+                loadPos = function()
+                    local m = MDB()
+                    return m and m.position
+                end,
+                clearPos = function()
+                    local m = MDB(); if not m then return end
+                    m.position = nil
+                end,
+                applyPos = function()
+                    ApplyMinimap()
+                end,
+            }),
+            MK({
+                key   = "EBS_Chat",
+                label = "Chat",
+                group = "Basics",
+                order = 510,
+                getFrame = function() return ChatFrame1 end,
+                getSize  = function()
+                    return ChatFrame1:GetWidth(), ChatFrame1:GetHeight()
+                end,
+                isHidden = function()
+                    local c = CDB()
+                    return not c or not c.enabled
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    local c = CDB(); if not c then return end
+                    c.position = { point = point, relPoint = relPoint, x = x, y = y }
+                    if not EllesmereUI._unlockActive then
+                        ApplyChat()
+                    end
+                end,
+                loadPos = function()
+                    local c = CDB()
+                    return c and c.position
+                end,
+                clearPos = function()
+                    local c = CDB(); if not c then return end
+                    c.position = nil
+                end,
+                applyPos = function()
+                    ApplyChat()
+                end,
+            }),
+        })
     end
 end

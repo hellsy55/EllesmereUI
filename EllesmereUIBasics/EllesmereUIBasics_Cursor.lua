@@ -71,6 +71,7 @@ local UpdateVisibility
 local lastUseClassColor
 
 local function Apply()
+    if not f or not t then return end
     local p = ECL.db.profile
 
     local scale = p.scale or DEF_SCALE

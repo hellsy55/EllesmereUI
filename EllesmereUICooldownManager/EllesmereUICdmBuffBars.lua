@@ -1838,7 +1838,12 @@ function ns.UpdateTrackedBuffBarTimers()
                                 ns.StopNativeGlow(bar._pandemicGlowTarget)
                             end
                             local c = cfg.pandemicGlowColor or { r = 1, g = 1, b = 0 }
-                            ns.StartNativeGlow(glowTarget, style, c.r or 1, c.g or 1, c.b or 0)
+                            local glowOpts = (style == 1) and {
+                                N = cfg.pandemicGlowLines or 8,
+                                th = cfg.pandemicGlowThickness or 2,
+                                period = cfg.pandemicGlowSpeed or 4,
+                            } or nil
+                            ns.StartNativeGlow(glowTarget, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
                             bar._pandemicGlowActive = true
                             bar._pandemicGlowStyleIdx = style
                             bar._pandemicGlowTarget = glowTarget

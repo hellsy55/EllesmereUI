@@ -805,7 +805,12 @@ local function ApplyPandemicGlow(icon, blizzChild, barData)
             StopNativeGlow(icon._glowOverlay)
         end
         local cr, cg, cb = ns.GetCdmPandemicColor(barData)
-        StartNativeGlow(icon._glowOverlay, style, cr, cg, cb)
+        local glowOpts = (style == 1) and {
+            N = barData.pandemicGlowLines or 8,
+            th = barData.pandemicGlowThickness or 2,
+            period = barData.pandemicGlowSpeed or 4,
+        } or nil
+        StartNativeGlow(icon._glowOverlay, style, cr, cg, cb, glowOpts)
         icon._pandemicGlowActive = true
         icon._pandemicGlowStyleIdx = style
     end
@@ -2026,7 +2031,7 @@ local GLOW_STYLES = {
 }
 ns.GLOW_STYLES = GLOW_STYLES
 
-StartNativeGlow = function(overlay, style, cr, cg, cb)
+StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
     if not overlay then return end
     local styleIdx = tonumber(style) or 1
     if styleIdx < 1 or styleIdx > #GLOW_STYLES then styleIdx = 1 end
@@ -2053,7 +2058,9 @@ StartNativeGlow = function(overlay, style, cr, cg, cb)
             shapeMask  = icon._shapeMask,
         })
     elseif entry.procedural then
-        local N = 8; local th = 2; local period = 4
+        local N = opts and opts.N or 8
+        local th = opts and opts.th or 2
+        local period = opts and opts.period or 4
         local lineLen = math.floor((sz + sz) * (2 / N - 0.1))
         lineLen = math.min(lineLen, sz)
         if lineLen < 1 then lineLen = 1 end

@@ -60,8 +60,8 @@ initFrame:SetScript("OnEvent", function(self)
         local visRow
         visRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order  = EllesmereUI.VIS_ORDER,
+              values = EllesmereUI.VIS_VALUES_BASICS,
+              order  = EllesmereUI.VIS_ORDER_BASICS,
               getValue=function()
                   if Cfg("enabled") == false then return "disabled" end
                   return Cfg("visibility") or "always"
@@ -108,7 +108,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local bgRow
         bgRow, h = W:DualRow(parent, y,
-            { type="slider", text="Background", min=0, max=100, step=5,
+            { type="slider", text="Background Opacity", min=0, max=100, step=5,
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
               getValue=function() return math.floor(((Cfg("bgAlpha") or 0.35)*100)+0.5) end,
@@ -214,13 +214,15 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         row, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Prey Quests",
+              getValue=function() return Cfg("showPreyQuests") ~= false end,
+              setValue=function(v) Set("showPreyQuests", v); Refresh() end },
             { type="toggle", text="Show Quest Items",
               getValue=function() return Cfg("showQuestItems") ~= false end,
-              setValue=function(v) Set("showQuestItems", v); Refresh() end },
-            { type="label", text="" })
+              setValue=function(v) Set("showQuestItems", v); Refresh() end })
         -- Resize icon on Show Quest Items for item size
         do
-            local rgn = row._leftRegion
+            local rgn = row._rightRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Quest Item Settings",
                 rows = {
@@ -242,9 +244,15 @@ initFrame:SetScript("OnEvent", function(self)
             resBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             resBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
-        -- Quest Item Hotkey in right half
+        y = y - h
+
+        -- Quest Item Hotkey row
+        local kbRow
+        kbRow, h = W:DualRow(parent, y,
+            { type="label", text="" },
+            { type="label", text="" })
         do
-            local rgn = row._rightRegion
+            local rgn = kbRow._leftRegion
             local SIDE_PAD = 20
             local KB_W, KB_H = 120, 26
 

@@ -28,7 +28,7 @@ local function ShortenChannelName(channelName, mode)
     -- Match "N. ChannelName" pattern (e.g., "2. Trade - City")
     local num, name = channelName:match("^(%d+)%.%s*(.+)")
     if not num then return nil end
-    -- Strip region suffix: "Trade - City" → "Trade"
+    -- Strip region suffix: "Trade - City" -> "Trade"
     local baseName = name:match("^(%S+)") or name
     local short = CHANNEL_ABBREVS[baseName]
     if short then
@@ -147,7 +147,7 @@ for _, event in ipairs(URL_EVENTS) do
     ChatFrame_AddMessageEventFilter(event, URLFilter)
 end
 
--- Hook SetItemRef via hooksecurefunc to handle euiurl clicks → copy dialog
+-- Hook SetItemRef via hooksecurefunc to handle euiurl clicks
 -- hooksecurefunc is a post-hook: the original runs first. For unknown link
 -- types like "euiurl:", the original is a no-op, so our post-hook can safely
 -- open the popup without taint concerns.
@@ -238,7 +238,7 @@ local function StripHyperlinks(text)
     text = text:gsub("|T.-|t", "")
     -- Remove atlas escapes
     text = text:gsub("|A.-|a", "")
-    -- Convert hyperlinks to plain text: |Htype:data|h[text]|h → text
+    -- Convert hyperlinks to plain text: |Htype:data|h[text]|h -> text
     text = text:gsub("|H.-|h%[?(.-)]?|h", "%1")
     -- Remove color codes
     text = text:gsub("|c%x%x%x%x%x%x%x%x", "")
@@ -321,7 +321,8 @@ end
 _G._EBS_ShowCopyDialog = ShowCopyDialog
 
 -- Slash command
-SLASH_EUICOPY1 = "/copy"
+SLASH_EUICOPY1 = "/copychat"
+SLASH_EUICOPY2 = "/cc"
 SlashCmdList["EUICOPY"] = function()
     local chatFrame = SELECTED_CHAT_FRAME or ChatFrame1
     ShowCopyDialog(chatFrame)
@@ -356,11 +357,11 @@ end
 -- Called from ApplyChat or options refresh
 function _G._EBS_UpdateCopyButtons()
     local p = GetChatDB()
-    if not p or not p.enabled then return end
+    local show = p and p.enabled and p.copyButton
     for i = 1, NUM_CHAT_WINDOWS or 10 do
         local cf = _G["ChatFrame" .. i]
         if cf then
-            if p.copyButton then
+            if show then
                 local btn = CreateCopyButton(cf)
                 btn:Show()
             elseif copyButtons[cf] then
@@ -508,11 +509,11 @@ end
 
 function _G._EBS_UpdateSearchButtons()
     local p = GetChatDB()
-    if not p or not p.enabled then return end
+    local show = p and p.enabled and p.showSearchButton
     for i = 1, NUM_CHAT_WINDOWS or 10 do
         local cf = _G["ChatFrame" .. i]
         if cf then
-            if p.showSearchButton then
+            if show then
                 local btn = CreateSearchButton(cf)
                 AnchorSearchButton(btn, cf)
                 btn:Show()

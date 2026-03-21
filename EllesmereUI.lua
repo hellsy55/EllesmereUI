@@ -2363,7 +2363,7 @@ do
 --  an automatic full wipe at ADDON_LOADED time (before child addons init).
 --  Fresh installs are stamped immediately and never see the popup.
 -------------------------------------------------------------------------------
-local REQUIRED_RESET_VERSION = 6
+local REQUIRED_RESET_VERSION = 9
 
 function EllesmereUI.NeedsBetaReset()
     if not EllesmereUIDB then return false end
@@ -5931,7 +5931,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.3.1"
+EllesmereUI.VERSION = "5.3.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6852,6 +6852,19 @@ end)
 
 -- Dropdown 1: Visibility mode
 EllesmereUI.VIS_VALUES = {
+    never      = "Never",
+    always     = "Always",
+    mouseover  = "Mouseover",
+    in_combat      = "In Combat",
+    out_of_combat  = "Out of Combat",
+    in_raid        = "In Raid Group",
+    in_party   = "In Party",
+    solo       = "Solo",
+}
+EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
+
+-- Basics-only variant (includes Disable Module)
+EllesmereUI.VIS_VALUES_BASICS = {
     disabled   = "Disable Module",
     never      = "Never",
     always     = "Always",
@@ -6862,7 +6875,7 @@ EllesmereUI.VIS_VALUES = {
     in_party   = "In Party",
     solo       = "Solo",
 }
-EllesmereUI.VIS_ORDER = { "disabled", "---", "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
+EllesmereUI.VIS_ORDER_BASICS = { "disabled", "---", "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
 -- Checkbox dropdown 2: Visibility Options (keys match DB fields)
 EllesmereUI.VIS_OPT_ITEMS = {

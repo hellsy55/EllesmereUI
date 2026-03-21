@@ -78,8 +78,8 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildVisibilityRow(W, parent, y, getCfg, refreshFn)
         local visRow, visH = W:DualRow(parent, y,
             { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order  = EllesmereUI.VIS_ORDER,
+              values = EllesmereUI.VIS_VALUES_BASICS,
+              order  = EllesmereUI.VIS_ORDER_BASICS,
               getValue=function()
                   local c = getCfg(); if not c then return "always" end
                   if not c.enabled and c.enabled ~= nil then return "disabled" end
@@ -290,7 +290,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Scale | Border Color
+        -- Scale | Accent Color
         _, h = W:DualRow(parent, y,
             { type="slider", text="Scale", min=0.5, max=2.0, step=0.1,
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
@@ -301,39 +301,26 @@ initFrame:SetScript("OnEvent", function(self)
                 m.scale = v
                 RefreshMinimap()
               end },
-            { type="multiSwatch", text="Border Color",
+            { type="multiSwatch", text="Accent Color",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) }
         );  y = y - h
 
-        -- Hide Zone Text | Lock Position
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Zone Text",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideZoneText end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.hideZoneText = v
-                RefreshMinimap()
-              end },
-            { type="toggle", text="Lock Position",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.lock end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.lock = v
-                RefreshMinimap()
-              end }
-        );  y = y - h
-
         -- OVERLAYS section header
         _, h = W:SectionHeader(parent, "MINIMAP OVERLAYS", y);  y = y - h
 
-        -- Show Coordinates | Coord Precision
+        -- Show Zone Text | Show Coordinates
         _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Zone Text",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return not (m and m.hideZoneText) end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.hideZoneText = not v
+                RefreshMinimap()
+              end },
             { type="toggle", text="Show Coordinates",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
@@ -341,15 +328,6 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.showCoords = v
-                RefreshMinimap()
-              end },
-            { type="slider", text="Coord Precision", min=0, max=2, step=1,
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showCoords) end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.coordPrecision or 1 end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.coordPrecision = v
                 RefreshMinimap()
               end }
         );  y = y - h
@@ -395,64 +373,6 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- BUTTONS section header
-        _, h = W:SectionHeader(parent, "MINIMAP BUTTONS", y);  y = y - h
-
-        -- Hide Zoom Buttons | Hide Tracking
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Zoom Buttons",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideZoomButtons end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideZoomButtons = v; RefreshMinimap() end },
-            { type="toggle", text="Hide Tracking",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideTrackingButton end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideTrackingButton = v; RefreshMinimap() end }
-        );  y = y - h
-
-        -- Hide Calendar | Hide Mail Icon
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Calendar",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideGameTime end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideGameTime = v; RefreshMinimap() end },
-            { type="toggle", text="Hide Mail Icon",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideMail end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideMail = v; RefreshMinimap() end }
-        );  y = y - h
-
-        -- Hide Raid Difficulty | Hide Crafting Orders
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Raid Difficulty",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideRaidDifficulty end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideRaidDifficulty = v; RefreshMinimap() end },
-            { type="toggle", text="Hide Crafting Orders",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideCraftingOrder end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideCraftingOrder = v; RefreshMinimap() end }
-        );  y = y - h
-
-        -- Hide Addon Compartment | Addon Buttons on Hover
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Addon Compartment",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideAddonCompartment end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideAddonCompartment = v; RefreshMinimap() end },
-            { type="toggle", text="Addon Buttons on Hover",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.hideAddonButtons end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.hideAddonButtons = v; RefreshMinimap() end }
-        );  y = y - h
 
         return math.abs(y)
     end
@@ -498,8 +418,8 @@ initFrame:SetScript("OnEvent", function(self)
         title       = "Basics",
         description = "Lightweight skins for all major Blizzard UI objects.",
         pages       = { PAGE_CURSOR, PAGE_DMG_METERS, PAGE_QUEST_TRACKER, PAGE_FRIENDS, PAGE_CHAT, PAGE_MINIMAP },
-        disabledPages = { PAGE_DMG_METERS },
-        disabledPageTooltips = { [PAGE_DMG_METERS] = "Coming Soon" },
+        disabledPages = { PAGE_DMG_METERS, PAGE_CHAT, PAGE_FRIENDS, PAGE_MINIMAP },
+        disabledPageTooltips = { [PAGE_DMG_METERS] = "Coming Soon", [PAGE_CHAT] = "Coming Soon", [PAGE_FRIENDS] = "Coming Soon", [PAGE_MINIMAP] = "Coming Soon" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_CHAT    then return BuildChatPage(pageName, parent, yOffset) end
             if pageName == PAGE_MINIMAP then return BuildMinimapPage(pageName, parent, yOffset) end

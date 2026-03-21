@@ -287,7 +287,12 @@ initFrame:SetScript("OnEvent", function(self)
             if not bd then return end
             local style = bd.pandemicGlowStyle or 1
             local c = bd.pandemicGlowColor or { r = 1, g = 1, b = 0 }
-            ns.StartNativeGlow(glowOvr, style, c.r or 1, c.g or 1, c.b or 0)
+            local glowOpts = (style == 1) and {
+                N = bd.pandemicGlowLines or 8,
+                th = bd.pandemicGlowThickness or 2,
+                period = bd.pandemicGlowSpeed or 4,
+            } or nil
+            ns.StartNativeGlow(glowOvr, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
         end
         RefreshPreview()
 

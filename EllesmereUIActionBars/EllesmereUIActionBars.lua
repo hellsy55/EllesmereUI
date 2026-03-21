@@ -2287,22 +2287,12 @@ local function LayoutBar(key)
                 btn.AutoCastOverlay:SetAllPoints(btn)
             end
 
-            -- Scale SpellActivationAlert to match button size.
-            -- Blizzard builds this frame for the default 45px button size.
-            if btn.SpellActivationAlert then
-                if p and p.procGlowEnabled ~= false then
-                    -- Custom proc glows: pin to button bounds. UpdateFlipbook overrides
-                    -- the visual entirely so content size does not matter.
-                    btn.SpellActivationAlert:SetAllPoints(btn)
-                    btn.SpellActivationAlert:SetScale(1)
-                    btn._eabAlertScale = 1
-                else
-                    -- Native Blizzard glow (proc glow, assisted highlight, DK glow):
-                    -- use SetScale so the overflow-past-edges aesthetic is preserved.
-                    local alertScale = min(btnW, btnH) / 45
-                    btn.SpellActivationAlert:SetScale(alertScale)
-                    btn._eabAlertScale = alertScale
-                end
+            -- Pin SpellActivationAlert to button bounds when using custom proc
+            -- glows. When custom glows are off, leave Blizzard's alert
+            -- completely untouched so the native glow sizes itself correctly.
+            if btn.SpellActivationAlert and p and p.procGlowEnabled ~= false then
+                btn.SpellActivationAlert:SetAllPoints(btn)
+                btn.SpellActivationAlert:SetScale(1)
             end
 
             -- Hide profession quality diamond overlays (added in Dragonflight)
@@ -2611,16 +2601,6 @@ local function MakeButtonSquare(btn)
             C_Timer_After(0, self._eabHideFn)
         end)
         btn._eabIntHooked = true
-    end
-    -- Re-apply our alert scale each time Blizzard shows SpellActivationAlert.
-    -- ActionButtonSpellAlertManager may reset the frame's scale when triggering a glow.
-    if btn.SpellActivationAlert and not btn._eabAlertScaleHooked then
-        btn.SpellActivationAlert:HookScript("OnShow", function(self)
-            if btn._eabAlertScale then
-                self:SetScale(btn._eabAlertScale)
-            end
-        end)
-        btn._eabAlertScaleHooked = true
     end
     if btn.SlotBackground then
         btn.SlotBackground:Hide()
