@@ -465,6 +465,49 @@ local WIDGET_TYPE_DELVE_HEADER   = (Enum and Enum.UIWidgetVisualizationType and 
 local WIDGET_TYPE_SCENARIO_TIMER = 20
 local WIDGET_TYPE_STATUSBAR      = (Enum and Enum.UIWidgetVisualizationType and Enum.UIWidgetVisualizationType.StatusBar) or 2
 
+local function GetDelveLivesFromHeaderInfo(hi)
+    if not hi or not hi.currencies then
+        return nil, nil, nil
+    end
+
+    for _, c in ipairs(hi.currencies) do
+        local tooltip = tostring(c.tooltip or "")
+        if tooltip:find("Total deaths") then
+            local remaining = tonumber(c.text)
+            if remaining then
+                local deaths = tonumber(tooltip:match("[Tt]otal deaths:%s*(%d+)")) or 0
+                local maxLives = remaining + deaths
+                return remaining, maxLives, deaths
+            end
+        end
+    end
+
+    return nil, nil, nil
+end
+
+local function AddDelveLivesObjective(objectives, seenText, remaining, maxLives, deaths)
+    if not remaining then return end
+
+    local text
+    if maxLives and maxLives > 0 then
+        text = string.format("Lives Remaining: %d/%d", remaining, maxLives)
+    else
+        text = string.format("Lives Remaining: %d", remaining)
+    end
+
+    if deaths and deaths > 0 then
+        text = text .. string.format(" (Deaths: %d)", deaths)
+    end
+
+    if seenText[text] then return end
+    seenText[text] = true
+
+    table.insert(objectives, 1, {
+        text     = text,
+        finished = false,
+    })
+end
+
 local function GetScenarioSection()
     if not C_Scenario or not C_Scenario.IsInScenario then return nil end
     if not C_Scenario.IsInScenario() then return nil end
@@ -489,6 +532,7 @@ local function GetScenarioSection()
     -- Scan widget sets for Delve header (type 29) to get banner info
     local bannerTitle, bannerIcon, bannerTier = nil, nil, nil
     local isDelve = C_PartyInfo and C_PartyInfo.IsDelveInProgress and C_PartyInfo.IsDelveInProgress()
+    local delveLivesCur, delveLivesMax, delveDeathsUsed = nil, nil, nil
 
     local setsToScan = {}
     if widgetSetID and widgetSetID ~= 0 then setsToScan[#setsToScan+1] = widgetSetID end
@@ -504,14 +548,21 @@ local function GetScenarioSection()
                 for _, w in ipairs(widgets) do
                     local wType = w.widgetType
                     local wID   = w.widgetID
-                    -- Delve header widget
-                    if wType == WIDGET_TYPE_DELVE_HEADER and
-                       C_UIWidgetManager.GetScenarioHeaderDelvesWidgetVisualizationInfo then
+                        -- Delve header widget
+                        if wType == WIDGET_TYPE_DELVE_HEADER and
+                        C_UIWidgetManager.GetScenarioHeaderDelvesWidgetVisualizationInfo then
                         local dOk, wi = pcall(C_UIWidgetManager.GetScenarioHeaderDelvesWidgetVisualizationInfo, wID)
                         if dOk and wi then
                             bannerTitle = (wi.headerText and wi.headerText ~= "") and wi.headerText or bannerTitle
                             bannerTier  = (wi.tierText   and wi.tierText   ~= "") and wi.tierText  or bannerTier
                             bannerIcon  = wi.atlasIcon or wi.icon or bannerIcon
+
+                            local livesCur, livesMax, deathsUsed = GetDelveLivesFromHeaderInfo(wi)
+                            if livesCur ~= nil then
+                                delveLivesCur = livesCur
+                                delveLivesMax = livesMax
+                                delveDeathsUsed = deathsUsed
+                            end
                             isDelve = true
                         end
                     end
@@ -579,7 +630,7 @@ local function GetScenarioSection()
                             objType      = "progressbar",
                         })
                     end
-                elseif numRequired > 0 then
+                    elseif numRequired > 0 then
                     -- Only use quantityString prefix when it adds meaningful info (not just "0" or "1")
                     local qs = crit.quantityString
                     local useQS = qs and qs ~= "" and qs ~= "0" and qs ~= "1"
@@ -596,7 +647,7 @@ local function GetScenarioSection()
                             finished     = crit.completed or false,
                             numFulfilled = isBar and numFulfilled or nil,
                             numRequired  = isBar and numRequired  or nil,
-                            objType      = isBar and "progressbar" or nil,
+                        
                         })
                     end
                 else
@@ -671,6 +722,10 @@ local function GetScenarioSection()
         end
     end
 
+    if isDelve and delveLivesCur ~= nil then
+    AddDelveLivesObjective(objectives, seenText, delveLivesCur, delveLivesMax, delveDeathsUsed)
+end
+    
     if #objectives == 0 and title == "Scenario" then return nil end
 
     return {
