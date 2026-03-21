@@ -27,11 +27,28 @@ local defaults = {
         },
         minimap = {
             enabled       = true,
+            shape         = "square",
+            borderSize    = 1,
+            showCoords    = false,
+            coordPrecision = 1,
             scale         = 1.0,
             borderR       = 0.05, borderG = 0.05, borderB = 0.05, borderA = 1,
             useClassColor = false,
             hideZoneText  = false,
-            hideButtons   = true,
+            scrollZoom    = true,
+            autoZoomOut   = true,
+            hideZoomButtons      = true,
+            hideTrackingButton   = true,
+            hideGameTime         = true,
+            hideMail             = false,
+            hideRaidDifficulty   = false,
+            hideCraftingOrder    = false,
+            hideAddonCompartment = false,
+            hideAddonButtons     = false,
+            showClock     = false,
+            clockFormat   = "12h",
+            lock          = false,
+            position      = nil,
             visibility    = "always",
             visOnlyInstances = false,
             visHideHousing   = false,
@@ -348,11 +365,14 @@ local minimapDecorations = {
     "MinimapBorderTop",
 }
 
-local minimapButtons = {
-    "MinimapZoomIn",
-    "MinimapZoomOut",
-    "MiniMapTrackingButton",
-    "GameTimeFrame",
+local minimapButtonMap = {
+    { key = "hideZoomButtons",      names = { "MinimapZoomIn", "MinimapZoomOut" } },
+    { key = "hideTrackingButton",   names = { "MiniMapTrackingButton" } },
+    { key = "hideGameTime",         names = { "GameTimeFrame" } },
+    { key = "hideMail",             names = { "MiniMapMailFrame" } },
+    { key = "hideRaidDifficulty",   names = { "MiniMapInstanceDifficulty", "GuildInstanceDifficulty" } },
+    { key = "hideCraftingOrder",    names = { "MiniMapCraftingOrderFrame" } },
+    { key = "hideAddonCompartment", names = { "AddonCompartmentFrame" } },
 }
 
 local minimapButtonHooks = {}
@@ -364,9 +384,16 @@ local function HideMinimapButton(name)
     btn:SetAlpha(0)
     if not minimapButtonHooks[name] then
         hooksecurefunc(btn, "Show", function(self)
-            if _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap.hideButtons then
-                self:Hide()
-                self:SetAlpha(0)
+            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+            if not mp then return end
+            for _, entry in ipairs(minimapButtonMap) do
+                for _, btnName in ipairs(entry.names) do
+                    if btnName == name and mp[entry.key] then
+                        self:Hide()
+                        self:SetAlpha(0)
+                        return
+                    end
+                end
             end
         end)
         minimapButtonHooks[name] = true
@@ -380,7 +407,68 @@ local function ShowMinimapButton(name)
     btn:Show()
 end
 
-local minimapButtonsHidden = false
+local coordFrame, coordTicker
+local clockFrame, clockTicker
+
+local function UpdateClock()
+    if not clockFrame then return end
+    local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    local fmt = (p and p.clockFormat == "24h") and "%H:%M" or "%I:%M %p"
+    clockFrame:SetText(date(fmt))
+end
+
+local function UpdateCoords()
+    if not coordFrame then return end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID then coordFrame:SetText(""); return end
+    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then coordFrame:SetText(""); return end
+    local x, y = pos:GetXY()
+    local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    local prec = p and p.coordPrecision or 1
+    local fmt = "%." .. prec .. "f, %." .. prec .. "f"
+    coordFrame:SetText(format(fmt, x * 100, y * 100))
+end
+
+local autoZoomTimer = nil
+
+local function CancelAutoZoom()
+    if autoZoomTimer then
+        autoZoomTimer:Cancel()
+        autoZoomTimer = nil
+    end
+end
+
+local function ScheduleAutoZoom()
+    CancelAutoZoom()
+    local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    if not p or not p.autoZoomOut then return end
+    if Minimap:GetZoom() == 0 then return end
+    autoZoomTimer = C_Timer.NewTimer(10, function()
+        Minimap:SetZoom(0)
+        autoZoomTimer = nil
+    end)
+end
+
+local addonButtonPoll = nil
+local cachedAddonButtons = {}
+
+local function RefreshAddonButtonCache()
+    wipe(cachedAddonButtons)
+    if not Minimap then return end
+    for _, child in ipairs({ Minimap:GetChildren() }) do
+        local name = child:GetName()
+        if name and name:match("^LibDBIcon10_") then
+            cachedAddonButtons[#cachedAddonButtons + 1] = child
+        end
+    end
+end
+
+local function SetAddonButtonsAlpha(alpha)
+    for _, btn in ipairs(cachedAddonButtons) do
+        btn:SetAlpha(alpha)
+    end
+end
 
 local function ApplyMinimap()
     if InCombatLockdown() then QueueApplyAll(); return end
@@ -404,13 +492,25 @@ local function ApplyMinimap()
         -- Reset scale
         minimap:SetScale(1.0)
         -- Restore buttons
-        if minimapButtonsHidden then
-            for _, name in ipairs(minimapButtons) do ShowMinimapButton(name) end
-            minimapButtonsHidden = false
+        for _, entry in ipairs(minimapButtonMap) do
+            for _, btnName in ipairs(entry.names) do
+                ShowMinimapButton(btnName)
+            end
         end
+        -- Restore addon buttons
+        if addonButtonPoll then addonButtonPoll:Hide() end
+        RefreshAddonButtonCache()
+        SetAddonButtonsAlpha(1)
         -- Restore zone text
         local zoneBtn = MinimapZoneTextButton
         if zoneBtn then zoneBtn:Show() end
+        if coordFrame then coordFrame:Hide() end
+        if coordTicker then coordTicker:Hide() end
+        if clockFrame then clockFrame:Hide() end
+        if clockTicker then clockTicker:Hide() end
+        minimap:SetMovable(false)
+        minimap:EnableMouseWheel(false)
+        CancelAutoZoom()
         return
     end
 
@@ -420,16 +520,22 @@ local function ApplyMinimap()
         if frame then frame:Hide() end
     end
 
-    -- Square mask
-    minimap:SetMaskTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    -- Shape mask
+    if p.shape == "square" then
+        minimap:SetMaskTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    else
+        minimap:SetMaskTexture("Textures\\MinimapMask")
+    end
 
     -- Dark background
     if not minimap._ebsBg then
         minimap._ebsBg = minimap:CreateTexture(nil, "BACKGROUND", nil, -7)
         minimap._ebsBg:SetColorTexture(0, 0, 0)
-        minimap._ebsBg:SetPoint("TOPLEFT", -2, 2)
-        minimap._ebsBg:SetPoint("BOTTOMRIGHT", 2, -2)
     end
+    local inset = (p.borderSize or 1) + 1
+    minimap._ebsBg:ClearAllPoints()
+    minimap._ebsBg:SetPoint("TOPLEFT", -inset, inset)
+    minimap._ebsBg:SetPoint("BOTTOMRIGHT", inset, -inset)
 
     -- Border
     local r, g, b, a = GetBorderColor(p)
@@ -439,20 +545,84 @@ local function ApplyMinimap()
         PP.SetBorderColor(minimap, r, g, b, a)
     end
 
+    -- Border size
+    PP.SetBorderSize(minimap, p.borderSize or 1)
+
     -- Scale
     minimap:SetScale(p.scale)
 
-    -- Hide/show buttons
-    if p.hideButtons then
-        for _, name in ipairs(minimapButtons) do
-            HideMinimapButton(name)
+    -- Individual button toggles
+    for _, entry in ipairs(minimapButtonMap) do
+        local hide = p[entry.key]
+        for _, btnName in ipairs(entry.names) do
+            if hide then
+                HideMinimapButton(btnName)
+            else
+                ShowMinimapButton(btnName)
+            end
         end
-        minimapButtonsHidden = true
-    elseif minimapButtonsHidden then
-        for _, name in ipairs(minimapButtons) do
-            ShowMinimapButton(name)
+    end
+
+    -- Addon button mouseover
+    if p.hideAddonButtons then
+        RefreshAddonButtonCache()
+        SetAddonButtonsAlpha(0)
+        if not addonButtonPoll then
+            addonButtonPoll = CreateFrame("Frame")
+            addonButtonPoll:RegisterEvent("ADDON_LOADED")
+            addonButtonPoll:SetScript("OnEvent", function()
+                RefreshAddonButtonCache()
+                local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+                if mp and mp.hideAddonButtons and not Minimap:IsMouseOver() then
+                    SetAddonButtonsAlpha(0)
+                end
+            end)
+            local abElapsed = 0
+            local wasOver = false
+            addonButtonPoll:SetScript("OnUpdate", function(_, dt)
+                abElapsed = abElapsed + dt
+                if abElapsed < 0.15 then return end
+                abElapsed = 0
+                local over = Minimap:IsMouseOver()
+                if over and not wasOver then
+                    wasOver = true
+                    SetAddonButtonsAlpha(1)
+                elseif not over and wasOver then
+                    wasOver = false
+                    SetAddonButtonsAlpha(0)
+                end
+            end)
         end
-        minimapButtonsHidden = false
+        addonButtonPoll:Show()
+    else
+        if addonButtonPoll then addonButtonPoll:Hide() end
+        SetAddonButtonsAlpha(1)
+    end
+
+    -- Clock
+    if p.showClock then
+        if not clockFrame then
+            clockFrame = minimap:CreateFontString(nil, "OVERLAY")
+            clockFrame:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+            clockFrame:SetPoint("TOP", minimap, "BOTTOM", 0, -6)
+            clockFrame:SetTextColor(1, 1, 1, 0.9)
+        end
+        clockFrame:Show()
+        if not clockTicker then
+            clockTicker = CreateFrame("Frame")
+            local elapsed = 0
+            clockTicker:SetScript("OnUpdate", function(_, dt)
+                elapsed = elapsed + dt
+                if elapsed < 1 then return end
+                elapsed = 0
+                UpdateClock()
+            end)
+        end
+        clockTicker:Show()
+        UpdateClock()
+    else
+        if clockFrame then clockFrame:Hide() end
+        if clockTicker then clockTicker:Hide() end
     end
 
     -- Zone text
@@ -463,6 +633,87 @@ local function ApplyMinimap()
         else
             zoneBtn:Show()
         end
+    end
+
+    -- Coordinates
+    if p.showCoords then
+        if not coordFrame then
+            coordFrame = minimap:CreateFontString(nil, "OVERLAY")
+            coordFrame:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+            coordFrame:SetPoint("BOTTOM", minimap, "BOTTOM", 0, 4)
+            coordFrame:SetTextColor(1, 1, 1, 0.9)
+        end
+        coordFrame:Show()
+        if not coordTicker then
+            coordTicker = CreateFrame("Frame")
+            local elapsed = 0
+            coordTicker:SetScript("OnUpdate", function(_, dt)
+                elapsed = elapsed + dt
+                if elapsed < 0.5 then return end
+                elapsed = 0
+                UpdateCoords()
+            end)
+        end
+        coordTicker:Show()
+        UpdateCoords()
+    else
+        if coordFrame then coordFrame:Hide() end
+        if coordTicker then coordTicker:Hide() end
+    end
+
+    -- Mousewheel zoom
+    if p.scrollZoom then
+        minimap:EnableMouseWheel(true)
+        if not minimap._ebsZoomHooked then
+            minimap._ebsZoomHooked = true
+            minimap:HookScript("OnMouseWheel", function(self, delta)
+                local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+                if not mp or not mp.scrollZoom then return end
+                local zoom = self:GetZoom()
+                if delta > 0 then
+                    zoom = min(zoom + 1, 5)
+                else
+                    zoom = max(zoom - 1, 0)
+                end
+                self:SetZoom(zoom)
+                ScheduleAutoZoom()
+            end)
+        end
+    else
+        minimap:EnableMouseWheel(false)
+    end
+
+    -- Cancel auto-zoom if disabled
+    if not p.autoZoomOut then
+        CancelAutoZoom()
+    end
+
+    -- Drag to reposition
+    minimap:SetClampedToScreen(true)
+    minimap:SetMovable(not p.lock)
+    if not minimap._ebsDragHooked then
+        minimap._ebsDragHooked = true
+        minimap:RegisterForDrag("LeftButton")
+        minimap:SetScript("OnDragStart", function(self)
+            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+            if mp and not mp.lock then
+                self:StartMoving()
+            end
+        end)
+        minimap:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+            local point, _, relPoint, x, y = self:GetPoint()
+            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+            if mp then
+                mp.position = { point = point, relPoint = relPoint, x = x, y = y }
+            end
+        end)
+    end
+
+    -- Restore saved position
+    if p.position then
+        minimap:ClearAllPoints()
+        minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
     end
 end
 
@@ -712,6 +963,21 @@ end
 -------------------------------------------------------------------------------
 function EBS:OnInitialize()
     EBS.db = EllesmereUI.Lite.NewDB("EllesmereUIBasicsDB", defaults)
+
+    -- Migrate old hideButtons → individual keys
+    local mp = EBS.db.profile.minimap
+    if mp.hideButtons ~= nil then
+        if mp.hideButtons == true then
+            mp.hideZoomButtons    = true
+            mp.hideTrackingButton = true
+            mp.hideGameTime       = true
+        else
+            mp.hideZoomButtons    = false
+            mp.hideTrackingButton = false
+            mp.hideGameTime       = false
+        end
+        mp.hideButtons = nil
+    end
 
     -- Global bridge for options ↔ main communication
     _G._EBS_AceDB        = EBS.db
