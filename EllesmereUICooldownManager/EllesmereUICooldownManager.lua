@@ -6283,6 +6283,10 @@ local function RebuildKeybindCache()
             local key = GetBindingKey(bindName)
             if key then
                 local slot = def.startSlot + i - 1
+                if def.prefix == "ACTIONBUTTON" then
+                    local btn = _G["ActionButton" .. i]
+                    if btn and btn.action then slot = btn.action end
+                end
                 local slotType, id = GetActionInfo(slot)
                 local spellID
                 if slotType == "spell" then
@@ -8542,6 +8546,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
         _CDMApplyVisibility()
+        if event == "UPDATE_SHAPESHIFT_FORM" then
+            C_Timer.After(0.5, UpdateCDMKeybinds)
+        end
         return
     end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then
