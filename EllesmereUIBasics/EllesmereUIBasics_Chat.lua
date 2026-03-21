@@ -365,3 +365,151 @@ function _G._EBS_UpdateCopyButtons()
         end
     end
 end
+
+-------------------------------------------------------------------------------
+--  Chat Search
+-------------------------------------------------------------------------------
+local searchFrame
+
+local function CreateSearchFrame()
+    if searchFrame then return searchFrame end
+
+    searchFrame = CreateFrame("Frame", "EBS_ChatSearchDialog", UIParent, "BackdropTemplate")
+    searchFrame:SetSize(600, 400)
+    searchFrame:SetPoint("CENTER")
+    searchFrame:SetFrameStrata("DIALOG")
+    searchFrame:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    searchFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+    searchFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    searchFrame:EnableMouse(true)
+    searchFrame:SetMovable(true)
+    searchFrame:RegisterForDrag("LeftButton")
+    searchFrame:SetScript("OnDragStart", searchFrame.StartMoving)
+    searchFrame:SetScript("OnDragStop", searchFrame.StopMovingOrSizing)
+    tinsert(UISpecialFrames, "EBS_ChatSearchDialog")
+
+    -- Title
+    local title = searchFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 12, -12)
+    title:SetText("Search Chat")
+    title:SetTextColor(0.8, 0.8, 0.8)
+
+    -- Close button
+    local close = CreateFrame("Button", nil, searchFrame, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -2, -2)
+
+    -- Search input
+    local input = CreateFrame("EditBox", nil, searchFrame, "InputBoxTemplate")
+    input:SetSize(520, 20)
+    input:SetPoint("TOPLEFT", 14, -36)
+    input:SetAutoFocus(true)
+    searchFrame._input = input
+
+    -- Search button
+    local searchBtn = CreateFrame("Button", nil, searchFrame, "UIPanelButtonTemplate")
+    searchBtn:SetSize(50, 22)
+    searchBtn:SetPoint("LEFT", input, "RIGHT", 4, 0)
+    searchBtn:SetText("Go")
+
+    -- Results scroll
+    local scroll = CreateFrame("ScrollFrame", "EBS_ChatSearchScroll", searchFrame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 12, -64)
+    scroll:SetPoint("BOTTOMRIGHT", -30, 12)
+
+    local results = CreateFrame("EditBox", nil, scroll)
+    results:SetMultiLine(true)
+    results:SetFontObject("ChatFontNormal")
+    results:SetWidth(540)
+    results:SetAutoFocus(false)
+    results:SetScript("OnEscapePressed", function() searchFrame:Hide() end)
+    scroll:SetScrollChild(results)
+    searchFrame._results = results
+
+    local function DoSearch()
+        local query = input:GetText()
+        if not query or query == "" then return end
+        local chatFrame = SELECTED_CHAT_FRAME or ChatFrame1
+        local total = chatFrame:GetNumMessages()
+        local matches = {}
+        local lowerQuery = query:lower()
+        for i = 1, total do
+            local msg = chatFrame:GetMessageInfo(i)
+            if msg then
+                local plain = StripHyperlinks(msg)
+                if plain:lower():find(lowerQuery, 1, true) then
+                    matches[#matches + 1] = plain
+                end
+            end
+        end
+        if #matches == 0 then
+            results:SetText("No results found for: " .. query)
+        else
+            results:SetText(table.concat(matches, "\n"))
+        end
+        results:SetCursorPosition(0)
+    end
+
+    searchBtn:SetScript("OnClick", DoSearch)
+    input:SetScript("OnEnterPressed", DoSearch)
+    input:SetScript("OnEscapePressed", function() searchFrame:Hide() end)
+
+    return searchFrame
+end
+
+local function ShowSearchDialog()
+    local frame = CreateSearchFrame()
+    frame:Show()
+    frame._input:SetText("")
+    frame._results:SetText("")
+    frame._input:SetFocus()
+end
+
+_G._EBS_ShowSearchDialog = ShowSearchDialog
+
+-- Search button on chat frames
+local searchButtons = {}
+
+local function CreateSearchButton(chatFrame)
+    if searchButtons[chatFrame] then return searchButtons[chatFrame] end
+    local btn = CreateFrame("Button", nil, chatFrame)
+    btn:SetSize(20, 20)
+    -- Position left of copy button if it exists
+    local copyBtn = copyButtons[chatFrame]
+    if copyBtn then
+        btn:SetPoint("RIGHT", copyBtn, "LEFT", -2, 0)
+    else
+        btn:SetPoint("TOPRIGHT", chatFrame, "TOPRIGHT", -2, -2)
+    end
+    btn:SetNormalTexture("Interface\\Common\\UI-Searchbox-Icon")
+    btn:SetHighlightTexture("Interface\\Common\\UI-Searchbox-Icon")
+    btn:GetHighlightTexture():SetAlpha(0.3)
+    btn:SetScript("OnClick", ShowSearchDialog)
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Search Chat", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", GameTooltip_Hide)
+    searchButtons[chatFrame] = btn
+    return btn
+end
+
+function _G._EBS_UpdateSearchButtons()
+    local p = GetChatDB()
+    if not p or not p.enabled then return end
+    for i = 1, NUM_CHAT_WINDOWS or 10 do
+        local cf = _G["ChatFrame" .. i]
+        if cf then
+            if p.showSearchButton then
+                local btn = CreateSearchButton(cf)
+                btn:Show()
+            elseif searchButtons[cf] then
+                searchButtons[cf]:Hide()
+            end
+        end
+    end
+end
