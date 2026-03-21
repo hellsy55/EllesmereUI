@@ -1,12 +1,12 @@
 -------------------------------------------------------------------------------
 --  EllesmereUICooldownManager_Options.lua
 --  Registers CDM Effects module with EllesmereUI
---  Tab 1: CDM Bars  |  Tab 2: Bar Glows  |  Tab 3: Buff Bars  |  Tab 4: Unlock Mode
+--  Tab 1: CDM Bars  |  Tab 2: Bar Glows  |  Tab 3: Tracking Bars  |  Tab 4: Unlock Mode
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
 local PAGE_BAR_GLOWS    = "Bar Glows"
-local PAGE_BUFF_BARS    = "Buff Bars"
+local PAGE_BUFF_BARS    = "Tracking Bars"
 local PAGE_CDM_BARS     = "CDM Bars"
 
 local PAGE_UNLOCK       = "Unlock Mode"
@@ -6029,6 +6029,27 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().anchorPosition = v
                   ns.BuildAllCDMBars(); Refresh()
               end });  y = y - h
+
+        -- "(Applies on Window Close)" subtitle on the Anchor to Cursor toggle label
+        do
+            local suffix = cursorRow._leftRegion:CreateFontString(nil, "OVERLAY")
+            suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+            suffix:SetTextColor(1, 1, 1, 0.35)
+            suffix:SetText("(Applies on Window Close)")
+            local anchorLabel
+            for i = 1, cursorRow._leftRegion:GetNumRegions() do
+                local reg = select(i, cursorRow._leftRegion:GetRegions())
+                if reg and reg.GetText and reg:GetText() == "Anchor to Cursor" then
+                    anchorLabel = reg
+                    break
+                end
+            end
+            if anchorLabel then
+                suffix:SetPoint("LEFT", anchorLabel, "RIGHT", 5, 0)
+            else
+                suffix:SetPoint("LEFT", cursorRow._leftRegion, "LEFT", 120, 0)
+            end
+        end
 
         -- Inline cog on Cursor Position (right) — X + Y offsets
         do

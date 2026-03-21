@@ -719,7 +719,7 @@ end
 --  Export / Import
 --  Format: !EUI_<base64 encoded compressed serialized data>
 --  The data table contains:
---    { version = 2, type = "full"|"partial", data = profileData }
+--    { version = 3, type = "full"|"partial", data = profileData }
 -------------------------------------------------------------------------------
 local EXPORT_PREFIX = "!EUI_"
 
@@ -747,7 +747,7 @@ function EllesmereUI.ExportProfile(profileName)
             barGlows = DeepCopy(sa.barGlows or {}),
         }
     end
-    local payload = { version = 2, type = "full", data = exportData }
+    local payload = { version = 3, type = "full", data = exportData }
     local serialized = Serializer.Serialize(payload)
     if not LibDeflate then return nil end
     local compressed = LibDeflate:CompressDeflate(serialized)
@@ -765,7 +765,7 @@ function EllesmereUI.ExportAddons(folderList)
         screenW  = sw and math.floor(sw) or 0,
         screenH  = sh and math.floor(sh) or 0,
     }
-    local payload = { version = 2, type = "partial", data = profileData, meta = meta }
+    local payload = { version = 3, type = "partial", data = profileData, meta = meta }
     local serialized = Serializer.Serialize(payload)
     if not LibDeflate then return nil end
     local compressed = LibDeflate:CompressDeflate(serialized)
@@ -979,7 +979,7 @@ function EllesmereUI.ExportCurrentProfile(selectedSpecs)
         screenW  = sw and math.floor(sw) or 0,
         screenH  = sh and math.floor(sh) or 0,
     }
-    local payload = { version = 2, type = "full", data = profileData, meta = meta }
+    local payload = { version = 3, type = "full", data = profileData, meta = meta }
     local serialized = Serializer.Serialize(payload)
     if not LibDeflate then return nil end
     local compressed = LibDeflate:CompressDeflate(serialized)
@@ -1006,10 +1006,10 @@ function EllesmereUI.DecodeImportString(importStr)
     if not payload or type(payload) ~= "table" then
         return nil, "Failed to deserialize data"
     end
-    if not payload.version or payload.version < 2 then
+    if not payload.version or payload.version < 3 then
         return nil, "This profile was created before the beta wipe and is no longer compatible. Please create a new export."
     end
-    if payload.version > 2 then
+    if payload.version > 3 then
         return nil, "This profile was created with a newer version of EllesmereUI. Please update your addon."
     end
     return payload, nil
@@ -1069,10 +1069,6 @@ function EllesmereUI.ImportProfile(importStr, profileName)
     end
 
     if payload.type == "full" then
-        -- Migrate all positions to CENTER/CENTER before storing or applying
-        if EllesmereUI.MigrateProfilePositions then
-            EllesmereUI.MigrateProfilePositions(payload.data)
-        end
         -- Full profile: store as a new named profile
         local stored = DeepCopy(payload.data)
         -- Strip spell assignment data from stored profile (lives in dedicated store)

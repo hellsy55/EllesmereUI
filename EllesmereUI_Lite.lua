@@ -200,59 +200,12 @@ function EUILite.NewDB(svName, defaults, defaultToCharKey)
     end
     local profile = profileData.addons[folder]
 
-    -- One-time flat-SV migration: if the centralized slot is empty and the
-    -- global SV contains data from a previous version, copy it into the slot.
-    -- Handles two legacy formats:
-    --   1) Flat data (e.g. Nameplates wrote directly to _G[svName])
-    --   2) Old Lite/AceDB format with profiles/profileKeys sub-tables
-    if not next(profile) then
-        local globalSV = _G[svName]
-        if globalSV and type(globalSV) == "table" then
-            if not globalSV.profiles and not globalSV.profileKeys then
-                -- Format 1: flat data, copy everything
-                for k, v in pairs(globalSV) do
-                    if type(v) == "table" then
-                        profile[k] = DeepCopy(v)
-                    else
-                        profile[k] = v
-                    end
-                end
-            elseif globalSV.profiles and type(globalSV.profiles) == "table" then
-                -- Format 2: old profile-based SV. Extract the matching
-                -- profile (or "Default") so settings carry over.
-                local oldProfile = globalSV.profiles[profileName]
-                if not oldProfile and globalSV.profileKeys then
-                    -- Try the character-keyed profile name
-                    local charName = UnitName("player")
-                    local realm = GetRealmName()
-                    if charName and realm then
-                        local charKey = charName .. " - " .. realm
-                        local mappedName = globalSV.profileKeys[charKey]
-                        if mappedName then
-                            oldProfile = globalSV.profiles[mappedName]
-                        end
-                    end
-                end
-                if not oldProfile then
-                    -- Fall back to "Default" or first available profile
-                    oldProfile = globalSV.profiles["Default"]
-                    if not oldProfile then
-                        for _, v in pairs(globalSV.profiles) do
-                            if type(v) == "table" then oldProfile = v; break end
-                        end
-                    end
-                end
-                if oldProfile and type(oldProfile) == "table" then
-                    for k, v in pairs(oldProfile) do
-                        if type(v) == "table" then
-                            profile[k] = DeepCopy(v)
-                        else
-                            profile[k] = v
-                        end
-                    end
-                end
-            end
-        end
+    -- If a beta-exit wipe just happened this session, nuke the child SV
+    -- global so old data on disk cannot be re-imported. The global is
+    -- vestigial (all data lives in EllesmereUIDB); writing {} ensures
+    -- WoW saves a clean file at logout.
+    if EllesmereUI and EllesmereUI._showResetPopup then
+        _G[svName] = {}
     end
 
     -- Merge defaults into profile (fills missing keys only)

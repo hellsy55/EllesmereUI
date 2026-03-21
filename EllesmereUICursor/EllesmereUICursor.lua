@@ -12,6 +12,8 @@ local RING_TEXTURES = {
     thick  = "Interface\\AddOns\\EllesmereUICursor\\Media\\ring_thick.tga",
 }
 
+local RING_INNER = { thin = 0.92, light = 0.85, normal = 0.78, heavy = 0.68, thick = 0.58 }
+
 local DEF_BASESIZE = 28
 local DEF_SCALE    = 1
 local DEF_HEX      = "0CD29D"
@@ -22,6 +24,7 @@ local floor, tonumber, strupper, strsub, strgsub, strmatch =
     math.floor, tonumber, string.upper, string.sub, string.gsub, string.match
 local min, max = math.min, math.max
 local sin, cos = _G.sin or math.sin, _G.cos or math.cos  -- WoW globals are degree-based
+local rad = math.rad
 local GetTime = GetTime
 local GetCursorPosition = GetCursorPosition
 local GetSpellCooldown = C_Spell and C_Spell.GetSpellCooldown or GetSpellCooldown
@@ -621,25 +624,23 @@ local function CreateCastCircle()
         local pct = dur / maxDur
         if pct <= 0 or pct >= 1 then spark:Hide(); if glow then glow:Hide() end; return end
 
-        local c2 = Cast_DB()
-        local ringRadius = c2.radius or 36
-        -- Approximate inner radius ratio per ring texture for spark orbit
-        local RING_INNER = { thin = 0.92, light = 0.85, normal = 0.78, heavy = 0.68, thick = 0.58 }
-        local innerRatio = RING_INNER[c2.ringTex or "normal"] or 0.78
+        local ringRadius = castRoot._sparkRadius or 36
+        local innerRatio = castRoot._sparkInnerRatio or 0.78
         local sparkOrbitR = ringRadius * (1 + innerRatio) * 0.5
 
         local angleDeg = 90 - (pct * 360)
         local sx = cos(angleDeg) * sparkOrbitR
         local sy = sin(angleDeg) * sparkOrbitR
+        local rotRad = rad(angleDeg - 90)
 
         spark:ClearAllPoints()
         spark:SetPoint("CENTER", castRoot, "CENTER", sx, sy)
-        spark:SetRotation(math.rad(angleDeg - 90))
+        spark:SetRotation(rotRad)
 
         if glow then
             glow:ClearAllPoints()
             glow:SetPoint("CENTER", castRoot, "CENTER", sx, sy)
-            glow:SetRotation(math.rad(angleDeg - 90))
+            glow:SetRotation(rotRad)
         end
     end)
 
@@ -739,6 +740,10 @@ local function ApplyCastCircle()
     castRing:SetRingRadius(radius)
     castRing:SetRingTexture(c.ringTex or "normal")
     castRoot:SetSize(radius * 2, radius * 2)
+
+    -- Cache spark orbit values for the OnUpdate handler
+    castRoot._sparkRadius = radius
+    castRoot._sparkInnerRatio = RING_INNER[c.ringTex or "normal"] or 0.78
 
     -- Spark settings
     if castRoot._spark then
@@ -850,7 +855,9 @@ local function RegisterUnlockElements()
                 if not p then return end
                 if not p.gcd then p.gcd = {} end
                 p.gcd.pos = { point = point, relPoint = relPoint, x = x, y = y }
-                ApplyGCDCircle()
+                if not EllesmereUI._unlockActive then
+                    ApplyGCDCircle()
+                end
             end,
             loadPos = function()
                 local g2 = GCD_DB()
@@ -896,7 +903,9 @@ local function RegisterUnlockElements()
                 if not p then return end
                 if not p.castCircle then p.castCircle = {} end
                 p.castCircle.pos = { point = point, relPoint = relPoint, x = x, y = y }
-                ApplyCastCircle()
+                if not EllesmereUI._unlockActive then
+                    ApplyCastCircle()
+                end
             end,
             loadPos = function()
                 local c2 = Cast_DB()

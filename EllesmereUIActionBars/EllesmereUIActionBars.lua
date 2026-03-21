@@ -209,7 +209,6 @@ local defaults = {
         procGlowScale = 1.0,
         procGlowEnabled = false,
         hideCastingAnimations = true,
-        disableTooltips = false,
         barPositions = {},
         bars = {},
     },
@@ -269,6 +268,7 @@ for _, info in ipairs(BAR_CONFIG) do
         cooldownTextXOffset = 0,
         cooldownTextYOffset = 0,
         cooldownTextColor = { r = 1, g = 1, b = 1 },
+        disableTooltips = false,
         orientation = "horizontal",
         numIcons = 12,
         numRows = 1,
@@ -1503,7 +1503,7 @@ local function SetupPagingFrame()
         end
         if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
             local s = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["MainBar"]
-            if s then
+            if s and not InCombatLockdown() then
                 local inCombat = (event == "PLAYER_REGEN_DISABLED")
                 if s.combatShowEnabled then
                     if inCombat then f:Show() else f:Hide() end
@@ -1532,6 +1532,7 @@ end
 LayoutPagingFrame = function()
     local f = _pagingFrame
     if not f then return end
+    if InCombatLockdown() then return end
     local mainFrame = barFrames and barFrames["MainBar"]
     if not mainFrame then f:Hide(); return end
 
@@ -2121,6 +2122,7 @@ local function ComputeBarLayout(key)
             if isVertical then
                 col = floor((i - 1) / stride)
                 row = (i - 1) % stride
+                if growDir == "UP" then row = stride - 1 - row end
             else
                 col = (i - 1) % stride
                 row = floor((i - 1) / stride)
@@ -2235,6 +2237,7 @@ local function LayoutBar(key)
             if isVertical then
                 col = floor((i - 1) / stride)
                 row = (i - 1) % stride
+                if growDir == "UP" then row = stride - 1 - row end
             else
                 col = (i - 1) % stride
                 row = floor((i - 1) / stride)
@@ -2258,7 +2261,7 @@ local function LayoutBar(key)
                 yOff = -(row * stepH)
                 anchor = "TOPLEFT"
             elseif growDir == "UP" then
-                -- Icon 1 at bottom, grows upward
+                -- Icon 1 at top, grows upward (row flipped so highest row index = bottom)
                 xOff = col * stepW
                 yOff = row * stepH
                 anchor = "BOTTOMLEFT"
@@ -2284,12 +2287,22 @@ local function LayoutBar(key)
                 btn.AutoCastOverlay:SetAllPoints(btn)
             end
 
-            -- Resize the spell activation alert (proc glow / assisted highlight)
-            -- to match the button size; Blizzard sizes it for default 45px buttons.
-            -- Only resize when using custom proc glows; the default Blizzard
-            -- glow intentionally extends past the button edges.
-            if btn.SpellActivationAlert and p and p.procGlowEnabled ~= false then
-                btn.SpellActivationAlert:SetAllPoints(btn)
+            -- Scale SpellActivationAlert to match button size.
+            -- Blizzard builds this frame for the default 45px button size.
+            if btn.SpellActivationAlert then
+                if p and p.procGlowEnabled ~= false then
+                    -- Custom proc glows: pin to button bounds. UpdateFlipbook overrides
+                    -- the visual entirely so content size does not matter.
+                    btn.SpellActivationAlert:SetAllPoints(btn)
+                    btn.SpellActivationAlert:SetScale(1)
+                    btn._eabAlertScale = 1
+                else
+                    -- Native Blizzard glow (proc glow, assisted highlight, DK glow):
+                    -- use SetScale so the overflow-past-edges aesthetic is preserved.
+                    local alertScale = min(btnW, btnH) / 45
+                    btn.SpellActivationAlert:SetScale(alertScale)
+                    btn._eabAlertScale = alertScale
+                end
             end
 
             -- Hide profession quality diamond overlays (added in Dragonflight)
@@ -2599,6 +2612,16 @@ local function MakeButtonSquare(btn)
         end)
         btn._eabIntHooked = true
     end
+    -- Re-apply our alert scale each time Blizzard shows SpellActivationAlert.
+    -- ActionButtonSpellAlertManager may reset the frame's scale when triggering a glow.
+    if btn.SpellActivationAlert and not btn._eabAlertScaleHooked then
+        btn.SpellActivationAlert:HookScript("OnShow", function(self)
+            if btn._eabAlertScale then
+                self:SetScale(btn._eabAlertScale)
+            end
+        end)
+        btn._eabAlertScaleHooked = true
+    end
     if btn.SlotBackground then
         btn.SlotBackground:Hide()
         if not btn._eabSlotBG then
@@ -2648,7 +2671,7 @@ local function EnsureBorders(btn)
     if btn._eabBorders then return btn._eabBorders end
     local PP = EllesmereUI and EllesmereUI.PP
     if PP then
-        PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", -1)
+        PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 2)
         btn._eabBorders = btn._ppBorders
     end
     return btn._eabBorders
@@ -2809,9 +2832,11 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
                 end
             end
         end
-        -- Show square borders
-        if btn._eabBorders then
+        -- Show square borders only if border is enabled
+        if btn._eabBorders and brdOn then
             PP.ShowBorder(btn)
+        elseif btn._eabBorders then
+            PP.HideBorder(btn)
         end
         -- Re-enable Blizzard's Border texture (was hidden for custom shapes)
         if btn.Border then
@@ -3524,9 +3549,10 @@ function EAB:ApplyRangeColoring()
                 end
                 -- Only update visuals when state actually changes
                 if (wasOut ~= nil) == (isOut) then return end
+                local bars = EAB.db.profile.bars
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
-                    local s = EAB.db.profile.bars[info.key]
+                    local s = bars[info.key]
                     if btns and s and s.outOfRangeColoring then
                         for _, btn in ipairs(btns) do
                             if GetButtonActionSlot(btn) == slot then
@@ -3605,6 +3631,24 @@ function EAB:ApplyRangeColoring()
         local s = self.db.profile.bars[key]
         if s and s.outOfRangeColoring then
             EnableRangeCheckForBar(key)
+            -- Immediate sweep: apply tint for slots already out of range
+            -- since EnableActionRangeCheck does not fire an initial event.
+            local btns = barButtons[key]
+            if btns then
+                for _, btn in ipairs(btns) do
+                    local slot = GetButtonActionSlot(btn)
+                    if slot and HasAction(slot) then
+                        local inRange = IsActionInRange(slot)
+                        if inRange == false then
+                            _range.outOfRange[slot] = true
+                            ApplyRangeTint(btn, true, s)
+                        else
+                            _range.outOfRange[slot] = nil
+                            ApplyRangeTint(btn, false, s)
+                        end
+                    end
+                end
+            end
         else
             DisableRangeCheckForBar(key)
         end
@@ -5042,7 +5086,7 @@ function EAB.AnchorVehicleButton()
                 and EAB.db.profile.barPositions["VehicleExit"]
     btn:ClearAllPoints()
     if pos then
-        local pt = pos.point or "CENTER"
+        local pt = pos.point
         btn:SetPoint(pt, UIParent, pos.relPoint or pt,
                      pos.x, pos.y)
     else
@@ -5277,7 +5321,7 @@ local function RestoreBarPositions()
             -- Skip for unlock-anchored bars (anchor system is authority)
             local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key)
             if not anchored or not frame:GetLeft() then
-                local pt = pos.point or "CENTER"
+                local pt = pos.point
                 frame:ClearAllPoints()
                 frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
             end
@@ -5377,7 +5421,7 @@ local function RegisterWithUnlockMode()
             loadPos = function()
                 local pos = EAB.db.profile.barPositions[info.key]
                 if not pos then return nil end
-                local pt = pos.point or "CENTER"
+                local pt = pos.point
                 return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
             end,
             clearPos = function()
@@ -5387,7 +5431,7 @@ local function RegisterWithUnlockMode()
                 local pos = EAB.db.profile.barPositions[info.key]
                 local frame = barFrames[info.key]
                 if pos and frame then
-                    local pt = pos.point or "CENTER"
+                    local pt = pos.point
                     frame:ClearAllPoints()
                     frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
                 end
@@ -5419,16 +5463,18 @@ local function RegisterWithUnlockMode()
                             point = point, relPoint = relPoint or point, x = x, y = y,
                         }
                     end
-                    local holder = blizzMovableHolders[bk]
-                    if holder and point and x and y and not InCombatLockdown() then
-                        holder:ClearAllPoints()
-                        holder:SetPoint(point, UIParent, relPoint or point, x, y)
+                    if not EllesmereUI._unlockActive then
+                        local holder = blizzMovableHolders[bk]
+                        if holder and point and x and y and not InCombatLockdown() then
+                            holder:ClearAllPoints()
+                            holder:SetPoint(point, UIParent, relPoint or point, x, y)
+                        end
                     end
                 end,
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions[bk]
                     if not pos then return nil end
-                    local pt = pos.point or "CENTER"
+                    local pt = pos.point
                     return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
@@ -5440,7 +5486,7 @@ local function RegisterWithUnlockMode()
                     if not holder or InCombatLockdown() then return end
                     holder:ClearAllPoints()
                     if pos then
-                        local pt = pos.point or "CENTER"
+                        local pt = pos.point
                         holder:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
                     else
                         holder:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
@@ -5469,7 +5515,7 @@ local function RegisterWithUnlockMode()
                             point = point, relPoint = relPoint or point, x = x, y = y,
                         }
                     end
-                    if not InCombatLockdown() then
+                    if not EllesmereUI._unlockActive and not InCombatLockdown() then
                         vBtn:ClearAllPoints()
                         vBtn:SetPoint(point, UIParent, relPoint or point, x, y)
                     end
@@ -5477,7 +5523,7 @@ local function RegisterWithUnlockMode()
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions["VehicleExit"]
                     if not pos then return nil end
-                    local pt = pos.point or "CENTER"
+                    local pt = pos.point
                     return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
@@ -5889,18 +5935,23 @@ function EAB:FinishSetup()
         ActionButton1:SetAttribute("showgrid", 0)
     end
 
-    -- Suppress action bar tooltips when the global setting is enabled.
+    -- Suppress action bar tooltips per-bar when the setting is enabled.
     -- Hooks GameTooltip:SetAction/SetPetAction which Blizzard action
     -- buttons call on hover. Zero per-frame cost.
     if GameTooltip then
-        local function ShouldHideTooltip()
-            return EAB.db and EAB.db.profile.disableTooltips
+        local function ShouldHideTooltip(tip)
+            local owner = tip:GetOwner()
+            if not owner then return false end
+            local info = buttonToBar[owner]
+            if not info then return false end
+            local s = EAB.db and EAB.db.profile.bars[info.barKey]
+            return s and s.disableTooltips
         end
         hooksecurefunc(GameTooltip, "SetAction", function(self)
-            if ShouldHideTooltip() then self:Hide() end
+            if ShouldHideTooltip(self) then self:Hide() end
         end)
         hooksecurefunc(GameTooltip, "SetPetAction", function(self)
-            if ShouldHideTooltip() then self:Hide() end
+            if ShouldHideTooltip(self) then self:Hide() end
         end)
     end
 
@@ -6734,14 +6785,12 @@ local function RegisterDataBarsWithUnlockMode()
                 setWidth = function(_, w)
                     local s = EAB.db.profile.bars[bk]
                     if s then s.width = math.floor(w + 0.5) end
-                    local frame = dataBarFrames[bk]
-                    if frame then frame:SetWidth(w) end
+                    ApplyDataBarLayout(bk)
                 end,
                 setHeight = function(_, h)
                     local s = EAB.db.profile.bars[bk]
                     if s then s.height = math.floor(h + 0.5) end
-                    local frame = dataBarFrames[bk]
-                    if frame then frame:SetHeight(h) end
+                    ApplyDataBarLayout(bk)
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     if point and x and y then
@@ -6749,16 +6798,18 @@ local function RegisterDataBarsWithUnlockMode()
                             point = point, relPoint = relPoint or point, x = x, y = y,
                         }
                     end
-                    local frame = dataBarFrames[bk]
-                    if frame and point and x and y then
-                        frame:ClearAllPoints()
-                        frame:SetPoint(point, UIParent, relPoint or point, x, y)
+                    if not EllesmereUI._unlockActive then
+                        local frame = dataBarFrames[bk]
+                        if frame and point and x and y then
+                            frame:ClearAllPoints()
+                            frame:SetPoint(point, UIParent, relPoint or point, x, y)
+                        end
                     end
                 end,
                 loadPos = function()
                     local pos = EAB.db.profile.barPositions[bk]
                     if not pos then return nil end
-                    local pt = pos.point or "CENTER"
+                    local pt = pos.point
                     return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
                 end,
                 clearPos = function()
@@ -7500,10 +7551,12 @@ local function RegisterExtraBarsWithUnlockMode()
                             point = point, relPoint = relPoint or point, x = x, y = y,
                         }
                     end
-                    local holder = extraBarHolders[bk]
-                    if holder and point and x and y then
-                        holder:ClearAllPoints()
-                        holder:SetPoint(point, UIParent, relPoint or point, x, y)
+                    if not EllesmereUI._unlockActive then
+                        local holder = extraBarHolders[bk]
+                        if holder and point and x and y then
+                            holder:ClearAllPoints()
+                            holder:SetPoint(point, UIParent, relPoint or point, x, y)
+                        end
                     end
                 end,
                 loadPos = function()

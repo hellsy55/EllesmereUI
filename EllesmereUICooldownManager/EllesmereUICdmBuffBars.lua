@@ -1259,12 +1259,11 @@ local function UpdateTBBStacks(bar, cfg)
             if blzChild and blzChild.Applications and blzChild.Applications:IsShown() then
                 local appsText = blzChild.Applications.Applications
                 if appsText then
-                    local ok, txt = pcall(appsText.GetText, appsText)
-                    if ok and txt then
+                    local txt = appsText:GetText()
+                    if txt then
                         bar._stacksText:SetText(txt)
                         bar._stacksText:Show()
-                        local nOk, n = pcall(tonumber, txt)
-                        bar._stackCount = (nOk and n) or 0
+                        bar._stackCount = tonumber(txt) or 0
                         return
                     end
                 end
@@ -1314,8 +1313,8 @@ local function UpdateTBBStacks(bar, cfg)
     if blzChild and blzChild.Applications and blzChild.Applications:IsShown() then
         local appsText = blzChild.Applications.Applications
         if appsText then
-            local ok, txt = pcall(appsText.GetText, appsText)
-            if ok and txt then
+            local txt = appsText:GetText()
+            if txt then
                 bar._stacksText:SetText(txt)
                 bar._stacksText:Show()
                 local apps
@@ -1334,8 +1333,7 @@ local function UpdateTBBStacks(bar, cfg)
                 end
                 bar._stackCount = apps or 0
                 if not apps then
-                    local nOk, n = pcall(tonumber, txt)
-                    if nOk and n then bar._stackCount = n end
+                    bar._stackCount = tonumber(txt) or 0
                 end
                 return
             end
@@ -1403,7 +1401,7 @@ function ns.UpdateTrackedBuffBarTimers()
     -- Self-heal placeholder mode if user navigated away from Buff Bars
     if ns._tbbPlaceholderMode then
         local ap = EllesmereUI and EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
-        if ap ~= "Buff Bars" then
+        if ap ~= "Tracking Bars" then
             ns._tbbPlaceholderMode = false
             if ns.HideTBBPlaceholders then ns.HideTBBPlaceholders() end
         end
@@ -1665,7 +1663,7 @@ function ns.UpdateTrackedBuffBarTimers()
                                     rawRemaining = calcRem
                                     rawDur = rd
                                 end
-                            elseif type(rs) == "number" and type(rd) == "number" and rd > 0 then
+                            elseif rd > 0 then
                                 rawRemaining = math.max(0, (rs + rd) - now)
                                 rawDur = rd
                             end
@@ -1868,7 +1866,7 @@ function ns.RegisterTBBUnlockElements()
         if bar then
             elements[#elements + 1] = MK({
                 key = "TBB_" .. posKey,
-                label = "Buff Bar: " .. (cfg.name or ("Bar " .. idx)),
+                label = "Tracking Bar: " .. (cfg.name or ("Bar " .. idx)),
                 group = "Cooldown Manager",
                 order = 650,
                 isHidden = function()
@@ -1898,12 +1896,14 @@ function ns.RegisterTBBUnlockElements()
                     local p = ECME.db.profile
                     if not p.tbbPositions then p.tbbPositions = {} end
                     p.tbbPositions[posKey] = { point = point, relPoint = relPoint, x = x, y = y }
-                    local f = tbbFrames[idx]
-                    if f then
-                        f:ClearAllPoints()
-                        f:SetPoint(point, UIParent, relPoint or point, x, y)
+                    if not EllesmereUI._unlockActive then
+                        local f = tbbFrames[idx]
+                        if f then
+                            f:ClearAllPoints()
+                            f:SetPoint(point, UIParent, relPoint or point, x, y)
+                        end
+                        ns.BuildTrackedBuffBars()
                     end
-                    ns.BuildTrackedBuffBars()
                 end,
                 loadPos = function()
                     local p = ECME.db.profile

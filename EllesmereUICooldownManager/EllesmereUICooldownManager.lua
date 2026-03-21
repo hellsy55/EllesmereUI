@@ -999,7 +999,7 @@ local DEFAULTS = {
                     borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
-                    iconZoom = 0.08, iconShape = "none", growDirection = "RIGHT",
+                    iconZoom = 0.08, iconShape = "none",
                     verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
                     barBgR = 0, barBgG = 0, barBgB = 0,
                     showCooldownText = true, cooldownFontSize = 12,
@@ -1027,7 +1027,7 @@ local DEFAULTS = {
                     borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
-                    iconZoom = 0.08, iconShape = "none", growDirection = "RIGHT",
+                    iconZoom = 0.08, iconShape = "none",
                     verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
                     barBgR = 0, barBgG = 0, barBgB = 0,
                     showCooldownText = true, cooldownFontSize = 12,
@@ -1055,7 +1055,7 @@ local DEFAULTS = {
                     borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
-                    iconZoom = 0.08, iconShape = "none", growDirection = "RIGHT",
+                    iconZoom = 0.08, iconShape = "none",
                     verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
                     barBgR = 0, barBgG = 0, barBgB = 0,
                     showCooldownText = true, cooldownFontSize = 12,
@@ -2611,7 +2611,7 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
     -- so the fixed edge stays put when bar width changes across specs.
     if pos.point == "CENTER" and (pos.relPoint == "CENTER" or not pos.relPoint) then
         local bd = barKey and barDataByKey[barKey]
-        local grow = bd and bd.growDirection or "RIGHT"
+        local grow = bd and bd.growDirection or "CENTER"
         local fw = frame:GetWidth() or 0
         local fh = frame:GetHeight() or 0
 
@@ -2647,7 +2647,7 @@ local function SaveCDMBarPosition(barKey, frame)
     -- Determine anchor point from grow direction so the bar's near edge
     -- stays fixed when icon count changes across specs.
     local bd = barDataByKey[barKey]
-    local grow = bd and bd.growDirection or "RIGHT"
+    local grow = bd and bd.growDirection or "CENTER"
     local pt
     if     grow == "RIGHT" then pt = "LEFT"
     elseif grow == "LEFT"  then pt = "RIGHT"
@@ -2713,7 +2713,7 @@ local function CDMFrameAnchorPoint(anchorSide, grow, centered)
     if grow == "DOWN"  then return "TOP"    end
     if grow == "UP"    then return "BOTTOM" end
     if grow == "CENTER" then return "CENTER" end
-    return "LEFT"
+    return "CENTER"
 end
 
 -------------------------------------------------------------------------------
@@ -2865,7 +2865,7 @@ BuildCDMBar = function(barIndex)
             local side = barData.partyFrameSide or "LEFT"
             local oX = barData.partyFrameOffsetX or 0
             local oY = barData.partyFrameOffsetY or 0
-            local grow = barData.growDirection or "RIGHT"
+            local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(side, grow, centered)
             frame._anchorSide = side:upper()
@@ -2896,7 +2896,7 @@ BuildCDMBar = function(barIndex)
             local side = barData.playerFrameSide or "LEFT"
             local oX = barData.playerFrameOffsetX or 0
             local oY = barData.playerFrameOffsetY or 0
-            local grow = barData.growDirection or "RIGHT"
+            local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(side, grow, centered)
             frame._anchorSide = side:upper()
@@ -2933,7 +2933,7 @@ BuildCDMBar = function(barIndex)
             local gap = barData.spacing or 2
             local oX = barData.anchorOffsetX or 0
             local oY = barData.anchorOffsetY or 0
-            local grow = barData.growDirection or "RIGHT"
+            local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(anchorPos:upper(), grow, centered)
             frame._anchorSide = anchorPos:upper()
@@ -3043,7 +3043,7 @@ local function ComputeCDMBarSize(barData, count)
     local rows = barData.numRows or 1
     if rows < 1 then rows = 1 end
     local stride = ComputeTopRowStride(barData, count)
-    local grow = barData.growDirection or "RIGHT"
+    local grow = barData.growDirection or "CENTER"
     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     if isH then
         return stride * iW + (stride - 1) * sp,
@@ -3090,7 +3090,7 @@ LayoutCDMBar = function(barKey)
         iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
     end
     local spacing = SnapForScale(barData.spacing or 2, 1)
-    local grow = frame._mouseGrow or barData.growDirection or "RIGHT"
+    local grow = frame._mouseGrow or barData.growDirection or "CENTER"
     local numRows = barData.numRows or 1
     if numRows < 1 then numRows = 1 end
 
@@ -3137,7 +3137,53 @@ LayoutCDMBar = function(barKey)
         totalW = numRows * iconW + (numRows - 1) * spacing
         totalH = stride * iconH + (stride - 1) * spacing
     end
+
+    -- Capture the fixed edge BEFORE SetSize so it does not move when the bar
+    -- grows. Only for non-center grow directions, outside unlock mode (unlock
+    -- mode's RecenterBarAnchor owns positioning there), and only for bars
+    -- free-floating on UIParent (anchored bars are positioned by their anchor).
+    local preEdgeX, preEdgeY, preGrowAnchor
+    local freeFloating = not barData.anchorTo or barData.anchorTo == "none"
+    if grow ~= "CENTER" and not EllesmereUI._unlockActive and freeFloating then
+        local fL = frame:GetLeft()
+        local fR = frame:GetRight()
+        local fT = frame:GetTop()
+        local fB = frame:GetBottom()
+        if fL and fR and fT and fB then
+            local uiS = UIParent:GetEffectiveScale()
+            local fS  = frame:GetEffectiveScale()
+            local ratio = fS / uiS
+            local uiW, uiH = UIParent:GetSize()
+            if grow == "RIGHT" then
+                preGrowAnchor = "LEFT"
+                preEdgeX = fL * ratio - uiW / 2
+                preEdgeY = ((fT + fB) / 2) * ratio - uiH / 2
+            elseif grow == "LEFT" then
+                preGrowAnchor = "RIGHT"
+                preEdgeX = fR * ratio - uiW / 2
+                preEdgeY = ((fT + fB) / 2) * ratio - uiH / 2
+            elseif grow == "DOWN" then
+                preGrowAnchor = "TOP"
+                preEdgeX = ((fL + fR) / 2) * ratio - uiW / 2
+                preEdgeY = fT * ratio - uiH / 2
+            elseif grow == "UP" then
+                preGrowAnchor = "BOTTOM"
+                preEdgeX = ((fL + fR) / 2) * ratio - uiW / 2
+                preEdgeY = fB * ratio - uiH / 2
+            end
+        end
+    end
+
     frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
+
+    -- Re-anchor from the fixed edge captured before SetSize.
+    if preGrowAnchor and preEdgeX and preEdgeY then
+        pcall(function()
+            frame:ClearAllPoints()
+            frame:SetPoint(preGrowAnchor, UIParent, "CENTER", preEdgeX, preEdgeY)
+        end)
+        SaveCDMBarPosition(barKey, frame)
+    end
 
     -- Track which axes actually changed for axis-isolated propagation
     local prevW = frame._prevLayoutW or 0
@@ -3148,10 +3194,6 @@ LayoutCDMBar = function(barKey)
     local heightChanged = (math.abs(newH - prevH) > 0.5)
     frame._prevLayoutW = newW
     frame._prevLayoutH = newH
-
-    -- Centered growth for buff/custom bars is handled by the centralized
-    -- unlock mode position system (NotifyElementResized re-applies CENTER
-    -- anchor on resize). No per-addon repositioning needed here.
 
     -- During unlock mode, skip anchor/propagation -- unlock mode owns positioning.
     if not EllesmereUI._unlockActive then
@@ -7175,7 +7217,7 @@ function ns.AddCDMBar(barType, name, numRows)
         borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
         borderClassColor = false, borderThickness = "thin",
         bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
-        iconZoom = 0.08, iconShape = "none", growDirection = "RIGHT",
+        iconZoom = 0.08, iconShape = "none",
         verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
         barBgR = 0, barBgG = 0, barBgB = 0,
         showCooldownText = true, cooldownFontSize = 12,
@@ -7256,7 +7298,7 @@ local function CDMFirstLoginCapture()
             end
             -- Orientation
             if cap.isHorizontal ~= nil then
-                barData.growDirection = cap.isHorizontal and "RIGHT" or "DOWN"
+                if not cap.isHorizontal then barData.growDirection = "DOWN" end
                 barData.verticalOrientation = not cap.isHorizontal
             end
             -- Position: no scale division needed (scale is always 1)
@@ -7338,7 +7380,7 @@ RegisterCDMUnlockElements = function()
                     local rows = bd2.numRows or 1
                     if rows < 1 then rows = 1 end
                     local stride = ComputeTopRowStride(bd2, count)
-                    local grow = bd2.growDirection or "RIGHT"
+                    local grow = bd2.growDirection or "CENTER"
                     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
                     local rawIcon
@@ -7360,7 +7402,7 @@ RegisterCDMUnlockElements = function()
                     local rows = bd2.numRows or 1
                     if rows < 1 then rows = 1 end
                     local stride = ComputeTopRowStride(bd2, count)
-                    local grow = bd2.growDirection or "RIGHT"
+                    local grow = bd2.growDirection or "CENTER"
                     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
                     local shape = bd2.iconShape or "none"
@@ -7380,10 +7422,9 @@ RegisterCDMUnlockElements = function()
                     local p = ECME.db.profile
                     -- Centralized system already converts to CENTER/CENTER
                     p.cdmBarPositions[key] = { point = point, relPoint = relPoint, x = x, y = y }
-                    -- Skip rebuild when called from anchor propagation --
-                    -- the bar is already positioned correctly and rebuilding
-                    -- would re-trigger propagation in an infinite loop.
-                    if not EllesmereUI._propagatingSave then
+                    -- Skip rebuild when called from anchor propagation or while
+                    -- unlock mode is active (unlock mode owns positioning then).
+                    if not EllesmereUI._propagatingSave and not EllesmereUI._unlockActive then
                         BuildAllCDMBars()
                     end
                 end,
@@ -8204,7 +8245,7 @@ function ECME:CDMFinishSetup()
                                 iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
                             end
                             local spacing = SnapForScale(barData.spacing or 2, 1)
-                            local grow = barData.growDirection or "RIGHT"
+                            local grow = barData.growDirection or "CENTER"
                             local numRows = barData.numRows or 1
                             if numRows < 1 then numRows = 1 end
                             local stride = ComputeTopRowStride(barData, cachedCount)
