@@ -7512,16 +7512,43 @@ AttachExtraBarHoverHooks = function(info)
     local blizzFrame = _G[info.frameName]
     if not blizzFrame then return end
     local holder = extraBarHolders[info.key]
+    local hoverFrame = info.hoverFrame and _G[info.hoverFrame]
 
     -- Fade the Blizzard frame directly rather than the holder.
     -- The holder is for positioning only; fading it can be overridden by
     -- Blizzard's own layout code calling SetAlpha on the child frame.
     local fadeTarget = blizzFrame
+    local hoverRoot = hoverFrame or blizzFrame
 
     local state = { isHovered = false, fadeDir = nil, frame = fadeTarget }
     hoverStates[info.key] = state
 
+    local function IsChildOfHoverRoot(frame)
+        while frame do
+            if frame == hoverRoot then
+                return true
+            end
+            frame = frame.GetParent and frame:GetParent() or nil
+        end
+        return false
+    end
+
+    local function IsHoverRootActive()
+        local foci = GetMouseFoci and GetMouseFoci() or { GetMouseFocus and GetMouseFocus() }
+        if foci then
+            for _, focus in ipairs(foci) do
+                if focus and IsChildOfHoverRoot(focus) then
+                    return true
+                end
+            end
+        end
+
+        if not MouseIsOver then return true end
+        return MouseIsOver(hoverRoot)
+    end
+
     local function OnEnter()
+        if not IsHoverRootActive() then return end
         state.isHovered = true
         local bs = EAB.db.profile.bars[info.key]
         if bs and bs.mouseoverEnabled and state.fadeDir ~= "in" then
@@ -7533,6 +7560,10 @@ AttachExtraBarHoverHooks = function(info)
     local function OnLeave()
         state.isHovered = false
         C_Timer_After(0.1, function()
+            if IsHoverRootActive() then
+                state.isHovered = true
+                return
+            end
             if state.isHovered then return end
             if _quickKeybindState.open then return end
             local bs = EAB.db.profile.bars[info.key]
@@ -7543,13 +7574,8 @@ AttachExtraBarHoverHooks = function(info)
         end)
     end
 
-    blizzFrame:HookScript("OnEnter", OnEnter)
-    blizzFrame:HookScript("OnLeave", OnLeave)
-    local hoverFrame = info.hoverFrame and _G[info.hoverFrame]
-    if hoverFrame and hoverFrame ~= blizzFrame then
-        hoverFrame:HookScript("OnEnter", OnEnter)
-        hoverFrame:HookScript("OnLeave", OnLeave)
-    end
+    hoverRoot:HookScript("OnEnter", OnEnter)
+    hoverRoot:HookScript("OnLeave", OnLeave)
 
     -- Recurse into child frames to hook all interactive buttons, including
     -- those nested inside sub-containers (e.g. MicroMenu inside MicroMenuContainer).
@@ -7566,10 +7592,7 @@ AttachExtraBarHoverHooks = function(info)
             end
         end
     end
-    HookChildren(blizzFrame)
-    if hoverFrame and hoverFrame ~= blizzFrame then
-        HookChildren(hoverFrame)
-    end
+    HookChildren(hoverRoot)
 end
 
 function EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, opts)
