@@ -995,6 +995,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
     if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
     if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
+    -- Blizzard indicator children call self:GetParent():Layout() on events;
+    -- provide a no-op so reparented frames don't error
+    if not minimap.Layout then minimap.Layout = function() end end
 
     if circleMode then
         -----------------------------------------------------------------------
