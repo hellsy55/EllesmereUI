@@ -17,6 +17,12 @@ ns.EAB = EAB
 
 local PP = EllesmereUI.PP
 
+-- Cold-path helper table for module-level behavior that benefits from a
+-- shared dispatch surface without adding more direct top-level helpers.
+local EAB_VTABLE = {
+    ExtraBars = {},
+}
+
 -------------------------------------------------------------------------------
 --  Upvalues
 -------------------------------------------------------------------------------
@@ -100,6 +106,62 @@ ns.DATA_BAR            = DATA_BAR
 ns.BAR_LOOKUP          = BAR_LOOKUP
 ns.ALL_BARS            = ALL_BARS
 ns.EXTRA_BARS          = EXTRA_BARS
+
+function EAB_VTABLE.ExtraBars.PatchDetachedQueueStatusLayout()
+    if not MicroMenuContainer or MicroMenuContainer._eabDetachedQueueLayout then return end
+    MicroMenuContainer._eabDetachedQueueLayout = true
+    MicroMenuContainer._eabOriginalLayout = MicroMenuContainer.Layout
+
+    function MicroMenuContainer:Layout()
+        if not QueueStatusButton or QueueStatusButton:GetParent() == self then
+            return self._eabOriginalLayout(self)
+        end
+
+        -- Once the queue eye lives in its own holder, fall back to the same
+        -- container sizing logic but exclude detached queue-eye geometry.
+        local isHorizontal = not MicroMenu or MicroMenu.isHorizontal
+
+        local width, height = 0, 0
+        local function AddFrameSize(frame, includeOffset)
+            local frameScale = frame:GetScale()
+
+            if isHorizontal then
+                width = width + frame:GetWidth() * frameScale
+                if includeOffset then
+                    local _, _, _, offsetX = frame:GetPoint(1)
+                    width = width + abs(offsetX * frameScale)
+                end
+
+                height = max(height, frame:GetHeight() * frameScale)
+            else
+                width = max(width, frame:GetWidth() * frameScale)
+
+                height = height + frame:GetHeight() * frameScale
+                if includeOffset then
+                    local _, _, _, _, offsetY = frame:GetPoint(1)
+                    height = height + abs(offsetY * frameScale)
+                end
+            end
+        end
+
+        if MicroMenu then
+            if MicroMenu:GetParent() ~= self then
+                -- Preserve Blizzard's temporary override path when the micro
+                -- menu is moved elsewhere (vehicle/pet battle/tutorial flows).
+                return
+            end
+
+            MicroMenu:Layout()
+            AddFrameSize(MicroMenu)
+        end
+
+        if QueueStatusButton and QueueStatusButton:GetParent() == self then
+            AddFrameSize(QueueStatusButton, true)
+        end
+
+        self:SetSize(max(width, 1), max(height, 1))
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Media paths
@@ -7510,6 +7572,85 @@ AttachExtraBarHoverHooks = function(info)
     end
 end
 
+function EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, opts)
+    opts = opts or {}
+
+    local recentering = false
+
+    local function SyncHolderSize()
+        local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+        if fw and fw > 1 and fh and fh > 1 then
+            holder:SetSize(fw, fh)
+        end
+    end
+
+    local function ReparentIntoHolder()
+        if InCombatLockdown() then
+            _blizzMovablePendingOOC[barKey] = true
+            return
+        end
+
+        recentering = true
+        blizzFrame:SetParent(holder)
+        blizzFrame:ClearAllPoints()
+        blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        recentering = false
+        SyncHolderSize()
+    end
+
+    blizzFrame:HookScript("OnSizeChanged", SyncHolderSize)
+
+    if opts.disableLayoutFrame then
+        blizzFrame.ignoreInLayout = true
+        if blizzFrame.SetIsLayoutFrame then
+            blizzFrame:SetIsLayoutFrame(false)
+        end
+        blizzFrame.IsLayoutFrame = nil
+    end
+
+    ReparentIntoHolder()
+
+    hooksecurefunc(blizzFrame, "SetParent", function(self, newParent)
+        if newParent ~= holder then
+            C_Timer_After(0, function()
+                if self:GetParent() ~= holder then
+                    ReparentIntoHolder()
+                end
+            end)
+        end
+    end)
+
+    if opts.repairOnShow then
+        blizzFrame:HookScript("OnShow", function()
+            C_Timer_After(0, function()
+                if recentering or InCombatLockdown() then return end
+                ReparentIntoHolder()
+            end)
+        end)
+    end
+
+    hooksecurefunc(blizzFrame, "SetPoint", function(self)
+        if recentering or self:GetParent() ~= holder then return end
+        C_Timer_After(0, function()
+            if recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
+            if opts.recenterOnlyWhenMoved and self:GetPoint(1) == "CENTER" then return end
+            ReparentIntoHolder()
+        end)
+    end)
+
+    if opts.hookUpdatePosition and type(blizzFrame.UpdatePosition) == "function" then
+        hooksecurefunc(blizzFrame, "UpdatePosition", function()
+            if recentering or blizzFrame:GetParent() ~= holder then return end
+            C_Timer_After(0, function()
+                if recentering or blizzFrame:GetParent() ~= holder or InCombatLockdown() then return end
+                ReparentIntoHolder()
+            end)
+        end)
+    end
+
+    return SyncHolderSize, ReparentIntoHolder
+end
+
 local function SetupExtraBarHolder(barKey, frameName, barInfo)
     local blizzFrame = _G[frameName]
     if not blizzFrame then return end
@@ -7574,74 +7715,11 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         end
     end
 
-    local _recentering = false
-    local function SyncHolderSize()
-        local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
-        if fw and fw > 1 and fh and fh > 1 then
-            holder:SetSize(fw, fh)
-        end
-    end
-
-    blizzFrame:HookScript("OnSizeChanged", SyncHolderSize)
-
     -- QueueStatusButton starts as a child of `MicroMenuContainer`. Reparent it
     -- so its mouseover/hidden state can diverge from the micro menu while we
     -- continue using Blizzard's own button logic and animations.
     if barInfo and barInfo.blizzOwnedVisibility then
-        if MicroMenuContainer and not MicroMenuContainer._eabDetachedQueueLayout then
-            MicroMenuContainer._eabDetachedQueueLayout = true
-            MicroMenuContainer._eabOriginalLayout = MicroMenuContainer.Layout
-
-            function MicroMenuContainer:Layout()
-                if not QueueStatusButton or QueueStatusButton:GetParent() == self then
-                    return self._eabOriginalLayout(self)
-                end
-
-                -- Once the queue eye lives in its own holder, fall back to the same
-                -- container sizing logic but exclude detached queue-eye geometry.
-                local isHorizontal = not MicroMenu or MicroMenu.isHorizontal
-
-                local width, height = 0, 0
-                local function AddFrameSize(frame, includeOffset)
-                    local frameScale = frame:GetScale()
-
-                    if isHorizontal then
-                        width = width + frame:GetWidth() * frameScale
-                        if includeOffset then
-                            local _, _, _, offsetX = frame:GetPoint(1)
-                            width = width + abs(offsetX * frameScale)
-                        end
-
-                        height = max(height, frame:GetHeight() * frameScale)
-                    else
-                        width = max(width, frame:GetWidth() * frameScale)
-
-                        height = height + frame:GetHeight() * frameScale
-                        if includeOffset then
-                            local _, _, _, _, offsetY = frame:GetPoint(1)
-                            height = height + abs(offsetY * frameScale)
-                        end
-                    end
-                end
-
-                if MicroMenu then
-                    if MicroMenu:GetParent() ~= self then
-                        -- Preserve Blizzard's temporary override path when the micro
-                        -- menu is moved elsewhere (vehicle/pet battle/tutorial flows).
-                        return
-                    end
-
-                    MicroMenu:Layout()
-                    AddFrameSize(MicroMenu)
-                end
-
-                if QueueStatusButton and QueueStatusButton:GetParent() == self then
-                    AddFrameSize(QueueStatusButton, true)
-                end
-
-                self:SetSize(max(width, 1), max(height, 1))
-            end
-        end
+        EAB_VTABLE.ExtraBars.PatchDetachedQueueStatusLayout()
 
         SafeEnableMouse(holder, false)
 
@@ -7649,119 +7727,19 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         blizzFrame:SetFrameStrata("MEDIUM")
         blizzFrame:SetFrameLevel(100)
 
-        local function ReparentIntoHolder()
-            if InCombatLockdown() then
-                _blizzMovablePendingOOC[barKey] = true
-                return
-            end
-
-            _recentering = true
-            blizzFrame:SetParent(holder)
-            blizzFrame:ClearAllPoints()
-            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
-            _recentering = false
-            SyncHolderSize()
-        end
-
-        ReparentIntoHolder()
-
-        hooksecurefunc(blizzFrame, "SetParent", function(self, newParent)
-            if newParent ~= holder then
-                C_Timer_After(0, function()
-                    if self:GetParent() ~= holder then
-                        ReparentIntoHolder()
-                    end
-                end)
-            end
-        end)
-
-        blizzFrame:HookScript("OnShow", function()
-            C_Timer_After(0, function()
-                if _recentering or InCombatLockdown() then return end
-                ReparentIntoHolder()
-            end)
-        end)
-
-        hooksecurefunc(blizzFrame, "SetPoint", function(self)
-            if _recentering or self:GetParent() ~= holder then return end
-            C_Timer_After(0, function()
-                if _recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
-                ReparentIntoHolder()
-            end)
-        end)
-
-        if type(blizzFrame.UpdatePosition) == "function" then
-            hooksecurefunc(blizzFrame, "UpdatePosition", function()
-                if _recentering or blizzFrame:GetParent() ~= holder then return end
-                C_Timer_After(0, function()
-                    if _recentering or blizzFrame:GetParent() ~= holder or InCombatLockdown() then return end
-                    ReparentIntoHolder()
-                end)
-            end)
-        end
+        EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
+            repairOnShow = true,
+            hookUpdatePosition = true,
+        })
 
         return holder
     end
 
-    local function ReparentIntoHolder()
-        if InCombatLockdown() then
-            _blizzMovablePendingOOC[barKey] = true
-            return
-        end
-        _recentering = true
-        blizzFrame:SetParent(holder)
-        blizzFrame:ClearAllPoints()
-        blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
-        _recentering = false
-    end
-
-    -- Prevent Blizzard layout system from repositioning
-    blizzFrame.ignoreInLayout = true
-    if blizzFrame.SetIsLayoutFrame then
-        blizzFrame:SetIsLayoutFrame(false)
-    end
-    blizzFrame.IsLayoutFrame = nil
-
-    ReparentIntoHolder()
-
-    hooksecurefunc(blizzFrame, "SetParent", function(self, newParent)
-        if newParent ~= holder then
-            C_Timer_After(0, function()
-                if self:GetParent() ~= holder then
-                    ReparentIntoHolder()
-                end
-            end)
-        end
-    end)
-
-    hooksecurefunc(blizzFrame, "SetPoint", function(self)
-        if _recentering or self:GetParent() ~= holder then return end
-        C_Timer_After(0, function()
-            if _recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
-            local pt = self:GetPoint(1)
-            if pt ~= "CENTER" then
-                _recentering = true
-                self:ClearAllPoints()
-                self:SetPoint("CENTER", holder, "CENTER", 0, 0)
-                _recentering = false
-            end
-        end)
-    end)
-
-    if blizzFrame.UpdatePosition then
-        hooksecurefunc(blizzFrame, "UpdatePosition", function(self)
-            if _recentering or self:GetParent() ~= holder then return end
-            C_Timer_After(0, function()
-                if _recentering or self:GetParent() ~= holder or InCombatLockdown() then return end
-                _recentering = true
-                self:ClearAllPoints()
-                self:SetPoint("CENTER", holder, "CENTER", 0, 0)
-                _recentering = false
-            end)
-        end)
-    end
-
-    SyncHolderSize()
+    EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
+        disableLayoutFrame = true,
+        recenterOnlyWhenMoved = true,
+        hookUpdatePosition = true,
+    })
     return holder
 end
 
