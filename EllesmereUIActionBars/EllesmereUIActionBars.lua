@@ -3407,7 +3407,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
     if numIcons < 1 then numIcons = 1 end
 
-    local clickable = not s.clickThrough
+    local clickable = _quickKeybindState.open or not s.clickThrough
     local lastVisible = 0
     for i = 1, numIcons do
         local btn = buttons[i]
@@ -4038,7 +4038,15 @@ function EAB:ApplyAlwaysHidden()
         if frame then
             local vis = s.barVisibility or "always"
             local isHidden = (vis == "never") or s.alwaysHidden
-            if isHidden then
+            if _quickKeybindState.open and barFrames[key] and frame == barFrames[key] then
+                if not InCombatLockdown() then
+                    RegisterAttributeDriver(frame, "state-visibility", "show")
+                    frame:Show()
+                    SafeEnableMouseMotionOnly(frame, true)
+                end
+                -- QuickKeybind temporarily surfaces managed action bars even
+                -- when the user normally keeps them hidden.
+            elseif isHidden then
                 if not info.visibilityOnly and not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", "hide")
                 elseif info.visibilityOnly then
@@ -4118,7 +4126,7 @@ function EAB:ApplyClickThroughForBar(barKey)
     local buttons = barButtons[barKey]
     if not buttons then return end
 
-    local enable = not s.clickThrough
+    local enable = _quickKeybindState.open or not s.clickThrough
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
     SafeEnableMouseMotionOnly(frame, enable)
@@ -4143,6 +4151,7 @@ function EAB:UpdateHousingVisibility()
     -- (e.g. CameraOrSelectOrMoveStop triggering PLAYER_MOUNT_DISPLAY_CHANGED)
     C_Timer.After(0, function()
         if InCombatLockdown() then return end
+        if _quickKeybindState.open then return end
         -- Check non-macro visibility options here. Secure frames still use the
         -- state driver for target/enemy conditions, but mounted-like druid
         -- forms are also handled here to cover cases [mounted] does not match.
@@ -7718,8 +7727,18 @@ local function EAB_UpdateQuickKeybindVisibility(show)
     if InCombatLockdown() then return end
 
     for _, info in ipairs(BAR_CONFIG) do
+        local key = info.key
+        local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
+        local frame = barFrames[key]
+
+        if show and frame and s and s.enabled ~= false then
+            RegisterAttributeDriver(frame, "state-visibility", "show")
+            frame:Show()
+            SafeEnableMouseMotionOnly(frame, true)
+        end
+
         if not info.isStance and not info.isPetBar then
-            local buttons = barButtons[info.key]
+            local buttons = barButtons[key]
             if buttons then
                 for _, btn in ipairs(buttons) do
                     if btn then
@@ -7730,29 +7749,31 @@ local function EAB_UpdateQuickKeybindVisibility(show)
         end
     end
 
-    for _, info in ipairs(BAR_CONFIG) do
-        local key = info.key
-        local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
-        local frame = barFrames[key]
-        local state = hoverStates[key]
-        if frame and s and s.mouseoverEnabled then
-            StopFade(frame)
-            if show then
+    if show then
+        for _, info in ipairs(BAR_CONFIG) do
+            local key = info.key
+            local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
+            local frame = barFrames[key]
+            local state = hoverStates[key]
+            if frame and s and s.mouseoverEnabled then
+                StopFade(frame)
                 frame:SetAlpha(1)
                 if state then state.fadeDir = "in" end
                 if key == "MainBar" then SyncPagingAlpha(1) end
-            elseif state and state.isHovered then
-                frame:SetAlpha(1)
-                state.fadeDir = "in"
-                if key == "MainBar" then SyncPagingAlpha(1) end
-            else
-                FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
-                if state then state.fadeDir = "out" end
-                if key == "MainBar" then SyncPagingAlpha(0) end
             end
+            EAB:ApplyAlwaysShowButtons(key)
+            EAB:ApplyClickThroughForBar(key)
         end
-        EAB:ApplyAlwaysShowButtons(info.key)
+    else
+        EAB:ApplyCombatVisibility()
+        EAB:ApplyAlwaysHidden()
+        for _, info in ipairs(BAR_CONFIG) do
+            EAB:ApplyAlwaysShowButtons(info.key)
+            EAB:ApplyClickThroughForBar(info.key)
+        end
+        EAB:RefreshMouseover()
     end
+
     if _pagingFrame then
         LayoutPagingFrame()
     end
