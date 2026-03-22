@@ -970,6 +970,10 @@ function EQT:Refresh(skipAlphaFlash)
     for i = #self.sections, 1, -1 do ReleaseSection(self.sections[i]); self.sections[i] = nil end
 
     if f.bg then f.bg:SetColorTexture(Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0, Cfg("bgAlpha") or 0.35) end
+    if f.topLine then
+        local tlc = Cfg("secColor") or C.section
+        f.topLine:SetColorTexture(tlc.r, tlc.g, tlc.b, 0.7)
+    end
     f:SetWidth(width)
     local contentW = math.max(10, width - PAD_H * 2 - 10)
     content:SetWidth(contentW)
@@ -1581,7 +1585,8 @@ local function BuildFrame()
     topLine:SetHeight(1)
     topLine:SetPoint("TOPLEFT",  inner, "TOPLEFT",  0, 0)
     topLine:SetPoint("TOPRIGHT", inner, "TOPRIGHT", 0, 0)
-    topLine:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 0.7)
+    local sc = Cfg("secColor") or C.section
+    topLine:SetColorTexture(sc.r, sc.g, sc.b, 0.7)
     if not Cfg("showTopLine") then topLine:Hide() end
     f.topLine = topLine
 
