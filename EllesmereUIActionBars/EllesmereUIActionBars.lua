@@ -363,10 +363,15 @@ local _dragState = { visible = false, strataCache = {} }
 
 -- Grid show/hide state (show empty slots during spell drag)
 local _gridState = { shown = false, visPending = false, spellsPending = false }
+local _quickKeybindState = { open = false }
 
 -- Set of frames we own (bar frames, not Blizzard frames).
 -- Blizzard-owned frames use the _extraFadeQueue path to avoid taint.
 local _ownedFrames = {}
+
+local function AreExtraSlotsForcedVisible()
+    return _gridState.shown or _quickKeybindState.open
+end
 
 local function FadeTo(frame, toAlpha, duration)
     duration = duration or 0.1
@@ -540,9 +545,8 @@ do
                     button:SetAttributeNoHandler("statehidden", true)
                     button:Hide()
                 end
-                -- Keep MainActionBar.actionButtons intact so QuickKeybind
-                -- can find ActionButton1-12 when we temporarily restore the
-                -- bar on demand.
+                -- Keep Blizzard's actionButtons tables intact because the
+                -- stock grid/highlight helpers still drive some state there.
             end
         end
     end
@@ -1102,9 +1106,8 @@ local function HideBlizzardBars()
             end
         end
     end
-    -- MainActionBar retains events. Its actionButtons table (ActionButton1-12)
-    -- is intentionally kept intact so QuickKeybind can scan it and bind AB1.
-    -- Those buttons are already hidden and statehidden from the early disposal block.
+    -- MainActionBar retains events so Blizzard's own grid helpers still fire,
+    -- even though the visible MainBar buttons are EAB-owned.
     if MainActionBarController then
         MainActionBarController:UnregisterAllEvents()
     end
@@ -1348,6 +1351,11 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
     end
 
     if btn then
+        -- Reparented Blizzard buttons (MultiBar*Button*) intentionally do NOT
+        -- get _eabOwnQuickKeybind. Blizzard's ActionButtonUtil iterates them
+        -- by global name and already calls DoModeChange on them. Setting the
+        -- flag would cause EAB_UpdateQuickKeybindButtons to double-toggle
+        -- their QKB highlight.
         if not skipProtected then
             -- Clear statehidden set during HideBlizzardBars so the button
             -- becomes visible again under our control.
@@ -1454,6 +1462,35 @@ local function WireSecurePagingButton(btn, delta)
     btn:SetAttribute("macrotext", delta > 0 and _macroNext or _macroPrev)
 end
 
+local function InitPagingQuickKeybindButton(btn, atlas)
+    if not btn then return end
+
+    if not btn.QuickKeybindHighlightTexture then
+        local tex = btn:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints(btn)
+        tex:SetAtlas(atlas)
+        tex:SetAlpha(0.8)
+        tex:Hide()
+        btn.QuickKeybindHighlightTexture = tex
+    end
+
+    if btn._eabQuickKeybindInit or not QuickKeybindButtonTemplateMixin then
+        return
+    end
+
+    Mixin(btn, QuickKeybindButtonTemplateMixin)
+    btn:HookScript("OnShow", btn.QuickKeybindButtonOnShow)
+    btn:HookScript("OnHide", btn.QuickKeybindButtonOnHide)
+    btn:HookScript("OnClick", btn.QuickKeybindButtonOnClick)
+    btn:HookScript("OnEnter", btn.QuickKeybindButtonOnEnter)
+    btn:HookScript("OnLeave", btn.QuickKeybindButtonOnLeave)
+    btn._eabQuickKeybindInit = true
+    -- Do NOT call btn:QuickKeybindButtonOnShow() eagerly here. It registers
+    -- persistent EventRegistry callbacks that fire UpdateMouseWheelHandler
+    -- (and thus SetScript) on a SecureActionButtonTemplate frame on every
+    -- QKB mode change. The HookScript("OnShow") handles runtime visibility.
+end
+
 local function SetupPagingFrame()
     if _pagingFrame then return _pagingFrame end
 
@@ -1478,6 +1515,7 @@ local function SetupPagingFrame()
     upBtn:SetDisabledAtlas("UI-HUD-ActionBar-PageUpArrow-Disabled")
     upBtn:SetHighlightAtlas("UI-HUD-ActionBar-PageUpArrow-Mouseover")
     f._upBtn = upBtn
+    InitPagingQuickKeybindButton(upBtn, "UI-HUD-ActionBar-PageUpArrow-Mouseover")
 
     -- Down arrow (clicks Blizzard's ActionBarDownButton securely)
     local downBtn = CreateFrame("Button", "EABPagingDown", f, "SecureActionButtonTemplate")
@@ -1488,6 +1526,7 @@ local function SetupPagingFrame()
     downBtn:SetDisabledAtlas("UI-HUD-ActionBar-PageDownArrow-Disabled")
     downBtn:SetHighlightAtlas("UI-HUD-ActionBar-PageDownArrow-Mouseover")
     f._downBtn = downBtn
+    InitPagingQuickKeybindButton(downBtn, "UI-HUD-ActionBar-PageDownArrow-Mouseover")
 
     -- Update page text and handle combat visibility / vehicle state
     f:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
@@ -1524,6 +1563,8 @@ local function SetupPagingFrame()
     -- Wire arrow buttons to cycle pages via secure macro
     WireSecurePagingButton(upBtn, 1)
     WireSecurePagingButton(downBtn, -1)
+    upBtn.commandName = "NEXTACTIONPAGE"
+    downBtn.commandName = "PREVIOUSACTIONPAGE"
 
     _pagingFrame = f
     return f
@@ -1720,6 +1761,7 @@ local function SetupBar(info, skipProtected)
             local btn = _G["StanceButton" .. i]
             if btn then
                 btn._skipFlyout = true
+                btn.commandName = BINDING_MAP[key] .. i
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "stance")
@@ -1734,6 +1776,7 @@ local function SetupBar(info, skipProtected)
             local btn = _G["PetActionButton" .. i]
             if btn then
                 btn._skipFlyout = true
+                btn.commandName = BINDING_MAP[key] .. i
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "pet")
@@ -1791,6 +1834,7 @@ local function SetupBar(info, skipProtected)
                     end
                     allButtons[slot] = btn
                 end
+                btn._eabOwnQuickKeybind = true
 
                 RegisterButtonWithController(btn)
 
@@ -1829,7 +1873,6 @@ local function SetupBar(info, skipProtected)
                             btn:SetAttribute("action", slot)
                         end
                         -- Set binding attribute so QuickKeybind can resolve keybinds
-                        -- for all bar types including stance and pet bars
                         local bindPrefix = BINDING_MAP[key]
                         if bindPrefix then
                             local bindingStr = bindPrefix .. i
@@ -1843,6 +1886,13 @@ local function SetupBar(info, skipProtected)
             end
 
             if btn then
+                -- commandName is a plain Lua field (not a protected attribute),
+                -- set unconditionally so the skipProtected combat-reload path
+                -- also gets it. This is the single authoritative assignment.
+                local bindPrefix = BINDING_MAP[key]
+                if bindPrefix then
+                    btn.commandName = bindPrefix .. i
+                end
                 -- RegisterForClicks and EnableMouseWheel are not protected
                 if btn.RegisterForClicks then
                     btn:RegisterForClicks("AnyDown", "AnyUp")
@@ -2152,7 +2202,7 @@ local function ComputeBarLayout(key)
                 yOff = -(row * stepH)
             end
             local show = true
-            if not showEmpty and not _gridState.shown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
+            if not showEmpty and not AreExtraSlotsForcedVisible() and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 show = false
             end
             result[i] = { x = xOff, y = yOff, w = btnW, h = btnH, show = show }
@@ -2306,7 +2356,7 @@ local function LayoutBar(key)
                 end
             end
 
-            if not showEmpty and not _gridState.shown and not ButtonHasAction(btn, info.blizzBtnPrefix) then
+            if not showEmpty and not AreExtraSlotsForcedVisible() and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
             else
                 if not s.mouseoverEnabled then
@@ -3345,8 +3395,10 @@ function EAB:ApplyAlwaysShowButtons(barKey)
         end
     end
 
-    -- During a spell drag (grid shown), keep everything visible
-    if _gridState.shown then return end
+    -- During a spell drag, we leave the controller's secure visibility path
+    -- alone. QuickKeybind still needs the normal visibility refresh so its
+    -- dedicated KEYBOUND flag can show empty slots on EAB-owned bars.
+    if _gridState.shown and not _quickKeybindState.open then return end
 
     -- Respect icon cutoff
     local numIcons = s.overrideNumIcons or s.numIcons or info.count
@@ -3361,7 +3413,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
         local btn = buttons[i]
         if btn then
             local hasAction = ButtonHasAction(btn, info.blizzBtnPrefix)
-            local visible = showEmpty or hasAction
+            local visible = showEmpty or hasAction or _quickKeybindState.open
 
             if btn._eabSlotBG then
                 btn._eabSlotBG:SetShown(visible)
@@ -7624,72 +7676,150 @@ end)
 
 -------------------------------------------------------------------------------
 --  QuickKeybind compatibility
---  QuickKeybind scans Blizzard bar actionButtons tables and reads
---  button:GetAttribute("binding") to resolve keybind names.
---
---  We keep MainActionBar.actionButtons (ActionButton1-12) intact but hidden.
---  On QuickKeybindFrame show, we temporarily restore MainActionBar and its
---  buttons so QuickKeybind sees a normal AB1. On hide, we re-hide everything.
+--  Modern QuickKeybind works off visible buttons' `commandName` plus
+--  `DoModeChange(...)`. Blizzard's stock helpers only know about their own
+--  named bar buttons, so only EAB-owned buttons and the custom paging arrows need
+--  an explicit mode toggle here.
 -------------------------------------------------------------------------------
-local _qkbIsOpen = false
+local function EAB_SetQuickKeybindEffects(btn, show)
+    if not btn or btn:IsForbidden() then return end
+    if btn.DoModeChange then
+        btn:DoModeChange(show)
+    elseif btn.QuickKeybindHighlightTexture then
+        btn.QuickKeybindHighlightTexture:SetShown(show)
+    end
+    if btn.UpdateMouseWheelHandler then
+        btn:UpdateMouseWheelHandler()
+    end
+end
 
-local function EAB_QuickKeybindOpen()
-    if InCombatLockdown() then return end
-    local mab = MainActionBar
-    if not mab then return end
-    -- Exile our bar frame so it is completely inert.
-    local mainFrame = barFrames["MainBar"]
-    if mainFrame then mainFrame:SetParent(hiddenParent) end
-    -- Restore MainActionBar and ActionButton1-12.
-    mab:SetParent(UIParent)
-    mab:Show()
-    if mab.actionButtons then
-        for idx, btn in pairs(mab.actionButtons) do
-            btn:SetAttributeNoHandler("statehidden", nil)
-            btn:Show()
-            if not btn:GetAttribute("binding") then
-                btn:SetAttributeNoHandler("binding", "ACTIONBUTTON" .. idx)
+local function EAB_UpdateQuickKeybindButtons(show)
+    for _, info in ipairs(BAR_CONFIG) do
+        local buttons = barButtons[info.key]
+        if buttons then
+            for _, btn in ipairs(buttons) do
+                if btn and btn._eabOwnQuickKeybind and btn.commandName then
+                    EAB_SetQuickKeybindEffects(btn, show)
+                end
             end
         end
     end
-    _qkbIsOpen = true
+    if _pagingFrame then
+        if _pagingFrame._upBtn then
+            EAB_SetQuickKeybindEffects(_pagingFrame._upBtn, show)
+        end
+        if _pagingFrame._downBtn then
+            EAB_SetQuickKeybindEffects(_pagingFrame._downBtn, show)
+        end
+    end
+end
+
+local function EAB_UpdateQuickKeybindVisibility(show)
+    if InCombatLockdown() then return end
+
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local buttons = barButtons[info.key]
+            if buttons then
+                for _, btn in ipairs(buttons) do
+                    if btn then
+                        SetShowGridInsecure(btn, show, SHOWGRID.KEYBOUND)
+                    end
+                end
+            end
+        end
+    end
+
+    for _, info in ipairs(BAR_CONFIG) do
+        local key = info.key
+        local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
+        local frame = barFrames[key]
+        local state = hoverStates[key]
+        if frame and s and s.mouseoverEnabled then
+            StopFade(frame)
+            if show then
+                frame:SetAlpha(1)
+                if state then state.fadeDir = "in" end
+                if key == "MainBar" then SyncPagingAlpha(1) end
+            elseif state and state.isHovered then
+                frame:SetAlpha(1)
+                state.fadeDir = "in"
+                if key == "MainBar" then SyncPagingAlpha(1) end
+            else
+                FadeTo(frame, 0, s.mouseoverSpeed or 0.15)
+                if state then state.fadeDir = "out" end
+                if key == "MainBar" then SyncPagingAlpha(0) end
+            end
+        end
+        EAB:ApplyAlwaysShowButtons(info.key)
+    end
+    if _pagingFrame then
+        LayoutPagingFrame()
+    end
+end
+
+local _qkbHookFrame
+
+local function EAB_QuickKeybindOpen()
+    if _quickKeybindState.open then return end
+    if InCombatLockdown() then return end
+    _quickKeybindState.open = true
+    EAB_UpdateQuickKeybindButtons(true)
+    EAB_UpdateQuickKeybindVisibility(true)
 end
 
 local function EAB_QuickKeybindClose()
-    if not _qkbIsOpen then return end
-    if InCombatLockdown() then return end
-    _qkbIsOpen = false
-    C_Timer_After(0.2, function()
-        if InCombatLockdown() then return end
-        local mab = MainActionBar
-        if not mab then return end
-        if mab.actionButtons then
-            for _, btn in pairs(mab.actionButtons) do
-                btn:SetAttributeNoHandler("statehidden", true)
-                btn:Hide()
-            end
-        end
-        mab:Hide()
-        mab:SetParent(hiddenParent)
-        -- Restore our bar frame to UIParent and reapply its saved position.
-        local mainFrame = barFrames["MainBar"]
-        if mainFrame then
-            mainFrame:SetParent(UIParent)
-            RestoreBarPositions()
-        end
-    end)
+    if not _quickKeybindState.open then return end
+    if InCombatLockdown() then
+        -- Defer until combat ends; the PLAYER_REGEN_ENABLED handler on
+        -- _qkbHookFrame will retry once protected mutations are safe.
+        _qkbHookFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    _quickKeybindState.open = false
+    EAB_UpdateQuickKeybindButtons(false)
+    EAB_UpdateQuickKeybindVisibility(false)
 end
 
 -- Defer hook until QuickKeybindFrame exists (it loads after PLAYER_LOGIN).
-local _qkbHookFrame = CreateFrame("Frame")
+_qkbHookFrame = CreateFrame("Frame")
 _qkbHookFrame:RegisterEvent("PLAYER_LOGIN")
-_qkbHookFrame:SetScript("OnEvent", function(self)
-    self:UnregisterEvent("PLAYER_LOGIN")
-    C_Timer_After(1, function()
-        local qkb = QuickKeybindFrame
-        if qkb then
-            qkb:HookScript("OnShow", EAB_QuickKeybindOpen)
-            qkb:HookScript("OnHide", EAB_QuickKeybindClose)
+_qkbHookFrame:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_LOGIN" then
+        self:UnregisterEvent("PLAYER_LOGIN")
+        C_Timer_After(1, function()
+            local qkb = QuickKeybindFrame
+            if qkb then
+                if _pagingFrame then
+                    InitPagingQuickKeybindButton(_pagingFrame._upBtn, "UI-HUD-ActionBar-PageUpArrow-Mouseover")
+                    InitPagingQuickKeybindButton(_pagingFrame._downBtn, "UI-HUD-ActionBar-PageDownArrow-Mouseover")
+                end
+                -- Install a stable frame-owned wrapper once, then update the
+                -- target callbacks each session so /reload never stacks stale
+                -- closures that still point at an old Lua chunk.
+                if not qkb._eabQuickKeybindShowHook then
+                    qkb._eabQuickKeybindShowHook = function(frame)
+                        if frame._eabQuickKeybindOnShow then
+                            frame:_eabQuickKeybindOnShow()
+                        end
+                    end
+                    qkb._eabQuickKeybindHideHook = function(frame)
+                        if frame._eabQuickKeybindOnHide then
+                            frame:_eabQuickKeybindOnHide()
+                        end
+                    end
+                    qkb:HookScript("OnShow", qkb._eabQuickKeybindShowHook)
+                    qkb:HookScript("OnHide", qkb._eabQuickKeybindHideHook)
+                end
+                qkb._eabQuickKeybindOnShow = EAB_QuickKeybindOpen
+                qkb._eabQuickKeybindOnHide = EAB_QuickKeybindClose
+            end
+        end)
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        if _quickKeybindState.open
+            and not (QuickKeybindFrame and QuickKeybindFrame:IsShown()) then
+            EAB_QuickKeybindClose()
         end
-    end)
+    end
 end)
