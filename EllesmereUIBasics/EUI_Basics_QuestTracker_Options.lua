@@ -149,7 +149,7 @@ initFrame:SetScript("OnEvent", function(self)
               min=100, max=800, step=10,
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("height") or 600 end,
+              getValue=function() return Cfg("height") or 500 end,
               setValue=function(v)
                   Set("height", v)
                   local f = EQT.frame
@@ -166,7 +166,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Width", min=160, max=400, step=5,
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("width") or 220 end,
+              getValue=function() return Cfg("width") or 325 end,
               setValue=function(v)
                   Set("width", v)
                   EQT:Refresh(true)

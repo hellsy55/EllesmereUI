@@ -279,7 +279,7 @@ initFrame:SetScript("OnEvent", function(self)
                 m.shape = v
                 RefreshMinimap()
               end },
-            { type="slider", text="Border Thickness", min=1, max=5, step=1,
+            { type="slider", text="Border Thickness", min=0, max=5, step=1,
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.borderSize or 1 end,
@@ -290,15 +290,15 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Scale | Accent Color
+        -- Size | Accent Color
         _, h = W:DualRow(parent, y,
-            { type="slider", text="Scale", min=0.5, max=2.0, step=0.1,
+            { type="slider", text="Size", min=100, max=350, step=5,
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.scale or 1.0 end,
+              getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
-                m.scale = v
+                m.mapSize = v
                 RefreshMinimap()
               end },
             { type="multiSwatch", text="Accent Color",

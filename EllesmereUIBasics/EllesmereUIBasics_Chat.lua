@@ -56,9 +56,8 @@ local function ChannelFilter(self, event, msg, author, lang, channelName, ...)
     return false
 end
 
-for _, event in ipairs(CHANNEL_EVENTS) do
-    ChatFrame_AddMessageEventFilter(event, ChannelFilter)
-end
+-- Deferred: filters installed by _EBS_InitChatFilters() after DB is ready
+local _chatFiltersInstalled = false
 
 -------------------------------------------------------------------------------
 --  Class-Colored Names
@@ -96,11 +95,7 @@ local function ClassColoredGetColoredName(event, ...)
     return origGetColoredName(event, ...)
 end
 
--- Install hook once at load time
-if GetColoredName then
-    origGetColoredName = GetColoredName
-    GetColoredName = ClassColoredGetColoredName
-end
+-- Deferred: installed by _EBS_InitChatFilters() after DB is ready
 
 -------------------------------------------------------------------------------
 --  Clickable URLs
@@ -143,9 +138,7 @@ local function URLFilter(self, event, msg, ...)
     return false
 end
 
-for _, event in ipairs(URL_EVENTS) do
-    ChatFrame_AddMessageEventFilter(event, URLFilter)
-end
+-- Deferred: filters installed by _EBS_InitChatFilters() after DB is ready
 
 -- Hook SetItemRef via hooksecurefunc to handle euiurl clicks
 -- hooksecurefunc is a post-hook: the original runs first. For unknown link
@@ -195,12 +188,7 @@ local function ShowURLPopup(url)
     popup:Show()
 end
 
-hooksecurefunc("SetItemRef", function(link)
-    local url = link:match("^euiurl:(.+)")
-    if url then
-        ShowURLPopup(url)
-    end
-end)
+-- Deferred: SetItemRef hook installed by _EBS_InitChatFilters()
 
 -------------------------------------------------------------------------------
 --  Timestamps
@@ -223,12 +211,7 @@ end
 
 _G._EBS_ApplyTimestamps = ApplyTimestamps
 
-local tsFrame = CreateFrame("Frame")
-tsFrame:RegisterEvent("PLAYER_LOGIN")
-tsFrame:SetScript("OnEvent", function(self)
-    self:UnregisterEvent("PLAYER_LOGIN")
-    C_Timer.After(0.5, ApplyTimestamps)
-end)
+-- Deferred: timestamp init handled by _EBS_InitChatFilters()
 
 -------------------------------------------------------------------------------
 --  Copy Chat
@@ -326,6 +309,41 @@ SLASH_EUICOPY2 = "/cc"
 SlashCmdList["EUICOPY"] = function()
     local chatFrame = SELECTED_CHAT_FRAME or ChatFrame1
     ShowCopyDialog(chatFrame)
+end
+
+-------------------------------------------------------------------------------
+--  Deferred filter/hook installation (called from ApplyChat when enabled)
+-------------------------------------------------------------------------------
+function _G._EBS_InitChatFilters()
+    if _chatFiltersInstalled then return end
+    _chatFiltersInstalled = true
+
+    -- Channel shortening filters
+    for _, event in ipairs(CHANNEL_EVENTS) do
+        ChatFrame_AddMessageEventFilter(event, ChannelFilter)
+    end
+
+    -- Class-colored names
+    if GetColoredName and not origGetColoredName then
+        origGetColoredName = GetColoredName
+        GetColoredName = ClassColoredGetColoredName
+    end
+
+    -- Clickable URL filters
+    for _, event in ipairs(URL_EVENTS) do
+        ChatFrame_AddMessageEventFilter(event, URLFilter)
+    end
+
+    -- SetItemRef hook for euiurl clicks
+    hooksecurefunc("SetItemRef", function(link)
+        local url = link:match("^euiurl:(.+)")
+        if url then
+            ShowURLPopup(url)
+        end
+    end)
+
+    -- Timestamps
+    ApplyTimestamps()
 end
 
 -------------------------------------------------------------------------------

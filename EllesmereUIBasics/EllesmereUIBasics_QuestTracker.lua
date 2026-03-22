@@ -66,7 +66,12 @@ end
 local function SetFontSafe(fs, path, size, flags)
     if not fs then return end
     local safePath = SafeFont(path)
-    fs:SetFont(safePath, size or 11, flags or "NONE")
+    size = size or 11
+    flags = flags or "NONE"
+    -- Skip if font hasn't changed
+    local curPath, curSize, curFlags = fs:GetFont()
+    if curPath == safePath and curSize == size and (curFlags or "NONE") == flags then return end
+    fs:SetFont(safePath, size, flags)
     -- Verify font was set; if not try forward-slash fallback, then Blizzard default
     if not fs:GetFont() then
         fs:SetFont("Fonts/FRIZQT__.TTF", size or 11, flags or "NONE")
@@ -122,73 +127,81 @@ local function ShowContextMenu(anchor, items)
 
         -- Close when clicking anywhere outside the menu
         local clickOff = CreateFrame("Frame")
-        clickOff:RegisterEvent("GLOBAL_MOUSE_DOWN")
         clickOff:SetScript("OnEvent", function()
             if ctxMenu:IsShown() and not ctxMenu:IsMouseOver() then
                 ctxMenu:Hide()
             end
         end)
+        ctxMenu:HookScript("OnShow", function()
+            clickOff:RegisterEvent("GLOBAL_MOUSE_DOWN")
+        end)
+        ctxMenu:HookScript("OnHide", function()
+            clickOff:UnregisterEvent("GLOBAL_MOUSE_DOWN")
+        end)
     end
 
-    -- Clear old item frames
+    -- Hide excess pooled buttons
     for _, btn in ipairs(ctxMenu._items) do
         btn:Hide()
     end
-    wipe(ctxMenu._items)
 
     local ITEM_H = 26
     local MENU_PAD = 4
     local maxTextW = 0
 
-    -- Measure text widths first
-    for _, item in ipairs(items) do
-        local tmp = ctxMenu:CreateFontString(nil, "OVERLAY")
-        SetFontSafe(tmp, GlobalFont(), 12, OutlineFlag())
-        tmp:SetText(item.text)
-        local w = tmp:GetStringWidth()
-        if w > maxTextW then maxTextW = w end
-        tmp:Hide()
+    -- Reusable measurement font string
+    if not ctxMenu._measureFS then
+        ctxMenu._measureFS = ctxMenu:CreateFontString(nil, "OVERLAY")
     end
+    local mfs = ctxMenu._measureFS
+    SetFontSafe(mfs, GlobalFont(), 12, OutlineFlag())
+    for _, item in ipairs(items) do
+        mfs:SetText(item.text)
+        local w = mfs:GetStringWidth()
+        if w > maxTextW then maxTextW = w end
+    end
+    mfs:SetText("")
+    mfs:Hide()
 
     local MENU_W = math.max(140, maxTextW + 40)
 
-    -- Create item buttons
+    -- Acquire or create item buttons from pool
+    local acR, acG, acB = C.accent.r, C.accent.g, C.accent.b
     for i, item in ipairs(items) do
-        local btn = CreateFrame("Button", nil, ctxMenu)
+        local btn = ctxMenu._items[i]
+        if not btn then
+            btn = CreateFrame("Button", nil, ctxMenu)
+            local hl = btn:CreateTexture(nil, "BACKGROUND", nil, 1)
+            hl:SetAllPoints()
+            btn._hl = hl
+            local lbl = btn:CreateFontString(nil, "OVERLAY")
+            lbl:SetPoint("LEFT", btn, "LEFT", 10, 0)
+            lbl:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
+            lbl:SetJustifyH("LEFT")
+            btn._lbl = lbl
+            btn:SetScript("OnEnter", function()
+                btn._hl:SetColorTexture(1, 1, 1, E.DD_ITEM_HL_A)
+                btn._lbl:SetTextColor(acR, acG, acB, 1)
+            end)
+            btn:SetScript("OnLeave", function()
+                btn._hl:SetColorTexture(1, 1, 1, 0)
+                btn._lbl:SetTextColor(1, 1, 1, 1)
+            end)
+            ctxMenu._items[i] = btn
+        end
         btn:SetSize(MENU_W - MENU_PAD * 2, ITEM_H)
+        btn:ClearAllPoints()
         btn:SetPoint("TOPLEFT", ctxMenu, "TOPLEFT", MENU_PAD, -(MENU_PAD + (i - 1) * ITEM_H))
-
-        -- Highlight
-        local hl = btn:CreateTexture(nil, "BACKGROUND", nil, 1)
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0)
-        btn._hl = hl
-
-        -- Label
-        local lbl = btn:CreateFontString(nil, "OVERLAY")
-        SetFontSafe(lbl, GlobalFont(), 12, OutlineFlag())
-        lbl:SetPoint("LEFT", btn, "LEFT", 10, 0)
-        lbl:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
-        lbl:SetJustifyH("LEFT")
-        lbl:SetTextColor(1, 1, 1, 1)
-        lbl:SetText(item.text)
-        btn._lbl = lbl
-
-        local acR, acG, acB = C.accent.r, C.accent.g, C.accent.b
-        btn:SetScript("OnEnter", function()
-            hl:SetColorTexture(1, 1, 1, E.DD_ITEM_HL_A)
-            lbl:SetTextColor(acR, acG, acB, 1)
-        end)
-        btn:SetScript("OnLeave", function()
-            hl:SetColorTexture(1, 1, 1, 0)
-            lbl:SetTextColor(1, 1, 1, 1)
-        end)
+        btn._hl:SetColorTexture(1, 1, 1, 0)
+        SetFontSafe(btn._lbl, GlobalFont(), 12, OutlineFlag())
+        btn._lbl:SetTextColor(1, 1, 1, 1)
+        btn._lbl:SetText(item.text)
+        btn._onClick = item.onClick
         btn:SetScript("OnClick", function()
             ctxMenu:Hide()
-            if item.onClick then item.onClick() end
+            if btn._onClick then btn._onClick() end
         end)
-
-        table.insert(ctxMenu._items, btn)
+        btn:Show()
     end
 
     ctxMenu:SetSize(MENU_W, MENU_PAD * 2 + #items * ITEM_H)
@@ -319,7 +332,7 @@ local function ReleaseRow(r)
     table.insert(rowPool, r)
 end
 local function ReleaseAll()
-    EQT.timerRows = {}
+    wipe(EQT.timerRows)
     for i = #EQT.rows, 1, -1 do ReleaseRow(EQT.rows[i]); EQT.rows[i] = nil end
 end
 
@@ -795,12 +808,13 @@ function EQT:ClearSectionCache()
     wipe(questSectionCache)
 end
 
+local _ql_watched, _ql_zone, _ql_world, _ql_prey, _ql_seen = {}, {}, {}, {}, {}
 local function GetQuestLists()
-    local watched = {}
-    local zone    = {}
-    local world   = {}
-    local prey    = {}
-    local seen    = {}
+    local watched = wipe(_ql_watched)
+    local zone    = wipe(_ql_zone)
+    local world   = wipe(_ql_world)
+    local prey    = wipe(_ql_prey)
+    local seen    = wipe(_ql_seen)
 
     if not C_QuestLog then return watched, zone, world, prey end
     local n = C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetNumQuestLogEntries() or 0
@@ -874,6 +888,56 @@ local function GetQuestLists()
 end
 
 -------------------------------------------------------------------------------
+-- Tracked Recipes
+-------------------------------------------------------------------------------
+local _recipes = {}
+local function GetTrackedRecipes()
+    local list = wipe(_recipes)
+    if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipesTracked then return list end
+
+    local tracked = C_TradeSkillUI.GetRecipesTracked(false)
+    local recraft = C_TradeSkillUI.GetRecipesTracked(true)
+    if recraft then for _, v in ipairs(recraft) do table.insert(tracked, v) end end
+    if not tracked or #tracked == 0 then return list end
+
+    for _, tracked_entry in ipairs(tracked) do
+        local recipeID = type(tracked_entry) == "table" and (tracked_entry.recipeID or tracked_entry.recipeSchematicID) or tracked_entry
+        if recipeID then
+            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+            if ok and schematic then
+                local entry = {
+                    recipeID = recipeID,
+                    name = schematic.name or ("Recipe #"..recipeID),
+                    reagents = {},
+                }
+                if schematic.reagentSlotSchematics then
+                    for _, slot in ipairs(schematic.reagentSlotSchematics) do
+                        if slot.reagentType == 1 and slot.reagents then
+                            for _, reagent in ipairs(slot.reagents) do
+                                local itemID = reagent.itemID
+                                if itemID then
+                                    local name = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
+                                    local owned = C_Item.GetItemCount(itemID, true) or 0
+                                    local needed = slot.quantityRequired or 1
+                                    table.insert(entry.reagents, {
+                                        name = name,
+                                        owned = owned,
+                                        needed = needed,
+                                        finished = owned >= needed,
+                                    })
+                                end
+                            end
+                        end
+                    end
+                end
+                table.insert(list, entry)
+            end
+        end
+    end
+    return list
+end
+
+-------------------------------------------------------------------------------
 -- Refresh
 -------------------------------------------------------------------------------
 local PAD_H    = 8
@@ -892,7 +956,7 @@ function EQT:Refresh(skipAlphaFlash)
     local f = self.frame
     if not f then return end
     local content = f.content
-    local width   = Cfg("width") or 220
+    local width   = Cfg("width") or 325
     local tc      = Cfg("titleColor")
     local oc      = Cfg("objColor")
     local cc      = Cfg("completedColor") or C.complete
@@ -1011,19 +1075,23 @@ function EQT:Refresh(skipAlphaFlash)
         r.text:SetHeight(TEXT_H + 2)
         r.text:Show()
 
-        -- Timer bar background
-        if r.barBg then r.barBg:Hide(); r.barBg = nil end
-        r.barBg = r.frame:CreateTexture(nil, "BACKGROUND")
+        -- Timer bar background (reuse existing texture)
+        if not r.barBg then
+            r.barBg = r.frame:CreateTexture(nil, "BACKGROUND")
+        end
         r.barBg:SetColorTexture(C.barBg.r, C.barBg.g, C.barBg.b, 0.8)
+        r.barBg:ClearAllPoints()
         r.barBg:SetPoint("TOPLEFT",  r.frame, "TOPLEFT",  14, -(TEXT_H + 4))
         r.barBg:SetPoint("TOPRIGHT", r.frame, "TOPRIGHT", -4, -(TEXT_H + 4))
         r.barBg:SetHeight(TIMER_BAR_H)
         r.barBg:Show()
 
-        -- Timer bar fill
-        if r.barFill then r.barFill:Hide(); r.barFill = nil end
-        r.barFill = r.frame:CreateTexture(nil, "ARTWORK")
+        -- Timer bar fill (reuse existing texture)
+        if not r.barFill then
+            r.barFill = r.frame:CreateTexture(nil, "ARTWORK")
+        end
         r.barFill:SetColorTexture(C.timer.r, C.timer.g, C.timer.b, 0.85)
+        r.barFill:ClearAllPoints()
         r.barFill:SetPoint("TOPLEFT",    r.barBg, "TOPLEFT",    0, 0)
         r.barFill:SetPoint("BOTTOMLEFT", r.barBg, "BOTTOMLEFT", 0, 0)
         r.barFill:Show()
@@ -1089,9 +1157,10 @@ function EQT:Refresh(skipAlphaFlash)
         r.barFill:SetWidth(math.max(1, barW * pct))
         r.barFill:Show()
 
-        -- Percentage text (always recreate - reparenting loses font state)
-        if r.pctFS then r.pctFS:Hide(); r.pctFS = nil end
-        r.pctFS = r.frame:CreateFontString(nil, "OVERLAY")
+        -- Percentage text (reuse existing font string)
+        if not r.pctFS then
+            r.pctFS = r.frame:CreateFontString(nil, "OVERLAY")
+        end
         SetFontSafe(r.pctFS, GlobalFont(), BAR_H + 2, OutlineFlag())
         r.pctFS:SetJustifyH("RIGHT")
         r.pctFS:SetJustifyV("MIDDLE")
@@ -1276,10 +1345,32 @@ function EQT:Refresh(skipAlphaFlash)
 
     local watched, zone, world, prey = GetQuestLists()
     local scenario = GetScenarioSection()
+    local recipes = GetTrackedRecipes()
+
+    -- Recipe Tracking section (top of tracker)
+    if #recipes > 0 then
+        local rc = Cfg("recipesCollapsed") or false
+        AddCollapsibleSection("RECIPE TRACKING", rc, function()
+            DB().recipesCollapsed = not Cfg("recipesCollapsed"); EQT:Refresh()
+        end)
+        if not rc then
+            for _, recipe in ipairs(recipes) do
+                AddTitleRow(recipe.name, tc.r, tc.g, tc.b)
+                for _, reagent in ipairs(recipe.reagents) do
+                    local cr = reagent.finished and cc.r or oc.r
+                    local cg = reagent.finished and cc.g or oc.g
+                    local cb = reagent.finished and cc.b or oc.b
+                    AddObjRow(reagent.owned.."/"..reagent.needed.." "..reagent.name, cr, cg, cb)
+                end
+                yOff = yOff + 3
+            end
+        end
+    end
 
     -- Scenario / Delve section
+    local anyAboveScenario = #recipes > 0
     if scenario then
-        if #watched > 0 or #zone > 0 or #world > 0 then yOff = yOff + 4 end
+        if anyAboveScenario or #watched > 0 or #zone > 0 or #world > 0 then yOff = yOff + 4 end
 
         -- Collapsible "DELVES" section header (only for delves, plain for other scenarios)
         local dc = false
@@ -1389,8 +1480,8 @@ function EQT:Refresh(skipAlphaFlash)
         end -- if not dc
     end
 
-    -- Order: Delves (above), Zone Quests, World Quests, Quests (bottom)
-    local anyAbove = scenario ~= nil
+    -- Order: Recipes (top), Delves, Zone Quests, World Quests, Quests (bottom)
+    local anyAbove = #recipes > 0 or scenario ~= nil
 
     if Cfg("showPreyQuests") and #prey > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
@@ -1424,13 +1515,13 @@ function EQT:Refresh(skipAlphaFlash)
         end)
         if not qc then RenderList(watched, 0) end
     end
-    if not scenario and #watched == 0 and #zone == 0 and #world == 0 and #prey == 0 then
+    if not scenario and #watched == 0 and #zone == 0 and #world == 0 and #prey == 0 and #recipes == 0 then
         AddObjRow("No tracked quests.", oc.r, oc.g, oc.b)
     end
 
     content:SetHeight(math.max(yOff, 1))
     local totalH = PAD_V + 2 + yOff + PAD_V + 5
-    local maxH = Cfg("height") or 600
+    local maxH = Cfg("height") or 500
     -- Outer frame stays at max height (consistent with unlock mode)
     f:SetHeight(maxH)
     -- Inner frame auto-collapses to content
@@ -1503,7 +1594,7 @@ local function BuildFrame()
     f.sf = sf
 
     local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(math.max(10, (Cfg("width") or 220) - PAD_H*2 - 10))
+    content:SetWidth(math.max(10, (Cfg("width") or 325) - PAD_H*2 - 10))
     content:SetHeight(1)
     sf:SetScrollChild(content); f.content = content
 
@@ -1779,16 +1870,9 @@ local function CaptureBlizzardTracker()
         point = "CENTER", relPoint = "CENTER",
         x = cx - (uiW / 2), y = cy - (uiH / 2),
     }
-    -- Capture width if available
-    local w = ot:GetWidth()
-    if w and w > 50 then
-        db.width = math.floor(w * bScale / uiScale + 0.5)
-    end
-    -- Capture height as fixed height
-    local h = ot:GetHeight()
-    if h and h > 50 then
-        db.height = math.floor(h * bScale / uiScale + 0.5)
-    end
+    -- Width and height not captured -- Blizzard's tracker is anchored on both
+    -- axes so GetWidth()/GetHeight() return the full stretch, not content size.
+    -- Defaults of 325 width and 500 height are used instead.
     -- Capture text size from Blizzard's edit mode setting (index 2)
     if ot.GetSettingValue then
         local ok, val = pcall(ot.GetSettingValue, ot, 2)
@@ -1821,8 +1905,8 @@ function EQT:Init()
     if not Cfg("enabled") then return end
     self._needsCapture = not DB()._capturedOnce
     self.frame = BuildFrame()
-    self.frame:SetWidth(Cfg("width") or 220)
-    self.frame:SetHeight(Cfg("height") or 600)
+    self.frame:SetWidth(Cfg("width") or 325)
+    self.frame:SetHeight(Cfg("height") or 500)
     self:ApplyPosition()
 
     -- Hide/show Blizzard ObjectiveTrackerFrame based on setting
@@ -1933,6 +2017,8 @@ function EQT:Init()
         "UI_WIDGET_UNIT_CHANGED",
         "QUEST_DATA_LOAD_RESULT","QUEST_POI_UPDATE","AREA_POIS_UPDATED",
         "SUPER_TRACKING_CHANGED",
+        "TRACKED_RECIPE_UPDATE",
+        "TRADE_SKILL_LIST_UPDATE",
     }
     local ZONE_EVENTS = {"ZONE_CHANGED_NEW_AREA","ZONE_CHANGED"}
 
@@ -1958,9 +2044,7 @@ function EQT:Init()
         -- Zone changed: clear section cache so quests re-categorize
         EQT:ClearSectionCache()
         C_Timer.After(0.5,  function() EQT.dirty = true end)
-        C_Timer.After(1.5,  function() EQT.dirty = true end)
-        C_Timer.After(3.0,  function() EQT.dirty = true end)
-        C_Timer.After(5.0,  function() EQT.dirty = true end)
+        C_Timer.After(2.0,  function() EQT.dirty = true end)
     end)
 
     -- Structural events always trigger a rebuild (quest actually added/removed)
@@ -1988,7 +2072,7 @@ function EQT:Init()
                 EQT._needsCapture = false
                 CaptureBlizzardTracker()
                 if EQT.frame then
-                    EQT.frame:SetWidth(Cfg("width") or 220)
+                    EQT.frame:SetWidth(Cfg("width") or 325)
                 end
             end
             EQT:ApplyPosition()
@@ -2227,6 +2311,7 @@ function EQT:Init()
                 group = "Basics",
                 order = 510,
                 noResize = false,
+                noAnchorTo = true,
                 getFrame = function() return f end,
                 getSize  = function()
                     return f:GetWidth(), f:GetHeight()
@@ -2293,7 +2378,7 @@ loader:SetScript("OnEvent", function(self, _, loaded)
             EQT._needsCapture = false
             CaptureBlizzardTracker()
             if EQT.frame then
-                EQT.frame:SetWidth(Cfg("width") or 220)
+                EQT.frame:SetWidth(Cfg("width") or 325)
                 EQT:ApplyPosition()
             end
         end

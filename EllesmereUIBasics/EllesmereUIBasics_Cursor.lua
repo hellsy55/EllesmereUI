@@ -122,6 +122,7 @@ end
 -------------------------------------------------------------------------------
 local trailDots = {}   -- texture pool
 local trailActive = {} -- active dot entries { tex, life, maxLife }
+local trailEntryPool = {} -- recycled entry tables to avoid GC churn
 local trailTimer = 0
 local trailLastCX, trailLastCY = 0, 0
 local trailEnabled = false
@@ -174,7 +175,9 @@ local function SpawnTrailDot(cx, cy)
     dot:SetPoint("CENTER", trailContainer, "BOTTOMLEFT", cx / s, cy / s)
     dot:SetAlpha(1)
     dot:Show()
-    trailActive[#trailActive + 1] = { tex = dot, life = TRAIL_DOT_DURATION, maxLife = TRAIL_DOT_DURATION }
+    local entry = table.remove(trailEntryPool) or {}
+    entry.tex = dot; entry.life = TRAIL_DOT_DURATION; entry.maxLife = TRAIL_DOT_DURATION
+    trailActive[#trailActive + 1] = entry
 end
 
 local function UpdateTrailDots(elapsed)
@@ -184,6 +187,8 @@ local function UpdateTrailDots(elapsed)
         if e.life <= 0 then
             e.tex:Hide()
             trailDots[#trailDots + 1] = e.tex
+            e.tex = nil
+            trailEntryPool[#trailEntryPool + 1] = e
             trailActive[i] = trailActive[#trailActive]
             trailActive[#trailActive] = nil
         else
@@ -200,6 +205,8 @@ local function HideTrailDots()
         local e = trailActive[i]
         e.tex:Hide()
         trailDots[#trailDots + 1] = e.tex
+        e.tex = nil
+        trailEntryPool[#trailEntryPool + 1] = e
         trailActive[i] = nil
     end
 end
@@ -419,9 +426,13 @@ local function CreateGCDCircle()
 end
 
 local function ApplyGCDCircle()
-    if not gcdRoot then CreateGCDCircle() end
     local g = GCD_DB()
     local enabled = g.enabled
+    if not enabled then
+        if gcdRoot then gcdRoot:Hide(); gcdRoot:SetScript("OnUpdate", nil) end
+        return
+    end
+    if not gcdRoot then CreateGCDCircle() end
     local attached = g.attached ~= false  -- default true
     local radius = g.radius or 30
     local scale = (g.scale or 100) / 100
@@ -444,45 +455,40 @@ local function ApplyGCDCircle()
         end
     end
 
-    if enabled then
-        gcdRoot:Show()
-        -- Respect instance-only: hide if not in instance
-        if g.instanceOnly and not InRealInstancedContent() then
-            gcdRoot:Hide()
-        end
-        if attached then
-            -- When the cursor circle is visible, anchor directly to it.
-            -- When the cursor circle is hidden (e.g. instance-only outside an instance),
-            -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
-            -- In that case we give the GCD circle its own cursor-tracking OnUpdate.
-            local cursorVisible = f and f:IsShown()
-            if cursorVisible then
-                gcdRoot:SetScript("OnUpdate", nil)
-                gcdRoot:ClearAllPoints()
-                gcdRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
-            else
-                gcdRoot:ClearAllPoints()
-                gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
-                local s = UIParent:GetEffectiveScale()
-                local cx, cy = GetCursorPosition()
-                gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
-                gcdRoot:SetScript("OnUpdate", function()
-                    local sc = UIParent:GetEffectiveScale()
-                    local mx, my = GetCursorPosition()
-                    gcdRoot:ClearAllPoints()
-                    gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
-                end)
-            end
-        else
+    gcdRoot:Show()
+    -- Respect instance-only: hide if not in instance
+    if g.instanceOnly and not InRealInstancedContent() then
+        gcdRoot:Hide()
+    end
+    if attached then
+        -- When the cursor circle is visible, anchor directly to it.
+        -- When the cursor circle is hidden (e.g. instance-only outside an instance),
+        -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
+        -- In that case we give the GCD circle its own cursor-tracking OnUpdate.
+        local cursorVisible = f and f:IsShown()
+        if cursorVisible then
             gcdRoot:SetScript("OnUpdate", nil)
-            -- Skip repositioning during unlock mode (mover owns position)
-            if not EllesmereUI._unlockActive then
-                _G._ECL_ApplyGCDPosition()
-            end
+            gcdRoot:ClearAllPoints()
+            gcdRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
+        else
+            gcdRoot:ClearAllPoints()
+            gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
+            local s = UIParent:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
+            gcdRoot:SetScript("OnUpdate", function()
+                local sc = UIParent:GetEffectiveScale()
+                local mx, my = GetCursorPosition()
+                gcdRoot:ClearAllPoints()
+                gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+            end)
         end
     else
-        gcdRoot:Hide()
         gcdRoot:SetScript("OnUpdate", nil)
+        -- Skip repositioning during unlock mode (mover owns position)
+        if not EllesmereUI._unlockActive then
+            _G._ECL_ApplyGCDPosition()
+        end
     end
 end
 
@@ -749,9 +755,13 @@ local function CreateCastCircle()
 end
 
 local function ApplyCastCircle()
-    if not castRoot then CreateCastCircle() end
     local c = Cast_DB()
     local enabled = c.enabled
+    if not enabled then
+        if castRoot then castRoot:Hide(); castRoot:SetScript("OnUpdate", nil) end
+        return
+    end
+    if not castRoot then CreateCastCircle() end
     local attached = c.attached ~= false  -- default true
     local radius = c.radius or 36
     local scale = (c.scale or 100) / 100
@@ -797,45 +807,40 @@ local function ApplyCastCircle()
         end
     end
 
-    if enabled then
-        castRoot:Show()
-        -- Respect instance-only: hide if not in instance
-        if c.instanceOnly and not InRealInstancedContent() then
-            castRoot:Hide()
-        end
-        if attached then
-            -- When the cursor circle is visible, anchor directly to it.
-            -- When the cursor circle is hidden (e.g. instance-only outside an instance),
-            -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
-            -- In that case we give the cast circle its own cursor-tracking OnUpdate.
-            local cursorVisible = f and f:IsShown()
-            if cursorVisible then
-                castRoot:SetScript("OnUpdate", nil)
-                castRoot:ClearAllPoints()
-                castRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
-            else
-                castRoot:ClearAllPoints()
-                castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
-                local s = UIParent:GetEffectiveScale()
-                local cx, cy = GetCursorPosition()
-                castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
-                castRoot:SetScript("OnUpdate", function()
-                    local sc = UIParent:GetEffectiveScale()
-                    local mx, my = GetCursorPosition()
-                    castRoot:ClearAllPoints()
-                    castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
-                end)
-            end
-        else
+    castRoot:Show()
+    -- Respect instance-only: hide if not in instance
+    if c.instanceOnly and not InRealInstancedContent() then
+        castRoot:Hide()
+    end
+    if attached then
+        -- When the cursor circle is visible, anchor directly to it.
+        -- When the cursor circle is hidden (e.g. instance-only outside an instance),
+        -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
+        -- In that case we give the cast circle its own cursor-tracking OnUpdate.
+        local cursorVisible = f and f:IsShown()
+        if cursorVisible then
             castRoot:SetScript("OnUpdate", nil)
-            -- Skip repositioning during unlock mode (mover owns position)
-            if not EllesmereUI._unlockActive then
-                _G._ECL_ApplyCastPosition()
-            end
+            castRoot:ClearAllPoints()
+            castRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
+        else
+            castRoot:ClearAllPoints()
+            castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
+            local s = UIParent:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
+            castRoot:SetScript("OnUpdate", function()
+                local sc = UIParent:GetEffectiveScale()
+                local mx, my = GetCursorPosition()
+                castRoot:ClearAllPoints()
+                castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+            end)
         end
     else
-        castRoot:Hide()
         castRoot:SetScript("OnUpdate", nil)
+        -- Skip repositioning during unlock mode (mover owns position)
+        if not EllesmereUI._unlockActive then
+            _G._ECL_ApplyCastPosition()
+        end
     end
 end
 

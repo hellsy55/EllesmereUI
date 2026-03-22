@@ -265,6 +265,8 @@ for _, info in ipairs(BAR_CONFIG) do
         iconZoom = nil,
         keybindOffsetX = 0,
         keybindOffsetY = 0,
+        macroOffsetX = 0,
+        macroOffsetY = 0,
         countOffsetX = 0,
         countOffsetY = 0,
         cooldownFontSize = 12,

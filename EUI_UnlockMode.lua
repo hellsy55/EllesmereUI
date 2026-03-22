@@ -146,7 +146,8 @@ if not EllesmereUI.NotifyElementResized then
 
         -- Read grow direction from the bar's per-profile settings
         local growDir
-        if key:sub(1, 4) == "CDM_" then
+        if key == "EQT_Tracker" then growDir = "DOWN"
+        elseif key:sub(1, 4) == "CDM_" then
             local rawKey = key:sub(5)
             local cdm = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon and EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
             local cdmBars = cdm and cdm.db and cdm.db.profile and cdm.db.profile.cdmBars
@@ -510,6 +511,7 @@ local GetPositionDB
 --  Used for position calculations where we need the true anchor edge.
 -------------------------------------------------------------------------------
 local function GetBarGrowDirActual(barKey)
+    if barKey == "EQT_Tracker" then return "DOWN" end
     if barKey:sub(1, 4) == "CDM_" then
         local rawKey = barKey:sub(5)
         local cdm = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
@@ -539,6 +541,7 @@ end
 --  Action bar default is "UP", CDM default is nil (centered).
 -------------------------------------------------------------------------------
 local function GetBarGrowDir(barKey)
+    if barKey == "EQT_Tracker" then return "DOWN" end
     if barKey:sub(1, 4) == "CDM_" then
         local rawKey = barKey:sub(5)
         local cdm = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
@@ -3222,6 +3225,8 @@ local function CreateMover(barKey)
 
     -- Determine if this element supports resizing
     local canResize = not (elem and elem.noResize)
+    -- Determine if this element can be anchored to other elements
+    local canAnchorTo = not (elem and elem.noAnchorTo)
 
     -- Grow direction is only relevant for horizontal action bars 1-8 and CDM bars
     local _GROW_KEYS = {
@@ -3256,9 +3261,9 @@ local function CreateMover(barKey)
     -- Layout: position action link buttons + dividers centered below name
     local function LayoutActionRow()
         local gap = 8
+        local atW = canAnchorTo and (atFS:GetStringWidth() or 45) or 0
         if not canResize then
-            if canGrow then
-                local atW = atFS:GetStringWidth() or 45
+            if canGrow and canAnchorTo then
                 local gdW = gdFS:GetStringWidth() or 30
                 local totalW = atW + gap + 1 + gap + gdW
                 local startX = -totalW / 2
@@ -3268,8 +3273,11 @@ local function CreateMover(barKey)
                 div3:SetPoint("TOP", nameFS, "BOTTOM", startX + atW + gap + 0.5, -6)
                 gdBtn:SetSize(gdW + 4, 14); gdBtn:ClearAllPoints()
                 gdBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + atW + gap + 1 + gap + gdW / 2, -4)
-            else
-                local atW = atFS:GetStringWidth() or 45
+            elseif canGrow then
+                local gdW = gdFS:GetStringWidth() or 30
+                gdBtn:SetSize(gdW + 4, 14); gdBtn:ClearAllPoints()
+                gdBtn:SetPoint("TOP", nameFS, "BOTTOM", 0, -4)
+            elseif canAnchorTo then
                 atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
                 atBtn:SetPoint("TOP", nameFS, "BOTTOM", 0, -4)
             end
@@ -3277,38 +3285,58 @@ local function CreateMover(barKey)
         end
         local wmW = wmFS:GetStringWidth() or 50
         local hmW = hmFS:GetStringWidth() or 55
-        local atW = atFS:GetStringWidth() or 45
         if canGrow then
             local gdW = gdFS:GetStringWidth() or 30
-            local totalW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW + gap + 1 + gap + gdW
+            -- Build items list dynamically based on what's available
+            local items = {}
+            items[#items + 1] = { btn = wmBtn, fs = wmFS, w = wmW }
+            items[#items + 1] = { btn = hmBtn, fs = hmFS, w = hmW }
+            if canAnchorTo then
+                items[#items + 1] = { btn = atBtn, fs = atFS, w = atW }
+            end
+            items[#items + 1] = { btn = gdBtn, fs = gdFS, w = gdW }
+            local divs = { div1, div2, div3 }
+            local totalW = 0
+            for i, it in ipairs(items) do
+                totalW = totalW + it.w
+                if i < #items then totalW = totalW + gap + 1 + gap end
+            end
             local startX = -totalW / 2
-            wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
-            wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
-            div1:ClearAllPoints()
-            div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
-            hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
-            hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
-            div2:ClearAllPoints()
-            div2:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 0.5, -6)
-            atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
-            atBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW / 2, -4)
-            div3:ClearAllPoints()
-            div3:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW + gap + 0.5, -6)
-            gdBtn:SetSize(gdW + 4, 14); gdBtn:ClearAllPoints()
-            gdBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW + gap + 1 + gap + gdW / 2, -4)
+            local x = startX
+            for i, it in ipairs(items) do
+                it.btn:SetSize(it.w + 4, 14); it.btn:ClearAllPoints()
+                it.btn:SetPoint("TOP", nameFS, "BOTTOM", x + it.w / 2, -4)
+                x = x + it.w
+                if i < #items and divs[i] then
+                    divs[i]:ClearAllPoints()
+                    divs[i]:SetPoint("TOP", nameFS, "BOTTOM", x + gap + 0.5, -6)
+                    x = x + gap + 1 + gap
+                end
+            end
         else
-            local totalW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW
-            local startX = -totalW / 2
-            wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
-            wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
-            div1:ClearAllPoints()
-            div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
-            hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
-            hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
-            div2:ClearAllPoints()
-            div2:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 0.5, -6)
-            atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
-            atBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW / 2, -4)
+            if canAnchorTo then
+                local totalW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW
+                local startX = -totalW / 2
+                wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
+                wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
+                div1:ClearAllPoints()
+                div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
+                hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
+                hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
+                div2:ClearAllPoints()
+                div2:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 0.5, -6)
+                atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
+                atBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW / 2, -4)
+            else
+                local totalW = wmW + gap + 1 + gap + hmW
+                local startX = -totalW / 2
+                wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
+                wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
+                div1:ClearAllPoints()
+                div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
+                hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
+                hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
+            end
         end
     end
 
@@ -3469,8 +3497,12 @@ local function CreateMover(barKey)
         else
             wmBtn:Hide(); hmBtn:Hide(); div1:Hide(); div2:Hide()
         end
-        atBtn:SetAlpha(s)
-        if s > 0.01 then atBtn:Show() else atBtn:Hide() end
+        if canAnchorTo then
+            atBtn:SetAlpha(s)
+            if s > 0.01 then atBtn:Show() else atBtn:Hide() end
+        else
+            atBtn:Hide()
+        end
         if canGrow then
             gdBtn:SetAlpha(s); div3:SetAlpha(s)
             if s > 0.01 then gdBtn:Show(); div3:Show() else gdBtn:Hide(); div3:Hide() end

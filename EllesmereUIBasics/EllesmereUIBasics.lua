@@ -45,7 +45,6 @@ local defaults = {
             borderSize    = 1,
             showCoords    = false,
             coordPrecision = 0,
-            scale         = 1.0,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             useClassColor = false,
             hideZoneText  = false,
@@ -59,7 +58,7 @@ local defaults = {
             hideCraftingOrder    = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
-            showClock     = false,
+            showClock     = true,
             clockFormat   = "12h",
             lock          = false,
             position      = nil,
@@ -124,12 +123,12 @@ local defaults = {
         questTracker = {
             enabled              = true,
             pos                  = nil,
-            width                = 220,
+            width                = 325,
             bgAlpha              = 0.7,
             bgR                  = 0,
             bgG                  = 0,
             bgB                  = 0,
-            height               = 600,
+            height               = 500,
             alignment            = "top",
             titleFontSize        = 11,
             titleColor           = { r=1.0,  g=0.91, b=0.47 },
@@ -419,6 +418,9 @@ local function ApplyChat()
         end
         return
     end
+
+    -- Install chat message filters/hooks on first enable
+    if _G._EBS_InitChatFilters then _G._EBS_InitChatFilters() end
 
     local numWindows = NUM_CHAT_WINDOWS or 10
     for i = 1, numWindows do
@@ -820,16 +822,22 @@ local function ApplyMinimapFont(fs, size)
     end
 end
 
+-- Cache clock CVars so we don't read them every second
+local cachedUse24h, cachedUseLocal
+local function RefreshClockCVars()
+    cachedUse24h = GetCVar("timeMgrUseMilitaryTime") == "1"
+    cachedUseLocal = GetCVar("timeMgrUseLocalTime") == "1"
+end
+
 local function UpdateClock()
     if not clockFrame then return end
-    local use24h = GetCVar("timeMgrUseMilitaryTime") == "1"
-    local useLocal = GetCVar("timeMgrUseLocalTime") == "1"
-    if useLocal then
-        local fmt = use24h and "%H:%M" or "%I:%M %p"
+    if cachedUse24h == nil then RefreshClockCVars() end
+    if cachedUseLocal then
+        local fmt = cachedUse24h and "%H:%M" or "%I:%M %p"
         clockFrame:SetText(date(fmt))
     else
         local h, m = GetGameTime()
-        if use24h then
+        if cachedUse24h then
             clockFrame:SetText(format("%02d:%02d", h, m))
         else
             local ampm = h >= 12 and "PM" or "AM"
@@ -840,6 +848,8 @@ local function UpdateClock()
     end
 end
 
+-- Cache coord format string so we don't rebuild it every 0.5s
+local cachedCoordPrec, cachedCoordFmt
 local function UpdateCoords()
     if not coordFrame then return end
     local mapID = C_Map.GetBestMapForUnit("player")
@@ -849,19 +859,22 @@ local function UpdateCoords()
     local x, y = pos:GetXY()
     local p = EBS.db and EBS.db.profile.minimap
     local prec = p and p.coordPrecision or 1
-    local fmtStr = format("%%.%df, %%.%df", prec, prec)
-    coordFrame:SetText(format(fmtStr, x * 100, y * 100))
+    if prec ~= cachedCoordPrec then
+        cachedCoordPrec = prec
+        cachedCoordFmt = format("%%.%df, %%.%df", prec, prec)
+    end
+    coordFrame:SetText(format(cachedCoordFmt, x * 100, y * 100))
 end
 
+local lastLocationText
 local function UpdateLocation()
     if not locationFrame then return end
     if InCombatLockdown() then return end
     local sub = GetSubZoneText()
-    if sub and sub ~= "" then
-        locationFrame:SetText(sub)
-    else
-        locationFrame:SetText(GetZoneText() or "")
-    end
+    local text = (sub and sub ~= "") and sub or (GetZoneText() or "")
+    if text == lastLocationText then return end
+    lastLocationText = text
+    locationFrame:SetText(text)
     if locationBg then
         local tw = locationFrame:GetStringWidth() or 0
         locationBg:SetSize(tw + 20, 18)
@@ -921,6 +934,25 @@ local function ShowMinimapChild(btn)
     btn:Show()
 end
 
+-- Pin/POI frame patterns to exclude from the flyout (HandyNotes, TomTom, etc.)
+local flyoutPinPatterns = {
+    "^HandyNotes",
+    "^TomTom",
+    "^HereBeDragons",
+    "^Questie",
+    "^GatherMate",
+    "^pin",
+    "^Pin",
+}
+
+local function IsPinFrame(name)
+    if not name then return false end
+    for _, pat in ipairs(flyoutPinPatterns) do
+        if name:match(pat) then return true end
+    end
+    return false
+end
+
 -- Gather all minimap buttons (Blizzard + addon) into cachedAddonButtons
 local function GatherMinimapButtons()
     wipe(cachedAddonButtons)
@@ -928,9 +960,17 @@ local function GatherMinimapButtons()
     for _, child in ipairs({ Minimap:GetChildren() }) do
         if not flyoutOwnedFrames[child] then
             local name = child:GetName()
-            -- Only collect actual buttons, skip blacklisted structural frames
-            if child:IsObjectType("Button") and name and not flyoutBlacklist[name] then
-                cachedAddonButtons[#cachedAddonButtons + 1] = child
+            -- Skip blacklisted structural frames and map pin frames
+            if flyoutBlacklist[name] then
+                -- skip
+            elseif IsPinFrame(name) then
+                -- skip pin/POI frames (HandyNotes, TomTom, etc.)
+            elseif child:IsObjectType("Button") and name then
+                -- Skip tiny frames (map pins are typically < 20px, real buttons are 25+)
+                local w = child:GetWidth() or 0
+                if w >= 20 then
+                    cachedAddonButtons[#cachedAddonButtons + 1] = child
+                end
             elseif not child:IsObjectType("Button") and name and name:match("^LibDBIcon10_") then
                 -- LibDBIcon sometimes uses Frame instead of Button
                 cachedAddonButtons[#cachedAddonButtons + 1] = child
@@ -991,8 +1031,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local mailFrame = indicator and indicator.MailFrame
     local craftingFrame = indicator and indicator.CraftingOrderFrame
 
-    -- Reparent all indicator children onto minimap
+    -- Reparent all indicator children onto minimap (cluster is hidden)
     if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
+    if gameTime then gameTime:SetParent(minimap); gameTime:SetFrameLevel(flvl + 1) end
     if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
     if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
     -- Blizzard indicator children call self:GetParent():Layout() on events;
@@ -1167,16 +1208,68 @@ local function RestoreIndicatorFrames()
             indicator.CraftingOrderFrame:SetParent(indicator)
             indicator.CraftingOrderFrame:ClearAllPoints()
         end
+        -- Trigger Blizzard's layout so children get their default anchors back
+        if indicator.Layout then indicator:Layout() end
     end
 
     local gameTime = _G.GameTimeFrame
     if gameTime then
+        if indicator then
+            gameTime:SetParent(indicator)
+        elseif MinimapCluster then
+            gameTime:SetParent(MinimapCluster)
+        end
         gameTime:ClearAllPoints()
         gameTime:SetAlpha(1)
         gameTime:Show()
     end
 
+    -- Remove the no-op Layout we added to the minimap
+    if Minimap and Minimap.Layout then Minimap.Layout = nil end
+
+    -- Trigger MinimapCluster layout to restore all default positions
+    if MinimapCluster and MinimapCluster.Layout then
+        MinimapCluster:Layout()
+    end
+
     if indicatorBg then indicatorBg:Hide() end
+end
+
+-------------------------------------------------------------------------------
+-- Snapshot Blizzard minimap size and position on first install.
+-- Captures the native size and center position so our module starts matching
+-- whatever the user had via Edit Mode. Only runs once per profile.
+-------------------------------------------------------------------------------
+local function CaptureBlizzardMinimap()
+    local minimap = Minimap
+    if not minimap then return end
+    local p = EBS.db.profile.minimap
+    if p._capturedOnce then return end
+
+    local uiScale = UIParent:GetEffectiveScale()
+    local mScale  = minimap:GetEffectiveScale()
+    local ratio   = mScale / uiScale
+
+    -- Capture size (use the larger dimension to keep it square)
+    local w, h = minimap:GetWidth(), minimap:GetHeight()
+    if w and w > 10 then
+        local sz = math.floor(math.max(w, h) * ratio + 0.5)
+        p.mapSize = sz
+    end
+
+    -- Capture center position as CENTER/CENTER offset from UIParent
+    local cx, cy = minimap:GetCenter()
+    if cx and cy then
+        local uiW, uiH = UIParent:GetSize()
+        cx = cx * ratio
+        cy = cy * ratio
+        p.position = {
+            point = "CENTER", relPoint = "CENTER",
+            x = cx - (uiW / 2), y = cy - (uiH / 2),
+        }
+    end
+
+    p._capturedOnce = true
 end
 
 local function ApplyMinimap()
@@ -1188,6 +1281,18 @@ local function ApplyMinimap()
     if not minimap then return end
 
     if not p.enabled then
+        -- If we never touched the minimap this session, do absolutely nothing.
+        -- This ensures zero interference with other minimap addons.
+        if not minimap._ebsActive then return end
+
+        -- We previously modified the minimap; undo everything.
+        minimap._ebsActive = false
+
+        -- Restore minimap back to MinimapCluster
+        if MinimapCluster then
+            minimap:SetParent(MinimapCluster)
+            MinimapCluster:Show()
+        end
         -- Restore default decorations
         for _, name in ipairs(minimapDecorations) do
             local frame = _G[name]
@@ -1210,7 +1315,7 @@ local function ApplyMinimap()
         if minimap._ppBorders then PP.SetBorderColor(minimap, 0, 0, 0, 0) end
         if minimap._circBorder then minimap._circBorder:Hide() end
         if minimap._texCircBorder then minimap._texCircBorder:Hide() end
-        -- Reset scale
+        -- Reset scale (size will be restored by MinimapCluster:Layout below)
         minimap:SetScale(1.0)
         -- Tear down flyout and restore all buttons
         HideFlyoutPanel()
@@ -1237,7 +1342,27 @@ local function ApplyMinimap()
         minimap:EnableMouseWheel(false)
         CancelAutoZoom()
         RestoreIndicatorFrames()
+        -- Restore default minimap position within cluster
+        minimap:ClearAllPoints()
+        minimap:SetPoint("CENTER", MinimapCluster, "CENTER", 0, 0)
+        -- Trigger cluster layout to restore default positioning
+        if MinimapCluster.Layout then
+            MinimapCluster:Layout()
+        end
         return
+    end
+
+    -- Snapshot Blizzard's native size/position before we modify anything
+    CaptureBlizzardMinimap()
+
+    -- Reparent minimap to UIParent so MinimapCluster layout cannot override our size
+    if minimap:GetParent() ~= UIParent then
+        minimap:SetParent(UIParent)
+    end
+    minimap:Show()
+    -- Hide the entire cluster (we manage everything ourselves)
+    if MinimapCluster then
+        MinimapCluster:Hide()
     end
 
     -- Hide default decorations
@@ -1246,14 +1371,6 @@ local function ApplyMinimap()
         if frame then frame:Hide() end
     end
 
-    -- Hide cluster header bar
-    if MinimapCluster and MinimapCluster.BorderTop then
-        MinimapCluster.BorderTop:Hide()
-    end
-    -- Hide the IndicatorFrame container (children reparented by LayoutIndicatorFrames)
-    if MinimapCluster and MinimapCluster.IndicatorFrame then
-        MinimapCluster.IndicatorFrame:Hide()
-    end
     -- Hide AddonCompartmentFrame by reparenting to a hidden frame
     local compartment = _G.AddonCompartmentFrame
     if compartment then
@@ -1325,8 +1442,10 @@ local function ApplyMinimap()
         minimap._texCircBorder:Show()
     end
 
-    -- Scale
-    minimap:SetScale(p.scale)
+    -- Size (always scale 1, resize via SetSize to avoid scale/position bugs)
+    minimap:SetScale(1.0)
+    local mapSize = p.mapSize or 140
+    minimap:SetSize(mapSize, mapSize)
 
     -- Flyout toggle button (bottom-left corner) -- create before hiding children
     CreateFlyoutToggle()
@@ -1339,8 +1458,14 @@ local function ApplyMinimap()
     if not addonButtonPoll then
         addonButtonPoll = CreateFrame("Frame")
         addonButtonPoll:RegisterEvent("ADDON_LOADED")
+        local pollPending = false
         addonButtonPoll:SetScript("OnEvent", function()
-            HideAllMinimapButtons()
+            if pollPending then return end
+            pollPending = true
+            C_Timer.After(0.1, function()
+                pollPending = false
+                HideAllMinimapButtons()
+            end)
         end)
     end
     addonButtonPoll:Show()
@@ -1355,6 +1480,9 @@ local function ApplyMinimap()
         MinimapCluster.ZoneTextButton:Hide()
     end
     if MinimapZoneText then MinimapZoneText:Hide() end
+
+    -- Refresh cached clock CVars when settings are applied
+    RefreshClockCVars()
 
     -- Clock -- top center, text vertically centered on the top edge
     if p.showClock then
@@ -1461,11 +1589,13 @@ local function ApplyMinimap()
     coordTicker:Show()
     UpdateCoords()
     if not minimap._ebsCoordsHooked then
-        minimap:HookScript("OnEnter", function()
+        minimap:HookScript("OnEnter", function(self)
+            if not self._ebsActive then return end
             if coordFrame then coordFrame:Show() end
         end)
-        minimap:HookScript("OnLeave", function()
-            if coordFrame and not minimap:IsMouseOver() then coordFrame:Hide() end
+        minimap:HookScript("OnLeave", function(self)
+            if not self._ebsActive then return end
+            if coordFrame and not self:IsMouseOver() then coordFrame:Hide() end
         end)
         minimap._ebsCoordsHooked = true
     end
@@ -1498,10 +1628,16 @@ local function ApplyMinimap()
     end
 
     -- Restore saved position (managed by unlock mode)
+    minimap:ClearAllPoints()
     if p.position then
-        minimap:ClearAllPoints()
         minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
+    else
+        -- Default position: top-right corner (where Blizzard places it)
+        minimap:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -10)
     end
+
+    -- Mark module as active so persistent hooks know they can fire
+    minimap._ebsActive = true
 end
 
 -------------------------------------------------------------------------------
@@ -1771,6 +1907,9 @@ function EBS:OnInitialize()
         mp.shape = "circle"
     end
 
+    -- Scale removed in favor of direct sizing via snapshot; clean up stale key
+    mp.scale = nil
+
     -- Global bridge for options <-> main communication
     _G._EBS_AceDB        = EBS.db
     _G._EBS_ApplyAll     = ApplyAll
@@ -1782,34 +1921,36 @@ end
 function EBS:OnEnable()
     ApplyAll()
 
-    -- Hook FriendsFrame for load-on-demand
-    if not FriendsFrame then
-        local hookFrame = CreateFrame("Frame")
-        hookFrame:RegisterEvent("ADDON_LOADED")
-        hookFrame:SetScript("OnEvent", function(self, event, addon)
-            if addon == "Blizzard_SocialUI" then
-                C_Timer.After(0.1, function()
-                    if FriendsFrame and EBS.db.profile.friends.enabled then
-                        SkinFriendsFrame()
-                    end
-                end)
-            end
-        end)
-
-        -- Also hook ShowUIPanel as a fallback
-        if ShowUIPanel then
-            hooksecurefunc("ShowUIPanel", function(frame)
-                if frame == FriendsFrame and not friendsSkinned then
-                    C_Timer.After(0, function()
-                        if EBS.db.profile.friends.enabled then
+    -- Hook FriendsFrame for load-on-demand (only if friends module is enabled)
+    if EBS.db.profile.friends.enabled then
+        if not FriendsFrame then
+            local hookFrame = CreateFrame("Frame")
+            hookFrame:RegisterEvent("ADDON_LOADED")
+            hookFrame:SetScript("OnEvent", function(self, event, addon)
+                if addon == "Blizzard_SocialUI" then
+                    C_Timer.After(0.1, function()
+                        if FriendsFrame and EBS.db.profile.friends.enabled then
                             SkinFriendsFrame()
                         end
                     end)
                 end
             end)
+
+            -- Also hook ShowUIPanel as a fallback
+            if ShowUIPanel then
+                hooksecurefunc("ShowUIPanel", function(frame)
+                    if frame == FriendsFrame and not friendsSkinned then
+                        C_Timer.After(0, function()
+                            if EBS.db.profile.friends.enabled then
+                                SkinFriendsFrame()
+                            end
+                        end)
+                    end
+                end)
+            end
+        else
+            SkinFriendsFrame()
         end
-    else
-        SkinFriendsFrame()
     end
 
     -- Register minimap with unlock mode
@@ -1824,10 +1965,10 @@ function EBS:OnEnable()
                 group = "Basics",
                 order = 500,
                 noResize = true,
+                noAnchorTo = true,
                 getFrame = function() return Minimap end,
                 getSize  = function()
-                    local s = Minimap:GetScale()
-                    return Minimap:GetWidth() * s, Minimap:GetHeight() * s
+                    return Minimap:GetWidth(), Minimap:GetHeight()
                 end,
                 isHidden = function()
                     local m = MDB()
@@ -1842,13 +1983,16 @@ function EBS:OnEnable()
                 end,
                 loadPos = function()
                     local m = MDB()
-                    return m and m.position
+                    if not m or not m.enabled then return nil end
+                    return m.position
                 end,
                 clearPos = function()
                     local m = MDB(); if not m then return end
                     m.position = nil
                 end,
                 applyPos = function()
+                    local m = MDB()
+                    if not m or not m.enabled then return end
                     ApplyMinimap()
                 end,
             }),
