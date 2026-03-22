@@ -369,8 +369,15 @@ local _quickKeybindState = { open = false }
 -- Blizzard-owned frames use the _extraFadeQueue path to avoid taint.
 local _ownedFrames = {}
 
-local function AreExtraSlotsForcedVisible()
-    return _gridState.shown or _quickKeybindState.open
+local function ShouldQuickKeybindSurfaceBar(s)
+    if not _quickKeybindState.open or not s or s.enabled == false then
+        return false
+    end
+
+    -- QuickKeybind should surface bars hidden by transient runtime rules,
+    -- but explicit "Never" visibility remains authoritative.
+    local vis = s.barVisibility or "always"
+    return not s.alwaysHidden and vis ~= "never"
 end
 
 local function FadeTo(frame, toAlpha, duration)
@@ -2202,7 +2209,7 @@ local function ComputeBarLayout(key)
                 yOff = -(row * stepH)
             end
             local show = true
-            if not showEmpty and not AreExtraSlotsForcedVisible() and not ButtonHasAction(btn, info.blizzBtnPrefix) then
+            if not showEmpty and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s)) and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 show = false
             end
             result[i] = { x = xOff, y = yOff, w = btnW, h = btnH, show = show }
@@ -2356,7 +2363,7 @@ local function LayoutBar(key)
                 end
             end
 
-            if not showEmpty and not AreExtraSlotsForcedVisible() and not ButtonHasAction(btn, info.blizzBtnPrefix) then
+            if not showEmpty and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s)) and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
             else
                 if not s.mouseoverEnabled then
@@ -3407,13 +3414,14 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
     if numIcons < 1 then numIcons = 1 end
 
-    local clickable = _quickKeybindState.open or not s.clickThrough
+    local quickKeybindVisible = ShouldQuickKeybindSurfaceBar(s)
+    local clickable = quickKeybindVisible or not s.clickThrough
     local lastVisible = 0
     for i = 1, numIcons do
         local btn = buttons[i]
         if btn then
             local hasAction = ButtonHasAction(btn, info.blizzBtnPrefix)
-            local visible = showEmpty or hasAction or _quickKeybindState.open
+            local visible = showEmpty or hasAction or quickKeybindVisible
 
             if btn._eabSlotBG then
                 btn._eabSlotBG:SetShown(visible)
@@ -4038,14 +4046,15 @@ function EAB:ApplyAlwaysHidden()
         if frame then
             local vis = s.barVisibility or "always"
             local isHidden = (vis == "never") or s.alwaysHidden
-            if _quickKeybindState.open and barFrames[key] and frame == barFrames[key] then
+            if ShouldQuickKeybindSurfaceBar(s) and barFrames[key] and frame == barFrames[key] then
                 if not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", "show")
                     frame:Show()
                     SafeEnableMouseMotionOnly(frame, true)
                 end
-                -- QuickKeybind temporarily surfaces managed action bars even
-                -- when the user normally keeps them hidden.
+                -- QuickKeybind temporarily surfaces managed action bars when
+                -- runtime conditions hide them, but not when the user chose
+                -- an explicit "Never" visibility mode.
             elseif isHidden then
                 if not info.visibilityOnly and not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", "hide")
@@ -4126,7 +4135,7 @@ function EAB:ApplyClickThroughForBar(barKey)
     local buttons = barButtons[barKey]
     if not buttons then return end
 
-    local enable = _quickKeybindState.open or not s.clickThrough
+    local enable = ShouldQuickKeybindSurfaceBar(s) or not s.clickThrough
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
     SafeEnableMouseMotionOnly(frame, enable)
@@ -7731,7 +7740,7 @@ local function EAB_UpdateQuickKeybindVisibility(show)
         local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
         local frame = barFrames[key]
 
-        if show and frame and s and s.enabled ~= false then
+        if show and frame and ShouldQuickKeybindSurfaceBar(s) then
             RegisterAttributeDriver(frame, "state-visibility", "show")
             frame:Show()
             SafeEnableMouseMotionOnly(frame, true)
@@ -7755,7 +7764,7 @@ local function EAB_UpdateQuickKeybindVisibility(show)
             local s = EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars[key]
             local frame = barFrames[key]
             local state = hoverStates[key]
-            if frame and s and s.mouseoverEnabled then
+            if frame and ShouldQuickKeybindSurfaceBar(s) and s.mouseoverEnabled then
                 StopFade(frame)
                 frame:SetAlpha(1)
                 if state then state.fadeDir = "in" end
