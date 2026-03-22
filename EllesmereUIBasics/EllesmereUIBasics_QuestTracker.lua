@@ -2154,40 +2154,64 @@ function EQT:Init()
 
     -- Set the WoW binding so GetBindingKey('EUI_QUESTITEM') works
     -- This uses SaveBindings which is the standard API
-    local function ApplyQuestItemHotkey()
-        if InCombatLockdown() then return end
+    local _applyingQuestItemHotkey = false
+
+local function ApplyQuestItemHotkey()
+    if InCombatLockdown() then return end
+    if _applyingQuestItemHotkey then return end
+
+    _applyingQuestItemHotkey = true
+
+    local ok, err = pcall(function()
         local key = Cfg("questItemHotkey")
         local old1, old2 = GetBindingKey("EUI_QUESTITEM")
         local hasOld = old1 or old2
         local hasNew = key and key ~= ""
 
-        -- Nothing to do if no old binding and no new binding
-        if not hasOld and not hasNew then return end
+        if not hasOld and not hasNew then
+            return
+        end
 
-        -- Only modify bindings if something actually changes
+        local changed = false
+
         if hasOld then
-            -- Only clear the old key if it differs from the new one
-            if old1 and old1 ~= key then SetBinding(old1) end
-            if old2 and old2 ~= key then SetBinding(old2) end
+            if old1 and old1 ~= key then
+                SetBinding(old1)
+                changed = true
+            end
+            if old2 and old2 ~= key then
+                SetBinding(old2)
+                changed = true
+            end
         end
+
         if hasNew then
-            SetBinding(key, "EUI_QUESTITEM")
+            local alreadyBound = (old1 == key or old2 == key)
+            if not alreadyBound then
+                SetBinding(key, "EUI_QUESTITEM")
+                changed = true
+            end
         end
 
-        -- Only persist if the binding set is valid (1 = account, 2 = character)
-        local bindingSet = GetCurrentBindingSet()
-        if bindingSet and bindingSet >= 1 and bindingSet <= 2 then
-            SaveBindings(bindingSet)
+        if changed then
+            local bindingSet = GetCurrentBindingSet()
+            if bindingSet and bindingSet >= 1 and bindingSet <= 2 then
+                SaveBindings(bindingSet)
+            end
         end
 
-        -- Trigger attribute handler to re-register click binding
-        if not InCombatLockdown() then
-            local cur = qItemBtn:GetAttribute("item")
-            qItemBtn:SetAttribute("item", nil)
-            qItemBtn:SetAttribute("item", cur)
-        end
+        local cur = qItemBtn:GetAttribute("item")
+        qItemBtn:SetAttribute("item", nil)
+        qItemBtn:SetAttribute("item", cur)
+    end)
+
+    _applyingQuestItemHotkey = false
+
+    if not ok and err then
+        geterrorhandler()(err)
     end
-    EQT.ApplyQuestItemHotkey = ApplyQuestItemHotkey
+end
+EQT.ApplyQuestItemHotkey = ApplyQuestItemHotkey
 
     -- Register the binding name globally so WoW knows about it
     _G["BINDING_NAME_EUI_QUESTITEM"] = "Use Quest Item"
@@ -2225,12 +2249,23 @@ function EQT:Init()
     qItemFrame:RegisterEvent("UPDATE_BINDINGS")
     qItemFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     qItemFrame:SetScript("OnEvent", function(_, event)
-        if InCombatLockdown() then return end
-        if event == "PLAYER_REGEN_ENABLED" or event == "UPDATE_BINDINGS" then
-            ApplyQuestItemHotkey()
-        end
+    if InCombatLockdown() then return end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        ApplyQuestItemHotkey()
         UpdateQuestItemAttribute()
-    end)
+        return
+    end
+
+    if event == "UPDATE_BINDINGS" then
+        local cur = qItemBtn:GetAttribute("item")
+        qItemBtn:SetAttribute("item", nil)
+        qItemBtn:SetAttribute("item", cur)
+        return
+    end
+
+    UpdateQuestItemAttribute()
+end)
 
     C_Timer.After(1.5, function()
         if InCombatLockdown() then return end
