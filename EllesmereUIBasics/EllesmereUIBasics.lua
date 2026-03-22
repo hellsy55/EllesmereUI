@@ -40,7 +40,7 @@ local defaults = {
             showSearchButton   = true,
         },
         minimap = {
-            enabled       = false,
+            enabled       = true,
             shape         = "square",
             borderSize    = 1,
             showCoords    = false,
@@ -53,7 +53,7 @@ local defaults = {
             autoZoomOut   = true,
             hideZoomButtons      = true,
             hideTrackingButton   = true,
-            hideGameTime         = true,
+            hideGameTime         = false,
             hideMail             = false,
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
@@ -135,6 +135,8 @@ local defaults = {
             titleColor           = { r=1.0,  g=0.91, b=0.47 },
             objFontSize          = 10,
             objColor             = { r=0.72, g=0.72, b=0.72 },
+            completedColor       = { r=0.25, g=1.0,  b=0.35 },
+            completedFontSize    = 10,
             secFontSize          = 12,
             showZoneQuests       = true,
             showWorldQuests      = true,
@@ -761,8 +763,10 @@ local function CreateFlyoutToggle()
     if flyoutToggle then return flyoutToggle end
 
     local btn = CreateFrame("Button", nil, Minimap)
-    btn:SetSize(24, 24)
-    btn:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", 4, 4)
+    local iconSize = (MinimapCluster and MinimapCluster.Tracking)
+        and MinimapCluster.Tracking:GetHeight() or 22
+    btn:SetSize(iconSize, iconSize)
+    btn:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMLEFT", 0, 0)
     btn:SetFrameLevel(Minimap:GetFrameLevel() + 10)
 
     local norm = btn:CreateTexture(nil, "ARTWORK")
@@ -780,6 +784,13 @@ local function CreateFlyoutToggle()
     hl:SetAtlas("Map-Filter-Button")
     hl:SetAlpha(0.3)
     btn:SetHighlightTexture(hl)
+
+    -- Black background to match indicator icons
+    local bg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+    bg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+    bg:SetBackdropColor(0, 0, 0, 0.8)
+    bg:SetAllPoints(btn)
+    bg:SetFrameLevel(btn:GetFrameLevel() - 1)
 
     btn:SetScript("OnClick", ToggleFlyoutPanel)
 
@@ -811,9 +822,22 @@ end
 
 local function UpdateClock()
     if not clockFrame then return end
-    local p = EBS.db and EBS.db.profile.minimap
-    local fmt = (p and p.clockFormat == "24h") and "%H:%M" or "%I:%M %p"
-    clockFrame:SetText(date(fmt))
+    local use24h = GetCVar("timeMgrUseMilitaryTime") == "1"
+    local useLocal = GetCVar("timeMgrUseLocalTime") == "1"
+    if useLocal then
+        local fmt = use24h and "%H:%M" or "%I:%M %p"
+        clockFrame:SetText(date(fmt))
+    else
+        local h, m = GetGameTime()
+        if use24h then
+            clockFrame:SetText(format("%02d:%02d", h, m))
+        else
+            local ampm = h >= 12 and "PM" or "AM"
+            h = h % 12
+            if h == 0 then h = 12 end
+            clockFrame:SetText(format("%d:%02d %s", h, m, ampm))
+        end
+    end
 end
 
 local function UpdateCoords()
@@ -869,6 +893,7 @@ local flyoutBlacklist = {
     MinimapZoomIn    = true,
     MinimapZoomOut   = true,
     MinimapBackdrop  = true,
+    GameTimeFrame    = true,
 }
 
 -- Persistently hide a minimap button via Show hook
@@ -929,6 +954,228 @@ local function ShowAllMinimapButtons()
     wipe(cachedAddonButtons)
 end
 
+-------------------------------------------------------------------------------
+--  Minimap Indicator Frames (top-left outer: Tracking, Calendar, Mail, Crafting)
+-------------------------------------------------------------------------------
+local indicatorBg = nil
+local indicatorIconBgs = {}
+
+local function GetIconBg(frame)
+    if indicatorIconBgs[frame] then return indicatorIconBgs[frame] end
+    local bg = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    bg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+    bg:SetBackdropColor(0, 0, 0, 0.8)
+    bg:SetAllPoints(frame)
+    bg:SetFrameLevel(frame:GetFrameLevel() - 1)
+    indicatorIconBgs[frame] = bg
+    return bg
+end
+
+local function ShrinkTrackingIcon(tracking)
+    local tBtn = tracking.Button
+    if tBtn then
+        tBtn:ClearAllPoints()
+        tBtn:SetPoint("CENTER", tracking, "CENTER", 0, 0)
+        local tw2 = (tracking:GetWidth() or 22) - 3
+        local th2 = (tracking:GetHeight() or 22) - 3
+        tBtn:SetSize(tw2, th2)
+    end
+end
+
+local function LayoutIndicatorFrames(minimap, p, circleMode)
+    local flvl = minimap:GetFrameLevel() + 10
+
+    local tracking = MinimapCluster and MinimapCluster.Tracking
+    local gameTime = _G.GameTimeFrame
+    local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
+    local mailFrame = indicator and indicator.MailFrame
+    local craftingFrame = indicator and indicator.CraftingOrderFrame
+
+    -- Reparent all indicator children onto minimap
+    if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
+    if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
+    if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
+
+    if circleMode then
+        -----------------------------------------------------------------------
+        -- Circle layout: horizontal row around the clock
+        -- [crafting][mail][tracking] [CLOCK] [calendar]
+        -----------------------------------------------------------------------
+
+        -- Tracking -- flush left of clock
+        if tracking then
+            tracking:ClearAllPoints()
+            if clockBg and p.showClock then
+                tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
+            else
+                tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
+            end
+            tracking:Show()
+            ShrinkTrackingIcon(tracking)
+        end
+
+        -- Calendar -- flush right of clock
+        if gameTime then
+            if not p.hideGameTime then
+                gameTime:ClearAllPoints()
+                if clockBg and p.showClock then
+                    gameTime:SetPoint("LEFT", clockBg, "RIGHT", 0, 0)
+                else
+                    gameTime:SetPoint("TOP", minimap, "TOP", 20, -3)
+                end
+                gameTime:SetAlpha(1)
+                gameTime:Show()
+                gameTime:SetFrameLevel(flvl + 1)
+            else
+                gameTime:Hide()
+            end
+        end
+
+        -- Mail -- left of tracking, building left
+        if mailFrame then
+            mailFrame:ClearAllPoints()
+            if tracking then
+                mailFrame:SetPoint("RIGHT", tracking, "LEFT", 0, 0)
+            elseif clockBg and p.showClock then
+                mailFrame:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
+            end
+        end
+
+        -- Crafting Order -- left of mail, building left
+        if craftingFrame then
+            craftingFrame:ClearAllPoints()
+            if mailFrame then
+                craftingFrame:SetPoint("RIGHT", mailFrame, "LEFT", 0, 0)
+            elseif tracking then
+                craftingFrame:SetPoint("RIGHT", tracking, "LEFT", 0, 0)
+            end
+        end
+
+        -- Individual black backgrounds behind each icon
+        if tracking then GetIconBg(tracking):Show() end
+        if gameTime and not p.hideGameTime then GetIconBg(gameTime):Show() end
+        if mailFrame then
+            local bg = GetIconBg(mailFrame)
+            if mailFrame:IsShown() then bg:Show() else bg:Hide() end
+        end
+        if craftingFrame then
+            local bg = GetIconBg(craftingFrame)
+            if craftingFrame:IsShown() then bg:Show() else bg:Hide() end
+        end
+        if indicatorBg then indicatorBg:Hide() end
+
+    else
+        -----------------------------------------------------------------------
+        -- Square layout: vertical stack on the left side, building down
+        -- [tracking] [calendar] [mail] [crafting]
+        -----------------------------------------------------------------------
+        local y = 0
+        local w = 0
+        local visCount = 0
+
+        if tracking then
+            tracking:ClearAllPoints()
+            tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", -1, y)
+            tracking:Show()
+            ShrinkTrackingIcon(tracking)
+            local tw = tracking:GetWidth() or 22
+            y = y - (tracking:GetHeight() or 22)
+            if tw > w then w = tw end
+            visCount = visCount + 1
+        end
+
+        if gameTime then
+            if not p.hideGameTime then
+                gameTime:ClearAllPoints()
+                gameTime:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 2, y)
+                gameTime:SetAlpha(1)
+                gameTime:Show()
+                gameTime:SetFrameLevel(flvl + 1)
+                local gw = gameTime:GetWidth() or 22
+                y = y - (gameTime:GetHeight() or 22)
+                if gw > w then w = gw end
+                visCount = visCount + 1
+            else
+                gameTime:Hide()
+            end
+        end
+
+        if mailFrame then
+            mailFrame:ClearAllPoints()
+            mailFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            if mailFrame:IsShown() then
+                local mw = mailFrame:GetWidth() or 22
+                y = y - (mailFrame:GetHeight() or 22)
+                if mw > w then w = mw end
+                visCount = visCount + 1
+            end
+        end
+
+        if craftingFrame then
+            craftingFrame:ClearAllPoints()
+            craftingFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            if craftingFrame:IsShown() then
+                local cw = craftingFrame:GetWidth() or 22
+                y = y - (craftingFrame:GetHeight() or 22)
+                if cw > w then w = cw end
+                visCount = visCount + 1
+            end
+        end
+
+        -- Hide individual icon backgrounds (square uses the combined one)
+        for frame, bg in pairs(indicatorIconBgs) do bg:Hide() end
+
+        -- Black background sized to visible icons only
+        local totalH = -y
+        if visCount > 0 and totalH > 0 then
+            if not indicatorBg then
+                indicatorBg = CreateFrame("Frame", nil, minimap, "BackdropTemplate")
+                indicatorBg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+                indicatorBg:SetBackdropColor(0, 0, 0, 0.8)
+            end
+            indicatorBg:SetParent(minimap)
+            indicatorBg:ClearAllPoints()
+            indicatorBg:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, 0)
+            indicatorBg:SetSize(w, totalH)
+            indicatorBg:SetFrameLevel(flvl)
+            indicatorBg:Show()
+        elseif indicatorBg then
+            indicatorBg:Hide()
+        end
+    end
+end
+
+local function RestoreIndicatorFrames()
+    local tracking = MinimapCluster and MinimapCluster.Tracking
+    if tracking then
+        tracking:SetParent(MinimapCluster)
+        tracking:ClearAllPoints()
+        tracking:Show()
+    end
+
+    local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
+    if indicator then
+        indicator:Show()
+        if indicator.MailFrame then
+            indicator.MailFrame:SetParent(indicator)
+            indicator.MailFrame:ClearAllPoints()
+        end
+        if indicator.CraftingOrderFrame then
+            indicator.CraftingOrderFrame:SetParent(indicator)
+            indicator.CraftingOrderFrame:ClearAllPoints()
+        end
+    end
+
+    local gameTime = _G.GameTimeFrame
+    if gameTime then
+        gameTime:ClearAllPoints()
+        gameTime:SetAlpha(1)
+        gameTime:Show()
+    end
+
+    if indicatorBg then indicatorBg:Hide() end
+end
+
 local function ApplyMinimap()
     if InCombatLockdown() then QueueApplyAll(); return end
 
@@ -947,14 +1194,19 @@ local function ApplyMinimap()
         if MinimapCluster and MinimapCluster.BorderTop then
             MinimapCluster.BorderTop:Show()
         end
-        if MinimapCluster and MinimapCluster.Tracking then
-            MinimapCluster.Tracking:Show()
+        -- Restore AddonCompartmentFrame
+        local compartment = _G.AddonCompartmentFrame
+        if compartment and compartment._ebsOrigParent then
+            compartment:SetParent(compartment._ebsOrigParent)
+            compartment:Show()
         end
         -- Restore circular mask
         minimap:SetMaskTexture(186178)
         -- Hide our background & border
         if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
         if minimap._ppBorders then PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        if minimap._circBorder then minimap._circBorder:Hide() end
+        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
         -- Reset scale
         minimap:SetScale(1.0)
         -- Tear down flyout and restore all buttons
@@ -981,6 +1233,7 @@ local function ApplyMinimap()
         if locationBg then locationBg:Hide() end
         minimap:EnableMouseWheel(false)
         CancelAutoZoom()
+        RestoreIndicatorFrames()
         return
     end
 
@@ -990,33 +1243,84 @@ local function ApplyMinimap()
         if frame then frame:Hide() end
     end
 
-    -- Hide cluster header bar (zone text + time + tracking above minimap)
+    -- Hide cluster header bar
     if MinimapCluster and MinimapCluster.BorderTop then
         MinimapCluster.BorderTop:Hide()
     end
-    if MinimapCluster and MinimapCluster.Tracking then
-        MinimapCluster.Tracking:Hide()
+    -- Hide the IndicatorFrame container (children reparented by LayoutIndicatorFrames)
+    if MinimapCluster and MinimapCluster.IndicatorFrame then
+        MinimapCluster.IndicatorFrame:Hide()
+    end
+    -- Hide AddonCompartmentFrame by reparenting to a hidden frame
+    local compartment = _G.AddonCompartmentFrame
+    if compartment then
+        if not EBS._hiddenFrame then
+            EBS._hiddenFrame = CreateFrame("Frame")
+            EBS._hiddenFrame:Hide()
+        end
+        compartment._ebsOrigParent = compartment._ebsOrigParent or compartment:GetParent()
+        compartment:SetParent(EBS._hiddenFrame)
     end
 
     -- Shape mask (retail texture IDs: 130937 = square, 186178 = circle)
-    if p.shape == "square" then
-        minimap:SetMaskTexture(130937)
-    else
+    local isCircle = (p.shape == "circle" or p.shape == "textured_circle")
+    if isCircle then
         minimap:SetMaskTexture(186178)
+    else
+        minimap:SetMaskTexture(130937)
     end
 
     -- Hide background (no black bg behind minimap)
     if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
 
-    -- Border (pixel perfect)
+    -- Border
     local r, g, b = GetBorderColor(p)
-    local bs = p.borderSize or 1
-    if not minimap._ppBorders then
-        PP.CreateBorder(minimap, r, g, b, 1, bs, "OVERLAY", 7)
-    else
-        PP.SetBorderColor(minimap, r, g, b, 1)
+    if p.shape == "square" then
+        -- Square: pixel-perfect border
+        local bs = p.borderSize or 1
+        if not minimap._ppBorders then
+            PP.CreateBorder(minimap, r, g, b, 1, bs, "OVERLAY", 7)
+        else
+            PP.SetBorderColor(minimap, r, g, b, 1)
+        end
+        PP.SetBorderSize(minimap, bs)
+        if minimap._circBorder then minimap._circBorder:Hide() end
+        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
+    elseif p.shape == "circle" then
+        -- Circle: solid colored disc behind the minimap, slightly larger = border ring
+        if minimap._ppBorders then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        if not minimap._circBorder then
+            local disc = CreateFrame("Frame", nil, minimap)
+            disc:SetFrameLevel(minimap:GetFrameLevel() - 1)
+            local tex = disc:CreateTexture(nil, "BACKGROUND")
+            tex:SetAllPoints(disc)
+            tex:SetTexture("Interface\\Common\\CommonMaskCircle")
+            disc._tex = tex
+            minimap._circBorder = disc
+        end
+        local bs = p.borderSize or 1
+        minimap._circBorder:ClearAllPoints()
+        minimap._circBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -bs, bs)
+        minimap._circBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", bs, -bs)
+        minimap._circBorder._tex:SetVertexColor(r, g, b, 1)
+        minimap._circBorder:Show()
+        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
+    elseif p.shape == "textured_circle" then
+        -- Textured Circle: void ring border, hide the solid circle border
+        if minimap._ppBorders then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        if minimap._circBorder then minimap._circBorder:Hide() end
+        if not minimap._texCircBorder then
+            local ring = minimap:CreateTexture(nil, "OVERLAY", nil, 7)
+            ring:SetAtlas("wowlabs_minimapvoid-ring-single")
+            minimap._texCircBorder = ring
+        end
+        local inset = 2
+        minimap._texCircBorder:ClearAllPoints()
+        minimap._texCircBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -inset, inset)
+        minimap._texCircBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", inset, -inset)
+        minimap._texCircBorder:SetVertexColor(r, g, b, 1)
+        minimap._texCircBorder:Show()
     end
-    PP.SetBorderSize(minimap, bs)
 
     -- Scale
     minimap:SetScale(p.scale)
@@ -1072,6 +1376,9 @@ local function ApplyMinimap()
             local ar, ag, ab = GetBorderColor(p)
             clockBg:SetBackdropColor(ar, ag, ab, 1)
         end
+        local clockYOff = isCircle and -3 or 7
+        clockBg:ClearAllPoints()
+        clockBg:SetPoint("TOP", minimap, "TOP", 0, clockYOff)
         clockBg:Show()
         clockFrame:Show()
         if not clockTicker then
@@ -1091,6 +1398,9 @@ local function ApplyMinimap()
         if clockFrame then clockFrame:Hide() end
         if clockTicker then clockTicker:Hide() end
     end
+
+    -- Indicator frames (tracking, calendar, mail, crafting)
+    LayoutIndicatorFrames(minimap, p, isCircle)
 
     -- Location bar -- bottom center, shows subzone/zone name
     if not p.hideZoneText then
@@ -1116,6 +1426,9 @@ local function ApplyMinimap()
             local ar, ag, ab = GetBorderColor(p)
             locationBg:SetBackdropColor(ar, ag, ab, 1)
         end
+        local locYOff = isCircle and 3 or -7
+        locationBg:ClearAllPoints()
+        locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, locYOff)
         locationBg:Show()
         locationFrame:Show()
         UpdateLocation()
@@ -1124,40 +1437,34 @@ local function ApplyMinimap()
         if locationFrame then locationFrame:Hide() end
     end
 
-    -- Coordinates -- top-right, only visible on hover
-    if p.showCoords then
-        if not coordFrame then
-            coordFrame = minimap:CreateFontString(nil, "OVERLAY")
-            ApplyMinimapFont(coordFrame, 11)
-            coordFrame:SetPoint("TOPRIGHT", minimap, "TOPRIGHT", -4, -4)
-            coordFrame:SetTextColor(1, 1, 1, 0.9)
-        end
-        coordFrame:Hide()  -- hidden by default, shown on hover
-        if not coordTicker then
-            coordTicker = CreateFrame("Frame")
-            local elapsed = 0
-            coordTicker:SetScript("OnUpdate", function(_, dt)
-                elapsed = elapsed + dt
-                if elapsed < 0.5 then return end
-                elapsed = 0
-                UpdateCoords()
-            end)
-        end
-        coordTicker:Show()
-        UpdateCoords()
-        -- Hover scripts on minimap to show/hide coords
-        if not minimap._ebsCoordsHooked then
-            minimap:HookScript("OnEnter", function()
-                if coordFrame then coordFrame:Show() end
-            end)
-            minimap:HookScript("OnLeave", function()
-                if coordFrame then coordFrame:Hide() end
-            end)
-            minimap._ebsCoordsHooked = true
-        end
-    else
-        if coordFrame then coordFrame:Hide() end
-        if coordTicker then coordTicker:Hide() end
+    -- Coordinates -- top-right, always visible on hover
+    if not coordFrame then
+        coordFrame = minimap:CreateFontString(nil, "OVERLAY")
+        ApplyMinimapFont(coordFrame, 11)
+        coordFrame:SetPoint("TOPRIGHT", minimap, "TOPRIGHT", -4, -4)
+        coordFrame:SetTextColor(1, 1, 1, 0.9)
+    end
+    coordFrame:Hide()  -- hidden by default, shown on hover
+    if not coordTicker then
+        coordTicker = CreateFrame("Frame")
+        local elapsed = 0
+        coordTicker:SetScript("OnUpdate", function(_, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0.5 then return end
+            elapsed = 0
+            UpdateCoords()
+        end)
+    end
+    coordTicker:Show()
+    UpdateCoords()
+    if not minimap._ebsCoordsHooked then
+        minimap:HookScript("OnEnter", function()
+            if coordFrame then coordFrame:Show() end
+        end)
+        minimap:HookScript("OnLeave", function()
+            if coordFrame and not minimap:IsMouseOver() then coordFrame:Hide() end
+        end)
+        minimap._ebsCoordsHooked = true
     end
 
     -- Mousewheel zoom
@@ -1454,6 +1761,11 @@ function EBS:OnInitialize()
             mp.hideGameTime       = false
         end
         mp.hideButtons = nil
+    end
+
+    -- Migrate old "round" shape to "circle"
+    if mp.shape == "round" then
+        mp.shape = "circle"
     end
 
     -- Global bridge for options <-> main communication

@@ -515,12 +515,24 @@ initFrame:SetScript("OnEvent", function(self)
             countFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
             countFS:SetText("")
 
+            -- Macro name text (bottom-center, mirrors real button Name position)
+            local macroFS = bf:CreateFontString(nil, "OVERLAY")
+            macroFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
+            macroFS:SetShadowOffset(0, 0)
+            macroFS:SetTextColor(1, 1, 1)
+            macroFS:SetPoint("BOTTOMLEFT", bf, "BOTTOMLEFT", 1, 4)
+            macroFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
+            macroFS:SetJustifyH("CENTER")
+            macroFS:SetWordWrap(false)
+            macroFS:SetText("")
+
             buttons[i] = {
                 frame   = bf,
                 icon    = icon,
                 borders = { bT, bB, bL, bR },
                 keybind = keybindFS,
                 count   = countFS,
+                macro   = macroFS,
             }
         end
 
@@ -597,6 +609,9 @@ initFrame:SetScript("OnEvent", function(self)
             local kbColor   = settings.keybindFontColor or { r = 1, g = 1, b = 1 }
             local ctSize    = settings.countFontSize or 12
             local ctColor   = settings.countFontColor or { r = 1, g = 1, b = 1 }
+            local hideMacro = settings.hideMacroText
+            local mcSize    = settings.macroFontSize or 12
+            local mcColor   = settings.macroFontColor or { r = 1, g = 1, b = 1 }
 
             -- Shape settings: derive from unified border system
             local btnShape = settings.buttonShape or "none"
@@ -635,6 +650,7 @@ initFrame:SetScript("OnEvent", function(self)
             local totalScale = (self._blizzEditScale or 1)
             local scaledKBSize = math.max(6, floor(kbSize * totalScale + 0.5))
             local scaledCTSize = math.max(6, floor(ctSize * totalScale + 0.5))
+            local scaledMCSize = math.max(6, floor(mcSize * totalScale + 0.5))
 
             -- Multi-row grid layout (vertical swaps cols/rows)
             -- For vertical: calculate actual columns used (not all numRows may be filled)
@@ -915,6 +931,29 @@ initFrame:SetScript("OnEvent", function(self)
                     local ctOY = (settings.countOffsetY or 0) * totalScale
                     countFS:ClearAllPoints()
                     countFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1 + ctOX, 4 + ctOY)
+
+                    -- Macro name text
+                    local macroFS = entry.macro
+                    if macroFS then
+                        if hideMacro then
+                            macroFS:SetText("")
+                        else
+                            local mcText = ""
+                            if realBtn and realBtn.Name then
+                                mcText = realBtn.Name:GetText() or ""
+                            end
+                            macroFS:SetText(mcText)
+                        end
+                        macroFS:SetFont(fontPath, scaledMCSize, "OUTLINE")
+                        macroFS:SetShadowOffset(0, 0)
+                        macroFS:SetTextColor(mcColor.r, mcColor.g, mcColor.b)
+                        local mcOX = (settings.macroOffsetX or 0) * totalScale
+                        local mcOY = (settings.macroOffsetY or 0) * totalScale
+                        macroFS:ClearAllPoints()
+                        macroFS:SetPoint("BOTTOMLEFT", bf, "BOTTOMLEFT", 1 + mcOX, 4 + mcOY)
+                        macroFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1 + mcOX, 4 + mcOY)
+                        macroFS:SetJustifyH("CENTER")
+                    end
                     end -- close alwaysShowButtons else
                 else
                     -- Button beyond numButtonsShowable hide it
@@ -2844,7 +2883,164 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rgn, kbCogShowRaw, kbSwatch, EllesmereUI.DIRECTIONS_ICON)
             end
 
-            -- Row 2: Charges Text Size slider + inline swatch (left) | Cooldown Text Size slider + inline swatch (right)
+            -- Row 2: Hide Macro Text (left) | Macro Text Size slider + inline swatch (right)
+            local macroRow
+            macroRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Hide Macro Text",
+                  getValue=function()
+                      return SGet("hideMacroText")
+                  end,
+                  setValue=function(v)
+                      SSet("hideMacroText", v, function(k) EAB:ApplyFontsForBar(k) end)
+                      SUpdatePreview()
+                  end },
+                { type="slider", text="Macro Text Size", min=6, max=24, step=1, trackWidth=120,
+                  getValue=function() return SVal("macroFontSize", 12) end,
+                  setValue=function(v)
+                      SSet("macroFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
+                      SUpdatePreview()
+                  end });  y = y - h
+            -- Sync icon: Hide Macro Text (left region)
+            do
+                local rgn = macroRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Macro Text Visibility to all Bars",
+                    onClick = function()
+                        local v = SB().hideMacroText
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            EAB.db.profile.bars[key].hideMacroText = v
+                            EAB:ApplyFontsForBar(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SB().hideMacroText or false
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].hideMacroText or false) ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SB().hideMacroText
+                            for _, key in ipairs(checkedKeys) do
+                                EAB.db.profile.bars[key].hideMacroText = v
+                                EAB:ApplyFontsForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+            -- Sync icon: Macro Text Settings (right region)
+            do
+                local rgn = macroRow._rightRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Macro Text Settings to all Bars",
+                    onClick = function()
+                        local s = SB()
+                        local c = s.macroFontColor
+                        local sz = s.macroFontSize or 12
+                        local ox = s.macroOffsetX or 0
+                        local oy = s.macroOffsetY or 0
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if c then EAB.db.profile.bars[key].macroFontColor = { r=c.r, g=c.g, b=c.b } end
+                            EAB.db.profile.bars[key].macroFontSize = sz
+                            EAB.db.profile.bars[key].macroOffsetX = ox
+                            EAB.db.profile.bars[key].macroOffsetY = oy
+                            EAB:ApplyFontsForBar(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local s = SB()
+                        local sz = s.macroFontSize or 12
+                        local c = s.macroFontColor
+                        local ox = s.macroOffsetX or 0
+                        local oy = s.macroOffsetY or 0
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            local b = EAB.db.profile.bars[key]
+                            if (b.macroFontSize or 12) ~= sz then return false end
+                            if (b.macroOffsetX or 0) ~= ox then return false end
+                            if (b.macroOffsetY or 0) ~= oy then return false end
+                            if c then
+                                local bc = b.macroFontColor
+                                if not bc or bc.r ~= c.r or bc.g ~= c.g or bc.b ~= c.b then return false end
+                            end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local s = SB()
+                            local c = s.macroFontColor
+                            local sz = s.macroFontSize or 12
+                            local ox = s.macroOffsetX or 0
+                            local oy = s.macroOffsetY or 0
+                            for _, key in ipairs(checkedKeys) do
+                                if c then EAB.db.profile.bars[key].macroFontColor = { r=c.r, g=c.g, b=c.b } end
+                                EAB.db.profile.bars[key].macroFontSize = sz
+                                EAB.db.profile.bars[key].macroOffsetX = ox
+                                EAB.db.profile.bars[key].macroOffsetY = oy
+                                EAB:ApplyFontsForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+
+            -- Inline color swatch + directions cog for Macro Text (right region)
+            do
+                local rgn = macroRow._rightRegion
+                local ctrl = rgn._control
+                local mcSwatch, mcUpdateSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, macroRow:GetFrameLevel() + 3,
+                    function()
+                        local c = SGet("macroFontColor")
+                        if not c then return 1, 1, 1 end
+                        return c.r, c.g, c.b
+                    end,
+                    function(r, g, b)
+                        SSetColor("macroFontColor", r, g, b, nil, function(k) EAB:ApplyFontsForBar(k) end)
+                        SUpdatePreview()
+                    end,
+                    false, 20)
+                PP.Point(mcSwatch, "RIGHT", ctrl, "LEFT", -12, 0)
+                rgn._lastInline = mcSwatch
+                EllesmereUI.RegisterWidgetRefresh(function() mcUpdateSwatch() end)
+
+                local _, mcCogShowRaw = EllesmereUI.BuildCogPopup({
+                    title = "Macro Text Offsets",
+                    rows = {
+                        { type="slider", label="X Offset", min=-50, max=20, step=1,
+                          get=function() return SVal("macroOffsetX", 0) end,
+                          set=function(v)
+                              SSet("macroOffsetX", v, function(k) EAB:ApplyFontsForBar(k) end)
+                              SUpdatePreview()
+                          end },
+                        { type="slider", label="Y Offset", min=-20, max=20, step=1,
+                          get=function() return SVal("macroOffsetY", 0) end,
+                          set=function(v)
+                              SSet("macroOffsetY", v, function(k) EAB:ApplyFontsForBar(k) end)
+                              SUpdatePreview()
+                          end },
+                    },
+                })
+                MakeCogBtn(rgn, mcCogShowRaw, mcSwatch, EllesmereUI.DIRECTIONS_ICON)
+            end
+
+            -- Row 3: Charges Text Size slider + inline swatch (left) | Cooldown Text Size slider + inline swatch (right)
             chargesRow, h = W:DualRow(parent, y,
                 { type="slider", text="Charges Text Size", min=6, max=24, step=1, trackWidth=120,
                   getValue=function() return SVal("countFontSize", 12) end,

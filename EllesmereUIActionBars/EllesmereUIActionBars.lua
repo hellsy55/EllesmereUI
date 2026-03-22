@@ -239,6 +239,9 @@ for _, info in ipairs(BAR_CONFIG) do
         hideKeybind = false,
         keybindFontSize = 12,
         keybindFontColor = { r = 1, g = 1, b = 1 },
+        hideMacroText = false,
+        macroFontSize = 12,
+        macroFontColor = { r = 1, g = 1, b = 1 },
         countFontSize = 12,
         countFontColor = { r = 1, g = 1, b = 1 },
         alwaysHidden = false,
@@ -3327,6 +3330,12 @@ function EAB:ApplyFontsForBar(barKey)
     local kbOY = s.keybindOffsetY or 0
     local ctOX = s.countOffsetX or 0
     local ctOY = s.countOffsetY or 0
+    local hideMacro = s.hideMacroText
+    local macroSize = s.macroFontSize or 12
+    if info and (info.isStance or info.isPetBar) then macroSize = max(macroSize - 2, 6) end
+    local macroColor = s.macroFontColor or { r=1, g=1, b=1 }
+    local macroOX = s.macroOffsetX or 0
+    local macroOY = s.macroOffsetY or 0
     local RANGE_INDICATOR = RANGE_INDICATOR or "\226\128\162"
 
     for i = 1, #buttons do
@@ -3381,6 +3390,23 @@ function EAB:ApplyFontsForBar(barKey)
             ct:SetTextColor(ctColor.r, ctColor.g, ctColor.b)
             ct:ClearAllPoints()
             ct:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1 + ctOX, 4 + ctOY)
+        end
+
+        -- Macro name text
+        local nm = btn.Name
+        if nm then
+            if hideMacro then
+                nm:SetAlpha(0)
+            else
+                nm:SetAlpha(1)
+                nm:SetFont(fontPath, macroSize, "OUTLINE")
+                nm:SetShadowOffset(0, 0)
+                nm:SetTextColor(macroColor.r, macroColor.g, macroColor.b)
+                nm:ClearAllPoints()
+                nm:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1 + macroOX, 4 + macroOY)
+                nm:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1 + macroOX, 4 + macroOY)
+                nm:SetJustifyH("CENTER")
+            end
         end
     end
 end

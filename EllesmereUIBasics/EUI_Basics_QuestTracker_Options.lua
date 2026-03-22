@@ -152,7 +152,16 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("height") or 600 end,
               setValue=function(v)
                   Set("height", v)
-                  Refresh()
+                  local f = EQT.frame
+                  if not f then return end
+                  f:SetHeight(v)
+                  if f.inner then
+                      local pv = EQT.PAD_V or 6
+                      local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
+                      f.inner:SetHeight(math.min(totalH, v))
+                      if EQT.UpdateInnerAlignment then EQT.UpdateInnerAlignment(f) end
+                  end
+                  if f._updateScrollThumb then f._updateScrollThumb() end
               end },
             { type="slider", text="Width", min=160, max=400, step=5,
               disabled=function() return Cfg("enabled") == false end,
@@ -160,21 +169,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("width") or 220 end,
               setValue=function(v)
                   Set("width", v)
-                  if EQT.frame then
-                      EQT.frame:SetWidth(v)
-                      if not EQT._widthDragging then
-                          EQT._widthDragging = true
-                          for _, r in ipairs(EQT.rows) do
-                              if r.text then r.text:SetWordWrap(false) end
-                          end
-                      end
-                      if EQT._widthTimer then EQT._widthTimer:Cancel() end
-                      EQT._widthTimer = C_Timer.NewTimer(0.15, function()
-                          EQT._widthTimer = nil
-                          EQT._widthDragging = false
-                          EQT:Refresh()
-                      end)
-                  end
+                  EQT:Refresh(true)
               end })
         y = y - h
 
@@ -402,7 +397,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Quest Size", min=7, max=24, step=1,
               getValue=function() return Cfg("objFontSize") or 10 end,
               setValue=function(v) Set("objFontSize", v); Refresh() end },
-            { type="label", text="" })
+            { type="slider", text="Completed Size", min=7, max=24, step=1,
+              getValue=function() return Cfg("completedFontSize") or 10 end,
+              setValue=function(v) Set("completedFontSize", v); Refresh() end })
         do
             local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
@@ -420,7 +417,8 @@ initFrame:SetScript("OnEvent", function(self)
                 sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             end
-            AttachSwatch(row._leftRegion, "Quest", "objColor", 0.72, 0.72, 0.72)
+            AttachSwatch(row._leftRegion,  "Quest",     "objColor",       0.72, 0.72, 0.72)
+            AttachSwatch(row._rightRegion, "Completed", "completedColor", 0.25, 1.0,  0.35)
         end
         y = y - h
 

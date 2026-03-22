@@ -13,7 +13,7 @@ local PAGE_CURSOR        = "Cursor"
 local PAGE_DMG_METERS    = "Damage Meters"
 
 local SECTION_CHAT    = "CHAT"
-local SECTION_MINIMAP = "MINIMAP"
+local SECTION_MINIMAP = "DISPLAY"
 local SECTION_FRIENDS = "FRIENDS LIST"
 
 local initFrame = CreateFrame("Frame")
@@ -269,8 +269,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Shape | Border Thickness
         _, h = W:DualRow(parent, y,
             { type="dropdown", text="Shape",
-              values = { square = "Square", round = "Round" },
-              order  = { "square", "round" },
+              values = { square = "Square", circle = "Circle", textured_circle = "Textured Circle" },
+              order  = { "square", "circle", "textured_circle" },
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.shape or "square" end,
@@ -306,13 +306,15 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Module is disabled",
               swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) }
         );  y = y - h
+            
+        y = y - 10
 
-        -- OVERLAYS section header
-        _, h = W:SectionHeader(parent, "MINIMAP OVERLAYS", y);  y = y - h
+        -- EXTRAS section header
+        _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
-        -- Show Zone Text | Show Coordinates
+        -- Show Zone | Show Clock
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Zone Text",
+            { type="toggle", text="Show Zone",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return not (m and m.hideZoneText) end,
@@ -321,39 +323,16 @@ initFrame:SetScript("OnEvent", function(self)
                 m.hideZoneText = not v
                 RefreshMinimap()
               end },
-            { type="toggle", text="Show Coordinates",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.showCoords end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.showCoords = v
-                RefreshMinimap()
-              end }
-        );  y = y - h
-
-        -- Show Clock | Clock Format
-        _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Clock",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.showClock end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.showClock = v; RefreshMinimap() end },
-            { type="dropdown", text="Clock Format",
-              values = { ["12h"] = "12 Hour", ["24h"] = "24 Hour" },
-              order  = { "12h", "24h" },
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showClock) end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.clockFormat or "12h" end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.clockFormat = v; RefreshMinimap() end }
+              setValue=function(v) local m = MinimapDB(); if not m then return end; m.showClock = v; RefreshMinimap() end }
         );  y = y - h
 
-        -- ZOOM section header
-        _, h = W:SectionHeader(parent, "MINIMAP ZOOM", y);  y = y - h
-
-        -- Scroll Zoom | Auto Zoom Out
+        -- Scroll to Zoom | Auto Zoom Out
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Scroll Zoom",
+            { type="toggle", text="Scroll to Zoom",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.scrollZoom end,
@@ -418,8 +397,8 @@ initFrame:SetScript("OnEvent", function(self)
         title       = "Basics",
         description = "Lightweight skins for all major Blizzard UI objects.",
         pages       = { PAGE_CURSOR, PAGE_DMG_METERS, PAGE_QUEST_TRACKER, PAGE_FRIENDS, PAGE_CHAT, PAGE_MINIMAP },
-        disabledPages = { PAGE_DMG_METERS, PAGE_CHAT, PAGE_FRIENDS, PAGE_MINIMAP },
-        disabledPageTooltips = { [PAGE_DMG_METERS] = "Coming Soon", [PAGE_CHAT] = "Coming Soon", [PAGE_FRIENDS] = "Coming Soon", [PAGE_MINIMAP] = "Coming Soon" },
+        disabledPages = { PAGE_DMG_METERS, PAGE_CHAT, PAGE_FRIENDS },
+        disabledPageTooltips = { [PAGE_DMG_METERS] = "Coming Soon", [PAGE_CHAT] = "Coming Soon", [PAGE_FRIENDS] = "Coming Soon" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_CHAT    then return BuildChatPage(pageName, parent, yOffset) end
             if pageName == PAGE_MINIMAP then return BuildMinimapPage(pageName, parent, yOffset) end

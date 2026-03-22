@@ -2173,6 +2173,27 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     return active
 end
 
+-- Returns the unlock position key for a unit's castbar, or nil
+local function CastbarUnlockKey(unit)
+    if unit == "player" then return "playerCastbar"
+    elseif unit == "target" then return "targetCastbar"
+    elseif unit == "focus" then return "focusCastbar"
+    end
+end
+
+-- If a saved unlock position exists for this unit's castbar, apply it
+-- and return true. Otherwise return false so the caller can fall back
+-- to the default relative anchor.
+local function ApplyCastbarUnlockPos(castbarBg, unit)
+    local key = CastbarUnlockKey(unit)
+    if not key then return false end
+    local pos = db and db.profile and db.profile.positions and db.profile.positions[key]
+    if not pos then return false end
+    castbarBg:ClearAllPoints()
+    castbarBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+    return true
+end
+
 local function CreateCastBar(frame, unit, settings)
     local settings = GetSettingsForUnit(unit)
     
@@ -2195,9 +2216,10 @@ local function CreateCastBar(frame, unit, settings)
     end
     PP.Size(castbarBg, cbWidth, cbHeight)
 
-    -- Default position: centered below the parent frame.
-    -- The unlock anchor system will reposition this on load.
-    castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, 0)
+    -- Use saved unlock position if available, otherwise default below parent
+    if not ApplyCastbarUnlockPos(castbarBg, unit) then
+        castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, 0)
+    end
 
     local bgTex = castbarBg:CreateTexture(nil, "BACKGROUND")
     PP.Point(bgTex, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
@@ -2848,11 +2870,14 @@ local function StyleFullFrame(frame, unit)
         frame.BottomTextBar = CreateBottomTextBar(frame, unit, settings, anchorFrame, btbXOff, totalWidth)
         frame._btb = frame.BottomTextBar
         -- Re-anchor cast bar below BTB only when BTB is attached at bottom
+        -- and no saved unlock position exists
         if btbPos == "bottom" and frame.Castbar then
             local castbarBg = frame.Castbar:GetParent()
             if castbarBg and castbarBg:GetParent() == frame then
-                castbarBg:ClearAllPoints()
-                castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
+                if not ApplyCastbarUnlockPos(castbarBg, unit) then
+                    castbarBg:ClearAllPoints()
+                    castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
+                end
             end
         end
     end
@@ -3054,11 +3079,14 @@ local function StyleFocusFrame(frame, unit)
         frame.BottomTextBar = CreateBottomTextBar(frame, unit, settings, anchorFrame, btbXOff, totalWidth)
         frame._btb = frame.BottomTextBar
         -- Re-anchor cast bar below BTB only when BTB is attached at bottom
+        -- and no saved unlock position exists
         if btbPos == "bottom" and frame.Castbar then
             local castbarBg = frame.Castbar:GetParent()
             if castbarBg and castbarBg:GetParent() == frame then
-                castbarBg:ClearAllPoints()
-                castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
+                if not ApplyCastbarUnlockPos(castbarBg, unit) then
+                    castbarBg:ClearAllPoints()
+                    castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
+                end
             end
         end
     end
@@ -4319,7 +4347,8 @@ local function ReloadFrames()
                                 if showPortrait and isAttached then
                                     castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
                                 end
-                                local cbW = totalWidth
+                                local owW = db.profile.player.playerCastbarWidth or 0
+                                local cbW = (owW > 0) and owW or totalWidth
                                 local cbH = settings.castbarHeight or 14
                                 local owH = settings.playerCastbarHeight or 0
                                 if owH > 0 then cbH = owH end
@@ -4332,13 +4361,14 @@ local function ReloadFrames()
                                         frame.Castbar._iconFrame:Hide()
                                     end
                                 end
+                                if not ApplyCastbarUnlockPos(castbarBg, unit) then
                                 castbarBg:ClearAllPoints()
                                 local pBtbPos = settings.btbPosition or "bottom"
                                 local pBtbVisible = (settings.bottomTextBar and pBtbPos == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
                                 local anchorFrame = pBtbVisible and frame.BottomTextBar or (ppIsAtt and (settings.powerHeight or 0) > 0 and frame.Power) or frame.Health
                                 local pCbXOff = pBtbVisible and 0 or castBarOffset
-                                -- Player castbar is always locked to frame ? no x/y offsets
                                 castbarBg:SetPoint("TOP", anchorFrame, "BOTTOM", pCbXOff, 0)
+                                end
                                 -- Respect hide-while-not-casting
                                 if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                     castbarBg:Hide()
@@ -4696,10 +4726,12 @@ local function ReloadFrames()
                                 if showPortrait and isAttached then
                                     castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
                                 end
-                                castbarBg:SetSize(totalWidth, settings.castbarHeight or 14)
+                                local owW2 = settings.castbarWidth or 0
+                                local cbW2 = (owW2 > 0) and owW2 or totalWidth
+                                local cbH2 = settings.castbarHeight or 14
+                                castbarBg:SetSize(cbW2, cbH2)
                                 if frame.Castbar._iconFrame then
-                                    local cbH = settings.castbarHeight or 14
-                                    frame.Castbar._iconFrame:SetSize(cbH, cbH)
+                                    frame.Castbar._iconFrame:SetSize(cbH2, cbH2)
                                     -- Icon only visible during active cast, always hide on settings update
                                     if not frame.Castbar:IsShown() then
                                         frame.Castbar._iconFrame:Hide()
@@ -4709,12 +4741,14 @@ local function ReloadFrames()
                                         frame.Castbar._iconFrame:Show()
                                     end
                                 end
+                                if not ApplyCastbarUnlockPos(castbarBg, unit) then
                                 castbarBg:ClearAllPoints()
                                 local tBtbPos = settings.btbPosition or "bottom"
                                 local btbVisible = (settings.bottomTextBar and tBtbPos == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
                                 local cbAnchor = btbVisible and frame.BottomTextBar or tPpBtbAnchor
                                 local cbXOff = btbVisible and 0 or castBarOffset
                                 castbarBg:SetPoint("TOP", cbAnchor, "BOTTOM", cbXOff, 0)
+                                end
                                 -- Respect hide-while-not-casting: only show bg if inactive hiding is off or cast is active
                                 if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                     castbarBg:Hide()
@@ -5024,10 +5058,12 @@ local function ReloadFrames()
                             if showPortrait and isAttached then
                                 castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
                             end
-                            castbarBg:SetSize(totalWidth, settings.castbarHeight or 14)
+                            local owW3 = settings.castbarWidth or 0
+                            local cbW3 = (owW3 > 0) and owW3 or totalWidth
+                            local cbH3 = settings.castbarHeight or 14
+                            castbarBg:SetSize(cbW3, cbH3)
                             if frame.Castbar._iconFrame then
-                                local cbH = settings.castbarHeight or 14
-                                frame.Castbar._iconFrame:SetSize(cbH, cbH)
+                                frame.Castbar._iconFrame:SetSize(cbH3, cbH3)
                                 -- Icon only visible during active cast, always hide on settings update
                                 if not frame.Castbar:IsShown() then
                                     frame.Castbar._iconFrame:Hide()
@@ -5037,12 +5073,14 @@ local function ReloadFrames()
                                     frame.Castbar._iconFrame:Show()
                                 end
                             end
+                            if not ApplyCastbarUnlockPos(castbarBg, unit) then
                             castbarBg:ClearAllPoints()
                             local fBtbPos2 = settings.btbPosition or "bottom"
                             local btbVisible = (settings.bottomTextBar and fBtbPos2 == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
                             local cbAnchor = btbVisible and frame.BottomTextBar or fPpBtbAnchor
                             local cbXOff = btbVisible and 0 or castBarOffset
                             castbarBg:SetPoint("TOP", cbAnchor, "BOTTOM", cbXOff, 0)
+                            end
                             -- Respect hide-while-not-casting: only show bg if inactive hiding is off or cast is active
                             if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                 castbarBg:Hide()

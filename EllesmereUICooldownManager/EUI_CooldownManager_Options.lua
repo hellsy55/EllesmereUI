@@ -6575,7 +6575,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Row 3: Number of Rows | Vertical Orientation
-        _, h = W:DualRow(parent, y,
+        local numRowsRow
+        numRowsRow, h = W:DualRow(parent, y,
             { type="slider", text="Number of Rows",
               min=1, max=6, step=1,
               getValue=function() return BD().numRows or 1 end,
@@ -6593,35 +6594,53 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
-        -- Row 3b: Top Row Icons (only when numRows == 2)
-        if (BD().numRows or 1) == 2 then
-            _, h = W:DualRow(parent, y,
-                { type="slider", text="Top Row Icons",
-                  tooltip="How many icons to show on the top row. The rest go on the bottom row.",
-                  min=1, max=50, step=1,
-                  getValue=function()
-                      local bd = BD()
-                      if bd.topRowCount and bd.topRowCount > 0 then return bd.topRowCount end
-                      -- Auto: count visible spells and compute default
-                      local count = 0
-                      local sdTR = ns.GetBarSpellData(bd.key)
-                      if sdTR and sdTR.customSpells then
-                          for _, sid in ipairs(sdTR.customSpells) do if sid and sid ~= 0 then count = count + 1 end end
-                      elseif sdTR and sdTR.trackedSpells then
-                          for _, sid in ipairs(sdTR.trackedSpells) do if sid and sid ~= 0 then count = count + 1 end end
-                          if sdTR.extraSpells then
-                              for _, sid in ipairs(sdTR.extraSpells) do if sid and sid ~= 0 then count = count + 1 end end
+        -- Inline cog on Number of Rows: Top Row Icons (only relevant when numRows == 2)
+        do
+            local leftRgn = numRowsRow._leftRegion
+            local ctrl = leftRgn._control
+            local _, topRowCogShow = EllesmereUI.BuildCogPopup({
+                title = "Top Row Icons",
+                rows = {
+                    { type="slider", label="Top Row Icons",
+                      min=1, max=50, step=1,
+                      tooltip="How many icons to show on the top row. The rest go on the bottom row.",
+                      get=function()
+                          local bd = BD()
+                          if bd.topRowCount and bd.topRowCount > 0 then return bd.topRowCount end
+                          local count = 0
+                          local sdTR = ns.GetBarSpellData(bd.key)
+                          if sdTR and sdTR.customSpells then
+                              for _, sid in ipairs(sdTR.customSpells) do if sid and sid ~= 0 then count = count + 1 end end
+                          elseif sdTR and sdTR.trackedSpells then
+                              for _, sid in ipairs(sdTR.trackedSpells) do if sid and sid ~= 0 then count = count + 1 end end
+                              if sdTR.extraSpells then
+                                  for _, sid in ipairs(sdTR.extraSpells) do if sid and sid ~= 0 then count = count + 1 end end
+                              end
                           end
-                      end
-                      if count == 0 then return 1 end
-                      return math.ceil(count / 2)
-                  end,
-                  setValue=function(v)
-                      if v == 0 then v = nil end
-                      BD().topRowCount = v
-                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-                  end },
-                { type="label", text="" });  y = y - h
+                          if count == 0 then return 1 end
+                          return math.ceil(count / 2)
+                      end,
+                      set=function(v)
+                          if v == 0 then v = nil end
+                          BD().topRowCount = v
+                          ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(leftRgn, topRowCogShow, ctrl)
+            -- Disable cog when numRows ~= 2
+            local block = CreateFrame("Frame", nil, cogBtn)
+            block:SetAllPoints(); block:SetFrameLevel(cogBtn:GetFrameLevel() + 10); block:EnableMouse(true)
+            block:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Rows to 2"))
+            end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local notTwo = (BD().numRows or 1) ~= 2
+                if notTwo then cogBtn:SetAlpha(0.15); block:Show() else cogBtn:SetAlpha(0.4); block:Hide() end
+            end)
+            local notTwo = (BD().numRows or 1) ~= 2
+            if notTwo then cogBtn:SetAlpha(0.15); block:Show() else cogBtn:SetAlpha(0.4); block:Hide() end
         end
 
         -- Hide Buffs When Inactive / Out of Range + Show Keybind
@@ -6943,6 +6962,47 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().iconSize = v
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end },
+            { type="slider", text="Icon Spacing",
+              min=-10, max=20, step=1,
+              getValue=function() return BD().spacing or 2 end,
+              setValue=function(v)
+                  BD().spacing = v
+                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+              end });  y = y - h
+
+        -- Sync icon on Icon Spacing (right of row 1)
+        EllesmereUI.BuildSyncIcon({
+            region  = scaleAnimRow._rightRegion,
+            tooltip = "Apply Icon Spacing to all Bars",
+            isSynced = function()
+                local v = BD().spacing or 2
+                local pp = DB(); if not pp or not pp.cdmBars then return false end
+                for _, b in ipairs(pp.cdmBars.bars) do
+                    if (b.spacing or 2) ~= v then return false end
+                end
+                return true
+            end,
+            onClick = function()
+                local v = BD().spacing or 2
+                local pp = DB(); if not pp or not pp.cdmBars then return end
+                for _, b in ipairs(pp.cdmBars.bars) do b.spacing = v end
+                ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
+            end,
+        })
+        end -- isBuffBar else
+
+        -- Row 2: (Sync) Border Size (swatch) | Active Animation (swatches + eye)
+        local borderRow
+        borderRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Border Size",
+              values=BORDER_LABELS, order=BORDER_ORDER,
+              disabled=function() return IsCustomShape() end,
+              disabledTooltip="This option is not available for custom shapes",
+              getValue=function() return BD().borderThickness or "thin" end,
+              setValue=function(v)
+                  BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
+                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
+              end },
             { type="dropdown", text="Active Animation",
               values=ACTIVE_ANIM_VALUES, order=ACTIVE_ANIM_ORDER,
               disabled=function() return IsCustomShape() end,
@@ -6975,15 +7035,117 @@ initFrame:SetScript("OnEvent", function(self)
                   Refresh()
               end });  y = y - h
 
-        -- Inline active anim color swatches + eye on Active Animation (right of row 1)
-        -- Order right-to-left: [class swatch] [custom swatch] [eye]
+        -- Sync icon on Border Size (left of row 2)
+        EllesmereUI.BuildSyncIcon({
+            region  = borderRow._leftRegion,
+            tooltip = "Apply Border Size to all Bars",
+            isSynced = function()
+                local bd = BD()
+                local v = bd.borderThickness or "thin"
+                local cc = bd.borderClassColor
+                local pp = DB(); if not pp or not pp.cdmBars then return false end
+                for _, b in ipairs(pp.cdmBars.bars) do
+                    if (b.borderThickness or "thin") ~= v or b.borderClassColor ~= cc then return false end
+                end
+                return true
+            end,
+            onClick = function()
+                local bd = BD()
+                local v = bd.borderThickness or "thin"
+                local sz = bd.borderSize or 1
+                local cc = bd.borderClassColor
+                local pp = DB(); if not pp or not pp.cdmBars then return end
+                for _, b in ipairs(pp.cdmBars.bars) do
+                    b.borderThickness = v; b.borderSize = sz
+                    b.borderClassColor = cc
+                end
+                ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+            end,
+        })
+
+        -- Inline border color swatches on Border Size (left of row 2)
+        -- Order right-to-left: [class swatch] [custom swatch]
         do
-            local rightRgn = scaleAnimRow._rightRegion
+            local leftRgn = borderRow._leftRegion
+            local ctrl = leftRgn._control
+
+            -- Class color swatch (rightmost, single-click activates class color mode)
+            local classBorderSwatch, updateClassBorderSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, borderRow:GetFrameLevel() + 3,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end,
+                false, 20)
+            PP.Point(classBorderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            classBorderSwatch:SetScript("OnClick", function()
+                BD().borderClassColor = true
+                ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                EllesmereUI:RefreshPage()
+            end)
+            classBorderSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(classBorderSwatch, "Class Colored")
+            end)
+            classBorderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Custom color swatch (left of class swatch, two-click: first activates custom mode)
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, borderRow:GetFrameLevel() + 3,
+                function() return BD().borderR or 0, BD().borderG or 0, BD().borderB or 0 end,
+                function(r, g, b)
+                    BD().borderR, BD().borderG, BD().borderB = r, g, b
+                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                end,
+                false, 20)
+            PP.Point(swatch, "RIGHT", classBorderSwatch, "LEFT", -8, 0)
+            swatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(swatch, "Custom Colored")
+            end)
+            swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Block overlay on custom swatch -- clicking while class colored deactivates class color mode
+            local swatchBlock = CreateFrame("Button", nil, swatch)
+            swatchBlock:SetAllPoints()
+            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            swatchBlock:EnableMouse(true)
+            swatchBlock:SetScript("OnClick", function()
+                if BD().borderClassColor then
+                    BD().borderClassColor = false
+                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                    EllesmereUI:RefreshPage()
+                end
+            end)
+            swatchBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
+            end)
+            swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function UpdateBorderSwatchState()
+                local isClassColored = BD().borderClassColor
+                if isClassColored then
+                    swatch:SetAlpha(0.3); swatchBlock:Show()
+                else
+                    swatch:SetAlpha(1); swatchBlock:Hide()
+                end
+                classBorderSwatch:SetAlpha(isClassColored and 1 or 0.3)
+            end
+            EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
+            UpdateBorderSwatchState()
+        end
+
+        -- Inline active anim color swatches + eye on Active Animation (right of row 2)
+        -- Order right-to-left: [class swatch] [custom swatch] [eye]
+        if not isBuffBar then
+        do
+            local rightRgn = borderRow._rightRegion
             local ctrl = rightRgn._control
 
             -- Class color swatch (rightmost, single-click activates class color mode)
             local classSwatch, updateClassSwatch = EllesmereUI.BuildColorSwatch(
-                rightRgn, scaleAnimRow:GetFrameLevel() + 3,
+                rightRgn, borderRow:GetFrameLevel() + 3,
                 function()
                     local _, classFile = UnitClass("player")
                     local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
@@ -7005,7 +7167,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Custom color swatch (left of class swatch, two-click: first activates custom mode)
             local animSwatch, updateAnimSwatch = EllesmereUI.BuildColorSwatch(
-                rightRgn, scaleAnimRow:GetFrameLevel() + 3,
+                rightRgn, borderRow:GetFrameLevel() + 3,
                 function() return BD().activeAnimR or 1.0, BD().activeAnimG or 0.85, BD().activeAnimB or 0.0 end,
                 function(r, g, b)
                     BD().activeAnimR = r; BD().activeAnimG = g; BD().activeAnimB = b
@@ -7091,9 +7253,9 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateAnimSwatch(); updateClassSwatch(); UpdateAnimState() end)
             UpdateAnimState()
         end
-        end -- isBuffBar else
+        end
 
-        -- Row 2: (Sync) Custom Icon Shape | (Sync) Icon Spacing
+        -- Row 3: (Sync) Custom Icon Shape | (Sync) Icon Zoom
         local shapeRow
         shapeRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Custom Icon Shape",
@@ -7112,15 +7274,15 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end },
-            { type="slider", text="Icon Spacing",
-              min=-10, max=20, step=1,
-              getValue=function() return BD().spacing or 2 end,
+            { type="slider", text="Icon Zoom",
+              min=0, max=0.20, step=0.01,
+              getValue=function() return BD().iconZoom or 0.08 end,
               setValue=function(v)
-                  BD().spacing = v
-                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                  BD().iconZoom = v
+                  ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
               end });  y = y - h
 
-        -- Sync icons on Shape and Spacing
+        -- Sync icons on Custom Icon Shape and Icon Zoom
         do
             EllesmereUI.BuildSyncIcon({
                 region  = shapeRow._leftRegion,
@@ -7151,74 +7313,6 @@ initFrame:SetScript("OnEvent", function(self)
             })
             EllesmereUI.BuildSyncIcon({
                 region  = shapeRow._rightRegion,
-                tooltip = "Apply Icon Spacing to all Bars",
-                isSynced = function()
-                    local v = BD().spacing or 2
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.spacing or 2) ~= v then return false end
-                    end
-                    return true
-                end,
-                onClick = function()
-                    local v = BD().spacing or 2
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do b.spacing = v end
-                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
-                end,
-            })
-        end
-
-        -- Row 3: (Sync) Border Size (swatch + cog) | (Sync) Icon Zoom
-        local borderRow
-        borderRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Border Size",
-              values=BORDER_LABELS, order=BORDER_ORDER,
-              disabled=function() return IsCustomShape() end,
-              disabledTooltip="This option is not available for custom shapes",
-              getValue=function() return BD().borderThickness or "thin" end,
-              setValue=function(v)
-                  BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
-                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
-              end },
-            { type="slider", text="Icon Zoom",
-              min=0, max=0.20, step=0.01,
-              getValue=function() return BD().iconZoom or 0.08 end,
-              setValue=function(v)
-                  BD().iconZoom = v
-                  ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
-              end });  y = y - h
-
-        -- Sync icons on Border Size and Icon Zoom
-        do
-            EllesmereUI.BuildSyncIcon({
-                region  = borderRow._leftRegion,
-                tooltip = "Apply Border Size to all Bars",
-                isSynced = function()
-                    local bd = BD()
-                    local v = bd.borderThickness or "thin"
-                    local cc = bd.borderClassColor
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.borderThickness or "thin") ~= v or b.borderClassColor ~= cc then return false end
-                    end
-                    return true
-                end,
-                onClick = function()
-                    local bd = BD()
-                    local v = bd.borderThickness or "thin"
-                    local sz = bd.borderSize or 1
-                    local cc = bd.borderClassColor
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        b.borderThickness = v; b.borderSize = sz
-                        b.borderClassColor = cc
-                    end
-                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
-                end,
-            })
-            EllesmereUI.BuildSyncIcon({
-                region  = borderRow._rightRegion,
                 tooltip = "Apply Icon Zoom to all Bars",
                 isSynced = function()
                     local v = BD().iconZoom or 0.08
@@ -7235,79 +7329,6 @@ initFrame:SetScript("OnEvent", function(self)
                     ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                 end,
             })
-        end
-
-        -- Inline border color swatches on Border Size (left of row 3)
-        -- Order right-to-left: [class swatch] [custom swatch]
-        do
-            local leftRgn = borderRow._leftRegion
-            local ctrl = leftRgn._control
-
-            -- Class color swatch (rightmost, single-click activates class color mode)
-            local classBorderSwatch, updateClassBorderSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, borderRow:GetFrameLevel() + 3,
-                function()
-                    local _, classFile = UnitClass("player")
-                    local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-                    if cc then return cc.r, cc.g, cc.b end
-                    return 1, 1, 1
-                end,
-                function() end,
-                false, 20)
-            PP.Point(classBorderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            classBorderSwatch:SetScript("OnClick", function()
-                BD().borderClassColor = true
-                ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
-                EllesmereUI:RefreshPage()
-            end)
-            classBorderSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(classBorderSwatch, "Class Colored")
-            end)
-            classBorderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Custom color swatch (left of class swatch, two-click: first activates custom mode)
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, borderRow:GetFrameLevel() + 3,
-                function() return BD().borderR or 0, BD().borderG or 0, BD().borderB or 0 end,
-                function(r, g, b)
-                    BD().borderR, BD().borderG, BD().borderB = r, g, b
-                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
-                end,
-                false, 20)
-            PP.Point(swatch, "RIGHT", classBorderSwatch, "LEFT", -8, 0)
-            swatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, "Custom Colored")
-            end)
-            swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Block overlay on custom swatch -- clicking while class colored deactivates class color mode
-            local swatchBlock = CreateFrame("Button", nil, swatch)
-            swatchBlock:SetAllPoints()
-            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-            swatchBlock:EnableMouse(true)
-            swatchBlock:SetScript("OnClick", function()
-                if BD().borderClassColor then
-                    BD().borderClassColor = false
-                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
-                    EllesmereUI:RefreshPage()
-                end
-            end)
-            swatchBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
-            end)
-            swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            local function UpdateBorderSwatchState()
-                local isClassColored = BD().borderClassColor
-                if isClassColored then
-                    swatch:SetAlpha(0.3); swatchBlock:Show()
-                else
-                    swatch:SetAlpha(1); swatchBlock:Hide()
-                end
-                classBorderSwatch:SetAlpha(isClassColored and 1 or 0.3)
-            end
-            EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
-            UpdateBorderSwatchState()
         end
 
         -- Row 4: Show Duration (colorpicker + resize cog) | Stack Count (colorpicker + resize cog)

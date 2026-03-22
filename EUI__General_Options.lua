@@ -80,7 +80,6 @@ initFrame:SetScript("OnEvent", function(self)
     local EUI_DEFAULTS = {
         { "cameraDistanceMaxZoomFactor",                    "2.6" },
         { "ActionButtonUseKeyDown",                         "1"   },
-        { "SpellQueueWindow",                               "150" },
         { "floatingCombatTextCombatHealing_v2",             "1"   },
         { "WorldTextScale_v2",                              "0.5" },
         { "floatingCombatTextCombatDamage_v2",              "1"   },

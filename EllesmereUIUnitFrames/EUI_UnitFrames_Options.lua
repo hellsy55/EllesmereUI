@@ -2642,7 +2642,7 @@ initFrame:SetScript("OnEvent", function(self)
     local UNIT_SUPPORTS = {
         powerHeight          = { player=true, target=true, focus=true },
         showPlayerAbsorb     = { player=true },
-        showBuffs            = { player=true, target=true },
+        showBuffs            = { player=true, target=true, focus=true },
         combatIndicatorStyle   = { player=true },
         combatIndicatorColor   = { player=true },
         combatIndicatorCustomColor = { player=true },
@@ -2650,9 +2650,9 @@ initFrame:SetScript("OnEvent", function(self)
         combatIndicatorSize    = { player=true },
         combatIndicatorX       = { player=true },
         combatIndicatorY       = { player=true },
-        buffAnchor           = { player=true, target=true },
-        buffGrowth           = { player=true, target=true },
-        maxBuffs             = { player=true, target=true },
+        buffAnchor           = { player=true, target=true, focus=true },
+        buffGrowth           = { player=true, target=true, focus=true },
+        maxBuffs             = { player=true, target=true, focus=true },
         showPlayerCastbar    = { player=true },
         showPlayerCastIcon   = { player=true },
         playerCastbarHeight  = { player=true },
@@ -2677,10 +2677,10 @@ initFrame:SetScript("OnEvent", function(self)
         classPowerCustomColor= { player=true },
         classPowerBgColor    = { player=true },
         classPowerEmptyColor = { player=true },
-        debuffAnchor         = { target=true },
-        debuffGrowth         = { target=true },
-        maxDebuffs           = { target=true },
-        onlyPlayerDebuffs    = { target=true },
+        debuffAnchor         = { target=true, focus=true },
+        debuffGrowth         = { target=true, focus=true },
+        maxDebuffs           = { target=true, focus=true },
+        onlyPlayerDebuffs    = { target=true, focus=true },
         showInRaid           = { player=true, target=true, focus=true },
         showInParty          = { player=true, target=true, focus=true },
         showSolo             = { player=true, target=true, focus=true },
@@ -6131,42 +6131,63 @@ initFrame:SetScript("OnEvent", function(self)
         end
         end -- _showAbsorbsCombat
 
-        -- Row 2: Show Buffs on Frame + Target Debuffs Location
+        -- Row 2: Buffs Location + Debuffs Location
         local sharedAddRow2
         sharedAddRow2, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Buffs on Frame",
+            { type="dropdown", text="Buffs Location", values=buffAnchorValues, order=buffAnchorOrder,
               getValue=function()
-                  local v = SGetSupported("showBuffs")
-                  return v ~= false
+                  local s = UNIT_DB_MAP[selectedUnit]()
+                  if s.showBuffs == false then return "none" end
+                  return SValSupported("buffAnchor", "topleft")
               end,
-              setValue=function(v) SSetSupported("showBuffs", v) end },
-            { type="dropdown", text="Target Debuffs Location", values=buffAnchorValues, order=buffAnchorOrder,
-              getValue=function() return SValSupported("debuffAnchor", "bottomleft") end,
+              setValue=function(v)
+                  local s = UNIT_DB_MAP[selectedUnit]()
+                  if v == "none" then
+                      s.showBuffs = false
+                  else
+                      s.showBuffs = true
+                      SwapAuraSlot(s, "buffAnchor", v)
+                  end
+                  ReloadAndUpdate(); UpdatePreview()
+              end },
+            { type="dropdown", text="Debuffs Location", values=buffAnchorValues, order=buffAnchorOrder,
+              getValue=function()
+                  local v = SValSupported("debuffAnchor", "bottomleft")
+                  return v
+              end,
               setValue=function(v)
                   SwapAuraSlot(UNIT_DB_MAP[selectedUnit](), "debuffAnchor", v)
                   ReloadAndUpdate(); UpdatePreview()
               end });  y = y - h
         SApplySupport(sharedAddRow2._leftRegion, "showBuffs")
         SApplySupport(sharedAddRow2._rightRegion, "debuffAnchor")
-        -- Sync icon: Show Buffs (left only -- Target Debuffs Location is target-only, no sync needed)
+        -- Sync icon: Buffs Location (left)
         do
             local rgn = sharedAddRow2._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Show Buffs to all Frames",
+                tooltip = "Apply Buffs Location to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showBuffs
-                    if v == nil then v = true end
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().showBuffs = v end
+                    local s = UNIT_DB_MAP[selectedUnit]()
+                    local showV = s.showBuffs
+                    if showV == nil then showV = true end
+                    local anchorV = s.buffAnchor or "topleft"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        UNIT_DB_MAP[key]().showBuffs = showV
+                        if showV then UNIT_DB_MAP[key]().buffAnchor = anchorV end
+                    end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showBuffs
-                    if v == nil then v = true end
+                    local s = UNIT_DB_MAP[selectedUnit]()
+                    local showV = s.showBuffs
+                    if showV == nil then showV = true end
+                    local anchorV = s.buffAnchor or "topleft"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        local ov = UNIT_DB_MAP[key]().showBuffs
-                        if ov == nil then ov = true end
-                        if ov ~= v then return false end
+                        local os = UNIT_DB_MAP[key]()
+                        local ov = os.showBuffs; if ov == nil then ov = true end
+                        if ov ~= showV then return false end
+                        if showV and (os.buffAnchor or "topleft") ~= anchorV then return false end
                     end
                     return true
                 end,
@@ -6176,27 +6197,26 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().showBuffs
-                        if v == nil then v = true end
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().showBuffs = v end
+                        local s = UNIT_DB_MAP[selectedUnit]()
+                        local showV = s.showBuffs
+                        if showV == nil then showV = true end
+                        local anchorV = s.buffAnchor or "topleft"
+                        for _, key in ipairs(checkedKeys) do
+                            UNIT_DB_MAP[key]().showBuffs = showV
+                            if showV then UNIT_DB_MAP[key]().buffAnchor = anchorV end
+                        end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
             })
         end
 
-        -- Cogwheel on Show Buffs for Position, Growth Direction, Max Count
+        -- Cogwheel on Buffs Location for Growth Direction, Max Count
         do
             local leftRgn = sharedAddRow2._leftRegion
             local _, buffCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Buff Settings",
                 rows = {
-                    { type="dropdown", label="Position", values=buffAnchorValues, order=buffAnchorOrder,
-                      get=function() return SValSupported("buffAnchor", "topleft") end,
-                      set=function(v)
-                          SwapAuraSlot(UNIT_DB_MAP[selectedUnit](), "buffAnchor", v)
-                          ReloadAndUpdate(); UpdatePreview()
-                      end },
                     { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                       get=function() return SValSupported("buffGrowth", "auto") end,
                       set=function(v) SSetSupported("buffGrowth", v) end },
@@ -6209,7 +6229,7 @@ initFrame:SetScript("OnEvent", function(self)
             MakeCogBtn(leftRgn, buffCogShow)
         end
 
-        -- Cogwheel on Target Debuffs Location
+        -- Cogwheel on Debuffs Location
         do
             local rightRgn = sharedAddRow2._rightRegion
             local _, debuffCogShowRaw = EllesmereUI.BuildCogPopup({
@@ -6549,7 +6569,7 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Shared mini frame settings builder
     ---------------------------------------------------------------------------
-    local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow)
+    local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow, afterSizeRow)
         local _, h
 
         -- DISPLAY
@@ -6578,6 +6598,11 @@ initFrame:SetScript("OnEvent", function(self)
                 settingsTable.frameWidth = v
                 ReloadAndUpdate()
               end });  y = y - h
+
+        -- Optional extra rows after size row (e.g. buff/debuff location)
+        if afterSizeRow then
+            y = afterSizeRow(W, parent, y)
+        end
 
         -- TEXT section
         local textHeader
@@ -6710,8 +6735,89 @@ initFrame:SetScript("OnEvent", function(self)
             return portraitRow, h
         end
 
+        local function bossAfterSize(Ww, pp, yy)
+            local _, hh
+            local function BossCogBtn(rgn, showFn)
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+            end
+            local bossAuraRow
+            bossAuraRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Buffs Location", values=buffAnchorValues, order=buffAnchorOrder,
+                  getValue=function()
+                      local s = db.profile.boss
+                      if s.showBuffs == false then return "none" end
+                      return s.buffAnchor or "topleft"
+                  end,
+                  setValue=function(v)
+                      local s = db.profile.boss
+                      if v == "none" then
+                          s.showBuffs = false
+                      else
+                          s.showBuffs = true
+                          SwapAuraSlot(s, "buffAnchor", v)
+                      end
+                      ReloadAndUpdate()
+                  end },
+                { type="dropdown", text="Debuffs Location", values=buffAnchorValues, order=buffAnchorOrder,
+                  getValue=function() return db.profile.boss.debuffAnchor or "bottomleft" end,
+                  setValue=function(v)
+                      SwapAuraSlot(db.profile.boss, "debuffAnchor", v)
+                      ReloadAndUpdate()
+                  end });  yy = yy - hh
+
+            -- Cogwheel on Buffs Location
+            do
+                local leftRgn = bossAuraRow._leftRegion
+                local _, bBuffCogShowRaw = EllesmereUI.BuildCogPopup({
+                    title = "Buff Settings",
+                    rows = {
+                        { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
+                          get=function() return db.profile.boss.buffGrowth or "auto" end,
+                          set=function(v) db.profile.boss.buffGrowth = v; ReloadAndUpdate() end },
+                        { type="slider", label="Max Count", min=1, max=20, step=1,
+                          get=function() return db.profile.boss.maxBuffs or 4 end,
+                          set=function(v) db.profile.boss.maxBuffs = v; ReloadAndUpdate() end },
+                    },
+                })
+                BossCogBtn(leftRgn, bBuffCogShowRaw)
+            end
+
+            -- Cogwheel on Debuffs Location
+            do
+                local rightRgn = bossAuraRow._rightRegion
+                local _, bDebuffCogShowRaw = EllesmereUI.BuildCogPopup({
+                    title = "Debuff Settings",
+                    rows = {
+                        { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
+                          get=function() return db.profile.boss.debuffGrowth or "auto" end,
+                          set=function(v) db.profile.boss.debuffGrowth = v; ReloadAndUpdate() end },
+                        { type="slider", label="Max Count", min=1, max=20, step=1,
+                          get=function() return db.profile.boss.maxDebuffs or 10 end,
+                          set=function(v) db.profile.boss.maxDebuffs = v; ReloadAndUpdate() end },
+                        { type="toggle", label="Show Own Only",
+                          get=function() return db.profile.boss.onlyPlayerDebuffs or false end,
+                          set=function(v) db.profile.boss.onlyPlayerDebuffs = v; ReloadAndUpdate() end },
+                    },
+                })
+                BossCogBtn(rightRgn, bDebuffCogShowRaw)
+            end
+
+            return yy
+        end
+
         local displayHeader, sizeRow, textHeader, textRow
-        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow)
+        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize)
 
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
