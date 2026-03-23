@@ -57,33 +57,55 @@ initFrame:SetScript("OnEvent", function(self)
         -- ── DISPLAY ────────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
-        local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES_BASICS,
-              order  = EllesmereUI.VIS_ORDER_BASICS,
-              getValue=function()
-                  if Cfg("enabled") == false then return "disabled" end
-                  return Cfg("visibility") or "always"
-              end,
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Module",
+              getValue=function() return Cfg("enabled") ~= false end,
               setValue=function(v)
-                  if v == "disabled" then
-                      Set("enabled", false)
-                      Set("visibility", "disabled")
-                  else
-                      Set("enabled", true)
-                      Set("visibility", v)
+                  Set("enabled", v)
+                  if v and EQT and not EQT.frame then
+                      EQT:Init()
                   end
                   local f = EQT and EQT.frame
                   if f then
-                      if Cfg("enabled") == false then f:Hide()
+                      if not v then f:Hide()
                       else f:Show(); Refresh() end
                   end
                   if EQT.ApplyBlizzardTrackerVisibility then EQT.ApplyBlizzardTrackerVisibility() end
                   if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
                   EllesmereUI:RefreshPage()
               end },
+            { type="dropdown", text="Alignment",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              values = { top = "Top", center = "Centered", bottom = "Bottom" },
+              order  = { "top", "center", "bottom" },
+              getValue=function() return Cfg("alignment") or "top" end,
+              setValue=function(v)
+                  Set("alignment", v)
+                  Refresh()
+              end })
+        y = y - h
+
+        local visRow, visH = W:DualRow(parent, y,
+            { type="dropdown", text="Visibility",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              values = EllesmereUI.VIS_VALUES,
+              order  = EllesmereUI.VIS_ORDER,
+              getValue=function()
+                  return Cfg("visibility") or "always"
+              end,
+              setValue=function(v)
+                  Set("visibility", v)
+                  local f = EQT and EQT.frame
+                  if f then f:Show(); Refresh() end
+                  if EQT.ApplyBlizzardTrackerVisibility then EQT.ApplyBlizzardTrackerVisibility() end
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
             { type="dropdown", text="Visibility Options",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
               setValue=function() end })
@@ -104,6 +126,35 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
+        y = y - visH
+
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Width", min=160, max=400, step=5,
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("width") or 325 end,
+              setValue=function(v)
+                  Set("width", v)
+                  EQT:Refresh(true)
+              end },
+            { type="slider", text="Height",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              min=100, max=800, step=10,
+              getValue=function() return Cfg("height") or 500 end,
+              setValue=function(v)
+                  Set("height", v)
+                  local f = EQT.frame
+                  if not f then return end
+                  f:SetHeight(v)
+                  if f.inner then
+                      local pv = EQT.PAD_V or 6
+                      local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
+                      f.inner:SetHeight(math.min(totalH, v))
+                      if EQT.UpdateInnerAlignment then EQT.UpdateInnerAlignment(f) end
+                  end
+                  if f._updateScrollThumb then f._updateScrollThumb() end
+              end })
         y = y - h
 
         local bgRow
@@ -117,16 +168,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local br, bg, bb = Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0
                   if EQT.frame and EQT.frame.bg then EQT.frame.bg:SetColorTexture(br, bg, bb, v/100) end
               end },
-            { type="dropdown", text="Alignment",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              values = { top = "Top", center = "Centered", bottom = "Bottom" },
-              order  = { "top", "center", "bottom" },
-              getValue=function() return Cfg("alignment") or "top" end,
-              setValue=function(v)
-                  Set("alignment", v)
-                  Refresh()
-              end })
+            { type="label", text="" })
         do
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control
@@ -144,35 +186,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        row, h = W:DualRow(parent, y,
-            { type="slider", text="Height",
-              min=100, max=800, step=10,
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("height") or 500 end,
-              setValue=function(v)
-                  Set("height", v)
-                  local f = EQT.frame
-                  if not f then return end
-                  f:SetHeight(v)
-                  if f.inner then
-                      local pv = EQT.PAD_V or 6
-                      local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
-                      f.inner:SetHeight(math.min(totalH, v))
-                      if EQT.UpdateInnerAlignment then EQT.UpdateInnerAlignment(f) end
-                  end
-                  if f._updateScrollThumb then f._updateScrollThumb() end
-              end },
-            { type="slider", text="Width", min=160, max=400, step=5,
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("width") or 325 end,
-              setValue=function(v)
-                  Set("width", v)
-                  EQT:Refresh(true)
-              end })
-        y = y - h
-
         y = y - 10
 
         -- ── EXTRAS ─────────────────────────────────────────────────────────
@@ -186,8 +199,19 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("autoTurnIn") or false end,
               setValue=function(v) Set("autoTurnIn", v) end })
         do
-            local rgn = row._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
+            local lrgn = row._leftRegion
+            local _, cogShowL = EllesmereUI.BuildCogPopup({
+                title = "Auto Accept Settings",
+                rows = {
+                    { type="toggle", label="Prevent Multi Quest Accept",
+                      get=function() return Cfg("autoAcceptPreventMulti") or false end,
+                      set=function(v) Set("autoAcceptPreventMulti", v) end },
+                },
+            })
+            MakeCogBtn(lrgn, cogShowL)
+
+            local rrgn = row._rightRegion
+            local _, cogShowR = EllesmereUI.BuildCogPopup({
                 title = "Auto Turn In Settings",
                 rows = {
                     { type="toggle", label="Hold Shift to Skip",
@@ -195,7 +219,7 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v) Set("autoTurnInShiftSkip", v) end },
                 },
             })
-            MakeCogBtn(rgn, cogShow)
+            MakeCogBtn(rrgn, cogShowR)
         end
         y = y - h
 
@@ -398,7 +422,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("objFontSize") or 10 end,
               setValue=function(v) Set("objFontSize", v); Refresh() end },
             { type="slider", text="Completed Size", min=7, max=24, step=1,
-              getValue=function() return Cfg("completedFontSize") or 10 end,
+              getValue=function() return Cfg("completedFontSize") or Cfg("objFontSize") or 10 end,
               setValue=function(v) Set("completedFontSize", v); Refresh() end })
         do
             local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
@@ -422,13 +446,35 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        row, h = W:DualRow(parent, y,
+            { type="slider", text="Focused Size", min=8, max=24, step=1,
+              getValue=function() return Cfg("focusedFontSize") or Cfg("titleFontSize") or 11 end,
+              setValue=function(v) Set("focusedFontSize", v); Refresh() end },
+            { type="label", text="" })
+        do
+            local rgn = row._leftRegion
+            local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local c = Cfg("focusedColor") or {}
+                    return c.r or 0.871, c.g or 0.251, c.b or 1.0
+                end,
+                function(r, g, b)
+                    local c = Cfg("focusedColor") or {}
+                    c.r = r; c.g = g; c.b = b; Set("focusedColor", c); Refresh()
+                end,
+                false, 20)
+            local ctrl = rgn._control
+            sw:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+            sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Focused Color") end)
+            sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+        end
+        y = y - h
+
         return math.abs(y)
     end
 
     _G._EBS_BuildQuestTrackerPage = BuildPage
     _G._EBS_ResetQuestTracker = function()
-        local basicsDB = _G._EBS_AceDB
-        if basicsDB and basicsDB.profile then basicsDB.profile.questTracker = nil end
         if EQT and EQT.Refresh then EQT:Refresh() end
     end
 end)

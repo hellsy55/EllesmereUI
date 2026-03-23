@@ -78,22 +78,15 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildVisibilityRow(W, parent, y, getCfg, refreshFn)
         local visRow, visH = W:DualRow(parent, y,
             { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES_BASICS,
-              order  = EllesmereUI.VIS_ORDER_BASICS,
+              values = EllesmereUI.VIS_VALUES,
+              order  = EllesmereUI.VIS_ORDER,
               getValue=function()
                   local c = getCfg(); if not c then return "always" end
-                  if not c.enabled and c.enabled ~= nil then return "disabled" end
                   return c.visibility or "always"
               end,
               setValue=function(v)
                   local c = getCfg(); if not c then return end
-                  if v == "disabled" then
-                      c.enabled = false
-                      c.visibility = "disabled"
-                  else
-                      c.enabled = true
-                      c.visibility = v
-                  end
+                  c.visibility = v
                   if refreshFn then refreshFn() end
                   if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
                   EllesmereUI:RefreshPage()
@@ -188,10 +181,16 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:SectionHeader(parent, SECTION_CHAT, y);  y = y - h
 
-        h = BuildVisibilityRow(W, parent, y, ChatDB, RefreshChat);  y = y - h
-
-        -- Font Size | Background Opacity
         _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Module",
+              getValue=function() local c = ChatDB(); return not (c and c.enabled == false) end,
+              setValue=function(v)
+                  local c = ChatDB(); if not c then return end
+                  c.enabled = v
+                  RefreshChat()
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
             { type="slider", text="Font Size", min=8, max=24, step=1,
               disabled=function() local c = ChatDB(); return c and not c.enabled end,
               disabledTooltip="Module is disabled",
@@ -200,7 +199,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local c = ChatDB(); if not c then return end
                 c.fontSize = v
                 RefreshChat()
-              end },
+              end })
+        y = y - h
+
+        h = BuildVisibilityRow(W, parent, y, ChatDB, RefreshChat);  y = y - h
+
+        -- Background Opacity | Border Color
+        _, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity", min=0, max=1, step=0.05,
               disabled=function() local c = ChatDB(); return c and not c.enabled end,
               disabledTooltip="Module is disabled",
@@ -209,16 +214,11 @@ initFrame:SetScript("OnEvent", function(self)
                 local c = ChatDB(); if not c then return end
                 c.bgAlpha = v
                 RefreshChat()
-              end }
-        );  y = y - h
-
-        -- Border Color | (spacer)
-        _, h = W:DualRow(parent, y,
+              end },
             { type="multiSwatch", text="Border Color",
               disabled=function() local c = ChatDB(); return c and not c.enabled end,
               disabledTooltip="Module is disabled",
-              swatches = MakeBorderSwatch(ChatDB, RefreshChat) },
-            { type="label", text="" }
+              swatches = MakeBorderSwatch(ChatDB, RefreshChat) }
         );  y = y - h
 
         -- Hide Chat Buttons | Hide Tab Flash
@@ -264,6 +264,63 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:SectionHeader(parent, SECTION_MINIMAP, y);  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Module",
+              getValue=function() local m = MinimapDB(); return not (m and m.enabled == false) end,
+              setValue=function(v)
+                  local m = MinimapDB(); if not m then return end
+                  m.enabled = v
+                  if not v and EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "This module requires a UI reload to fully disable.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+                  RefreshMinimap()
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Size", min=100, max=350, step=5,
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.mapSize = v
+                -- Cover the map render during drag to mask the zoom-nudge blink.
+                -- Borders, buttons, etc. remain visible above the overlay.
+                local minimap = _G.Minimap
+                if minimap then
+                    if not minimap._dragOverlay then
+                        local ov = minimap:CreateTexture(nil, "BACKGROUND", nil, 7)
+                        ov:SetAllPoints(minimap)
+                        minimap._dragOverlay = ov
+                    end
+                    local shape = m.shape or "square"
+                    if shape == "circle" or shape == "textured_circle" then
+                        minimap._dragOverlay:SetTexture("Interface\\Common\\CommonMaskCircle")
+                        minimap._dragOverlay:SetVertexColor(0, 0, 0, 1)
+                    else
+                        minimap._dragOverlay:SetColorTexture(0, 0, 0, 1)
+                    end
+                    minimap._dragOverlay:Show()
+                end
+                RefreshMinimap()
+                if not _G._EBS_SizeDragTimer then
+                    _G._EBS_SizeDragTimer = C_Timer.NewTimer(0, function() end)
+                end
+                _G._EBS_SizeDragTimer:Cancel()
+                _G._EBS_SizeDragTimer = C_Timer.NewTimer(0.15, function()
+                    if minimap and minimap._dragOverlay then
+                        minimap._dragOverlay:Hide()
+                    end
+                end)
+              end })
+        y = y - h
+
         h = BuildVisibilityRow(W, parent, y, MinimapDB, RefreshMinimap);  y = y - h
 
         -- Shape | Border Thickness
@@ -290,21 +347,13 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Size | Accent Color
+        -- Accent Color | (spacer)
         _, h = W:DualRow(parent, y,
-            { type="slider", text="Size", min=100, max=350, step=5,
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.mapSize = v
-                RefreshMinimap()
-              end },
             { type="multiSwatch", text="Accent Color",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
-              swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) }
+              swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) },
+            { type="label", text="" }
         );  y = y - h
             
         y = y - 10
@@ -368,10 +417,16 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:SectionHeader(parent, SECTION_FRIENDS, y);  y = y - h
 
-        h = BuildVisibilityRow(W, parent, y, FriendsDB, RefreshFriends);  y = y - h
-
-        -- Background Opacity | Border Color
         _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Module",
+              getValue=function() local f = FriendsDB(); return not (f and f.enabled == false) end,
+              setValue=function(v)
+                  local f = FriendsDB(); if not f then return end
+                  f.enabled = v
+                  RefreshFriends()
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
             { type="slider", text="Background Opacity", min=0, max=1, step=0.05,
               disabled=function() local f = FriendsDB(); return f and not f.enabled end,
               disabledTooltip="Module is disabled",
@@ -380,11 +435,18 @@ initFrame:SetScript("OnEvent", function(self)
                 local f = FriendsDB(); if not f then return end
                 f.bgAlpha = v
                 RefreshFriends()
-              end },
+              end })
+        y = y - h
+
+        h = BuildVisibilityRow(W, parent, y, FriendsDB, RefreshFriends);  y = y - h
+
+        -- Border Color | (spacer)
+        _, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Border Color",
               disabled=function() local f = FriendsDB(); return f and not f.enabled end,
               disabledTooltip="Module is disabled",
-              swatches = MakeBorderSwatch(FriendsDB, RefreshFriends) }
+              swatches = MakeBorderSwatch(FriendsDB, RefreshFriends) },
+            { type="label", text="" }
         );  y = y - h
 
         return math.abs(y)

@@ -8,6 +8,18 @@ local EBS = EllesmereUI.Lite.NewAddon("EllesmereUIBasics")
 
 local PP = EllesmereUI.PP
 
+-- Modules temporarily disabled for public release (Coming Soon).
+-- Force-overrides the per-module "enabled" flag so these do absolutely nothing
+-- regardless of what users have in their SavedVariables.
+local TEMP_DISABLED = {
+    chat    = true,
+    friends = true,
+    -- minimap = true,
+    -- questTracker = true,
+    -- cursor  = true,
+}
+_G._EBS_TEMP_DISABLED = TEMP_DISABLED
+
 local defaults = {
     profile = {
         chat = {
@@ -132,10 +144,10 @@ local defaults = {
             alignment            = "top",
             titleFontSize        = 11,
             titleColor           = { r=1.0,  g=0.91, b=0.47 },
-            objFontSize          = 10,
+            objFontSize          = 11,
             objColor             = { r=0.72, g=0.72, b=0.72 },
             completedColor       = { r=0.25, g=1.0,  b=0.35 },
-            completedFontSize    = 10,
+            completedFontSize    = 11,
             secFontSize          = 12,
             showZoneQuests       = true,
             showWorldQuests      = true,
@@ -402,6 +414,7 @@ end
 
 local function ApplyChat()
     if InCombatLockdown() then QueueApplyAll(); return end
+    if TEMP_DISABLED.chat then return end
 
     local p = EBS.db.profile.chat
 
@@ -1273,6 +1286,7 @@ local function CaptureBlizzardMinimap()
 end
 
 local function ApplyMinimap()
+    if TEMP_DISABLED.minimap then return end
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.minimap
@@ -1284,71 +1298,9 @@ local function ApplyMinimap()
         -- If we never touched the minimap this session, do absolutely nothing.
         -- This ensures zero interference with other minimap addons.
         if not minimap._ebsActive then return end
-
-        -- We previously modified the minimap; undo everything.
-        minimap._ebsActive = false
-
-        -- Restore minimap back to MinimapCluster
-        if MinimapCluster then
-            minimap:SetParent(MinimapCluster)
-            MinimapCluster:Show()
-        end
-        -- Restore default decorations
-        for _, name in ipairs(minimapDecorations) do
-            local frame = _G[name]
-            if frame then frame:Show() end
-        end
-        -- Restore cluster header
-        if MinimapCluster and MinimapCluster.BorderTop then
-            MinimapCluster.BorderTop:Show()
-        end
-        -- Restore AddonCompartmentFrame
-        local compartment = _G.AddonCompartmentFrame
-        if compartment and compartment._ebsOrigParent then
-            compartment:SetParent(compartment._ebsOrigParent)
-            compartment:Show()
-        end
-        -- Restore circular mask
-        minimap:SetMaskTexture(186178)
-        -- Hide our background & border
-        if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
-        if minimap._ppBorders then PP.SetBorderColor(minimap, 0, 0, 0, 0) end
-        if minimap._circBorder then minimap._circBorder:Hide() end
-        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
-        -- Reset scale (size will be restored by MinimapCluster:Layout below)
-        minimap:SetScale(1.0)
-        -- Tear down flyout and restore all buttons
-        HideFlyoutPanel()
-        if flyoutToggle then flyoutToggle:Hide() end
-        ShowAllMinimapButtons()
-        if addonButtonPoll then
-            addonButtonPoll:Hide()
-            addonButtonPoll:UnregisterAllEvents()
-        end
-        -- Restore zone text
-        local zoneBtn = MinimapZoneTextButton
-        if zoneBtn then zoneBtn:Show() end
-        if MinimapCluster and MinimapCluster.ZoneTextButton then
-            MinimapCluster.ZoneTextButton:Show()
-        end
-        if MinimapZoneText then MinimapZoneText:Show() end
-        if coordFrame then coordFrame:Hide() end
-        if coordTicker then coordTicker:Hide() end
-        if clockFrame then clockFrame:Hide() end
-        if clockBg then clockBg:Hide() end
-        if clockTicker then clockTicker:Hide() end
-        if locationFrame then locationFrame:Hide() end
-        if locationBg then locationBg:Hide() end
-        minimap:EnableMouseWheel(false)
-        CancelAutoZoom()
-        RestoreIndicatorFrames()
-        -- Restore default minimap position within cluster
-        minimap:ClearAllPoints()
-        minimap:SetPoint("CENTER", MinimapCluster, "CENTER", 0, 0)
-        -- Trigger cluster layout to restore default positioning
-        if MinimapCluster.Layout then
-            MinimapCluster:Layout()
-        end
+        -- Module was active but is now disabled; a reload is required to
+        -- cleanly hand control back to Blizzard. The options toggle handles
+        -- prompting the user for a reload.
         return
     end
 
@@ -1382,13 +1334,7 @@ local function ApplyMinimap()
         compartment:SetParent(EBS._hiddenFrame)
     end
 
-    -- Shape mask (retail texture IDs: 130937 = square, 186178 = circle)
     local isCircle = (p.shape == "circle" or p.shape == "textured_circle")
-    if isCircle then
-        minimap:SetMaskTexture(186178)
-    else
-        minimap:SetMaskTexture(130937)
-    end
 
     -- Hide background (no black bg behind minimap)
     if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
@@ -1442,10 +1388,30 @@ local function ApplyMinimap()
         minimap._texCircBorder:Show()
     end
 
-    -- Size (always scale 1, resize via SetSize to avoid scale/position bugs)
+    -- Size
     minimap:SetScale(1.0)
     local mapSize = p.mapSize or 140
     minimap:SetSize(mapSize, mapSize)
+    -- Shape mask
+    minimap:SetMaskTexture(isCircle and 186178 or 130937)
+    -- Clamp to screen so the border never extends off-screen
+    minimap:SetClampedToScreen(true)
+    local bInset = isCircle and (p.borderSize or 1) or 0
+    minimap:SetClampRectInsets(-bInset, bInset, bInset, -bInset)
+    -- Force the minimap engine to re-render at the new size. Nudge the zoom
+    -- to a different value now, then restore it on the next rendered frame.
+    -- Doing both in the same frame gets optimized away by the engine.
+    local savedZoom = minimap:GetZoom()
+    local nudgeZoom = savedZoom < minimap:GetZoomLevels() and savedZoom + 1 or savedZoom - 1
+    minimap:SetZoom(nudgeZoom)
+    if not minimap._zoomRestoreFrame then
+        minimap._zoomRestoreFrame = CreateFrame("Frame")
+    end
+    minimap._zoomRestoreFrame._targetZoom = savedZoom
+    minimap._zoomRestoreFrame:SetScript("OnUpdate", function(self)
+        self:SetScript("OnUpdate", nil)
+        minimap:SetZoom(self._targetZoom)
+    end)
 
     -- Flyout toggle button (bottom-left corner) -- create before hiding children
     CreateFlyoutToggle()
@@ -1627,13 +1593,14 @@ local function ApplyMinimap()
         CancelAutoZoom()
     end
 
-    -- Restore saved position (managed by unlock mode)
-    minimap:ClearAllPoints()
-    if p.position then
-        minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
-    else
-        -- Default position: top-right corner (where Blizzard places it)
-        minimap:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -10)
+    -- Position: only set on first activation; after that, unlock mode owns positioning.
+    if not minimap._ebsActive then
+        minimap:ClearAllPoints()
+        if p.position then
+            minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
+        else
+            minimap:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -10)
+        end
     end
 
     -- Mark module as active so persistent hooks know they can fire
@@ -1679,6 +1646,7 @@ end
 -- Live updates: colors, opacity — safe to call repeatedly
 local function ApplyFriends()
     if InCombatLockdown() then QueueApplyAll(); return end
+    if TEMP_DISABLED.friends then return end
 
     local p = EBS.db.profile.friends
 
@@ -1771,7 +1739,7 @@ local function RebuildMouseoverTargets()
     if not EBS.db then return end
     local prof = EBS.db.profile
     -- Chat: use first skinned chat frame as hover anchor, apply alpha to all
-    if prof.chat and prof.chat.enabled and prof.chat.visibility == "mouseover" then
+    if not TEMP_DISABLED.chat and prof.chat and prof.chat.enabled and prof.chat.visibility == "mouseover" then
         for chatFrame in pairs(skinnedChatFrames) do
             mouseoverTargets[#mouseoverTargets + 1] = { frame = chatFrame }
         end
@@ -1783,7 +1751,7 @@ local function RebuildMouseoverTargets()
         end
     end
     -- Friends
-    if prof.friends and prof.friends.enabled and prof.friends.visibility == "mouseover" then
+    if not TEMP_DISABLED.friends and prof.friends and prof.friends.enabled and prof.friends.visibility == "mouseover" then
         if FriendsFrame then
             mouseoverTargets[#mouseoverTargets + 1] = { frame = FriendsFrame }
         end
@@ -1796,6 +1764,7 @@ local function RebuildMouseoverTargets()
 end
 
 local function UpdateChatVisibility()
+    if TEMP_DISABLED.chat then return end
     local p = EBS.db and EBS.db.profile and EBS.db.profile.chat
     if not p or not p.enabled then return end
     local vis = EvalVisibility(p)
@@ -1829,6 +1798,7 @@ local function UpdateMinimapVisibility()
 end
 
 local function UpdateFriendsVisibility()
+    if TEMP_DISABLED.friends then return end
     local p = EBS.db and EBS.db.profile and EBS.db.profile.friends
     if not p or not p.enabled then return end
     if not FriendsFrame or not FriendsFrame:IsShown() then return end
@@ -1840,13 +1810,59 @@ local function UpdateFriendsVisibility()
     end
 end
 
+-- Check if ANY module uses a non-"always" visibility mode that requires event updates
+local function AnyVisibilityActive()
+    if not EBS.db then return false end
+    local prof = EBS.db.profile
+    local function needs(cfg)
+        if not cfg or not cfg.enabled then return false end
+        local m = cfg.visibility or "always"
+        return m ~= "always"
+    end
+    if not TEMP_DISABLED.chat and needs(prof.chat) then return true end
+    if needs(prof.minimap) then return true end
+    if not TEMP_DISABLED.friends and needs(prof.friends) then return true end
+    if needs(prof.questTracker) then return true end
+    if needs(prof.cursor) then return true end
+    return false
+end
+
+-- These high-frequency events are only needed when a module uses conditional visibility
+local visFrame = CreateFrame("Frame")
+-- Always track combat state (cheap: only fires on enter/leave combat)
+visFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+local VIS_EVENTS = {
+    "PLAYER_TARGET_CHANGED",
+    "PLAYER_MOUNT_DISPLAY_CHANGED",
+    "ZONE_CHANGED_NEW_AREA",
+    "GROUP_ROSTER_UPDATE",
+    "UPDATE_SHAPESHIFT_FORM",
+}
+local visEventsRegistered = false
+
+local function UpdateVisEventRegistration()
+    local need = AnyVisibilityActive()
+    if need and not visEventsRegistered then
+        for _, ev in ipairs(VIS_EVENTS) do visFrame:RegisterEvent(ev) end
+        visEventsRegistered = true
+    elseif not need and visEventsRegistered then
+        for _, ev in ipairs(VIS_EVENTS) do visFrame:UnregisterEvent(ev) end
+        visEventsRegistered = false
+    end
+end
+_G._EBS_UpdateVisEventRegistration = UpdateVisEventRegistration
+
 local function UpdateAllVisibility()
+    if not EBS.db then return end
     UpdateChatVisibility()
     UpdateMinimapVisibility()
     UpdateFriendsVisibility()
     if _G._EBS_UpdateQTVisibility then _G._EBS_UpdateQTVisibility() end
     if _G._ECL_UpdateVisibility then _G._ECL_UpdateVisibility() end
     RebuildMouseoverTargets()
+    UpdateVisEventRegistration()
 end
 
 -- Expose globals for options/quest tracker/cursor
@@ -1854,21 +1870,18 @@ _G._EBS_InCombat = function() return _ebsInCombat end
 _G._EBS_UpdateVisibility = UpdateAllVisibility
 _G._EBS_EvalVisibility = EvalVisibility
 
-local visFrame = CreateFrame("Frame")
-visFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-visFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
-visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-visFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+-- Shared callback avoids creating a new closure on every event fire
+local function DeferredUpdateAllVisibility()
+    UpdateAllVisibility()
+end
+
 visFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_REGEN_DISABLED" then
         _ebsInCombat = true
     elseif event == "PLAYER_REGEN_ENABLED" then
         _ebsInCombat = false
     end
-    C_Timer.After(0, UpdateAllVisibility)
+    C_Timer.After(0, DeferredUpdateAllVisibility)
 end)
 
 -------------------------------------------------------------------------------
@@ -1878,7 +1891,8 @@ ApplyAll = function()
     ApplyChat()
     ApplyMinimap()
     ApplyFriends()
-    C_Timer.After(0, UpdateAllVisibility)
+    C_Timer.After(0, DeferredUpdateAllVisibility)
+    UpdateVisEventRegistration()
 end
 
 -------------------------------------------------------------------------------
@@ -1922,7 +1936,7 @@ function EBS:OnEnable()
     ApplyAll()
 
     -- Hook FriendsFrame for load-on-demand (only if friends module is enabled)
-    if EBS.db.profile.friends.enabled then
+    if not TEMP_DISABLED.friends and EBS.db.profile.friends.enabled then
         if not FriendsFrame then
             local hookFrame = CreateFrame("Frame")
             hookFrame:RegisterEvent("ADDON_LOADED")

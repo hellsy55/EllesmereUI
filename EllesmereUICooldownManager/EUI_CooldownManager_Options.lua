@@ -5669,18 +5669,31 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local count = #tracked
 
-            -- Spell columns: enough to fit all spells with full rows
-            local stride = math.ceil(count / numRows)
-            if stride < 1 then stride = 1 end
+            -- Use the same stride logic as the runtime (ComputeTopRowStride)
+            local stride, topRowCount
+            if numRows == 2 and bd.customTopRowEnabled and bd.topRowCount and bd.topRowCount > 0 then
+                topRowCount = math.min(bd.topRowCount, count)
+                local bottomCount = count - topRowCount
+                stride = math.max(topRowCount, bottomCount)
+            else
+                stride = math.ceil(count / numRows)
+                if stride < 1 then stride = 1 end
+                topRowCount = count - (numRows - 1) * stride
+                if topRowCount < 0 then topRowCount = 0 end
+            end
             local gridSlots = (count > 0) and (stride * numRows) or 0
             self._stride = stride
             self._numRows = numRows
             self._gridSlots = gridSlots
 
-            -- How many icons on the top row (remainder). Bottom rows are full.
-            local topRowCount = count - (numRows - 1) * stride
-            if topRowCount < 0 then topRowCount = 0 end
-            local topRowHasLess = (topRowCount > 0 and topRowCount < stride)
+            local bottomRowCount = count - topRowCount
+            if bottomRowCount < 0 then bottomRowCount = 0 end
+
+            -- Per-row icon count for centering
+            local function RowIconCount(row)
+                if row == 0 then return topRowCount end
+                return bottomRowCount
+            end
 
             -- Total dimensions: spell grid + 1 extra slot for the "+" button
             local isVert = (grow == "DOWN" or grow == "UP")
@@ -5710,15 +5723,15 @@ initFrame:SetScript("OnEvent", function(self)
             local startY = -5
 
             -- Position helper: places frame at grid position (col, row).
-            -- Row 0 = top row (partial, centered when fewer icons).
-            -- Rows 1..numRows-1 = bottom rows (always full).
+            -- Center any row that has fewer icons than stride.
             local function PosAtGrid(frame, col, row)
                 PP.Size(frame, iconSize, iconH); frame:ClearAllPoints()
-                -- Centering only applies to top row when it has fewer icons
+                local rowCount = RowIconCount(row)
+                local rowHasLess = (rowCount > 0 and rowCount < stride)
                 local rowOffset = 0
                 if isVert then
-                    if row == 0 and topRowHasLess then
-                        rowOffset = math.floor((stride - topRowCount) * (iconH + spacing) / 2)
+                    if rowHasLess then
+                        rowOffset = math.floor((stride - rowCount) * (iconH + spacing) / 2)
                     end
                     local px = startX + row * (iconSize + spacing)
                     local py
@@ -5731,12 +5744,12 @@ initFrame:SetScript("OnEvent", function(self)
                     frame._baseX = px
                     frame._baseY = py
                 else
-                    if row == 0 and topRowHasLess then
-                        rowOffset = math.floor((stride - topRowCount) * (iconSize + spacing) / 2)
+                    if rowHasLess then
+                        rowOffset = math.floor((stride - rowCount) * (iconSize + spacing) / 2)
                     end
                     local px
                     if grow == "LEFT" then
-                        px = startX + (stride - 1 - col) * (iconSize + spacing) + rowOffset
+                        px = startX + (stride - 1 - col) * (iconSize + spacing) - rowOffset
                     else
                         px = startX + col * (iconSize + spacing) + rowOffset
                     end
@@ -6582,7 +6595,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return BD().numRows or 1 end,
               setValue=function(v)
                   BD().numRows = v
-                  if v ~= 2 then BD().topRowCount = nil end
+                  if v ~= 2 then BD().topRowCount = nil; BD().customTopRowEnabled = nil end
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   EllesmereUI:RefreshPage()
               end },
@@ -6594,16 +6607,28 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
-        -- Inline cog on Number of Rows: Top Row Icons (only relevant when numRows == 2)
+        -- Inline cog on Number of Rows: Custom Top Row Count (only relevant when numRows == 2)
         do
             local leftRgn = numRowsRow._leftRegion
             local ctrl = leftRgn._control
+            local function customTopOff()
+                local bd = BD()
+                return not bd or not bd.customTopRowEnabled
+            end
             local _, topRowCogShow = EllesmereUI.BuildCogPopup({
                 title = "Top Row Icons",
                 rows = {
+                    { type="toggle", label="Custom Top Row Count",
+                      get=function() return BD().customTopRowEnabled end,
+                      set=function(v)
+                          BD().customTopRowEnabled = v
+                          ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                      end },
                     { type="slider", label="Top Row Icons",
                       min=1, max=50, step=1,
                       tooltip="How many icons to show on the top row. The rest go on the bottom row.",
+                      disabled=customTopOff,
+                      disabledTooltip="Enable Custom Top Row Count",
                       get=function()
                           local bd = BD()
                           if bd.topRowCount and bd.topRowCount > 0 then return bd.topRowCount end
@@ -6627,12 +6652,12 @@ initFrame:SetScript("OnEvent", function(self)
                       end },
                 },
             })
-            local cogBtn = MakeCogBtn(leftRgn, topRowCogShow, ctrl)
+            local cogBtn = MakeCogBtn(leftRgn, topRowCogShow, ctrl, EllesmereUI.COGS_ICON)
             -- Disable cog when numRows ~= 2
             local block = CreateFrame("Frame", nil, cogBtn)
             block:SetAllPoints(); block:SetFrameLevel(cogBtn:GetFrameLevel() + 10); block:EnableMouse(true)
             block:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Rows to 2"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option requires exactly 2 rows"))
             end)
             block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()

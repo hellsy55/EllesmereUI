@@ -264,6 +264,7 @@ local function IsAddonLoaded(name)
     return false
 end
 
+
 -------------------------------------------------------------------------------
 --  Forward declarations
 -------------------------------------------------------------------------------
@@ -3572,6 +3573,66 @@ local function CreateMainFrame()
         dlIcon:Hide()
         btn._dlIcon = dlIcon
 
+        -- Power toggle button (not shown for comingSoon or alwaysLoaded entries)
+        if not info.comingSoon and not info.alwaysLoaded then
+            -- Register helper once (on EllesmereUI to avoid new upvalues)
+            if not EllesmereUI._addonToggleInit then
+                EllesmereUI._addonToggleInit = true
+                EllesmereUI.IsAddonEnabled = function(name)
+                    if C_AddOns and C_AddOns.GetAddOnEnableState then
+                        return C_AddOns.GetAddOnEnableState(name) > 0
+                    end
+                    return true
+                end
+            end
+            local pwrBtn = CreateFrame("Button", nil, btn)
+            pwrBtn:SetSize(16, 16)
+            pwrBtn:SetPoint("RIGHT", btn, "RIGHT", -18, 0)
+            pwrBtn:SetFrameLevel(btn:GetFrameLevel() + 5)
+            local pwrTex = pwrBtn:CreateTexture(nil, "ARTWORK")
+            pwrTex:SetAllPoints()
+            pwrTex:SetTexture(ICONS_PATH .. "power.png")
+            pwrTex:SetAlpha(0.75)
+            pwrBtn._tex = pwrTex
+            pwrBtn._folder = info.folder
+            pwrBtn._display = info.display
+            pwrBtn:SetScript("OnEnter", function(self)
+                local enabled = EllesmereUI.IsAddonEnabled(self._folder)
+                if enabled then
+                    self._tex:SetVertexColor(0.824, 0.212, 0.212, 1)
+                else
+                    self._tex:SetVertexColor(0.212, 0.824, 0.325, 1)
+                end
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, enabled and "Disable " .. self._display or "Enable " .. self._display)
+                end
+            end)
+            pwrBtn:SetScript("OnLeave", function(self)
+                self._tex:SetVertexColor(1, 1, 1, 1)
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
+            pwrBtn:SetScript("OnClick", function(self)
+                local enabled = EllesmereUI.IsAddonEnabled(self._folder)
+                local action = enabled and "disable" or "enable"
+                local folder = self._folder
+                EllesmereUI:ShowConfirmPopup({
+                    title       = (enabled and "Disable" or "Enable") .. " Module",
+                    message     = "Are you sure you want to " .. action .. " " .. self._display .. "?",
+                    confirmText = enabled and "Disable & Reload" or "Enable & Reload",
+                    cancelText  = "Cancel",
+                    confirmMacro = "/reload",
+                    onConfirm   = function()
+                        if enabled then
+                            C_AddOns.DisableAddOn(folder)
+                        else
+                            C_AddOns.EnableAddOn(folder)
+                        end
+                    end,
+                })
+            end)
+            btn._pwrBtn = pwrBtn
+        end
+
         -- Default to unloaded appearance (refreshed each time panel opens)
         label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
         icon:SetDesaturated(true)
@@ -3592,13 +3653,7 @@ local function CreateMainFrame()
                 end
                 return
             end
-            -- Show tooltip for disabled (not enabled) addons
-            if self._notEnabled then
-                if EllesmereUI.ShowWidgetTooltip then
-                    EllesmereUI.ShowWidgetTooltip(self, "Enable via Blizzard Addons List")
-                end
-                return
-            end
+            if self._notEnabled then return end
             hlTex:SetAlpha(0.06)
             if activeModule ~= self._folder then
                 self._hoverGlow:Show()
@@ -4378,6 +4433,7 @@ local function CreateMainFrame()
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, textR, textG, textB)
         lbl:SetAlpha(textA); lbl:SetPoint("CENTER"); lbl:SetText(label)
+        btn._label = lbl
         do
             local FADE_DUR = 0.1
             local progress, target = 0, 0
@@ -4400,18 +4456,18 @@ local function CreateMainFrame()
         return btn
     end
 
-    local FOOTER_BTN_W, FOOTER_BTN_H = 170, 36
+    local FOOTER_BTN_W, FOOTER_BTN_H = 180, 36
     local FOOTER_BTN_GAP = 20   -- gap between Reset and Reload
-    local DONE_BTN_W = 145      -- Done button width
+    local DONE_BTN_W = 160      -- Done button width
     local FOOTER_PAD = 24       -- symmetric inset from left/right edges
     local FOOTER_Y   = 24       -- vertical offset from bottom
 
-    -- Reset to Defaults  (left side, FOOTER_PAD from left edge)
+    -- Reset button  (left side, FOOTER_PAD from left edge)
     local resetBtn = MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
         "BOTTOMLEFT", footerFrame, "BOTTOMLEFT", FOOTER_PAD, FOOTER_Y,
         RS_TEXT_R, RS_TEXT_G, RS_TEXT_B, RS_TEXT_A, RS_TEXT_HR, RS_TEXT_HG, RS_TEXT_HB, RS_TEXT_HA,
         RS_BRD_R, RS_BRD_G, RS_BRD_B, RS_BRD_A, RS_BRD_HR, RS_BRD_HG, RS_BRD_HB, RS_BRD_HA,
-        "Reset to Defaults", function()
+        "Reset", function()
             if not activeModule or not modules[activeModule] or not modules[activeModule].onReset then return end
             local config = modules[activeModule]
             local addonTitle = config.title or activeModule
@@ -4432,6 +4488,7 @@ local function CreateMainFrame()
                 end,
             })
         end)
+    footerFrame._resetBtn = resetBtn
 
     -- Reload UI  (next to Reset, 40px gap, same white/muted style)
     MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
@@ -5646,6 +5703,14 @@ function EllesmereUI:SelectModule(folderName)
     local config = modules[folderName]
     UpdateSidebarHighlight(folderName)
     headerFrame._title:SetText(config.title or folderName)
+    local rb = footerFrame and footerFrame._resetBtn
+    if rb and rb._label then
+        local displayName = config.title or folderName
+        for _, entry in ipairs(ADDON_ROSTER) do
+            if entry.folder == folderName then displayName = entry.display; break end
+        end
+        rb._label:SetText("Reset " .. displayName)
+    end
     headerFrame._desc:SetText(config.description or "")
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
     local savedPage = _lastPagePerModule[folderName]
@@ -5712,6 +5777,7 @@ local function RefreshSidebarStates()
         btn._loaded = true
         btn._notEnabled = false
         btn._dlIcon:Hide()
+        if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(1) end
         if folder == activeModule then
             btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
             btn._icon:SetTexture(btn._iconOff)
@@ -5737,6 +5803,7 @@ local function RefreshSidebarStates()
         btn._loaded = false
         btn._notEnabled = true
         btn._dlIcon:Hide()
+        if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(0.5) end
         btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
         btn._icon:SetTexture(btn._iconOff)
         btn._icon:SetDesaturated(true)
@@ -5931,7 +5998,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.4.2"
+EllesmereUI.VERSION = "5.4.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

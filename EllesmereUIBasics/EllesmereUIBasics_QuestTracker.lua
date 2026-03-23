@@ -21,7 +21,28 @@ EQT.rows       = {}
 EQT.sections   = {}
 EQT.itemBtns   = {}
 EQT.timerRows  = {}   -- rows with active timers (need OnUpdate)
-EQT.dirty      = false
+
+-------------------------------------------------------------------------------
+-- Dirty coalescing: replaces per-frame OnUpdate dirty check with C_Timer
+-------------------------------------------------------------------------------
+local _dirtyTimer = nil
+local _structuralDirty = true  -- true = quest list structure changed
+local _timerUpdateFrame        -- forward decl; created in Init
+
+function EQT:SetDirty(structural)
+    if structural then _structuralDirty = true end
+    if _dirtyTimer then _dirtyTimer:Cancel() end
+    _dirtyTimer = C_Timer.NewTimer(0.5, function()
+        _dirtyTimer = nil
+        local wasStructural = _structuralDirty
+        _structuralDirty = false
+        if wasStructural then
+            EQT:Refresh()
+        else
+            EQT:RefreshProgress()
+        end
+    end)
+end
 
 -------------------------------------------------------------------------------
 -- DB
@@ -125,18 +146,16 @@ local function ShowContextMenu(anchor, items)
 
         ctxMenu._items = {}
 
-        -- Close when clicking anywhere outside the menu
-        local clickOff = CreateFrame("Frame")
-        clickOff:SetScript("OnEvent", function()
-            if ctxMenu:IsShown() and not ctxMenu:IsMouseOver() then
-                ctxMenu:Hide()
-            end
+        -- Close when clicking anywhere outside the menu (non-blocking)
+        ctxMenu:HookScript("OnShow", function(self)
+            self:SetScript("OnUpdate", function(self)
+                if not self:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                    self:Hide()
+                end
+            end)
         end)
-        ctxMenu:HookScript("OnShow", function()
-            clickOff:RegisterEvent("GLOBAL_MOUSE_DOWN")
-        end)
-        ctxMenu:HookScript("OnHide", function()
-            clickOff:UnregisterEvent("GLOBAL_MOUSE_DOWN")
+        ctxMenu:HookScript("OnHide", function(self)
+            self:SetScript("OnUpdate", nil)
         end)
     end
 
@@ -286,6 +305,86 @@ end
 
 -- GetProgressBar removed: progress bar logic now lives in BuildEntry
 
+local RemoveWatch  -- forward declaration (used by TitleRowOnClick)
+
+-------------------------------------------------------------------------------
+-- Shared title-row click handler (avoids per-row closure creation)
+-------------------------------------------------------------------------------
+local function TitleRowOnClick(self, btn)
+    local recipeID = self._recipeID
+    if recipeID then
+        local function UntrackRecipe()
+            if C_TradeSkillUI and C_TradeSkillUI.SetRecipeTracked then
+                C_TradeSkillUI.SetRecipeTracked(recipeID, false, self._isRecraft or false)
+                EQT:SetDirty(true)
+            end
+        end
+        if btn == "RightButton" then
+            ShowContextMenu(self, {
+                { text = "Untrack Recipe", onClick = UntrackRecipe },
+            })
+        elseif IsShiftKeyDown() then
+            UntrackRecipe()
+        end
+        return
+    end
+    local qID = self._questID
+    if not qID then return end
+    if btn == "RightButton" then
+        local isFocused = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID() == qID
+        ShowContextMenu(self, {
+            { text = isFocused and "Unfocus" or "Focus", onClick = function()
+                if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+                    if isFocused then
+                        C_SuperTrack.SetSuperTrackedQuestID(0)
+                    else
+                        C_SuperTrack.SetSuperTrackedQuestID(qID)
+                    end
+                end
+            end },
+            { text = "Untrack Quest", onClick = function()
+                RemoveWatch(qID); EQT:SetDirty(true)
+            end },
+            { text = "Abandon Quest", onClick = function()
+                C_QuestLog.SetSelectedQuest(qID)
+                C_QuestLog.SetAbandonQuest()
+                StaticPopup_Show("ABANDON_QUEST", C_QuestLog.GetTitleForQuestID(qID))
+            end },
+        })
+    elseif IsShiftKeyDown() then
+        RemoveWatch(qID); EQT:SetDirty(true)
+    else
+        EQT._suppressDirty = true
+        if EQT._suppressTimer then EQT._suppressTimer:Cancel() end
+        EQT._suppressTimer = C_Timer.NewTimer(0.5, function()
+            EQT._suppressDirty = false; EQT._suppressTimer = nil
+        end)
+        if self._isAutoComplete and self._isComplete then
+            if AutoQuestPopupTracker_RemovePopUp then
+                AutoQuestPopupTracker_RemovePopUp(qID)
+            end
+            if TryCompleteQuest(qID) then return end
+        end
+        if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+            C_SuperTrack.SetSuperTrackedQuestID(qID)
+        end
+        if WorldMapFrame and WorldMapFrame:IsShown() then
+            HideUIPanel(WorldMapFrame)
+        else
+            if C_QuestLog.SetSelectedQuest then
+                C_QuestLog.SetSelectedQuest(qID)
+            end
+            if QuestMapFrame_OpenToQuestDetails then
+                QuestMapFrame_OpenToQuestDetails(qID)
+            elseif OpenQuestLog then
+                OpenQuestLog(qID)
+            elseif WorldMapFrame then
+                ShowUIPanel(WorldMapFrame)
+            end
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Row pool
 -------------------------------------------------------------------------------
@@ -317,7 +416,10 @@ local function AcquireRow(parent)
 end
 local function ReleaseRow(r)
     r.frame:Hide(); r.frame:ClearAllPoints(); r.frame:SetScript("OnClick", nil)
+    r.frame._isAutoComplete = nil; r.frame._isComplete = nil
+    r.frame._recipeID = nil; r.frame._isRecraft = nil
     r._baseR, r._baseG, r._baseB = nil, nil, nil
+    r._rowType = nil; r._objIndex = nil; r._objCount = nil
     if r.numFS then r.numFS:Hide() end
     -- Clean up timer/progressbar sub-widgets
     if r.timerFS     then r.timerFS:Hide()     end
@@ -329,7 +431,7 @@ local function ReleaseRow(r)
     if r.bannerAccent then r.bannerAccent:Hide() end
     if r.bannerIcon  then r.bannerIcon:Hide()  end
     if r.tierFS      then r.tierFS:Hide()      end
-    table.insert(rowPool, r)
+    rowPool[#rowPool + 1] = r
 end
 local function ReleaseAll()
     wipe(EQT.timerRows)
@@ -351,6 +453,17 @@ local function AcquireSection(parent)
         s.line:SetHeight(1)
         s.line:SetPoint("BOTTOMLEFT",  s.frame, "BOTTOMLEFT",  0, 0)
         s.line:SetPoint("BOTTOMRIGHT", s.frame, "BOTTOMRIGHT", 0, 0)
+        -- Shared handlers set once per section frame (read color from s._scR/G/B)
+        s.frame:SetScript("OnEnter", function()
+            if EQT._qtMouseoverIn then EQT._qtMouseoverIn() end
+            if s._scR then
+                s.label:SetTextColor(s._scR + (1 - s._scR) * 0.5, s._scG + (1 - s._scG) * 0.5, s._scB + (1 - s._scB) * 0.5)
+            end
+        end)
+        s.frame:SetScript("OnLeave", function()
+            if EQT._qtMouseoverOut then EQT._qtMouseoverOut() end
+            if s._scR then s.label:SetTextColor(s._scR, s._scG, s._scB) end
+        end)
     end
     s.frame:SetParent(parent); s.frame:EnableMouse(true)
     s.frame:Show(); s.label:Show(); s.arrow:Show(); s.line:Show()
@@ -358,8 +471,9 @@ local function AcquireSection(parent)
 end
 local function ReleaseSection(s)
     s.frame:Hide(); s.frame:ClearAllPoints(); s.frame:SetScript("OnClick", nil)
+    s._scR, s._scG, s._scB = nil, nil, nil
     if s.line then s.line:Hide() end
-    table.insert(secPool, s)
+    secPool[#secPool + 1] = s
 end
 
 -- Item button pool
@@ -397,7 +511,7 @@ local function AcquireItemBtn()
         if EQT._qtMouseoverOut then EQT._qtMouseoverOut() end
         GameTooltip:Hide()
     end)
-    table.insert(allItemBtns, b)
+    allItemBtns[#allItemBtns + 1] = b
     return b
 end
 local function ReleaseItemBtn(b)
@@ -412,7 +526,7 @@ end
 -------------------------------------------------------------------------------
 -- Misc helpers
 -------------------------------------------------------------------------------
-local function RemoveWatch(qID)
+RemoveWatch = function(qID)
     if C_QuestLog and C_QuestLog.RemoveQuestWatch then C_QuestLog.RemoveQuestWatch(qID) end
 end
 
@@ -433,8 +547,54 @@ local function IsInternalTitle(t)
     return false
 end
 
+local _obj_pool = {}
+local _obj_pool_n = 0
+local _entry_pool = {}
+local _entry_pool_n = 0
+
+local function AcquireObj()
+    if _obj_pool_n > 0 then
+        local o = _obj_pool[_obj_pool_n]
+        _obj_pool[_obj_pool_n] = nil
+        _obj_pool_n = _obj_pool_n - 1
+        return o
+    end
+    return {}
+end
+
+local function AcquireEntry()
+    if _entry_pool_n > 0 then
+        local e = _entry_pool[_entry_pool_n]
+        _entry_pool[_entry_pool_n] = nil
+        _entry_pool_n = _entry_pool_n - 1
+        return e
+    end
+    return { objectives = {} }
+end
+
+local function RecycleQuestData(lists)
+    for _, list in ipairs(lists) do
+        for i = 1, #list do
+            local entry = list[i]
+            if entry.objectives then
+                for j = 1, #entry.objectives do
+                    local o = entry.objectives[j]
+                    _obj_pool_n = _obj_pool_n + 1
+                    _obj_pool[_obj_pool_n] = o
+                    entry.objectives[j] = nil
+                end
+            end
+            _entry_pool_n = _entry_pool_n + 1
+            _entry_pool[_entry_pool_n] = entry
+            list[i] = nil
+        end
+    end
+end
+
 local function BuildEntry(info, qID, list)
-    local objs = {}
+    local entry = AcquireEntry()
+    local objs = entry.objectives
+    local objN = 0
     local ot = C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(qID)
     if ot then
         for _, o in ipairs(ot) do
@@ -446,25 +606,24 @@ local function BuildEntry(info, qID, list)
                     nr = 100
                 end
             end
-            table.insert(objs, {
-                text         = o.text or "",
-                finished     = o.finished,
-                objType      = o.type,
-                numFulfilled = nf,
-                numRequired  = nr,
-            })
+            local obj = AcquireObj()
+            obj.text         = o.text or ""
+            obj.finished     = o.finished
+            obj.objType      = o.type
+            obj.numFulfilled = nf
+            obj.numRequired  = nr
+            objN = objN + 1
+            objs[objN] = obj
         end
     end
-    table.insert(list, {
-        index      = #list + 1,
-        title      = (info and info.title) or ("Quest #"..qID),
-        questID    = qID,
-        objectives = objs,
-        isComplete      = C_QuestLog.IsComplete and C_QuestLog.IsComplete(qID) or false,
-        isAutoComplete  = info and info.isAutoComplete or false,
-        isFailed        = info and info.isFailed or false,
-        isTask          = info and info.isTask or false,
-    })
+    entry.index          = #list + 1
+    entry.title          = (info and info.title) or ("Quest #"..qID)
+    entry.questID        = qID
+    entry.isComplete     = C_QuestLog.IsComplete and C_QuestLog.IsComplete(qID) or false
+    entry.isAutoComplete = info and info.isAutoComplete or false
+    entry.isFailed       = info and info.isFailed or false
+    entry.isTask         = info and info.isTask or false
+    list[#list + 1] = entry
 end
 
 -------------------------------------------------------------------------------
@@ -517,9 +676,18 @@ local function AddDelveLivesObjective(objectives, seenText, remaining, maxLives,
     })
 end
 
+local _cachedScenario = nil
+local _scenarioDirty = true
+
+local function InvalidateScenarioCache()
+    _scenarioDirty = true
+end
+
 local function GetScenarioSection()
     if not C_Scenario or not C_Scenario.IsInScenario then return nil end
-    if not C_Scenario.IsInScenario() then return nil end
+    if not C_Scenario.IsInScenario() then _cachedScenario = nil; return nil end
+    if not _scenarioDirty and _cachedScenario then return _cachedScenario end
+    _scenarioDirty = false
 
     -- Step info: stageName, numCriteria, widgetSetID (index 12)
     local ok, stageName, _, numCriteria, _, _, _, _, _, _, _, widgetSetID = pcall(C_Scenario.GetStepInfo)
@@ -736,9 +904,9 @@ local function GetScenarioSection()
     end
 
 
-    if #objectives == 0 and title == "Scenario" then return nil end
+    if #objectives == 0 and title == "Scenario" then _cachedScenario = nil; return nil end
 
-    return {
+    _cachedScenario = {
         title          = title,
         objectives     = objectives,
         isDelve        = isDelve,
@@ -747,15 +915,19 @@ local function GetScenarioSection()
         timerDuration  = timerDuration,
         timerStartTime = timerStartTime,
     }
+    return _cachedScenario
 end
 
 -------------------------------------------------------------------------------
 -- Prey quest detection
 -- Prey quests: Recurring or Meta classification with "Prey" in title,
 -- or weekly/recurring frequency with "Prey" in title.
-local function IsPreyQuest(qID)
+-- @param qID  number  quest ID
+-- @param info table   (optional) C_QuestLog.GetInfo result already fetched by caller
+local function IsPreyQuest(qID, info)
     if not qID then return false end
-    local title = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(qID)
+    local title = info and info.title
+        or (C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(qID))
     if not title or not title:find("Prey", 1, true) then return false end
 
     if C_QuestInfoSystem and C_QuestInfoSystem.GetQuestClassification and Enum and Enum.QuestClassification then
@@ -766,16 +938,20 @@ local function IsPreyQuest(qID)
         end
     end
 
-    local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(qID)
-    if idx then
-        local ok, info = pcall(C_QuestLog.GetInfo, idx)
-        if ok and info and info.frequency ~= nil then
-            local f = info.frequency
-            local isWeekly = f == 2 or f == 3
-                or (Enum and Enum.QuestFrequency and f == Enum.QuestFrequency.Weekly)
-                or (LE_QUEST_FREQUENCY_WEEKLY and f == LE_QUEST_FREQUENCY_WEEKLY)
-            if isWeekly then return true end
+    -- Use caller-provided info when available to avoid redundant GetInfo call
+    local freq = info and info.frequency
+    if freq == nil then
+        local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(qID)
+        if idx then
+            local ok, fetched = pcall(C_QuestLog.GetInfo, idx)
+            if ok and fetched then freq = fetched.frequency end
         end
+    end
+    if freq ~= nil then
+        local isWeekly = freq == 2 or freq == 3
+            or (Enum and Enum.QuestFrequency and freq == Enum.QuestFrequency.Weekly)
+            or (LE_QUEST_FREQUENCY_WEEKLY and freq == LE_QUEST_FREQUENCY_WEEKLY)
+        if isWeekly then return true end
     end
 
     return false
@@ -804,86 +980,141 @@ end
 -- Cleared on zone change or structural quest events.
 local questSectionCache = {}  -- qID -> "watched" | "zone" | "world" | "prey"
 
+-- Shared quest log scan: single iteration used by zone snapshot,
+-- GetQuestLists, and UpdateQuestItemAttribute.
+local _qlScanResult = {}   -- array of {info, index, questID}
+local _qlScanStale = true
+
+local function ScanQuestLog()
+    if not _qlScanStale then return _qlScanResult end
+    _qlScanStale = false
+    local n2 = #_qlScanResult
+    for k = 1, n2 do _qlScanResult[k] = nil end
+    if not C_QuestLog or not C_QuestLog.GetNumQuestLogEntries then return _qlScanResult end
+    local n = C_QuestLog.GetNumQuestLogEntries()
+    local cnt = 0
+    for i = 1, n do
+        local info = C_QuestLog.GetInfo(i)
+        if info and not info.isHeader and not info.isInternalOnly and info.questID then
+            cnt = cnt + 1
+            local e = _qlScanResult[cnt]
+            if not e then e = {}; _qlScanResult[cnt] = e end
+            e.info = info; e.index = i; e.questID = info.questID
+        end
+    end
+    -- Clear excess entries from previous scan
+    for k = cnt + 1, n2 do _qlScanResult[k] = nil end
+    return _qlScanResult
+end
+
+local function InvalidateQuestLogCache()
+    _qlScanStale = true
+end
+
+-- Stable snapshot of which quests are zone-relevant. Built from isOnMap
+-- at cache-clear time only, so super-track changes can't cause flicker.
+local zoneQuestSnapshot = {}  -- qID -> true
+
+local function RebuildZoneSnapshot()
+    wipe(zoneQuestSnapshot)
+    local entries = ScanQuestLog()
+    for _, e in ipairs(entries) do
+        if e.info.isOnMap then
+            zoneQuestSnapshot[e.questID] = true
+        end
+    end
+end
+
 function EQT:ClearSectionCache()
     wipe(questSectionCache)
+    InvalidateQuestLogCache()
+    RebuildZoneSnapshot()
 end
 
 local _ql_watched, _ql_zone, _ql_world, _ql_prey, _ql_seen = {}, {}, {}, {}, {}
+local _questListsCached = false
+
 local function GetQuestLists()
-    local watched = wipe(_ql_watched)
-    local zone    = wipe(_ql_zone)
-    local world   = wipe(_ql_world)
-    local prey    = wipe(_ql_prey)
+    -- Return cached lists for progress-only refreshes
+    if _questListsCached and not _structuralDirty then
+        return _ql_watched, _ql_zone, _ql_world, _ql_prey
+    end
+
+    -- Recycle previous entries back to pools before wiping
+    RecycleQuestData({ _ql_watched, _ql_zone, _ql_world, _ql_prey })
+    local watched = _ql_watched
+    local zone    = _ql_zone
+    local world   = _ql_world
+    local prey    = _ql_prey
     local seen    = wipe(_ql_seen)
 
     if not C_QuestLog then return watched, zone, world, prey end
-    local n = C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetNumQuestLogEntries() or 0
+    local entries = ScanQuestLog()
+    local db = DB()
+    local cfgPrey  = db.showPreyQuests
+    local cfgZone  = db.showZoneQuests
+    local cfgWorld = db.showWorldQuests
 
-    for i = 1, n do
-        local info = C_QuestLog.GetInfo(i)
-        if info and not info.isHeader and not info.isInternalOnly then
-            local qID = info.questID
-            if qID and not seen[qID] then
-                -- isTask quests may have isHidden=true in TWW – allow them through
-                local skipHidden = info.isHidden and not info.isTask
-                if not skipHidden then
-                    local tracked = false
-                    if C_QuestLog.GetQuestWatchType then
-                        local wt = C_QuestLog.GetQuestWatchType(qID)
-                        -- wt ~= nil means the quest is watched (0 = auto, 1 = manual)
-                        tracked = (wt ~= nil)
-                    end
-                    if not tracked and C_QuestLog.IsQuestWatched then
-                        tracked = C_QuestLog.IsQuestWatched(qID) == true
-                    end
+    for _, e in ipairs(entries) do
+        local info = e.info
+        local qID = e.questID
+        if qID and not seen[qID] then
+            -- isTask quests may have isHidden=true in TWW - allow them through
+            local skipHidden = info.isHidden and not info.isTask
+            if not skipHidden then
+                local tracked = false
+                if C_QuestLog.GetQuestWatchType then
+                    local wt = C_QuestLog.GetQuestWatchType(qID)
+                    tracked = (wt ~= nil)
+                end
+                if not tracked and C_QuestLog.IsQuestWatched then
+                    tracked = C_QuestLog.IsQuestWatched(qID) == true
+                end
 
-                    -- Determine which section this quest belongs to
-                    local section
-                    if Cfg("showPreyQuests") and IsPreyQuest(qID) then
-                        section = "prey"
-                    elseif tracked then
-                        if Cfg("showZoneQuests") and info.isOnMap and not info.isTask then
-                            section = "zone"
-                        else
-                            section = "watched"
-                        end
-                    elseif info.isTask then
-                        if Cfg("showWorldQuests") and not IsInternalTitle(info.title) then
-                            section = "world"
-                        end
-                    elseif info.isOnMap then
-                        if Cfg("showZoneQuests") then
-                            section = "zone"
-                        end
-                    end
+                local onMap = zoneQuestSnapshot[qID]
 
-                    if section then
-                        -- Use cached section if available to prevent jumping
-                        local cached = questSectionCache[qID]
-                        if cached then
-                            if cached == "prey" and IsPreyQuest(qID) then section = "prey"
-                            elseif cached == "watched" and tracked then section = "watched"
-                            elseif cached == "zone" and (tracked or info.isOnMap) then section = "zone"
-                            elseif cached == "world" and info.isTask then section = "world"
-                            end
-                        end
-                        questSectionCache[qID] = section
-                        seen[qID] = true
-                        if section == "prey" then
-                            BuildEntry(info, qID, prey)
-                        elseif section == "zone" then
-                            BuildEntry(info, qID, zone)
-                        elseif section == "world" then
-                            BuildEntry(info, qID, world)
-                        else
-                            BuildEntry(info, qID, watched)
-                        end
+                local section
+                if cfgPrey and IsPreyQuest(qID, info) then
+                    section = "prey"
+                elseif tracked then
+                    if cfgZone and onMap and not info.isTask then
+                        section = "zone"
+                    else
+                        section = "watched"
+                    end
+                elseif info.isTask then
+                    if cfgWorld and not IsInternalTitle(info.title) then
+                        section = "world"
+                    end
+                elseif onMap then
+                    if cfgZone then
+                        section = "zone"
+                    end
+                end
+
+                local cached = questSectionCache[qID]
+                if cached then
+                    section = cached
+                end
+
+                if section then
+                    questSectionCache[qID] = section
+                    seen[qID] = true
+                    if section == "prey" then
+                        BuildEntry(info, qID, prey)
+                    elseif section == "zone" then
+                        BuildEntry(info, qID, zone)
+                    elseif section == "world" then
+                        BuildEntry(info, qID, world)
+                    else
+                        BuildEntry(info, qID, watched)
                     end
                 end
             end
         end
     end
 
+    _questListsCached = true
     return watched, zone, world, prey
 end
 
@@ -891,50 +1122,80 @@ end
 -- Tracked Recipes
 -------------------------------------------------------------------------------
 local _recipes = {}
+local _recipe_entries = {}   -- reusable entry tables
+local _reagent_pool = {}     -- reusable reagent tables
+local _reagent_pool_n = 0
+
 local function GetTrackedRecipes()
-    local list = wipe(_recipes)
-    if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipesTracked then return list end
+    -- Recycle reagent tables from previous call
+    for i = 1, #_recipes do
+        local e = _recipes[i]
+        if e and e.reagents then
+            for j = 1, #e.reagents do
+                _reagent_pool_n = _reagent_pool_n + 1
+                _reagent_pool[_reagent_pool_n] = e.reagents[j]
+                e.reagents[j] = nil
+            end
+        end
+        _recipes[i] = nil
+    end
+
+    if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipesTracked then return _recipes end
 
     local tracked = C_TradeSkillUI.GetRecipesTracked(false)
     local recraft = C_TradeSkillUI.GetRecipesTracked(true)
-    if recraft then for _, v in ipairs(recraft) do table.insert(tracked, v) end end
-    if not tracked or #tracked == 0 then return list end
+    if recraft then for _, v in ipairs(recraft) do
+        if type(v) == "table" then v._isRecraft = true end
+        tracked[#tracked + 1] = v
+    end end
+    if not tracked or #tracked == 0 then return _recipes end
 
+    local listN = 0
     for _, tracked_entry in ipairs(tracked) do
         local recipeID = type(tracked_entry) == "table" and (tracked_entry.recipeID or tracked_entry.recipeSchematicID) or tracked_entry
         if recipeID then
             local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
             if ok and schematic then
-                local entry = {
-                    recipeID = recipeID,
-                    name = schematic.name or ("Recipe #"..recipeID),
-                    reagents = {},
-                }
+                listN = listN + 1
+                local entry = _recipe_entries[listN]
+                if not entry then
+                    entry = { reagents = {} }
+                    _recipe_entries[listN] = entry
+                end
+                entry.recipeID = recipeID
+                entry.isRecraft = (type(tracked_entry) == "table" and tracked_entry._isRecraft) or false
+                entry.name = schematic.name or ("Recipe #"..recipeID)
+                local reagentN = 0
                 if schematic.reagentSlotSchematics then
                     for _, slot in ipairs(schematic.reagentSlotSchematics) do
                         if slot.reagentType == 1 and slot.reagents then
                             for _, reagent in ipairs(slot.reagents) do
                                 local itemID = reagent.itemID
                                 if itemID then
-                                    local name = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
-                                    local owned = C_Item.GetItemCount(itemID, true) or 0
-                                    local needed = slot.quantityRequired or 1
-                                    table.insert(entry.reagents, {
-                                        name = name,
-                                        owned = owned,
-                                        needed = needed,
-                                        finished = owned >= needed,
-                                    })
+                                    local r
+                                    if _reagent_pool_n > 0 then
+                                        r = _reagent_pool[_reagent_pool_n]
+                                        _reagent_pool[_reagent_pool_n] = nil
+                                        _reagent_pool_n = _reagent_pool_n - 1
+                                    else
+                                        r = {}
+                                    end
+                                    r.name = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
+                                    r.owned = C_Item.GetItemCount(itemID, true) or 0
+                                    r.needed = slot.quantityRequired or 1
+                                    r.finished = r.owned >= r.needed
+                                    reagentN = reagentN + 1
+                                    entry.reagents[reagentN] = r
                                 end
                             end
                         end
                     end
                 end
-                table.insert(list, entry)
+                _recipes[listN] = entry
             end
         end
     end
-    return list
+    return _recipes
 end
 
 -------------------------------------------------------------------------------
@@ -955,12 +1216,23 @@ local UpdateInnerAlignment
 function EQT:Refresh(skipAlphaFlash)
     local f = self.frame
     if not f then return end
+    -- Full rebuild: invalidate caches so data is fresh
+    InvalidateQuestLogCache()
+    _questListsCached = false
+    _structuralDirty = false
     local content = f.content
-    local width   = Cfg("width") or 325
-    local tc      = Cfg("titleColor")
-    local oc      = Cfg("objColor")
-    local cc      = Cfg("completedColor") or C.complete
-    local iqSize  = Cfg("questItemSize") or 22
+    -- Cache DB once for entire refresh
+    local db      = DB()
+    local width   = db.width or 325
+    local tc      = db.titleColor  or C.header
+    local oc      = db.objColor    or { r=0.9, g=0.9, b=0.9 }
+    local cc      = db.completedColor or C.complete
+    local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
+    local ffs     = db.focusedFontSize
+    local iqSize  = db.questItemSize or 22
+    local sc      = db.secColor or C.section
+    local compFS  = db.completedFontSize
+    local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
 
     -- Hide content during teardown+rebuild to prevent single-frame flicker.
     -- Skip when triggered by resize (content is already visible at ~correct size).
@@ -969,10 +1241,9 @@ function EQT:Refresh(skipAlphaFlash)
     ReleaseAll(); ReleaseAllItems()
     for i = #self.sections, 1, -1 do ReleaseSection(self.sections[i]); self.sections[i] = nil end
 
-    if f.bg then f.bg:SetColorTexture(Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0, Cfg("bgAlpha") or 0.35) end
+    if f.bg then f.bg:SetColorTexture(db.bgR or 0, db.bgG or 0, db.bgB or 0, db.bgAlpha or 0.35) end
     if f.topLine then
-        local tlc = Cfg("secColor") or C.section
-        f.topLine:SetColorTexture(tlc.r, tlc.g, tlc.b, 0.7)
+        f.topLine:SetColorTexture(sc.r, sc.g, sc.b, 0.7)
     end
     f:SetWidth(width)
     local contentW = math.max(10, width - PAD_H * 2 - 10)
@@ -984,12 +1255,13 @@ function EQT:Refresh(skipAlphaFlash)
     local sfp, sfs, sff = SecFont()
     local arrowSize = math.max(sfs + 4, 13)
     local arrowFont = SafeFont(GlobalFont())
+    local scR, scG, scB = sc.r, sc.g, sc.b
 
     local function AddCollapsibleSection(label, isCollapsed, onToggle)
         local s = AcquireSection(content)
+        s._scR, s._scG, s._scB = scR, scG, scB
         SetFontSafe(s.label, sfp, sfs, sff)
-        local sc = Cfg("secColor") or C.section
-        s.label:SetTextColor(sc.r, sc.g, sc.b)
+        s.label:SetTextColor(scR, scG, scB)
         ApplyFontShadow(s.label)
         s.label:SetText(label)
         s.label:ClearAllPoints()
@@ -1001,16 +1273,7 @@ function EQT:Refresh(skipAlphaFlash)
         s.arrow:ClearAllPoints()
         s.arrow:SetPoint("RIGHT", s.frame, "RIGHT", 0, 3)
         s.arrow:SetWidth(arrowSize + 4)
-        s.line:SetColorTexture(sc.r, sc.g, sc.b, 0.4)
-        local br, bg, bb = sc.r, sc.g, sc.b
-        s.frame:SetScript("OnEnter", function()
-            if EQT._qtMouseoverIn then EQT._qtMouseoverIn() end
-            s.label:SetTextColor(br + (1 - br) * 0.5, bg + (1 - bg) * 0.5, bb + (1 - bb) * 0.5)
-        end)
-        s.frame:SetScript("OnLeave", function()
-            if EQT._qtMouseoverOut then EQT._qtMouseoverOut() end
-            s.label:SetTextColor(br, bg, bb)
-        end)
+        s.line:SetColorTexture(scR, scG, scB, 0.4)
         local textH = math.max(sfs + 6, arrowSize + 2)
         local h = textH + 5 + 1
         s.frame:SetHeight(h)
@@ -1018,36 +1281,27 @@ function EQT:Refresh(skipAlphaFlash)
         s.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -yOff)
         s.frame:SetScript("OnClick", onToggle)
         yOff = yOff + h + SEC_GAP
-        table.insert(self.sections, s)
+        self.sections[#self.sections + 1] = s
     end
 
     local function AddPlainSection(label)
         local s = AcquireSection(content)
+        s._scR, s._scG, s._scB = scR, scG, scB
         SetFontSafe(s.label, sfp, sfs, sff)
-        local sc2 = Cfg("secColor") or C.section
-        s.label:SetTextColor(sc2.r, sc2.g, sc2.b)
+        s.label:SetTextColor(scR, scG, scB)
         s.label:SetText(label)
         s.label:ClearAllPoints()
         s.label:SetPoint("LEFT",  s.frame, "LEFT",  0, 3)
         s.label:SetPoint("RIGHT", s.frame, "RIGHT", 0, 3)
         SetFontSafe(s.arrow, sfp, sfs, sff); s.arrow:SetText("")
-        s.line:SetColorTexture(sc2.r, sc2.g, sc2.b, 0.4)
-        local br, bg, bb = sc2.r, sc2.g, sc2.b
-        s.frame:SetScript("OnEnter", function()
-            if EQT._qtMouseoverIn then EQT._qtMouseoverIn() end
-            s.label:SetTextColor(br + (1 - br) * 0.5, bg + (1 - bg) * 0.5, bb + (1 - bb) * 0.5)
-        end)
-        s.frame:SetScript("OnLeave", function()
-            if EQT._qtMouseoverOut then EQT._qtMouseoverOut() end
-            s.label:SetTextColor(br, bg, bb)
-        end)
+        s.line:SetColorTexture(scR, scG, scB, 0.4)
         local textH = math.max(sfs + 6, 12)
         local h = textH + 5 + 1
         s.frame:SetHeight(h)
         s.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
         s.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -yOff)
         yOff = yOff + h + SEC_GAP
-        table.insert(self.sections, s)
+        self.sections[#self.sections + 1] = s
     end
 
     local tfp, tfs, tff = TitleFont()
@@ -1126,9 +1380,9 @@ function EQT:Refresh(skipAlphaFlash)
         UpdateTimer()
 
         yOff = yOff + TOTAL_H + ROW_GAP + 2
-        table.insert(self.rows, r)
+        self.rows[#self.rows + 1] = r
         r._updateTimer = UpdateTimer
-        table.insert(self.timerRows, r)
+        self.timerRows[#self.timerRows + 1] = r
     end
 
     -- Progress bar row
@@ -1181,20 +1435,22 @@ function EQT:Refresh(skipAlphaFlash)
         r.frame:SetHeight(rh)
         r.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
         r.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -yOff)
+        r._rowType = "progress"
+        r.frame._questID = _curObjQuestID
+        r._objIndex = _curObjIndex
         yOff = yOff + rh + ROW_GAP
-        table.insert(self.rows, r)
+        self.rows[#self.rows + 1] = r
     end
 
-    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete)
+    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft)
         local r = AcquireRow(content)
-        local fontSize = isComplete and (Cfg("completedFontSize") or tfs) or tfs
-        SetFontSafe(r.text, tfp, fontSize, tff)
+        SetFontSafe(r.text, tfp, tfs, tff)
         r.text:SetTextColor(cr, cg, cb)
         r._baseR, r._baseG, r._baseB = cr, cg, cb
         ApplyFontShadow(r.text)
         r.text:SetText(text)
         r.text:Show()
-        local item = Cfg("showQuestItems") and qID and GetQuestItem(qID)
+        local item = db.showQuestItems and qID and GetQuestItem(qID)
         local rightPad = item and (iqSize + ITEM_PAD * 2) or 0
         r.text:ClearAllPoints()
         r.text:SetPoint("TOPLEFT",  r.frame, "TOPLEFT",  2, 0)
@@ -1229,74 +1485,32 @@ function EQT:Refresh(skipAlphaFlash)
                 end
                 btn._chargeFS:SetText(item.charges); btn._chargeFS:Show()
             elseif btn._chargeFS then btn._chargeFS:Hide() end
-            table.insert(self.itemBtns, btn)
+            self.itemBtns[#self.itemBtns + 1] = btn
         end
         if qID then
             r.frame._questID = qID; r.frame:EnableMouse(true)
+            r.frame._isAutoComplete = isAutoComplete
+            r.frame._isComplete = isComplete
             r.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            r.frame:SetScript("OnClick", function(self, btn)
-                if btn == "RightButton" then
-                    ShowContextMenu(self, {
-                        { text = "Focus", onClick = function()
-                            if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
-                                C_SuperTrack.SetSuperTrackedQuestID(qID)
-                            end
-                        end },
-                        { text = "Untrack Quest", onClick = function()
-                            RemoveWatch(qID); EQT.dirty = true
-                        end },
-                        { text = "Abandon Quest", onClick = function()
-                            C_QuestLog.SetSelectedQuest(qID)
-                            C_QuestLog.SetAbandonQuest()
-                            StaticPopup_Show("ABANDON_QUEST", C_QuestLog.GetTitleForQuestID(qID))
-                        end },
-                    })
-                elseif IsShiftKeyDown() then
-                    RemoveWatch(qID); EQT.dirty = true
-                else
-                    -- Suppress refresh so QUEST_LOG_UPDATE from SetSelectedQuest
-                    -- doesn't rebuild the list and cause quests to jump
-                    EQT._suppressDirty = true
-                    if EQT._suppressTimer then EQT._suppressTimer:Cancel() end
-                    EQT._suppressTimer = C_Timer.NewTimer(0.5, function()
-                        EQT._suppressDirty = false; EQT._suppressTimer = nil
-                    end)
-                    -- Auto-complete quests: open the completion dialog directly
-                    if isAutoComplete and isComplete then
-                        if AutoQuestPopupTracker_RemovePopUp then
-                            AutoQuestPopupTracker_RemovePopUp(qID)
-                        end
-                        if TryCompleteQuest(qID) then return end
-                    end
-                    -- Set waypoint to clicked quest
-                    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
-                        C_SuperTrack.SetSuperTrackedQuestID(qID)
-                    end
-                    -- Toggle map: close if already open to this quest, open otherwise
-                    if WorldMapFrame and WorldMapFrame:IsShown() then
-                        HideUIPanel(WorldMapFrame)
-                    else
-                        if C_QuestLog.SetSelectedQuest then
-                            C_QuestLog.SetSelectedQuest(qID)
-                        end
-                        if QuestMapFrame_OpenToQuestDetails then
-                            QuestMapFrame_OpenToQuestDetails(qID)
-                        elseif OpenQuestLog then
-                            OpenQuestLog(qID)
-                        elseif WorldMapFrame then
-                            ShowUIPanel(WorldMapFrame)
-                        end
-                    end
-                end
-            end)
+            r.frame:SetScript("OnClick", TitleRowOnClick)
+        elseif recipeID then
+            r.frame._recipeID = recipeID; r.frame:EnableMouse(true)
+            r.frame._isRecraft = isRecraft or false
+            r.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            r.frame:SetScript("OnClick", TitleRowOnClick)
         end
+        r._rowType = "title"
         yOff = yOff + rh + ROW_GAP
-        table.insert(self.rows, r)
+        self.rows[#self.rows + 1] = r
     end
 
-    local function AddObjRow(text, cr, cg, cb)
+    local _curObjQuestID = nil  -- set by RenderList before objectives
+    local _curObjIndex = 0
+
+    local function AddObjRow(text, cr, cg, cb, isFinished)
         local r = AcquireRow(content)
-        SetFontSafe(r.text, ofp, ofs, off)
+        local objFS = isFinished and (compFS or ofs) or ofs
+        SetFontSafe(r.text, ofp, objFS, off)
         r.text:SetTextColor(cr, cg, cb)
         ApplyFontShadow(r.text)
         r.text:SetText(text)
@@ -1312,17 +1526,37 @@ function EQT:Refresh(skipAlphaFlash)
         local th = r.text:GetStringHeight()
         if th < ofs then th = ofs end
         local rh = th + 4; r.frame:SetHeight(rh); r.text:SetHeight(rh)
+        r._rowType = "obj"
+        r.frame._questID = _curObjQuestID
+        r._objIndex = _curObjIndex
         yOff = yOff + rh + ROW_GAP
-        table.insert(self.rows, r)
+        self.rows[#self.rows + 1] = r
     end
 
     local function RenderList(list, startIdx)
         for i, q in ipairs(list) do
             local tr, tg, tb
+            local isFocused = superQID and q.questID == superQID
             if q.isFailed then tr, tg, tb = C.failed.r, C.failed.g, C.failed.b
             elseif q.isComplete then tr, tg, tb = cc.r, cc.g, cc.b
+            elseif isFocused then tr, tg, tb = fc.r, fc.g, fc.b
             else tr, tg, tb = tc.r, tc.g, tc.b end
+            -- Override font size for focused quest
+            local prevTfs
+            if isFocused and ffs then
+                prevTfs = tfs
+                tfs = ffs
+            end
             AddTitleRow(((startIdx or 0)+i).."  "..q.title, tr, tg, tb, q.questID, q.isAutoComplete, q.isComplete)
+            if prevTfs then tfs = prevTfs end
+
+            -- Store objective count on the title row for change detection
+            local titleRow = self.rows[#self.rows]
+            if titleRow then titleRow._objCount = #q.objectives end
+
+            -- Set current quest context for objective row tagging
+            _curObjQuestID = q.questID
+            _curObjIndex = 0
 
             -- Timer (for world/task quests)
             if q.isTask then
@@ -1331,6 +1565,7 @@ function EQT:Refresh(skipAlphaFlash)
 
             -- Objectives
             for _, obj in ipairs(q.objectives) do
+                _curObjIndex = _curObjIndex + 1
                 if obj.objType == "progressbar" and obj.numRequired and obj.numRequired > 0 then
                     -- Show progress bar instead of text
                     AddProgressRow(obj.numFulfilled or 0, obj.numRequired)
@@ -1339,10 +1574,11 @@ function EQT:Refresh(skipAlphaFlash)
                     local cg = obj.finished and cc.g or oc.g
                     local cb = obj.finished and cc.b or oc.b
                     if obj.text and obj.text ~= "" then
-                        AddObjRow(obj.text, cr, cg, cb)
+                        AddObjRow(obj.text, cr, cg, cb, obj.finished)
                     end
                 end
             end
+            _curObjQuestID = nil
             yOff = yOff + 3
         end
     end
@@ -1353,18 +1589,18 @@ function EQT:Refresh(skipAlphaFlash)
 
     -- Recipe Tracking section (top of tracker)
     if #recipes > 0 then
-        local rc = Cfg("recipesCollapsed") or false
+        local rc = db.recipesCollapsed or false
         AddCollapsibleSection("RECIPE TRACKING", rc, function()
-            DB().recipesCollapsed = not Cfg("recipesCollapsed"); EQT:Refresh()
+            DB().recipesCollapsed = not DB().recipesCollapsed; EQT:Refresh()
         end)
         if not rc then
             for _, recipe in ipairs(recipes) do
-                AddTitleRow(recipe.name, tc.r, tc.g, tc.b)
+                AddTitleRow(recipe.name, tc.r, tc.g, tc.b, nil, nil, nil, recipe.recipeID, recipe.isRecraft)
                 for _, reagent in ipairs(recipe.reagents) do
                     local cr = reagent.finished and cc.r or oc.r
                     local cg = reagent.finished and cc.g or oc.g
                     local cb = reagent.finished and cc.b or oc.b
-                    AddObjRow(reagent.owned.."/"..reagent.needed.." "..reagent.name, cr, cg, cb)
+                    AddObjRow(reagent.owned.."/"..reagent.needed.." "..reagent.name, cr, cg, cb, reagent.finished)
                 end
                 yOff = yOff + 3
             end
@@ -1379,9 +1615,9 @@ function EQT:Refresh(skipAlphaFlash)
         -- Collapsible "DELVES" section header (only for delves, plain for other scenarios)
         local dc = false
         if scenario.isDelve then
-            dc = Cfg("delveCollapsed") or false
+            dc = db.delveCollapsed or false
             AddCollapsibleSection("DELVES", dc, function()
-                DB().delveCollapsed = not Cfg("delveCollapsed"); EQT:Refresh()
+                DB().delveCollapsed = not DB().delveCollapsed; EQT:Refresh()
             end)
         end
 
@@ -1441,7 +1677,7 @@ function EQT:Refresh(skipAlphaFlash)
             end
 
             -- Title text (vertically centered in banner)
-            local bc = Cfg("titleColor") or {r=1.0,g=0.82,b=0.0}
+            local bc = tc
             local leftPad = 10
             SetFontSafe(r.text, tfp, tfs + 2, tff)
             r.text:SetTextColor(bc.r, bc.g, bc.b)
@@ -1455,7 +1691,7 @@ function EQT:Refresh(skipAlphaFlash)
             ApplyFontShadow(r.text)
 
             yOff = yOff + BANNER_H + 6  -- extra gap below banner
-            table.insert(self.rows, r)
+            self.rows[#self.rows + 1] = r
         else
             AddPlainSection(scenario.title)
         end
@@ -1487,45 +1723,52 @@ function EQT:Refresh(skipAlphaFlash)
     -- Order: Recipes (top), Delves, Zone Quests, World Quests, Quests (bottom)
     local anyAbove = #recipes > 0 or scenario ~= nil
 
-    if Cfg("showPreyQuests") and #prey > 0 then
+    if db.showPreyQuests and #prey > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
-        local pc = Cfg("preyCollapsed") or false
+        local pc = db.preyCollapsed or false
         AddCollapsibleSection("PREYS", pc, function()
-            DB().preyCollapsed = not Cfg("preyCollapsed"); EQT:Refresh()
+            DB().preyCollapsed = not DB().preyCollapsed; EQT:Refresh()
         end)
         if not pc then RenderList(prey, 0) end
     end
-    if Cfg("showZoneQuests") and #zone > 0 then
+    if db.showZoneQuests and #zone > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
-        local zc = Cfg("zoneCollapsed") or false
+        local zc = db.zoneCollapsed or false
         AddCollapsibleSection("ZONE QUESTS", zc, function()
-            DB().zoneCollapsed = not Cfg("zoneCollapsed"); EQT:Refresh()
+            DB().zoneCollapsed = not DB().zoneCollapsed; EQT:Refresh()
         end)
         if not zc then RenderList(zone, 0) end
     end
-    if Cfg("showWorldQuests") and #world > 0 then
+    if db.showWorldQuests and #world > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
-        local wc = Cfg("worldCollapsed") or false
+        local wc = db.worldCollapsed or false
         AddCollapsibleSection("WORLD QUESTS", wc, function()
-            DB().worldCollapsed = not Cfg("worldCollapsed"); EQT:Refresh()
+            DB().worldCollapsed = not DB().worldCollapsed; EQT:Refresh()
         end)
         if not wc then RenderList(world, 0) end
     end
     if #watched > 0 then
         if anyAbove then yOff = yOff + 4 end
-        local qc = Cfg("questsCollapsed") or false
+        local qc = db.questsCollapsed or false
         AddCollapsibleSection("QUESTS", qc, function()
-            DB().questsCollapsed = not Cfg("questsCollapsed"); EQT:Refresh()
+            DB().questsCollapsed = not DB().questsCollapsed; EQT:Refresh()
         end)
         if not qc then RenderList(watched, 0) end
     end
-    if not scenario and #watched == 0 and #zone == 0 and #world == 0 and #prey == 0 and #recipes == 0 then
-        AddObjRow("No tracked quests.", oc.r, oc.g, oc.b)
+    local hasContent = scenario or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0
+    if not hasContent then
+        if f.inner then f.inner:Hide() end
+        if f.bg then f.bg:Hide() end
+        if f.topLine then f.topLine:Hide() end
+        return
     end
+    if f.inner then f.inner:Show() end
+    if f.bg then f.bg:Show() end
+    if f.topLine and (db.showTopLine ~= false) then f.topLine:Show() end
 
     content:SetHeight(math.max(yOff, 1))
     local totalH = PAD_V + 2 + yOff + PAD_V + 5
-    local maxH = Cfg("height") or 500
+    local maxH = db.height or 500
     -- Outer frame stays at max height (consistent with unlock mode)
     f:SetHeight(maxH)
     -- Inner frame auto-collapses to content
@@ -1545,6 +1788,131 @@ function EQT:Refresh(skipAlphaFlash)
 
     -- Restore visibility after rebuild is complete (prevents teardown flicker)
     if f.inner and not skipAlphaFlash then f.inner:SetAlpha(1) end
+
+    -- Show/hide timer update frame
+    if _timerUpdateFrame then
+        if #self.timerRows > 0 then _timerUpdateFrame:Show()
+        else _timerUpdateFrame:Hide() end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- RefreshProgress: lightweight in-place update for non-structural changes
+-- Re-queries objective data and updates existing row text/colors without
+-- tearing down and rebuilding the entire UI.
+-------------------------------------------------------------------------------
+function EQT:RefreshProgress()
+    local f = self.frame
+    if not f then return end
+    if #self.rows == 0 then self:Refresh(); return end
+
+    InvalidateQuestLogCache()
+
+    local db      = DB()
+    local tc      = db.titleColor  or C.header
+    local oc      = db.objColor    or { r=0.9, g=0.9, b=0.9 }
+    local cc      = db.completedColor or C.complete
+    local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
+    local ffs     = db.focusedFontSize
+    local compFS  = db.completedFontSize
+    local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
+
+    -- Build a map of qID -> fresh objectives
+    local freshObjs = {}
+    local freshComplete = {}
+    local freshFailed = {}
+    local objCountChanged = false
+    if C_QuestLog and C_QuestLog.GetQuestObjectives then
+        for _, r in ipairs(self.rows) do
+            local qID = r.frame._questID
+            if qID and not freshObjs[qID] then
+                local ot = C_QuestLog.GetQuestObjectives(qID)
+                freshObjs[qID] = ot or {}
+                freshComplete[qID] = C_QuestLog.IsComplete and C_QuestLog.IsComplete(qID) or false
+                -- Get isFailed from quest log info
+                local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(qID)
+                if idx and idx > 0 then
+                    local info = C_QuestLog.GetInfo(idx)
+                    freshFailed[qID] = info and info.isFailed or false
+                end
+                -- Check if objective count changed (structural change via progress event)
+                local oldCount = r._objCount
+                if oldCount and ot and #ot ~= oldCount then
+                    objCountChanged = true
+                end
+            end
+        end
+    end
+
+    -- If objective count changed, fall through to full rebuild
+    if objCountChanged then
+        _structuralDirty = true
+        self:Refresh()
+        return
+    end
+
+    -- Update rows in-place
+    local tfp, tfs, tff = TitleFont()
+    local ofp, ofs, off = ObjFont()
+
+    for _, r in ipairs(self.rows) do
+        local qID = r.frame._questID
+        if qID and r._rowType == "title" then
+            local isFocused = superQID and qID == superQID
+            local isComp = freshComplete[qID]
+            local isFail = freshFailed[qID]
+            local tr, tg, tb
+            if isFail then tr, tg, tb = C.failed.r, C.failed.g, C.failed.b
+            elseif isComp then tr, tg, tb = cc.r, cc.g, cc.b
+            elseif isFocused then tr, tg, tb = fc.r, fc.g, fc.b
+            else tr, tg, tb = tc.r, tc.g, tc.b end
+            r.text:SetTextColor(tr, tg, tb)
+            r._baseR, r._baseG, r._baseB = tr, tg, tb
+            if isFocused and ffs then
+                SetFontSafe(r.text, tfp, ffs, tff)
+            else
+                SetFontSafe(r.text, tfp, tfs, tff)
+            end
+        elseif qID and r._rowType == "obj" then
+            local objs = freshObjs[qID]
+            local objIdx = r._objIndex
+            if objs and objIdx and objs[objIdx] then
+                local o = objs[objIdx]
+                local finished = o.finished
+                local cr = finished and cc.r or oc.r
+                local cg = finished and cc.g or oc.g
+                local cb = finished and cc.b or oc.b
+                r.text:SetTextColor(cr, cg, cb)
+                if o.text and o.text ~= "" then
+                    r.text:SetText(o.text)
+                end
+                local objFS = finished and (compFS or ofs) or ofs
+                SetFontSafe(r.text, ofp, objFS, off)
+            end
+        elseif qID and r._rowType == "progress" then
+            local objs = freshObjs[qID]
+            local objIdx = r._objIndex
+            if objs and objIdx and objs[objIdx] then
+                local o = objs[objIdx]
+                local nf = o.numFulfilled or 0
+                local nr = o.numRequired or 1
+                if o.type == "progressbar" then
+                    local pct = GetQuestProgressBarPercent(qID)
+                    if pct then nf = pct; nr = 100 end
+                end
+                local pct = math.max(0, math.min(1, nf / nr))
+                if r.barFill and r.barBg then
+                    local barW = r.barBg:GetWidth()
+                    if barW and barW > 0 then
+                        r.barFill:SetWidth(math.max(1, barW * pct))
+                    end
+                end
+                if r.pctFS then
+                    r.pctFS:SetText(math.floor(pct * 100 + 0.5).."%")
+                end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1554,7 +1922,7 @@ UpdateInnerAlignment = function(f)
     local inner = f.inner
     if not inner then return end
     inner:ClearAllPoints()
-    local align = Cfg("alignment") or "top"
+    local align = DB().alignment or "top"
     if align == "bottom" then
         inner:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  0, 0)
         inner:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
@@ -1846,7 +2214,7 @@ local function RegisterSlash()
         msg = strtrim(msg or ""):lower()
         if msg == "" or msg == "toggle" then
             local f = EQT.frame
-            if f then if f:IsShown() then f:Hide() else f:Show(); EQT:Refresh() end end
+            if f and not InCombatLockdown() then if f:IsShown() then f:Hide() else f:Show(); EQT:Refresh() end end
         elseif msg == "reset" then
             DB().pos = nil; EQT:ApplyPosition()
         end
@@ -1903,6 +2271,7 @@ local function IsInHiddenInstance()
 end
 
 function EQT:Init()
+    if _G._EBS_TEMP_DISABLED and _G._EBS_TEMP_DISABLED.questTracker then return end
     DB()
     EQT.sections  = EQT.sections  or {}
     EQT.itemBtns  = EQT.itemBtns  or {}
@@ -1978,6 +2347,7 @@ function EQT:Init()
 
     local function UpdateQTVisibility()
         if not EQT.frame then return end
+        if InCombatLockdown() then return end
         if Cfg("enabled") == false then EQT.frame:Hide(); qtMouseoverActive = false; return end
         if IsInHiddenInstance() then EQT.frame:Hide(); qtMouseoverActive = false; return end
         local qt = DB()
@@ -2048,8 +2418,9 @@ function EQT:Init()
     zoneFrame:SetScript("OnEvent", function()
         -- Zone changed: clear section cache so quests re-categorize
         EQT:ClearSectionCache()
-        C_Timer.After(0.5,  function() EQT.dirty = true end)
-        C_Timer.After(2.0,  function() EQT.dirty = true end)
+        EQT:SetDirty(true)
+        C_Timer.After(0.5,  function() InvalidateQuestLogCache(); RebuildZoneSnapshot(); EQT:SetDirty(true) end)
+        C_Timer.After(2.0,  function() InvalidateQuestLogCache(); RebuildZoneSnapshot(); EQT:SetDirty(true) end)
     end)
 
     -- Structural events always trigger a rebuild (quest actually added/removed)
@@ -2061,16 +2432,37 @@ function EQT:Init()
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
     }
+    local SCENARIO_EVENTS = {
+        SCENARIO_CRITERIA_UPDATE = true,
+        SCENARIO_UPDATE = true,
+        SCENARIO_COMPLETED = true,
+        PLAYER_ENTERING_WORLD = true,
+    }
     w:SetScript("OnEvent", function(_, event)
+        -- Super-tracking changes only need a visual refresh (focused highlight),
+        -- NOT a full quest re-sort, because isOnMap flags shift with focus and
+        -- would cause quests to jump between sections.
+        if event == "SUPER_TRACKING_CHANGED" then
+            EQT:RefreshProgress()
+            return
+        end
         -- Non-structural events (progress, selection, POI) are suppressible
         if EQT._suppressDirty and not STRUCTURAL_EVENTS[event] then
             return
         end
         -- Structural events clear section cache so quests re-categorize
-        if STRUCTURAL_EVENTS[event] then
+        local isStructural = STRUCTURAL_EVENTS[event]
+        if isStructural then
+            _questListsCached = false
             EQT:ClearSectionCache()
         end
-        EQT.dirty = true
+        -- Invalidate scenario cache only on scenario-related events
+        if SCENARIO_EVENTS[event] then
+            InvalidateScenarioCache()
+        end
+        -- Invalidate quest log cache so next scan re-reads
+        InvalidateQuestLogCache()
+        EQT:SetDirty(isStructural)
         if event == "PLAYER_ENTERING_WORLD" then
             -- First install: snapshot Blizzard tracker position before we hide it
             if EQT._needsCapture then
@@ -2089,54 +2481,112 @@ function EQT:Init()
     -- Fully suspend/resume quest tracking when hidden/shown
     self.frame:HookScript("OnHide", function()
         UnregisterQTEvents()
+        if _dirtyTimer then _dirtyTimer:Cancel(); _dirtyTimer = nil end
+        if _timerUpdateFrame then _timerUpdateFrame:Hide() end
     end)
     self.frame:HookScript("OnShow", function()
         RegisterQTEvents()
-        EQT.dirty = true
+        EQT:SetDirty(true)
     end)
 
     -------------------------------------------------------------------------------
     -- Auto Accept / Auto Turn-in
     -------------------------------------------------------------------------------
     local autoFrame = CreateFrame("Frame")
+    local autoPreventNPCGUID = nil  -- tracks NPC where prevent-multi was triggered
     -- QUEST_DETAIL: fires when a quest offer is shown to the player (NPC or item)
     -- QUEST_COMPLETE: fires when the turn-in dialog opens
-    -- QUEST_ACCEPTED: fires after quest is accepted (used to confirm, not trigger)
+    -- QUEST_AUTOCOMPLETE: fires when an auto-complete quest finishes (no NPC needed)
+    -- GOSSIP_SHOW / GOSSIP_CLOSED: track NPC interaction boundaries
     autoFrame:RegisterEvent("QUEST_DETAIL")
     autoFrame:RegisterEvent("QUEST_COMPLETE")
+    autoFrame:RegisterEvent("QUEST_AUTOCOMPLETE")
+    autoFrame:RegisterEvent("GOSSIP_SHOW")
     autoFrame:SetScript("OnEvent", function(self, event, ...)
+        if event == "GOSSIP_SHOW" then
+            if C_GossipInfo then
+                -- Auto turn-in: select the first completed active quest
+                if Cfg("autoTurnIn") and C_GossipInfo.GetActiveQuests then
+                    local active = C_GossipInfo.GetActiveQuests()
+                    if active then
+                        for _, quest in ipairs(active) do
+                            if quest.questID and quest.isComplete then
+                                C_GossipInfo.SelectActiveQuest(quest.questID)
+                                return
+                            end
+                        end
+                    end
+                end
+                -- Auto accept: select available quests from gossip
+                if Cfg("autoAccept") and C_GossipInfo.GetAvailableQuests then
+                    local available = C_GossipInfo.GetAvailableQuests()
+                    if available and #available > 0 then
+                        local npcGUID = UnitGUID("npc")
+                        -- Prevent multi: skip if NPC originally had multiple quests
+                        if Cfg("autoAcceptPreventMulti") then
+                            if #available > 1 then
+                                -- Remember this NPC had multiple quests
+                                autoPreventNPCGUID = npcGUID
+                            end
+                            if autoPreventNPCGUID == npcGUID then
+                                -- do nothing; let user pick manually
+                            elseif available[1].questID then
+                                C_GossipInfo.SelectAvailableQuest(available[1].questID)
+                                return
+                            end
+                        elseif available[1].questID then
+                            C_GossipInfo.SelectAvailableQuest(available[1].questID)
+                            return
+                        end
+                    end
+                end
+            end
+            return
+        end
+        if event == "QUEST_AUTOCOMPLETE" then
+            -- Blizzard's popup is hidden because we reparented ObjectiveTrackerFrame.
+            -- Show the completion dialog directly so the player can turn in.
+            local qID = ...
+            if qID then
+                if ShowQuestComplete and type(ShowQuestComplete) == "function" then
+                    pcall(ShowQuestComplete, qID)
+                end
+            end
+            return
+        end
         if event == "QUEST_DETAIL" then
             if not Cfg("autoAccept") then return end
-            -- AcceptQuest() works immediately on QUEST_DETAIL in TWW
-            -- No delay needed – the event fires exactly when the offer is ready
             AcceptQuest()
         elseif event == "QUEST_COMPLETE" then
             if not Cfg("autoTurnIn") then return end
-            -- Skip auto turn-in if Shift is held (allows reading rewards)
             if Cfg("autoTurnInShiftSkip") and IsShiftKeyDown() then return end
-            -- CompleteQuest() submits the turn-in
-            CompleteQuest()
+            local numChoices = GetNumQuestChoices()
+            if numChoices <= 1 then
+                GetQuestReward(numChoices)
+            end
         end
     end)
 
-    local elapsed = 0
+    -- Dedicated timer update frame: only runs when timer rows exist
+    _timerUpdateFrame = CreateFrame("Frame")
+    _timerUpdateFrame:Hide()
     local timerElapsed = 0
-    self.frame:SetScript("OnUpdate", function(_, dt)
-        elapsed = elapsed + dt
-        if elapsed >= 0.3 and EQT.dirty then
-            elapsed = 0; EQT.dirty = false; EQT:Refresh()
-        end
-        -- Update active timers every second
+    _timerUpdateFrame:SetScript("OnUpdate", function(_, dt)
         timerElapsed = timerElapsed + dt
         if timerElapsed >= 1.0 then
             timerElapsed = 0
+            if #EQT.timerRows == 0 then
+                _timerUpdateFrame:Hide()
+                return
+            end
             for _, r in ipairs(EQT.timerRows) do
                 if r._updateTimer then r._updateTimer() end
             end
         end
     end)
+
     RegisterSlash()
-    C_Timer.After(1.5, function() EQT.dirty = true end)
+    C_Timer.After(1.5, function() EQT:SetDirty(true) end)
 
     -------------------------------------------------------------------------------
     -- Quest item hotkey using SecureHandlerAttributeTemplate pattern (no taint)
@@ -2246,36 +2696,46 @@ function EQT:Init()
     -- Register the binding name globally so WoW knows about it
     _G["BINDING_NAME_EUI_QUESTITEM"] = "Use Quest Item"
 
+    local cachedQuestItemName = nil
+    local questItemDirty = true
+
     local function UpdateQuestItemAttribute()
         if InCombatLockdown() then return end
-        local n = C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetNumQuestLogEntries() or 0
+        if not questItemDirty then return end
+        questItemDirty = false
+
+        local entries = ScanQuestLog()
+        local found = nil
         for pass = 1, 3 do
-            for i = 1, n do
-                local info = C_QuestLog.GetInfo(i)
-                if info and not info.isHeader and not info.isInternalOnly then
-                    local qID = info.questID
-                    local wt = C_QuestLog.GetQuestWatchType and C_QuestLog.GetQuestWatchType(qID)
-                    local isRelevant = (pass == 1 and wt ~= nil)
-                        or (pass == 2 and info.isOnMap and not info.isTask)
-                        or (pass == 3 and info.isTask)
-                    if isRelevant and not (info.isHidden and not info.isTask) then
-                        local item = GetQuestItem(qID)
-                        if item and item.name then
-                            qItemBtn:SetAttribute("item", item.name)
-                            return
-                        end
+            for _, e in ipairs(entries) do
+                local info = e.info
+                local qID = e.questID
+                local wt = C_QuestLog.GetQuestWatchType and C_QuestLog.GetQuestWatchType(qID)
+                local isRelevant = (pass == 1 and wt ~= nil)
+                    or (pass == 2 and info.isOnMap and not info.isTask)
+                    or (pass == 3 and info.isTask)
+                if isRelevant and not (info.isHidden and not info.isTask) then
+                    local item = GetQuestItem(qID)
+                    if item and item.name then
+                        found = item.name
+                        break
                     end
                 end
             end
+            if found then break end
         end
-        qItemBtn:SetAttribute("item", nil)
+        if found ~= cachedQuestItemName then
+            cachedQuestItemName = found
+            qItemBtn:SetAttribute("item", found)
+        end
     end
     EQT.UpdateQuestItemAttribute = UpdateQuestItemAttribute
 
     local qItemFrame = CreateFrame("Frame")
     qItemFrame:RegisterEvent("QUEST_LOG_UPDATE")
-    qItemFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    qItemFrame:RegisterEvent("ZONE_CHANGED")
+    qItemFrame:RegisterEvent("QUEST_ACCEPTED")
+    qItemFrame:RegisterEvent("QUEST_REMOVED")
+    qItemFrame:RegisterEvent("QUEST_TURNED_IN")
     qItemFrame:RegisterEvent("UPDATE_BINDINGS")
     qItemFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     qItemFrame:SetScript("OnEvent", function(_, event)
@@ -2283,6 +2743,7 @@ function EQT:Init()
 
         if event == "PLAYER_REGEN_ENABLED" then
             ApplyQuestItemHotkey()
+            questItemDirty = true
             UpdateQuestItemAttribute()
             return
         end
@@ -2294,6 +2755,7 @@ function EQT:Init()
             return
         end
 
+        questItemDirty = true
         UpdateQuestItemAttribute()
     end)
 
@@ -2373,12 +2835,15 @@ end
 
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
+local _loaderSawSelf, _loaderSawOT = false, false
 loader:SetScript("OnEvent", function(self, _, loaded)
     if loaded == addonName then
+        _loaderSawSelf = true
         EQT:Init()
     end
     -- Catch Blizzard's tracker loading: capture position then hide it
     if loaded == "Blizzard_ObjectiveTracker" then
+        _loaderSawOT = true
         if EQT._needsCapture then
             EQT._needsCapture = false
             CaptureBlizzardTracker()
@@ -2390,5 +2855,9 @@ loader:SetScript("OnEvent", function(self, _, loaded)
         if EQT.ApplyBlizzardTrackerVisibility then
             EQT.ApplyBlizzardTrackerVisibility()
         end
+    end
+    -- Once both addons have loaded, unregister to stop processing future ADDON_LOADED
+    if _loaderSawSelf and _loaderSawOT then
+        self:UnregisterAllEvents()
     end
 end)

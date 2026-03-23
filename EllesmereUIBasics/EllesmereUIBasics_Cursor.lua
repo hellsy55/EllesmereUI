@@ -429,10 +429,20 @@ local function ApplyGCDCircle()
     local g = GCD_DB()
     local enabled = g.enabled
     if not enabled then
-        if gcdRoot then gcdRoot:Hide(); gcdRoot:SetScript("OnUpdate", nil) end
+        if gcdRoot then
+            gcdRoot:Hide()
+            gcdRoot:SetScript("OnUpdate", nil)
+            gcdRoot:UnregisterAllEvents()
+        end
         return
     end
     if not gcdRoot then CreateGCDCircle() end
+    -- Re-register events in case they were unregistered when disabled
+    gcdRoot:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    gcdRoot:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+    gcdRoot:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+    gcdRoot:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+    gcdRoot:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
     local attached = g.attached ~= false  -- default true
     local radius = g.radius or 30
     local scale = (g.scale or 100) / 100
@@ -758,10 +768,28 @@ local function ApplyCastCircle()
     local c = Cast_DB()
     local enabled = c.enabled
     if not enabled then
-        if castRoot then castRoot:Hide(); castRoot:SetScript("OnUpdate", nil) end
+        if castRoot then
+            castRoot:Hide()
+            castRoot:SetScript("OnUpdate", nil)
+            castRoot:UnregisterAllEvents()
+        end
         return
     end
     if not castRoot then CreateCastCircle() end
+    -- Re-register events in case they were unregistered when disabled
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_DELAYED", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", "player")
+    castRoot:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+    if UnitChannelInfo and GetUnitEmpowerHoldAtMaxTime then
+        castRoot:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", "player")
+        castRoot:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_UPDATE", "player")
+        castRoot:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", "player")
+    end
     local attached = c.attached ~= false  -- default true
     local radius = c.radius or 36
     local scale = (c.scale or 100) / 100
@@ -1034,6 +1062,7 @@ function ECL:OnInitialize()
 end
 
 function ECL:OnEnable()
+    if _G._EBS_TEMP_DISABLED and _G._EBS_TEMP_DISABLED.cursor then return end
     f = CreateFrame("Frame", "EllesmereUICursorFrame", UIParent)
     f:SetFrameStrata("TOOLTIP")
     f:SetFrameLevel(9999)
@@ -1049,9 +1078,7 @@ function ECL:OnEnable()
 
     Apply()
 
-    -- Create and apply GCD / Cast circles
-    CreateGCDCircle()
-    CreateCastCircle()
+    -- Apply GCD / Cast circles (creates on demand only when enabled)
     C_Timer.After(0.5, function()
         ApplyGCDCircle()
         ApplyCastCircle()

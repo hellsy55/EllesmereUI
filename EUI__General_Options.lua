@@ -3558,7 +3558,7 @@ initFrame:SetScript("OnEvent", function(self)
             local ROW_H  = 50
             local ITEM_H = 30
             local GAP    = 15
-            local BTN_W  = 110
+            local BTN_W  = 130
             local DD_W   = 220
 
             local totalW = parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2
@@ -3566,7 +3566,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Size(rowFrame, totalW, ROW_H)
             PP.Point(rowFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
 
-            local groupW = DD_W + GAP * 3 + BTN_W * 3
+            local groupW = DD_W + GAP * 2 + BTN_W * 2
             local startX = math.floor((totalW - groupW) / 2)
             local offsetY = -math.floor((ROW_H - ITEM_H) / 2)
 
@@ -4069,7 +4069,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Size(saveAsBtn, BTN_W, ITEM_H)
             PP.Point(saveAsBtn, "LEFT", assignBtn, "RIGHT", GAP, 0)
             saveAsBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 2)
-            EllesmereUI.MakeStyledButton(saveAsBtn, "Copy Profile", 11, PROF_BTN_COLOURS, function()
+            EllesmereUI.MakeStyledButton(saveAsBtn, "Create New (Copy)", 11, PROF_BTN_COLOURS, function()
                 EllesmereUI:ShowInputPopup({
                     title       = "Copy Profile",
                     message     = "Enter a name for the new profile:",
@@ -4347,7 +4347,7 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule(GLOBAL_KEY, {
         title       = "Global Settings",
         description = "General options for all EllesmereUI addons.",
-        pages       = { PAGE_GENERAL, PAGE_PROFILES, PAGE_CORE, PAGE_COLORS, "Disable Addons" },
+        pages       = { PAGE_GENERAL, PAGE_PROFILES, PAGE_CORE, PAGE_COLORS },
         disabledPages = disabledList,
         disabledPageTooltips = disabledTips,
         buildPage   = function(pageName, parent, yOffset)
