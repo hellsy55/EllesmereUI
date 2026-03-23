@@ -1070,6 +1070,8 @@ local DEFAULTS = {
             enabled = true,
             hideBlizzard = true,
             useBlizzardBuffBars = false,
+            rotationHelperEnabled = true,
+            rotationHelperGlowStyle = 5,
             -- The 3 default bars (match Blizzard CDM)
             bars = {
                 {
@@ -8554,6 +8556,82 @@ function ECME:CDMFinishSetup()
 end
 
 -------------------------------------------------------------------------------
+--  Rotation Helper Integration (Blizzard C_AssistedCombat)
+--  Highlights the currently suggested spell from the rotation assistant
+--  with a glow on its CDM icon.
+-------------------------------------------------------------------------------
+local _rotationGlowedIcons = {}  -- icon -> true for currently glowed icons
+local _lastSuggestedSpell = nil
+
+local function UpdateRotationHighlights()
+    local p = ECME.db and ECME.db.profile
+    if not p or not p.cdmBars or not p.cdmBars.rotationHelperEnabled then
+        -- Clear all glows if disabled
+        for icon in pairs(_rotationGlowedIcons) do
+            if icon._glowOverlay then
+                _G_Glows.StopAllGlows(icon._glowOverlay)
+                icon._glowOverlay:SetAlpha(0)
+            end
+            _rotationGlowedIcons[icon] = nil
+        end
+        _lastSuggestedSpell = nil
+        return
+    end
+
+    local suggestedSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell and C_AssistedCombat.GetNextCastSpell()
+
+    -- Early exit if nothing changed
+    if suggestedSpell == _lastSuggestedSpell then return end
+    _lastSuggestedSpell = suggestedSpell
+
+    -- Clear previous glows
+    for icon in pairs(_rotationGlowedIcons) do
+        if icon._glowOverlay then
+            _G_Glows.StopAllGlows(icon._glowOverlay)
+            icon._glowOverlay:SetAlpha(0)
+        end
+    end
+    wipe(_rotationGlowedIcons)
+
+    if not suggestedSpell then return end
+
+    -- Find matching icons across all bars and apply glow
+    local glowStyle = p.cdmBars.rotationHelperGlowStyle or 5
+    for barKey, icons in pairs(cdmBarIcons) do
+        for _, icon in ipairs(icons) do
+            if icon._spellID and icon._spellID == suggestedSpell and icon:IsShown() then
+                if icon._glowOverlay then
+                    icon._glowOverlay:SetAlpha(1)
+                    StartNativeGlow(icon._glowOverlay, glowStyle, 1, 0.82, 0.1)
+                    _rotationGlowedIcons[icon] = true
+                end
+            end
+        end
+    end
+end
+ns.UpdateRotationHighlights = UpdateRotationHighlights
+
+-- Hook into Blizzard's rotation change callback (deferred until after login)
+local _rotationHookInstalled = false
+local function InstallRotationHook()
+    if _rotationHookInstalled then return end
+    _rotationHookInstalled = true
+
+    if EventRegistry and EventRegistry.RegisterCallback then
+        EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
+            UpdateRotationHighlights()
+        end, "ECME_CDM_RotationHelper")
+    end
+
+    -- Also hook the manager's update method as a fallback
+    if AssistedCombatManager and AssistedCombatManager.UpdateAllAssistedHighlightFramesForSpell then
+        hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedHighlightFramesForSpell", function()
+            UpdateRotationHighlights()
+        end)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Event-Driven Runtime Maintenance
 --
 --  This frame owns the non-tick triggers: login/world transitions, spec swaps,
@@ -8802,6 +8880,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns.StartSpecValidation then
             ns.StartSpecValidation()
         end
+        -- Install rotation helper hook after CDM frames have been built
+        C_Timer.After(1, function()
+            InstallRotationHook()
+        end)
     end
     if event == "SPELLS_CHANGED" then
         -- SPELLS_CHANGED fires reliably after spec data is available.

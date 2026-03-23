@@ -6799,6 +6799,44 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Rotation Helper (global CDM setting, reads from cdmBars root)
+        do
+            local function CDM() local pp = DB(); return pp and pp.cdmBars end
+
+            local ROT_GLOW_VALUES = {}
+            local ROT_GLOW_ORDER  = {}
+            if ns.GLOW_STYLES then
+                for i, entry in ipairs(ns.GLOW_STYLES) do
+                    if not entry.shapeGlow then
+                        ROT_GLOW_VALUES[i] = entry.name
+                        ROT_GLOW_ORDER[#ROT_GLOW_ORDER + 1] = i
+                    end
+                end
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Rotation Helper",
+                  getValue=function() local c = CDM(); return c and c.rotationHelperEnabled ~= false end,
+                  setValue=function(v)
+                      local c = CDM(); if not c then return end
+                      c.rotationHelperEnabled = v
+                      if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
+                      Refresh()
+                  end,
+                  tooltip="Highlight the suggested next spell from Blizzard's rotation assistant on CDM icons" },
+                { type="dropdown", text="Rotation Glow Style",
+                  values=ROT_GLOW_VALUES, order=ROT_GLOW_ORDER,
+                  getValue=function() local c = CDM(); return c and c.rotationHelperGlowStyle or 5 end,
+                  setValue=function(v)
+                      local c = CDM(); if not c then return end
+                      c.rotationHelperGlowStyle = v
+                      if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
+                      Refresh()
+                  end,
+                  tooltip="Glow style used for the rotation helper highlight" }
+            );  y = y - h
+        end
+
         _, h = W:Spacer(parent, y, 8);  y = y - h
 
         -------------------------------------------------------------------
