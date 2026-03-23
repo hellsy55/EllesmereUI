@@ -6471,6 +6471,18 @@ function InitializeFrames()
     frames._portraitBorderUpdater:SetScript("OnEvent", function(_, event)
         local unitKey = (event == "PLAYER_TARGET_CHANGED") and "target" or "focus"
         local frame = frames[unitKey]
+        if frame and (unitKey == "target" or unitKey == "focus") then
+            local s = db.profile[unitKey]
+            if frame.LeftText and s and s.leftTextClassColor ~= nil then
+                ApplyClassColor(frame.LeftText, unitKey, s.leftTextClassColor)
+            end
+            if frame.RightText and s and s.rightTextClassColor ~= nil then
+                ApplyClassColor(frame.RightText, unitKey, s.rightTextClassColor)
+            end
+            if frame.CenterText and s and s.centerTextClassColor ~= nil then
+                ApplyClassColor(frame.CenterText, unitKey, s.centerTextClassColor)
+            end
+        end
         if not frame or not frame.Portrait then return end
         local backdrop = frame.Portrait.backdrop
         if not backdrop then return end
