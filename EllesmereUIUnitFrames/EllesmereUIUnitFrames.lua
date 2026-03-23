@@ -5635,9 +5635,15 @@ local function UnitFrame_OnEnter(self)
         self:SetAlpha(1)
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
-        GameTooltip_SetDefaultAnchor(GameTooltip, self)
-        GameTooltip:SetUnit(unit)
-        GameTooltip:Show()
+        local showTooltip = true
+        if s and s.showUnitTooltip ~= nil then
+            showTooltip = s.showUnitTooltip
+        end
+        if showTooltip then
+            GameTooltip_SetDefaultAnchor(GameTooltip, self)
+            GameTooltip:SetUnit(unit)
+            GameTooltip:Show()
+        end
     end
 end
 
