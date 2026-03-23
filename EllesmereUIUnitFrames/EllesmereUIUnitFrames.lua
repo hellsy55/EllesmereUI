@@ -5634,6 +5634,11 @@ local function UnitFrame_OnEnter(self)
     if s and (s.barVisibility or "always") == "mouseover" then
         self:SetAlpha(1)
     end
+    if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
+        GameTooltip_SetDefaultAnchor(GameTooltip, self)
+        GameTooltip:SetUnit(unit)
+        GameTooltip:Show()
+    end
 end
 
 local function UnitFrame_OnLeave(self)
@@ -5643,6 +5648,9 @@ local function UnitFrame_OnLeave(self)
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
         self:SetAlpha(0)
+    end
+    if GameTooltip then
+        GameTooltip:Hide()
     end
 end
 
