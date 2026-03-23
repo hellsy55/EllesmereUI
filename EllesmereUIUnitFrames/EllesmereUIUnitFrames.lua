@@ -4121,7 +4121,10 @@ local function ReloadFrames()
             -- Restore position and scale from profile
             if unitKey == "boss" then
                 local bossPos = db.profile.positions.boss
-                local bossSpacing = db.profile.bossSpacing or 60
+                local bossSettings = db.profile.boss or {}
+                local barHeight = (bossSettings.healthHeight or 34) + (bossSettings.powerHeight or 6) + (bossSettings.castbarHeight or 14)
+                local gap = 10
+                local bossSpacing = barHeight + gap
                 local bossIdx = tonumber(unit:match("(%d+)$"))
                 local bossAnchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("boss")
                 if bossPos and bossIdx and not (EllesmereUI and EllesmereUI._unlockActive) and (not bossAnchored or not frame:GetLeft()) then
@@ -6174,7 +6177,11 @@ function InitializeFrames()
 
     oUF:SetActiveStyle("EllesmereBoss")
     local bossPos = db.profile.positions.boss
-    local spacing = db.profile.bossSpacing or 60
+
+    local bossSettings = db.profile.boss or {}
+    local barHeight = (bossSettings.healthHeight or 34) + (bossSettings.powerHeight or 6) + (bossSettings.castbarHeight or 14)
+    local gap = 10
+    local spacing = barHeight + gap
     for i = 1, 5 do
         local bossUnit = "boss" .. i
         local bossFrame = oUF:Spawn(bossUnit, "EllesmereUIUnitFrames_Boss" .. i)
