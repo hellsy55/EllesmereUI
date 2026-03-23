@@ -3620,13 +3620,13 @@ local function CreateMainFrame()
                     message     = "Are you sure you want to " .. action .. " " .. self._display .. "?",
                     confirmText = enabled and "Disable & Reload" or "Enable & Reload",
                     cancelText  = "Cancel",
-                    confirmMacro = "/reload",
                     onConfirm   = function()
                         if enabled then
                             C_AddOns.DisableAddOn(folder)
                         else
                             C_AddOns.EnableAddOn(folder)
                         end
+                        ReloadUI()
                     end,
                 })
             end)
@@ -5998,7 +5998,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.4.5"
+EllesmereUI.VERSION = "5.4.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

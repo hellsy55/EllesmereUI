@@ -467,6 +467,7 @@ local DEFAULTS = {
             height        = 20,
             anchorX       = 0,
             anchorY       = -54,
+            classColored  = false,
             fillR         = playerCC[1], fillG = playerCC[2], fillB = playerCC[3], fillA = 1,
             gradientEnabled = false,
             gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
@@ -2961,8 +2962,13 @@ if cb.gradientEnabled then
     tex:SetTexture(texPath)
 
     tex:SetVertexColor(1, 1, 1, 1)
+    local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
+    if cb.classColored then
+        local cc = CLASS_COLORS[cachedClass]
+        if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
+    end
     tex:SetGradient(dir,
-        CreateColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA),
+        CreateColor(fR, fG, fB, fA),
         CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA)
     )
 
@@ -2980,7 +2986,14 @@ else
     castBarFrame._nameText:SetParent(bar)
     castBarFrame._timerText:SetParent(bar)
 
-    fillTex:SetVertexColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA)
+    do
+        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
+        if cb.classColored then
+            local cc = CLASS_COLORS[cachedClass]
+            if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
+        end
+        fillTex:SetVertexColor(fR, fG, fB, fA)
+    end
 end
 
     -- Spark

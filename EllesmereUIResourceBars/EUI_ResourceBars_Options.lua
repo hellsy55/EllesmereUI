@@ -2620,11 +2620,17 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Bar color / gradient
         local fillTex = pf.bar:GetStatusBarTexture()
+        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
+        if cb.classColored == true then
+            local _, cf = UnitClass("player")
+            local cc = cf and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cf]
+            if cc then fR, fG, fB = cc.r, cc.g, cc.b end
+        end
         if cb.gradientEnabled then
             local dir = cb.gradientDir or "HORIZONTAL"
-            fillTex:SetGradient(dir, CreateColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA), CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA))
+            fillTex:SetGradient(dir, CreateColor(fR, fG, fB, fA), CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA))
         else
-            fillTex:SetVertexColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA)
+            fillTex:SetVertexColor(fR, fG, fB, fA)
         end
 
         -- Spark
@@ -3053,10 +3059,10 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateBorderSwatchState()
         end
 
-        -- Row 4: Custom Color (multiSwatch + cog: gradient) | Bar Texture
+        -- Row 4: Color (multiSwatch + cog: gradient) | Bar Texture
         local castColorRow
         castColorRow, h = W:DualRow(parent, y,
-            { type = "multiSwatch", text = "Custom Color",
+            { type = "multiSwatch", text = "Color",
               disabled = castOff,
               disabledTooltip = "Enable Player Cast Bar",
               swatches = {
@@ -3071,7 +3077,7 @@ initFrame:SetScript("OnEvent", function(self)
                         p.castBar.gradientR, p.castBar.gradientG, p.castBar.gradientB, p.castBar.gradientA = r, g, b, a
                         RefreshCast()
                     end },
-                  { tooltip = "Main Color", hasAlpha = true,
+                  { tooltip = "Custom Colored", hasAlpha = true,
                     getValue = function()
                         local p = DB()
                         if not p then
@@ -3084,7 +3090,38 @@ initFrame:SetScript("OnEvent", function(self)
                     setValue = function(r, g, b, a)
                         local p = DB(); if not p then return end
                         p.castBar.fillR, p.castBar.fillG, p.castBar.fillB, p.castBar.fillA = r, g, b, a
-                        RefreshCast()
+                        if p.castBar.classColored then p.castBar.classColored = false end
+                        RefreshCast(); EllesmereUI:RefreshPage()
+                    end,
+                    onClick = function(self)
+                        local p = DB(); if not p then return end
+                        if p.castBar.classColored then
+                            p.castBar.classColored = false
+                            RefreshCast(); EllesmereUI:RefreshPage()
+                            return
+                        end
+                        if self._eabOrigClick then self._eabOrigClick(self) end
+                    end,
+                    refreshAlpha = function()
+                        local p = DB()
+                        return (p and not p.castBar.classColored) and 1 or 0.3
+                    end },
+                  { tooltip = "Class Colored",
+                    getValue = function()
+                        local _, classFile = UnitClass("player")
+                        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+                        if cc then return cc.r, cc.g, cc.b, 1 end
+                        return 1, 0.70, 0, 1
+                    end,
+                    setValue = function() end,
+                    onClick = function()
+                        local p = DB(); if not p then return end
+                        p.castBar.classColored = true
+                        RefreshCast(); EllesmereUI:RefreshPage()
+                    end,
+                    refreshAlpha = function()
+                        local p = DB()
+                        return (not p or p.castBar.classColored == true) and 1 or 0.3
                     end },
               } },
             { type = "dropdown", text = "Bar Texture",
