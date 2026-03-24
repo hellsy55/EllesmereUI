@@ -1233,10 +1233,53 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castName:SetMaxLines(1)
     plate.castTarget = plate.cast:CreateFontString(nil, "OVERLAY")
     SetFSFont(plate.castTarget, 10, GetNPOutline())
-    plate.castTarget:SetPoint("RIGHT", plate.cast, "RIGHT", -3, 0)
     plate.castTarget:SetJustifyH("RIGHT")
     plate.castTarget:SetWordWrap(false)
     plate.castTarget:SetMaxLines(1)
+    -- Cast timer text: remaining/elapsed seconds, anchored to the far right.
+    -- castTarget is repositioned to sit immediately left of it.
+    plate.castTimer = plate.cast:CreateFontString(nil, "OVERLAY")
+    SetFSFont(plate.castTimer, 10, GetNPOutline())
+    plate.castTimer:SetPoint("RIGHT", plate.cast, "RIGHT", -3, 0)
+    plate.castTimer:SetJustifyH("RIGHT")
+    plate.castTimer:SetWordWrap(false)
+    plate.castTimer:SetMaxLines(1)
+    plate.castTimer:SetTextColor(1, 1, 1, 1)
+    -- castTarget sits left of castTimer with a small gap
+    plate.castTarget:SetPoint("RIGHT", plate.castTimer, "LEFT", -4, 0)
+    -- OnUpdate: tick the cast timer every frame while a cast is active.
+    -- Uses UnitCastingDuration/UnitChannelDuration duration objects and their
+    -- :GetRemainingDuration() method to avoid taint from UnitCastingInfo's
+    -- secret endTime/startTime values, which cannot be used in arithmetic.
+    -- Falls back gracefully when the native duration API is unavailable.
+    plate.cast:SetScript("OnUpdate", function(self)
+        local owner = self._timerPlate
+        if not owner or not owner.unit or not owner.isCasting then return end
+        if UnitCastingDuration then
+            local durObj = UnitCastingDuration(owner.unit)
+                        or (UnitChannelDuration and UnitChannelDuration(owner.unit))
+            if durObj then
+                local remaining = durObj:GetRemainingDuration()
+                owner.castTimer:SetFormattedText("%.1f", remaining)
+            else
+                owner.castTimer:SetText("")
+            end
+        else
+            -- Fallback path (no native duration API): derive remaining from the
+            -- bar's own min/max/value, which are untainted and driven by the
+            -- fallback ticker.
+            local min, max = owner.cast:GetMinMaxValues()
+            local val = owner.cast:GetValue()
+            if max and max > 0 then
+                local remaining = max - val
+                if remaining < 0 then remaining = 0 end
+                owner.castTimer:SetFormattedText("%.1f", remaining)
+            else
+                owner.castTimer:SetText("")
+            end
+        end
+    end)
+    plate.cast._timerPlate = plate
     plate.debuffs = {}
     for i = 1, 4 do
         local d = CreateFrame("Frame", nil, plate)
@@ -2757,6 +2800,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     local cnc = (p and p.castNameColor) or defaults.castNameColor
     SetFSFont(self.castName, cns, GetNPOutline())
     SetFSFont(self.castTarget, cts, GetNPOutline())
+    SetFSFont(self.castTimer, cts, GetNPOutline())
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     -- Cast target color: class-colored if enabled and target is a player, otherwise use castTargetColor
     local useClassColor = defaults.castTargetClassColor
@@ -3652,6 +3696,7 @@ function NameplateFrame:UpdateCast()
         if not self._interrupted then
             self.cast:Hide()
         end
+        self.castTimer:SetText("")
         if self.isCasting then
             if self._castFallback then
                 self._castFallback = nil
