@@ -5552,12 +5552,18 @@ local function RestoreBarPositions()
         local pos = positions[key]
         local frame = barFrames[key]
         if pos and frame then
-            -- Skip for unlock-anchored bars (anchor system is authority)
-            local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key)
-            if not anchored or not frame:GetLeft() then
-                local pt = pos.point
+            local pt = pos.point or "CENTER"
+            local rpt = pos.relPoint or pt
+            local px = pos.x or 0
+            local py = pos.y or 0
+            -- Skip CENTER 0,0: this is never an intentional position.
+            -- Anchored bars save 0,0 as a placeholder; their real position
+            -- comes from the anchor chain which resolves later.
+            if pt == "CENTER" and rpt == "CENTER" and px == 0 and py == 0 then
+                -- skip
+            else
                 frame:ClearAllPoints()
-                frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
+                frame:SetPoint(pt, UIParent, rpt, px, py)
             end
         end
     end
@@ -7476,6 +7482,11 @@ _blizzMovableCombatFrame:SetScript("OnEvent", function()
         end
     end
     wipe(_blizzMovablePendingOOC)
+
+    -- Reapply all unlock-mode anchors now that protected frames can be moved.
+    if EllesmereUI.ReapplyAllUnlockAnchors then
+        EllesmereUI.ReapplyAllUnlockAnchors()
+    end
 
     -- Re-disable mouse on ExtraActionBarFrame after combat ends.
     -- Blizzard's secure code re-enables mouse on protected frames during combat.

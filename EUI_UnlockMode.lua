@@ -2000,7 +2000,20 @@ if not EAB then
     _posFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
         -- Delay so child addons have time to register their unlock elements
-        C_Timer.After(1, ApplySavedPositions)
+        C_Timer.After(1, function()
+            ApplySavedPositions()
+            -- Reapply anchors after positions are set
+            if EllesmereUI.ReapplyAllUnlockAnchors then
+                EllesmereUI.ReapplyAllUnlockAnchors()
+            end
+        end)
+        -- Safety net: reapply anchors after all child addons have
+        -- registered their unlock elements and built frames.
+        C_Timer.After(2, function()
+            if EllesmereUI.ReapplyAllUnlockAnchors then
+                EllesmereUI.ReapplyAllUnlockAnchors()
+            end
+        end)
     end)
 end
 

@@ -467,8 +467,19 @@ function EllesmereUI.ApplyProfileData(profileData)
             local db = dbByFolder[entry.folder]
             if db then
                 local profile = db.profile
+                -- Preserve spec-specific CDM data that is not included in exports
+                local savedTBB, savedTBBPos
+                if entry.folder == "EllesmereUICooldownManager" then
+                    savedTBB    = profile.trackedBuffBars
+                    savedTBBPos = profile.tbbPositions
+                end
                 for k in pairs(profile) do profile[k] = nil end
                 for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
+                -- Restore spec-specific data after profile wipe
+                if entry.folder == "EllesmereUICooldownManager" then
+                    if not profile.trackedBuffBars then profile.trackedBuffBars = savedTBB end
+                    if not profile.tbbPositions    then profile.tbbPositions    = savedTBBPos end
+                end
                 if db._profileDefaults then
                     EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                 end
@@ -739,12 +750,22 @@ function EllesmereUI.ExportProfile(profileName)
         }
     end
     local exportData = DeepCopy(profileData)
+    -- Exclude spec-specific data from export (bar glows, tracking bars)
+    exportData.trackedBuffBars = nil
+    exportData.tbbPositions = nil
     -- Include spell assignments from the dedicated store on the export copy
+    -- (barGlows and trackedBuffBars excluded from export -- spec-specific)
     local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
     if sa then
+        local spCopy = DeepCopy(sa.specProfiles or {})
+        -- Strip spec-specific non-exportable data from each spec profile
+        for _, prof in pairs(spCopy) do
+            prof.barGlows = nil
+            prof.trackedBuffBars = nil
+            prof.tbbPositions = nil
+        end
         exportData.spellAssignments = {
-            specProfiles = DeepCopy(sa.specProfiles or {}),
-            barGlows = DeepCopy(sa.barGlows or {}),
+            specProfiles = spCopy,
         }
     end
     local payload = { version = 3, type = "full", data = exportData }

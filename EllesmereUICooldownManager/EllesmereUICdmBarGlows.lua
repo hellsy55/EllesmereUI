@@ -1,29 +1,94 @@
---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 --  EllesmereUICdmBarGlows.lua
---  Bar Glows: Overlay system that reads CDM buff bars and overlays glows
---  on action buttons.
---------------------------------------------------------------------------------
+--  Bar Glows: Overlays glow effects on action bar buttons when configured
+--  buff/aura spells become active (or inactive in MISSING mode).
+--  Simplified v3: uses C_UnitAuras.GetPlayerAuraBySpellID for detection.
+-------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
--- Forward references from main CDM file (set during init)
-local ECME, GetTargetButton, GetActionButton, GetSortedSlots, StartNativeGlow, StopNativeGlow
+-- Glow functions from main file (available after main file loads)
+local StartNativeGlow = function(...) if ns.StartNativeGlow then return ns.StartNativeGlow(...) end end
+local StopNativeGlow  = function(...) if ns.StopNativeGlow then return ns.StopNativeGlow(...) end end
 
-function ns.InitBarGlows(ecme, getTarget, getAction, getSorted, startGlow, stopGlow)
-    ECME = ecme
-    GetTargetButton = getTarget
-    GetActionButton = getAction
-    GetSortedSlots = getSorted
-    StartNativeGlow = startGlow
-    StopNativeGlow = stopGlow
+-- Slot offsets per bar index (matches EllesmereUIActionBars BAR_SLOT_OFFSETS)
+local BAR_OFFSETS = { 0, 60, 48, 24, 36, 144, 156, 168 }
+
+-- CDM bar key mapping for bar glow indices 101+
+local CDM_GLOW_BAR_KEYS = { [101] = "cooldowns", [102] = "utility" }
+
+-- Action bar / CDM bar button lookup
+local function GetActionButton(barIdx, btnIdx)
+    -- CDM bars: look up icon from cdmBarIcons
+    local cdmKey = CDM_GLOW_BAR_KEYS[barIdx]
+    if cdmKey then
+        local icons = ns.cdmBarIcons and ns.cdmBarIcons[cdmKey]
+        return icons and icons[btnIdx]
+    end
+    -- EllesmereUI action bar buttons: EABButton<slot> where slot = offset + btnIdx
+    local offset = BAR_OFFSETS[barIdx] or 0
+    local slot = offset + btnIdx
+    local btn = _G["EABButton" .. slot]
+    if btn then return btn end
+    -- Fallback: Blizzard bar names
+    local BLIZZ_PREFIXES = {
+        "ActionButton",
+        "MultiBarBottomLeftButton",
+        "MultiBarBottomRightButton",
+        "MultiBarRightButton",
+        "MultiBarLeftButton",
+        "MultiBar5Button",
+        "MultiBar6Button",
+        "MultiBar7Button",
+    }
+    if barIdx >= 1 and barIdx <= #BLIZZ_PREFIXES then
+        btn = _G[BLIZZ_PREFIXES[barIdx] .. btnIdx]
+    end
+    return btn
 end
 
 -------------------------------------------------------------------------------
---  Bar Glows v2: Collect all tracked buff spells across all CDM bars
---  Returns two lists: tracked (spells the user has in their CDM bars) and
---  untracked (known spells not currently in any CDM bar).
---  Each entry: { spellID, name, icon, barKey, barName }
+--  Data Access
 -------------------------------------------------------------------------------
+
+--- Get barGlows data from SavedVariables (with lazy init)
+function ns.GetBarGlows()
+    if not EllesmereUIDB then return { enabled = true, selectedBar = 1, assignments = {} } end
+    if not EllesmereUIDB.spellAssignments then
+        EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+    end
+    local sa = EllesmereUIDB.spellAssignments
+    if not sa.barGlows or not next(sa.barGlows) then
+        sa.barGlows = {
+            enabled = true,
+            selectedBar = 101,
+            assignments = {},
+        }
+    end
+    return sa.barGlows
+end
+
+--- Get assignments for a specific action bar button
+function ns.GetButtonAssignments(barIdx, btnIdx)
+    local bg = ns.GetBarGlows()
+    local key = barIdx .. "_" .. btnIdx
+    return bg.assignments[key]
+end
+
+--- Returns true if the user has at least one bar glow assignment
+function ns.HasBarGlowAssignments()
+    if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return false end
+    local bg = EllesmereUIDB.spellAssignments.barGlows
+    if not bg or not bg.assignments then return false end
+    for _, buffList in pairs(bg.assignments) do
+        if buffList and #buffList > 0 then return true end
+    end
+    return false
+end
+
+--- Collect all tracked buff spells across all CDM buff bars
+--- Returns tracked (displayed in CDM) and untracked (known but not displayed)
 function ns.GetAllCDMBuffSpells()
+    local ECME = ns.ECME
     if not ECME or not ECME.db then return {}, {} end
     local p = ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return {}, {} end
@@ -34,7 +99,7 @@ function ns.GetAllCDMBuffSpells()
     for _, bar in ipairs(p.cdmBars.bars) do
         local isBuff = (bar.barType == "buffs") or (bar.key == "buffs")
         if isBuff then
-            local spells = ns.GetCDMSpellsForBar(bar.key)
+            local spells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(bar.key)
             if spells then
                 for _, sp in ipairs(spells) do
                     if sp.isKnown and sp.spellID and sp.spellID > 0 and not trackedSet[sp.spellID] then
@@ -55,9 +120,14 @@ function ns.GetAllCDMBuffSpells()
         end
     end
 
+    -- Split by Tracked Bars presence (BuffBarCooldownViewer).
+    -- Spells in Tracked Bars go first (no popup in TBB picker).
+    -- Everything else goes to untracked (fires popup).
+    local barViewerCache = ns._tickBarViewerCache
     local tracked, untracked = {}, {}
     for _, entry in ipairs(trackedOrder) do
-        if entry.isDisplayed then
+        local inTrackedBars = barViewerCache and entry.spellID and barViewerCache[entry.spellID]
+        if inTrackedBars then
             tracked[#tracked + 1] = entry
         else
             untracked[#untracked + 1] = entry
@@ -67,227 +137,19 @@ function ns.GetAllCDMBuffSpells()
     return tracked, untracked
 end
 
---- Get barGlows data from the dedicated spell assignment store (with lazy init)
-function ns.GetBarGlows()
-    if not EllesmereUIDB then return { enabled = true, selectedBar = 1, assignments = {} } end
-    if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
-    end
-    local sa = EllesmereUIDB.spellAssignments
-    if not sa.barGlows or not next(sa.barGlows) then
-        sa.barGlows = {
-            enabled = true,
-            selectedBar = 1,
-            selectedButton = nil,
-            selectedAssignment = 1,
-            assignments = {},
-        }
-    end
-    return sa.barGlows
-end
-
---- Get assignments for a specific action bar button
-function ns.GetButtonAssignments(barIdx, btnIdx)
-    local bg = ns.GetBarGlows()
-    local key = barIdx .. "_" .. btnIdx
-    return bg.assignments[key]
-end
-
---- Returns true if the user has at least one bar glow assignment configured
-function ns.HasBarGlowAssignments()
-    if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return false end
-    local bg = EllesmereUIDB.spellAssignments.barGlows
-    if not bg or not bg.assignments then return false end
-    for _, buffList in pairs(bg.assignments) do
-        if buffList and #buffList > 0 then return true end
-    end
-    return false
-end
-
--- RequestUpdate and lastSourceStates are defined in the Bar Glows block below
-
 -------------------------------------------------------------------------------
---  Bar Glows: Overlay System (reads CDM buff bars, overlays on action buttons)
+--  Overlay System
 -------------------------------------------------------------------------------
+local overlayFrames = {}  -- [key] = overlay frame
+local lastStates = {}     -- [key] = bool (last glow state for change detection)
+local _cachedBG = nil     -- cached barGlows reference (refreshed on SetupOverlays)
 
-local overlayFrames = {}
-local hasActiveOverlays = false
-local hasHiddenSlots = false
-local lastSourceStates = {}
-
-local HIDDEN_ALPHA = 0.001
-local PACK_SPACING = 6
-
-local function SaveOrigPoints(slot)
-    if slot.__ECMEOrigPoints then return end
-    local n = slot:GetNumPoints()
-    if not n or n == 0 then return end
-    local pts = {}
-    for i = 1, n do pts[i] = { slot:GetPoint(i) } end
-    slot.__ECMEOrigPoints = pts
-end
-
-local function RestoreOrigPoints(slot)
-    local pts = slot.__ECMEOrigPoints
-    if not pts then return end
-    slot:ClearAllPoints()
-    for _, p in ipairs(pts) do slot:SetPoint(p[1], p[2], p[3], p[4], p[5]) end
-end
-
-local function ApplyPerSlotAlpha(slots)
-    if not slots then return end
-    for _, slot in ipairs(slots) do
-        if slot.__ECMEHideFromCDM then
-            if slot.__ECMEPrevAlpha == nil then
-                slot.__ECMEPrevAlpha = slot:GetAlpha() or 1
-                slot:SetAlpha(HIDDEN_ALPHA)
-            end
-        else
-            if slot.__ECMEPrevAlpha ~= nil then
-                slot:SetAlpha(slot.__ECMEPrevAlpha)
-                slot.__ECMEPrevAlpha = nil
-            end
-        end
-    end
-end
-
-local lastPackLayout = {}
-local shownBuffer = {}
-
-local function PackVisibleSlots()
-    local root = _G.BuffIconCooldownViewer
-    if not root or not GetSortedSlots then return end
-    local slots = GetSortedSlots()
-    if not slots then return end
-
-    local count = 0
-    for _, slot in ipairs(slots) do
-        if slot and slot.IsShown and slot:IsShown() and not slot.__ECMEHideFromCDM then
-            count = count + 1
-            shownBuffer[count] = slot
-        end
-    end
-    for i = count + 1, #shownBuffer do shownBuffer[i] = nil end
-    if count == 0 then lastPackLayout.count = 0; return end
-
-    local iconSize = shownBuffer[1]:GetWidth() or 35
-    if iconSize < 5 then iconSize = 35 end
-
-    local layoutChanged = (count ~= lastPackLayout.count) or (iconSize ~= lastPackLayout.iconSize)
-    if not layoutChanged then
-        for idx = 1, count do
-            if shownBuffer[idx] ~= lastPackLayout[idx] then layoutChanged = true; break end
-        end
-    end
-    if not layoutChanged then return end
-
-    for _, slot in ipairs(slots) do SaveOrigPoints(slot) end
-    for _, slot in ipairs(slots) do RestoreOrigPoints(slot) end
-
-    local totalW = (count * iconSize) + ((count - 1) * PACK_SPACING)
-    local startX = -(totalW / 2) + (iconSize / 2)
-    for idx = 1, count do
-        local slot = shownBuffer[idx]
-        slot:ClearAllPoints()
-        slot:SetPoint("CENTER", root, "CENTER", startX + (idx - 1) * (iconSize + PACK_SPACING), 0)
-        lastPackLayout[idx] = slot
-    end
-    for i = count + 1, (lastPackLayout.count or 0) do lastPackLayout[i] = nil end
-    lastPackLayout.count = count
-    lastPackLayout.iconSize = iconSize
-end
-
-local function ApplyPerSlotHidingAndPack()
-    if not GetSortedSlots then return end
-    local slots = GetSortedSlots()
-    if not slots then return end
-    ApplyPerSlotAlpha(slots)
-    PackVisibleSlots()
-end
-
-local function ApplyPerSlotHidingAndPackSoon()
-    lastPackLayout.count = nil
-    ApplyPerSlotHidingAndPack()
-    C_Timer.After(0.2, function()
-        lastPackLayout.count = nil
-        ApplyPerSlotHidingAndPack()
-    end)
-end
-ns.ApplyPerSlotHidingAndPackSoon = ApplyPerSlotHidingAndPackSoon
-
-local hookedSlots = {}
-local UpdateOverlayVisuals
-
-local overlayVisualsPending = false
-local function DeferredOverlayVisuals()
-    overlayVisualsPending = false
-    if UpdateOverlayVisuals then UpdateOverlayVisuals() end
-end
-
-local function OnSlotVisibilityChanged()
-    lastPackLayout.count = nil
-    ApplyPerSlotHidingAndPack()
-    if not overlayVisualsPending then
-        overlayVisualsPending = true
-        C_Timer.After(0, DeferredOverlayVisuals)
-    end
-end
-
-local function HookCDMSlot(slot)
-    if not slot or hookedSlots[slot] then return end
-    hookedSlots[slot] = true
-    slot:HookScript("OnShow", OnSlotVisibilityChanged)
-    slot:HookScript("OnHide", OnSlotVisibilityChanged)
-end
-
-local function HookAllCDMChildren(root)
-    if not root or not root.GetChildren then return end
-    for i = 1, root:GetNumChildren() do
-        local c = select(i, root:GetChildren())
-        if c and c.GetWidth and c:GetWidth() > 5 then HookCDMSlot(c) end
-    end
-end
-ns.HookAllCDMChildren = HookAllCDMChildren
-
-local cdmHookFrame = CreateFrame("Frame")
-cdmHookFrame:Hide()
-local lastChildCount = 0
-cdmHookFrame:SetScript("OnUpdate", function(self, elapsed)
-    -- No assignments -- nothing to do
-    if not ns.HasBarGlowAssignments() then self:Hide(); return end
-    self.elapsed = (self.elapsed or 0) + elapsed
-    if self.elapsed < 0.5 then return end
-    self.elapsed = 0
-    local root = _G.BuffIconCooldownViewer
-    if not root or not root.GetChildren then return end
-    local children = root:GetNumChildren()
-    if children ~= lastChildCount then
-        lastChildCount = children
-        HookAllCDMChildren(root)
-    else
-        self:Hide()
-    end
-end)
-
-local function GetOrCreateOverlay(actionBar, actionButtonIndex, cdmSlotIndex)
-    local key = actionBar .. "_" .. actionButtonIndex .. "_" .. cdmSlotIndex
-    if overlayFrames[key] then return overlayFrames[key] end
-    local btn = GetTargetButton(actionBar, actionButtonIndex)
-    if not btn then return nil end
-    local overlay = CreateFrame("Frame", "ECME_Overlay" .. key, btn)
-    overlay:SetAllPoints(btn)
-    overlay:SetFrameLevel(btn:GetFrameLevel() + 10)
-    overlay:Hide()
-    overlayFrames[key] = overlay
-    return overlay
-end
-
+--- Rebuild overlay frames from assignments
 local function SetupOverlays()
-    if not ECME or not ECME.db then return end
     local bg = ns.GetBarGlows()
+    _cachedBG = bg
     if not bg or not bg.enabled then
-        hasActiveOverlays = false
-        hasHiddenSlots = false
+        -- Disabled: stop all glows
         for key, overlay in pairs(overlayFrames) do
             StopNativeGlow(overlay)
             overlay:Hide()
@@ -296,112 +158,84 @@ local function SetupOverlays()
     end
 
     local activeKeys = {}
-    local anyActive = false
-
-    local assignCount = 0
-    for assignKey, buffList in pairs(bg.assignments) do
-        if buffList and #buffList > 0 then
-            assignCount = assignCount + 1
-        end
-    end
-
     for assignKey, buffList in pairs(bg.assignments) do
         if buffList and #buffList > 0 then
             local barIdx, btnIdx = assignKey:match("^(%d+)_(%d+)$")
             barIdx = tonumber(barIdx)
             btnIdx = tonumber(btnIdx)
             if barIdx and btnIdx then
-                for i, entry in ipairs(buffList) do
-                    local key = assignKey .. "_" .. i
-                    local btn = GetTargetButton(barIdx, btnIdx)
-                    if btn then
-                        if not entry.actionSpellID and btn.action then
-                            local aType, aID = GetActionInfo(btn.action)
-                            if aType == "spell" and aID then
-                                entry.actionSpellID = aID
-                            end
-                        end
-                        local existing = overlayFrames[key]
-                        if existing then
-                            -- If the button was reparented, follow it
-                            if existing:GetParent() ~= btn then
-                                existing:SetParent(btn)
-                                existing:SetAllPoints(btn)
-                                lastSourceStates[key] = nil
-                            end
-                        else
-                            local overlay = CreateFrame("Frame", "ECME_GlowV2_" .. key, btn)
-                            overlay:SetAllPoints(btn)
+                local btn = GetActionButton(barIdx, btnIdx)
+                if btn then
+                    for i, entry in ipairs(buffList) do
+                        local key = assignKey .. "_" .. i
+                        local overlay = overlayFrames[key]
+                        if not overlay then
+                            overlay = CreateFrame("Frame", "ECME_Glow_" .. key, btn)
                             overlayFrames[key] = overlay
                         end
-                        local overlay = overlayFrames[key]
+                        if overlay:GetParent() ~= btn then
+                            overlay:SetParent(btn)
+                        end
+                        overlay:SetAllPoints(btn)
                         overlay:SetFrameLevel(btn:GetFrameLevel() + 10)
                         overlay:SetAlpha(1)
                         overlay._assignEntry = entry
                         overlay:Show()
                         activeKeys[key] = true
-                        anyActive = true
                     end
                 end
             end
         end
     end
 
+    -- Hide overlays that are no longer assigned
     for key, overlay in pairs(overlayFrames) do
         if not activeKeys[key] then
             StopNativeGlow(overlay)
             overlay:Hide()
-            lastSourceStates[key] = nil
+            lastStates[key] = nil
         end
     end
 
-    -- Reset all state so UpdateOverlayVisuals re-evaluates glows from scratch
-    wipe(lastSourceStates)
-
-    hasActiveOverlays = anyActive
-    hasHiddenSlots = false
+    -- Force re-evaluation on next tick
+    wipe(lastStates)
 end
 
-UpdateOverlayVisuals = function()
+--- Update glow visuals based on current aura state.
+--- Called each CDM tick (~10Hz from UpdateAllCDMBars).
+local function UpdateOverlayVisuals()
+    local bg = _cachedBG
+    if not bg or not bg.enabled then return end
+
     for key, overlay in pairs(overlayFrames) do
         if overlay:IsShown() and overlay._assignEntry then
             local entry = overlay._assignEntry
             local spellID = entry.spellID
             local mode = entry.mode or "ACTIVE"
 
-            local slotMismatch = false
-            if entry.actionSpellID then
-                local btn = overlay:GetParent()
-                if btn and btn.action then
-                    local aType, aID = GetActionInfo(btn.action)
-                    if aType == "spell" and aID and aID ~= entry.actionSpellID then
-                        slotMismatch = true
-                    end
-                end
-            end
-
+            -- Check if aura/buff is active via the CDM active cache
+            -- (populated each tick from viewer frames with auraInstanceID)
             local auraActive = false
-            if not slotMismatch and spellID and spellID > 0 then
-                local blizzCache = ns._tickBlizzActiveCache
-                if blizzCache and blizzCache[spellID] then
+            if spellID and spellID > 0 then
+                local cache = ns._tickBlizzActiveCache
+                if cache and cache[spellID] then
                     auraActive = true
                 end
             end
 
+            -- Determine if glow should be on
             local shouldGlow
             if mode == "MISSING" then
-                shouldGlow = not slotMismatch and not auraActive
+                shouldGlow = not auraActive
             else
                 shouldGlow = auraActive
             end
 
-            local prevState = lastSourceStates[key]
-            if shouldGlow ~= prevState then
-                lastSourceStates[key] = shouldGlow
+            -- Only update on state change (avoids restarting animations)
+            if shouldGlow ~= lastStates[key] then
+                lastStates[key] = shouldGlow
                 if shouldGlow then
-                    if overlay._glowActive then
-                        StopNativeGlow(overlay)
-                    end
+                    StopNativeGlow(overlay)
                     local style = entry.glowStyle or 1
                     local cr, cg, cb = 1, 0.82, 0.1
                     if entry.classColor then
@@ -417,42 +251,31 @@ UpdateOverlayVisuals = function()
                     end
                     StartNativeGlow(overlay, style, cr, cg, cb)
                 else
-                    if overlay._glowActive then
-                        StopNativeGlow(overlay)
-                    end
+                    StopNativeGlow(overlay)
                 end
             end
         end
     end
 end
--- END BAR GLOWS
 ns.UpdateOverlayVisuals = UpdateOverlayVisuals
 
--- BAR GLOWS MASTER UPDATE
-local updatePending = false
-local updateTimer = nil
+--- Rebuild overlays and force a visual update
+function ns.RequestBarGlowUpdate()
+    SetupOverlays()
+    UpdateOverlayVisuals()
+end
+-- Alias for backward compatibility with options code
+ns.RequestUpdate = ns.RequestBarGlowUpdate
 
-local function DoUpdate()
-    updatePending = false
-    updateTimer = nil
-    if ns.UpdateAllCDMBorders then ns.UpdateAllCDMBorders() end
+-------------------------------------------------------------------------------
+--  Integration: called from main file's UpdateAllCDMBars tick
+-------------------------------------------------------------------------------
+
+-- Called once during CDMFinishSetup
+function ns.InitBarGlows()
     SetupOverlays()
 end
 
-local function RequestUpdate()
-    if not ns.HasBarGlowAssignments() then return end
-    wipe(lastSourceStates)
-    if updateTimer then updateTimer:Cancel() end
-    updatePending = true
-    cdmHookFrame:Show()
-    updateTimer = C_Timer.NewTimer(0.1, DoUpdate)
-end
-ns.RequestUpdate = RequestUpdate
-
-local lastPackTime = 0
-local PACK_THROTTLE = 0.5
-
--- Bar glow visuals are updated directly from UpdateAllCDMBars each tick
--- (same timing as CDM bars, using the same _tickBlizzActiveCache data).
--- No separate polling frame needed.
--- END BAR GLOWS MASTER UPDATE
+-- No-ops for removed functionality (options may reference these)
+ns.ApplyPerSlotHidingAndPackSoon = function() end
+ns.HookAllCDMChildren = function() end
