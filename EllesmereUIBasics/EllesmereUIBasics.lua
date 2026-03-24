@@ -1487,6 +1487,13 @@ local function ApplyMinimap()
                 elapsed = 0
                 UpdateClock()
             end)
+            clockTicker:RegisterEvent("CVAR_UPDATE")
+            clockTicker:SetScript("OnEvent", function(_, _, cvarName)
+                if cvarName == "timeMgrUseMilitaryTime" or cvarName == "timeMgrUseLocalTime" then
+                    RefreshClockCVars()
+                    UpdateClock()
+                end
+            end)
         end
         clockTicker:Show()
         UpdateClock()
