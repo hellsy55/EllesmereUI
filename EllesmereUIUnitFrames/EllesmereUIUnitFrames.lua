@@ -43,8 +43,14 @@ local defaults = {
             maxBuffs = 4,
             buffAnchor = "topleft",
             buffGrowth = "auto",
+            buffSize = 22,
+            buffOffsetX = 0,
+            buffOffsetY = 0,
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
+            debuffSize = 22,
+            debuffOffsetX = 0,
+            debuffOffsetY = 0,
             namePosition = "left",
             healthTextPosition = "right",
             leftTextContent = "name",
@@ -195,6 +201,12 @@ local defaults = {
             debuffGrowth = "auto",
             maxBuffs = 4,
             maxDebuffs = 20,
+            buffSize = 22,
+            buffOffsetX = 0,
+            buffOffsetY = 0,
+            debuffSize = 22,
+            debuffOffsetX = 0,
+            debuffOffsetY = 0,
             namePosition = "left",
             healthTextPosition = "right",
             leftTextContent = "name",
@@ -290,6 +302,12 @@ local defaults = {
             castbarHeight = 14,
             maxBuffs = 4,
             maxDebuffs = 20,
+            buffSize = 22,
+            buffOffsetX = 0,
+            buffOffsetY = 0,
+            debuffSize = 22,
+            debuffOffsetX = 0,
+            debuffOffsetY = 0,
             healthDisplay = "both",
             showBuffs = true,
             onlyPlayerDebuffs = false,
@@ -437,6 +455,12 @@ local defaults = {
             buffAnchor = "topleft",
             buffGrowth = "auto",
             maxBuffs = 4,
+            buffSize = 22,
+            buffOffsetX = 0,
+            buffOffsetY = 0,
+            debuffSize = 22,
+            debuffOffsetX = 0,
+            debuffOffsetY = 0,
             textSize = 12,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
@@ -493,6 +517,12 @@ local defaults = {
             buffAnchor = "topleft",
             buffGrowth = "auto",
             maxBuffs = 4,
+            buffSize = 22,
+            buffOffsetX = 0,
+            buffOffsetY = 0,
+            debuffSize = 22,
+            debuffOffsetX = 0,
+            debuffOffsetY = 0,
             textSize = 12,
             leftTextContent = "name",
             rightTextContent = "perhp",
@@ -2476,12 +2506,13 @@ local function CreateTargetAuras(frame, unit)
         end
     end
 
-    local auraSize = 22
     local gap = 1
     local perRow = 7
     local containerWidth = frame:GetWidth()
 
     local settings = GetSettingsForUnit(unit or 'target')
+    local auraSize = (settings and settings.buffSize) or 22
+    local debuffAuraSize = (settings and settings.debuffSize) or 22
 
     local showBuffs = true
     if settings and settings.showBuffs == false then
@@ -2506,7 +2537,7 @@ local function CreateTargetAuras(frame, unit)
     if bAnc == "bottomleft" or bAnc == "bottomright" then
         buffCbOff = cbOffset
     end
-    buffs:SetPoint(bia, frame, bfp, box * gap, boy * gap + buffCbOff)
+    buffs:SetPoint(bia, frame, bfp, box * gap + (settings and settings.buffOffsetX or 0), boy * gap + buffCbOff + (settings and settings.buffOffsetY or 0))
     buffs:SetSize(containerWidth, auraSize)
     buffs.size = auraSize
     buffs.spacing = gap
@@ -2534,9 +2565,9 @@ local function CreateTargetAuras(frame, unit)
         if effectiveAnc == "bottomleft" or effectiveAnc == "bottomright" then
             debuffCbOff = cbOffset
         end
-        debuffs:SetPoint(dia, frame, dfp, dox * gap, doy * gap + debuffCbOff)
-        debuffs:SetSize(containerWidth, auraSize)
-        debuffs.size = auraSize
+        debuffs:SetPoint(dia, frame, dfp, dox * gap + (settings and settings.debuffOffsetX or 0), doy * gap + debuffCbOff + (settings and settings.debuffOffsetY or 0))
+        debuffs:SetSize(containerWidth, debuffAuraSize)
+        debuffs.size = debuffAuraSize
         debuffs.spacing = gap
         debuffs.num = (dAnc ~= "none") and maxDebuffs or 0
         debuffs["size-x"] = perRow
@@ -2636,7 +2667,7 @@ local function StyleFullFrame(frame, unit)
 
         -- Always create player buffs; oUF element disabled later if not wanted
         do
-            local auraSize = 22
+            local auraSize = settings.buffSize or 22
             local gap = 1
             local perRow = 7
             local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
@@ -2652,7 +2683,7 @@ local function StyleFullFrame(frame, unit)
                 buffCbOffset = -cbH
             end
             local buffs = CreateFrame("Frame", nil, frame)
-            buffs:SetPoint(bia, frame, bfp, box * gap, boy * gap + buffCbOffset)
+            buffs:SetPoint(bia, frame, bfp, box * gap + (settings.buffOffsetX or 0), boy * gap + buffCbOffset + (settings.buffOffsetY or 0))
             buffs:SetSize(frame:GetWidth(), auraSize)
             buffs.size = auraSize
             buffs.spacing = gap
@@ -4457,11 +4488,12 @@ local function ReloadFrames()
                                 buffCbOff = -cbH
                             end
                             -- Only reanchor + ForceUpdate when layout actually changed
-                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. buffCbOff .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4)
+                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. buffCbOff .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
+                                frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
-                                frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + buffCbOff)
+                                frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + buffCbOff + (settings.buffOffsetY or 0))
                                 frame.Buffs.initialAnchor = bia
                                 frame.Buffs.growthX = bgx
                                 frame.Buffs.growthY = bgy
@@ -4807,11 +4839,12 @@ local function ReloadFrames()
                                     liveCbOff = -cbH
                                 end
                             end
-                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 20) .. liveCbOff
+                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 20) .. liveCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
+                                frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
-                                frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + liveCbOff)
+                                frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + liveCbOff + (settings.buffOffsetY or 0))
                                 frame.Buffs.initialAnchor = bia
                                 frame.Buffs.growthX = bgx
                                 frame.Buffs.growthY = bgy
@@ -4853,11 +4886,12 @@ local function ReloadFrames()
                                     liveDbCbOff = -cbH
                                 end
                             end
-                            local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 20) .. liveDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
+                            local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 20) .. liveDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
+                                frame.Debuffs.size = settings.debuffSize or 22
                                 frame.Debuffs:ClearAllPoints()
-                                frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1, doy * 1 + liveDbCbOff)
+                                frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + liveDbCbOff + (settings.debuffOffsetY or 0))
                                 frame.Debuffs.initialAnchor = dia
                                 frame.Debuffs.growthX = dgx
                                 frame.Debuffs.growthY = dgy
@@ -5143,11 +5177,12 @@ local function ReloadFrames()
                                 focusDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. focusDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. focusDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
+                            frame.Debuffs.size = settings.debuffSize or 22
                             frame.Debuffs:ClearAllPoints()
-                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1, doy * 1 + focusDbCbOff)
+                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + focusDbCbOff + (settings.debuffOffsetY or 0))
                             frame.Debuffs.initialAnchor = dia
                             frame.Debuffs.growthX = dgx
                             frame.Debuffs.growthY = dgy
@@ -5179,11 +5214,12 @@ local function ReloadFrames()
                                 focusBfCbOff = -cbH
                             end
                         end
-                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. focusBfCbOff
+                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. focusBfCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
+                            frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
-                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + focusBfCbOff)
+                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + focusBfCbOff + (settings.buffOffsetY or 0))
                             frame.Buffs.initialAnchor = bia
                             frame.Buffs.growthX = bgx
                             frame.Buffs.growthY = bgy
@@ -5418,11 +5454,12 @@ local function ReloadFrames()
                                 liveDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. liveDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. liveDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
+                            frame.Debuffs.size = settings.debuffSize or 22
                             frame.Debuffs:ClearAllPoints()
-                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1, doy * 1 + liveDbCbOff)
+                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + liveDbCbOff + (settings.debuffOffsetY or 0))
                             frame.Debuffs.initialAnchor = dia
                             frame.Debuffs.growthX = dgx
                             frame.Debuffs.growthY = dgy
@@ -5454,11 +5491,12 @@ local function ReloadFrames()
                                 bossBfCbOff = -cbH
                             end
                         end
-                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. bossBfCbOff
+                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. bossBfCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
+                            frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
-                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1, boy * 1 + bossBfCbOff)
+                            frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + bossBfCbOff + (settings.buffOffsetY or 0))
                             frame.Buffs.initialAnchor = bia
                             frame.Buffs.growthX = bgx
                             frame.Buffs.growthY = bgy

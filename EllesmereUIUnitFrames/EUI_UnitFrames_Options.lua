@@ -1528,19 +1528,17 @@ initFrame:SetScript("OnEvent", function(self)
             if not settings.showPlayerAbsorb then absorbBar:Hide() end
         end
 
-        -- Fake buff icons (player only, shown when showBuffs is on)
+        -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
         local buffIcons = {}
-        if unitKey == "player" then
-            local buffSize = 22
+        do
+            local buffSize = settings.buffSize or 22
             local buffGap = 1
-            local ba = settings.buffAnchor or "topleft"
             for i = 1, 2 do
                 local bf = CreateFrame("Frame", nil, pf, "BackdropTemplate")
                 PP.Size(bf, buffSize, buffSize)
                 bf:SetBackdrop(SOLID_BACKDROP)
                 bf:SetBackdropColor(0, 0, 0, 1)
                 bf:SetFrameLevel(pf:GetFrameLevel() + 3)
-                -- Initial placement at topleft; Update() will reposition properly
                 PP.Point(bf, "BOTTOMLEFT", pf, "TOPLEFT", (i - 1) * (buffSize + buffGap), buffGap)
                 local tex = bf:CreateTexture(nil, "ARTWORK")
                 PP.Point(tex, "TOPLEFT", bf, "TOPLEFT", 1, -1)
@@ -1549,7 +1547,37 @@ initFrame:SetScript("OnEvent", function(self)
                 tex:SetTexture(_previewBuffIcons[i] or 135932)
                 bf._iconTex = tex
                 buffIcons[i] = bf
-                if not settings.showBuffs then bf:Hide() end
+                local showB = settings.showBuffs and (settings.buffAnchor or "topleft") ~= "none"
+                if not showB then bf:Hide() end
+            end
+        end
+
+        -- Fake debuff icons (all units, shown when debuffAnchor is not "none")
+        local debuffIcons = {}
+        do
+            local debuffSize = settings.debuffSize or 22
+            local debuffGap = 1
+            local previewDebuffIcons = {
+                136116, 132099, 136182, 136214, 132155,
+                136201, 136148, 136175, 136130, 136160,
+                136195, 136133, 136222, 136168, 136205,
+                136186, 136124, 136151, 136210, 136143,
+            }
+            for i = 1, 20 do
+                local df = CreateFrame("Frame", nil, pf, "BackdropTemplate")
+                PP.Size(df, debuffSize, debuffSize)
+                df:SetBackdrop(SOLID_BACKDROP)
+                df:SetBackdropColor(0.55, 0, 0, 1)
+                df:SetFrameLevel(pf:GetFrameLevel() + 3)
+                PP.Point(df, "TOPLEFT", pf, "BOTTOMLEFT", (i - 1) * (debuffSize + debuffGap), -debuffGap)
+                local tex = df:CreateTexture(nil, "ARTWORK")
+                PP.Point(tex, "TOPLEFT", df, "TOPLEFT", 1, -1)
+                PP.Point(tex, "BOTTOMRIGHT", df, "BOTTOMRIGHT", -1, 1)
+                tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                tex:SetTexture(previewDebuffIcons[i] or 136116)
+                df._iconTex = tex
+                debuffIcons[i] = df
+                if (settings.debuffAnchor or "bottomleft") == "none" then df:Hide() end
             end
         end
 
@@ -2206,14 +2234,17 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Buff icons (player only) -- reposition based on anchor/growth settings
+            -- Buff icons -- reposition based on anchor/growth/size/offset settings
             local buffExtra = 0
             if #buffIcons > 0 then
                 local maxBuf = s.maxBuffs or 4
                 local visibleBuffCount = math.min(2, maxBuf)
-                if s.showBuffs and visibleBuffCount > 0 then
-                    local buffSize = 22
+                local showB = s.showBuffs and (s.buffAnchor or "topleft") ~= "none"
+                if showB and visibleBuffCount > 0 then
+                    local buffSize = s.buffSize or 22
                     local buffGap = 1
+                    local bOffX = s.buffOffsetX or 0
+                    local bOffY = s.buffOffsetY or 0
                     local ba = s.buffAnchor or "topleft"
                     local bg = s.buffGrowth or "auto"
 
@@ -2227,12 +2258,12 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Anchor point on pf and offset for first icon
                     local anchorMap = {
-                        topleft     = { pt = "TOPLEFT",     ox = 0,                       oy = buffGap },
-                        topright    = { pt = "TOPRIGHT",    ox = 0,                       oy = buffGap },
-                        bottomleft  = { pt = "BOTTOMLEFT",  ox = 0,                       oy = -(buffSize + buffGap) },
-                        bottomright = { pt = "BOTTOMRIGHT", ox = 0,                       oy = -(buffSize + buffGap) },
-                        left        = { pt = "LEFT",         ox = -(buffGap),              oy = 0 },
-                        right       = { pt = "RIGHT",        ox = buffGap,                 oy = 0 },
+                        topleft     = { pt = "TOPLEFT",     ox = bOffX,                        oy = buffGap + bOffY },
+                        topright    = { pt = "TOPRIGHT",    ox = bOffX,                        oy = buffGap + bOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
+                        left        = { pt = "LEFT",        ox = -(buffGap) + bOffX,           oy = bOffY },
+                        right       = { pt = "RIGHT",       ox = buffGap + bOffX,              oy = bOffY },
                     }
                     local am = anchorMap[ba] or anchorMap.topleft
 
@@ -2254,14 +2285,11 @@ initFrame:SetScript("OnEvent", function(self)
                         justH = "BOTTOMLEFT"
                     end
 
-                    -- Build a cache key so we only reanchor when the anchor actually changes.
-                    -- ClearAllPoints + SetPoint causes a one-frame gap that makes icons blink.
-                    -- Also guard Show()/Hide() -- calling Show() on an already-visible frame
-                    -- triggers a re-render that causes a shutter effect.
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. buffSize
                     for i, bf in ipairs(buffIcons) do
                         if i <= visibleBuffCount then
                             if bf._anchorKey ~= anchorKey then
+                                PP.Size(bf, buffSize, buffSize)
                                 bf:ClearAllPoints()
                                 if i == 1 then
                                     PP.Point(bf, justH, pf, am.pt, am.ox, am.oy)
@@ -2283,6 +2311,75 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 else
                     for _, bf in ipairs(buffIcons) do if bf:IsShown() then bf:Hide() end end
+                end
+            end
+
+            -- Debuff icons -- reposition based on anchor/growth/size/offset settings
+            if #debuffIcons > 0 then
+                local dAnc = s.debuffAnchor or "bottomleft"
+                local maxDeb = s.maxDebuffs or 20
+                local previewDebuffLimit = 5
+                local visibleDebuffCount = math.min(#debuffIcons, maxDeb, previewDebuffLimit)
+                if dAnc ~= "none" and visibleDebuffCount > 0 then
+                    local debuffSize = s.debuffSize or 22
+                    local debuffGap = 1
+                    local dOffX = s.debuffOffsetX or 0
+                    local dOffY = s.debuffOffsetY or 0
+                    local dg = s.debuffGrowth or "auto"
+
+                    local autoGrowth = {
+                        topleft = "right", topright = "left",
+                        bottomleft = "right", bottomright = "left",
+                        left = "left", right = "right",
+                    }
+                    local gDir = (dg == "auto") and (autoGrowth[dAnc] or "right") or dg
+
+                    local anchorMap = {
+                        topleft     = { pt = "TOPLEFT",     ox = dOffX,                         oy = debuffGap + dOffY },
+                        topright    = { pt = "TOPRIGHT",    ox = dOffX,                         oy = debuffGap + dOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
+                        left        = { pt = "LEFT",        ox = -(debuffGap) + dOffX,          oy = dOffY },
+                        right       = { pt = "RIGHT",       ox = debuffGap + dOffX,             oy = dOffY },
+                    }
+                    local am = anchorMap[dAnc] or anchorMap.bottomleft
+
+                    local dx, dy = 0, 0
+                    if gDir == "right" then dx = debuffSize + debuffGap
+                    elseif gDir == "left" then dx = -(debuffSize + debuffGap)
+                    elseif gDir == "up" then dy = debuffSize + debuffGap
+                    elseif gDir == "down" then dy = -(debuffSize + debuffGap)
+                    else dx = debuffSize + debuffGap end
+
+                    local justH = "BOTTOMLEFT"
+                    if dAnc == "topright" or dAnc == "bottomright" then
+                        justH = "BOTTOMRIGHT"
+                    elseif dAnc == "left" then
+                        justH = "BOTTOMRIGHT"
+                    elseif dAnc == "right" then
+                        justH = "BOTTOMLEFT"
+                    end
+
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize
+                    for i, df in ipairs(debuffIcons) do
+                        if i <= visibleDebuffCount then
+                            if df._anchorKey ~= anchorKey then
+                                PP.Size(df, debuffSize, debuffSize)
+                                df:ClearAllPoints()
+                                if i == 1 then
+                                    PP.Point(df, justH, pf, am.pt, am.ox, am.oy)
+                                else
+                                    PP.Point(df, justH, debuffIcons[1], justH, dx * (i - 1), dy * (i - 1))
+                                end
+                                df._anchorKey = anchorKey
+                            end
+                            if not df:IsShown() then df:Show() end
+                        else
+                            if df:IsShown() then df:Hide() end
+                        end
+                    end
+                else
+                    for _, df in ipairs(debuffIcons) do if df:IsShown() then df:Hide() end end
                 end
             end
 
@@ -2522,6 +2619,7 @@ initFrame:SetScript("OnEvent", function(self)
         pf._centerFS = centerFS
         pf._portraitFrame = portraitFrame
         pf._buffIcons = buffIcons
+        pf._debuffIcons = debuffIcons
         pf._barArea = barArea
         pf._textOverlay = textOverlay
         pf._btbFrame = btbFrame
@@ -6223,6 +6321,15 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxBuffs", 4) end,
                       set=function(v) SSetSupported("maxBuffs", v) end },
+                    { type="slider", label="Icon Size", min=10, max=40, step=1,
+                      get=function() return SValSupported("buffSize", 22) end,
+                      set=function(v) SSetSupported("buffSize", v) end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffOffsetX", 0) end,
+                      set=function(v) SSetSupported("buffOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffOffsetY", 0) end,
+                      set=function(v) SSetSupported("buffOffsetY", v) end },
                 },
             })
             local buffCogShow = buffCogShowRaw
@@ -6245,6 +6352,15 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Show Own Only",
                       get=function() return SValSupported("onlyPlayerDebuffs", false) end,
                       set=function(v) SSetSupported("onlyPlayerDebuffs", v) end },
+                    { type="slider", label="Icon Size", min=10, max=40, step=1,
+                      get=function() return SValSupported("debuffSize", 22) end,
+                      set=function(v) SSetSupported("debuffSize", v) end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffOffsetX", 0) end,
+                      set=function(v) SSetSupported("debuffOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffOffsetY", 0) end,
+                      set=function(v) SSetSupported("debuffOffsetY", v) end },
                 },
             })
             local debuffCogShow = debuffCogShowRaw
@@ -6283,6 +6399,8 @@ initFrame:SetScript("OnEvent", function(self)
             btbCenterText= { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "left" },
             btbClassIcon = { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "right" },
             combatIndicator = { section = sharedAddHeader, target = sharedAddRow1, slotSide = "right" },
+            buffIcon     = { section = sharedAddHeader,      target = sharedAddRow2, slotSide = "left" },
+            debuffIcon   = { section = sharedAddHeader,      target = sharedAddRow2, slotSide = "right" },
             castBar      = { section = sharedCastHeader,     target = sharedCastRow1 },
             castIcon     = { section = sharedCastHeader,     target = sharedCastRow1 },
             castName     = { section = sharedCastHeader,     target = sharedCastRow1 },
@@ -6544,6 +6662,11 @@ initFrame:SetScript("OnEvent", function(self)
             if pv._buffIcons then
                 for i = 1, #pv._buffIcons do
                     if pv._buffIcons[i] and pv._buffIcons[i]:IsShown() then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
+                end
+            end
+            if pv._debuffIcons then
+                for i = 1, #pv._debuffIcons do
+                    if pv._debuffIcons[i] and pv._debuffIcons[i]:IsShown() then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
                 end
             end
             if pv._btbFrame then
@@ -6839,6 +6962,8 @@ initFrame:SetScript("OnEvent", function(self)
             portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
+            buffIcon   = { section = displayHeader,  target = bossAuraRow,   slotSide = "left" },
+            debuffIcon = { section = displayHeader,  target = bossAuraRow,   slotSide = "right" },
         }
 
         return abs(y)
