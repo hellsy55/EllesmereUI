@@ -1612,6 +1612,9 @@ function EQT:Refresh(skipAlphaFlash)
         self.timerRows[#self.timerRows + 1] = r
     end
 
+    local _curObjQuestID = nil  -- set by RenderList before objectives
+    local _curObjIndex = 0
+
     -- Progress bar row
     local function AddProgressRow(cur, max)
         local r = AcquireRow(content)
@@ -1757,9 +1760,6 @@ function EQT:Refresh(skipAlphaFlash)
         yOff = yOff + rh + ROW_GAP
         self.rows[#self.rows + 1] = r
     end
-
-    local _curObjQuestID = nil  -- set by RenderList before objectives
-    local _curObjIndex = 0
 
     local function AddObjRow(text, cr, cg, cb, isFinished)
         local r = AcquireRow(content)
@@ -2153,7 +2153,7 @@ function EQT:RefreshProgress()
                 local o = objs[objIdx]
                 local nf = o.numFulfilled or 0
                 local nr = o.numRequired or 1
-                if o.objType == "progressbar" then
+                if o.type == "progressbar" or o.objType == "progressbar" then
                     local pct = GetQuestProgressBarPercent(qID)
                     if pct then nf = pct; nr = 100 end
                 end
@@ -2718,7 +2718,10 @@ function EQT:Init()
             InvalidateQuestLogCache()
             InvalidateScenarioCache()
             _questListsCached = false
-            EQT:Refresh()
+            -- Use SetDirty (deferred) so GetQuestProgressBarPercent has time to
+            -- populate before the rebuild reads it. Calling Refresh() synchronously
+            -- on the event races the engine update and reads 0 out of combat.
+            EQT:SetDirty(false)
             if EQT.UpdateQuestItemAttribute then EQT.UpdateQuestItemAttribute() end
             return
         end
