@@ -162,6 +162,11 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
+            raidMarkerEnabled = true,
+            raidMarkerSize = 28,
+            raidMarkerAlign = "right",
+            raidMarkerX = 0,
+            raidMarkerY = 0,
         },
         target = {
             frameWidth = 181,
@@ -284,6 +289,11 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
+            raidMarkerEnabled = true,
+            raidMarkerSize = 28,
+            raidMarkerAlign = "right",
+            raidMarkerX = 0,
+            raidMarkerY = 0,
         },
         playerTarget = {
             frameWidth = 181,
@@ -474,6 +484,11 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
+            raidMarkerEnabled = true,
+            raidMarkerSize = 28,
+            raidMarkerAlign = "right",
+            raidMarkerX = 0,
+            raidMarkerY = 0,
         },
         boss = {
             frameWidth = 160,
@@ -2763,6 +2778,31 @@ local function StyleFullFrame(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame)
 
+    -- Raid target marker icon -- oUF's RaidTargetIndicator element manages
+    -- this texture automatically via RAID_TARGET_UPDATE in its own protected scope.
+    do
+        local raidIconHolder = CreateFrame("Frame", nil, frame)
+        raidIconHolder:SetAllPoints(frame)
+        raidIconHolder:SetFrameLevel(frame:GetFrameLevel() + 20)
+        local raidIcon = raidIconHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+        -- Read per-unit marker settings from DB; fall back to defaults
+        local _rmSettings = settings
+        local _rmSize    = (_rmSettings and _rmSettings.raidMarkerSize)    or 28
+        local _rmAlign   = (_rmSettings and _rmSettings.raidMarkerAlign)   or "right"
+        local _rmX       = (_rmSettings and _rmSettings.raidMarkerX)       or 0
+        local _rmY       = (_rmSettings and _rmSettings.raidMarkerY)       or 0
+        local _rmAnchor  = (_rmAlign == "left") and "TOPLEFT"
+                        or (_rmAlign == "center") and "TOP"
+                        or "TOPRIGHT"
+        raidIcon:SetSize(_rmSize, _rmSize)
+        raidIcon:SetPoint("CENTER", frame, _rmAnchor, _rmX, _rmY)
+        if _rmSettings and _rmSettings.raidMarkerEnabled == false then
+            raidIcon:Hide()
+        end
+        frame.RaidTargetIndicator = raidIcon
+        frame._raidMarkerHolder = raidIconHolder
+    end
+
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
     local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(frame.Health)
@@ -2984,6 +3024,30 @@ local function StyleFocusFrame(frame, unit)
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame)
+
+    -- Raid target marker icon
+    do
+        local raidIconHolder = CreateFrame("Frame", nil, frame)
+        raidIconHolder:SetAllPoints(frame)
+        raidIconHolder:SetFrameLevel(frame:GetFrameLevel() + 20)
+        local raidIcon = raidIconHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+        -- Read per-unit marker settings from DB; fall back to defaults
+        local _rmSettings = settings
+        local _rmSize    = (_rmSettings and _rmSettings.raidMarkerSize)    or 28
+        local _rmAlign   = (_rmSettings and _rmSettings.raidMarkerAlign)   or "right"
+        local _rmX       = (_rmSettings and _rmSettings.raidMarkerX)       or 0
+        local _rmY       = (_rmSettings and _rmSettings.raidMarkerY)       or 0
+        local _rmAnchor  = (_rmAlign == "left") and "TOPLEFT"
+                        or (_rmAlign == "center") and "TOP"
+                        or "TOPRIGHT"
+        raidIcon:SetSize(_rmSize, _rmSize)
+        raidIcon:SetPoint("CENTER", frame, _rmAnchor, _rmX, _rmY)
+        if _rmSettings and _rmSettings.raidMarkerEnabled == false then
+            raidIcon:Hide()
+        end
+        frame.RaidTargetIndicator = raidIcon
+        frame._raidMarkerHolder = raidIconHolder
+    end
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
     local textOverlay = CreateFrame("Frame", nil, frame.Health)
@@ -5654,6 +5718,45 @@ local function ReloadFrames()
             frames.player._combatIndicator:Show()
         else
             frames.player._combatIndicator:Hide()
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Live-update raid target marker icon (size / alignment / X / Y / enabled)
+    --  for player, target, and focus frames.  The texture itself is managed by
+    --  oUF's RaidTargetIndicator element; we only reposition and show/hide it.
+    ---------------------------------------------------------------------------
+    local RAID_MARKER_UNITS = { "player", "target", "focus" }
+    for _, rmUnit in ipairs(RAID_MARKER_UNITS) do
+        local rmFrame = frames[rmUnit]
+        if rmFrame and rmFrame.RaidTargetIndicator then
+            local rmS = GetSettingsForUnit(rmUnit)
+            local rmSize   = (rmS and rmS.raidMarkerSize)    or 28
+            local rmAlign  = (rmS and rmS.raidMarkerAlign)   or "right"
+            local rmX      = (rmS and rmS.raidMarkerX)       or 0
+            local rmY      = (rmS and rmS.raidMarkerY)       or 0
+            local rmEnabled = not (rmS and rmS.raidMarkerEnabled == false)
+            local rmAnchor = (rmAlign == "left")   and "TOPLEFT"
+                          or (rmAlign == "center") and "TOP"
+                          or "TOPRIGHT"
+            local icon = rmFrame.RaidTargetIndicator
+            icon:SetSize(rmSize, rmSize)
+            icon:ClearAllPoints()
+            icon:SetPoint("CENTER", rmFrame, rmAnchor, rmX, rmY)
+            -- Only show/hide when the icon is not currently being controlled by
+            -- oUF's RAID_TARGET_UPDATE (i.e. no marker is assigned to the unit).
+            -- When a marker IS assigned oUF shows the icon; we only force-hide
+            -- it here when the feature is disabled entirely.
+            if not rmEnabled then
+                icon:Hide()
+            else
+                -- Let oUF manage visibility; ensure it is not stuck hidden from
+                -- a previous disabled state by forcing a tag update if the unit
+                -- currently has a marker.
+                if rmFrame.UpdateAllElements then
+                    rmFrame:UpdateAllElements("ReloadFrames_RaidMarker")
+                end
+            end
         end
     end
 end
