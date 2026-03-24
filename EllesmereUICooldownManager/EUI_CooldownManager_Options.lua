@@ -977,12 +977,13 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     realBtn = prefix and _G[prefix .. i]
                 end
-                local hasAction = realBtn and ((realBtn.icon and realBtn.icon:GetTexture()) or (realBtn._tex and realBtn._tex:GetTexture()))
+                local _rbTex = realBtn and ((ns._hookFrameData[realBtn] and ns._hookFrameData[realBtn].tex) or realBtn._tex)
+                local hasAction = realBtn and ((realBtn.icon and realBtn.icon:GetTexture()) or (_rbTex and _rbTex:GetTexture()))
                 local iconTex = bf:CreateTexture(nil, "ARTWORK")
                 iconTex:SetAllPoints()
                 UnsnapTex(iconTex)
                 if hasAction then
-                    local srcTex = (realBtn.icon and realBtn.icon:GetTexture()) or (realBtn._tex and realBtn._tex:GetTexture())
+                    local srcTex = (realBtn.icon and realBtn.icon:GetTexture()) or (_rbTex and _rbTex:GetTexture())
                     iconTex:SetTexture(srcTex)
                     local z = zoom
                     if btnShape == "cropped" then
@@ -3434,9 +3435,10 @@ initFrame:SetScript("OnEvent", function(self)
             local removed = sd.removedSpells
             local spells = {}
             for _, icon in ipairs(liveIcons) do
-                if icon._spellID and icon._spellID > 0 then
-                    if not (removed and removed[icon._spellID]) then
-                        spells[#spells + 1] = icon._spellID
+                local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
+                if _sid and _sid > 0 then
+                    if not (removed and removed[_sid]) then
+                        spells[#spells + 1] = _sid
                     end
                 end
             end
@@ -5899,7 +5901,8 @@ initFrame:SetScript("OnEvent", function(self)
                         local liveIcons = ns.cdmBarIcons and ns.cdmBarIcons[barKey]
                         if liveIcons then
                             for _, lIcon in ipairs(liveIcons) do
-                                if lIcon._spellID == sid and lIcon._isPlaceholder then
+                                local _lSid = (ns._ecmeFC[lIcon] and ns._ecmeFC[lIcon].spellID) or lIcon._spellID
+                                if _lSid == sid and lIcon._isPlaceholder then
                                     isUntracked = true; break
                                 end
                             end

@@ -25,6 +25,10 @@ ns._hookFrameData = hookFrameData
 local _ecmeFC = ns._ecmeFC
 local FC = ns.FC
 
+-- Convenience: get or create hookFrameData entry for a frame
+local function FD(f) local d = hookFrameData[f]; if not d then d = {}; hookFrameData[f] = d end; return d end
+ns.FD = FD
+
 -- Spell routing: spellID -> barKey. Rebuilt when bar config changes.
 local _spellRouteMap = {}
 local _spellRouteGeneration = 0
@@ -396,55 +400,55 @@ local function DecorateFrame(frame, barData)
     if iconWidget and not iconWidget.GetTexture then
         if iconWidget.Icon then iconWidget = iconWidget.Icon end
     end
-    frame._tex = iconWidget
-    frame._cooldown = frame.Cooldown
+    fd.tex = iconWidget
+    fd.cooldown = frame.Cooldown
 
     frame:SetScale(1)
     HideBlizzardDecorations(frame)
 
     -- Background
-    if not frame._bg then
+    if not fd.bg then
         local bg = frame:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
             barData.bgB or 0.08, barData.bgA or 0.6)
-        frame._bg = bg
+        fd.bg = bg
     end
 
     -- Glow overlay
-    if not frame._glowOverlay then
+    if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
         go:SetFrameLevel(frame:GetFrameLevel() + 2)
         go:SetAlpha(0)
         go:EnableMouse(false)
-        frame._glowOverlay = go
+        fd.glowOverlay = go
     end
 
     -- Text overlay
-    if not frame._textOverlay then
+    if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
         txo:SetFrameLevel(frame:GetFrameLevel() + 3)
         txo:EnableMouse(false)
-        frame._textOverlay = txo
+        fd.textOverlay = txo
     end
 
     -- Keybind text
-    if not frame._keybindText then
-        local kt = frame._textOverlay:CreateFontString(nil, "OVERLAY")
+    if not fd.keybindText then
+        local kt = fd.textOverlay:CreateFontString(nil, "OVERLAY")
         kt:SetFont(GetCDMFont(), barData.keybindSize or 10, "OUTLINE")
         kt:SetShadowOffset(0, 0)
-        kt:SetPoint("TOPLEFT", frame._textOverlay, "TOPLEFT",
+        kt:SetPoint("TOPLEFT", fd.textOverlay, "TOPLEFT",
             barData.keybindOffsetX or 2, barData.keybindOffsetY or -2)
         kt:SetJustifyH("LEFT")
         kt:SetTextColor(barData.keybindR or 1, barData.keybindG or 1,
             barData.keybindB or 1, barData.keybindA or 0.9)
         kt:Hide()
-        frame._keybindText = kt
+        fd.keybindText = kt
     end
 
-    frame._tooltipShown = false
+    fd.tooltipShown = false
 
     -- Suppress Blizzard's built-in tooltip when showTooltip is off.
     -- HookScript fires after Blizzard's OnEnter which shows GameTooltip.
@@ -452,7 +456,8 @@ local function DecorateFrame(frame, barData)
     if not fc.tooltipHooked then
         fc.tooltipHooked = true
         frame:HookScript("OnEnter", function()
-            local bd = frame._barKey and barDataByKey[frame._barKey]
+            local ffc = _ecmeFC[frame]
+            local bd = ffc and ffc.barKey and barDataByKey[ffc.barKey]
             if bd and not bd.showTooltip then
                 GameTooltip:Hide()
             end
@@ -465,7 +470,8 @@ local function DecorateFrame(frame, barData)
         local inVC = false
         hooksecurefunc(iconWidget, "SetVertexColor", function(self, r, g, b, a)
             if inVC then return end
-            local bd = frame._barKey and barDataByKey[frame._barKey]
+            local ffc = _ecmeFC[frame]
+            local bd = ffc and ffc.barKey and barDataByKey[ffc.barKey]
             if bd and not bd.outOfRangeOverlay then
                 if r < 0.95 or g < 0.95 or b < 0.95 then
                     inVC = true
@@ -477,28 +483,27 @@ local function DecorateFrame(frame, barData)
     end
 
     -- PP border
-    if not frame._ppBorderCreated then
+    if not fd.ppBorderCreated then
         EllesmereUI.PP.CreateBorder(frame,
             barData.borderR or 0, barData.borderG or 0,
             barData.borderB or 0, barData.borderA or 1,
             barData.borderSize or 1, "OVERLAY", 7)
-        frame._ppBorderCreated = true
+        fd.ppBorderCreated = true
     end
 
-    frame._isActive = false
-    frame._procGlowActive = false
-    frame._edges = {}
+    fd.isActive = false
+    fd.procGlowActive = false
 
     -- Cooldown widget styling
-    if frame._cooldown then
-        frame._cooldown:SetDrawEdge(false)
-        frame._cooldown:SetDrawSwipe(true)
-        frame._cooldown:SetDrawBling(false)
-        frame._cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
-        frame._cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
-        frame._cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
+    if fd.cooldown then
+        fd.cooldown:SetDrawEdge(false)
+        fd.cooldown:SetDrawSwipe(true)
+        fd.cooldown:SetDrawBling(false)
+        fd.cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+        fd.cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
+        fd.cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs")
-        frame._cooldown:SetReverse(isBuff)
+        fd.cooldown:SetReverse(isBuff)
     end
 
     return fd
@@ -678,8 +683,8 @@ local function CollectAndReanchor()
         if barData and barData.enabled then
             local container = cdmBarFrames[barKey]
             if container then
-                -- Bar hidden by visibility mode: hide icons and skip processing
-                local barHidden = container:GetAlpha() == 0
+                -- Bar hidden by visibility mode (flag set by _CDMApplyVisibility)
+                local barHidden = container._visHidden
                 local sd = ns.GetBarSpellData(barKey)
 
                 -- Build spell order for sorting (reuse scratch)
@@ -1046,9 +1051,10 @@ local function CollectAndReanchor()
                             if frame:GetParent() ~= UIParent then frame:SetParent(UIParent) end
                             DecorateFrame(frame, barData)
                             if frame:GetScale() ~= 1 then frame:SetScale(1) end
-                            frame._barKey = barKey
-                            frame._spellID = entry and (entry.baseSpellID or entry.spellID) or sid
-                            if noRange and frame._tex then frame._tex:SetVertexColor(1, 1, 1, 1) end
+                            local fd = hookFrameData[frame]
+                            FC(frame).barKey = barKey
+                            FC(frame).spellID = entry and (entry.baseSpellID or entry.spellID) or sid
+                            if noRange and fd and fd.tex then fd.tex:SetVertexColor(1, 1, 1, 1) end
                             icons[count] = frame
 
                             -- hideInactive: hide inactive real frames (not placeholders)
@@ -1066,7 +1072,7 @@ local function CollectAndReanchor()
                                 ns.ApplyUntrackedOverlay(frame, true)
                             else
                                 frame:SetAlpha(entryInactive and 0.5 or 1)
-                                if frame._untrackedOverlay then frame._untrackedOverlay:Hide() end
+                                if fd and fd.untrackedOverlay then fd.untrackedOverlay:Hide() end
                                 -- Hide old placeholder for this spell
                                 local phKey = barKey .. ":ph:" .. (sid > 0 and sid or -sid)
                                 local ph = _presetFrames[phKey]
@@ -1074,7 +1080,8 @@ local function CollectAndReanchor()
                             end
 
                             -- Active state glow (CD/utility bars)
-                            if not isPlaceholder and barType ~= "buffs" and frame._glowOverlay then
+                            local glowOv = fd and fd.glowOverlay
+                            if not isPlaceholder and barType ~= "buffs" and glowOv then
                                 local anim = barData.activeStateAnim or "blizzard"
                                 local isInActiveState = false
                                 if frame.auraInstanceID ~= nil then
@@ -1090,7 +1097,7 @@ local function CollectAndReanchor()
                                 if anim == "hideActive" then
                                     if isInActiveState then frame:SetAlpha(0) end
                                 elseif glowStyle and glowStyle > 0 and isInActiveState then
-                                    if not frame._glowOverlay._glowActive or ffc.activeGlowStyle ~= glowStyle then
+                                    if not glowOv._glowActive or ffc.activeGlowStyle ~= glowStyle then
                                         local gr, gg, gb
                                         if barData.activeAnimClassColor then
                                             local _, cf = UnitClass("player")
@@ -1100,26 +1107,26 @@ local function CollectAndReanchor()
                                         gr = gr or barData.activeAnimR or 1.0
                                         gg = gg or barData.activeAnimG or 0.85
                                         gb = gb or barData.activeAnimB or 0.0
-                                        ns.StartNativeGlow(frame._glowOverlay, glowStyle, gr, gg, gb)
+                                        ns.StartNativeGlow(glowOv, glowStyle, gr, gg, gb)
                                         ffc.activeGlowStyle = glowStyle
                                     end
                                 elseif anim == "none" and isInActiveState then
-                                    if frame._glowOverlay._glowActive then
-                                        ns.StopNativeGlow(frame._glowOverlay)
+                                    if glowOv._glowActive then
+                                        ns.StopNativeGlow(glowOv)
                                         ffc.activeGlowStyle = nil
                                     end
                                 else
-                                    if frame._glowOverlay._glowActive and ffc.activeGlowStyle then
-                                        ns.StopNativeGlow(frame._glowOverlay)
+                                    if glowOv._glowActive and ffc.activeGlowStyle then
+                                        ns.StopNativeGlow(glowOv)
                                         ffc.activeGlowStyle = nil
                                     end
                                 end
                             end
                             -- Buff glow
-                            if not isPlaceholder and barType == "buffs" and frame._glowOverlay then
+                            if not isPlaceholder and barType == "buffs" and glowOv then
                                 local glowType = barData.buffGlowType or 0
                                 if glowType > 0 and not entryInactive then
-                                    if not frame._glowOverlay._glowActive then
+                                    if not glowOv._glowActive then
                                         local gr, gg, gb
                                         if barData.buffGlowClassColor then
                                             local _, cf = UnitClass("player")
@@ -1129,11 +1136,11 @@ local function CollectAndReanchor()
                                         gr = gr or barData.buffGlowR or 1.0
                                         gg = gg or barData.buffGlowG or 0.776
                                         gb = gb or barData.buffGlowB or 0.376
-                                        ns.StartNativeGlow(frame._glowOverlay, glowType, gr, gg, gb)
+                                        ns.StartNativeGlow(glowOv, glowType, gr, gg, gb)
                                     end
                                 else
-                                    if frame._glowOverlay._glowActive then
-                                        ns.StopNativeGlow(frame._glowOverlay)
+                                    if glowOv._glowActive then
+                                        ns.StopNativeGlow(glowOv)
                                     end
                                 end
                             end
@@ -1148,9 +1155,10 @@ local function CollectAndReanchor()
                         if frame:GetParent() ~= UIParent then frame:SetParent(UIParent) end
                         DecorateFrame(frame, barData)
                         if frame:GetScale() ~= 1 then frame:SetScale(1) end
-                        frame._barKey = barKey
-                        frame._spellID = entry.baseSpellID or entry.spellID
-                        if noRange and frame._tex then frame._tex:SetVertexColor(1, 1, 1, 1) end
+                        local fd = hookFrameData[frame]
+                        FC(frame).barKey = barKey
+                        FC(frame).spellID = entry.baseSpellID or entry.spellID
+                        if noRange and fd and fd.tex then fd.tex:SetVertexColor(1, 1, 1, 1) end
                         icons[count] = frame
                         if barHidden then
                             frame:Hide()

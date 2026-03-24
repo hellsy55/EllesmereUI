@@ -291,7 +291,8 @@ SpellUsedOnAnyOtherBar = function(spellID, targetBarKey)
                 local icons = cdmBarIcons[b.key]
                 if icons then
                     for _, icon in ipairs(icons) do
-                        if icon._spellID == spellID then return bName end
+                        local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
+                        if _sid == spellID then return bName end
                     end
                 end
             end

@@ -120,6 +120,10 @@ local _cdmViewerNames = {
 local _ecmeFC = setmetatable({}, { __mode = "k" })
 local function FC(f) local c = _ecmeFC[f]; if not c then c = {}; _ecmeFC[f] = c end; return c end
 
+-- Access decoration data stored externally by EllesmereUICdmHooks.lua
+-- Populated at runtime (hooks file loads after this file)
+local function _getFD(f) return ns._hookFrameData and ns._hookFrameData[f] end
+
 -- Duration object caches (hooked from Blizzard SetCooldownFromDurationObject)
 local _ecmeChildHasDurObj = {}
 local _ecmeDurObjCache    = {}
@@ -1268,14 +1272,16 @@ local _blizzViewerToBarKey = {
 -- Walk up from a frame to find which Blizzard CDM viewer it belongs to.
 -- Also handles reparented frames (hook system) via the _barKey field.
 local function GetBarKeyForBlizzChild(frame)
-    -- Fast path: reparented frame with _barKey set by hook system
-    if frame._barKey then return frame._barKey, frame end
+    -- Fast path: reparented frame with barKey set by hook system (external cache) or CDM frame
+    local fc = _ecmeFC[frame]
+    if (fc and fc.barKey) or frame._barKey then return (fc and fc.barKey) or frame._barKey, frame end
     local current = frame
     while current do
         local parent = current:GetParent()
         if not parent then return nil end
-        -- Check if parent is one of our CDM bar containers
-        if parent._barKey then return parent._barKey, current end
+        -- Check if parent is one of our CDM bar containers (external cache or direct)
+        local pfc = _ecmeFC[parent]
+        if (pfc and pfc.barKey) or parent._barKey then return (pfc and pfc.barKey) or parent._barKey, current end
         local name = parent.GetName and parent:GetName()
         if name and _blizzViewerToBarKey[name] then
             return _blizzViewerToBarKey[name], current
@@ -1300,11 +1306,13 @@ local function FindOurIconForBlizzChild(barKey, blizzChild)
     local alertSid = ResolveBlizzChildSpellID(blizzChild)
     if alertSid then
         for _, icon in ipairs(icons) do
-            if icon._spellID == alertSid then return icon end
+            local ifc = _ecmeFC[icon]
+            if (ifc and ifc.spellID or icon._spellID) == alertSid then return icon end
         end
         -- Check override mapping (base spell <-> override)
         for _, icon in ipairs(icons) do
-            local iconSid = icon._spellID
+            local ifc = _ecmeFC[icon]
+            local iconSid = ifc and ifc.spellID or icon._spellID
             if iconSid and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
                 local ovr = C_SpellBook.FindSpellOverrideByID(iconSid)
                 if ovr and ovr == alertSid then return icon end
@@ -1330,20 +1338,25 @@ end
 
 -- Show proc glow on one of our icons (separate from active state glow)
 local function ShowProcGlow(icon, cr, cg, cb)
-    if not icon or not icon._glowOverlay then return end
+    if not icon then return end
+    local fd = _getFD(icon)
+    local glow = fd and fd.glowOverlay or icon._glowOverlay
+    if not glow then return end
     -- Don't double-start if already showing proc glow
     if icon._procGlowActive then return end
     -- If active state glow is running, stop it first (proc glow takes priority)
-    if icon._isActive and icon._glowOverlay._glowActive then
-        StopNativeGlow(icon._glowOverlay)
+    if icon._isActive and glow._glowActive then
+        StopNativeGlow(glow)
     end
-    StartNativeGlow(icon._glowOverlay, PROC_GLOW_STYLE, cr, cg, cb)
+    StartNativeGlow(glow, PROC_GLOW_STYLE, cr, cg, cb)
     icon._procGlowActive = true
 end
 
 local function StopProcGlow(icon)
     if not icon or not icon._procGlowActive then return end
-    StopNativeGlow(icon._glowOverlay)
+    local fd = _getFD(icon)
+    local glow = fd and fd.glowOverlay or icon._glowOverlay
+    StopNativeGlow(glow)
     icon._procGlowActive = false
 end
 
@@ -1470,6 +1483,7 @@ local _playerRace, _playerClass
 -- Forward declarations
 local BuildCDMBar, LayoutCDMBar, HideBlizzardCDM, RestoreBlizzardCDM
 local CaptureCDMPositions, ApplyCDMBarPosition, ApplyShapeToCDMIcon
+local _CDMApplyVisibility
 
 -------------------------------------------------------------------------------
 --  Capture Blizzard CDM positions (first login only)
@@ -2455,10 +2469,13 @@ local function HideUntrackedTooltip()
 end
 
 local function ApplyUntrackedOverlay(ourIcon, isUntracked)
+    local fd = _getFD(ourIcon)
+    local utOv = fd and fd.untrackedOverlay or ourIcon._untrackedOverlay
     if isUntracked then
-        if not ourIcon._untrackedOverlay then
+        if not utOv then
+            local tex = fd and fd.tex or ourIcon._tex
             local ov = CreateFrame("Button", nil, ourIcon)
-            ov:SetAllPoints(ourIcon._tex or ourIcon)
+            ov:SetAllPoints(tex or ourIcon)
             ov:SetFrameLevel(ourIcon:GetFrameLevel() + 4)
             local ovTex = ov:CreateTexture(nil, "OVERLAY", nil, 6)
             ovTex:SetAllPoints()
@@ -2479,7 +2496,8 @@ local function ApplyUntrackedOverlay(ourIcon, isUntracked)
             ov._label = label
             ov:SetScript("OnClick", function(self)
                 local parent = self:GetParent()
-                local bk = parent and parent._barKey
+                local pfc = parent and _ecmeFC[parent]
+                local bk = (pfc and pfc.barKey) or (parent and parent._barKey)
                 local barType = bk
                 if barDataByKey and barDataByKey[bk] then
                     barType = barDataByKey[bk].barType or bk
@@ -2489,7 +2507,8 @@ local function ApplyUntrackedOverlay(ourIcon, isUntracked)
             end)
             ov:SetScript("OnEnter", function(self)
                 local parent = self:GetParent()
-                local bk = parent and parent._barKey
+                local pfc = parent and _ecmeFC[parent]
+                local bk = (pfc and pfc.barKey) or (parent and parent._barKey)
                 local barType = bk
                 if barDataByKey and barDataByKey[bk] then
                     barType = barDataByKey[bk].barType or bk
@@ -2500,13 +2519,14 @@ local function ApplyUntrackedOverlay(ourIcon, isUntracked)
                     "Not tracked in Blizzard CDM.\nClick to open the |cff0cd29d" .. tabName .. "|r tab.")
             end)
             ov:SetScript("OnLeave", function() HideUntrackedTooltip() end)
-            ourIcon._untrackedOverlay = ov
+            if fd then fd.untrackedOverlay = ov else ourIcon._untrackedOverlay = ov end
+            utOv = ov
         end
-        ourIcon._untrackedOverlay:EnableMouse(true)
-        ourIcon._untrackedOverlay:Show()
+        utOv:EnableMouse(true)
+        utOv:Show()
         ourIcon._isUntracked = true
-    elseif ourIcon._untrackedOverlay then
-        ourIcon._untrackedOverlay:Hide()
+    elseif utOv then
+        utOv:Hide()
         ourIcon._isUntracked = false
     end
 end
@@ -2519,25 +2539,29 @@ ns.ApplyUntrackedOverlay = ApplyUntrackedOverlay
 -------------------------------------------------------------------------------
 local _cdmTooltipOnUpdate = function(self)
     -- Suppress tooltips while in edit / unlock mode
+    local sfd = _getFD(self)
     if EllesmereUI and EllesmereUI._unlockActive then
-        if self._tooltipShown then
+        local shown = sfd and sfd.tooltipShown or self._tooltipShown
+        if shown then
             GameTooltip:Hide()
-            self._tooltipShown = false
+            if sfd then sfd.tooltipShown = false else self._tooltipShown = false end
         end
         return
     end
     local over = self:IsMouseOver()
-    if over and not self._tooltipShown then
-        local sid = self._spellID
+    local shown = sfd and sfd.tooltipShown or self._tooltipShown
+    if over and not shown then
+        local sfc = _ecmeFC[self]
+        local sid = sfc and sfc.spellID or self._spellID
         if sid and sid > 0 then
             GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
             GameTooltip:SetSpellByID(sid)
             GameTooltip:Show()
-            self._tooltipShown = true
+            if sfd then sfd.tooltipShown = true else self._tooltipShown = true end
         end
-    elseif not over and self._tooltipShown then
+    elseif not over and shown then
         GameTooltip:Hide()
-        self._tooltipShown = false
+        if sfd then sfd.tooltipShown = false else self._tooltipShown = false end
     end
 end
 
@@ -2551,9 +2575,11 @@ local function ApplyCDMTooltipState(barKey)
             icon:SetScript("OnUpdate", _cdmTooltipOnUpdate)
         else
             icon:SetScript("OnUpdate", nil)
-            if icon._tooltipShown then
+            local ifd = _getFD(icon)
+            local shown = ifd and ifd.tooltipShown or icon._tooltipShown
+            if shown then
                 GameTooltip:Hide()
-                icon._tooltipShown = false
+                if ifd then ifd.tooltipShown = false else icon._tooltipShown = false end
             end
         end
     end
@@ -2565,6 +2591,10 @@ ns.ApplyCDMTooltipState = ApplyCDMTooltipState
 -------------------------------------------------------------------------------
 ApplyShapeToCDMIcon = function(icon, shape, barData)
     if not icon then return end
+    local fd = _getFD(icon)
+    local tex = fd and fd.tex or icon._tex
+    local cd = fd and fd.cooldown or icon._cooldown
+    local bg = fd and fd.bg or icon._bg
     local zoom = barData.iconZoom or 0.08
     local borderSz = barData.borderSize or 1
     local brdR = barData.borderR or 0
@@ -2580,9 +2610,9 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         -- Remove shape mask if previously applied
         if icon._shapeMask then
             local mask = icon._shapeMask
-            if icon._tex then pcall(icon._tex.RemoveMaskTexture, icon._tex, mask) end
-            if icon._bg then pcall(icon._bg.RemoveMaskTexture, icon._bg, mask) end
-            if icon._cooldown then pcall(icon._cooldown.RemoveMaskTexture, icon._cooldown, mask) end
+            if tex then pcall(tex.RemoveMaskTexture, tex, mask) end
+            if bg then pcall(bg.RemoveMaskTexture, bg, mask) end
+            if cd then pcall(cd.RemoveMaskTexture, cd, mask) end
             mask:SetTexture(nil); mask:ClearAllPoints(); mask:SetSize(0.001, 0.001); mask:Hide()
         end
         if icon._shapeBorder then icon._shapeBorder:Hide() end
@@ -2596,28 +2626,28 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         end
 
         -- Restore icon texture coords
-        if icon._tex then
-            icon._tex:ClearAllPoints()
-            EllesmereUI.PP.Point(icon._tex, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
-            EllesmereUI.PP.Point(icon._tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
+        if tex then
+            tex:ClearAllPoints()
+            EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
+            EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
             if shape == "cropped" then
-                icon._tex:SetTexCoord(zoom, 1 - zoom, zoom + 0.10, 1 - zoom - 0.10)
+                tex:SetTexCoord(zoom, 1 - zoom, zoom + 0.10, 1 - zoom - 0.10)
             else
-                icon._tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+                tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
             end
         end
 
         -- Restore cooldown (full frame so swipe covers the entire icon)
-        if icon._cooldown then
-            icon._cooldown:ClearAllPoints()
-            icon._cooldown:SetAllPoints(icon)
-            pcall(icon._cooldown.SetSwipeTexture, icon._cooldown, "Interface\\Buttons\\WHITE8x8")
-            if icon._cooldown.SetUseCircularEdge then pcall(icon._cooldown.SetUseCircularEdge, icon._cooldown, false) end
+        if cd then
+            cd:ClearAllPoints()
+            cd:SetAllPoints(icon)
+            pcall(cd.SetSwipeTexture, cd, "Interface\\Buttons\\WHITE8x8")
+            if cd.SetUseCircularEdge then pcall(cd.SetUseCircularEdge, cd, false) end
         end
 
         -- Restore background
-        if icon._bg then
-            icon._bg:ClearAllPoints(); icon._bg:SetAllPoints()
+        if bg then
+            bg:ClearAllPoints(); bg:SetAllPoints()
         end
         return
     end
@@ -2634,13 +2664,13 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     mask:Show()
 
     -- Remove existing mask refs before re-adding
-    if icon._tex then pcall(icon._tex.RemoveMaskTexture, icon._tex, mask) end
-    if icon._bg then pcall(icon._bg.RemoveMaskTexture, icon._bg, mask) end
-    if icon._cooldown then pcall(icon._cooldown.RemoveMaskTexture, icon._cooldown, mask) end
+    if tex then pcall(tex.RemoveMaskTexture, tex, mask) end
+    if bg then pcall(bg.RemoveMaskTexture, bg, mask) end
+    if cd then pcall(cd.RemoveMaskTexture, cd, mask) end
 
     -- Apply mask to icon texture and background
-    if icon._tex then icon._tex:AddMaskTexture(mask) end
-    if icon._bg then icon._bg:AddMaskTexture(mask) end
+    if tex then tex:AddMaskTexture(mask) end
+    if bg then bg:AddMaskTexture(mask) end
 
     -- Expand icon beyond frame for shape
     local shapeOffset = CDM_SHAPES.iconExpandOffsets[shape] or 0
@@ -2648,10 +2678,10 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     local iconExp = CDM_SHAPES.iconExpand + shapeOffset + ((zoom - shapeDefault) * 200)
     if iconExp < 0 then iconExp = 0 end
     local halfIE = iconExp / 2
-    if icon._tex then
-        icon._tex:ClearAllPoints()
-        EllesmereUI.PP.Point(icon._tex, "TOPLEFT", icon, "TOPLEFT", -halfIE, halfIE)
-        EllesmereUI.PP.Point(icon._tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", halfIE, -halfIE)
+    if tex then
+        tex:ClearAllPoints()
+        EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", -halfIE, halfIE)
+        EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", halfIE, -halfIE)
     end
 
     -- Mask position (inset for border)
@@ -2667,7 +2697,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     local insetPx = CDM_SHAPES.insets[shape] or 17
     local visRatio = (128 - 2 * insetPx) / 128
     local expand = ((1 / visRatio) - 1) * 0.5
-    if icon._tex then icon._tex:SetTexCoord(-expand, 1 + expand, -expand, 1 + expand) end
+    if tex then tex:SetTexCoord(-expand, 1 + expand, -expand, 1 + expand) end
 
     -- Hide square borders (pixel-perfect via PP)
     if icon._ppBorders then
@@ -2699,22 +2729,22 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     end
 
     -- Apply mask to cooldown so swipe follows shape
-    if icon._cooldown then
-        icon._cooldown:ClearAllPoints()
-        icon._cooldown:SetAllPoints(icon)
-        pcall(icon._cooldown.AddMaskTexture, icon._cooldown, mask)
-        if icon._cooldown.SetSwipeTexture then
-            pcall(icon._cooldown.SetSwipeTexture, icon._cooldown, maskTex)
+    if cd then
+        cd:ClearAllPoints()
+        cd:SetAllPoints(icon)
+        pcall(cd.AddMaskTexture, cd, mask)
+        if cd.SetSwipeTexture then
+            pcall(cd.SetSwipeTexture, cd, maskTex)
         end
         local useCircular = (shape ~= "square" and shape ~= "csquare")
-        if icon._cooldown.SetUseCircularEdge then pcall(icon._cooldown.SetUseCircularEdge, icon._cooldown, useCircular) end
+        if cd.SetUseCircularEdge then pcall(cd.SetUseCircularEdge, cd, useCircular) end
         local edgeScale = CDM_SHAPES.edgeScales[shape] or 0.60
-        if icon._cooldown.SetEdgeScale then pcall(icon._cooldown.SetEdgeScale, icon._cooldown, edgeScale) end
+        if cd.SetEdgeScale then pcall(cd.SetEdgeScale, cd, edgeScale) end
     end
 
     -- Restore background to full icon
-    if icon._bg then
-        icon._bg:ClearAllPoints(); icon._bg:SetAllPoints()
+    if bg then
+        bg:ClearAllPoints(); bg:SetAllPoints()
     end
 
     icon._shapeApplied = true
@@ -2742,19 +2772,26 @@ local function RefreshCDMIconAppearance(barKey)
     local zoom = barData.iconZoom or 0.08
 
     for _, icon in ipairs(icons) do
+        local fd = _getFD(icon)
+        local tex = fd and fd.tex or icon._tex
+        local cd = fd and fd.cooldown or icon._cooldown
+        local bg = fd and fd.bg or icon._bg
+        local glowOv = fd and fd.glowOverlay or icon._glowOverlay
+        local kbText = fd and fd.keybindText or icon._keybindText
+        local txOverlay = fd and fd.textOverlay or icon._textOverlay
         -- Update texture zoom
-        if icon._tex then
-            icon._tex:ClearAllPoints()
-            EllesmereUI.PP.Point(icon._tex, "TOPLEFT", icon, "TOPLEFT", borderSize, -borderSize)
-            EllesmereUI.PP.Point(icon._tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
-            icon._tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+        if tex then
+            tex:ClearAllPoints()
+            EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", borderSize, -borderSize)
+            EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
+            tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
         -- Update cooldown (full frame so swipe covers the entire icon)
-        if icon._cooldown then
-            icon._cooldown:ClearAllPoints()
-            icon._cooldown:SetAllPoints(icon)
-            icon._cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
-            icon._cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
+        if cd then
+            cd:ClearAllPoints()
+            cd:SetAllPoints(icon)
+            cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+            cd:SetHideCountdownNumbers(not barData.showCooldownText)
             -- Mark pending font update (applied in batch after frame renders)
             if barData.showCooldownText then
                 icon._pendingFontPath = GetCDMFont()
@@ -2769,8 +2806,8 @@ local function RefreshCDMIconAppearance(barKey)
             EllesmereUI.PP.UpdateBorder(icon, borderSize, barData.borderR or 0, barData.borderG or 0, barData.borderB or 0, barData.borderA or 1)
         end
         -- Update background
-        if icon._bg then
-            icon._bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08, barData.bgB or 0.08, barData.bgA or 0.6)
+        if bg then
+            bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08, barData.bgB or 0.08, barData.bgA or 0.6)
         end
         -- Style Blizzard's native stack/charge text elements
         local scFont = GetCDMFont()
@@ -2793,12 +2830,12 @@ local function RefreshCDMIconAppearance(barKey)
         end
 
         -- Update keybind text style
-        if icon._keybindText then
-            icon._keybindText:SetFont(GetCDMFont(), barData.keybindSize or 10, "OUTLINE")
-            icon._keybindText:SetShadowOffset(0, 0)
-            icon._keybindText:ClearAllPoints()
-            icon._keybindText:SetPoint("TOPLEFT", icon._textOverlay, "TOPLEFT", barData.keybindOffsetX or 2, barData.keybindOffsetY or -2)
-            icon._keybindText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
+        if kbText then
+            kbText:SetFont(GetCDMFont(), barData.keybindSize or 10, "OUTLINE")
+            kbText:SetShadowOffset(0, 0)
+            kbText:ClearAllPoints()
+            kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", barData.keybindOffsetX or 2, barData.keybindOffsetY or -2)
+            kbText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
         end
 
         -- Apply custom shape (overrides border/zoom set above)
@@ -2808,12 +2845,12 @@ local function RefreshCDMIconAppearance(barKey)
         -- Reset active state so glow type change takes effect on next tick.
         -- Preserve proc glow across rebuilds to avoid visible blink at load-in.
         local hadProcGlow = icon._procGlowActive
-        if icon._glowOverlay then
-            StopNativeGlow(icon._glowOverlay)
+        if glowOv then
+            StopNativeGlow(glowOv)
         end
         icon._isActive = false
-        if hadProcGlow and icon._glowOverlay then
-            StartNativeGlow(icon._glowOverlay, PROC_GLOW_STYLE, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
+        if hadProcGlow and glowOv then
+            StartNativeGlow(glowOv, PROC_GLOW_STYLE, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
             icon._procGlowActive = true
         else
             icon._procGlowActive = false
@@ -3229,7 +3266,7 @@ local function _CDMAttachHoverHooks(barKey)
     end
 end
 
-local function _CDMApplyVisibility()
+_CDMApplyVisibility = function()
     local p = ECME.db and ECME.db.profile
     if not p then return end
     local inCombat = _inCombat
@@ -3249,99 +3286,60 @@ local function _CDMApplyVisibility()
                 _CDMStopFade(frame)
                 frame:SetAlpha(barData.barBgAlpha or 1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                frame._visHidden = false
             else
 
             local vis = barData.barVisibility or "always"
+            local shouldHide = false
 
             -- Priority 1: vehicle always hides
             if inVehicle then
-                _CDMStopFade(frame)
-                frame:SetAlpha(0)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                shouldHide = true
             -- Priority 2: visibility options (checkbox dropdown)
             elseif EllesmereUI.CheckVisibilityOptions(barData) then
-                _CDMStopFade(frame)
-                frame:SetAlpha(0)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                shouldHide = true
             -- Priority 3: visibility mode dropdown
             elseif vis == "never" then
-                _CDMStopFade(frame)
-                frame:SetAlpha(0)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                shouldHide = true
             elseif vis == "in_combat" then
-                _CDMStopFade(frame)
-                if inCombat then
-                    frame:SetAlpha(barData.barBgAlpha or 1)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                else
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-                end
+                shouldHide = not inCombat
             elseif vis == "out_of_combat" then
-                _CDMStopFade(frame)
-                if not inCombat then
-                    frame:SetAlpha(barData.barBgAlpha or 1)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                else
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-                end
+                shouldHide = inCombat
             elseif vis == "in_raid" then
-                _CDMStopFade(frame)
-                if inRaid then
-                    frame:SetAlpha(barData.barBgAlpha or 1)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                else
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-                end
+                shouldHide = not inRaid
             elseif vis == "in_party" then
-                _CDMStopFade(frame)
-                if inParty or inRaid then
-                    frame:SetAlpha(barData.barBgAlpha or 1)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                else
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-                end
+                shouldHide = not (inParty or inRaid)
             elseif vis == "solo" then
-                _CDMStopFade(frame)
-                if not inRaid and not inParty then
-                    frame:SetAlpha(barData.barBgAlpha or 1)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                else
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-                end
+                shouldHide = inRaid or inParty
             elseif vis == "mouseover" then
                 _CDMAttachHoverHooks(barData.key)
                 local state = _cdmHoverStates[barData.key]
-                if not state or not state.isHovered then
-                    _CDMStopFade(frame)
-                    frame:SetAlpha(0)
-                    if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-                end
-            else -- "always"
+                shouldHide = not state or not state.isHovered
+            end
+
+            if shouldHide then
+                if vis ~= "mouseover" then _CDMStopFade(frame) end
+                frame:SetAlpha(0)
+                if frame.EnableMouseMotion then frame:EnableMouseMotion(vis == "mouseover") end
+                frame._visHidden = true
+            else
                 _CDMStopFade(frame)
                 frame:SetAlpha(barData.barBgAlpha or 1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                frame._visHidden = false
             end
 
             end -- unlockActive else
 
             -- Icons are parented to UIParent (not the container) so they
-            -- don't inherit the container's alpha. Explicitly hide/show them.
-            local barHidden = frame:GetAlpha() == 0
-            local icons = cdmBarIcons[barData.key]
-            if icons then
-                for i = 1, #icons do
-                    local icon = icons[i]
-                    if icon then
-                        if barHidden then
-                            icon:Hide()
-                        else
-                            icon:Show()
-                        end
+            -- don't inherit the container's alpha. Hide them when bar is
+            -- hidden by visibility mode. Uses _visHidden flag to avoid
+            -- confusing "hidden by vis mode" with "hidden by empty layout."
+            if frame._visHidden then
+                local icons = cdmBarIcons[barData.key]
+                if icons then
+                    for i = 1, #icons do
+                        if icons[i] then icons[i]:Hide() end
                     end
                 end
             end
@@ -3448,19 +3446,23 @@ local function ApplyCachedKeybinds()
     for barKey, icons in pairs(cdmBarIcons) do
         local bd = barDataByKey[barKey]
         for _, icon in ipairs(icons) do
-            if icon._keybindText then
-                if bd and bd.showKeybind and icon._spellID then
-                    local key = _cdmKeybindCache[icon._spellID]
-                    local name = C_Spell.GetSpellName and C_Spell.GetSpellName(icon._spellID)
+            local ifd = _getFD(icon)
+            local kbText = ifd and ifd.keybindText or icon._keybindText
+            if kbText then
+                local ifc = _ecmeFC[icon]
+                local sid = ifc and ifc.spellID or icon._spellID
+                if bd and bd.showKeybind and sid then
+                    local key = _cdmKeybindCache[sid]
+                    local name = C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
                     if not key and name then key = _cdmKeybindCache[name] end
                     if key then
-                        icon._keybindText:SetText(key)
-                        icon._keybindText:Show()
+                        kbText:SetText(key)
+                        kbText:Show()
                     else
-                        icon._keybindText:Hide()
+                        kbText:Hide()
                     end
                 else
-                    icon._keybindText:Hide()
+                    kbText:Hide()
                 end
             end
         end
@@ -3564,6 +3566,7 @@ BuildAllCDMBars = function()
                     for _, icon in ipairs(icons) do
                         icon._lastTex = nil
                         icon._lastDesat = nil
+                        if _ecmeFC[icon] then _ecmeFC[icon].spellID = nil end
                         icon._spellID = nil
                         icon._blizzChild = nil
                     end
@@ -3628,18 +3631,22 @@ BuildAllCDMBars = function()
     C_Timer.After(0, function()
         for _, icons in pairs(cdmBarIcons) do
             for _, icon in ipairs(icons) do
-                if icon._pendingFontPath and icon._cooldown then
-                    local fontPath, fontSize = icon._pendingFontPath, icon._pendingFontSize
-                    local fR, fG, fB = icon._pendingFontR, icon._pendingFontG, icon._pendingFontB
-                    for ri = 1, icon._cooldown:GetNumRegions() do
-                        local region = select(ri, icon._cooldown:GetRegions())
-                        if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-                            SetBlizzCDMFont(region, fontPath, fontSize, fR, fG, fB)
-                            break
+                if icon._pendingFontPath then
+                    local ifd = _getFD(icon)
+                    local cd = ifd and ifd.cooldown or icon._cooldown
+                    if cd then
+                        local fontPath, fontSize = icon._pendingFontPath, icon._pendingFontSize
+                        local fR, fG, fB = icon._pendingFontR, icon._pendingFontG, icon._pendingFontB
+                        for ri = 1, cd:GetNumRegions() do
+                            local region = select(ri, cd:GetRegions())
+                            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                                SetBlizzCDMFont(region, fontPath, fontSize, fR, fG, fB)
+                                break
+                            end
                         end
+                        icon._pendingFontPath = nil; icon._pendingFontSize = nil
+                        icon._pendingFontR = nil; icon._pendingFontG = nil; icon._pendingFontB = nil
                     end
-                    icon._pendingFontPath = nil; icon._pendingFontSize = nil
-                    icon._pendingFontR = nil; icon._pendingFontG = nil; icon._pendingFontB = nil
                 end
             end
         end
@@ -4092,8 +4099,10 @@ function ECME:OnEnable()
     C_Timer.After(2, function()
         for _, icons in pairs(cdmBarIcons) do
             for _, icon in ipairs(icons) do
-                if icon._glowOverlay and icon._glowOverlay._glowActive then
-                    StopNativeGlow(icon._glowOverlay)
+                local ifd = _getFD(icon)
+                local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
+                if glowOv and glowOv._glowActive then
+                    StopNativeGlow(glowOv)
                     icon._procGlowActive = false
                 end
             end
@@ -4641,9 +4650,11 @@ local function UpdateRotationHighlights()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.rotationHelperEnabled then
         for icon in pairs(ns._rotationGlowedIcons) do
-            if icon._glowOverlay then
-                _G_Glows.StopAllGlows(icon._glowOverlay)
-                icon._glowOverlay:SetAlpha(0)
+            local ifd = _getFD(icon)
+            local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
+            if glowOv then
+                _G_Glows.StopAllGlows(glowOv)
+                glowOv:SetAlpha(0)
             end
             ns._rotationGlowedIcons[icon] = nil
         end
@@ -4657,9 +4668,11 @@ local function UpdateRotationHighlights()
     ns._lastSuggestedSpell = suggestedSpell
 
     for icon in pairs(ns._rotationGlowedIcons) do
-        if icon._glowOverlay then
-            _G_Glows.StopAllGlows(icon._glowOverlay)
-            icon._glowOverlay:SetAlpha(0)
+        local ifd = _getFD(icon)
+        local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
+        if glowOv then
+            _G_Glows.StopAllGlows(glowOv)
+            glowOv:SetAlpha(0)
         end
     end
     wipe(ns._rotationGlowedIcons)
@@ -4669,10 +4682,14 @@ local function UpdateRotationHighlights()
     local glowStyle = p.cdmBars.rotationHelperGlowStyle or 5
     for barKey, icons in pairs(cdmBarIcons) do
         for _, icon in ipairs(icons) do
-            if icon._spellID and icon._spellID == suggestedSpell and icon:IsShown() then
-                if icon._glowOverlay then
-                    icon._glowOverlay:SetAlpha(1)
-                    StartNativeGlow(icon._glowOverlay, glowStyle, 1, 0.82, 0.1)
+            local ifc = _ecmeFC[icon]
+            local sid = ifc and ifc.spellID or icon._spellID
+            if sid and sid == suggestedSpell and icon:IsShown() then
+                local ifd = _getFD(icon)
+                local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
+                if glowOv then
+                    glowOv:SetAlpha(1)
+                    StartNativeGlow(glowOv, glowStyle, 1, 0.82, 0.1)
                     ns._rotationGlowedIcons[icon] = true
                 end
             end
