@@ -15,13 +15,8 @@ local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local DEFAULT_GLOW_COLOR = {r=1, g=0.776, b=0.376}
 local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 
--------------------------------------------------------------------------------
---  Hunter's Mark combat reminder state
---  On combat enter: flag is set to true (reminder needed).
---  On UNIT_SPELLCAST_SUCCEEDED for Hunter's Mark: flag cleared.
---  On combat leave: flag cleared.
---  OOC: falls back to target debuff check instead.
--------------------------------------------------------------------------------
+-- Hunter's Mark combat state: set true on PLAYER_REGEN_DISABLED, cleared on
+-- cast or combat end. OOC falls back to target debuff check.
 local _huntersMarkNeeded = false
 local _huntersMarkCooldown = false  -- brief cooldown after casting OOC
 
@@ -208,14 +203,9 @@ local function GetCurrentInstanceName()
 end
 
 -------------------------------------------------------------------------------
---  Aura query helpers (secret-value safe)
---  Uses C_UnitAuras.GetPlayerAuraBySpellID for player checks takes a known
---  (non-secret) spell ID and returns nil or an AuraData table.  The table
---  reference itself is never secret, only its fields, so "if result then" is
---  safe even in combat.
---
---  NON_SECRET_SPELL_IDS: Blizzard-whitelisted spell IDs whose aura data
---  remains non-secret even during combat lockdown (Patch 12.0).
+--  Aura query helpers (secret-value safe, Midnight 12.0)
+--  NON_SECRET_SPELL_IDS: whitelisted IDs readable via GetPlayerAuraBySpellID
+--  even during combat lockdown.
 -------------------------------------------------------------------------------
 local NON_SECRET_SPELL_IDS = {
     -- Preservation Evoker
@@ -241,8 +231,7 @@ local NON_SECRET_SPELL_IDS = {
     [462854]=true, [474754]=true,
     -- Alternate buff IDs (talent variants that provide the same effect)
     [432661]=true, [432778]=true,
-    -- Paladin Auras Devotion Aura (465) is still ContextuallySecret as of
-    -- Midnight 12.0; removed from whitelist so the reminder hides in combat.
+    -- Devotion Aura (465) is ContextuallySecret in Midnight 12.0; not whitelisted.
     -- Blessing of the Bronze Auras
     [381732]=true, [381741]=true, [381746]=true, [381748]=true,
     [381749]=true, [381750]=true, [381751]=true, [381752]=true,
@@ -264,11 +253,8 @@ local NON_SECRET_SPELL_IDS = {
 
 -------------------------------------------------------------------------------
 --  Pre-combat aura snapshot
---  Snapshots player aura state before entering combat so we have a reliable
---  fallback for any whitelisted spell whose live API returns nil in combat.
 -------------------------------------------------------------------------------
 local _preCombatAuraCache = {}  -- [spellID] = true/false, snapshotted at REGEN_DISABLED
-local _eabrLogEnabled = false   -- toggled by /eabrlog
 
 local function _isRuntimeNonSecret(id)
     if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
@@ -279,20 +265,23 @@ end
 
 local function SnapshotPlayerAuras()
     wipe(_preCombatAuraCache)
-    -- Snapshot every whitelisted spell ID before entering combat.
-    -- GetPlayerAuraBySpellID returns nil for everything during combat,
-    -- and UNIT_AURA payload spell IDs are all secret values in combat,
-    -- so this snapshot is the ONLY reliable source of aura state.
     for id in pairs(NON_SECRET_SPELL_IDS) do
         local result = C_UnitAuras.GetPlayerAuraBySpellID(id)
         _preCombatAuraCache[id] = (result ~= nil)
     end
+    -- Also snapshot non-whitelisted auras (e.g. Devotion Aura) that become
+    -- secret when a party member enters combat before the local player does.
+    for i = 1, 40 do
+        local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+        if not aura then break end
+        local sid = aura.spellId
+        if sid and not issecretvalue(sid) and not NON_SECRET_SPELL_IDS[sid] then
+            _preCombatAuraCache[sid] = true
+        end
+    end
 end
 
--- Pre-combat snapshot for "ownOnRaid" buffs (Source of Magic, etc.)
--- These are buffs the player casts on OTHER group members. sourceUnit is
--- unreadable in combat, so we snapshot the result of the full group scan
--- before entering combat.
+-- Pre-combat snapshot for ownOnRaid buffs (Source of Magic, Blistering Scales).
 local _preCombatOwnOnRaidCache = {}  -- [spellID] = true/false
 local SnapshotOwnOnRaidBuffs  -- forward declaration; defined after _unitHasBuffFromPlayer
 
@@ -306,8 +295,6 @@ local function PlayerHasAuraByID(spellIDs)
     for j = 1, #spellIDs do
         local id = spellIDs[j]
         if NON_SECRET_SPELL_IDS[id] then
-            -- Try the live API first.  Wrap in pcall to guard against any
-            -- restricted-API edge cases.
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok then
                 if result ~= nil then
@@ -319,9 +306,7 @@ local function PlayerHasAuraByID(spellIDs)
                     -- Secret value API confirms aura exists but won't reveal data
                     return true
                 end
-                -- result == nil: API says "not found" OR spell is contextually
-                -- secret and the API just returns nil.  During combat, consult
-                -- the pre-combat snapshot as a fallback.
+                -- nil: not found or contextually secret. Use snapshot in combat.
                 if inCombat and _preCombatAuraCache[id] then return true end
             else
                 -- pcall failed API restricted; use snapshot in combat
@@ -329,7 +314,9 @@ local function PlayerHasAuraByID(spellIDs)
             end
         end
     end
-    -- Fallback for non-whitelisted IDs: iterate auras (only works out of combat)
+    -- Fallback for non-whitelisted IDs. Use snapshot if spellIds are secret
+    -- (e.g. party member in combat before local player).
+    local anySecretSpellIds = false
     if not inCombat then
         for i = 1, 40 do
             local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
@@ -339,7 +326,15 @@ local function PlayerHasAuraByID(spellIDs)
                 for j = 1, #spellIDs do
                     if not NON_SECRET_SPELL_IDS[spellIDs[j]] and sid == spellIDs[j] then return true end
                 end
+            elseif sid and issecretvalue(sid) then
+                anySecretSpellIds = true
             end
+        end
+    end
+    if inCombat or anySecretSpellIds then
+        for j = 1, #spellIDs do
+            local id = spellIDs[j]
+            if not NON_SECRET_SPELL_IDS[id] and _preCombatAuraCache[id] then return true end
         end
     end
     return false
@@ -394,66 +389,58 @@ local function _unitHasBuff(u, spellIDs)
     return false
 end
 
--- Like _unitHasBuff but only returns true if the buff's source is the player.
--- Used for Source of Magic, Earth Shield (orbit) we need to verify it's OUR
--- buff, not another caster's.
--- Works in combat for non-secret spell IDs via GetUnitAuraBySpellID (direct
--- lookup, no iteration).  Falls back to GetAuraDataByIndex iteration OOC.
+-- Returns true if the buff's source is the player.
+-- Non-player units: OOC iteration only; in combat returns false (caller uses snapshot).
 local function _unitHasBuffFromPlayer(u, spellIDs)
     local inCombat = InCombat()
     local idLookup = _idLookupScratch
     wipe(idLookup)
     for j = 1, #spellIDs do idLookup[spellIDs[j]] = true end
 
-    -- Fast path: direct lookup for whitelisted IDs
-    for id in pairs(idLookup) do
-        if NON_SECRET_SPELL_IDS[id] then
-            -- Direct lookup works on any unit, in or out of combat, for
-            -- non-secret spell IDs.  Player uses GetPlayerAuraBySpellID
-            -- (faster), everyone else uses GetUnitAuraBySpellID.
-            local ok, aura
-            if UnitIsUnit(u, "player") then
-                ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            else
-                ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, u, id)
-            end
-            if ok and aura ~= nil and not issecretvalue(aura) then
-                -- Check isFromPlayerOrPlayerPet first (simple boolean, always
-                -- present).  Fall back to sourceUnit if available.
-                local fromMe = aura.isFromPlayerOrPlayerPet
-                if fromMe and not issecretvalue(fromMe) and fromMe == true then
-                    return true
-                end
-                local src = aura.sourceUnit
-                if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
-                    return true
-                end
-                -- Direct lookup found the aura but couldn't verify source.
-                -- OOC: can't disprove ownership, so assume it's ours.
-                -- In combat we fall through to the snapshot path instead.
-                if not inCombat then
-                    return true
+    if UnitIsUnit(u, "player") then
+        -- Player-self: GetPlayerAuraBySpellID for whitelisted IDs
+        for id in pairs(idLookup) do
+            if NON_SECRET_SPELL_IDS[id] then
+                local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+                if ok and aura ~= nil and not issecretvalue(aura) then
+                    local fromMe = aura.isFromPlayerOrPlayerPet
+                    if fromMe and not issecretvalue(fromMe) and fromMe == true then
+                        return true
+                    end
+                    local src = aura.sourceUnit
+                    if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+                        return true
+                    end
                 end
             end
         end
-    end
-    -- Iteration fallback (OOC): works for ALL spell IDs, including whitelisted
-    -- ones where the direct lookup couldn't confirm source ownership.
-    if not inCombat then
-        for i = 1, 40 do
-            local aura = C_UnitAuras.GetAuraDataByIndex(u, i, "HELPFUL")
-            if not aura then break end
-            local sid = aura.spellId
-            if sid and not issecretvalue(sid) and idLookup[sid] then
-                local src = aura.sourceUnit
-                if src and not issecretvalue(src) then
-                    -- sourceUnit is available: verify it's the player
-                    if UnitIsUnit(src, "player") then return true end
-                else
-                    -- sourceUnit unavailable OOC: can't disprove ownership,
-                    -- assume it's ours to avoid false-positive warnings.
-                    return true
+        if not inCombat then
+            for i = 1, 40 do
+                local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+                if not aura then break end
+                local sid = aura.spellId
+                if sid and not issecretvalue(sid) and idLookup[sid] then
+                    local src = aura.sourceUnit
+                    if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+                        return true
+                    end
                 end
+            end
+        end
+        return false
+    end
+
+    if inCombat then return false end  -- sourceUnit secret in combat, caller uses snapshot
+    for i = 1, 40 do
+        local aura = C_UnitAuras.GetAuraDataByIndex(u, i, "HELPFUL")
+        if not aura then break end
+        local sid = aura.spellId
+        if sid and not issecretvalue(sid) and idLookup[sid] then
+            local src = aura.sourceUnit
+            if src and not issecretvalue(src) then
+                if UnitIsUnit(src, "player") then return true end
+            else
+                return true  -- sourceUnit unavailable OOC, assume ours
             end
         end
     end
@@ -464,7 +451,7 @@ end
 -- now that _unitHasBuffFromPlayer is defined).
 SnapshotOwnOnRaidBuffs = function()
     wipe(_preCombatOwnOnRaidCache)
-    local ownOnRaidIDs = { 369459 }
+    local ownOnRaidIDs = { 369459, 360827 }
     for _, id in ipairs(ownOnRaidIDs) do
         local found = false
         if _unitHasBuffFromPlayer("player", {id}) then found = true end
@@ -483,14 +470,8 @@ SnapshotOwnOnRaidBuffs = function()
     end
 end
 
--- Like PlayerHasAuraByID but only returns true if the buff's source is the
--- player themselves.  Used for Devotion Aura Holy Paladins need their OWN
--- aura active for Aura Mastery, and Lightsmith Prot Paladins need their own
--- aura for amplification.  Another paladin's Devotion Aura on the player
--- does NOT satisfy this check.
--- IMPORTANT: This only works out of combat (aura iteration).  The caller
--- must ensure combatOk=false on the aura entry so this is never called
--- during combat where aura data is secret/restricted.
+-- Returns true only if the buff was cast by the player on themselves.
+-- OOC only — combatOk must be false on any aura using this check.
 local function PlayerHasSelfCastAuraByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     if InCombat() then return false end  -- safety: can't read sourceUnit in combat
@@ -511,26 +492,41 @@ local function PlayerHasSelfCastAuraByID(spellIDs)
     return false
 end
 
--- Check if ANY group/raid member is missing a buff (for "show if others missing")
+-- OOC range check (~28 yd). Returns true in combat (CheckInteractDistance is protected).
+local function _unitInRange(u)
+    if UnitIsUnit(u, "player") then return true end
+    if not UnitExists(u) then return false end
+    if InCombat() then return true end  -- CheckInteractDistance is protected in combat
+    local ok, result = pcall(CheckInteractDistance, u, 4)
+    return ok and result == true
+end
+
+-- Returns true if any in-range group member is missing the buff.
 local function AnyGroupMemberMissingBuff(spellIDs)
     if not IsInGroup() then return not _unitHasBuff("player", spellIDs) end
     if _unitOk("player") and not _unitHasBuff("player", spellIDs) then return true end
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
             local u = "raid"..i
-            if _unitOk(u) and UnitIsPlayer(u) and not UnitIsUnit(u, "player") and not _unitHasBuff(u, spellIDs) then return true end
+            if _unitOk(u) and UnitIsPlayer(u) and not UnitIsUnit(u, "player")
+               and _unitInRange(u) and not _unitHasBuff(u, spellIDs) then
+                return true
+            end
         end
     else
         for i = 1, GetNumSubgroupMembers() do
             local u = "party"..i
-            if _unitOk(u) and UnitIsPlayer(u) and not _unitHasBuff(u, spellIDs) then return true end
+            if _unitOk(u) and UnitIsPlayer(u)
+               and _unitInRange(u) and not _unitHasBuff(u, spellIDs) then
+                return true
+            end
         end
     end
     return false
 end
 
--- Check if the buff exists on ANY group/raid member (any source).
--- Used for Symbiotic Relationship just needs to exist on someone.
+-- Returns true if the buff exists on any group member (any source).
+-- Used for Symbiotic Relationship.
 local function BuffExistsOnAnyGroupMember(spellIDs)
     if _unitHasBuff("player", spellIDs) then return true end
     if IsInRaid() then
@@ -545,26 +541,34 @@ local function BuffExistsOnAnyGroupMember(spellIDs)
     return false
 end
 
--- Check if the PLAYER'S buff exists on ANY group/raid member (source must be player).
--- Returns true if at least one member has the buff cast by the player.
--- Used for Source of Magic, Earth Shield (orbit other).
+-- Returns true if the player's cast of spellIDs exists on any group member,
+-- OR if no in-range member is a valid target (suppress reminder either way).
+-- Used for Source of Magic, Blistering Scales.
 local function PlayerOwnBuffOnAnyGroupMember(spellIDs)
     if _unitHasBuffFromPlayer("player", spellIDs) then return true end
+    local anyInRangeWithoutBuff = false
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
-            if _unitHasBuffFromPlayer("raid"..i, spellIDs) then return true end
+            local u = "raid"..i
+            if _unitOk(u) and not UnitIsUnit(u, "player") then
+                if _unitHasBuffFromPlayer(u, spellIDs) then return true end
+                if _unitInRange(u) then anyInRangeWithoutBuff = true end
+            end
         end
     elseif IsInGroup() then
         for i = 1, GetNumSubgroupMembers() do
-            if _unitHasBuffFromPlayer("party"..i, spellIDs) then return true end
+            local u = "party"..i
+            if _unitOk(u) then
+                if _unitHasBuffFromPlayer(u, spellIDs) then return true end
+                if _unitInRange(u) then anyInRangeWithoutBuff = true end
+            end
         end
     end
-    return false
+    -- No reminder if nobody reachable is missing the buff.
+    return not anyInRangeWithoutBuff
 end
 
--- Check if the player's current target has a debuff from the given spell IDs.
--- Used for Hunter's Mark (debuff on enemy target, not a friendly buff).
--- Only works OOC (aura data is secret in combat).
+-- Returns true if the target has the debuff. OOC only; suppresses in combat.
 local function TargetHasDebuffByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     if not UnitExists("target") or UnitIsFriend("player", "target") then return true end
@@ -642,9 +646,7 @@ local AURAS = {
       check="player", specs={73}, combatOk=false },
     { key="berserk_stance", class="WARRIOR", name="Berserker Stance", castSpell=386196, buffIDs={386196},
       check="player", specs={71, 72}, combatOk=false },
-    -- Shadowform: NOT on non-secret list, OOC only
-    -- Void Form (194249) replaces Shadowform visually while in Void Form,
-    -- so either buff satisfies the "in Shadowform" requirement.
+    -- Shadowform: OOC only. Void Form (194249) also satisfies the check.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false },
     -- Devotion Aura: simple player buff check, OOC only
@@ -660,6 +662,10 @@ local AURAS = {
     -- not the caster; check if player's cast exists on any group member.
     { key="som",        class="EVOKER",  name="Source of Magic",   castSpell=369459, buffIDs={369459},
       check="ownOnRaid", combatOk=true, requireInstanceGroup=true },
+    -- Blistering Scales: requireTalent omitted (Regenerative Chitin is a passive modifier).
+    { key="blistering_scales", class="EVOKER", name="Blistering Scales", castSpell=360827,
+      buffIDs={360827}, check="ownOnRaid", combatOk=true,
+      requireInstanceGroup=true },
 }
 
 -------------------------------------------------------------------------------
@@ -878,9 +884,6 @@ local function PlayerHasBuffByName(buffName)
 end
 
 local function PlayerHasWellFed()
-    -- "Well Fed" and "Hearty Well Fed" are name-based checks since the buff
-    -- spell IDs vary by food type.  Use name iteration (OOC only).
-    -- Also try a broader check: any aura whose name contains "Well Fed".
     if InCombat() then return true end  -- never show food reminder in combat
     for i = 1, 40 do
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
@@ -894,10 +897,6 @@ local function PlayerHasWellFed()
 end
 
 local function PlayerHasFlaskBuff()
-    -- Try direct API lookup for each known flask buff ID.
-    -- GetPlayerAuraBySpellID works OOC for any spell ID and in combat for
-    -- non-secret IDs.  Flask checks are gated to OOC in Refresh(), so this
-    -- should always succeed when the buff is active.
     for _, id in ipairs(FLASK_BUFF_IDS) do
         local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
         if ok and result ~= nil then return true end
@@ -1074,7 +1073,7 @@ local defaults = {
             scale = 1.0,
             enabled = {
                 symbiotic=true, def_stance=true, berserk_stance=true, shadowform=true,
-                devo_aura=true, bol=true, bof=true, som=true,
+                devo_aura=true, bol=true, bof=true, som=true, blistering_scales=true,
             },
         },
         consumables = {
@@ -1131,18 +1130,14 @@ local talentIconPool = {}
 local talentActiveIcons = {}
 
 -------------------------------------------------------------------------------
---  Combat Icon Pool non-secure frames for visual-only display during combat
---  Parented to a separate combatAnchor (not iconAnchor) so Show/Hide is
---  never blocked by combat lockdown.
+--  Combat Icon Pool — non-secure frames for visual-only display during combat.
 -------------------------------------------------------------------------------
 local combatAnchor      -- created in OnEnable, follows iconAnchor position
 local combatIconPool = {}
 local combatActiveIcons = {}
 
 -------------------------------------------------------------------------------
---  Cursor-attached combat icons "important" buffs shown at the cursor
---  when cursorAttach is enabled.  Anchors to EllesmereUICursorFrame
---  (the cursor circle addon's tracking frame) for zero-cost positioning.
+--  Cursor-attached combat icons — shown at cursor when cursorAttach is enabled.
 -------------------------------------------------------------------------------
 local CURSOR_IMPORTANT = {
     -- All raid buffs are important (checked by cat == "raidbuff")
@@ -1471,9 +1466,6 @@ local function HideAllIcons()
     if talentIconAnchor then EllesmereUI.SetElementVisibility(talentIconAnchor, false) end
 end
 
--- Resize iconAnchor to match the current icon layout.
--- Centered growth is handled by the centralized unlock mode position system
--- (NotifyElementResized re-applies CENTER anchor on resize).
 local function ResizeAnchorCentered(newW, newH)
     if not iconAnchor then return end
     iconAnchor:SetSize(newW, newH)
@@ -1595,7 +1587,11 @@ if inInstance or rb.showNonInstanced then
                         isMissing = not _huntersMarkCooldown and not TargetHasDebuffByID(buff.buffIDs)
                     end
                 elseif rb.showOthersMissing and buff.check == "raid" and (IsInGroup() or IsInRaid()) then
-                    isMissing = AnyGroupMemberMissingBuff(buff.buffIDs)
+                    if inCombat then
+                        isMissing = not PlayerHasAuraByID(buff.buffIDs)
+                    else
+                        isMissing = AnyGroupMemberMissingBuff(buff.buffIDs)
+                    end
                 else
                     isMissing = not PlayerHasAuraByID(buff.buffIDs)
                 end
@@ -1626,7 +1622,8 @@ if inInstance or au.showNonInstanced then
         if aura.standalone then
             -- Handled by standalone system, skip
         elseif au.enabled[aura.key] and (aura.class == playerClass) and Known(aura.castSpell)
-           and not (aura.notIfKnown and Known(aura.notIfKnown)) then
+           and not (aura.notIfKnown and Known(aura.notIfKnown))
+           and not (aura.requireTalent and not Known(aura.requireTalent)) then
             -- Spec check
             local specOk = true
             if aura.specs then
@@ -1662,7 +1659,6 @@ if inInstance or au.showNonInstanced then
                         end
                     elseif aura.check == "ownOnRaid" then
                         if inCombat then
-                            -- In combat, sourceUnit is unreliable; use pre-combat snapshot
                             local cached = _preCombatOwnOnRaidCache[aura.buffIDs[1]]
                             isMissing = (cached == false)
                         else
@@ -1926,9 +1922,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         end -- end inInstance
     end -- end not inCombat
 
-    -- Earth Shield (elemental orbit) safe in combat, spell IDs 974 and
-    -- 383648 are non-secret.  Uses GetUnitAuraBySpellID for group checks.
-    -- Other shaman shields (LS, WS) remain OOC-only above.
+    -- Earth Shield: combat-safe (974, 383648 non-secret). LS/WS are OOC-only above.
     if specialsActive and playerClass == "SHAMAN" then
         for _, shield in ipairs(SHAMAN_SHIELDS) do
             if shield.key == "es" and co.enabled[shield.key] and Known(shield.castSpell) then
@@ -2109,9 +2103,8 @@ local function Refresh()
                 -- Skip middle-click dismissed reminders
                 local dk = m.dismissKey or (m.data and m.data.key and (m.cat .. ":" .. m.data.key)) or nil
                 if not (dk and _dismissedUntilLoad[dk]) then
-                    -- Only show reminders whose buff IDs are ALL whitelisted non-secret.
-                    -- Anything else must never appear during combat.
-                    -- huntersMark uses a state flag (no aura reading), always safe.
+                    -- Only show reminders with all-whitelisted buff IDs.
+                    -- huntersMark uses a state flag, always safe.
                     local safe = false
                     if m.data and m.data.check == "huntersMark" then
                         safe = true
@@ -2312,9 +2305,8 @@ local function TrackItemUse(itemID)
 end
 
 -------------------------------------------------------------------------------
---  STANDALONE BEACON REMINDERS (IsSpellOverlayed-based, fully combat-safe)
---  Completely independent from the aura/buff reminder system above.
---  Uses Blizzard's spell activation overlay to detect missing beacons.
+--  Standalone Beacon Reminders — IsSpellOverlayed-based, combat-safe.
+--  Independent from the main aura/buff system.
 -------------------------------------------------------------------------------
 local _beaconFrame = CreateFrame("Frame")
 local _beaconIsPaladin = false
@@ -2543,6 +2535,7 @@ _beaconFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 _beaconFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 _beaconFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 _beaconFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+_beaconFrame:RegisterEvent("PLAYER_LEVEL_CHANGED")
 _beaconFrame:SetScript("OnEvent", function(_, e, id)
     if not _beaconIsPaladin then return end
     if e == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or e == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
@@ -2556,7 +2549,8 @@ _beaconFrame:SetScript("OnEvent", function(_, e, id)
         BeaconUpdateOverlayEvents()
     end
     if e == "TRAIT_CONFIG_UPDATED" or e == "PLAYER_TALENT_UPDATE"
-       or e == "SPELLS_CHANGED" or e == "PLAYER_SPECIALIZATION_CHANGED" then
+       or e == "SPELLS_CHANGED" or e == "PLAYER_SPECIALIZATION_CHANGED"
+       or e == "PLAYER_LEVEL_CHANGED" then
         BeaconRefreshSoon()
         return
     end
@@ -2639,10 +2633,7 @@ function EABR:OnEnable()
     combatAnchor:Show()
     EllesmereUI.SetElementVisibility(combatAnchor, false)
 
-    -- Create cursor-attached anchor for important buffs.
-    -- Parents to EllesmereUICursorFrame if it exists (the cursor circle
-    -- addon's tracking frame already has an OnUpdate for cursor position).
-    -- Falls back to UIParent center if cursor addon isn't loaded.
+    -- Cursor anchor: parents to EllesmereUICursorFrame if available.
     local cursorParent = _G.EllesmereUICursorFrame or UIParent
     cursorAnchor = CreateFrame("Frame", "EABR_CursorAnchor", cursorParent)
     cursorAnchor:SetSize(1, 1)
@@ -2691,9 +2682,7 @@ function EABR:OnEnable()
     BeaconInit()
     C_Timer.After(0.5, RegisterUnlockElements)
 
-    -- Conditionally register group UNIT_AURA only when needed.
-    -- Needed for: showOthersMissing (raid buffs), Earth Shield orbit
-    -- (Resto Shaman), Source of Magic (Evoker ownOnRaid check).
+    -- Register broad UNIT_AURA when group buff checking is needed.
     local _groupAuraRegistered = false
     local function UpdateGroupAuraRegistration()
         local needGroup = false
@@ -2704,10 +2693,13 @@ function EABR:OnEnable()
             if cls == "SHAMAN" or cls == "EVOKER" then needGroup = true end
         end
         if needGroup and not _groupAuraRegistered then
+            mainFrame:RegisterEvent("UNIT_AURA")  -- broad: fires for any unit
             mainFrame:RegisterEvent("GROUP_JOINED")
             mainFrame:RegisterEvent("GROUP_LEFT")
             _groupAuraRegistered = true
         elseif not needGroup and _groupAuraRegistered then
+            mainFrame:UnregisterEvent("UNIT_AURA")
+            mainFrame:RegisterUnitEvent("UNIT_AURA", "player")
             mainFrame:UnregisterEvent("GROUP_JOINED")
             mainFrame:UnregisterEvent("GROUP_LEFT")
             _groupAuraRegistered = false
@@ -2720,14 +2712,61 @@ function EABR:OnEnable()
     if GetPlayerClass() == "HUNTER" then
         mainFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     end
+
+    ---------------------------------------------------------------------------
+    --  Range polling (OOC, 0.5s throttle)
+    ---------------------------------------------------------------------------
+    local _lastRangeSet = {}   -- [unitToken] = true/false (last known in-range state)
+    local _rangeAccum   = 0    -- seconds since last poll
+
+    local rangeFrame = CreateFrame("Frame")
+    rangeFrame:SetScript("OnUpdate", function(_, elapsed)
+        -- Only poll OOC and when in a group (avoids all taint risk in combat).
+        if InCombat() or not IsInGroup() then
+            _rangeAccum = 0
+            return
+        end
+        _rangeAccum = _rangeAccum + elapsed
+        if _rangeAccum < 0.5 then return end
+        _rangeAccum = 0
+
+        local changed = false
+        local function checkUnit(u)
+            if not UnitExists(u) then
+                if _lastRangeSet[u] ~= nil then
+                    _lastRangeSet[u] = nil
+                    changed = true
+                end
+                return
+            end
+            local state = _unitInRange(u)
+            if _lastRangeSet[u] ~= state then
+                _lastRangeSet[u] = state
+                changed = true
+            end
+        end
+
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do checkUnit("raid"..i) end
+        else
+            for i = 1, GetNumSubgroupMembers() do checkUnit("party"..i) end
+        end
+
+        if changed then RequestRefresh() end
+    end)
 end
 
 -------------------------------------------------------------------------------
 --  MAIN EVENT HANDLER (OnEvent script for runtime events)
 -------------------------------------------------------------------------------
 mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
+    if e == "ENCOUNTER_START" then
+        SnapshotPlayerAuras()
+        SnapshotOwnOnRaidBuffs()
+        return
+    end
+
     if e == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat: immediately hide OOC secure icons, snapshot, then refresh
         _huntersMarkNeeded = true
         FadeOutSecureIcons()
         SnapshotPlayerAuras()
@@ -2771,9 +2810,31 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "UNIT_AURA" then
-        if arg1 == "player" then
-            RequestRefresh()
+        if InCombat() and IsInGroup() then
+            local ownOnRaidIDs = { 369459, 360827 }
+            local found = {}
+            local function scanMember(u)
+                if not UnitExists(u) then return end
+                for _, id in ipairs(ownOnRaidIDs) do
+                    if not found[id] then
+                        local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, u, id)
+                        if ok and result ~= nil and not issecretvalue(result) then
+                            found[id] = true
+                        end
+                    end
+                end
+            end
+            scanMember("player")
+            if IsInRaid() then
+                for i = 1, GetNumGroupMembers() do scanMember("raid"..i) end
+            else
+                for i = 1, GetNumSubgroupMembers() do scanMember("party"..i) end
+            end
+            for _, id in ipairs(ownOnRaidIDs) do
+                _preCombatOwnOnRaidCache[id] = found[id] == true
+            end
         end
+        RequestRefresh()
         return
     end
 
@@ -2826,6 +2887,7 @@ bagTrackFrame:SetScript("OnEvent", function(_, ev)
     end
 end)
 
+mainFrame:RegisterEvent("ENCOUNTER_START")
 mainFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 mainFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -2833,6 +2895,7 @@ mainFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 mainFrame:RegisterEvent("SPELLS_CHANGED")
 mainFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 mainFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+mainFrame:RegisterEvent("PLAYER_LEVEL_CHANGED")
 mainFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 mainFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 mainFrame:RegisterUnitEvent("UNIT_AURA", "player")
@@ -2846,302 +2909,3 @@ mainFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
 mainFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
 mainFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 mainFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-
--------------------------------------------------------------------------------
---  /eabr debug prints full diagnostic state to chat
--------------------------------------------------------------------------------
-SLASH_EABRDEBUG1 = "/eabrdebug"
-SlashCmdList["EABRDEBUG"] = function()
-
-    local p = function(...) print("|cff0cd29f[EABR Debug]|r", ...) end
-    p("--- AuraBuff Reminders Debug ---")
-
-    if not db then p("|cffff4444db is nil -- OnInitialize never fired|r"); return end
-
-    local playerClass = GetPlayerClass()
-    local specID = GetSpecID()
-    local specIdx = GetSpecialization()
-    local specName = specIdx and select(2, GetSpecializationInfo(specIdx)) or "?"
-    CacheInstanceInfo()
-    local inInstance = InRealInstancedContent()
-    local inKeystone = InMythicPlusKey()
-    local inCombat = InCombat()
-    local inGroup = IsInGroup()
-    local inRaid = IsInRaid()
-
-    p("Class:", playerClass, "| Spec:", specID, "(" .. specName .. ")")
-    p("InInstance:", tostring(inInstance), "| InKeystone:", tostring(inKeystone), "| InCombat:", tostring(inCombat))
-    p("InGroup:", tostring(inGroup), "| InRaid:", tostring(inRaid))
-    p("EUI panel open:", tostring(euiPanelOpen))
-    p("iconAnchor:", iconAnchor and "exists" or "|cffff4444NIL|r",
-      iconAnchor and ("shown=" .. tostring(iconAnchor:IsShown())) or "")
-    p("Active icons:", #activeIcons)
-    p("Combat icons:", #combatActiveIcons)
-
-    -- Raid Buffs
-    local rb = db.profile.raidBuffs
-    p("--- Raid Buffs ---")
-    p("  showNonInstanced:", tostring(rb.showNonInstanced), "| showOthersMissing:", tostring(rb.showOthersMissing))
-    local rbActive = inInstance or rb.showNonInstanced
-    p("  Category active (inInstance or showNonInstanced):", tostring(rbActive))
-    if rbActive then
-        for _, buff in ipairs(RAID_BUFFS) do
-            local enabled = rb.enabled[buff.key]
-            local classMatch = buff.class == playerClass
-            local known = Known(buff.castSpell)
-            local status = ""
-            if not enabled then status = "DISABLED"
-            elseif not classMatch then status = "wrong class (" .. buff.class .. ")"
-            elseif not known then status = "spell not known"
-            else
-                local isMissing
-                if buff.check == "targetDebuff" then
-                    isMissing = not TargetHasDebuffByID(buff.buffIDs)
-                elseif rb.showOthersMissing and buff.check == "raid" and (inGroup or inRaid) then
-                    isMissing = AnyGroupMemberMissingBuff(buff.buffIDs)
-                else
-                    isMissing = not PlayerHasAuraByID(buff.buffIDs)
-                end
-                status = isMissing and "|cffff4444MISSING|r" or "buff present"
-            end
-            p("  " .. buff.key .. " (" .. buff.name .. "): " .. status)
-        end
-    end
-
-    -- Auras
-    local au = db.profile.auras
-    p("--- Auras ---")
-    p("  showNonInstanced:", tostring(au.showNonInstanced))
-    local auActive = inInstance or au.showNonInstanced
-    p("  Category active:", tostring(auActive))
-    if auActive then
-        for _, aura in ipairs(AURAS) do
-            local enabled = au.enabled[aura.key]
-            local classMatch = aura.class == playerClass
-            local known = Known(aura.castSpell)
-            local specOk = true
-            if aura.specs then
-                specOk = false
-                for _, s in ipairs(aura.specs) do if s == specID then specOk = true; break end end
-            end
-            local status = ""
-            if not enabled then status = "DISABLED"
-            elseif not classMatch then status = "wrong class (" .. aura.class .. ")"
-            elseif not known then status = "spell not known"
-            elseif not specOk then status = "wrong spec"
-            elseif aura.requireInstanceGroup and (not inInstance or not (inGroup or inRaid)) then status = "skipped (requireInstanceGroup: not in instance+group)"
-            elseif inCombat and not aura.combatOk then status = "skipped (in combat, not combatOk)"
-            else
-                local isMissing
-                if aura.check == "mineOnRaid" then
-                    if inCombat then
-                        status = "skipped (in combat, mineOnRaid can't check others)"
-                    else
-                        isMissing = not BuffExistsOnAnyGroupMember(aura.buffIDs)
-                        if not (inGroup or inRaid) then isMissing = false; status = "not in group"; end
-                    end
-                elseif aura.check == "ownOnRaid" then
-                    if inCombat then
-                        local cached = _preCombatOwnOnRaidCache[aura.buffIDs[1]]
-                        isMissing = (cached == false)
-                        status = "ownOnRaid (combat snapshot: " .. tostring(cached) .. ")"
-                    else
-                        isMissing = not PlayerOwnBuffOnAnyGroupMember(aura.buffIDs)
-                    end
-                    if not (inGroup or inRaid) then isMissing = false; status = "not in group"; end
-                elseif aura.check == "playerSelfCast" then
-                    isMissing = not PlayerHasSelfCastAuraByID(aura.buffIDs)
-                end
-                if status == "" then
-                    if aura.check ~= "mineOnRaid" and aura.check ~= "ownOnRaid" and aura.check ~= "playerSelfCast" then
-                        isMissing = not PlayerHasAuraByID(aura.buffIDs)
-                    end
-                    status = isMissing and "|cffff4444MISSING should show icon|r" or "buff present"
-                end
-            end
-            p("  " .. aura.key .. " (" .. aura.name .. "): " .. status)
-        end
-    end
-
-    -- Consumables
-    local co = db.profile.consumables
-    p("--- Consumables ---")
-    p("  inKeystone:", tostring(inKeystone), "| inInstance:", tostring(inInstance))
-    p("  showSpecialsNonInstanced:", tostring(co.showSpecialsNonInstanced))
-    local specialsActive = inInstance or co.showSpecialsNonInstanced
-    local coActive = not inKeystone
-    p("  Category active (not inKeystone):", tostring(coActive), "| Specials active:", tostring(specialsActive))
-    if coActive and not inCombat then
-        if playerClass == "ROGUE" then
-            for _, poison in ipairs(ROGUE_POISONS) do
-                local enabled = co.enabled[poison.key]
-                local known = Known(poison.castSpell)
-                local has = PlayerHasAuraByID(poison.buffIDs)
-                p("  " .. poison.key .. ": enabled=" .. tostring(enabled) .. " known=" .. tostring(known) .. " hasBuff=" .. tostring(has))
-            end
-        end
-        if playerClass == "SHAMAN" then
-            for _, imbue in ipairs(SHAMAN_IMBUES) do
-                p("  " .. imbue.key .. ": enabled=" .. tostring(co.enabled[imbue.key]) .. " known=" .. tostring(Known(imbue.castSpell)))
-            end
-        end
-        p("  augment_rune enabled:", tostring(co.enabled.augment_rune), "| inM0/MythicRaid:", tostring(InMythicZeroDungeonOrMythicRaid()))
-        p("  weapon_enchant enabled:", tostring(co.enabled.weapon_enchant))
-        local hasMH = GetWeaponEnchantInfo()
-        p("  MH enchant present:", tostring(hasMH))
-    elseif inCombat then
-        p("  (skipped in combat)")
-    end
-
-    p("--- End Debug ---")
-end
-
--------------------------------------------------------------------------------
---  /eabrcombat targeted combat aura API debug
---  Run this IN COMBAT with Devotion Aura active to diagnose the issue.
--------------------------------------------------------------------------------
-SLASH_EABRCOMBAT1 = "/eabrcombat"
-SlashCmdList["EABRCOMBAT"] = function()
-    local p = function(...) print("|cffff9900[EABR Combat]|r", ...) end
-    p("--- Combat Aura Debug ---")
-    p("InCombatLockdown:", tostring(InCombatLockdown()))
-    p("issecretvalue global:", type(issecretvalue))
-
-    -- Test specific whitelisted spell IDs
-    local testIDs = {465, 1126, 1459, 6673, 21562, 462854, 474754, 369459}
-    local testNames = {
-        [465]="Devotion Aura", [1126]="Mark of the Wild", [1459]="Arcane Intellect", [6673]="Battle Shout",
-        [21562]="Fortitude", [462854]="Skyfury", [474754]="Symbiotic", [369459]="Source of Magic",
-    }
-
-    for _, id in ipairs(testIDs) do
-        local name = testNames[id] or tostring(id)
-
-        -- 1) Secrecy level
-        local secrecyStr = "API_MISSING"
-        if C_Secrets and C_Secrets.GetSpellAuraSecrecy then
-            local secOk, sec = pcall(C_Secrets.GetSpellAuraSecrecy, id)
-            if secOk then
-                if sec == 0 then secrecyStr = "NeverSecret"
-                elseif sec == 1 then secrecyStr = "AlwaysSecret"
-                elseif sec == 2 then secrecyStr = "ContextuallySecret"
-                else secrecyStr = tostring(sec) end
-            else
-                secrecyStr = "ERROR:" .. tostring(sec)
-            end
-        end
-
-        -- 2) ShouldSpellAuraBeSecret
-        local shouldBeSecret = "API_MISSING"
-        if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
-            local sbsOk, sbsVal = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
-            shouldBeSecret = sbsOk and tostring(sbsVal) or ("ERROR:" .. tostring(sbsVal))
-        end
-
-        -- 3) Raw API call
-        local resultStr = "?"
-        local resultType = "?"
-        local isSecret = "?"
-        local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-        if not ok then
-            resultStr = "|cffff4444PCALL_ERROR: " .. tostring(result) .. "|r"
-        else
-            resultType = type(result)
-            local isvOk, isvResult = pcall(issecretvalue, result)
-            if not isvOk then
-                isSecret = "ERROR:" .. tostring(isvResult)
-            else
-                isSecret = tostring(isvResult)
-            end
-            if result == nil then
-                resultStr = "nil"
-            elseif isvOk and isvResult then
-                resultStr = "|cff00ff00SECRET (aura EXISTS)|r"
-            elseif result then
-                local fieldOk, fieldVal = pcall(function() return result.spellId end)
-                if fieldOk then
-                    resultStr = "|cff00ff00TABLE spellId=" .. tostring(fieldVal) .. "|r"
-                else
-                    resultStr = "|cff00ff00TABLE (field err)|r"
-                end
-            end
-        end
-
-        -- 4) Our wrapper
-        local wrapperOk, wrapperResult = pcall(PlayerHasAuraByID, {id})
-        local wrapperStr
-        if not wrapperOk then
-            wrapperStr = "|cffff4444ERROR: " .. tostring(wrapperResult) .. "|r"
-        else
-            wrapperStr = tostring(wrapperResult)
-        end
-
-        -- 5) Snapshot value
-        local cached = _preCombatAuraCache[id]
-
-        p(name .. " (" .. id .. "):")
-        p("  Secrecy=" .. secrecyStr .. " ShouldBeSecret=" .. shouldBeSecret)
-        p("  API: type=" .. resultType .. " isSecret=" .. isSecret .. " => " .. resultStr)
-        p("  Snapshot=" .. tostring(cached) .. " | PlayerHasAuraByID=" .. wrapperStr)
-    end
-
-    p("--- Icon counts ---")
-    p("  activeIcons:", #activeIcons, "combatActiveIcons:", #combatActiveIcons)
-    p("  NON_SECRET_SPELL_IDS[465]:", tostring(NON_SECRET_SPELL_IDS[465]))
-
-    p("--- End Combat Debug ---")
-end
-
--------------------------------------------------------------------------------
---  /eabrlog toggle live UNIT_AURA payload logging during combat
--------------------------------------------------------------------------------
-SLASH_EABRLOG1 = "/eabrlog"
-SlashCmdList["EABRLOG"] = function()
-    _eabrLogEnabled = not _eabrLogEnabled
-    print("|cffff9900[EABR]|r Combat aura logging " .. (_eabrLogEnabled and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
-end
-
--------------------------------------------------------------------------------
---  /beacondebug standalone beacon system diagnostics
--------------------------------------------------------------------------------
-SLASH_BEACONDEBUG1 = "/beacondebug"
-SlashCmdList["BEACONDEBUG"] = function()
-    local p = function(...) print("|cffffcc00[Beacon Debug]|r", ...) end
-    p("--- Beacon Reminder Debug ---")
-    p("isPaladin:", tostring(_beaconIsPaladin))
-    p("db:", db and "exists" or "|cffff4444NIL|r")
-    p("IsSpellOverlayed:", IsSpellOverlayed and "exists" or "|cffff4444NIL|r")
-    p("cachedInInstance:", tostring(_beaconCachedInInstance))
-    p("overlayEventsRegistered:", tostring(_beaconOverlayRegistered))
-    p("beaconAnchor:", _beaconAnchor and "exists" or "|cffff4444NIL|r")
-    p("InGroup:", tostring(IsInGroup()), "InRaid:", tostring(IsInRaid()))
-    p("InCombat:", tostring(InCombatLockdown()))
-
-    local _, iType, diffID = GetInstanceInfo()
-    p("InstanceType:", tostring(iType), "DifficultyID:", tostring(diffID))
-
-    local au = db and db.profile.auras
-    local enabled = au and au.enabled
-    p("auras.enabled.bol:", tostring(enabled and enabled.bol))
-    p("auras.enabled.bof:", tostring(enabled and enabled.bof))
-
-    p("Known(BOL 53563):", tostring(Known(BEACON_BOL)))
-    p("Known(BOF 156910):", tostring(Known(BEACON_BOF)))
-    p("Known(Virtue 200025):", tostring(Known(BEACON_VIRTUE)))
-
-    if IsSpellOverlayed then
-        local bolOverlay = IsSpellOverlayed(BEACON_BOL)
-        local bofOverlay = IsSpellOverlayed(BEACON_BOF)
-        p("IsSpellOverlayed(BOL):", tostring(bolOverlay))
-        p("IsSpellOverlayed(BOF):", tostring(bofOverlay))
-    else
-        p("|cffff4444IsSpellOverlayed function not available|r")
-    end
-
-    p("iconState[BOL]:", tostring(_beaconIconState[BEACON_BOL]))
-    p("iconState[BOF]:", tostring(_beaconIconState[BEACON_BOF]))
-    p("icon frames: BOL=", _beaconIcons[BEACON_BOL] and "exists" or "NIL",
-      "BOF=", _beaconIcons[BEACON_BOF] and "exists" or "NIL")
-
-    p("--- End Beacon Debug ---")
-end
