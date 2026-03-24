@@ -1343,21 +1343,21 @@ local function ShowProcGlow(icon, cr, cg, cb)
     local glow = fd and fd.glowOverlay or icon._glowOverlay
     if not glow then return end
     -- Don't double-start if already showing proc glow
-    if icon._procGlowActive then return end
+    if fd and fd.procGlowActive then return end
     -- If active state glow is running, stop it first (proc glow takes priority)
-    if icon._isActive and glow._glowActive then
+    if (fd and fd.isActive) and glow._glowActive then
         StopNativeGlow(glow)
     end
     StartNativeGlow(glow, PROC_GLOW_STYLE, cr, cg, cb)
-    icon._procGlowActive = true
+    if fd then fd.procGlowActive = true end
 end
 
 local function StopProcGlow(icon)
-    if not icon or not icon._procGlowActive then return end
-    local fd = _getFD(icon)
+    local fd = icon and _getFD(icon)
+    if not icon or not (fd and fd.procGlowActive) then return end
     local glow = fd and fd.glowOverlay or icon._glowOverlay
     StopNativeGlow(glow)
-    icon._procGlowActive = false
+    if fd then fd.procGlowActive = false end
 end
 
 -- Proc glow color: hardcoded gold (#ffc923)
@@ -1401,7 +1401,8 @@ local function InstallProcGlowHooks()
         local barKey, cdmChild = GetBarKeyForBlizzChild(frame)
         if not barKey or not cdmChild then return end
         local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
-        if not ourIcon or not ourIcon._procGlowActive then return end
+        local fd = ourIcon and _getFD(ourIcon)
+        if not ourIcon or not (fd and fd.procGlowActive) then return end
 
         -- Guard: CDM may fire HideAlert during internal refresh cycles even though
         -- the spell is still procced. Check IsSpellOverlayed before killing the glow.
@@ -1600,6 +1601,68 @@ CaptureCDMPositions = function()
     end
 
     return captured
+end
+
+-------------------------------------------------------------------------------
+--  Force Blizzard EditMode CooldownViewer settings
+--  Ensures viewers are set to "Always Visible" so Blizzard's hideWhenInactive
+--  and visibility modes don't interfere with CDM's frame management.
+-------------------------------------------------------------------------------
+local _editModePolicyApplied = false
+local function EnforceCooldownViewerEditModeSettings()
+    if _editModePolicyApplied then return end
+    if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
+            and Enum and Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
+            and Enum.EditModeCooldownViewerSetting and Enum.CooldownViewerVisibleSetting) then
+        return
+    end
+
+    local layoutInfo = C_EditMode.GetLayouts()
+    if type(layoutInfo) ~= "table" or type(layoutInfo.layouts) ~= "table" then return end
+
+    -- Merge preset layouts so activeLayout index resolves correctly
+    if EditModePresetLayoutManager and EditModePresetLayoutManager.GetCopyOfPresetLayouts then
+        local presets = EditModePresetLayoutManager:GetCopyOfPresetLayouts()
+        if type(presets) == "table" then
+            tAppendAll(presets, layoutInfo.layouts)
+            layoutInfo.layouts = presets
+        end
+    end
+
+    local activeLayout = type(layoutInfo.activeLayout) == "number"
+        and layoutInfo.layouts[layoutInfo.activeLayout]
+    if not activeLayout or type(activeLayout.systems) ~= "table" then return end
+
+    local changed = false
+    local cooldownSystem = Enum.EditModeSystem.CooldownViewer
+    local visSetting  = Enum.EditModeCooldownViewerSetting.VisibleSetting
+    local visAlways   = Enum.CooldownViewerVisibleSetting.Always
+
+    for _, sysInfo in ipairs(activeLayout.systems) do
+        if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
+            -- Force VisibleSetting = Always
+            local found = false
+            for _, s in ipairs(sysInfo.settings) do
+                if s.setting == visSetting then
+                    found = true
+                    if s.value ~= visAlways then
+                        s.value = visAlways
+                        changed = true
+                    end
+                    break
+                end
+            end
+            if not found then
+                sysInfo.settings[#sysInfo.settings + 1] = { setting = visSetting, value = visAlways }
+                changed = true
+            end
+        end
+    end
+
+    if changed then
+        C_EditMode.SaveLayouts(layoutInfo)
+    end
+    _editModePolicyApplied = true
 end
 
 -------------------------------------------------------------------------------
@@ -2844,16 +2907,17 @@ local function RefreshCDMIconAppearance(barKey)
 
         -- Reset active state so glow type change takes effect on next tick.
         -- Preserve proc glow across rebuilds to avoid visible blink at load-in.
-        local hadProcGlow = icon._procGlowActive
+        local ifd = _getFD(icon)
+        local hadProcGlow = ifd and ifd.procGlowActive
         if glowOv then
             StopNativeGlow(glowOv)
         end
-        icon._isActive = false
+        if ifd then ifd.isActive = false end
         if hadProcGlow and glowOv then
             StartNativeGlow(glowOv, PROC_GLOW_STYLE, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
-            icon._procGlowActive = true
+            if ifd then ifd.procGlowActive = true end
         else
-            icon._procGlowActive = false
+            if ifd then ifd.procGlowActive = false end
         end
     end
 end
@@ -3136,15 +3200,16 @@ local function UpdateAllCDMBars(dt)
                                     end)
                                 end
                                 hooksecurefunc(ch.Cooldown, "SetCooldown", function(_, start, dur)
-                                    if issecretvalue and (issecretvalue(dur) or issecretvalue(start)) then
-                                        -- Secret values (in combat): store as-is, sink handles them
+                                    -- Blizzard's secure code may still pass secret
+                                    -- values internally; guard before comparing.
+                                    if issecretvalue and dur ~= nil and issecretvalue(dur) then
                                         _ecmeRawStartCache[ch] = start
                                         _ecmeRawDurCache[ch] = dur
                                     elseif dur and dur > 0 then
                                         _ecmeRawStartCache[ch] = start
                                         _ecmeRawDurCache[ch] = dur
                                     else
-                                        -- dur=0 means inactive; wipe like Clear() (0 is truthy in Lua)
+                                        -- dur=0 means inactive; wipe like Clear()
                                         _ecmeDurObjCache[ch] = nil
                                         _ecmeChildHasDurObj[ch] = nil
                                         _ecmeRawStartCache[ch] = nil
@@ -3529,6 +3594,10 @@ BuildAllCDMBars = function()
     for key, frame in pairs(cdmBarFrames) do
         EllesmereUI.SetElementVisibility(frame, false)
     end
+
+    -- Force Blizzard's EditMode CooldownViewer to "Always Visible" so
+    -- hideWhenInactive and other viewer settings don't fight with CDM.
+    EnforceCooldownViewerEditModeSettings()
 
     -- Hide Blizzard CDM
     if p.cdmBars.hideBlizzard then
@@ -4103,7 +4172,7 @@ function ECME:OnEnable()
                 local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
                 if glowOv and glowOv._glowActive then
                     StopNativeGlow(glowOv)
-                    icon._procGlowActive = false
+                    if ifd then ifd.procGlowActive = false end
                 end
             end
         end

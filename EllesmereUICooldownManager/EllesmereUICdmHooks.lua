@@ -510,18 +510,22 @@ local function DecorateFrame(frame, barData)
 end
 
 -- Hoisted buff active check (avoids per-tick closure allocation)
-local _issecretFn = type(issecretvalue) == "function" and issecretvalue or nil
 local function IsBuffActive(f)
     if f._isPresetFrame then return f:IsShown() end
-    local v = f.isActive
-    if _issecretFn and _issecretFn(v) then
-        local aid = f.auraInstanceID
-        if aid ~= nil then
-            if _issecretFn(aid) then return true end
-            return aid ~= nil
-        end
-        return false
+    -- For buffs, "active" means the aura is present on the player.
+    -- Check auraInstanceID or wasSetFromAura to detect aura presence.
+    -- Avoid reading isActive directly because PP.CreateBorder still
+    -- writes keys to the frame, tainting the entire table.
+    local aid = f.auraInstanceID
+    if aid ~= nil then
+        if issecretvalue and issecretvalue(aid) then return true end
+        return true
     end
+    if f.wasSetFromAura == true then return true end
+    -- Fallback: isActive (guard against taint)
+    local v = f.isActive
+    if v == nil then return false end
+    if issecretvalue and issecretvalue(v) then return true end
     return v == true
 end
 
@@ -1083,19 +1087,40 @@ local function CollectAndReanchor()
                             local glowOv = fd and fd.glowOverlay
                             if not isPlaceholder and barType ~= "buffs" and glowOv then
                                 local anim = barData.activeStateAnim or "blizzard"
+                                -- Check if the spell has an active aura with a
+                                -- running cooldown. frame.isActive on viewer frames
+                                -- means "displayed" (true for all icons), not
+                                -- "on cooldown." cooldownDuration is non-secret
+                                -- post-hotfix.
                                 local isInActiveState = false
                                 if frame.auraInstanceID ~= nil then
                                     local dur = frame.cooldownDuration
-                                    if _issecretFn and dur ~= nil and _issecretFn(dur) then
-                                        isInActiveState = true
-                                    elseif dur ~= nil and dur ~= 0 then
-                                        isInActiveState = true
+                                    if dur ~= nil then
+                                        local _isSecret = issecretvalue and issecretvalue(dur)
+                                        if _isSecret or dur ~= 0 then
+                                            isInActiveState = true
+                                        end
                                     end
                                 end
                                 local glowStyle = tonumber(anim)
                                 local ffc = FC(frame)
                                 if anim == "hideActive" then
-                                    if isInActiveState then frame:SetAlpha(0) end
+                                    -- Suppress the cooldown swipe during active state.
+                                    -- Hook SetDrawSwipe to persistently block Blizzard
+                                    -- from re-enabling it on GCD/cooldown refreshes.
+                                    local cd = fd and fd.cooldown
+                                    if cd then
+                                        if not fd.swipeHookInstalled then
+                                            fd.swipeHookInstalled = true
+                                            hooksecurefunc(cd, "SetDrawSwipe", function(self, show)
+                                                if fd.blockSwipe and show then
+                                                    self:SetDrawSwipe(false)
+                                                end
+                                            end)
+                                        end
+                                        fd.blockSwipe = isInActiveState
+                                        cd:SetDrawSwipe(not isInActiveState)
+                                    end
                                 elseif glowStyle and glowStyle > 0 and isInActiveState then
                                     if not glowOv._glowActive or ffc.activeGlowStyle ~= glowStyle then
                                         local gr, gg, gb
