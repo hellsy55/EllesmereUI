@@ -3459,13 +3459,7 @@ initFrame:SetScript("OnEvent", function(self)
         local allSpells
         if not removeOnly then
             allSpells = ns.GetCDMSpellsForBar(barKey)
-            -- Misc bars only show custom options (no spell list needed)
-            local isMiscBarEarly = false
-            do
-                local bde = SelectedCDMBar()
-                isMiscBarEarly = bde and bde.barType == "misc"
-            end
-            if not isMiscBarEarly and (not allSpells or #allSpells == 0) then return end
+            if not allSpells or #allSpells == 0 then return end
         end
         if not allSpells then allSpells = {} end
 
@@ -3514,7 +3508,6 @@ initFrame:SetScript("OnEvent", function(self)
         local primaryCat   = isCooldownType and 0 or (isUtilityType and 1 or nil)
         local secondaryCat = isCooldownType and 1 or (isUtilityType and 0 or nil)
 
-        local isMiscBar = bd and bd.barType == "misc"
         local isBuffBar = bd and (bd.barType == "buffs" or bd.key == "buffs")
 
         -- Buckets for cooldown/utility bars (two-section layout)
@@ -3816,8 +3809,299 @@ initFrame:SetScript("OnEvent", function(self)
 
             allItems[#allItems + 1] = csItem
             mH = mH + ITEM_H
+        end
 
-            -- Divider below Custom Spell ID
+        if false then -- misc bar custom item menu removed
+            -- Bag scan + Custom Item button (moved from bottom to top)
+            local BAG_ITEM_BLACKLIST = {
+                [234389] = true, [234390] = true, [249699] = true,
+            }
+            local MIN_CD_SEC = 30
+            local MAX_CD_SEC = 660
+            local ITEM_PRIORITY_NAMES = {
+                "Trinket Slot 1", "Trinket Slot 2", "Light's Potential",
+                "Potion of Recklessness", "Silvermoon Health Potion",
+                "Lightfused Mana Potion", "Healthstone",
+            }
+            local ITEM_PRIORITY = {}
+            for i, n in ipairs(ITEM_PRIORITY_NAMES) do ITEM_PRIORITY[n:lower()] = i end
+
+            local _candidateItems = {}
+            do
+                local seen = {}
+                for slotIdx = 13, 14 do
+                    local trinketID = GetInventoryItemID("player", slotIdx)
+                    if trinketID and not seen[trinketID] and not BAG_ITEM_BLACKLIST[trinketID] then
+                        seen[trinketID] = true
+                        local spellName, spellID = C_Item.GetItemSpell(trinketID)
+                        if spellName and spellID then
+                            _candidateItems[#_candidateItems + 1] = {
+                                itemID = trinketID, spellName = spellName,
+                                spellID = spellID, isTrinket = slotIdx,
+                            }
+                            C_Item.RequestLoadItemDataByID(trinketID)
+                        end
+                    end
+                end
+                for bag = 0, 4 do
+                    local numSlots = C_Container.GetContainerNumSlots(bag)
+                    for slot = 1, numSlots do
+                        local info = C_Container.GetContainerItemInfo(bag, slot)
+                        if info and info.itemID and not seen[info.itemID] and not BAG_ITEM_BLACKLIST[info.itemID] then
+                            seen[info.itemID] = true
+                            local invType = C_Item.GetItemInventoryTypeByID(info.itemID)
+                            local isTrinket = invType and invType == Enum.InventoryType.IndexTrinketType
+                            if not isTrinket then
+                                local spellName, spellID = C_Item.GetItemSpell(info.itemID)
+                                if spellName and spellID then
+                                    _candidateItems[#_candidateItems + 1] = {
+                                        itemID = info.itemID, spellName = spellName, spellID = spellID,
+                                    }
+                                    C_Item.RequestLoadItemDataByID(info.itemID)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            local function ResolveBagItems()
+                local results = {}
+                local allResolved = true
+                for _, cand in ipairs(_candidateItems) do
+                    local tipData = C_TooltipInfo.GetItemByID(cand.itemID)
+                    if tipData and tipData.lines then
+                        local cdSec = nil
+                        for _, line in ipairs(tipData.lines) do
+                            local text = line.leftText
+                            if text and text:find("Cooldown%)") then
+                                local cdStr = text:match(".*%((.+Cooldown)%)")
+                                if cdStr then
+                                    local totalSec = 0
+                                    for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
+                                        local n = tonumber(num)
+                                        if n then
+                                            local u = unit:lower()
+                                            if u == "min" then totalSec = totalSec + n * 60
+                                            elseif u == "sec" then totalSec = totalSec + n
+                                            elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                                            end
+                                        end
+                                    end
+                                    if totalSec > 0 then cdSec = totalSec end
+                                    break
+                                end
+                            end
+                        end
+                        if cand.isTrinket or (cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC) then
+                            local tex = C_Item.GetItemIconByID(cand.itemID)
+                            local itemName = C_Item.GetItemNameByID(cand.itemID)
+                            local displayName
+                            if cand.isTrinket then
+                                displayName = (itemName or cand.spellName) .. " (Trinket " .. (cand.isTrinket - 12) .. ")"
+                            else
+                                displayName = itemName or cand.spellName
+                            end
+                            results[#results + 1] = {
+                                itemID = cand.itemID, name = displayName,
+                                icon = tex, spellID = cand.spellID, isTrinket = cand.isTrinket,
+                            }
+                        end
+                    else
+                        allResolved = false
+                    end
+                end
+                local PRIORITY_COUNT = #ITEM_PRIORITY_NAMES
+                table.sort(results, function(a, b)
+                    local aKey = a.isTrinket and ("trinket slot " .. (a.isTrinket - 12)) or a.name:lower()
+                    local bKey = b.isTrinket and ("trinket slot " .. (b.isTrinket - 12)) or b.name:lower()
+                    local aPri = ITEM_PRIORITY[aKey] or (PRIORITY_COUNT + 1)
+                    local bPri = ITEM_PRIORITY[bKey] or (PRIORITY_COUNT + 1)
+                    if aPri ~= bPri then return aPri < bPri end
+                    return a.name < b.name
+                end)
+                _cachedBagItems = results
+                _bagScanComplete = allResolved
+                return allResolved
+            end
+            ResolveBagItems()
+            if not _bagScanComplete then
+                local attempts = 0
+                local ticker
+                ticker = C_Timer.NewTicker(0.2, function()
+                    attempts = attempts + 1
+                    local done = ResolveBagItems()
+                    if done or attempts >= 25 then
+                        if ticker then ticker:Cancel() end
+                        _bagScanComplete = true
+                        if _customTrackingSub and _customTrackingSub:IsShown() then
+                            _customTrackingSub._needsRebuild = true
+                        end
+                    elseif _customTrackingSub and _customTrackingSub:IsShown() then
+                        _customTrackingSub._needsRebuild = true
+                    end
+                end)
+                menu:HookScript("OnHide", function()
+                    if ticker then ticker:Cancel(); ticker = nil end
+                end)
+            end
+
+            local ctItem = CreateFrame("Button", nil, inner)
+            ctItem:SetHeight(ITEM_H)
+            ctItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            ctItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            ctItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local ctHl = ctItem:CreateTexture(nil, "ARTWORK")
+            ctHl:SetAllPoints(); ctHl:SetColorTexture(1, 1, 1, 0); ctHl:SetAlpha(0)
+            local ctLbl = ctItem:CreateFontString(nil, "OVERLAY")
+            ctLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            ctLbl:SetPoint("LEFT", 10, 0); ctLbl:SetJustifyH("LEFT")
+            ctLbl:SetText("Custom Item")
+            ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+            local ctArrow = ctItem:CreateTexture(nil, "ARTWORK")
+            ctArrow:SetSize(10, 10)
+            ctArrow:SetPoint("RIGHT", ctItem, "RIGHT", -8, 0)
+            ctArrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
+            ctArrow:SetAlpha(0.7)
+
+            local function ShowCustomTrackingSub()
+                local items = _cachedBagItems or {}
+                local alreadyTracked = {}
+                local sdCT = bd and ns.GetBarSpellData(bd.key)
+                if sdCT and sdCT.assignedSpells then
+                    for _, sid in ipairs(sdCT.assignedSpells) do
+                        if sid <= -100 then alreadyTracked[-sid] = true end
+                    end
+                end
+                local filtered = {}
+                for _, it in ipairs(items) do
+                    if not alreadyTracked[it.itemID] then filtered[#filtered + 1] = it end
+                end
+                local prevCount = _customTrackingSub and _customTrackingSub._itemCount or -1
+                if not _customTrackingSub then
+                    _customTrackingSub = CreateFrame("Frame", nil, UIParent)
+                    _customTrackingSub:SetFrameStrata("FULLSCREEN_DIALOG")
+                    _customTrackingSub:SetFrameLevel(menu:GetFrameLevel() + 5)
+                    _customTrackingSub:SetClampedToScreen(true)
+                    _customTrackingSub:EnableMouse(true)
+                elseif _customTrackingSub:IsShown() and #filtered == prevCount and not _customTrackingSub._needsRebuild then
+                    return
+                else
+                    for _, child in ipairs({_customTrackingSub:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+                    for _, rgn in ipairs({_customTrackingSub:GetRegions()}) do if rgn.Hide then rgn:Hide() end end
+                end
+                _customTrackingSub._itemCount = #filtered
+                _customTrackingSub._needsRebuild = false
+                local subW = 220
+                local SUB_ITEM_H = 26
+                local SUB_MAX_H = 260
+                _customTrackingSub:SetSize(subW, 10)
+                _customTrackingSub:ClearAllPoints()
+                _customTrackingSub:SetPoint("TOPLEFT", ctItem, "TOPRIGHT", 2, 0)
+                local subBg = _customTrackingSub:CreateTexture(nil, "BACKGROUND")
+                subBg:SetAllPoints(); subBg:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
+                EllesmereUI.MakeBorder(_customTrackingSub, 1, 1, 1, mBrdA, EllesmereUI.PP)
+                local subInner = CreateFrame("Frame", nil, _customTrackingSub)
+                subInner:SetWidth(subW); subInner:SetPoint("TOPLEFT")
+                local subH = 4
+                if #filtered == 0 then
+                    local loadingText = (not _bagScanComplete) and "Loading items..." or "No on-use items in bags"
+                    local emptyLbl = subInner:CreateFontString(nil, "OVERLAY")
+                    emptyLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
+                    emptyLbl:SetPoint("TOPLEFT", subInner, "TOPLEFT", 10, -subH - 4)
+                    emptyLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.6)
+                    emptyLbl:SetText(loadingText)
+                    subH = subH + SUB_ITEM_H
+                else
+                    for _, it in ipairs(filtered) do
+                        local si = CreateFrame("Button", nil, subInner)
+                        si:SetHeight(SUB_ITEM_H)
+                        si:SetPoint("TOPLEFT", subInner, "TOPLEFT", 1, -subH)
+                        si:SetPoint("TOPRIGHT", subInner, "TOPRIGHT", -1, -subH)
+                        si:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 2)
+                        si:RegisterForClicks("AnyUp")
+                        local sIco = si:CreateTexture(nil, "ARTWORK")
+                        local icoSz = SUB_ITEM_H - 2
+                        sIco:SetSize(icoSz, icoSz)
+                        sIco:SetPoint("RIGHT", si, "RIGHT", -6, 0)
+                        if it.icon then sIco:SetTexture(it.icon) end
+                        sIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                        local sLbl = si:CreateFontString(nil, "OVERLAY")
+                        sLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                        sLbl:SetPoint("LEFT", si, "LEFT", 10, 0)
+                        sLbl:SetPoint("RIGHT", sIco, "LEFT", -5, 0)
+                        sLbl:SetJustifyH("LEFT"); sLbl:SetWordWrap(false); sLbl:SetMaxLines(1)
+                        sLbl:SetText(it.name); sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                        local sHl = si:CreateTexture(nil, "ARTWORK")
+                        sHl:SetAllPoints(); sHl:SetColorTexture(1, 1, 1, 0); sHl:SetAlpha(0)
+                        si:SetScript("OnEnter", function()
+                            sLbl:SetTextColor(1, 1, 1, 1); sHl:SetColorTexture(1, 1, 1, hlA); sHl:SetAlpha(1)
+                        end)
+                        si:SetScript("OnLeave", function()
+                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); sHl:SetAlpha(0)
+                        end)
+                        si:SetScript("OnClick", function()
+                            _customTrackingSub:Hide(); menu:Hide()
+                            if onSelect then onSelect(-it.itemID, true) end
+                        end)
+                        subH = subH + SUB_ITEM_H
+                    end
+                end
+                local totalSubH = subH + 4
+                subInner:SetHeight(totalSubH)
+                if totalSubH > SUB_MAX_H then
+                    _customTrackingSub:SetHeight(SUB_MAX_H)
+                    local sf = CreateFrame("ScrollFrame", nil, _customTrackingSub)
+                    sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+                    sf:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 1)
+                    sf:EnableMouseWheel(true); sf:SetScrollChild(subInner)
+                    subInner:SetWidth(subW)
+                    local scrollPos = 0
+                    local maxScroll = totalSubH - SUB_MAX_H
+                    sf:SetScript("OnMouseWheel", function(_, delta)
+                        scrollPos = math.max(0, math.min(maxScroll, scrollPos - delta * 30))
+                        sf:SetVerticalScroll(scrollPos)
+                    end)
+                else
+                    _customTrackingSub:SetHeight(totalSubH)
+                    subInner:SetParent(_customTrackingSub); subInner:SetPoint("TOPLEFT")
+                end
+                _customTrackingSub:SetScript("OnLeave", function(self)
+                    C_Timer.After(0.1, function()
+                        if self:IsShown() and not self:IsMouseOver() and not ctItem:IsMouseOver() then self:Hide() end
+                    end)
+                end)
+                if not _bagScanComplete then
+                    _customTrackingSub:SetScript("OnUpdate", function(self)
+                        if self._needsRebuild then ShowCustomTrackingSub() end
+                        if _bagScanComplete then self:SetScript("OnUpdate", nil) end
+                    end)
+                else
+                    _customTrackingSub:SetScript("OnUpdate", nil)
+                end
+                _customTrackingSub:Show()
+            end
+
+            ctItem:SetScript("OnEnter", function()
+                ctLbl:SetTextColor(1, 1, 1, 1); ctHl:SetColorTexture(1, 1, 1, hlA); ctHl:SetAlpha(1)
+                ShowCustomTrackingSub()
+            end)
+            ctItem:SetScript("OnLeave", function()
+                ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); ctHl:SetAlpha(0)
+                C_Timer.After(0.15, function()
+                    if _customTrackingSub and _customTrackingSub:IsShown()
+                       and not _customTrackingSub:IsMouseOver() and not ctItem:IsMouseOver() then
+                        _customTrackingSub:Hide()
+                    end
+                end)
+            end)
+
+            allItems[#allItems + 1] = ctItem
+            mH = mH + ITEM_H
+        end
+
+        do
+            -- Divider below Custom Spell ID / Custom Item
             local csDiv = inner:CreateTexture(nil, "ARTWORK")
             csDiv:SetHeight(1)
             csDiv:SetColorTexture(1, 1, 1, 0.10)
@@ -3827,12 +4111,32 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Trinket slots + potion presets for CD/utility bars
-        if not isBuffBar and not isMiscBar then
-            -- Build already-tracked set
+        if not isBuffBar then
+            -- Build already-tracked set (this bar + other bars)
             local alreadyOnBar = {}
+            local usedOnOtherBar = {}  -- [sid] = barName
             local sdTrk = bd and ns.GetBarSpellData(bd.key)
             if sdTrk and sdTrk.assignedSpells then
                 for _, sid in ipairs(sdTrk.assignedSpells) do alreadyOnBar[sid] = true end
+            end
+            -- Check all other non-buff bars for cross-bar duplicate detection
+            local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
+            if prof and prof.cdmBars and prof.cdmBars.bars then
+                for _, otherBar in ipairs(prof.cdmBars.bars) do
+                    if otherBar.key ~= barKey then
+                        local otherType = otherBar.barType or otherBar.key
+                        if otherType ~= "buffs" then
+                            local osd = ns.GetBarSpellData(otherBar.key)
+                            if osd and osd.assignedSpells then
+                                for _, sid in ipairs(osd.assignedSpells) do
+                                    if sid and sid ~= 0 and not usedOnOtherBar[sid] then
+                                        usedOnOtherBar[sid] = otherBar.name or otherBar.key
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
             end
 
             -- Trinket Slot 1 & 2
@@ -3842,6 +4146,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local label = (slot == 13) and "Trinket Slot 1" or "Trinket Slot 2"
                 local tex = itemID and C_Item.GetItemIconByID(itemID)
                 local isAdded = alreadyOnBar[negSlot]
+                local otherBarName = not isAdded and usedOnOtherBar[negSlot]
+                local isDisabled = isAdded or otherBarName
 
                 local ti = CreateFrame("Button", nil, inner)
                 ti:SetHeight(ITEM_H)
@@ -3861,17 +4167,17 @@ initFrame:SetScript("OnEvent", function(self)
                     tiIco:SetPoint("RIGHT", ti, "RIGHT", -6, 0)
                     tiIco:SetTexture(tex)
                     tiIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                    if isAdded then tiIco:SetDesaturated(true); tiIco:SetAlpha(0.4) end
+                    if isDisabled then tiIco:SetDesaturated(true); tiIco:SetAlpha(0.4) end
                 end
 
                 local tiHl = ti:CreateTexture(nil, "ARTWORK")
                 tiHl:SetAllPoints(); tiHl:SetColorTexture(1, 1, 1, 0); tiHl:SetAlpha(0)
 
-                if isAdded then
+                if isDisabled then
                     tiLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
-                    local bName = bd and (bd.name or bd.key) or barKey
+                    local tooltipName = isAdded and (bd and (bd.name or bd.key) or barKey) or otherBarName
                     ti:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(ti, "Already on " .. bName)
+                        EllesmereUI.ShowWidgetTooltip(ti, "Already on " .. tooltipName)
                     end)
                     ti:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 else
@@ -3915,6 +4221,8 @@ initFrame:SetScript("OnEvent", function(self)
                         local rTex = C_Spell.GetSpellTexture(rSid)
                         if rName then
                             local isAdded = alreadyOnBar[rSid]
+                            local rOtherBar = not isAdded and usedOnOtherBar[rSid]
+                            local rIsDisabled = isAdded or rOtherBar
                             local ri = CreateFrame("Button", nil, inner)
                             ri:SetHeight(ITEM_H)
                             ri:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -3931,15 +4239,15 @@ initFrame:SetScript("OnEvent", function(self)
                                 riIco:SetPoint("RIGHT", ri, "RIGHT", -6, 0)
                                 riIco:SetTexture(rTex)
                                 riIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                                if isAdded then riIco:SetDesaturated(true); riIco:SetAlpha(0.4) end
+                                if rIsDisabled then riIco:SetDesaturated(true); riIco:SetAlpha(0.4) end
                             end
                             local riHl = ri:CreateTexture(nil, "ARTWORK")
                             riHl:SetAllPoints(); riHl:SetColorTexture(1, 1, 1, 0); riHl:SetAlpha(0)
-                            if isAdded then
+                            if rIsDisabled then
                                 riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
-                                local bName = bd and (bd.name or bd.key) or barKey
+                                local rTooltipName = isAdded and (bd and (bd.name or bd.key) or barKey) or rOtherBar
                                 ri:SetScript("OnEnter", function()
-                                    EllesmereUI.ShowWidgetTooltip(ri, "Already on " .. bName)
+                                    EllesmereUI.ShowWidgetTooltip(ri, "Already on " .. rTooltipName)
                                 end)
                                 ri:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                             else
@@ -4032,6 +4340,8 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, preset in ipairs(itemPresets) do
                         local pID = -(preset.itemID)
                         local isAdded = alreadyOnBar[pID]
+                        local pOtherBar = not isAdded and usedOnOtherBar[pID]
+                        local pIsDisabled = isAdded or pOtherBar
 
                         local si = CreateFrame("Button", nil, subInner)
                         si:SetHeight(SUB_ITEM_H)
@@ -4060,13 +4370,13 @@ initFrame:SetScript("OnEvent", function(self)
                         sHl:SetAllPoints()
                         sHl:SetColorTexture(1, 1, 1, 0); sHl:SetAlpha(0)
 
-                        if isAdded then
+                        if pIsDisabled then
                             sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
                             sIco:SetDesaturated(true)
                             sIco:SetAlpha(0.4)
-                            local bName = bd and (bd.name or bd.key) or barKey
+                            local pTooltipName = isAdded and (bd and (bd.name or bd.key) or barKey) or pOtherBar
                             si:SetScript("OnEnter", function()
-                                EllesmereUI.ShowWidgetTooltip(si, "Already on " .. bName)
+                                EllesmereUI.ShowWidgetTooltip(si, "Already on " .. pTooltipName)
                             end)
                             si:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                         else
@@ -4127,623 +4437,6 @@ initFrame:SetScript("OnEvent", function(self)
             trDiv:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
             trDiv:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
             mH = mH + 9
-        end
-
-        -- "Custom Item" sub-menu for misc bars: on-use bag items
-        -- Bag scan starts immediately when the picker opens so tooltip data
-        -- can cache in the background; the sub-menu refreshes live as items load.
-        local _customTrackingSub
-        local _cachedBagItems       -- cached scan results (populated async)
-        local _bagScanComplete = false
-        if isMiscBar then
-            -- Scan bags for on-use items with real cooldowns
-            -- Blacklist: items that pass filters but should not appear
-            local BAG_ITEM_BLACKLIST = {
-                [234389] = true, -- Gallagio Loyalty Rewards Card: Silver
-                [234390] = true, -- Gallagio Loyalty Rewards Card: Gold
-                [249699] = true, -- Shadowguard Translocator
-            }
-            local MIN_CD_SEC = 30
-            local MAX_CD_SEC = 660  -- 11 minutes
-
-            -- Priority sort order for the Custom Item sub-menu.
-            -- Items matching these names appear first in this order;
-            -- everything else sorts alphabetically after.
-            local ITEM_PRIORITY_NAMES = {
-                "Trinket Slot 1",
-                "Trinket Slot 2",
-                "Light's Potential",
-                "Potion of Recklessness",
-                "Silvermoon Health Potion",
-                "Lightfused Mana Potion",
-                "Healthstone",
-            }
-            local ITEM_PRIORITY = {}
-            for i, n in ipairs(ITEM_PRIORITY_NAMES) do
-                ITEM_PRIORITY[n:lower()] = i
-            end
-
-            -- Collect candidate itemIDs from bags (fast, no tooltip needed)
-            local _candidateItems = {}
-            do
-                local seen = {}
-                -- Equipped trinkets (slots 13 and 14)
-                for slotIdx = 13, 14 do
-                    local trinketID = GetInventoryItemID("player", slotIdx)
-                    if trinketID and not seen[trinketID] and not BAG_ITEM_BLACKLIST[trinketID] then
-                        seen[trinketID] = true
-                        local spellName, spellID = C_Item.GetItemSpell(trinketID)
-                        if spellName and spellID then
-                            _candidateItems[#_candidateItems + 1] = {
-                                itemID = trinketID,
-                                spellName = spellName,
-                                spellID = spellID,
-                                isTrinket = slotIdx,
-                            }
-                            C_Item.RequestLoadItemDataByID(trinketID)
-                        end
-                    end
-                end
-                -- Bag items (excluding trinkets)
-                for bag = 0, 4 do
-                    local numSlots = C_Container.GetContainerNumSlots(bag)
-                    for slot = 1, numSlots do
-                        local info = C_Container.GetContainerItemInfo(bag, slot)
-                        if info and info.itemID and not seen[info.itemID] and not BAG_ITEM_BLACKLIST[info.itemID] then
-                            seen[info.itemID] = true
-                            local invType = C_Item.GetItemInventoryTypeByID(info.itemID)
-                            local isTrinket = invType and invType == Enum.InventoryType.IndexTrinketType
-                            if not isTrinket then
-                                local spellName, spellID = C_Item.GetItemSpell(info.itemID)
-                                if spellName and spellID then
-                                    _candidateItems[#_candidateItems + 1] = {
-                                        itemID = info.itemID,
-                                        spellName = spellName,
-                                        spellID = spellID,
-                                    }
-                                    C_Item.RequestLoadItemDataByID(info.itemID)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            -- Resolve candidates into final results using tooltip cooldown data.
-            -- Returns true if all candidates have been resolved.
-            local function ResolveBagItems()
-                local results = {}
-                local allResolved = true
-                for _, cand in ipairs(_candidateItems) do
-                    local tipData = C_TooltipInfo.GetItemByID(cand.itemID)
-                    if tipData and tipData.lines then
-                        local cdSec = nil
-                        for _, line in ipairs(tipData.lines) do
-                            local text = line.leftText
-                            if text and text:find("Cooldown%)") then
-                                local cdStr = text:match(".*%((.+Cooldown)%)")
-                                if cdStr then
-                                    local totalSec = 0
-                                    for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
-                                        local n = tonumber(num)
-                                        if n then
-                                            local u = unit:lower()
-                                            if u == "min" then totalSec = totalSec + n * 60
-                                            elseif u == "sec" then totalSec = totalSec + n
-                                            elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
-                                            end
-                                        end
-                                    end
-                                    if totalSec > 0 then cdSec = totalSec end
-                                    break
-                                end
-                            end
-                        end
-                        if cand.isTrinket or (cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC) then
-                            local tex = C_Item.GetItemIconByID(cand.itemID)
-                            local itemName = C_Item.GetItemNameByID(cand.itemID)
-                            local displayName
-                            if cand.isTrinket then
-                                displayName = (itemName or cand.spellName) .. " (Trinket " .. (cand.isTrinket - 12) .. ")"
-                            else
-                                displayName = itemName or cand.spellName
-                            end
-                            results[#results + 1] = {
-                                itemID = cand.itemID,
-                                name = displayName,
-                                icon = tex,
-                                spellID = cand.spellID,
-                                isTrinket = cand.isTrinket,
-                            }
-                        end
-                        -- Item data loaded (even if it didn't qualify) -- resolved
-                    else
-                        allResolved = false
-                    end
-                end
-                -- Sort by priority list first, then alphabetically
-                local PRIORITY_COUNT = #ITEM_PRIORITY_NAMES
-                table.sort(results, function(a, b)
-                    local aKey = a.isTrinket and ("trinket slot " .. (a.isTrinket - 12)) or a.name:lower()
-                    local bKey = b.isTrinket and ("trinket slot " .. (b.isTrinket - 12)) or b.name:lower()
-                    local aPri = ITEM_PRIORITY[aKey] or (PRIORITY_COUNT + 1)
-                    local bPri = ITEM_PRIORITY[bKey] or (PRIORITY_COUNT + 1)
-                    if aPri ~= bPri then return aPri < bPri end
-                    return a.name < b.name
-                end)
-                _cachedBagItems = results
-                _bagScanComplete = allResolved
-                return allResolved
-            end
-
-            -- Kick off the first resolve immediately (will get whatever is cached)
-            ResolveBagItems()
-
-            -- If not all resolved, poll until done (tooltip data loads async)
-            if not _bagScanComplete then
-                local attempts = 0
-                local ticker
-                ticker = C_Timer.NewTicker(0.2, function()
-                    attempts = attempts + 1
-                    local done = ResolveBagItems()
-                    if done or attempts >= 25 then
-                        if ticker then ticker:Cancel() end
-                        _bagScanComplete = true
-                        -- If the sub-menu is already visible, rebuild it live
-                        if _customTrackingSub and _customTrackingSub:IsShown() then
-                            _customTrackingSub._needsRebuild = true
-                        end
-                    elseif _customTrackingSub and _customTrackingSub:IsShown() then
-                        -- Rebuild live as more items resolve
-                        _customTrackingSub._needsRebuild = true
-                    end
-                end)
-                -- Clean up ticker when menu closes
-                menu:HookScript("OnHide", function()
-                    if ticker then ticker:Cancel(); ticker = nil end
-                end)
-            end
-            local ctItem = CreateFrame("Button", nil, inner)
-            ctItem:SetHeight(ITEM_H)
-            ctItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
-            ctItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
-            ctItem:SetFrameLevel(menu:GetFrameLevel() + 2)
-
-            local ctHl = ctItem:CreateTexture(nil, "ARTWORK")
-            ctHl:SetAllPoints(); ctHl:SetColorTexture(1, 1, 1, 0); ctHl:SetAlpha(0)
-
-            local ctLbl = ctItem:CreateFontString(nil, "OVERLAY")
-            ctLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-            ctLbl:SetPoint("LEFT", 10, 0)
-            ctLbl:SetJustifyH("LEFT")
-            ctLbl:SetText("Custom Item")
-            ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-
-            local ctArrow = ctItem:CreateTexture(nil, "ARTWORK")
-            ctArrow:SetSize(10, 10)
-            ctArrow:SetPoint("RIGHT", ctItem, "RIGHT", -8, 0)
-            ctArrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
-            ctArrow:SetAlpha(0.7)
-
-            local function ShowCustomTrackingSub()
-                -- Filter out items already tracked on this bar
-                local items = _cachedBagItems or {}
-                local alreadyTracked = {}
-                local sdCT = bd and ns.GetBarSpellData(bd.key)
-                if sdCT and sdCT.assignedSpells then
-                    for _, sid in ipairs(sdCT.assignedSpells) do
-                        if sid <= -100 then alreadyTracked[-sid] = true end
-                    end
-                end
-                local filtered = {}
-                for _, it in ipairs(items) do
-                    if not alreadyTracked[it.itemID] then
-                        filtered[#filtered + 1] = it
-                    end
-                end
-
-                -- Track the last filtered count so we know when to rebuild
-                local prevCount = _customTrackingSub and _customTrackingSub._itemCount or -1
-
-                if not _customTrackingSub then
-                    _customTrackingSub = CreateFrame("Frame", nil, UIParent)
-                    _customTrackingSub:SetFrameStrata("FULLSCREEN_DIALOG")
-                    _customTrackingSub:SetFrameLevel(menu:GetFrameLevel() + 5)
-                    _customTrackingSub:SetClampedToScreen(true)
-                    _customTrackingSub:EnableMouse(true)
-                elseif _customTrackingSub:IsShown() and #filtered == prevCount and not _customTrackingSub._needsRebuild then
-                    return -- already showing with same items
-                else
-                    -- Clear previous children
-                    for _, child in ipairs({_customTrackingSub:GetChildren()}) do
-                        child:Hide(); child:SetParent(nil)
-                    end
-                    for _, rgn in ipairs({_customTrackingSub:GetRegions()}) do
-                        if rgn.Hide then rgn:Hide() end
-                    end
-                end
-
-                _customTrackingSub._itemCount = #filtered
-                _customTrackingSub._needsRebuild = false
-
-                local subW = 220
-                local SUB_ITEM_H = 26
-                local SUB_MAX_H = 260
-                _customTrackingSub:SetSize(subW, 10)
-                _customTrackingSub:ClearAllPoints()
-                _customTrackingSub:SetPoint("TOPLEFT", ctItem, "TOPRIGHT", 2, 0)
-
-                local subBg = _customTrackingSub:CreateTexture(nil, "BACKGROUND")
-                subBg:SetAllPoints()
-                subBg:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
-                EllesmereUI.MakeBorder(_customTrackingSub, 1, 1, 1, mBrdA, EllesmereUI.PP)
-
-                -- Inner frame for items (scrollable if needed)
-                local subInner = CreateFrame("Frame", nil, _customTrackingSub)
-                subInner:SetWidth(subW)
-                subInner:SetPoint("TOPLEFT")
-
-                local subH = 4
-
-                if #filtered == 0 then
-                    local loadingText = (not _bagScanComplete) and "Loading items..." or "No on-use items in bags"
-                    local emptyLbl = subInner:CreateFontString(nil, "OVERLAY")
-                    emptyLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
-                    emptyLbl:SetPoint("TOPLEFT", subInner, "TOPLEFT", 10, -subH - 4)
-                    emptyLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.6)
-                    emptyLbl:SetText(loadingText)
-                    subH = subH + SUB_ITEM_H
-                else
-                    for _, it in ipairs(filtered) do
-                        local si = CreateFrame("Button", nil, subInner)
-                        si:SetHeight(SUB_ITEM_H)
-                        si:SetPoint("TOPLEFT", subInner, "TOPLEFT", 1, -subH)
-                        si:SetPoint("TOPRIGHT", subInner, "TOPRIGHT", -1, -subH)
-                        si:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 2)
-                        si:RegisterForClicks("AnyUp")
-
-                        local sIco = si:CreateTexture(nil, "ARTWORK")
-                        local icoSz = SUB_ITEM_H - 2
-                        sIco:SetSize(icoSz, icoSz)
-                        sIco:SetPoint("RIGHT", si, "RIGHT", -6, 0)
-                        if it.icon then sIco:SetTexture(it.icon) end
-                        local zoom = 0.08
-                        sIco:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
-
-                        local sLbl = si:CreateFontString(nil, "OVERLAY")
-                        sLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                        sLbl:SetPoint("LEFT", si, "LEFT", 10, 0)
-                        sLbl:SetPoint("RIGHT", sIco, "LEFT", -5, 0)
-                        sLbl:SetJustifyH("LEFT")
-                        sLbl:SetWordWrap(false)
-                        sLbl:SetMaxLines(1)
-                        sLbl:SetText(it.name)
-                        sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-
-                        local sHl = si:CreateTexture(nil, "ARTWORK")
-                        sHl:SetAllPoints()
-                        sHl:SetColorTexture(1, 1, 1, 0); sHl:SetAlpha(0)
-
-                        si:SetScript("OnEnter", function()
-                            sLbl:SetTextColor(1, 1, 1, 1)
-                            sHl:SetColorTexture(1, 1, 1, hlA); sHl:SetAlpha(1)
-                        end)
-                        si:SetScript("OnLeave", function()
-                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                            sHl:SetAlpha(0)
-                        end)
-                        si:SetScript("OnClick", function()
-                            _customTrackingSub:Hide()
-                            menu:Hide()
-                            -- Store as negated itemID
-                            if onSelect then onSelect(-it.itemID, true) end
-                        end)
-
-                        subH = subH + SUB_ITEM_H
-                    end
-                end
-
-                local totalSubH = subH + 4
-                subInner:SetHeight(totalSubH)
-
-                if totalSubH > SUB_MAX_H then
-                    _customTrackingSub:SetHeight(SUB_MAX_H)
-                    local sf = CreateFrame("ScrollFrame", nil, _customTrackingSub)
-                    sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
-                    sf:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 1)
-                    sf:EnableMouseWheel(true)
-                    sf:SetScrollChild(subInner)
-                    subInner:SetWidth(subW)
-                    local scrollPos = 0
-                    local maxScroll = totalSubH - SUB_MAX_H
-                    sf:SetScript("OnMouseWheel", function(_, delta)
-                        scrollPos = math.max(0, math.min(maxScroll, scrollPos - delta * 30))
-                        sf:SetVerticalScroll(scrollPos)
-                    end)
-                else
-                    _customTrackingSub:SetHeight(totalSubH)
-                    subInner:SetParent(_customTrackingSub)
-                    subInner:SetPoint("TOPLEFT")
-                end
-                _customTrackingSub:SetScript("OnLeave", function(self)
-                    C_Timer.After(0.1, function()
-                        if self:IsShown() and not self:IsMouseOver()
-                           and not ctItem:IsMouseOver() then
-                            self:Hide()
-                        end
-                    end)
-                end)
-                -- Live-rebuild when async item data finishes loading
-                if not _bagScanComplete then
-                    _customTrackingSub:SetScript("OnUpdate", function(self)
-                        if self._needsRebuild then
-                            ShowCustomTrackingSub()
-                        end
-                        -- Stop polling once scan is done
-                        if _bagScanComplete then
-                            self:SetScript("OnUpdate", nil)
-                        end
-                    end)
-                else
-                    _customTrackingSub:SetScript("OnUpdate", nil)
-                end
-                _customTrackingSub:Show()
-            end
-
-            ctItem:SetScript("OnEnter", function()
-                ctLbl:SetTextColor(1, 1, 1, 1)
-                ctHl:SetColorTexture(1, 1, 1, hlA); ctHl:SetAlpha(1)
-                ShowCustomTrackingSub()
-            end)
-            ctItem:SetScript("OnLeave", function()
-                ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                ctHl:SetAlpha(0)
-                -- Delay hide so user can move mouse to sub-menu
-                C_Timer.After(0.15, function()
-                    if _customTrackingSub and _customTrackingSub:IsShown()
-                       and not _customTrackingSub:IsMouseOver()
-                       and not ctItem:IsMouseOver() then
-                        _customTrackingSub:Hide()
-                    end
-                end)
-            end)
-
-            allItems[#allItems + 1] = ctItem
-            mH = mH + ITEM_H
-
-            -- "Custom Spell ID" option: opens a popup to enter a spell ID
-            local csItem = CreateFrame("Button", nil, inner)
-            csItem:SetHeight(ITEM_H)
-            csItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
-            csItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
-            csItem:SetFrameLevel(menu:GetFrameLevel() + 2)
-
-            local csHl = csItem:CreateTexture(nil, "ARTWORK")
-            csHl:SetAllPoints(); csHl:SetColorTexture(1, 1, 1, 0); csHl:SetAlpha(0)
-
-            local csLbl = csItem:CreateFontString(nil, "OVERLAY")
-            csLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-            csLbl:SetPoint("LEFT", 10, 0)
-            csLbl:SetJustifyH("LEFT")
-            csLbl:SetText("Custom Spell ID")
-            csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-
-            csItem:SetScript("OnEnter", function()
-                csLbl:SetTextColor(1, 1, 1, 1)
-                csHl:SetColorTexture(1, 1, 1, hlA); csHl:SetAlpha(1)
-            end)
-            csItem:SetScript("OnLeave", function()
-                csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                csHl:SetAlpha(0)
-            end)
-            csItem:SetScript("OnClick", function()
-                menu:Hide()
-                -- Show spell ID input popup
-                local popupName = "EUI_CDM_SpellIDPopup"
-                local popup = _G[popupName]
-                if not popup then
-                    local POPUP_W, POPUP_H = 320, 160
-                    local dimmer = CreateFrame("Frame", popupName .. "Dimmer", UIParent)
-                    dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
-                    dimmer:SetAllPoints(UIParent)
-                    dimmer:EnableMouse(true)
-                    dimmer:Hide()
-                    local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
-                    dimTex:SetAllPoints(); dimTex:SetColorTexture(0, 0, 0, 0.25)
-                    dimmer:SetScript("OnMouseDown", function(self) self:Hide() end)
-
-                    popup = CreateFrame("Frame", popupName, dimmer)
-                    popup:SetSize(POPUP_W, POPUP_H)
-                    popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-                    popup:SetFrameStrata("FULLSCREEN_DIALOG")
-                    popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
-                    popup:EnableMouse(true)
-                    local popBg = popup:CreateTexture(nil, "BACKGROUND")
-                    popBg:SetAllPoints(); popBg:SetColorTexture(0.06, 0.08, 0.10, 1)
-                    EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PP)
-
-                    local title = popup:CreateFontString(nil, "OVERLAY")
-                    title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
-                    title:SetPoint("TOP", popup, "TOP", 0, -18)
-                    title:SetTextColor(1, 1, 1, 1)
-                    title:SetText("Add Custom Spell")
-                    popup._title = title
-
-                    local editBox = CreateFrame("EditBox", nil, popup)
-                    editBox:SetSize(180, 28)
-                    editBox:SetPoint("TOP", title, "BOTTOM", 0, -16)
-                    editBox:SetAutoFocus(true)
-                    editBox:SetNumeric(true)
-                    editBox:SetMaxLetters(7)
-                    editBox:SetFont(FONT_PATH, 13, GetCDMOptOutline())
-                    editBox:SetTextColor(1, 1, 1, 0.9)
-                    editBox:SetJustifyH("CENTER")
-                    local ebBg = editBox:CreateTexture(nil, "BACKGROUND")
-                    ebBg:SetAllPoints(); ebBg:SetColorTexture(0.04, 0.06, 0.08, 1)
-                    EllesmereUI.MakeBorder(editBox, 1, 1, 1, 0.12, EllesmereUI.PP)
-
-                    local placeholder = editBox:CreateFontString(nil, "ARTWORK")
-                    placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    placeholder:SetPoint("CENTER")
-                    placeholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
-                    placeholder:SetText("Spell ID")
-                    editBox:SetScript("OnTextChanged", function(self)
-                        if self:GetText() == "" then placeholder:Show() else placeholder:Hide() end
-                    end)
-                    popup._editBox = editBox
-
-                    local status = popup:CreateFontString(nil, "OVERLAY")
-                    status:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                    status:SetPoint("TOP", editBox, "BOTTOM", 0, -6)
-                    status:SetTextColor(1, 0.3, 0.3, 1)
-                    status:SetText("")
-                    popup._status = status
-                    popup._statusTimer = nil
-
-                    -- Add button
-                    local ar, ag, ab = EllesmereUI.GetAccentColor()
-                    local addBtn = CreateFrame("Button", nil, popup)
-                    addBtn:SetSize(80, 28)
-                    addBtn:SetPoint("BOTTOMRIGHT", popup, "BOTTOM", -4, 16)
-                    local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
-                    addBg:SetAllPoints(); addBg:SetColorTexture(ar, ag, ab, 0.15)
-                    EllesmereUI.MakeBorder(addBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
-                    local addLbl = addBtn:CreateFontString(nil, "OVERLAY")
-                    addLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    addLbl:SetPoint("CENTER"); addLbl:SetText("Add")
-                    addLbl:SetTextColor(ar, ag, ab, 0.9)
-                    addBtn:SetScript("OnEnter", function() addLbl:SetTextColor(1, 1, 1, 1) end)
-                    addBtn:SetScript("OnLeave", function() addLbl:SetTextColor(ar, ag, ab, 0.9) end)
-                    popup._addBtn = addBtn
-
-                    -- Cancel button
-                    local cancelBtn = CreateFrame("Button", nil, popup)
-                    cancelBtn:SetSize(80, 28)
-                    cancelBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 4, 16)
-                    local cBg = cancelBtn:CreateTexture(nil, "BACKGROUND")
-                    cBg:SetAllPoints(); cBg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
-                    EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
-                    local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
-                    cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    cLbl:SetPoint("CENTER"); cLbl:SetText("Cancel")
-                    cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
-                    cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
-                    cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
-                    cancelBtn:SetScript("OnClick", function() dimmer:Hide() end)
-                    popup._cancelBtn = cancelBtn
-
-                    editBox:SetScript("OnEscapePressed", function() dimmer:Hide() end)
-
-                    -- Duration field (shown only for buff-type bars)
-                    local durLabel = popup:CreateFontString(nil, "OVERLAY")
-                    durLabel:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                    durLabel:SetPoint("TOP", editBox, "BOTTOM", 0, -32)
-                    durLabel:SetTextColor(0.7, 0.7, 0.7, 0.85)
-                    durLabel:SetText("Duration (seconds)")
-                    popup._durLabel = durLabel
-
-                    local durBox = CreateFrame("EditBox", nil, popup)
-                    durBox:SetSize(180, 28)
-                    durBox:SetPoint("TOP", durLabel, "BOTTOM", 0, -6)
-                    durBox:SetNumeric(true)
-                    durBox:SetMaxLetters(5)
-                    durBox:SetFont(FONT_PATH, 13, GetCDMOptOutline())
-                    durBox:SetTextColor(1, 1, 1, 0.9)
-                    durBox:SetJustifyH("CENTER")
-                    local durBg = durBox:CreateTexture(nil, "BACKGROUND")
-                    durBg:SetAllPoints(); durBg:SetColorTexture(0.04, 0.06, 0.08, 1)
-                    EllesmereUI.MakeBorder(durBox, 1, 1, 1, 0.12, EllesmereUI.PP)
-                    local durPlaceholder = durBox:CreateFontString(nil, "ARTWORK")
-                    durPlaceholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    durPlaceholder:SetPoint("CENTER")
-                    durPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
-                    durPlaceholder:SetText("Required")
-                    durBox:SetScript("OnTextChanged", function(self)
-                        if self:GetText() == "" then durPlaceholder:Show() else durPlaceholder:Hide() end
-                    end)
-                    durBox:SetScript("OnEscapePressed", function() dimmer:Hide() end)
-                    popup._durBox = durBox
-
-                    popup._dimmer = dimmer
-                    _G[popupName] = popup
-                end
-
-                -- Wire up the Add action for this invocation
-                local function SetStatus(text, r, g, b)
-                    popup._status:SetText(text)
-                    popup._status:SetTextColor(r or 1, g or 0.3, b or 0.3, 1)
-                    if popup._statusTimer then popup._statusTimer:Cancel() end
-                    if text ~= "" then
-                        popup._statusTimer = C_Timer.NewTimer(2.5, function()
-                            popup._status:SetText("")
-                        end)
-                    end
-                end
-
-                local function DoAdd()
-                    local text = popup._editBox:GetText()
-                    local sid = tonumber(text)
-                    if not sid or sid <= 0 then
-                        SetStatus("Enter a valid spell ID")
-                        return
-                    end
-                    sid = math.floor(sid)
-                    local spellName = C_Spell.GetSpellName(sid)
-                    if not spellName then
-                        SetStatus("Unknown spell ID")
-                        return
-                    end
-                    -- Check if already tracked
-                    local sdBuf = bd and ns.GetBarSpellData(bd.key)
-                    if sdBuf and sdBuf.assignedSpells then
-                        for _, existing in ipairs(sdBuf.assignedSpells) do
-                            if existing == sid then
-                                SetStatus("Already tracked")
-                                return
-                            end
-                        end
-                    end
-                    -- Store duration (required for buff bars, optional otherwise)
-                    if isBuffBar then
-                        if not popup._durBox or not popup._durBox:IsShown() then
-                            SetStatus("Duration is required")
-                            return
-                        end
-                        local durText = popup._durBox:GetText()
-                        local dur = tonumber(durText)
-                        if not dur or dur <= 0 then
-                            SetStatus("Enter a duration in seconds")
-                            return
-                        end
-                        if not sdBuf then return end
-                        if not sdBuf.customSpellDurations then sdBuf.customSpellDurations = {} end
-                        sdBuf.customSpellDurations[sid] = math.floor(dur)
-                    end
-                    popup._dimmer:Hide()
-                    if onSelect then onSelect(sid, true) end
-                end
-
-                popup._addBtn:SetScript("OnClick", DoAdd)
-                popup._editBox:SetScript("OnEnterPressed", DoAdd)
-                popup._editBox:SetText("")
-                popup._status:SetText("")
-                -- Show/hide duration field based on bar type
-                if isBuffBar then
-                    popup:SetHeight(220)
-                    popup._durLabel:Show()
-                    popup._durBox:Show()
-                    popup._durBox:SetText("")
-                else
-                    popup:SetHeight(160)
-                    popup._durLabel:Hide()
-                    popup._durBox:Hide()
-                end
-                popup._dimmer:Show()
-                popup._editBox:SetFocus()
-            end)
-
-            allItems[#allItems + 1] = csItem
-            mH = mH + ITEM_H
         end
 
         -- "Presets" flyout row for buff bars
@@ -4921,7 +4614,7 @@ initFrame:SetScript("OnEvent", function(self)
             if not isDisabled and sp.cdmCatGroup then
                 if isBuffBar and sp.cdmCatGroup == "cooldown" then
                     wrongCatGroup = true
-                elseif not isBuffBar and not isMiscBar and sp.cdmCatGroup == "buff" then
+                elseif not isBuffBar and sp.cdmCatGroup == "buff" then
                     wrongCatGroup = true
                 end
             end
@@ -5025,12 +4718,7 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + 9
         end
 
-        if isMiscBar then
-            -- Misc bars: only show extras (trinket slots, racials, etc.)
-            -- Skip all cooldown/utility/buff spell categories.
-            if isMiscBar and mH > 4 and #itemsExtra > 0 then MakeDivider() end
-            for _, sp in ipairs(itemsExtra) do MakeItem(sp, false, false) end
-        elseif isCDorUtil then
+        if isCDorUtil then
             -- Layout: available primary -> unavailable primary -> available secondary
             -- -> unavailable secondary -> disabled (unlearned)
             local hasPriDisp    = #priDisplayed > 0
@@ -6424,10 +6112,6 @@ initFrame:SetScript("OnEvent", function(self)
             local function UpdateDDLabel()
                 local bd = bars[selectedCDMBarIndex]
                 local label = bd and (bd.name or bd.key) or ""
-                -- Normalize verbose bar names for display
-                if bd and bd.barType == "misc" then
-                    label = label:gsub("Custom ", ""):gsub("Trinkets/Racials/Potions Bar ", "Miscellaneous "):gsub("Trinkets Bar ", "Miscellaneous "):gsub("^Trinkets ", "Miscellaneous ")
-                end
                 ddLbl:SetText(label)
             end
             UpdateDDLabel()
@@ -6469,10 +6153,6 @@ initFrame:SetScript("OnEvent", function(self)
                     iLbl:SetWordWrap(false); iLbl:SetMaxLines(1)
                     iLbl:SetPoint("LEFT", item, "LEFT", 10, 0)
                     local displayName = b.name or b.key
-                    -- Normalize verbose bar names for display
-                    if b.barType == "misc" then
-                        displayName = displayName:gsub("Custom ", ""):gsub("Trinkets/Racials/Potions Bar ", "Miscellaneous "):gsub("Trinkets Bar ", "Miscellaneous "):gsub("^Trinkets ", "Miscellaneous ")
-                    end
                     iLbl:SetText(displayName)
 
                     local iHl = item:CreateTexture(nil, "ARTWORK")
@@ -6564,7 +6244,6 @@ initFrame:SetScript("OnEvent", function(self)
                     { type = "cooldowns", label = "+ Add New Cooldowns Bar" },
                     { type = "utility",   label = "+ Add New Utility Bar" },
                     { type = "buffs",     label = "+ Add New Buff Bar" },
-                    { type = "misc",      label = "+ Add Miscellaneous Bar" },
                 }
                 for _, entry in ipairs(addBarTypes) do
                     local addItem = CreateFrame("Button", nil, menu)

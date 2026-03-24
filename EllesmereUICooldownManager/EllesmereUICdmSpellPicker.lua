@@ -11,80 +11,12 @@ local ECME                   = ns.ECME
 local barDataByKey           = ns.barDataByKey
 local cdmBarFrames           = ns.cdmBarFrames
 local cdmBarIcons            = ns.cdmBarIcons
-local RACE_RACIALS           = ns.RACE_RACIALS
-local HEALTH_ITEMS           = ns.HEALTH_ITEMS
-local GetActiveHealthItemID  = ns.GetActiveHealthItemID
 local ResolveChildSpellID    = ns.ResolveChildSpellID
 local ResolveInfoSpellID     = ns.ResolveInfoSpellID
 local _cdIDToCorrectSID      = ns._cdIDToCorrectSID
 local _tickCDUtilTrackedSet  = ns._tickCDUtilTrackedSet
 local _tickBuffIconTrackedSet = ns._tickBuffIconTrackedSet
 local ComputeTopRowStride    = ns.ComputeTopRowStride
-
---- Build list of trinket / racial / health-potion entries.
---- Returns array of { spellID, name, icon, isKnown=true, isExtra=true }.
---- spellID is negative for trinket slots (-13, -14).
-local function GetExtraSpells()
-    local extras = {}
-    local _playerRace = ns._playerRace
-    local _playerClass = ns._playerClass
-
-    -- Trinket slots (dynamic  reads currently equipped item)
-    for _, slot in ipairs({ 13, 14 }) do
-        local itemID = GetInventoryItemID("player", slot)
-        if itemID then
-            local tex  = C_Item.GetItemIconByID(itemID)
-            if tex then
-                local label = (slot == 13) and "Trinket Slot 1" or "Trinket Slot 2"
-                extras[#extras + 1] = {
-                    spellID = -slot, cdID = nil,
-                    name = label, icon = tex,
-                    isKnown = true, isDisplayed = false, isExtra = true,
-                }
-            end
-        end
-    end
-
-    -- Racial abilities for current player
-    if _playerRace and RACE_RACIALS[_playerRace] then
-        for _, entry in ipairs(RACE_RACIALS[_playerRace]) do
-            local sid = type(entry) == "table" and entry[1] or entry
-            local reqClass = type(entry) == "table" and entry.class or nil
-            if (not reqClass or reqClass == _playerClass) then
-                local sName = C_Spell.GetSpellName(sid)
-                local sTex  = C_Spell.GetSpellTexture(sid)
-                if sName then
-                    extras[#extras + 1] = {
-                        spellID = sid, cdID = nil,
-                        name = sName, icon = sTex,
-                        isKnown = true, isDisplayed = false,
-                        isExtra = true, isRacial = true,
-                    }
-                end
-            end
-        end
-    end
-
-    -- Health potions / healthstones
-    for _, item in ipairs(HEALTH_ITEMS) do
-        if not item.class or item.class == _playerClass then
-            local sName = C_Spell.GetSpellName(item.spellID)
-            -- Use the active item ID (base or alt) for the icon
-            local activeID = GetActiveHealthItemID(item)
-            local sTex  = C_Item.GetItemIconByID(activeID)
-            if sName then
-                extras[#extras + 1] = {
-                    spellID = item.spellID, cdID = nil,
-                    name = sName, icon = sTex or C_Spell.GetSpellTexture(item.spellID),
-                    isKnown = true, isDisplayed = false, isExtra = true,
-                }
-            end
-        end
-    end
-
-    return extras
-end
-ns.GetExtraSpells = GetExtraSpells
 
 --- Get all available CDM spells for a bar's categories.
 -- Forward declaration -- defined after GetCDMSpellsForBar (which calls it)
@@ -259,14 +191,6 @@ function ns.GetCDMSpellsForBar(barKey)
         return a.name < b.name
     end)
 
-    -- Append trinket/racial/potion extras for misc bars
-    if barType == "misc" then
-        local extras = GetExtraSpells()
-        table.sort(extras, function(a, b) return a.name < b.name end)
-        for _, ex in ipairs(extras) do
-            spells[#spells + 1] = ex
-        end
-    end
 
     return spells
 end
@@ -504,7 +428,6 @@ function ns.AddCDMBar(barType, name, numRows)
     local typeLabel = barType == "cooldowns" and "Cooldowns"
                    or barType == "utility" and "Utility"
                    or barType == "buffs" and "Buffs"
-                   or barType == "misc" and "Miscellaneous"
                    or "Cooldowns"
     -- Count existing custom bars of this type for numbering
     local typeCount = 0
@@ -514,7 +437,7 @@ function ns.AddCDMBar(barType, name, numRows)
     local key = "custom_" .. (#bars + 1) .. "_" .. GetTime()
     key = key:gsub("%.", "_")
     bars[#bars + 1] = {
-        key = key, name = name or ((barType == "misc" and "Miscellaneous " or "Custom " .. typeLabel .. " Bar ") .. (typeCount + 1)),
+        key = key, name = name or ("Custom " .. typeLabel .. " Bar " .. (typeCount + 1)),
         barType = barType,
         enabled = true, iconSize = 36, numRows = numRows or 1,
         spacing = 2,

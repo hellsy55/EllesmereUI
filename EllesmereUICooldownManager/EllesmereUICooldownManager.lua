@@ -3460,6 +3460,28 @@ BuildAllCDMBars = function()
     end
 
     local p = ECME.db.profile
+
+    -- Migration: remove misc bars and unanchor anything that referenced them
+    do
+        local bars = p.cdmBars and p.cdmBars.bars
+        if bars then
+            local miscKeys = {}
+            for i = #bars, 1, -1 do
+                if bars[i].barType == "misc" then
+                    miscKeys[bars[i].key] = true
+                    table.remove(bars, i)
+                end
+            end
+            if next(miscKeys) then
+                for _, bd in ipairs(bars) do
+                    if bd.anchorTo and miscKeys[bd.anchorTo] then
+                        bd.anchorTo = "none"
+                    end
+                end
+            end
+        end
+    end
+
     if not p.cdmBars.enabled then
         -- Restore Blizzard CDM if we're disabled
         RestoreBlizzardCDM()

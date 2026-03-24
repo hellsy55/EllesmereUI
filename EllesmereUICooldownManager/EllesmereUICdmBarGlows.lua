@@ -120,14 +120,19 @@ function ns.GetAllCDMBuffSpells()
         end
     end
 
-    -- Split by Tracked Bars presence (BuffBarCooldownViewer).
-    -- Spells in Tracked Bars go first (no popup in TBB picker).
-    -- Everything else goes to untracked (fires popup).
+    -- Split by Blizzard CDM buff viewer presence.
+    -- Spells tracked in either buff viewer (icon vi=3 or bar vi=4) go first
+    -- (no popup). Everything else goes to untracked (fires popup).
     local barViewerCache = ns._tickBarViewerCache
+    local buffIconTracked = ns._tickBuffIconTrackedSet
     local tracked, untracked = {}, {}
     for _, entry in ipairs(trackedOrder) do
-        local inTrackedBars = barViewerCache and entry.spellID and barViewerCache[entry.spellID]
-        if inTrackedBars then
+        local sid = entry.spellID
+        local inTracked = sid and (
+            (barViewerCache and barViewerCache[sid]) or
+            (buffIconTracked and buffIconTracked[sid])
+        )
+        if inTracked then
             tracked[#tracked + 1] = entry
         else
             untracked[#untracked + 1] = entry

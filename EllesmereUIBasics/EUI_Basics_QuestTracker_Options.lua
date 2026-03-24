@@ -450,7 +450,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Focused Size", min=8, max=24, step=1,
               getValue=function() return Cfg("focusedFontSize") or Cfg("titleFontSize") or 11 end,
               setValue=function(v) Set("focusedFontSize", v); Refresh() end },
-            { type="label", text="" })
+            { type="slider", text="Focus BG Opacity", min=0, max=100, step=5,
+              getValue=function() return Cfg("focusBgOpacity") or 25 end,
+              setValue=function(v) Set("focusBgOpacity", v); Refresh() end })
         do
             local rgn = row._leftRegion
             local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,

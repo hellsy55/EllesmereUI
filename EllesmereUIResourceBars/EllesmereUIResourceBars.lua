@@ -2633,6 +2633,7 @@ local TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
 local CAST_BAR_TEXTURES = {
     ["none"]          = nil,
     ["blizzard"]      = "ATLAS",
+    ["melli"]         = TEX_BASE .. "melli.tga",
     ["beautiful"]     = TEX_BASE .. "beautiful.tga",
     ["plating"]       = TEX_BASE .. "plating.tga",
     ["atrocity"]      = TEX_BASE .. "atrocity.tga",
@@ -2646,15 +2647,16 @@ local CAST_BAR_TEXTURES = {
     ["sheer"]         = TEX_BASE .. "sheer.tga",
 }
 local CAST_BAR_TEXTURE_ORDER = {
-    "none", "blizzard",
+    "none", "blizzard", "melli", "atrocity",
     "beautiful", "plating",
-    "atrocity", "divide", "glass",
+    "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
     "matte", "sheer",
 }
 local CAST_BAR_TEXTURE_NAMES = {
     ["none"]        = "None",
     ["blizzard"]    = "Blizzard",
+    ["melli"]       = "Melli (ElvUI)",
     ["beautiful"]   = "Beautiful",
     ["plating"]     = "Plating",
     ["atrocity"]    = "Atrocity",
@@ -2678,6 +2680,7 @@ _G._ERB_CastBarTextureNames = CAST_BAR_TEXTURE_NAMES
 local BAR_TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
 local BAR_TEXTURES = {
     ["none"]          = nil,
+    ["melli"]         = BAR_TEX_BASE .. "melli.tga",
     ["beautiful"]     = BAR_TEX_BASE .. "beautiful.tga",
     ["plating"]       = BAR_TEX_BASE .. "plating.tga",
     ["atrocity"]      = BAR_TEX_BASE .. "atrocity.tga",
@@ -2691,13 +2694,15 @@ local BAR_TEXTURES = {
     ["sheer"]         = BAR_TEX_BASE .. "sheer.tga",
 }
 local BAR_TEXTURE_ORDER = {
-    "none", "beautiful", "plating",
-    "atrocity", "divide", "glass",
+    "none", "melli", "atrocity",
+    "beautiful", "plating",
+    "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
     "matte", "sheer",
 }
 local BAR_TEXTURE_NAMES = {
     ["none"]        = "None",
+    ["melli"]       = "Melli (ElvUI)",
     ["beautiful"]   = "Beautiful",
     ["plating"]     = "Plating",
     ["atrocity"]    = "Atrocity",

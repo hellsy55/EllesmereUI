@@ -1049,6 +1049,19 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if gameTime then gameTime:SetParent(minimap); gameTime:SetFrameLevel(flvl + 1) end
     if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
     if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
+    -- Difficulty flag (instance type/size indicator)
+    local diffFrame = (MinimapCluster and MinimapCluster.InstanceDifficulty) or _G.MiniMapInstanceDifficulty
+    if diffFrame then
+        diffFrame:SetParent(minimap)
+        diffFrame:SetFrameLevel(flvl + 2)
+        diffFrame:ClearAllPoints()
+        diffFrame:SetPoint("TOPRIGHT", minimap, "TOPRIGHT", 2, 1)
+        if p.hideRaidDifficulty then
+            diffFrame:SetAlpha(0)
+        else
+            diffFrame:SetAlpha(1)
+        end
+    end
     -- Blizzard indicator children call self:GetParent():Layout() on events;
     -- provide a no-op so reparented frames don't error
     if not minimap.Layout then minimap.Layout = function() end end

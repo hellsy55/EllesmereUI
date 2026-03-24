@@ -255,6 +255,11 @@ initFrame:SetScript("OnEvent", function(self)
         specChangeFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
         specChangeFrame:SetScript("OnEvent", function(self, event)
             if event == "ACTIVE_TALENT_GROUP_CHANGED" and _barsHeaderBuilder then
+                -- Only rebuild if ActionBars is the active module and panel is open
+                if not EllesmereUI:IsShown() or EllesmereUI:GetActiveModule() ~= "EllesmereUIActionBars" then
+                    activePreview = nil
+                    return
+                end
                 -- Force a full rebuild of the preview and header on spec change
                 activePreview = nil
                 EllesmereUI:SetContentHeader(_barsHeaderBuilder)

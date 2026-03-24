@@ -106,8 +106,18 @@ initFrame:SetScript("OnEvent", function(self)
                 cns = _db.castNameSize or cns
                 cts = _db.castTargetSize or cts
             end
+            local ctmSz = ns.defaults.castTimerSize
+            local ctmC = ns.defaults.castTimerColor
+            if _db then
+                ctmSz = _db.castTimerSize or ctmSz
+                ctmC = _db.castTimerColor or ctmC
+            end
             if plate.castName then SetFSFont(plate.castName, cns, GetNPOutline()) end
             if plate.castTarget then SetFSFont(plate.castTarget, cts, GetNPOutline()) end
+            if plate.castTimer then
+                SetFSFont(plate.castTimer, ctmSz, GetNPOutline())
+                plate.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
+            end
             local auraStackSz = (_db and _db.auraStackTextSize) or ns.defaults.auraStackTextSize
             for i = 1, 4 do
                 if plate.debuffs[i] and plate.debuffs[i].count then SetFSFont(plate.debuffs[i].count, auraStackSz, "OUTLINE") end
@@ -528,10 +538,20 @@ initFrame:SetScript("OnEvent", function(self)
         castParts.nameFS:SetMaxLines(1)
         castParts.nameFS:SetText("Spell Name")
 
-        -- Cast target (right, dynamic width)
+        -- Cast timer (far right)
+        castParts.timerFS = cast:CreateFontString(nil, "OVERLAY")
+        SetPVFont(castParts.timerFS, FONT_PATH, 10, GetNPOptOutline())
+        castParts.timerFS:SetPoint("RIGHT", cast, -3, 0)
+        castParts.timerFS:SetJustifyH("RIGHT")
+        castParts.timerFS:SetWordWrap(false)
+        castParts.timerFS:SetMaxLines(1)
+        castParts.timerFS:SetTextColor(1, 1, 1, 1)
+        castParts.timerFS:SetText("2.3")
+
+        -- Cast target (right, anchored left of timer)
         castParts.targetFS = cast:CreateFontString(nil, "OVERLAY")
         SetPVFont(castParts.targetFS, FONT_PATH, 10, GetNPOptOutline())
-        castParts.targetFS:SetPoint("RIGHT", cast, -3, 0)
+        castParts.targetFS:SetPoint("RIGHT", castParts.timerFS, "LEFT", -4, 0)
         castParts.targetFS:SetJustifyH("RIGHT")
         castParts.targetFS:SetWordWrap(false)
         castParts.targetFS:SetMaxLines(1)
@@ -1071,11 +1091,26 @@ initFrame:SetScript("OnEvent", function(self)
             local cns = DBVal("castNameSize") or defaults.castNameSize
             local cts = DBVal("castTargetSize") or defaults.castTargetSize
             local cnc = (DB() and DB().castNameColor) or defaults.castNameColor
+            local ctmSz = DBVal("castTimerSize") or defaults.castTimerSize
+            local ctmC = (DB() and DB().castTimerColor) or defaults.castTimerColor
             SetPVFont(castParts.nameFS, fontPath, cns, npOutline)
             SetPVFont(castParts.targetFS, fontPath, cts, npOutline)
+            SetPVFont(castParts.timerFS, fontPath, ctmSz, npOutline)
+            castParts.timerFS:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
             castParts.nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
-            local useClassColor = defaults.castTargetClassColor
             local dbRef = DB()
+            local pvShowTimer = defaults.showCastTimer
+            if dbRef and dbRef.showCastTimer ~= nil then pvShowTimer = dbRef.showCastTimer end
+            if pvShowTimer then
+                castParts.timerFS:Show()
+                castParts.targetFS:ClearAllPoints()
+                castParts.targetFS:SetPoint("RIGHT", castParts.timerFS, "LEFT", -4, 0)
+            else
+                castParts.timerFS:Hide()
+                castParts.targetFS:ClearAllPoints()
+                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
+            end
+            local useClassColor = defaults.castTargetClassColor
             if dbRef and dbRef.castTargetClassColor ~= nil then useClassColor = dbRef.castTargetClassColor end
             if useClassColor then
                 local _, pClass = UnitClass("player")
@@ -1090,9 +1125,12 @@ initFrame:SetScript("OnEvent", function(self)
                 castParts.targetFS:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
             end
 
-            -- Dynamic cast name width: fill space minus target text minus 5px gap
-            local targetTextW = castParts.targetFS:GetUnboundedStringWidth()
-            local castNameMaxW = barW - 5 - 3 - targetTextW - 5
+            -- Dynamic cast name width: fill space minus target text and timer minus gaps
+            local rightTextW = castParts.targetFS:GetUnboundedStringWidth()
+            if pvShowTimer then
+                rightTextW = rightTextW + 4 + castParts.timerFS:GetUnboundedStringWidth()
+            end
+            local castNameMaxW = barW - 5 - 3 - rightTextW - 5
             if castNameMaxW < 20 then castNameMaxW = 20 end
             castParts.nameFS:SetWidth(castNameMaxW)
 
@@ -1601,6 +1639,7 @@ initFrame:SetScript("OnEvent", function(self)
         pf._castIconFrame = castParts.iconFrame
         pf._castNameFS   = castParts.nameFS
         pf._castTargetFS = castParts.targetFS
+        pf._castTimerFS  = castParts.timerFS
         pf._raidFrame    = raidFrame
         pf._classIcon    = classIcon
         pf._health       = health
@@ -1755,7 +1794,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_FRIENDLY, y);  y = y - h
 
-        local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false and DBVal("friendlyShowDefaultNames") ~= true end
+        local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false end
         local function friendlyPlateOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") ~= false end
         local function nameOnlyOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") == false end
 
@@ -1765,7 +1804,6 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return DBVal("showFriendlyPlayers") ~= false end,
               setValue=function(v)
                 DB().showFriendlyPlayers = v
-                if v then DB().friendlyShowDefaultNames = false end
                 if SetCVar then
                     pcall(SetCVar, "nameplateShowFriendlyPlayers", v and 1 or 0)
                     pcall(SetCVar, "nameplateShowFriends", v and 1 or 0)
@@ -1919,10 +1957,10 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                     pf._updateToggle = UpdateToggle4
 
-                    -- Row 5: Show Default Names
+                    -- Row 5: Class Colored + inline color swatch (shown when off)
                     local r5Y = r4Y - TOGGLE_ROW_H - GAP
                     local lbl5 = MakeFont(pf, 11, nil, 1, 1, 1); lbl5:SetAlpha(0.6)
-                    lbl5:SetText("Show Default Names"); lbl5:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r5Y)
+                    lbl5:SetText("Class Colored"); lbl5:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r5Y)
 
                     local tgBtn5 = CreateFrame("Button", nil, pf)
                     tgBtn5:SetSize(TG_W, TG_H)
@@ -1936,7 +1974,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     local function UpdateToggle5()
                         local _db = DB()
-                        local on = (_db and _db.friendlyShowDefaultNames == true)
+                        local on = not (_db and _db.classColorFriendly == false)
                         if on then
                             local g = EllesmereUI.ELLESMERE_GREEN
                             tgBg5:SetColorTexture(g.r, g.g, g.b, 0.45)
@@ -1951,24 +1989,12 @@ initFrame:SetScript("OnEvent", function(self)
                     UpdateToggle5()
                     tgBtn5:SetScript("OnClick", function()
                         local _db = DB()
-                        local cur = _db and _db.friendlyShowDefaultNames or false
+                        local cur = _db and _db.classColorFriendly
+                        if cur == nil then cur = true end
                         local newVal = not cur
-                        DB().friendlyShowDefaultNames = newVal
-                        if newVal then
-                            -- Turn off friendly nameplates, keep names on
-                            DB().showFriendlyPlayers = false
-                            if SetCVar then
-                                pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
-                                pcall(SetCVar, "nameplateShowFriends", 0)
-                                pcall(SetCVar, "UnitNameFriendlyPlayerName", 1)
-                            end
-                        else
-                            if SetCVar then
-                                pcall(SetCVar, "UnitNameFriendlyPlayerName", 0)
-                            end
-                        end
-                        if ns.UpdateFriendlyNameplateSystem then ns.UpdateFriendlyNameplateSystem() end
-                        if EllesmereUI and EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                        DB().classColorFriendly = newVal
+                        ns.RefreshAllSettings()
+                        if ns.RefreshFriendlyColors then ns.RefreshFriendlyColors() end
                         UpdateToggle5()
                     end)
 
@@ -2307,7 +2333,8 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_MISC, y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local focusCastRow
+        focusCastRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show All Your Player Debuffs",
               getValue=function() return DBVal("showAllDebuffs") == true end,
               setValue=function(v)
@@ -2315,14 +2342,38 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshAllAuras()
               end,
               tooltip="This will display ALL of your debuffs on enemy nameplates, rather than only the important ones." },
-            { type="slider", text="Scale Nameplate On Cast",
+            { type="slider", text="Focus Cast Height",
               trackWidth=110,
-              min=50, max=200, step=5,
-              getValue=function() return DBVal("castScale") or defaults.castScale end,
+              min=100, max=200, step=5,
+              getValue=function() return DBVal("focusCastHeight") or defaults.focusCastHeight end,
               setValue=function(v)
-                DB().castScale = v
+                DB().focusCastHeight = v
+                ns.RefreshAllSettings()
               end,
-              tooltip="Scales enemy nameplates while they are casting. 100% = no change." });  y = y - h
+              tooltip="Increases the cast bar height on your focus target's nameplate. 100% = normal height." });  y = y - h
+        -- "(Percent)" suffix on Focus Cast Height
+        do
+            local rightFrame = focusCastRow._rightRegion
+            if rightFrame then
+                local suffixFS = rightFrame:CreateFontString(nil, "OVERLAY")
+                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, GetNPOptOutline())
+                suffixFS:SetTextColor(1, 1, 1, 0.35)
+                local sliderLabel
+                for i = 1, rightFrame:GetNumRegions() do
+                    local reg = select(i, rightFrame:GetRegions())
+                    if reg and reg.GetText and reg:GetText() == "Focus Cast Height" then
+                        sliderLabel = reg
+                        break
+                    end
+                end
+                if sliderLabel then
+                    suffixFS:SetPoint("LEFT", sliderLabel, "RIGHT", 5, -1)
+                else
+                    suffixFS:SetPoint("LEFT", rightFrame, "LEFT", 180, -1)
+                end
+                suffixFS:SetText("(Percent)")
+            end
+        end
 
         -- Helper: pandemic glow is off when style is "None"
         local function pandemicOff()
@@ -2697,23 +2748,30 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:EnableMouse(not hashLineOff())
         end
 
-        -- Row 4: Focus Cast Height slider
-        local focusCastRow
-        focusCastRow, h = W:DualRow(parent, y,
-            { type="slider", text="Focus Cast Height",
+        -- Row 4: Scale Target Nameplate | Scale Nameplate On Cast
+        row, h = W:DualRow(parent, y,
+            { type="slider", text="Scale Target Nameplate",
               trackWidth=110,
-              min=100, max=200, step=5,
-              getValue=function() return DBVal("focusCastHeight") or defaults.focusCastHeight end,
+              min=50, max=200, step=5,
+              getValue=function() return DBVal("targetScale") or defaults.targetScale end,
               setValue=function(v)
-                DB().focusCastHeight = v
-                ns.RefreshAllSettings()
+                DB().targetScale = v
+                for _, plate in pairs(plates) do
+                    plate:ApplyScale()
+                end
               end,
-              tooltip="Increases the cast bar height on your focus target's nameplate. 100% = normal height." },
-            { type="label", text="" });  y = y - h
-
-        -- Add "(Percent)" suffix in smaller, dimmer text next to the slider label
+              tooltip="Scales your current target's nameplate. 100% = no change." },
+            { type="slider", text="Scale Nameplate On Cast",
+              trackWidth=110,
+              min=50, max=200, step=5,
+              getValue=function() return DBVal("castScale") or defaults.castScale end,
+              setValue=function(v)
+                DB().castScale = v
+              end,
+              tooltip="Scales enemy nameplates while they are casting. 100% = no change." });  y = y - h
+        -- "(Percent)" suffixes on both scale sliders
         do
-            local leftFrame = focusCastRow._leftRegion
+            local leftFrame = row._leftRegion
             if leftFrame then
                 local suffixFS = leftFrame:CreateFontString(nil, "OVERLAY")
                 suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, GetNPOptOutline())
@@ -2721,7 +2779,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local sliderLabel
                 for i = 1, leftFrame:GetNumRegions() do
                     local reg = select(i, leftFrame:GetRegions())
-                    if reg and reg.GetText and reg:GetText() == "Focus Cast Height" then
+                    if reg and reg.GetText and reg:GetText() == "Scale Target Nameplate" then
                         sliderLabel = reg
                         break
                     end
@@ -2730,6 +2788,26 @@ initFrame:SetScript("OnEvent", function(self)
                     suffixFS:SetPoint("LEFT", sliderLabel, "RIGHT", 5, -1)
                 else
                     suffixFS:SetPoint("LEFT", leftFrame, "LEFT", 180, -1)
+                end
+                suffixFS:SetText("(Percent)")
+            end
+            local rightFrame = row._rightRegion
+            if rightFrame then
+                local suffixFS = rightFrame:CreateFontString(nil, "OVERLAY")
+                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, GetNPOptOutline())
+                suffixFS:SetTextColor(1, 1, 1, 0.35)
+                local sliderLabel
+                for i = 1, rightFrame:GetNumRegions() do
+                    local reg = select(i, rightFrame:GetRegions())
+                    if reg and reg.GetText and reg:GetText() == "Scale Nameplate On Cast" then
+                        sliderLabel = reg
+                        break
+                    end
+                end
+                if sliderLabel then
+                    suffixFS:SetPoint("LEFT", sliderLabel, "RIGHT", 5, -1)
+                else
+                    suffixFS:SetPoint("LEFT", rightFrame, "LEFT", 180, -1)
                 end
                 suffixFS:SetText("(Percent)")
             end
@@ -4071,6 +4149,49 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
+        -- Row 3: Cast Timer toggle | Cast Timer size + inline color swatch
+        local castTimerRow
+        castTimerRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Cast Timer",
+              getValue=function()
+                local db = DB()
+                if db and db.showCastTimer ~= nil then return db.showCastTimer end
+                return defaults.showCastTimer
+              end,
+              setValue=function(v)
+                DB().showCastTimer = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Cast Timer", min=6, max=20, step=1,
+              getValue=function() return DBVal("castTimerSize") or defaults.castTimerSize end,
+              setValue=function(v)
+                DB().castTimerSize = v
+                for _, plate in pairs(plates) do
+                    if plate.castTimer then SetFSFont(plate.castTimer, v, GetNPOutline()) end
+                end
+                UpdatePreview()
+              end });  y = y - h
+        -- Inline color swatch on Cast Timer size (right region)
+        do
+            local rightRgn = castTimerRow._rightRegion
+            local ctColorGet = function()
+                local c = (DB() and DB().castTimerColor) or defaults.castTimerColor
+                return c.r, c.g, c.b
+            end
+            local ctColorSet = function(r, g, b)
+                DB().castTimerColor = { r = r, g = g, b = b }
+                for _, plate in pairs(plates) do
+                    if plate.castTimer then plate.castTimer:SetTextColor(r, g, b, 1) end
+                end
+                UpdatePreview()
+            end
+            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
+            PP.Point(ctSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
@@ -4443,7 +4564,7 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
             end
             local stSwatch, stUpdate = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, stColorGet, stColorSet, nil, 20)
-            PP.Point(stSwatch, "RIGHT", ccSwatch, "LEFT", -4, 0)
+            PP.Point(stSwatch, "RIGHT", ccSwatch, "LEFT", -9, 0)
             stSwatch:SetScript("OnClick", function(self)
                 local db = DB()
                 local cc = db and db.castTargetClassColor
@@ -4579,6 +4700,7 @@ initFrame:SetScript("OnEvent", function(self)
             auraStack    = { section = generalTextHeader,  target = auraTimerStackRow,   slotSide = "right" },
             castBar      = { section = healthBarHeader,  target = castBarHeightRow,    slotSide = "left" },
             castIcon     = { section = healthBarHeader,  target = showCastIconRow,     slotSide = "right" },
+            castTimer    = { section = healthBarHeader,  target = castTimerRow,        slotSide = "left" },
             castName     = { section = generalTextHeader, target = spellNameRow,        slotSide = "left" },
             castTarget   = { section = generalTextHeader, target = spellNameRow,        slotSide = "right" },
             healthBar    = { section = healthBarHeader,  target = healthBarHeightRow },
@@ -4815,6 +4937,10 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pv._castTargetFS then
                 local ov = CreateHitOverlay(pv._castTargetFS, "castTarget", true, castTextLevel)
+                textOverlays[#textOverlays + 1] = ov
+            end
+            if pv._castTimerFS and pv._castTimerFS:IsShown() then
+                local ov = CreateHitOverlay(pv._castTimerFS, "castTimer", true, castTextLevel)
                 textOverlays[#textOverlays + 1] = ov
             end
             -- Enemy name text
@@ -5257,15 +5383,34 @@ initFrame:SetScript("OnEvent", function(self)
             nameFS:SetText(isHalf and "Spell Name" or "Spell Name")
             nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
 
+            local colShowTimer = defaults.showCastTimer
+            local dbRef = DB()
+            if dbRef and dbRef.showCastTimer ~= nil then colShowTimer = dbRef.showCastTimer end
+            local colCtmSz = math.min((dbRef and dbRef.castTimerSize) or defaults.castTimerSize, 13)
+            local colCtmC = (dbRef and dbRef.castTimerColor) or defaults.castTimerColor
+
+            local timerFS = cast:CreateFontString(nil, "OVERLAY")
+            SetPVFont(timerFS, fontPath, colCtmSz, GetNPOptOutline())
+            timerFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
+            timerFS:SetJustifyH("RIGHT")
+            timerFS:SetWordWrap(false)
+            timerFS:SetMaxLines(1)
+            timerFS:SetTextColor(colCtmC.r, colCtmC.g, colCtmC.b, 1)
+            timerFS:SetText("2.3")
+            if not colShowTimer then timerFS:Hide() end
+
             local targetFS = cast:CreateFontString(nil, "OVERLAY")
             SetPVFont(targetFS, fontPath, cts, GetNPOptOutline())
-            targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
+            if colShowTimer then
+                targetFS:SetPoint("RIGHT", timerFS, "LEFT", -4, 0)
+            else
+                targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
+            end
             targetFS:SetJustifyH("RIGHT")
             targetFS:SetWordWrap(false)
             targetFS:SetMaxLines(1)
             targetFS:SetText(isHalf and (UnitName("player") or "Target") or (UnitName("player") or "Spell Target"))
             local useClassColor = defaults.castTargetClassColor
-            local dbRef = DB()
             if dbRef and dbRef.castTargetClassColor ~= nil then useClassColor = dbRef.castTargetClassColor end
             if useClassColor then
                 local _, pClass = UnitClass("player")
@@ -5280,9 +5425,12 @@ initFrame:SetScript("OnEvent", function(self)
                 targetFS:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
             end
 
-            -- Dynamic name width: fill available space minus target text minus 5px gap
-            local tgtW = targetFS:GetUnboundedStringWidth()
-            local nameMaxW = BAR_W - 5 - 3 - tgtW - 5
+            -- Dynamic name width: fill available space minus right-side text minus gaps
+            local rightW = targetFS:GetUnboundedStringWidth()
+            if colShowTimer then
+                rightW = rightW + 4 + timerFS:GetUnboundedStringWidth()
+            end
+            local nameMaxW = BAR_W - 5 - 3 - rightW - 5
             if nameMaxW < 20 then nameMaxW = 20 end
             nameFS:SetWidth(nameMaxW)
 

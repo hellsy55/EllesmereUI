@@ -634,18 +634,24 @@ function FriendlyFrame:SetUnit(unit, nameplate)
     self:RegisterUnitEvent("UNIT_HEALTH", unit)
     self:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
 
+    local _fp = FP()
+    local useClassColor = not _fp or _fp.classColorFriendly ~= false
     local classColor
     if UnitIsPlayer(unit) then
-        local _, classToken = UnitClass(unit)
-        if classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] then
-            classColor = RAID_CLASS_COLORS[classToken]
+        if useClassColor then
+            local _, classToken = UnitClass(unit)
+            if classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] then
+                classColor = RAID_CLASS_COLORS[classToken]
+            end
+        else
+            local bc = (_fp and _fp.friendlyBarColor) or ns.defaults.friendlyBarColor
+            classColor = bc
         end
     end
     if classColor then
         self.health:SetStatusBarColor(classColor.r, classColor.g, classColor.b)
         self.name:SetTextColor(1, 1, 1)
     else
-        -- Friendly NPC: #00ff00
         self.health:SetStatusBarColor(NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B)
         self.name:SetTextColor(NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B)
     end
@@ -902,6 +908,25 @@ end
 function ns.RefreshFriendlyHealthText()
     for _, plate in pairs(friendlyPlates) do
         plate:UpdateHealth()
+    end
+end
+
+function ns.RefreshFriendlyColors()
+    local _fp = FP()
+    local useClassColor = not _fp or _fp.classColorFriendly ~= false
+    local bc = (_fp and _fp.friendlyBarColor) or ns.defaults.friendlyBarColor
+    for unit, plate in pairs(friendlyPlates) do
+        if UnitIsPlayer(unit) then
+            if useClassColor then
+                local _, classToken = UnitClass(unit)
+                if classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] then
+                    local cc = RAID_CLASS_COLORS[classToken]
+                    plate.health:SetStatusBarColor(cc.r, cc.g, cc.b)
+                end
+            else
+                plate.health:SetStatusBarColor(bc.r, bc.g, bc.b)
+            end
+        end
     end
 end
 

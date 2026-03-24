@@ -46,8 +46,9 @@ local defaults = {
             buffSize = 22,
             buffOffsetX = 0,
             buffOffsetY = 0,
-            debuffAnchor = "bottomleft",
+            debuffAnchor = "none",
             debuffGrowth = "auto",
+            maxDebuffs = 10,
             debuffSize = 22,
             debuffOffsetX = 0,
             debuffOffsetY = 0,
@@ -162,7 +163,7 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
-            raidMarkerEnabled = true,
+            raidMarkerEnabled = false,
             raidMarkerSize = 28,
             raidMarkerAlign = "right",
             raidMarkerX = 0,
@@ -289,7 +290,7 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
-            raidMarkerEnabled = true,
+            raidMarkerEnabled = false,
             raidMarkerSize = 28,
             raidMarkerAlign = "right",
             raidMarkerX = 0,
@@ -484,7 +485,7 @@ local defaults = {
             visHideMounted = false,
             visHideNoTarget = false,
             visHideNoEnemy = false,
-            raidMarkerEnabled = true,
+            raidMarkerEnabled = false,
             raidMarkerSize = 28,
             raidMarkerAlign = "right",
             raidMarkerX = 0,
@@ -640,6 +641,7 @@ end
 local TEXTURE_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
 local healthBarTextures = {
     ["none"]          = nil,
+    ["melli"]         = TEXTURE_BASE .. "melli.tga",
     ["beautiful"]     = TEXTURE_BASE .. "beautiful.tga",
     ["plating"]       = TEXTURE_BASE .. "plating.tga",
     ["atrocity"]      = TEXTURE_BASE .. "atrocity.tga",
@@ -653,13 +655,15 @@ local healthBarTextures = {
     ["sheer"]         = TEXTURE_BASE .. "sheer.tga",
 }
 local healthBarTextureOrder = {
-    "none", "beautiful", "plating",
-    "atrocity", "divide", "glass",
+    "none", "melli", "atrocity",
+    "beautiful", "plating",
+    "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
     "matte", "sheer",
 }
 local healthBarTextureNames = {
     ["none"]        = "None",
+    ["melli"]       = "Melli (ElvUI)",
     ["beautiful"]   = "Beautiful",
     ["plating"]     = "Plating",
     ["atrocity"]    = "Atrocity",
@@ -2365,7 +2369,7 @@ local function CreateCastBar(frame, unit, settings)
     local iconSize = cbH
     local iconFrame = CreateFrame("Frame", nil, castbarBg)
     iconFrame:SetSize(iconSize, iconSize)
-    PP.Point(iconFrame, "TOPRIGHT", castbarBg, "TOPLEFT", -2, 0)
+    PP.Point(iconFrame, "TOPRIGHT", castbarBg, "TOPLEFT", 0, 0)
     local iconBg = iconFrame:CreateTexture(nil, "BACKGROUND")
     iconBg:SetAllPoints()
     iconBg:SetColorTexture(0, 0, 0, 1)
@@ -2779,28 +2783,29 @@ local function StyleFullFrame(frame, unit)
     ReparentBarsToClip(frame)
 
     -- Raid target marker icon -- oUF's RaidTargetIndicator element manages
-    -- this texture automatically via RAID_TARGET_UPDATE in its own protected scope.
+    -- visibility via RAID_TARGET_UPDATE. We only assign the element when
+    -- enabled so oUF registers/unregisters the event accordingly.
     do
         local raidIconHolder = CreateFrame("Frame", nil, frame)
         raidIconHolder:SetAllPoints(frame)
         raidIconHolder:SetFrameLevel(frame:GetFrameLevel() + 20)
         local raidIcon = raidIconHolder:CreateTexture(nil, "OVERLAY", nil, 7)
-        -- Read per-unit marker settings from DB; fall back to defaults
-        local _rmSettings = settings
-        local _rmSize    = (_rmSettings and _rmSettings.raidMarkerSize)    or 28
-        local _rmAlign   = (_rmSettings and _rmSettings.raidMarkerAlign)   or "right"
-        local _rmX       = (_rmSettings and _rmSettings.raidMarkerX)       or 0
-        local _rmY       = (_rmSettings and _rmSettings.raidMarkerY)       or 0
-        local _rmAnchor  = (_rmAlign == "left") and "TOPLEFT"
-                        or (_rmAlign == "center") and "TOP"
-                        or "TOPRIGHT"
-        raidIcon:SetSize(_rmSize, _rmSize)
-        raidIcon:SetPoint("CENTER", frame, _rmAnchor, _rmX, _rmY)
-        if _rmSettings and _rmSettings.raidMarkerEnabled == false then
+        local rmSize  = settings.raidMarkerSize or 28
+        local rmAlign = settings.raidMarkerAlign or "right"
+        local rmX     = settings.raidMarkerX or 0
+        local rmY     = settings.raidMarkerY or 0
+        local rmAnchor = (rmAlign == "left") and "TOPLEFT"
+            or (rmAlign == "center") and "TOP"
+            or "TOPRIGHT"
+        raidIcon:SetSize(rmSize, rmSize)
+        raidIcon:SetPoint("CENTER", frame, rmAnchor, rmX, rmY)
+        frame._raidMarkerIcon = raidIcon
+        frame._raidMarkerHolder = raidIconHolder
+        if settings.raidMarkerEnabled then
+            frame.RaidTargetIndicator = raidIcon
+        else
             raidIcon:Hide()
         end
-        frame.RaidTargetIndicator = raidIcon
-        frame._raidMarkerHolder = raidIconHolder
     end
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
@@ -3031,22 +3036,22 @@ local function StyleFocusFrame(frame, unit)
         raidIconHolder:SetAllPoints(frame)
         raidIconHolder:SetFrameLevel(frame:GetFrameLevel() + 20)
         local raidIcon = raidIconHolder:CreateTexture(nil, "OVERLAY", nil, 7)
-        -- Read per-unit marker settings from DB; fall back to defaults
-        local _rmSettings = settings
-        local _rmSize    = (_rmSettings and _rmSettings.raidMarkerSize)    or 28
-        local _rmAlign   = (_rmSettings and _rmSettings.raidMarkerAlign)   or "right"
-        local _rmX       = (_rmSettings and _rmSettings.raidMarkerX)       or 0
-        local _rmY       = (_rmSettings and _rmSettings.raidMarkerY)       or 0
-        local _rmAnchor  = (_rmAlign == "left") and "TOPLEFT"
-                        or (_rmAlign == "center") and "TOP"
-                        or "TOPRIGHT"
-        raidIcon:SetSize(_rmSize, _rmSize)
-        raidIcon:SetPoint("CENTER", frame, _rmAnchor, _rmX, _rmY)
-        if _rmSettings and _rmSettings.raidMarkerEnabled == false then
+        local rmSize  = settings.raidMarkerSize or 28
+        local rmAlign = settings.raidMarkerAlign or "right"
+        local rmX     = settings.raidMarkerX or 0
+        local rmY     = settings.raidMarkerY or 0
+        local rmAnchor = (rmAlign == "left") and "TOPLEFT"
+            or (rmAlign == "center") and "TOP"
+            or "TOPRIGHT"
+        raidIcon:SetSize(rmSize, rmSize)
+        raidIcon:SetPoint("CENTER", frame, rmAnchor, rmX, rmY)
+        frame._raidMarkerIcon = raidIcon
+        frame._raidMarkerHolder = raidIconHolder
+        if settings.raidMarkerEnabled then
+            frame.RaidTargetIndicator = raidIcon
+        else
             raidIcon:Hide()
         end
-        frame.RaidTargetIndicator = raidIcon
-        frame._raidMarkerHolder = raidIconHolder
     end
 
     -- Text overlay frame -- sits above the StatusBar for clean text rendering.
@@ -5724,39 +5729,34 @@ local function ReloadFrames()
 
     ---------------------------------------------------------------------------
     --  Live-update raid target marker icon (size / alignment / X / Y / enabled)
-    --  for player, target, and focus frames.  The texture itself is managed by
-    --  oUF's RaidTargetIndicator element; we only reposition and show/hide it.
+    --  for player, target, and focus frames.  Uses oUF's EnableElement /
+    --  DisableElement so the RAID_TARGET_UPDATE event is properly toggled.
     ---------------------------------------------------------------------------
     local RAID_MARKER_UNITS = { "player", "target", "focus" }
     for _, rmUnit in ipairs(RAID_MARKER_UNITS) do
         local rmFrame = frames[rmUnit]
-        if rmFrame and rmFrame.RaidTargetIndicator then
+        local icon = rmFrame and rmFrame._raidMarkerIcon
+        if rmFrame and icon then
             local rmS = GetSettingsForUnit(rmUnit)
-            local rmSize   = (rmS and rmS.raidMarkerSize)    or 28
-            local rmAlign  = (rmS and rmS.raidMarkerAlign)   or "right"
-            local rmX      = (rmS and rmS.raidMarkerX)       or 0
-            local rmY      = (rmS and rmS.raidMarkerY)       or 0
-            local rmEnabled = not (rmS and rmS.raidMarkerEnabled == false)
-            local rmAnchor = (rmAlign == "left")   and "TOPLEFT"
-                          or (rmAlign == "center") and "TOP"
-                          or "TOPRIGHT"
-            local icon = rmFrame.RaidTargetIndicator
+            local rmSize   = (rmS and rmS.raidMarkerSize)  or 28
+            local rmAlign  = (rmS and rmS.raidMarkerAlign) or "right"
+            local rmX      = (rmS and rmS.raidMarkerX)     or 0
+            local rmY      = (rmS and rmS.raidMarkerY)     or 0
+            local rmEnabled = rmS and rmS.raidMarkerEnabled
+            local rmAnchor = (rmAlign == "left") and "TOPLEFT"
+                or (rmAlign == "center") and "TOP"
+                or "TOPRIGHT"
             icon:SetSize(rmSize, rmSize)
             icon:ClearAllPoints()
             icon:SetPoint("CENTER", rmFrame, rmAnchor, rmX, rmY)
-            -- Only show/hide when the icon is not currently being controlled by
-            -- oUF's RAID_TARGET_UPDATE (i.e. no marker is assigned to the unit).
-            -- When a marker IS assigned oUF shows the icon; we only force-hide
-            -- it here when the feature is disabled entirely.
-            if not rmEnabled then
-                icon:Hide()
+            if rmEnabled then
+                rmFrame.RaidTargetIndicator = icon
+                rmFrame:EnableElement("RaidTargetIndicator")
+                if icon.ForceUpdate then icon:ForceUpdate() end
             else
-                -- Let oUF manage visibility; ensure it is not stuck hidden from
-                -- a previous disabled state by forcing a tag update if the unit
-                -- currently has a marker.
-                if rmFrame.UpdateAllElements then
-                    rmFrame:UpdateAllElements("ReloadFrames_RaidMarker")
-                end
+                rmFrame:DisableElement("RaidTargetIndicator")
+                rmFrame.RaidTargetIndicator = nil
+                icon:Hide()
             end
         end
     end
@@ -5781,10 +5781,7 @@ local function UnitFrame_OnEnter(self)
         self:SetAlpha(1)
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
-        local showTooltip = true
-        if s and s.showUnitTooltip ~= nil then
-            showTooltip = s.showUnitTooltip
-        end
+        local showTooltip = not s or s.showUnitTooltip ~= false
         if showTooltip then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
             GameTooltip:SetUnit(unit)
@@ -5801,7 +5798,7 @@ local function UnitFrame_OnLeave(self)
     if s and (s.barVisibility or "always") == "mouseover" then
         self:SetAlpha(0)
     end
-    if GameTooltip then
+    if GameTooltip and GameTooltip:IsOwned(self) then
         GameTooltip:Hide()
     end
 end

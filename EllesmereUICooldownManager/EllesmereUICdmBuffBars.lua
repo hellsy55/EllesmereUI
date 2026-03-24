@@ -32,6 +32,7 @@ local function StopGlow(...)  if ns.StopNativeGlow  then return ns.StopNativeGlo
 local TBB_TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
 local TBB_TEXTURES = {
     ["none"]          = nil,
+    ["melli"]         = TBB_TEX_BASE .. "melli.tga",
     ["beautiful"]     = TBB_TEX_BASE .. "beautiful.tga",
     ["plating"]       = TBB_TEX_BASE .. "plating.tga",
     ["atrocity"]      = TBB_TEX_BASE .. "atrocity.tga",
@@ -45,13 +46,15 @@ local TBB_TEXTURES = {
     ["sheer"]         = TBB_TEX_BASE .. "sheer.tga",
 }
 local TBB_TEXTURE_ORDER = {
-    "none", "beautiful", "plating",
-    "atrocity", "divide", "glass",
+    "none", "melli", "atrocity",
+    "beautiful", "plating",
+    "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
     "matte", "sheer",
 }
 local TBB_TEXTURE_NAMES = {
     ["none"]        = "None",
+    ["melli"]       = "Melli (ElvUI)",
     ["beautiful"]   = "Beautiful",
     ["plating"]     = "Plating",
     ["atrocity"]    = "Atrocity",

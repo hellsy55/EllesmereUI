@@ -575,7 +575,7 @@ function ns.RebuildSpellRouteMap()
     if not p or not p.cdmBars then return end
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.barType ~= "misc" and bd.enabled then
+        if bd.enabled then
             local sd = ns.GetBarSpellData(bd.key)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
@@ -645,6 +645,23 @@ local function CollectAndReanchor()
     local LayoutCDMBar = ns.LayoutCDMBar
     local RefreshCDMIconAppearance = ns.RefreshCDMIconAppearance
     local ApplyCDMTooltipState = ns.ApplyCDMTooltipState
+
+    -- Ensure bars with negative-ID spells (trinkets/items) get processed
+    -- even when they have no Blizzard viewer pool frames.
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and not barLists[bd.key] then
+            local sd = ns.GetBarSpellData(bd.key)
+            local sl = sd and sd.assignedSpells
+            if sl then
+                for _, sid in ipairs(sl) do
+                    if sid and sid < 0 then
+                        barLists[bd.key] = {}
+                        break
+                    end
+                end
+            end
+        end
+    end
 
     -- Process each bar
     for barKey, list in pairs(barLists) do
@@ -817,13 +834,14 @@ local function CollectAndReanchor()
                                             end
                                         end
                                     end
-                                    if preset then
+                                    local icon = preset and preset.icon or C_Item.GetItemIconByID(itemID)
+                                    if icon then
                                         f = CreateFrame("Frame", nil, UIParent)
                                         f:SetSize(36, 36)
                                         f:Hide()
                                         local tex = f:CreateTexture(nil, "ARTWORK")
                                         tex:SetAllPoints()
-                                        tex:SetTexture(preset.icon)
+                                        tex:SetTexture(icon)
                                         tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                                         f.Icon = tex; f._tex = tex
                                         local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
@@ -979,8 +997,8 @@ local function CollectAndReanchor()
                                     frame._racialCdDirty = nil
                                 end
                                 usedFrames[frame] = true
-                            else
-                                -- No Blizzard child and not a racial: placeholder with overlay
+                            elseif sid > 0 and C_Spell.IsSpellKnownOrOverridesKnown and C_Spell.IsSpellKnownOrOverridesKnown(sid) then
+                                -- Known spell but no Blizzard child: placeholder with overlay
                                 local fkey = barKey .. ":ph:" .. sid
                                 frame = _presetFrames[fkey]
                                 if not frame then
@@ -1007,8 +1025,13 @@ local function CollectAndReanchor()
                                 end
                                 isPlaceholder = true
                                 usedFrames[frame] = true
+                            else
+                                -- Untalented spell: skip slot (disappears from bar)
+                                count = count - 1
+                                frame = nil
                             end
 
+                            if frame then
                             if frame:GetParent() ~= UIParent then frame:SetParent(UIParent) end
                             DecorateFrame(frame, barData)
                             if frame:GetScale() ~= 1 then frame:SetScale(1) end
@@ -1099,6 +1122,7 @@ local function CollectAndReanchor()
                                     end
                                 end
                             end
+                        end -- if frame then
                         end
                     end
                 else
@@ -1177,7 +1201,7 @@ local function CollectAndReanchor()
 
     -- Clean up empty bars
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.barType ~= "misc" and bd.enabled and not barLists[bd.key] then
+        if bd.enabled and not barLists[bd.key] then
             local icons = cdmBarIcons[bd.key]
             if icons then
                 for i = 1, #icons do

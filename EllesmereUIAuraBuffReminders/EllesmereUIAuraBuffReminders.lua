@@ -283,6 +283,7 @@ end
 
 -- Pre-combat snapshot for ownOnRaid buffs (Source of Magic, Blistering Scales).
 local _preCombatOwnOnRaidCache = {}  -- [spellID] = true/false
+local _ownOnRaidIDs = { 369459, 360827 }  -- Source of Magic, Blistering Scales
 local SnapshotOwnOnRaidBuffs  -- forward declaration; defined after _unitHasBuffFromPlayer
 
 -- Pre-allocated scratch tables for hot per-Refresh functions (avoids GC churn)
@@ -451,8 +452,7 @@ end
 -- now that _unitHasBuffFromPlayer is defined).
 SnapshotOwnOnRaidBuffs = function()
     wipe(_preCombatOwnOnRaidCache)
-    local ownOnRaidIDs = { 369459, 360827 }
-    for _, id in ipairs(ownOnRaidIDs) do
+    for _, id in ipairs(_ownOnRaidIDs) do
         local found = false
         if _unitHasBuffFromPlayer("player", {id}) then found = true end
         if not found then
@@ -2054,6 +2054,13 @@ local function Refresh()
 
     CacheInstanceInfo()
 
+    -- Suppress ALL reminders inside M+ keystones.
+    if InMythicPlusKey() then
+        HideCombatIcons(); HideCursorIcons()
+        if InCombat() then FadeOutSecureIcons() else HideAllIcons() end
+        return
+    end
+
     local playerClass = GetPlayerClass()
     local specID = GetSpecID()
     local inInstance = InRealInstancedContent()
@@ -2810,31 +2817,31 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "UNIT_AURA" then
-        if InCombat() and IsInGroup() then
-            local ownOnRaidIDs = { 369459, 360827 }
-            local found = {}
-            local function scanMember(u)
-                if not UnitExists(u) then return end
-                for _, id in ipairs(ownOnRaidIDs) do
-                    if not found[id] then
-                        local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, u, id)
+        -- arg1 = unit token. Ignore non-group units (enemies, NPCs, pets).
+        local isEvoker = GetPlayerClass() == "EVOKER"
+        if arg1 == "player" then
+            if isEvoker and InCombat() and IsInGroup() then
+                for _, id in ipairs(_ownOnRaidIDs) do
+                    local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+                    if ok and result ~= nil and not issecretvalue(result) then
+                        _preCombatOwnOnRaidCache[id] = true
+                    end
+                end
+            end
+            RequestRefresh()
+        elseif arg1 and (arg1:match("^party%d") or arg1:match("^raid%d")) then
+            if isEvoker and InCombat() and IsInGroup() then
+                for _, id in ipairs(_ownOnRaidIDs) do
+                    if not _preCombatOwnOnRaidCache[id] then
+                        local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, arg1, id)
                         if ok and result ~= nil and not issecretvalue(result) then
-                            found[id] = true
+                            _preCombatOwnOnRaidCache[id] = true
                         end
                     end
                 end
             end
-            scanMember("player")
-            if IsInRaid() then
-                for i = 1, GetNumGroupMembers() do scanMember("raid"..i) end
-            else
-                for i = 1, GetNumSubgroupMembers() do scanMember("party"..i) end
-            end
-            for _, id in ipairs(ownOnRaidIDs) do
-                _preCombatOwnOnRaidCache[id] = found[id] == true
-            end
+            RequestRefresh()
         end
-        RequestRefresh()
         return
     end
 

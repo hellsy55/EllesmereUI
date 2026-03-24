@@ -422,6 +422,7 @@ local function ReleaseRow(r)
     r._baseR, r._baseG, r._baseB = nil, nil, nil
     r._rowType = nil; r._objIndex = nil; r._objCount = nil
     if r.numFS then r.numFS:Hide() end
+    if r.focusBg then r.focusBg:Hide() end
     -- Clean up timer/progressbar sub-widgets
     if r.timerFS     then r.timerFS:Hide()     end
     if r.barBg       then r.barBg:Hide()       end
@@ -1250,25 +1251,33 @@ local function GetTrackedRecipes()
                 local reagentN = 0
                 if schematic.reagentSlotSchematics then
                     for _, slot in ipairs(schematic.reagentSlotSchematics) do
-                        if slot.reagentType == 1 and slot.reagents then
+                        if slot.reagentType == 1 and slot.reagents and #slot.reagents > 0 then
+                            -- One row per slot; sum owned across all quality tiers
+                            local firstName, totalOwned = nil, 0
                             for _, reagent in ipairs(slot.reagents) do
                                 local itemID = reagent.itemID
                                 if itemID then
-                                    local r
-                                    if _reagent_pool_n > 0 then
-                                        r = _reagent_pool[_reagent_pool_n]
-                                        _reagent_pool[_reagent_pool_n] = nil
-                                        _reagent_pool_n = _reagent_pool_n - 1
-                                    else
-                                        r = {}
+                                    if not firstName then
+                                        firstName = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
                                     end
-                                    r.name = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
-                                    r.owned = C_Item.GetItemCount(itemID, true) or 0
-                                    r.needed = slot.quantityRequired or 1
-                                    r.finished = r.owned >= r.needed
-                                    reagentN = reagentN + 1
-                                    entry.reagents[reagentN] = r
+                                    totalOwned = totalOwned + (C_Item.GetItemCount(itemID, true) or 0)
                                 end
+                            end
+                            if firstName then
+                                local r
+                                if _reagent_pool_n > 0 then
+                                    r = _reagent_pool[_reagent_pool_n]
+                                    _reagent_pool[_reagent_pool_n] = nil
+                                    _reagent_pool_n = _reagent_pool_n - 1
+                                else
+                                    r = {}
+                                end
+                                r.name = firstName
+                                r.owned = totalOwned
+                                r.needed = slot.quantityRequired or 1
+                                r.finished = totalOwned >= r.needed
+                                reagentN = reagentN + 1
+                                entry.reagents[reagentN] = r
                             end
                         end
                     end
@@ -1295,151 +1304,6 @@ local BAR_PAD  = 2   -- gap between text and bar
 -- Forward declaration; defined after BuildFrame
 local UpdateInnerAlignment
 
--------------------------------------------------------------------------------
--- Pin focused quest to top
--------------------------------------------------------------------------------
-local SECTION_NAMES_SET = {
-    ["ZONE QUESTS"] = true, ["QUESTS"] = true, ["WORLD QUESTS"] = true,
-    ["PREYS"] = true, ["RECIPE TRACKING"] = true, ["DELVES"] = true,
-}
-
-local focusedHeader
-
-local function GetOrCreateFocusedHeader(content)
-    if focusedHeader then
-        focusedHeader:SetParent(content)
-        return focusedHeader
-    end
-    local f = CreateFrame("Frame", nil, content)
-    f.label = f:CreateFontString(nil, "OVERLAY")
-    f.label:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
-    f.label:SetTextColor(C.section.r, C.section.g, C.section.b)
-    f.label:SetText("FOCUSED")
-    f.label:SetPoint("LEFT",  f, "LEFT",  0, 3)
-    f.label:SetPoint("RIGHT", f, "RIGHT", 0, 3)
-    f.line = f:CreateTexture(nil, "ARTWORK")
-    f.line:SetColorTexture(C.section.r, C.section.g, C.section.b, 0.4)
-    f.line:SetHeight(1)
-    f.line:SetPoint("TOPLEFT",  f.label, "BOTTOMLEFT",  0, -2)
-    f.line:SetPoint("TOPRIGHT", f.label, "BOTTOMRIGHT", 0, -2)
-    f.UpdateHeight = function(self)
-        local _, sz = self.label:GetFont()
-        local h = (sz or 12) + 10
-        self:SetHeight(h)
-        return h
-    end
-    f:UpdateHeight()
-    focusedHeader = f
-    return f
-end
-
-local function PinFocusedToTop(content)
-    if focusedHeader then focusedHeader:Hide() end
-
-    local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID
-        and C_SuperTrack.GetSuperTrackedQuestID()
-    if not superQID or superQID == 0 then return end
-
-    -- Match header style from existing section headers
-    local hdr = GetOrCreateFocusedHeader(content)
-    for _, child in ipairs({ content:GetChildren() }) do
-        if child:IsShown() and child ~= hdr and not child._questID then
-            for _, region in ipairs({ child:GetRegions() }) do
-                if region:IsObjectType("FontString") and region:IsShown()
-                   and SECTION_NAMES_SET[region:GetText()] then
-                    local fp, fs, ff = region:GetFont()
-                    if fp and fs then
-                        hdr.label:SetFont(fp, fs, ff or "")
-                        local r, g, b = region:GetTextColor()
-                        hdr.label:SetTextColor(r, g, b)
-                        hdr.line:SetColorTexture(r, g, b, 0.4)
-                    end
-                    break
-                end
-            end
-            if hdr.label:GetFont() then break end
-        end
-    end
-
-    local items = {}
-    for _, child in ipairs({ content:GetChildren() }) do
-        if child:IsShown() and child ~= hdr then
-            local _, _, _, _, y = child:GetPoint(1)
-            table.insert(items, {
-                frame   = child,
-                y       = y or 0,
-                qID     = child._questID,
-                isTitle = child._questID ~= nil and child:GetScript("OnClick") ~= nil,
-            })
-        end
-    end
-    table.sort(items, function(a, b) return a.y > b.y end)
-
-    local fStart, fEnd
-    for i, item in ipairs(items) do
-        if item.isTitle and item.qID == superQID then
-            fStart, fEnd = i, i
-            for j = i + 1, #items do
-                if items[j].qID == superQID then fEnd = j else break end
-            end
-            break
-        end
-    end
-    if not fStart then return end
-
-    local gaps = {}
-    for i = 2, #items do
-        local prevBot = math.abs(items[i-1].y) + (items[i-1].frame:GetHeight() or 0)
-        local curTop  = math.abs(items[i].y)
-        gaps[i] = math.max(0, curTop - prevBot)
-    end
-
-    local focused, other, otherGaps = {}, {}, {}
-    for i = fStart, fEnd do table.insert(focused, items[i]) end
-
-    local prevFocused = false
-    for i, item in ipairs(items) do
-        if i < fStart or i > fEnd then
-            table.insert(other, item)
-            local g
-            if prevFocused then
-                local ai = fEnd + 1
-                g = (ai <= #items and gaps[ai]) or gaps[i] or 1
-            else
-                g = gaps[i] or 1
-            end
-            table.insert(otherGaps, g)
-            prevFocused = false
-        else
-            prevFocused = true
-        end
-    end
-
-    hdr:ClearAllPoints()
-    hdr:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, 0)
-    hdr:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
-    hdr:Show()
-    local hdrH = hdr:UpdateHeight()
-
-    local yOff = hdrH + SEC_GAP
-    for _, item in ipairs(focused) do
-        item.frame:ClearAllPoints()
-        item.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
-        item.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0,       -yOff)
-        yOff = yOff + (item.frame:GetHeight() or 0) + ROW_GAP
-    end
-
-    yOff = yOff + SEC_GAP
-
-    for i, item in ipairs(other) do
-        if i > 1 then yOff = yOff + (otherGaps[i] or 1) end
-        item.frame:ClearAllPoints()
-        item.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
-        item.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0,       -yOff)
-        yOff = yOff + (item.frame:GetHeight() or 0)
-    end
-end
-
 function EQT:Refresh(skipAlphaFlash)
     local f = self.frame
     if not f then return end
@@ -1456,6 +1320,7 @@ function EQT:Refresh(skipAlphaFlash)
     local cc      = db.completedColor or C.complete
     local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
     local ffs     = db.focusedFontSize
+    local fbgA    = (db.focusBgOpacity or 25) / 100
     local iqSize  = db.questItemSize or 22
     local sc      = db.secColor or C.section
     local compFS  = db.completedFontSize
@@ -1495,7 +1360,7 @@ function EQT:Refresh(skipAlphaFlash)
         s.label:SetPoint("LEFT",  s.frame, "LEFT",  0, 3)
         s.label:SetPoint("RIGHT", s.frame, "RIGHT", -(arrowSize + 4), 3)
         SetFontSafe(s.arrow, arrowFont, arrowSize, OutlineFlag())
-        s.arrow:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
+        s.arrow:SetTextColor(scR, scG, scB)
         s.arrow:SetText(isCollapsed and "+" or "-")
         s.arrow:ClearAllPoints()
         s.arrow:SetPoint("RIGHT", s.frame, "RIGHT", 0, 3)
@@ -1674,22 +1539,17 @@ function EQT:Refresh(skipAlphaFlash)
 
     local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft)
         local r = AcquireRow(content)
+        if r.numFS then r.numFS:Hide() end
         SetFontSafe(r.text, tfp, tfs, tff)
         r.text:SetTextColor(cr, cg, cb)
         r._baseR, r._baseG, r._baseB = cr, cg, cb
         ApplyFontShadow(r.text)
-        -- Inject quest type icon into title text
+        -- Inject quest type icon at end of title text
         if qID then
             local atlas, isTurnIn = GetQuestIconAtlas(qID)
             if atlas then
                 local sz = isTurnIn and TURNIN_ICON_SIZE or QUEST_ICON_SIZE
-                local iconStr = "|A:" .. atlas .. ":" .. sz .. ":" .. sz .. ":0:0|a "
-                local num, rest = text:match("^(%d+%s+)(.*)")
-                if num then
-                    text = num .. iconStr .. rest
-                else
-                    text = iconStr .. text
-                end
+                text = text .. " |A:" .. atlas .. ":" .. sz .. ":" .. sz .. ":0:0|a"
             end
         end
         r.text:SetText(text)
@@ -1709,14 +1569,12 @@ function EQT:Refresh(skipAlphaFlash)
         local rh = math.max(th + 4, item and iqSize or 0)
         r.frame:SetHeight(rh); r.text:SetHeight(rh)
         -- Focus highlight for super-tracked quest
-        local focusQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID
-            and C_SuperTrack.GetSuperTrackedQuestID()
-        if qID and focusQID and qID == focusQID then
+        if qID and superQID and qID == superQID and fbgA > 0 then
             if not r.focusBg then
                 r.focusBg = r.frame:CreateTexture(nil, "BACKGROUND")
+                r.focusBg:SetAllPoints(r.frame)
             end
-            r.focusBg:SetColorTexture(C.focus.r, C.focus.g, C.focus.b, 0.25)
-            r.focusBg:SetAllPoints(r.frame)
+            r.focusBg:SetColorTexture(fc.r, fc.g, fc.b, fbgA)
             r.focusBg:Show()
         elseif r.focusBg then
             r.focusBg:Hide()
@@ -2009,9 +1867,6 @@ function EQT:Refresh(skipAlphaFlash)
         end)
         if not qc then RenderList(watched, 0) end
     end
-    -- Pin focused quest to top of tracker
-    PinFocusedToTop(content)
-
     local hasContent = scenario or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0
     if not hasContent then
         if f.inner then f.inner:Hide() end
@@ -2071,6 +1926,7 @@ function EQT:RefreshProgress()
     local cc      = db.completedColor or C.complete
     local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
     local ffs     = db.focusedFontSize
+    local fbgA    = (db.focusBgOpacity or 25) / 100
     local compFS  = db.completedFontSize
     local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
 
@@ -2129,6 +1985,16 @@ function EQT:RefreshProgress()
                 SetFontSafe(r.text, tfp, ffs, tff)
             else
                 SetFontSafe(r.text, tfp, tfs, tff)
+            end
+            if isFocused and fbgA > 0 then
+                if not r.focusBg then
+                    r.focusBg = r.frame:CreateTexture(nil, "BACKGROUND")
+                    r.focusBg:SetAllPoints(r.frame)
+                end
+                r.focusBg:SetColorTexture(fc.r, fc.g, fc.b, fbgA)
+                r.focusBg:Show()
+            elseif r.focusBg then
+                r.focusBg:Hide()
             end
         elseif qID and r._rowType == "obj" then
             local objs = freshObjs[qID]
@@ -2689,6 +2555,7 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
+        TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
         SCENARIO_CRITERIA_UPDATE = true,
@@ -2704,19 +2571,10 @@ function EQT:Init()
             EQT:RefreshProgress()
             return
         end
-        --Allows for % based worldquests to be tracked
-        if event == "QUEST_LOG_UPDATE"
-        or event == "UNIT_QUEST_LOG_CHANGED"
-        or event == "QUEST_TASK_PROGRESS_UPDATE"
-        or event == "TASK_PROGRESS_UPDATE"
-        or event == "WORLD_QUEST_UPDATE"
-        or event == "UI_WIDGET_UNIT_CHANGED"
-        or event == "QUEST_POI_UPDATE"
-        or event == "AREA_POIS_UPDATED"
-        or event == "SCENARIO_CRITERIA_UPDATE"
-        or event == "SCENARIO_UPDATE" then
+        -- World quest / task progress events: invalidate caches and refresh
+        -- so %-based world quests update their progress bars correctly.
+        if event == "TASK_PROGRESS_UPDATE" or event == "WORLD_QUEST_UPDATE" then
             InvalidateQuestLogCache()
-            InvalidateScenarioCache()
             _questListsCached = false
             -- Use SetDirty (deferred) so GetQuestProgressBarPercent has time to
             -- populate before the rebuild reads it. Calling Refresh() synchronously
