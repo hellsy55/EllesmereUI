@@ -1597,12 +1597,23 @@ local function BuildBars()
             if not secondaryBar then
                 secondaryBar = CreateStatusBar(secondaryFrame, "ERB_SecondaryBar", totalW, pipH,
                     0, 0, 0, 0, 0)
+                secondaryBar:SetMinMaxValues(0, maxPts)
+                secondaryBar:SetValue(0)
+            else
+                -- For existing bars, only update min/max if needed (don't reset value to 0)
+                local actualMax = maxPts
+                if cachedSecondary.power == "BREWMASTER_STAGGER" then
+                    actualMax = UnitHealthMax("player") or 1
+                    if actualMax <= 0 then actualMax = 1 end
+                end
+                if secondaryBar._lastMaxC ~= actualMax then
+                    secondaryBar._lastMaxC = actualMax
+                    secondaryBar:SetMinMaxValues(0, actualMax)
+                end
             end
             secondaryBar:SetSize(totalW, pipH)
             secondaryBar:ClearAllPoints()
             secondaryBar:SetAllPoints(secondaryFrame)
-            secondaryBar:SetMinMaxValues(0, maxPts)
-            secondaryBar:SetValue(0)
 
             -- Bar texture and orientation must be applied before colors since
             -- SetStatusBarTexture and SetRotatesTexture both reset vertex color
@@ -1614,6 +1625,11 @@ local function BuildBars()
             if sp.darkTheme then
                 secondaryBar:GetStatusBarTexture():SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
                 secondaryBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
+            elseif cachedSecondary.power == "BREWMASTER_STAGGER" then
+                -- Brewmaster Stagger: always use threshold colors (green/yellow/red), start with green
+                secondaryBar:GetStatusBarTexture():SetVertexColor(0.2, 0.8, 0.2, 1)
+                secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = 0.2, 0.8, 0.2
+                secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             elseif sp.classColored ~= false then
                 -- classColored is true (default) -- use class color, or power color if no class color
                 -- BM/MM hunter Focus bar: always use power color (not class color)
@@ -2141,29 +2157,40 @@ local function UpdateSecondaryResource()
                 maxC = UnitHealthMax("player") or 1
                 local curTainted = issecretvalue and issecretvalue(cur)
                 local maxTainted = issecretvalue and issecretvalue(maxC)
-                -- Apply stagger threshold colors only when using default power colors
-                if not sp.darkTheme and not sp.classColored then
+                -- Apply stagger threshold colors (green/yellow/red) unless darkTheme is active
+                -- Note: classColored is ignored for Stagger since the threshold colors ARE the feature
+                if not sp.darkTheme then
                     if not curTainted and not maxTainted and maxC > 0 then
                         local pct = cur / maxC
+                        local newR, newG, newB
                         if pct >= 0.6 then
-                            secondaryBar:GetStatusBarTexture():SetVertexColor(1.0, 0.2, 0.2, 1)
+                            newR, newG, newB = 1.0, 0.2, 0.2
                         elseif pct >= 0.3 then
-                            secondaryBar:GetStatusBarTexture():SetVertexColor(1.0, 0.85, 0.2, 1)
+                            newR, newG, newB = 1.0, 0.85, 0.2
                         else
-                            secondaryBar:GetStatusBarTexture():SetVertexColor(0.2, 0.8, 0.2, 1)
+                            newR, newG, newB = 0.2, 0.8, 0.2
+                        end
+                        -- Only update color if it actually changed (prevents flicker)
+                        local lastR, lastG, lastB = secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB
+                        if lastR ~= newR or lastG ~= newG or lastB ~= newB then
+                            secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = newR, newG, newB
+                            secondaryBar:GetStatusBarTexture():SetVertexColor(newR, newG, newB, 1)
                         end
                     end
                 end
                 if maxTainted then maxC = maxPts end
                 if not maxTainted and maxC <= 0 then maxC = 1 end
             end
-            secondaryBar:SetMinMaxValues(0, maxC)
+            -- Only call SetMinMaxValues if max actually changed (prevents flicker)
+            if secondaryBar._lastMaxC ~= maxC then
+                secondaryBar._lastMaxC = maxC
+                secondaryBar:SetMinMaxValues(0, maxC)
+            end
             -- Apply fill color (dark theme / class colored / custom).
-            -- Brewmaster stagger uses threshold colors when neither override
-            -- is active; all other cases use r,g,b,a from above.
+            -- Brewmaster stagger uses threshold colors unless darkTheme is active.
             -- For bar-type resources (Maelstrom, Insanity), threshold triggers
             -- at or above thresholdCount treated as a percent value.
-            if powerType ~= "BREWMASTER_STAGGER" or sp.darkTheme or sp.classColored then
+            if powerType ~= "BREWMASTER_STAGGER" or sp.darkTheme then
                 local ft = secondaryBar:GetStatusBarTexture()
                 if ft then
                     local pType = (powerType == "MAELSTROM_BAR") and PT.MAELSTROM
