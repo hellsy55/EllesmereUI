@@ -1307,15 +1307,24 @@ local function ApplyMinimap()
     -- Snapshot Blizzard's native size/position before we modify anything
     CaptureBlizzardMinimap()
 
-    -- Reparent minimap to UIParent so MinimapCluster layout cannot override our size
-    if minimap:GetParent() ~= UIParent then
-        minimap:SetParent(UIParent)
+    -- Reparent minimap to UIParent so MinimapCluster layout cannot override our size.
+    -- Deferred via C_Timer.After(0) to avoid tainting the secure frame environment
+    -- when ApplyMinimap fires during a ShowUIPanel/World Map open sequence, which
+    -- would cause ADDON_ACTION_BLOCKED when Blizzard's dungeon pin data provider
+    -- later calls the protected SetPropagateMouseClicks() on map pins.
+    local needsReparent = minimap:GetParent() ~= UIParent
+    local needsClusterHide = MinimapCluster and MinimapCluster:IsShown()
+    if needsReparent or needsClusterHide then
+        C_Timer.After(0, function()
+            if needsReparent and minimap:GetParent() ~= UIParent then
+                minimap:SetParent(UIParent)
+            end
+            if needsClusterHide and MinimapCluster then
+                MinimapCluster:Hide()
+            end
+        end)
     end
     minimap:Show()
-    -- Hide the entire cluster (we manage everything ourselves)
-    if MinimapCluster then
-        MinimapCluster:Hide()
-    end
 
     -- Hide default decorations
     for _, name in ipairs(minimapDecorations) do
@@ -1950,10 +1959,14 @@ function EBS:OnEnable()
                 end
             end)
 
-            -- Also hook ShowUIPanel as a fallback
+            -- Also hook ShowUIPanel as a fallback.
+            -- Guard with InCombatLockdown to avoid contributing taint during
+            -- protected UI panel open sequences (e.g. World Map open triggering
+            -- dungeon pin SetPropagateMouseClicks ADDON_ACTION_BLOCKED).
             if ShowUIPanel then
                 hooksecurefunc("ShowUIPanel", function(frame)
                     if frame == FriendsFrame and not friendsSkinned then
+                        if InCombatLockdown() then return end
                         C_Timer.After(0, function()
                             if EBS.db.profile.friends.enabled then
                                 SkinFriendsFrame()
