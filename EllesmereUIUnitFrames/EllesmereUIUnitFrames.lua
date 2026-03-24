@@ -4120,6 +4120,7 @@ local function CreateCustomClassPower(playerFrame, style)
 end
 
 local function ReloadFrames()
+    ResolveFontPath()
     if InCombatLockdown() then
         return
     end
