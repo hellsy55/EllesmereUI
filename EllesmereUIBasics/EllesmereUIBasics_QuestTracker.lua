@@ -1896,7 +1896,7 @@ function EQT:RefreshProgress()
                 local o = objs[objIdx]
                 local nf = o.numFulfilled or 0
                 local nr = o.numRequired or 1
-                if o.type == "progressbar" then
+                if o.objType == "progressbar" then
                     local pct = GetQuestProgressBarPercent(qID)
                     if pct then nf = pct; nr = 100 end
                 end
@@ -2387,6 +2387,7 @@ function EQT:Init()
     }
     local QUEST_EVENTS_SAFE = {
         "QUEST_WATCH_LIST_CHANGED","QUEST_WATCH_UPDATE","QUEST_TASK_PROGRESS_UPDATE",
+        "TASK_PROGRESS_UPDATE","WORLD_QUEST_UPDATE",
         "TASK_IS_TOO_DIFFERENT","SCENARIO_CRITERIA_UPDATE","SCENARIO_UPDATE",
         "SCENARIO_COMPLETED","CRITERIA_COMPLETE",
         "UI_WIDGET_UNIT_CHANGED",
@@ -2444,6 +2445,24 @@ function EQT:Init()
         -- would cause quests to jump between sections.
         if event == "SUPER_TRACKING_CHANGED" then
             EQT:RefreshProgress()
+            return
+        end
+        --Allows for % based worldquests to be tracked
+        if event == "QUEST_LOG_UPDATE"
+        or event == "UNIT_QUEST_LOG_CHANGED"
+        or event == "QUEST_TASK_PROGRESS_UPDATE"
+        or event == "TASK_PROGRESS_UPDATE"
+        or event == "WORLD_QUEST_UPDATE"
+        or event == "UI_WIDGET_UNIT_CHANGED"
+        or event == "QUEST_POI_UPDATE"
+        or event == "AREA_POIS_UPDATED"
+        or event == "SCENARIO_CRITERIA_UPDATE"
+        or event == "SCENARIO_UPDATE" then
+            InvalidateQuestLogCache()
+            InvalidateScenarioCache()
+            _questListsCached = false
+            EQT:Refresh()
+            if EQT.UpdateQuestItemAttribute then EQT.UpdateQuestItemAttribute() end
             return
         end
         -- Non-structural events (progress, selection, POI) are suppressible
