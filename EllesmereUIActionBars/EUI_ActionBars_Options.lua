@@ -1647,7 +1647,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Row 2: Number of Icons | Number of Rows
             row, h = W:DualRow(parent, y,
                 { type="slider", text="Number of Icons", min=1, max=12, step=1,
-                  isDisabled=function()
+                  disabled=function()
                       local info = BAR_LOOKUP[SelectedKey()]
                       return info and info.isStance
                   end,

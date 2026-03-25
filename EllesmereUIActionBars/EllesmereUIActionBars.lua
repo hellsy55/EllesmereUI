@@ -3989,6 +3989,10 @@ function EAB:ApplyRangeColoring()
                             _range.outOfRange[slot] = nil
                             ApplyRangeTint(btn, false, s)
                         end
+                    elseif slot and _range.outOfRange[slot] then
+                        -- Slot lost its action (e.g., talent swap). Clear stale tint.
+                        _range.outOfRange[slot] = nil
+                        ApplyRangeTint(btn, false, s)
                     end
                 end
             end
@@ -4191,35 +4195,36 @@ function EAB:RefreshMouseover()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
-        if not s then break end
-        local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
-        if frame then
-            -- For extra bars (MicroBar, BagBar), fade the Blizzard frame directly
-            -- since that's what AttachExtraBarHoverHooks targets.
-            if info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable then
-                local blizzFrame = _G[info.frameName]
-                if blizzFrame then frame = blizzFrame end
-            end
-            if s.mouseoverEnabled then
-                if info.isDataBar then
-                    AttachDataBarHoverHooks(key)
-                end
-                -- Ensure extra bars have hover hooks attached (may not have been
-                -- set up at load time if mouseover was disabled then)
+        if s then
+            local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
+            if frame then
+                -- For extra bars (MicroBar, BagBar), fade the Blizzard frame directly
+                -- since that's what AttachExtraBarHoverHooks targets.
                 if info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable then
-                    AttachExtraBarHoverHooks(info)
+                    local blizzFrame = _G[info.frameName]
+                    if blizzFrame then frame = blizzFrame end
                 end
-                StopFade(frame)
-                frame:SetAlpha(0)
-                local state = hoverStates[key]
-                if state then state.fadeDir = "out" end
-                if key == "MainBar" then SyncPagingAlpha(0) end
-            else
-                StopFade(frame)
-                frame:SetAlpha(s.mouseoverAlpha or 1)
-                local state = hoverStates[key]
-                if state then state.fadeDir = nil end
-                if key == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
+                if s.mouseoverEnabled then
+                    if info.isDataBar then
+                        AttachDataBarHoverHooks(key)
+                    end
+                    -- Ensure extra bars have hover hooks attached (may not have been
+                    -- set up at load time if mouseover was disabled then)
+                    if info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable then
+                        AttachExtraBarHoverHooks(info)
+                    end
+                    StopFade(frame)
+                    frame:SetAlpha(0)
+                    local state = hoverStates[key]
+                    if state then state.fadeDir = "out" end
+                    if key == "MainBar" then SyncPagingAlpha(0) end
+                else
+                    StopFade(frame)
+                    frame:SetAlpha(s.mouseoverAlpha or 1)
+                    local state = hoverStates[key]
+                    if state then state.fadeDir = nil end
+                    if key == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
+                end
             end
         end
     end
@@ -4517,13 +4522,14 @@ function EAB:ApplyCombatVisibility()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
-        if not s then break end
-        local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
-        if frame and not info.visibilityOnly then
-            if s.alwaysHidden then
-                RegisterAttributeDriver(frame, "state-visibility", "hide")
-            else
-                RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
+        if s then
+            local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
+            if frame and not info.visibilityOnly then
+                if s.alwaysHidden then
+                    RegisterAttributeDriver(frame, "state-visibility", "hide")
+                else
+                    RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
+                end
             end
         end
     end
@@ -4537,8 +4543,8 @@ function EAB:RefreshRuntimeVisibility()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
-        if not s then break end
-        if EAB_VTABLE.ExtraBars.IsManagedNonSecureBar(info) then
+        if not s then -- skip bars without settings (not yet initialized)
+        elseif EAB_VTABLE.ExtraBars.IsManagedNonSecureBar(info) then
             EAB_VTABLE.ExtraBars.ApplyManagedNonSecureVisibility(info)
         else
         local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
@@ -5505,16 +5511,20 @@ local function UpdateKeybinds()
 end
 
 -- Called when ActionButtonUseKeyDown CVar changes. Defers to out-of-combat.
+local _keyDownDeferFrame
 local function ApplyKeyDownCVar()
     if InCombatLockdown() then
-        -- Can't rebind in combat; defer until combat ends.
-        local f = CreateFrame("Frame")
-        f:RegisterEvent("PLAYER_REGEN_ENABLED")
-        f:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            self:SetScript("OnEvent", nil)
-            UpdateKeybinds()
-        end)
+        -- Can't rebind in combat; defer until combat ends. Reuse a single
+        -- frame so repeated CVAR_UPDATE events during combat don't accumulate
+        -- orphaned listeners.
+        if not _keyDownDeferFrame then
+            _keyDownDeferFrame = CreateFrame("Frame")
+            _keyDownDeferFrame:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                UpdateKeybinds()
+            end)
+        end
+        _keyDownDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         return
     end
     UpdateKeybinds()
@@ -5630,7 +5640,7 @@ do
             local anchor = bar1 or UIParent
             if parent ~= anchor and parent ~= UIParent then
                 hookGuard = true
-                EAB.AnchorVehicleButton()
+                pcall(EAB.AnchorVehicleButton)
                 hookGuard = false
             end
         end)
@@ -6533,10 +6543,11 @@ function EAB:FinishSetup()
         -- Force-restore all strata and clear drag visibility without the
         -- guard check, so stale state from spec changes etc. is always cleaned.
         _dragState.visible = false
+        -- Skip the restore if in combat; the strata cache entries survive
+        -- and will be restored on the next PLAYER_REGEN_ENABLED call.
+        if InCombatLockdown() then return end
         for frame, orig in pairs(_dragState.strataCache) do
-            if not InCombatLockdown() then
-                frame:SetFrameStrata(orig)
-            end
+            frame:SetFrameStrata(orig)
         end
         wipe(_dragState.strataCache)
     end
@@ -6546,7 +6557,8 @@ function EAB:FinishSetup()
         for _, info in ipairs(ALL_BARS) do
             local key = info.key
             local s = self.db.profile.bars[key]
-            if not s then break end
+            if not s then -- skip bars without settings
+            else
             local frame = barFrames[key]
                 or (info.isDataBar and dataBarFrames[key])
                 or (info.isBlizzardMovable and blizzMovableHolders[key])
@@ -6597,6 +6609,7 @@ function EAB:FinishSetup()
                 end
             end
         end
+        end
     end
 
     self:RegisterEvent("CURSOR_CHANGED", function()
@@ -6626,13 +6639,11 @@ function EAB:FinishSetup()
         ApplyAll()
         -- Restore any strata changes that couldn't be done in combat
         ResetDragState()
-    end)
-
-    self:RegisterEvent("PLAYER_REGEN_DISABLED", function()
+        -- Quick Keybind buttons may need reassertion after combat transitions
         _quickKeybindState.ReassertButtonsAfterCombatChange()
     end)
 
-    self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
+    self:RegisterEvent("PLAYER_REGEN_DISABLED", function()
         _quickKeybindState.ReassertButtonsAfterCombatChange()
     end)
 
