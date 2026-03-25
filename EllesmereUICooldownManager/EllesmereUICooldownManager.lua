@@ -2331,7 +2331,9 @@ LayoutCDMBar = function(barKey)
     frame._prevLayoutH = newH
 
     -- During unlock mode, skip anchor/propagation -- unlock mode owns positioning.
-    if not EllesmereUI._unlockActive then
+    -- Also skip for cursor-anchored bars -- the OnUpdate tracker owns positioning.
+    local isCursorAnchored = barData.anchorTo == "mouse"
+    if not EllesmereUI._unlockActive and not isCursorAnchored then
         -- Immediately reposition this bar if it's anchored to something,
         -- before the frame renders, to avoid a one-frame blink.
         if EllesmereUI.ReapplyOwnAnchor then

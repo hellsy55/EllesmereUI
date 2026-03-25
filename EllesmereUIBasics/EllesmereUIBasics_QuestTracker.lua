@@ -2415,7 +2415,12 @@ function EQT:Init()
     local function ApplyBlizzardTrackerVisibility()
         local ot = _G.ObjectiveTrackerFrame
         if not ot then return end
-        if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false then
+        -- Never hide Blizzard's tracker during M+ keystones -- the
+        -- scenario timer (M+ timer, death count, affixes) lives inside
+        -- ObjectiveTrackerFrame and must remain visible.
+        local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+            and C_ChallengeMode.IsChallengeModeActive()
+        if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
             if not ot._eqtOrigParent then
                 ot._eqtOrigParent = ot:GetParent()
             end
@@ -2434,7 +2439,10 @@ function EQT:Init()
         local suppressing = false
         local function SuppressBlizzTracker()
             if suppressing then return end
-            if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false then
+            -- Don't suppress during M+ -- the timer must stay visible.
+            local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+                and C_ChallengeMode.IsChallengeModeActive()
+            if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
                 suppressing = true
                 if not ot._eqtOrigParent then
                     ot._eqtOrigParent = ot:GetParent()
@@ -2470,9 +2478,11 @@ function EQT:Init()
 
     local function UpdateQTVisibility()
         if not EQT.frame then return end
-        if InCombatLockdown() then return end
         if Cfg("enabled") == false then EQT.frame:Hide(); qtMouseoverActive = false; return end
+        -- Instance hiding (raids, M+) works even in combat -- EQT.frame is
+        -- our own unprotected frame, so Hide() is always safe.
         if IsInHiddenInstance() then EQT.frame:Hide(); qtMouseoverActive = false; return end
+        if InCombatLockdown() then return end
         local qt = DB()
         if EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(qt) then
             EQT.frame:Hide(); qtMouseoverActive = false; return
@@ -2512,7 +2522,7 @@ function EQT:Init()
         "QUEST_WATCH_LIST_CHANGED","QUEST_WATCH_UPDATE","QUEST_TASK_PROGRESS_UPDATE",
         "TASK_PROGRESS_UPDATE","WORLD_QUEST_UPDATE",
         "TASK_IS_TOO_DIFFERENT","SCENARIO_CRITERIA_UPDATE","SCENARIO_UPDATE",
-        "SCENARIO_COMPLETED","CRITERIA_COMPLETE",
+        "SCENARIO_COMPLETED","CRITERIA_COMPLETE","CHALLENGE_MODE_START","CHALLENGE_MODE_COMPLETED",
         "UI_WIDGET_UNIT_CHANGED",
         "QUEST_DATA_LOAD_RESULT","QUEST_POI_UPDATE","AREA_POIS_UPDATED",
         "SUPER_TRACKING_CHANGED",
@@ -2564,6 +2574,18 @@ function EQT:Init()
         PLAYER_ENTERING_WORLD = true,
     }
     w:SetScript("OnEvent", function(_, event)
+        -- M+ start/end: re-evaluate both Blizzard tracker visibility (so
+        -- the M+ timer shows) and EQT visibility (so our tracker hides).
+        -- Delayed re-check because GetInstanceInfo may not return diffID 8
+        -- until a tick after CHALLENGE_MODE_START fires.
+        if event == "CHALLENGE_MODE_START" or event == "CHALLENGE_MODE_COMPLETED" then
+            if ApplyBlizzardTrackerVisibility then ApplyBlizzardTrackerVisibility() end
+            UpdateQTVisibility()
+            C_Timer.After(0.5, function()
+                if ApplyBlizzardTrackerVisibility then ApplyBlizzardTrackerVisibility() end
+                UpdateQTVisibility()
+            end)
+        end
         -- Super-tracking changes only need a visual refresh (focused highlight),
         -- NOT a full quest re-sort, because isOnMap flags shift with focus and
         -- would cause quests to jump between sections.
