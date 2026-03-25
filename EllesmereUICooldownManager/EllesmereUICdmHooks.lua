@@ -309,9 +309,8 @@ local HOOK_BAR_TO_VIEWER = {}
 for vn, bk in pairs(HOOK_VIEWER_TO_BAR) do HOOK_BAR_TO_VIEWER[bk] = vn end
 
 -- Secret boolean helper (guards against restricted combat API return values)
+-- Post-Midnight: boolean flags (isActive, isEnabled) are non-secret.
 local function IsPublicTrue(value)
-    if type(value) ~= "boolean" then return false end
-    if type(issecretvalue) == "function" and issecretvalue(value) then return false end
     return value == true
 end
 
@@ -336,48 +335,58 @@ local function HideBlizzardDecorations(frame)
     if fc.blizzHidden then return end
     fc.blizzHidden = true
 
-    -- Named children: hide + hook to stay hidden
-    local hideAndHook = function(child)
-        if not child then return end
-        child:SetAlpha(0)
-        child:Hide()
-        hooksecurefunc(child, "Show", function(self) self:Hide() end)
+    -- Suppress Blizzard decorations. Only hook Show on children that
+    -- Blizzard actively re-shows during refresh (DebuffBorder, CooldownFlash).
+    -- Everything else gets a one-time alpha 0 — hooking broadly taints
+    -- the secure frame hierarchy. Matches Ayije's minimal approach.
+    local function alphaOnly(child)
+        if child then child:SetAlpha(0) end
     end
-    hideAndHook(frame.Border)
-    hideAndHook(frame.SpellActivationAlert)
-    hideAndHook(frame.DebuffBorder)
-    hideAndHook(frame.Shadow)
-    hideAndHook(frame.IconShadow)
-    hideAndHook(frame.CooldownFlash)
+    alphaOnly(frame.Border)
+    alphaOnly(frame.SpellActivationAlert)
+    alphaOnly(frame.Shadow)
+    alphaOnly(frame.IconShadow)
+    alphaOnly(frame.DebuffBorder)
+    alphaOnly(frame.CooldownFlash)
 
     -- Applications (stack count): left visible -- Blizzard manages natively
 
-    -- Remove mask textures (alpha=0 doesn't stop clipping)
+    -- Neutralize circular mask by replacing with a full-white square.
+    -- Iterate regions and find MaskTexture objects with the Blizzard
+    -- circular atlas, then replace with WHITE8X8 (same as Ayije).
     local iconWidget = frame.Icon
-    if iconWidget then
-        if frame.MaskTexture then
-            pcall(function() iconWidget:RemoveMaskTexture(frame.MaskTexture) end)
-            frame.MaskTexture:Hide()
-        end
-        if frame.IconMask then
-            pcall(function() iconWidget:RemoveMaskTexture(frame.IconMask) end)
-            frame.IconMask:Hide()
-        end
-    end
-    if frame.Cooldown then
-        if frame.MaskTexture then pcall(function() frame.Cooldown:RemoveMaskTexture(frame.MaskTexture) end) end
-        if frame.IconMask then pcall(function() frame.Cooldown:RemoveMaskTexture(frame.IconMask) end) end
-    end
-
-    -- Hide Blizzard decoration textures (overlays, shadows) but preserve
-    -- FontStrings (stack counts, timers) which Blizzard manages natively.
     local regions = { frame:GetRegions() }
     for ri = 1, #regions do
         local rgn = regions[ri]
+        if rgn and rgn.IsObjectType and rgn:IsObjectType("MaskTexture") then
+            pcall(function() rgn:SetTexture("Interface\\Buttons\\WHITE8X8") end)
+        end
+    end
+    -- Also neutralize masks on the Cooldown widget
+    if frame.Cooldown then
+        local cdRegions = { frame.Cooldown:GetRegions() }
+        for ri = 1, #cdRegions do
+            local rgn = cdRegions[ri]
+            if rgn and rgn.IsObjectType and rgn:IsObjectType("MaskTexture") then
+                pcall(function() rgn:SetTexture("Interface\\Buttons\\WHITE8X8") end)
+            end
+        end
+    end
+
+    -- Hide specific Blizzard overlay textures (round border, shadow).
+    -- Only target known Blizzard textures by atlas/fileID -- hooking ALL
+    -- textures broadly taints internal textures Blizzard relies on.
+    local OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
+    local OVERLAY_FILE  = 6707800
+    for ri = 1, #regions do
+        local rgn = regions[ri]
         if rgn and rgn ~= iconWidget and rgn.IsObjectType and rgn:IsObjectType("Texture") then
-            rgn:SetAlpha(0)
-            rgn:Hide()
-            hooksecurefunc(rgn, "Show", function(self) self:Hide() end)
+            local atlas = rgn.GetAtlas and rgn:GetAtlas()
+            local tex = rgn.GetTexture and rgn:GetTexture()
+            if atlas == OVERLAY_ATLAS or tex == OVERLAY_FILE then
+                rgn:SetAlpha(0)
+                rgn:Hide()
+            end
         end
     end
 
@@ -464,31 +473,18 @@ local function DecorateFrame(frame, barData)
         end)
     end
 
-    -- Range overlay hook: block Blizzard's red tint when option is off
-    if iconWidget and not fc.rangeHooked then
-        fc.rangeHooked = true
-        local inVC = false
-        hooksecurefunc(iconWidget, "SetVertexColor", function(self, r, g, b, a)
-            if inVC then return end
-            local ffc = _ecmeFC[frame]
-            local bd = ffc and ffc.barKey and barDataByKey[ffc.barKey]
-            if bd and not bd.outOfRangeOverlay then
-                if r < 0.95 or g < 0.95 or b < 0.95 then
-                    inVC = true
-                    self:SetVertexColor(1, 1, 1, a or 1)
-                    inVC = false
-                end
-            end
-        end)
-    end
-
-    -- PP border
-    if not fd.ppBorderCreated then
-        EllesmereUI.PP.CreateBorder(frame,
+    -- PP border: create on a dedicated child frame so PP.CreateBorder
+    -- doesn't write _ppBorders/_ppBorderSize/_ppBorderColor directly to
+    -- Blizzard's secure viewer frames (which taints them).
+    if not fd.borderFrame then
+        local bf = CreateFrame("Frame", nil, frame)
+        bf:SetAllPoints(frame)
+        bf:SetFrameLevel(frame:GetFrameLevel())
+        fd.borderFrame = bf
+        EllesmereUI.PP.CreateBorder(bf,
             barData.borderR or 0, barData.borderG or 0,
             barData.borderB or 0, barData.borderA or 1,
             barData.borderSize or 1, "OVERLAY", 7)
-        fd.ppBorderCreated = true
     end
 
     fd.isActive = false
@@ -514,19 +510,13 @@ local function IsBuffActive(f)
     if f._isPresetFrame then return f:IsShown() end
     -- For buffs, "active" means the aura is present on the player.
     -- Check auraInstanceID or wasSetFromAura to detect aura presence.
-    -- Avoid reading isActive directly because PP.CreateBorder still
-    -- writes keys to the frame, tainting the entire table.
-    local aid = f.auraInstanceID
-    if aid ~= nil then
-        if issecretvalue and issecretvalue(aid) then return true end
-        return true
-    end
+    if f.auraInstanceID ~= nil then return true end
     if f.wasSetFromAura == true then return true end
-    -- Fallback: isActive (guard against taint)
-    local v = f.isActive
-    if v == nil then return false end
-    if issecretvalue and issecretvalue(v) then return true end
-    return v == true
+    -- isActive may still be tainted by residual frame taint;
+    -- pcall the comparison to avoid errors.
+    local ok, result = pcall(function() return f.isActive == true end)
+    if not ok then return true end  -- tainted = assume active
+    return result
 end
 
 -------------------------------------------------------------------------------
@@ -630,10 +620,22 @@ local function CollectAndReanchor()
     -- Wipe seenSpell sub-tables (keep table references to avoid realloc)
     for k, sub in pairs(seenSpell) do wipe(sub) end
 
+    -- Track all active viewer frames so we can hide unclaimed ones.
+    -- With no-reparent architecture, the viewer is visible, so any
+    -- frame not claimed by a bar must be explicitly hidden.
+    local _allActiveFrames = _scratch_allActive
+    if not _allActiveFrames then _allActiveFrames = {}; _scratch_allActive = _allActiveFrames end
+    wipe(_allActiveFrames)
+
+    -- Function-wide usedFrames (shared across all bars)
+    if not _scratch_usedFrames then _scratch_usedFrames = {} end
+    wipe(_scratch_usedFrames)
+
     for viewerName, defaultBarKey in pairs(HOOK_VIEWER_TO_BAR) do
         local viewer = _G[viewerName]
         if viewer and viewer.itemFramePool then
             for frame in viewer.itemFramePool:EnumerateActive() do
+                _allActiveFrames[frame] = true
                 local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
                 if targetBar and displaySID and displaySID > 0 then
                     -- Dedup: two-level lookup avoids string concat
@@ -641,9 +643,6 @@ local function CollectAndReanchor()
                     if not barSeen then barSeen = {}; seenSpell[targetBar] = barSeen end
                     local existing = barSeen[displaySID]
                     if existing then
-                        if frame:GetParent() == UIParent and existing.frame:GetParent() ~= UIParent then
-                            existing.frame = frame
-                        end
                         if frame ~= existing.frame then
                             frame:Hide()
                         end
@@ -664,19 +663,15 @@ local function CollectAndReanchor()
     local RefreshCDMIconAppearance = ns.RefreshCDMIconAppearance
     local ApplyCDMTooltipState = ns.ApplyCDMTooltipState
 
-    -- Ensure bars with negative-ID spells (trinkets/items) get processed
-    -- even when they have no Blizzard viewer pool frames.
+    -- Ensure bars with non-viewer spells (trinkets, racials, custom IDs)
+    -- get processed even when they have no Blizzard viewer pool frames.
+    -- Without this, bars with only these spells never enter the bar loop.
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and not barLists[bd.key] then
             local sd = ns.GetBarSpellData(bd.key)
             local sl = sd and sd.assignedSpells
-            if sl then
-                for _, sid in ipairs(sl) do
-                    if sid and sid < 0 then
-                        barLists[bd.key] = {}
-                        break
-                    end
-                end
+            if sl and #sl > 0 then
+                barLists[bd.key] = {}
             end
         end
     end
@@ -946,9 +941,10 @@ local function CollectAndReanchor()
                 ---------------------------------------------------------------
                 local useAssigned = spellList and #spellList > 0
                 local count = 0
-                local noRange = not barData.outOfRangeOverlay
+                -- Blizzard handles vertex color tinting natively (range,
+                -- resources, etc.) -- we don't override it.
                 local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
-                local usedFrames = {}  -- track which viewer frames we claimed
+                local usedFrames = _scratch_usedFrames  -- track which viewer frames we claimed
 
                 if useAssigned then
                     for _, sid in ipairs(spellList) do
@@ -1052,17 +1048,17 @@ local function CollectAndReanchor()
                             end
 
                             if frame then
-                            if frame:GetParent() ~= UIParent then frame:SetParent(UIParent) end
+                            -- No SetParent — frames stay parented to their viewer.
+                            -- We only change anchor points to position them over our
+                            -- container. Show/Hide are safe as long as we don't write
+                            -- custom keys to the frame table (all data in external tables).
                             DecorateFrame(frame, barData)
                             if frame:GetScale() ~= 1 then frame:SetScale(1) end
                             local fd = hookFrameData[frame]
                             FC(frame).barKey = barKey
                             FC(frame).spellID = entry and (entry.baseSpellID or entry.spellID) or sid
-                            if noRange and fd and fd.tex then fd.tex:SetVertexColor(1, 1, 1, 1) end
                             icons[count] = frame
 
-                            -- hideInactive: hide inactive real frames (not placeholders)
-                            -- barHidden: bar is invisible via visibility mode
                             if barHidden then
                                 frame:Hide()
                             elseif hideInactive and not euiOpen and entryInactive and not isPlaceholder then
@@ -1087,41 +1083,22 @@ local function CollectAndReanchor()
                             local glowOv = fd and fd.glowOverlay
                             if not isPlaceholder and barType ~= "buffs" and glowOv then
                                 local anim = barData.activeStateAnim or "blizzard"
-                                -- Check if the spell has an active aura with a
-                                -- running cooldown. frame.isActive on viewer frames
-                                -- means "displayed" (true for all icons), not
-                                -- "on cooldown." cooldownDuration is non-secret
-                                -- post-hotfix.
+                                -- Detect active aura state. cooldownDuration may
+                                -- still be tainted by PP border writes; pcall the
+                                -- comparison to avoid errors.
                                 local isInActiveState = false
                                 if frame.auraInstanceID ~= nil then
                                     local dur = frame.cooldownDuration
                                     if dur ~= nil then
-                                        local _isSecret = issecretvalue and issecretvalue(dur)
-                                        if _isSecret or dur ~= 0 then
+                                        local ok, nonZero = pcall(function() return dur ~= 0 end)
+                                        if not ok or nonZero then
                                             isInActiveState = true
                                         end
                                     end
                                 end
                                 local glowStyle = tonumber(anim)
                                 local ffc = FC(frame)
-                                if anim == "hideActive" then
-                                    -- Suppress the cooldown swipe during active state.
-                                    -- Hook SetDrawSwipe to persistently block Blizzard
-                                    -- from re-enabling it on GCD/cooldown refreshes.
-                                    local cd = fd and fd.cooldown
-                                    if cd then
-                                        if not fd.swipeHookInstalled then
-                                            fd.swipeHookInstalled = true
-                                            hooksecurefunc(cd, "SetDrawSwipe", function(self, show)
-                                                if fd.blockSwipe and show then
-                                                    self:SetDrawSwipe(false)
-                                                end
-                                            end)
-                                        end
-                                        fd.blockSwipe = isInActiveState
-                                        cd:SetDrawSwipe(not isInActiveState)
-                                    end
-                                elseif glowStyle and glowStyle > 0 and isInActiveState then
+                                if glowStyle and glowStyle > 0 and isInActiveState then
                                     if not glowOv._glowActive or ffc.activeGlowStyle ~= glowStyle then
                                         local gr, gg, gb
                                         if barData.activeAnimClassColor then
@@ -1177,13 +1154,11 @@ local function CollectAndReanchor()
                     for _, entry in ipairs(list) do
                         local frame = entry.frame
                         count = count + 1
-                        if frame:GetParent() ~= UIParent then frame:SetParent(UIParent) end
                         DecorateFrame(frame, barData)
                         if frame:GetScale() ~= 1 then frame:SetScale(1) end
                         local fd = hookFrameData[frame]
                         FC(frame).barKey = barKey
                         FC(frame).spellID = entry.baseSpellID or entry.spellID
-                        if noRange and fd and fd.tex then fd.tex:SetVertexColor(1, 1, 1, 1) end
                         icons[count] = frame
                         if barHidden then
                             frame:Hide()
@@ -1195,35 +1170,27 @@ local function CollectAndReanchor()
                     end
                 end
 
-                -- Return unused viewer frames back to their viewer
+                -- Hide unused frames (no reparenting needed since frames
+                -- stay in the viewer).
                 for _, entry in ipairs(list) do
                     if not usedFrames[entry.frame] then
                         entry.frame:Hide()
                         entry.frame:ClearAllPoints()
-                        local vn = HOOK_BAR_TO_VIEWER[barKey] or HOOK_BAR_TO_VIEWER[barData.barType]
-                        local viewer = vn and _G[vn]
-                        if viewer and entry.frame:GetParent() ~= viewer then
-                            entry.frame:SetParent(viewer)
-                        end
                     end
                 end
-                -- Return old icons no longer in use
                 for _, oldFrame in ipairs(icons) do
                     if oldFrame and not usedFrames[oldFrame] and not oldFrame._isPlaceholder then
                         oldFrame:Hide()
                         oldFrame:ClearAllPoints()
-                        local vn = HOOK_BAR_TO_VIEWER[barKey] or HOOK_BAR_TO_VIEWER[barData.barType]
-                        local viewer = vn and _G[vn]
-                        if viewer and oldFrame:GetParent() ~= viewer then
-                            oldFrame:SetParent(viewer)
-                        end
                     end
                 end
 
-                -- Hide excess icons
+                -- Hide and clear excess icons (including CDM-owned frames
+                -- like trinkets/racials that aren't in the viewer pool).
                 for i = count + 1, #icons do
                     if icons[i] then
-                        if not icons[i]._isPlaceholder then icons[i]:Hide() end
+                        icons[i]:Hide()
+                        icons[i]:ClearAllPoints()
                     end
                     icons[i] = nil
                 end
@@ -1269,6 +1236,16 @@ local function CollectAndReanchor()
         end
     end
 
+    -- Move unclaimed viewer frames off-screen. Hide() gets overridden
+    -- by Blizzard's viewer refresh, so anchor them far off-screen instead.
+    for frame in pairs(_allActiveFrames) do
+        if not _scratch_usedFrames[frame] then
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "TOPLEFT", -10000, 10000)
+            frame:SetAlpha(0)
+        end
+    end
+
 end
 ns.CollectAndReanchor = CollectAndReanchor
 
@@ -1294,11 +1271,27 @@ function ns.SetupViewerHooks()
     reanchorFrame:SetScript("OnUpdate", ProcessReanchorQueue)
     reanchorFrame:Hide()
 
+    -- No viewer repositioning — calling ClearAllPoints/SetPoint on
+    -- secure viewer frames from insecure code taints the entire
+    -- frame hierarchy. Individual icon anchoring to our containers
+    -- handles positioning.
+    ns.SyncViewerToContainer = function() end
+
     for viewerName in pairs(HOOK_VIEWER_TO_BAR) do
         local viewer = _G[viewerName]
         if viewer then
-            if viewer.Layout then hooksecurefunc(viewer, "Layout", QueueReanchor) end
-            if viewer.RefreshLayout then hooksecurefunc(viewer, "RefreshLayout", QueueReanchor) end
+            local vName = viewerName  -- capture for closure
+            if viewer.Layout then hooksecurefunc(viewer, "Layout", function()
+                -- Re-anchor icons immediately after Blizzard's Layout
+                -- so they don't flash at Blizzard's layout positions.
+                CollectAndReanchor()
+            end) end
+            if viewer.RefreshLayout then hooksecurefunc(viewer, "RefreshLayout", function()
+                CollectAndReanchor()
+            end) end
+            -- No SetPoint hook — calling ClearAllPoints/SetPoint from
+            -- insecure hook context on a secure viewer taints its children.
+            -- The Layout hook + HideBlizzardCDM initial setup handles positioning.
             if viewer.itemFramePool then
                 if viewer.itemFramePool.Acquire then hooksecurefunc(viewer.itemFramePool, "Acquire", QueueReanchor) end
                 if viewer.itemFramePool.ReleaseAll then hooksecurefunc(viewer.itemFramePool, "ReleaseAll", QueueReanchor) end

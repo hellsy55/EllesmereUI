@@ -1300,7 +1300,8 @@ local function FindOurIconForBlizzChild(barKey, blizzChild)
     local icons = cdmBarIcons[barKey]
     if not icons then return nil end
     for _, icon in ipairs(icons) do
-        if icon == blizzChild or icon._blizzChild == blizzChild then return icon end
+        local bc = (_ecmeFC[icon] and _ecmeFC[icon].blizzChild) or icon._blizzChild
+        if icon == blizzChild or bc == blizzChild then return icon end
     end
     -- Fallback: match by spellID (covers override spells like HST -> Storm Stream)
     local alertSid = ResolveBlizzChildSpellID(blizzChild)
@@ -1392,6 +1393,7 @@ local function InstallProcGlowHooks()
             local cr, cg, cb = PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3]
             ShowProcGlow(ourIcon, cr, cg, cb)
             -- Force icon texture re-evaluation so override textures apply immediately
+            local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
             ourIcon._lastTex = nil
         end)
     end)
@@ -1421,6 +1423,7 @@ local function InstallProcGlowHooks()
 
         StopProcGlow(ourIcon)
         -- Force icon texture re-evaluation so the original texture restores immediately
+        local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
         ourIcon._lastTex = nil
     end)
 
@@ -1669,11 +1672,16 @@ end
 --  Hide / Restore Blizzard CDM
 -------------------------------------------------------------------------------
 HideBlizzardCDM = function()
-    -- Shrink viewers to 1x1 and position at top-left corner.
-    -- Do NOT hook SetPoint or force off-screen -- Blizzard's internal
-    -- layout cycle must run unimpeded so it can call Hide() on inactive
-    -- buff frames (needed for hideBuffsWhenInactive).
-    -- Child frames are reparented to UIParent by CollectAndReanchor.
+    -- Anchor each viewer to our corresponding bar container.
+    -- Frames stay parented to viewers (no reparenting = no taint).
+    -- The viewer becomes an invisible shell overlapping our container;
+    -- CollectAndReanchor re-anchors individual icons within it.
+    -- Viewer alpha stays at 1 so child frames inherit visibility.
+    local viewerToBar = {
+        [BLIZZ_CDM_FRAMES.cooldowns] = "cooldowns",
+        [BLIZZ_CDM_FRAMES.utility]   = "utility",
+        [BLIZZ_CDM_FRAMES.buffs]     = "buffs",
+    }
     local allFrameNames = {}
     for _, fn in pairs(BLIZZ_CDM_FRAMES) do allFrameNames[#allFrameNames + 1] = fn end
     for _, fn in pairs(BLIZZ_CDM_FRAMES_SECONDARY) do allFrameNames[#allFrameNames + 1] = fn end
@@ -1688,10 +1696,16 @@ HideBlizzardCDM = function()
                 end
                 fc.hidden = true
             end
-            -- Leave viewer positioned normally so Blizzard's internal
-            -- layout system (including HideWhenInactive) keeps working.
-            -- Make it non-interactive and invisible via alpha.
-            frame:SetAlpha(0)
+            -- Don't reposition primary viewers (Essential/Utility/BuffIcon) —
+            -- individual icon anchoring handles positioning.
+            -- BuffBarCooldownViewer is secondary: hide it via alpha since
+            -- TBB renders its own bars and we don't hook its Cooldown widgets.
+            local isSecondary = (frameName == BLIZZ_CDM_FRAMES_SECONDARY.buffs)
+            if isSecondary then
+                frame:SetAlpha(0)
+                frame:ClearAllPoints()
+                frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+            end
             frame:EnableMouse(false)
             if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
         end
@@ -1707,13 +1721,16 @@ RestoreBlizzardCDM = function()
         local fc = frame and _ecmeFC[frame]
         if fc and fc.hidden then
             fc.restoring = true
-            frame:SetAlpha(fc.origAlpha or 1)
+            -- Restore original anchor points
             if fc.origPoints then
                 frame:ClearAllPoints()
                 for _, pt in ipairs(fc.origPoints) do
                     frame:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
                 end
             end
+            -- Restore mouse interaction
+            frame:EnableMouse(true)
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
             fc.hidden = false
             fc.restoring = nil
         end
@@ -1728,7 +1745,6 @@ local function RestoreBlizzardBuffFrame()
     local fc = frame and _ecmeFC[frame]
     if fc and fc.hidden then
         fc.restoring = true
-        frame:SetAlpha(fc.origAlpha or 1)
         if fc.origPoints then
             frame:ClearAllPoints()
             for _, pt in ipairs(fc.origPoints) do
@@ -2685,9 +2701,13 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         icon._shapeName = nil
 
         -- Restore square borders (pixel-perfect via PP)
-        if icon._ppBorders then
-            EllesmereUI.PP.ShowBorder(icon)
-            EllesmereUI.PP.UpdateBorder(icon, borderSz, brdR, brdG, brdB, brdA)
+        -- Border lives on fd.borderFrame (child of icon) to avoid tainting
+        -- Blizzard's secure frames. Fall back to icon._ppBorders for
+        -- CDM-owned frames that don't go through DecorateFrame's child wrapper.
+        local bdrTarget = (fd and fd.borderFrame) or icon
+        if fd and fd.borderFrame or icon._ppBorders then
+            EllesmereUI.PP.ShowBorder(bdrTarget)
+            EllesmereUI.PP.UpdateBorder(bdrTarget, borderSz, brdR, brdG, brdB, brdA)
         end
 
         -- Restore icon texture coords
@@ -2765,8 +2785,9 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     if tex then tex:SetTexCoord(-expand, 1 + expand, -expand, 1 + expand) end
 
     -- Hide square borders (pixel-perfect via PP)
-    if icon._ppBorders then
-        EllesmereUI.PP.HideBorder(icon)
+    local bdrTarget2 = (fd and fd.borderFrame) or icon
+    if fd and fd.borderFrame or icon._ppBorders then
+        EllesmereUI.PP.HideBorder(bdrTarget2)
     end
 
     -- Shape border texture (on a dedicated frame above the cooldown swipe)
@@ -2859,16 +2880,18 @@ local function RefreshCDMIconAppearance(barKey)
             cd:SetHideCountdownNumbers(not barData.showCooldownText)
             -- Mark pending font update (applied in batch after frame renders)
             if barData.showCooldownText then
-                icon._pendingFontPath = GetCDMFont()
-                icon._pendingFontSize = barData.cooldownFontSize or 12
-                icon._pendingFontR = barData.cooldownTextR or 1
-                icon._pendingFontG = barData.cooldownTextG or 1
-                icon._pendingFontB = barData.cooldownTextB or 1
+                local ifc = FC(icon)
+                ifc.pendingFontPath = GetCDMFont()
+                ifc.pendingFontSize = barData.cooldownFontSize or 12
+                ifc.pendingFontR = barData.cooldownTextR or 1
+                ifc.pendingFontG = barData.cooldownTextG or 1
+                ifc.pendingFontB = barData.cooldownTextB or 1
             end
         end
         -- Update border (pixel-perfect via PP)
-        if icon._ppBorders then
-            EllesmereUI.PP.UpdateBorder(icon, borderSize, barData.borderR or 0, barData.borderG or 0, barData.borderB or 0, barData.borderA or 1)
+        local bdrTgt = (fd and fd.borderFrame) or icon
+        if fd and fd.borderFrame or icon._ppBorders then
+            EllesmereUI.PP.UpdateBorder(bdrTgt, borderSize, barData.borderR or 0, barData.borderG or 0, barData.borderB or 0, barData.borderA or 1)
         end
         -- Update background
         if bg then
@@ -3061,24 +3084,19 @@ local function UpdateAllCDMBars(dt)
                                     cfc.cachedAuraInstID = ch.auraInstanceID
                                     -- Cache linkedSpellIDs for spells like Eclipse that
                                     -- have multiple variant auras under a single CDM child.
-                                    -- Static property -- only needs to be set once.
-                                    -- Only cache when values are clean (non-secret) to
-                                    -- avoid taint from combat API calls after /reload.
+                                    -- Post-Midnight: spell IDs are non-secret.
                                     if info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
-                                        local firstID = info.linkedSpellIDs[1]
-                                        if not (issecretvalue and issecretvalue(firstID)) then
-                                            cfc.linkedSpellIDs = info.linkedSpellIDs
-                                        end
+                                        cfc.linkedSpellIDs = info.linkedSpellIDs
                                     end
                                 end
                             else
                                 -- Refresh override from lightweight API (returns
                                 -- a number, not a table) so runtime activation
                                 -- overrides are still detected each tick.
+                                -- Post-Midnight: spell override IDs are non-secret.
                                 if baseSpellID and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
                                     local liveOverride = C_SpellBook.FindSpellOverrideByID(baseSpellID)
-                                    if liveOverride and not (issecretvalue and issecretvalue(liveOverride))
-                                       and liveOverride ~= 0 and liveOverride ~= cachedOverride then
+                                    if liveOverride and liveOverride ~= 0 and liveOverride ~= cachedOverride then
                                         cachedOverride = liveOverride
                                         resolvedSid = liveOverride
                                         cfc.overrideSid = cachedOverride
@@ -3188,12 +3206,12 @@ local function UpdateAllCDMBars(dt)
                                     end
                                 end
                             end
-                            -- Hook the child's Cooldown widget to capture DurationObjects
-                            -- when Blizzard sets them. Avoids secret-value arithmetic.
-                            -- Store captured values in our own tables, not on the child frame,
-                            -- to avoid taint from writing to Blizzard-owned frame fields.
+                            -- Hook the child's Cooldown widget to capture DurationObjects.
+                            -- Skip BuffBar viewer (vi=4) -- TBB reads from the StatusBar
+                            -- and aura API instead, and Cooldown hooks taint the frame.
                             local chfc = cfc or FC(ch)
-                            if ch.Cooldown and not chfc.hooked then
+                            local skipCooldownHooks = (vi == 4)
+                            if ch.Cooldown and not chfc.hooked and not skipCooldownHooks then
                                 chfc.hooked = true
                                 if ch.Cooldown.SetCooldownFromDurationObject then
                                     hooksecurefunc(ch.Cooldown, "SetCooldownFromDurationObject", function(_, durObj)
@@ -3202,16 +3220,22 @@ local function UpdateAllCDMBars(dt)
                                     end)
                                 end
                                 hooksecurefunc(ch.Cooldown, "SetCooldown", function(_, start, dur)
-                                    -- Blizzard's secure code may still pass secret
-                                    -- values internally; guard before comparing.
-                                    if issecretvalue and dur ~= nil and issecretvalue(dur) then
-                                        _ecmeRawStartCache[ch] = start
-                                        _ecmeRawDurCache[ch] = dur
-                                    elseif dur and dur > 0 then
+                                    -- Blizzard's secure code can still pass secret
+                                    -- dur values; pcall the comparison to handle both.
+                                    if dur == nil then
+                                        _ecmeDurObjCache[ch] = nil
+                                        _ecmeChildHasDurObj[ch] = nil
+                                        _ecmeRawStartCache[ch] = nil
+                                        _ecmeRawDurCache[ch] = nil
+                                        return
+                                    end
+                                    local ok, positive = pcall(function() return dur > 0 end)
+                                    if not ok or positive then
+                                        -- Secret (pcall failed) or positive duration: cache
                                         _ecmeRawStartCache[ch] = start
                                         _ecmeRawDurCache[ch] = dur
                                     else
-                                        -- dur=0 means inactive; wipe like Clear()
+                                        -- dur <= 0: inactive, wipe like Clear()
                                         _ecmeDurObjCache[ch] = nil
                                         _ecmeChildHasDurObj[ch] = nil
                                         _ecmeRawStartCache[ch] = nil
@@ -3255,7 +3279,16 @@ local function _CDMFadeTo(frame, toAlpha, duration)
         frame._cdmFadeAG:SetLooping("NONE")
         frame._cdmFadeAnim = frame._cdmFadeAG:CreateAnimation("Alpha")
         frame._cdmFadeAG:SetScript("OnFinished", function()
-            frame:SetAlpha(frame._cdmFadeAG._toAlpha or toAlpha)
+            local a = frame._cdmFadeAG._toAlpha or toAlpha
+            frame:SetAlpha(a)
+            -- Sync icons on finish (they're parented to viewer, not container)
+            local icons = cdmBarIcons[frame._barKey]
+            if icons then
+                for i = 1, #icons do
+                    if icons[i] then icons[i]:SetAlpha(a) end
+                end
+            end
+            frame._cdmFadeSyncing = nil
         end)
     end
     local ag = frame._cdmFadeAG
@@ -3266,6 +3299,21 @@ local function _CDMFadeTo(frame, toAlpha, duration)
     anim:SetToAlpha(toAlpha)
     anim:SetDuration(duration or 0.15)
     anim:SetStartDelay(0)
+    -- Sync icon alpha each frame during the fade animation
+    frame._cdmFadeSyncing = true
+    if not frame._cdmFadeSyncUpdate then
+        frame._cdmFadeSyncUpdate = true
+        frame:HookScript("OnUpdate", function(self)
+            if not self._cdmFadeSyncing then return end
+            local a = self:GetAlpha()
+            local icons = cdmBarIcons[self._barKey]
+            if icons then
+                for i = 1, #icons do
+                    if icons[i] then icons[i]:SetAlpha(a) end
+                end
+            end
+        end)
+    end
     ag:Restart()
 end
 
@@ -3398,15 +3446,21 @@ _CDMApplyVisibility = function()
 
             end -- unlockActive else
 
-            -- Icons are parented to UIParent (not the container) so they
-            -- don't inherit the container's alpha. Hide them when bar is
-            -- hidden by visibility mode. Uses _visHidden flag to avoid
-            -- confusing "hidden by vis mode" with "hidden by empty layout."
-            if frame._visHidden then
-                local icons = cdmBarIcons[barData.key]
-                if icons then
-                    for i = 1, #icons do
-                        if icons[i] then icons[i]:Hide() end
+            -- Sync icon alpha/visibility with the container.
+            -- Icons are parented to the viewer (not the container),
+            -- so they don't inherit the container's alpha. We must
+            -- propagate it explicitly.
+            local containerAlpha = frame:GetAlpha()
+            local icons = cdmBarIcons[barData.key]
+            if icons then
+                for i = 1, #icons do
+                    local icon = icons[i]
+                    if icon then
+                        if frame._visHidden then
+                            icon:Hide()
+                        else
+                            icon:SetAlpha(containerAlpha)
+                        end
                     end
                 end
             end
@@ -3561,6 +3615,18 @@ BuildAllCDMBars = function()
 
     local p = ECME.db.profile
 
+    -- Migration: hideActive removed in 5.5.4 — reset to blizzard default
+    do
+        local bars = p.cdmBars and p.cdmBars.bars
+        if bars then
+            for _, bd in ipairs(bars) do
+                if bd.activeStateAnim == "hideActive" then
+                    bd.activeStateAnim = "blizzard"
+                end
+            end
+        end
+    end
+
     -- Migration: remove misc bars and unanchor anything that referenced them
     do
         local bars = p.cdmBars and p.cdmBars.bars
@@ -3591,10 +3657,20 @@ BuildAllCDMBars = function()
         return
     end
 
-    -- Hide ALL existing bar frames before rebuilding. This ensures bars
-    -- from a previous spec that are not in the current spec get hidden.
+    -- Hide ALL existing bar frames and icons before rebuilding. This ensures
+    -- bars from a previous spec or deleted bars get fully cleaned up.
+    -- Icons include CDM-owned frames (trinkets, racials, placeholders) that
+    -- aren't in the viewer pool and won't be caught by unclaimed-frame cleanup.
     for key, frame in pairs(cdmBarFrames) do
         EllesmereUI.SetElementVisibility(frame, false)
+    end
+    for key, icons in pairs(cdmBarIcons) do
+        for i = 1, #icons do
+            if icons[i] then
+                icons[i]:Hide()
+                icons[i]:ClearAllPoints()
+            end
+        end
     end
 
     -- Force Blizzard's EditMode CooldownViewer to "Always Visible" so
@@ -3635,9 +3711,11 @@ BuildAllCDMBars = function()
                 local icons = cdmBarIcons[barData.key]
                 if icons then
                     for _, icon in ipairs(icons) do
+                        local iifc = _ecmeFC[icon]
+                        if iifc then iifc.lastTex = nil; iifc.lastDesat = nil; iifc.blizzChild = nil end
                         icon._lastTex = nil
                         icon._lastDesat = nil
-                        if _ecmeFC[icon] then _ecmeFC[icon].spellID = nil end
+                        if iifc then iifc.spellID = nil end
                         icon._spellID = nil
                         icon._blizzChild = nil
                     end
@@ -3702,12 +3780,16 @@ BuildAllCDMBars = function()
     C_Timer.After(0, function()
         for _, icons in pairs(cdmBarIcons) do
             for _, icon in ipairs(icons) do
-                if icon._pendingFontPath then
+                local ifc = _ecmeFC[icon]
+                local pendFP = ifc and ifc.pendingFontPath or icon._pendingFontPath
+                if pendFP then
                     local ifd = _getFD(icon)
                     local cd = ifd and ifd.cooldown or icon._cooldown
                     if cd then
-                        local fontPath, fontSize = icon._pendingFontPath, icon._pendingFontSize
-                        local fR, fG, fB = icon._pendingFontR, icon._pendingFontG, icon._pendingFontB
+                        local fontPath, fontSize = pendFP, (ifc and ifc.pendingFontSize or icon._pendingFontSize)
+                        local fR = ifc and ifc.pendingFontR or icon._pendingFontR
+                        local fG = ifc and ifc.pendingFontG or icon._pendingFontG
+                        local fB = ifc and ifc.pendingFontB or icon._pendingFontB
                         for ri = 1, cd:GetNumRegions() do
                             local region = select(ri, cd:GetRegions())
                             if region and region.GetObjectType and region:GetObjectType() == "FontString" then
@@ -3715,6 +3797,7 @@ BuildAllCDMBars = function()
                                 break
                             end
                         end
+                        if ifc then ifc.pendingFontPath = nil; ifc.pendingFontSize = nil; ifc.pendingFontR = nil; ifc.pendingFontG = nil; ifc.pendingFontB = nil end
                         icon._pendingFontPath = nil; icon._pendingFontSize = nil
                         icon._pendingFontR = nil; icon._pendingFontG = nil; icon._pendingFontB = nil
                     end
@@ -4637,6 +4720,9 @@ function ECME:CDMFinishSetup()
     BuildAllCDMBars()
 
     -- Initialize Tracking Bars
+    -- Validate existing TBB bars: remove any whose spells don't exist
+    -- for the current character's class. TBB data lives in the shared
+    -- profile and can leak between characters on first login.
     do
         local pp = ECME.db.profile
         local tbb = pp.trackedBuffBars
@@ -4644,6 +4730,163 @@ function ECME:CDMFinishSetup()
         if hasNoBars then
             pp.trackedBuffBars = { selectedBar = 1, bars = {} }
             pp.tbbPositions = nil
+        elseif tbb and tbb.bars and #tbb.bars > 0 then
+            -- Build set of all class spells for validation
+            local classSpells = {}
+            if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
+                for cat = 0, 3 do
+                    local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+                    if allIDs then
+                        for _, cdID in ipairs(allIDs) do
+                            local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                            if info then
+                                if info.spellID and info.spellID > 0 then classSpells[info.spellID] = true end
+                                if info.overrideSpellID and info.overrideSpellID > 0 then classSpells[info.overrideSpellID] = true end
+                            end
+                        end
+                    end
+                end
+            end
+            -- Remove bars whose spell isn't valid for this character
+            if next(classSpells) then
+                for i = #tbb.bars, 1, -1 do
+                    local bar = tbb.bars[i]
+                    local valid = false
+                    if bar.popularKey then
+                        valid = true  -- presets are class-agnostic
+                    elseif bar.spellIDs then
+                        for _, sid in ipairs(bar.spellIDs) do
+                            if classSpells[sid] then valid = true; break end
+                        end
+                    elseif bar.spellID and bar.spellID > 0 then
+                        valid = classSpells[bar.spellID]
+                    end
+                    if not valid then
+                        table.remove(tbb.bars, i)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Fix misattributed buff spells: if a user has a spellID that shares
+    -- a name with another spellID on the same bar, keep the one that's
+    -- actually in Blizzard's BuffIcon viewer and remove the other.
+    do
+        -- Build tracked set directly from viewer pool (tick cache may
+        -- not be populated yet at startup).
+        local buffIconTracked = {}
+        local biv = _G["BuffIconCooldownViewer"]
+        if biv and biv.itemFramePool and biv.itemFramePool.EnumerateActive then
+            for frame in biv.itemFramePool:EnumerateActive() do
+                local sid = ns.ResolveChildSpellID and ns.ResolveChildSpellID(frame)
+                if sid and sid > 0 then buffIconTracked[sid] = true end
+                -- Also check cooldownInfo for base/override IDs
+                local info = frame.cooldownInfo
+                if info then
+                    if info.spellID and info.spellID > 0 then buffIconTracked[info.spellID] = true end
+                    if info.overrideSpellID and info.overrideSpellID > 0 then buffIconTracked[info.overrideSpellID] = true end
+                end
+            end
+        end
+        -- Merge with tick cache if available
+        local tickSet = ns._tickBuffIconTrackedSet
+        if tickSet then
+            for sid in pairs(tickSet) do buffIconTracked[sid] = true end
+        end
+
+        -- Helper: clean a spell list by removing non-tracked dupes by name
+        local function CleanSpellList(spellList)
+            if not spellList or #spellList == 0 then return end
+            -- Build name groups: name -> { {idx, sid, tracked}, ... }
+            local byName = {}
+            for i, sid in ipairs(spellList) do
+                if sid and sid > 0 then
+                    local name = C_Spell.GetSpellName(sid)
+                    if name then
+                        if not byName[name] then byName[name] = {} end
+                        local group = byName[name]
+                        group[#group + 1] = { idx = i, sid = sid, tracked = buffIconTracked[sid] and true or false }
+                    end
+                end
+            end
+            -- For each name with multiple entries, keep only the tracked one
+            local removeSet = {}
+            for name, group in pairs(byName) do
+                if #group > 1 then
+                    local hasTracked = false
+                    for _, e in ipairs(group) do
+                        if e.tracked then hasTracked = true; break end
+                    end
+                    if hasTracked then
+                        for _, e in ipairs(group) do
+                            if not e.tracked then removeSet[e.idx] = true end
+                        end
+                    end
+                end
+            end
+            -- Remove marked entries (reverse order to preserve indices)
+            if next(removeSet) then
+                for i = #spellList, 1, -1 do
+                    if removeSet[i] then
+                        table.remove(spellList, i)
+                    end
+                end
+            end
+            -- Also dedup exact same spellID (keep first)
+            local seen = {}
+            for i = #spellList, 1, -1 do
+                local sid = spellList[i]
+                if sid and seen[sid] then
+                    table.remove(spellList, i)
+                elseif sid then
+                    seen[sid] = true
+                end
+            end
+        end
+
+        -- Fix CDM buff bar assignedSpells
+        local p = ECME.db.profile
+        for _, barData in ipairs(p.cdmBars.bars) do
+            if barData.barType == "buffs" or barData.key == "buffs" then
+                local sd = ns.GetBarSpellData(barData.key)
+                if sd then CleanSpellList(sd.assignedSpells) end
+            end
+        end
+
+        -- Fix TBB bars (single-spell entries): remove wrong-version entries
+        local pp = ECME.db.profile
+        local tbb = pp.trackedBuffBars
+        if tbb and tbb.bars then
+            local tbbByName = {}
+            for i, bar in ipairs(tbb.bars) do
+                if bar.spellID and bar.spellID > 0 and not bar.popularKey then
+                    local name = C_Spell.GetSpellName(bar.spellID)
+                    if name then
+                        if not tbbByName[name] then tbbByName[name] = {} end
+                        tbbByName[name][#tbbByName[name] + 1] = { idx = i, tracked = buffIconTracked[bar.spellID] and true or false }
+                    end
+                end
+            end
+            local removeIdxs = {}
+            for name, group in pairs(tbbByName) do
+                if #group > 1 then
+                    local hasTracked = false
+                    for _, e in ipairs(group) do
+                        if e.tracked then hasTracked = true; break end
+                    end
+                    if hasTracked then
+                        for _, e in ipairs(group) do
+                            if not e.tracked then removeIdxs[e.idx] = true end
+                        end
+                    end
+                end
+            end
+            if next(removeIdxs) then
+                for i = #tbb.bars, 1, -1 do
+                    if removeIdxs[i] then table.remove(tbb.bars, i) end
+                end
+            end
         end
     end
     if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end

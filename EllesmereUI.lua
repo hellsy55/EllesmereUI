@@ -827,8 +827,10 @@ do
     --  to exactly borderSize physical pixels. No BackdropTemplate, no
     --  sub-pixel interpolation.
     --
-    --  _ppBorders is a container Frame (supports Show/Hide/SetShown).
-    --  The 4 textures are stored as _ppBorders._top, _bottom, _left, _right.
+    --  Border data is stored in an external weak-keyed table (_ppBorderData)
+    --  instead of directly on the frame, to avoid tainting Blizzard's secure
+    --  frame tables. Each entry: { container, borderSize, borderColor }.
+    --  The container Frame holds _top, _bottom, _left, _right textures.
     --
     --  API:
     --    PP.CreateBorder(frame, r, g, b, a, borderSize, drawLayer, subLevel)
@@ -837,6 +839,7 @@ do
     --    PP.UpdateBorder(frame, borderSize, r, g, b, a)
     --    PP.HideBorder(frame)
     --    PP.ShowBorder(frame)
+    local _ppBorderData = setmetatable({}, { __mode = "k" })
     ---------------------------------------------------------------------------
 
     local function SnapBorderTextures(container, frame, borderSize)
@@ -895,13 +898,15 @@ do
             local entry = allBorders[i]
             local c, f = entry.container, entry.frame
             if c and f then
-                SnapBorderTextures(c, f, f._ppBorderSize or 1)
+                local bd = _ppBorderData[f]
+                SnapBorderTextures(c, f, bd and bd.borderSize or 1)
             end
         end
     end
 
     function PP.CreateBorder(frame, r, g, b, a, borderSize, drawLayer, subLevel)
-        if frame._ppBorders then return frame._ppBorders end
+        local bd = _ppBorderData[frame]
+        if bd then return bd.container end
         r = r or 0; g = g or 0; b = b or 0; a = a or 1
         borderSize = borderSize or 1
         drawLayer = drawLayer or "OVERLAY"
@@ -926,6 +931,16 @@ do
         container._left = MakeTex()
         container._right = MakeTex()
 
+        -- Store border data externally (avoids tainting secure frames)
+        bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
+        _ppBorderData[frame] = bd
+        -- Also write to frame for backwards compat with code that reads
+        -- frame._ppBorders directly. Safe on EUI-owned frames; Blizzard
+        -- frames get tainted but PP.GetBorder() avoids that path.
+        frame._ppBorders = container
+        frame._ppBorderSize = borderSize
+        frame._ppBorderColor = bd.borderColor
+
         -- Initial snap (effective scale may not be final yet)
         SnapBorderTextures(container, frame, borderSize)
 
@@ -934,7 +949,7 @@ do
         local ticks = 0
         container:SetScript("OnUpdate", function(self)
             ticks = ticks + 1
-            SnapBorderTextures(self, frame, frame._ppBorderSize or 1)
+            SnapBorderTextures(self, frame, bd.borderSize or 1)
             if ticks >= 2 then
                 self:SetScript("OnUpdate", nil)
             end
@@ -943,29 +958,28 @@ do
         -- Register for centralized re-snap on scale/resolution changes
         RegisterBorder(container, frame)
 
-        frame._ppBorders = container
-        frame._ppBorderSize = borderSize
-        frame._ppBorderColor = { r, g, b, a }
         return container
     end
 
     function PP.SetBorderSize(frame, borderSize)
-        local container = frame._ppBorders
-        if not container then return end
+        local bd = _ppBorderData[frame]
+        if not bd then return end
         borderSize = borderSize or 1
-        SnapBorderTextures(container, frame, borderSize)
+        SnapBorderTextures(bd.container, frame, borderSize)
+        bd.borderSize = borderSize
         frame._ppBorderSize = borderSize
     end
 
     function PP.SetBorderColor(frame, r, g, b, a)
-        local container = frame._ppBorders
-        if not container then return end
+        local bd = _ppBorderData[frame]
+        if not bd then return end
         a = a or 1
-        frame._ppBorderColor = { r, g, b, a }
-        container._top:SetColorTexture(r, g, b, a)
-        container._bottom:SetColorTexture(r, g, b, a)
-        container._left:SetColorTexture(r, g, b, a)
-        container._right:SetColorTexture(r, g, b, a)
+        bd.borderColor = { r, g, b, a }
+        frame._ppBorderColor = bd.borderColor
+        bd.container._top:SetColorTexture(r, g, b, a)
+        bd.container._bottom:SetColorTexture(r, g, b, a)
+        bd.container._left:SetColorTexture(r, g, b, a)
+        bd.container._right:SetColorTexture(r, g, b, a)
     end
 
     function PP.UpdateBorder(frame, borderSize, r, g, b, a)
@@ -974,13 +988,13 @@ do
     end
 
     function PP.HideBorder(frame)
-        local container = frame._ppBorders
-        if container then container:Hide() end
+        local bd = _ppBorderData[frame]
+        if bd then bd.container:Hide() end
     end
 
     function PP.ShowBorder(frame)
-        local container = frame._ppBorders
-        if container then container:Show() end
+        local bd = _ppBorderData[frame]
+        if bd then bd.container:Show() end
     end
 
     ---------------------------------------------------------------------------
@@ -6012,7 +6026,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.5.4"
+EllesmereUI.VERSION = "5.5.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

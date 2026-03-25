@@ -6717,14 +6717,13 @@ initFrame:SetScript("OnEvent", function(self)
         local ACTIVE_ANIM_VALUES = {
             blizzard    = "Blizzard",
             ["1"]       = "Pixel Glow",
-            hideActive  = "Hide Active State",
             ["3"]       = "Action Button Glow",
             ["4"]       = "Auto-Cast Shine",
             ["5"]       = "GCD",
             ["7"]       = "Classic WoW Glow",
             none        = "No Animation",
         }
-        local ACTIVE_ANIM_ORDER = { "blizzard", "1", "hideActive", "---", "3", "4", "5", "7", "none" }
+        local ACTIVE_ANIM_ORDER = { "blizzard", "1", "---", "3", "4", "5", "7", "none" }
 
         local function IsCustomShape()
             local s = BD().iconShape or "none"
@@ -6920,7 +6919,7 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                   local bd = BD()
-                  local wasOff = (bd.activeStateAnim == "blizzard") or (bd.activeStateAnim == "none") or (bd.activeStateAnim == "hideActive") or not bd.activeStateAnim
+                  local wasOff = (bd.activeStateAnim == "blizzard") or (bd.activeStateAnim == "none") or not bd.activeStateAnim
                   local turningOn = wasOff and tonumber(v) ~= nil
                   if turningOn then
                       EllesmereUI:ShowConfirmPopup({
@@ -7095,7 +7094,7 @@ initFrame:SetScript("OnEvent", function(self)
             animSwatchBlock:EnableMouse(true)
             animSwatchBlock:SetScript("OnClick", function()
                 local a = BD().activeStateAnim or "blizzard"
-                local noAnim = a == "none" or a == "hideActive" or IsCustomShape()
+                local noAnim = a == "none" or IsCustomShape()
                 if not noAnim and BD().activeAnimClassColor then
                     BD().activeAnimClassColor = false; ns.BuildAllCDMBars()
                     if _cdmActivePreviewOn and _cdmPreview then StopActiveStatePreview(); StartActiveStatePreview() end
@@ -7105,7 +7104,7 @@ initFrame:SetScript("OnEvent", function(self)
             animSwatchBlock:SetScript("OnEnter", function()
                 local a = BD().activeStateAnim or "blizzard"
                 local reason
-                if a == "none" or a == "hideActive" or IsCustomShape() then
+                if a == "none" or IsCustomShape() then
                     reason = "This option requires an active state selection"
                 else
                     reason = "Color is controlled by class color"
@@ -7145,7 +7144,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local function UpdateAnimState()
                 local a = BD().activeStateAnim or "blizzard"
-                local noAnim = a == "none" or a == "hideActive" or IsCustomShape()
+                local noAnim = a == "none" or IsCustomShape()
                 RefreshEye()
                 if noAnim then eyeBtn:SetAlpha(0.15); eyeBlock:Show()
                 else eyeBtn:SetAlpha(0.4); eyeBlock:Hide() end
@@ -7359,13 +7358,16 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
 
-        -- Out of Range Overlay | Show Keybind
+        -- Show Tooltip | Show Keybind
         local kbRow
         kbRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Out of Range Overlay",
-              getValue=function() return BD().outOfRangeOverlay == true end,
-              setValue=function(v) BD().outOfRangeOverlay = v; Refresh() end,
-              tooltip="Show a red overlay on icons when the target is out of range" },
+            { type="toggle", text="Show Tooltip on Hover",
+              getValue=function() return BD().showTooltip == true end,
+              setValue=function(v)
+                  BD().showTooltip = v
+                  ns.ApplyCDMTooltipState(BD().key)
+                  Refresh()
+              end },
             { type="toggle", text="Show Keybind",
               getValue=function() return BD().showKeybind == true end,
               setValue=function(v)
@@ -7543,18 +7545,6 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Glow style used for the rotation helper highlight" }
             );  y = y - h
         end
-
-        -- Show Tooltip on Hover
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Tooltip on Hover",
-              getValue=function() return BD().showTooltip == true end,
-              setValue=function(v)
-                  BD().showTooltip = v
-                  ns.ApplyCDMTooltipState(BD().key)
-                  Refresh()
-              end },
-            { type="label", text="" }
-        );  y = y - h
 
         return math.abs(y)
     end

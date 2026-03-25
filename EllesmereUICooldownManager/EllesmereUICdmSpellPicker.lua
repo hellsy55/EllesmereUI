@@ -49,11 +49,17 @@ function ns.GetCDMSpellsForBar(barKey)
         or { 0, 1 }
 
     -- Build our pool set: spellIDs we're currently tracking on this bar
-    local ourPool = {}  -- [spellID] = true
+    local ourPool = {}  -- [spellID or name] = true
     local sd = ns.GetBarSpellData(barKey)
     if sd and sd.assignedSpells then
         for _, sid in ipairs(sd.assignedSpells) do
-            if sid and sid ~= 0 then ourPool[sid] = true end
+            if sid and sid ~= 0 then
+                ourPool[sid] = true
+                -- Also match by name so same-name variants (ability vs aura)
+                -- show as "on this bar" in the picker.
+                local sname = sid > 0 and C_Spell.GetSpellName(sid)
+                if sname then ourPool[sname] = true end
+            end
         end
     end
 
@@ -160,8 +166,31 @@ function ns.GetCDMSpellsForBar(barKey)
                 if sid > 0 and not seenSpellID[sid] then
                     local name = C_Spell.GetSpellName(sid)
                     local tex = C_Spell.GetSpellTexture(sid)
-                    if name and (tex or cat == 2 or cat == 3) then
+                    -- Dedup by both spellID and name: some spells have
+                    -- multiple cdIDs with different spellIDs but the same
+                    -- name (e.g. "Voidfall" ability vs "Voidfall" aura).
+                    -- Prefer the version that's in the buff viewer (tracked).
+                    if not cdInfo then
+                        cdInfo = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                    end
+                    local baseSid = cdInfo and cdInfo.spellID
+                    if baseSid and baseSid > 0 then seenSpellID[baseSid] = true end
+                    local isTracked = blizzTracked[sid]
+                    -- Skip if we already have a tracked version with this name
+                    -- (keeps the viewer-tracked version, drops the other)
+                    local nameUsed = seenSpellID[name]
+                    if name and (tex or cat == 2 or cat == 3) and (not nameUsed or (isTracked and not nameUsed._tracked)) then
+                        -- If replacing a previous entry, remove it
+                        if nameUsed then
+                            for si = #spells, 1, -1 do
+                                if spells[si].name == name then
+                                    table.remove(spells, si)
+                                    break
+                                end
+                            end
+                        end
                         seenSpellID[sid] = true
+                        seenSpellID[name] = { _tracked = isTracked }
                         local usedOnBar = SpellUsedOnAnyOtherBar(sid, barKey)
                         local baseKnown = cdInfo and cdInfo.spellID
                             and cdInfo.spellID > 0 and spellIDKnown[cdInfo.spellID]
@@ -172,7 +201,7 @@ function ns.GetCDMSpellsForBar(barKey)
                             icon = tex,
                             cdmCat = cat,
                             cdmCatGroup = (cat == 2 or cat == 3) and "buff" or "cooldown",
-                            isDisplayed = ourPool[sid] or blizzTracked[sid] or false,
+                            isDisplayed = ourPool[sid] or (name and ourPool[name]) or blizzTracked[sid] or false,
                             isKnown = knownSet[cdID] or spellIDKnown[sid] or baseKnown or false,
                             usedOnBar = usedOnBar,
                         }

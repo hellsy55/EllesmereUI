@@ -766,29 +766,40 @@ end
 -------------------------------------------------------------------------------
 --  Stacks Helper (reads Blizzard child Applications frame)
 -------------------------------------------------------------------------------
-local function UpdateStacks(bar, blzChild)
-    if not blzChild or not blzChild.Applications or not blzChild.Applications:IsShown() then
-        if bar._stacksText then bar._stacksText:Hide() end
-        bar._stackCount = 0
-        return
-    end
-    local appsText = blzChild.Applications and blzChild.Applications.Applications
-    if not appsText then
-        if bar._stacksText then bar._stacksText:Hide() end
-        bar._stackCount = 0
-        return
-    end
-    local ok, txt = pcall(appsText.GetText, appsText)
-    if ok and txt then
-        bar._stackCount = tonumber(txt) or 0
-        if bar._stacksText and not bar._stacksHidden then
+local function UpdateStacks(bar, blzChild, cfg)
+    -- Read stacks from blzChild.Icon.Applications (same as BetterBuffBars).
+    -- BuffBar viewer children have Icon -> Applications FontString.
+    if blzChild and blzChild.Icon and blzChild.Icon.Applications then
+        -- Pass the text straight through without comparing (it may be tainted).
+        -- SetText accepts secret strings natively.
+        local ok, txt = pcall(blzChild.Icon.Applications.GetText, blzChild.Icon.Applications)
+        if ok and txt then
             bar._stacksText:SetText(txt)
             bar._stacksText:Show()
+            -- stackCount for threshold overlay: pcall the tonumber
+            local ok2, n = pcall(tonumber, txt)
+            bar._stackCount = (ok2 and n) or 0
+            return
         end
-    else
-        if bar._stacksText then bar._stacksText:Hide() end
-        bar._stackCount = 0
     end
+    -- Fallback: top-level Applications (BuffIcon children)
+    if blzChild and blzChild.Applications and blzChild.Applications:IsShown() then
+        local appsText = blzChild.Applications.Applications
+        if appsText then
+            local ok, txt = pcall(appsText.GetText, appsText)
+            if ok and txt and txt ~= "" then
+                bar._stackCount = tonumber(txt) or 0
+                if bar._stacksText and not bar._stacksHidden then
+                    bar._stacksText:SetText(txt)
+                    bar._stacksText:Show()
+                end
+                return
+            end
+        end
+    end
+    -- No stacks
+    if bar._stacksText then bar._stacksText:Hide() end
+    bar._stackCount = 0
 end
 
 -------------------------------------------------------------------------------
@@ -1008,7 +1019,7 @@ function ns.UpdateTrackedBuffBarTimers()
                 local sb = bar._bar
 
                 -- Stacks (gated)
-                if _anyStacks then UpdateStacks(bar, blzChild) end
+                if _anyStacks then UpdateStacks(bar, blzChild, cfg) end
 
                 if blizzBar then
                     -------------------------------------------------------
@@ -1029,7 +1040,7 @@ function ns.UpdateTrackedBuffBarTimers()
                         local blizzFillTex = blizzBar:GetStatusBarTexture()
                         if blizzFillTex then
                             local br, bg, bb, ba = blizzFillTex:GetVertexColor()
-                            if br and not (issecretvalue and issecretvalue(br)) then
+                            if br then
                                 local fillTex = sb:GetStatusBarTexture()
                                 if bar._gradientActive and bar._gradTex then
                                     bar._gradTex:SetGradient(cfg.gradientDir or "HORIZONTAL",
@@ -1051,7 +1062,7 @@ function ns.UpdateTrackedBuffBarTimers()
                         for _, rgn in ipairs(iconRegions) do
                             if rgn:GetObjectType() == "Texture" then
                                 local tex = rgn:GetTexture()
-                                if tex and not (issecretvalue and issecretvalue(tex)) and tex ~= bar._lastBlizzIcon then
+                                if tex and tex ~= bar._lastBlizzIcon then
                                     bar._icon._tex:SetTexture(tex)
                                     bar._lastBlizzIcon = tex
                                 end
