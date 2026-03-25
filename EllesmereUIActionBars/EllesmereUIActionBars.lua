@@ -6813,6 +6813,9 @@ function EAB:FinishSetup()
     -- summoning/dismissal; UNIT_PET covers pet swaps. PLAYER_ENTERING_WORLD
     -- ensures button state is populated on login (PetActionBar was
     -- unregistered from all events, so Blizzard's own update never fires).
+    -- PET_BAR_UPDATE_USABLE fires when action usability changes (energy/focus
+    -- state, etc.) so icon dimming stays current. UNIT_AURA "pet" fires when
+    -- an aura on the pet changes, which can also affect ability usability.
     local function UpdatePetBar(_, event)
         C_Timer_After(0, function()
             if event == "PET_BAR_UPDATE_COOLDOWN" then
@@ -6921,9 +6924,11 @@ function EAB:FinishSetup()
     local _petEventFrame = CreateFrame("Frame")
     _petEventFrame:RegisterEvent("PET_BAR_UPDATE")
     _petEventFrame:RegisterEvent("PET_BAR_UPDATE_COOLDOWN")
+    _petEventFrame:RegisterEvent("PET_BAR_UPDATE_USABLE")
     _petEventFrame:RegisterEvent("PET_UI_UPDATE")
     _petEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     _petEventFrame:RegisterUnitEvent("UNIT_PET", "player")
+    _petEventFrame:RegisterUnitEvent("UNIT_AURA", "pet")
     _petEventFrame:SetScript("OnEvent", UpdatePetBar)
 
 
