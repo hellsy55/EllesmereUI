@@ -4971,38 +4971,44 @@ local function UpdateFlipbook(btn)
     if p.procGlowEnabled == false then
         -- Custom shapes always use Shape Glow even if custom proc glow is "off"
         if not (btn._eabShapeMask and btn._eabShapeApplied) then
-            -- Clean up our custom glow layers; leave Blizzard's
-            -- SpellActivationAlert completely untouched so the native
-            -- start-burst -> loop transition plays at its original size.
+            -- Clean up our custom glow layers.
             if btn._eabGlowWrapper then
                 StopAllProceduralGlows(btn._eabGlowWrapper)
                 btn._eabGlowWrapper:Hide()
             end
-            -- If we previously customized Blizzard's flipbooks, reset them
-            -- so the native glow plays correctly.
-            if btn._eabCustomizedFlipbook then
-                btn._eabCustomizedFlipbook = nil
-                if region.ProcLoopFlipbook then
-                    region.ProcLoopFlipbook:SetDesaturated(false)
-                    region.ProcLoopFlipbook:SetVertexColor(1, 1, 1)
-                    region.ProcLoopFlipbook:SetScale(1)
-                    region.ProcLoopFlipbook:Show()
-                end
-                if region.ProcStartFlipbook then
-                    region.ProcStartFlipbook:SetDesaturated(false)
-                    region.ProcStartFlipbook:SetVertexColor(1, 1, 1)
-                    region.ProcStartFlipbook:SetScale(1)
-                    region.ProcStartFlipbook:Show()
-                end
-                if region.ProcLoop then
-                    local loopFlip = GetFlipBookAnim(region.ProcLoop)
-                    if loopFlip then loopFlip:SetDuration(1.0) end
-                end
-                if region.ProcStartAnim then
-                    local startFlip = GetFlipBookAnim(region.ProcStartAnim)
-                    if startFlip then startFlip:SetDuration(0.702) end
-                end
-                region:SetScale(1)
+            -- Blizzard's ActionButtonSpellAlertManager:ShowAlert no longer
+            -- activates the SpellActivationAlert frame in Midnight. Drive
+            -- the native flipbook glow ourselves: reset any prior custom
+            -- tinting, show the frame, and play the start-burst animation.
+            if region.ProcLoopFlipbook then
+                region.ProcLoopFlipbook:SetDesaturated(false)
+                region.ProcLoopFlipbook:SetVertexColor(1, 1, 1)
+                region.ProcLoopFlipbook:SetScale(1)
+                region.ProcLoopFlipbook:Show()
+            end
+            if region.ProcStartFlipbook then
+                region.ProcStartFlipbook:SetDesaturated(false)
+                region.ProcStartFlipbook:SetVertexColor(1, 1, 1)
+                region.ProcStartFlipbook:SetScale(1)
+                region.ProcStartFlipbook:Show()
+            end
+            if region.ProcLoop then
+                local loopFlip = GetFlipBookAnim(region.ProcLoop)
+                if loopFlip then loopFlip:SetDuration(1.0) end
+            end
+            if region.ProcStartAnim then
+                local startFlip = GetFlipBookAnim(region.ProcStartAnim)
+                if startFlip then startFlip:SetDuration(0.702) end
+            end
+            region:SetScale(1)
+            region:SetAlpha(1)
+            region:Show()
+            btn._eabCustomizedFlipbook = nil
+            -- Play the start-burst; on finish it transitions to the loop.
+            if region.ProcStartAnim then
+                region.ProcStartAnim:Play()
+            elseif region.ProcLoop then
+                region.ProcLoop:Play()
             end
             return
         end
@@ -5182,6 +5188,13 @@ function EAB:HookProcGlow()
                         if btn._eabGlowWrapper then
                             StopAllProceduralGlows(btn._eabGlowWrapper)
                             btn._eabGlowWrapper:Hide()
+                        end
+                        -- Stop the native flipbook glow we may have started
+                        local sa = btn.SpellActivationAlert
+                        if sa then
+                            if sa.ProcStartAnim then sa.ProcStartAnim:Stop() end
+                            if sa.ProcLoop then sa.ProcLoop:Stop() end
+                            sa:Hide()
                         end
                     end
                 end

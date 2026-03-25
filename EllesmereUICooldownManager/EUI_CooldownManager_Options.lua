@@ -1953,8 +1953,13 @@ initFrame:SetScript("OnEvent", function(self)
                     if p and p.cdmBars then
                         p.cdmBars.useBlizzardBuffBars = false
                     end
-                    if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
-                    EllesmereUI:RefreshPage(true)
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Reload Required",
+                        message = "Switching to EllesmereUI Tracking Bars requires a reload.",
+                        confirmText = "Reload Now",
+                        cancelText = "Later",
+                        onConfirm = function() ReloadUI() end,
+                    })
                 end,
                 function()
                     if ns.OpenBlizzardCDMTab then ns.OpenBlizzardCDMTab(true) end
@@ -1968,16 +1973,15 @@ initFrame:SetScript("OnEvent", function(self)
             function()
                 EllesmereUI:ShowConfirmPopup({
                     title = "Use Blizzard Bars",
-                    message = "This will disable EllesmereUI Tracking Bars and show Blizzard's default Tracked Bars display instead. You can re-enable Tracking Bars at any time.",
-                    confirmText = "Switch",
+                    message = "This will disable EllesmereUI Tracking Bars and show Blizzard's default Tracked Bars display instead.",
+                    confirmText = "Switch & Reload",
                     cancelText = "Cancel",
                     onConfirm = function()
                         local p = DB()
                         if p and p.cdmBars then
                             p.cdmBars.useBlizzardBuffBars = true
                         end
-                        if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
-                        EllesmereUI:RefreshPage(true)
+                        ReloadUI()
                     end,
                 })
             end,
@@ -2986,7 +2990,174 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateSwatchStates()
         end
 
-        -- Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
+        -- Border Style (slider + inline swatch) | Background Color
+        local borderRow
+        borderRow, h = W:DualRow(parent, y,
+            { type = "slider", text = "Border Style",
+              min = 0, max = 5, step = 1,
+              getValue = function() local bd = SelectedTBB(); return bd and bd.borderSize or 0 end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.borderSize = v; RefreshTBB()
+              end },
+            { type = "multiSwatch", text = "Background Color",
+              swatches = {
+                  { tooltip = "Background Color", hasAlpha = true,
+                    getValue = function()
+                        local bd = SelectedTBB()
+                        return (bd and bd.bgR or 0), (bd and bd.bgG or 0), (bd and bd.bgB or 0), (bd and bd.bgA or 0.4)
+                    end,
+                    setValue = function(r, g, b, a)
+                        local bd = SelectedTBB(); if not bd then return end
+                        bd.bgR, bd.bgG, bd.bgB, bd.bgA = r, g, b, a; RefreshTBB()
+                    end },
+              } }
+        );  y = y - h
+        -- Inline border color swatch on Border Style slider
+        do
+            local rgn = borderRow._leftRegion
+            local ctrl = rgn._control
+            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, borderRow:GetFrameLevel() + 3,
+                function()
+                    local bd = SelectedTBB()
+                    return (bd and bd.borderR or 0), (bd and bd.borderG or 0), (bd and bd.borderB or 0)
+                end,
+                function(r, g, b)
+                    local bd = SelectedTBB(); if not bd then return end
+                    bd.borderR, bd.borderG, bd.borderB = r, g, b; RefreshTBB()
+                end,
+                false, 20)
+            PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
+        end
+
+        -----------------------------------------------------------------------
+        --  EXTRAS
+        -----------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
+
+        -- Row 1: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
+        local function maxStacksOff()
+            local bd = SelectedTBB()
+            return not bd or not bd.stackThresholdMaxEnabled
+        end
+        local maxStacksRow
+        maxStacksRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Enable Max Stacks",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.stackThresholdMaxEnabled end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.stackThresholdMaxEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
+              end },
+            { type = "label", text = "Ticks at Stacks" }
+        );  y = y - h
+        -- Inline slider on Enable Max Stacks toggle (same as inline swatch positioning)
+        do
+            local rgn = maxStacksRow._leftRegion
+            local ctrl = rgn._control
+            local SL = EllesmereUI.SL or {}
+            local trackFrame, valBox, _, slThumb = EllesmereUI.BuildSliderCore(
+                rgn, 90, 4, 14, 36, 26, 13, SL.INPUT_A or 0.6,
+                1, 50, 1,
+                function() local bd = SelectedTBB(); return bd and bd.stackThresholdMax or 10 end,
+                function(v) local bd = SelectedTBB(); if bd then bd.stackThresholdMax = v; RefreshTBB() end end,
+                true)
+            PP.Point(valBox, "RIGHT", ctrl, "LEFT", -6, 0)
+            PP.Point(trackFrame, "RIGHT", valBox, "LEFT", -8, 0)
+            -- Disable block
+            local block = CreateFrame("Frame", nil, trackFrame)
+            block:SetPoint("TOPLEFT", trackFrame, "TOPLEFT", -4, 4)
+            block:SetPoint("BOTTOMRIGHT", valBox, "BOTTOMRIGHT", 4, -4)
+            block:SetFrameLevel(trackFrame:GetFrameLevel() + 10)
+            block:EnableMouse(true)
+            block:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(trackFrame, EllesmereUI.DisabledTooltip("Enable Max Stacks"))
+            end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateMaxSliderState()
+                local off = maxStacksOff()
+                trackFrame:SetAlpha(off and 0.3 or 1)
+                valBox:SetAlpha(off and 0.3 or 1)
+                valBox:EnableMouse(not off)
+                if slThumb then slThumb._sliderDisabled = off end
+                if off then block:Show() else block:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateMaxSliderState)
+            UpdateMaxSliderState()
+        end
+        -- Add "(Ex: 1,5,8)" suffix in smaller, dimmer text
+        do
+            local ticksLabel = maxStacksRow._rightRegion and maxStacksRow._rightRegion._label
+            if ticksLabel then
+                local suffix = maxStacksRow._rightRegion:CreateFontString(nil, "OVERLAY")
+                suffix:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                suffix:SetTextColor(1, 1, 1, 0.35)
+                suffix:SetPoint("LEFT", ticksLabel, "RIGHT", 5, 0)
+                suffix:SetText("(Ex: 1,5,8)")
+            end
+        end
+        -- Inline input on Ticks at Stacks (matches slider value box style)
+        do
+            local rgn = maxStacksRow._rightRegion
+            local SIDE_PAD = 20
+            local FONT = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+            local INPUT_W = 70
+            local INPUT_H = 26
+
+            local box = CreateFrame("EditBox", nil, rgn)
+            PP.Size(box, INPUT_W, INPUT_H)
+            PP.Point(box, "RIGHT", rgn, "RIGHT", -SIDE_PAD, 0)
+            box:SetFrameLevel(rgn:GetFrameLevel() + 2)
+            box:SetAutoFocus(false)
+            box:SetJustifyH("CENTER")
+            box:SetFont(FONT, 13, "")
+            box:SetTextColor(
+                EllesmereUI.TEXT_DIM_R or 0.75,
+                EllesmereUI.TEXT_DIM_G or 0.75,
+                EllesmereUI.TEXT_DIM_B or 0.75,
+                EllesmereUI.TEXT_DIM_A or 1)
+            -- Background matching slider input box
+            local bg = box:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(
+                EllesmereUI.SL_INPUT_R or 0.08,
+                EllesmereUI.SL_INPUT_G or 0.08,
+                EllesmereUI.SL_INPUT_B or 0.08,
+                (EllesmereUI.SL_INPUT_A or 0.5) + (EllesmereUI.MW_INPUT_ALPHA_BOOST or 0.15))
+            -- Border matching slider input box
+            if PP.CreateBorder then
+                PP.CreateBorder(box,
+                    EllesmereUI.BORDER_R or 0.15,
+                    EllesmereUI.BORDER_G or 0.15,
+                    EllesmereUI.BORDER_B or 0.15,
+                    EllesmereUI.SL_INPUT_BRD_A or 0.4, 1)
+            end
+
+            box:SetScript("OnEnterPressed", function(self)
+                self:ClearFocus()
+                local bd = SelectedTBB(); if bd then
+                    bd.stackThresholdTicks = self:GetText(); RefreshTBB()
+                end
+            end)
+            box:SetScript("OnEscapePressed", function(self)
+                self:ClearFocus()
+                local bd = SelectedTBB()
+                self:SetText(bd and bd.stackThresholdTicks or "")
+            end)
+
+            local function UpdateTicksInput()
+                local bd = SelectedTBB()
+                box:SetText(bd and bd.stackThresholdTicks or "")
+                local off = maxStacksOff()
+                box:SetAlpha(off and 0.3 or 1)
+                box:EnableMouse(not off)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateTicksInput)
+            UpdateTicksInput()
+        end
+
+        -- Row 2: Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
         local threshRow
         threshRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Stack Threshold",
@@ -3023,7 +3194,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 true, 20)
             PP.Point(threshSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            -- Disable block when threshold is off
             local threshBlock = CreateFrame("Frame", nil, threshSwatch)
             threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
             threshBlock:EnableMouse(true)
@@ -3040,64 +3210,8 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateThreshSwatch(); UpdateThreshSwatchState() end)
             UpdateThreshSwatchState()
         end
-        -- Cog on Stack Threshold slider: enable max stacks + max stacks slider + tick marks
-        do
-            local rgn = threshRow._rightRegion
-            local function maxStacksOff()
-                local bd = SelectedTBB()
-                return not bd or not bd.stackThresholdMaxEnabled
-            end
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Threshold Settings",
-                rows = {
-                    { type = "toggle", label = "Enable Max Stacks",
-                      get = function() local bd = SelectedTBB(); return bd and bd.stackThresholdMaxEnabled end,
-                      set = function(v)
-                          local bd = SelectedTBB(); if not bd then return end
-                          bd.stackThresholdMaxEnabled = v; RefreshTBB()
-                      end },
-                    { type = "slider", label = "Max Stacks", min = 1, max = 50, step = 1,
-                      disabled = maxStacksOff,
-                      disabledTooltip = "Enable Max Stacks",
-                      get = function() local bd = SelectedTBB(); return bd and bd.stackThresholdMax or 10 end,
-                      set = function(v)
-                          local bd = SelectedTBB(); if not bd then return end
-                          bd.stackThresholdMax = v; RefreshTBB()
-                      end },
-                    { type = "input", label = "Ticks at Stacks (Ex: 1,5,8)", inputWidth = 80,
-                      disabled = maxStacksOff,
-                      disabledTooltip = "Enable Max Stacks",
-                      get = function() local bd = SelectedTBB(); return bd and bd.stackThresholdTicks or "" end,
-                      set = function(v)
-                          local bd = SelectedTBB(); if not bd then return end
-                          bd.stackThresholdTicks = v; RefreshTBB()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.RESIZE_ICON)
-            local function UpdateThreshCogState()
-                local bd = SelectedTBB()
-                local off = not bd or not bd.stackThresholdEnabled
-                if off then
-                    cogBtn:SetAlpha(0.15); cogBtn:Disable()
-                else
-                    cogBtn:SetAlpha(0.4); cogBtn:Enable()
-                end
-            end
-            cogBtn:SetScript("OnEnter", function(self)
-                local bd = SelectedTBB()
-                if bd and bd.stackThresholdEnabled then self:SetAlpha(0.7)
-                else EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Stack Threshold")) end
-            end)
-            cogBtn:SetScript("OnLeave", function(self)
-                UpdateThreshCogState(); EllesmereUI.HideWidgetTooltip()
-            end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-            EllesmereUI.RegisterWidgetRefresh(UpdateThreshCogState)
-            UpdateThreshCogState()
-        end
 
-        -- Pandemic Glow (tracked buff bars)
+        -- Row 3: Pandemic Glow | Pandemic Glow Preview
         do
             local function tbbPandemicOff()
                 local bd = SelectedTBB(); return not bd or bd.pandemicGlow ~= true
@@ -3175,48 +3289,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 })
             end
-        end
-
-        -- Border Style (slider + inline swatch) | Background Color
-        local borderRow
-        borderRow, h = W:DualRow(parent, y,
-            { type = "slider", text = "Border Style",
-              min = 0, max = 5, step = 1,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.borderSize or 0 end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.borderSize = v; RefreshTBB()
-              end },
-            { type = "multiSwatch", text = "Background Color",
-              swatches = {
-                  { tooltip = "Background Color", hasAlpha = true,
-                    getValue = function()
-                        local bd = SelectedTBB()
-                        return (bd and bd.bgR or 0), (bd and bd.bgG or 0), (bd and bd.bgB or 0), (bd and bd.bgA or 0.4)
-                    end,
-                    setValue = function(r, g, b, a)
-                        local bd = SelectedTBB(); if not bd then return end
-                        bd.bgR, bd.bgG, bd.bgB, bd.bgA = r, g, b, a; RefreshTBB()
-                    end },
-              } }
-        );  y = y - h
-        -- Inline border color swatch on Border Style slider
-        do
-            local rgn = borderRow._leftRegion
-            local ctrl = rgn._control
-            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
-                rgn, borderRow:GetFrameLevel() + 3,
-                function()
-                    local bd = SelectedTBB()
-                    return (bd and bd.borderR or 0), (bd and bd.borderG or 0), (bd and bd.borderB or 0)
-                end,
-                function(r, g, b)
-                    local bd = SelectedTBB(); if not bd then return end
-                    bd.borderR, bd.borderG, bd.borderB = r, g, b; RefreshTBB()
-                end,
-                false, 20)
-            PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
         end
 
         -- Ensure bar frames exist before showing placeholders

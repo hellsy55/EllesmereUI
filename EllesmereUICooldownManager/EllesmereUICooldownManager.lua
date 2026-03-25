@@ -1737,9 +1737,11 @@ RestoreBlizzardCDM = function()
     end
 end
 
--- Restore only the Blizzard buff CDM frame (BuffIconCooldownViewer).
+-- Restore Blizzard's BuffBarCooldownViewer (the bar-style buff tracking strip)
+-- so it reappears when TBB is disabled via "Use Blizzard CDM Bars".
+-- Only touches the secondary bar viewer; CDM icon bars are never affected.
 local function RestoreBlizzardBuffFrame()
-    local frameName = BLIZZ_CDM_FRAMES.buffs
+    local frameName = BLIZZ_CDM_FRAMES_SECONDARY.buffs
     if not frameName then return end
     local frame = _G[frameName]
     local fc = frame and _ecmeFC[frame]
@@ -1751,6 +1753,9 @@ local function RestoreBlizzardBuffFrame()
                 frame:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
             end
         end
+        frame:SetAlpha(1)
+        frame:EnableMouse(true)
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
         fc.hidden = false
         fc.restoring = nil
     end
@@ -3459,6 +3464,7 @@ _CDMApplyVisibility = function()
                         if frame._visHidden then
                             icon:Hide()
                         else
+                            icon:Show()
                             icon:SetAlpha(containerAlpha)
                         end
                     end
@@ -3682,25 +3688,20 @@ BuildAllCDMBars = function()
         HideBlizzardCDM()
     end
 
-    --[[ DISABLED: useBlizzardBuffBars feature temporarily removed
-    local useBlizzBuffs = p.cdmBars.useBlizzardBuffBars
-    if useBlizzBuffs and p.cdmBars.hideBlizzard then
+    -- If user wants Blizzard's tracking bars instead of TBB, restore the
+    -- secondary BuffBarCooldownViewer that HideBlizzardCDM moved offscreen.
+    -- This only affects the bar-style buff viewer; CDM icon bars are untouched.
+    if p.cdmBars.useBlizzardBuffBars and p.cdmBars.hideBlizzard then
         RestoreBlizzardBuffFrame()
     end
-    --]]
-    local useBlizzBuffs = false
 
     -- Build each bar and populate fast lookup
     local hookActive = ns.IsViewerHooked and ns.IsViewerHooked()
     wipe(barDataByKey)
     for i, barData in ipairs(p.cdmBars.bars) do
         barDataByKey[barData.key] = barData
-        if useBlizzBuffs and barData.key == "buffs" then
-            local frame = cdmBarFrames[barData.key]
-            if frame then EllesmereUI.SetElementVisibility(frame, false) end
-        else
-            BuildCDMBar(i)
-            if hookActive and BLIZZ_CDM_FRAMES[barData.key] then
+        BuildCDMBar(i)
+        if hookActive and BLIZZ_CDM_FRAMES[barData.key] then
                 -- Hooked default bar: skip icon state reset and layout.
                 -- CollectAndReanchor will repopulate from viewer pools.
                 local frame = cdmBarFrames[barData.key]
@@ -3725,7 +3726,6 @@ BuildAllCDMBars = function()
                 LayoutCDMBar(barData.key)
                 ApplyCDMTooltipState(barData.key)
             end
-        end
     end
     -- When hooks are active, queue a reanchor to repopulate default bars
     if hookActive and ns.QueueReanchor then
@@ -5208,11 +5208,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if p and p.cdmBars and p.cdmBars.hideBlizzard then
             C_Timer.After(0, function()
                 HideBlizzardCDM()
-                --[[ DISABLED: useBlizzardBuffBars feature temporarily removed
                 if p.cdmBars.useBlizzardBuffBars then
                     RestoreBlizzardBuffFrame()
                 end
-                --]]
             end)
         end
         return
