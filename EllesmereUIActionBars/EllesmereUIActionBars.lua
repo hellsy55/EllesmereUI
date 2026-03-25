@@ -192,6 +192,12 @@ function EAB_VTABLE.ExtraBars.PatchDetachedQueueStatusLayout()
             return self._eabOriginalLayout(self)
         end
 
+        -- MicroMenu:Layout() calls MicroMenuContainer:GetPosition() which
+        -- needs valid GetCenter() coordinates. Skip the layout when the
+        -- container has just become visible and the layout system hasn't
+        -- resolved screen coordinates yet.
+        if not self:GetCenter() then return end
+
         -- Once the queue eye lives in its own holder, fall back to the same
         -- container sizing logic but exclude detached queue-eye geometry.
         local isHorizontal = not MicroMenu or MicroMenu.isHorizontal
@@ -4402,11 +4408,11 @@ function EAB_VTABLE.ExtraBars.ApplyManagedMouse(frame, blizzOwnedVisibility, s, 
     if not frame or not s then return end
 
     shouldShow = (shouldShow ~= false)
-    -- Managed non-secure bars can safely refresh mouse handling in combat.
-    -- Without this, bars that change visibility on combat enter/leave can end
-    -- up visible but still using the stale hidden-state mouse flags.
+    -- Blizzard-owned frames (QueueStatusButton) manage their own mouse
+    -- state; overriding it disables clicking/hovering after every
+    -- visibility refresh.
     if blizzOwnedVisibility then
-        SafeEnableMouse(frame, false)
+        return
     elseif s.mouseoverEnabled and s.clickThrough then
         SafeEnableMouseMotionOnly(frame, shouldShow)
     else
@@ -4416,6 +4422,16 @@ end
 
 function EAB_VTABLE.ExtraBars.ApplyManagedNonSecurePresentation(info, frame, s, shouldShow, allowShow)
     if not frame or not s then return end
+
+    -- Show/hide the holder BEFORE the Blizzard frame so the parent has
+    -- valid screen coordinates when the child's Show() triggers Blizzard
+    -- Layout callbacks that call GetCenter().
+    if not info.isDataBar then
+        local holder = extraBarHolders[info.key]
+        if holder then
+            if shouldShow then holder:Show() else holder:Hide() end
+        end
+    end
 
     if info.blizzOwnedVisibility then
         EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, "visibility", not shouldShow)
