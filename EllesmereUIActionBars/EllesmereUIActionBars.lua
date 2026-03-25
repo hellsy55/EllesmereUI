@@ -23,6 +23,7 @@ local EAB_VTABLE = {
     ExtraBars = {},
     CooldownFonts = {},
     Hover = {},
+    MainBarPageSync = {},
 }
 EAB.VisibilityCompat = EAB.VisibilityCompat or {}
 
@@ -39,6 +40,7 @@ local C_Timer_After = C_Timer.After
 local RegisterStateDriver = RegisterStateDriver
 local RegisterAttributeDriver = RegisterAttributeDriver
 local GetBindingKey = GetBindingKey
+local NUM_ACTIONBAR_BUTTONS = NUM_ACTIONBAR_BUTTONS or 12
 
 -------------------------------------------------------------------------------
 --  Bar configuration
@@ -1802,8 +1804,6 @@ ns.LayoutPagingFrame = LayoutPagingFrame
 --  handler. Buttons derive their action via CalculateAction path 1
 --  (ID + (page-1)*12) with native IDs.
 -------------------------------------------------------------------------------
-local NUM_ACTIONBAR_BUTTONS = NUM_ACTIONBAR_BUTTONS or 12
-
 local function CreateBarFrame(info)
     local key = info.key
     local frame = CreateFrame("Frame", "EABBar_" .. key, UIParent, "SecureHandlerStateTemplate")
@@ -1840,9 +1840,20 @@ local function CreateBarFrame(info)
         -- Propagate the page state to actionpage on this bar frame. Runs in the
         -- restricted environment so the attribute is untainted. Buttons with
         -- useparent-actionpage=true inherit it via SecureButton_GetModifiedAttribute.
+        --
+        -- The secure ChildUpdate restores Blizzard's missing second half of the
+        -- paging contract for our custom parent frame: each ActionButton gets an
+        -- attribute change so its normal OnAttributeChanged -> UpdateAction path
+        -- re-evaluates the derived slot even during combat.
         frame:SetAttributeNoHandler("_onstate-page", [[
-            self:SetAttribute("actionpage", tonumber(newstate) or 1)
+            local page = tonumber(newstate) or 1
+            self:SetAttribute("actionpage", page)
+            self:ChildUpdate("eab-page", page)
+            self:CallMethod("OnEABPageChanged")
         ]])
+        frame.OnEABPageChanged = function()
+            EAB_VTABLE.MainBarPageSync.Queue()
+        end
 
         RegisterStateDriver(frame, "page", pagingConditions)
     end
@@ -1995,6 +2006,9 @@ local function SetupBar(info, skipProtected)
                 -- Stance and pet bar buttons don't have flyout actions.
                 if not info.isStance and not info.isPetBar then
                     GetEABFlyout():RegisterButton(btn)
+                end
+                if info.nativeMainBar then
+                    EAB_VTABLE.MainBarPageSync.InstallButton(btn)
                 end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
@@ -3629,6 +3643,9 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     for i = 1, numIcons do
         local btn = buttons[i]
         if btn then
+            if info.nativeMainBar then
+                EAB_VTABLE.MainBarPageSync.SetButtonConfig(btn, true, showEmpty)
+            end
             local hasAction = ButtonHasAction(btn, info.blizzBtnPrefix)
             local visible = showEmpty or hasAction or quickKeybindVisible
 
@@ -3671,6 +3688,9 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     for i = numIcons + 1, #buttons do
         local btn = buttons[i]
         if btn then
+            if info.nativeMainBar then
+                EAB_VTABLE.MainBarPageSync.SetButtonConfig(btn, false, showEmpty)
+            end
             btn:SetAlpha(0)
             SafeEnableMouse(btn, false)
             if not InCombatLockdown() then
@@ -3684,6 +3704,80 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     -- OnEnter handler already checks cursor proximity to visible buttons,
     -- so shrinking the frame is unnecessary and can misposition bars
     -- whose anchor point isn't TOPLEFT.
+end
+
+-------------------------------------------------------------------------------
+--  Main Bar Page Sync
+--  EAB owns MainBar paging through a custom secure parent frame, so Blizzard's
+--  stock ActionBarController no longer runs its usual "set actionpage, then
+--  refresh every button" sequence for ActionButton1-12.  We restore that
+--  contract here by:
+--    1. tracking page-sensitive visibility inputs on the buttons, and
+--    2. using a secure child-update from the MainBar frame to trigger the
+--       buttons' normal OnAttributeChanged -> UpdateAction path in combat.
+-------------------------------------------------------------------------------
+function EAB_VTABLE.MainBarPageSync.SetButtonConfig(btn, withinCutoff, showEmpty)
+    if not btn or InCombatLockdown() then return end
+    btn:SetAttributeNoHandler("eab-withincutoff", withinCutoff and 1 or 0)
+    btn:SetAttributeNoHandler("eab-showempty", showEmpty and 1 or 0)
+end
+
+function EAB_VTABLE.MainBarPageSync.Queue()
+    local state = EAB_VTABLE.MainBarPageSync
+    if state.pending then return end
+    state.pending = true
+    C_Timer_After(0, function()
+        state.pending = false
+        if InCombatLockdown() or not EAB or not EAB.db then return end
+        EAB:ApplyAlwaysShowButtons("MainBar")
+    end)
+end
+
+function EAB_VTABLE.MainBarPageSync.InstallAll()
+    if InCombatLockdown() then return end
+    local buttons = barButtons["MainBar"]
+    if not buttons then return end
+    for _, btn in ipairs(buttons) do
+        EAB_VTABLE.MainBarPageSync.InstallButton(btn)
+    end
+end
+
+function EAB_VTABLE.MainBarPageSync.InstallButton(btn)
+    if not btn or btn:GetAttribute("_eabPageSyncInstalled") or InCombatLockdown() then return end
+
+    btn:SetAttributeNoHandler("_childupdate-eab-page", ([[
+        local page = tonumber(message) or 1
+        local visible = self:GetAttribute("eab-withincutoff") ~= 0
+
+        if visible and self:GetAttribute("eab-showempty") == 0 then
+            local slot = self:GetID() + ((page - 1) * %d)
+            visible = HasAction(slot)
+        end
+
+        local hidden = self:GetAttribute("statehidden")
+        local changed = false
+
+        if visible then
+            if hidden then
+                self:SetAttribute("statehidden", nil)
+                changed = true
+            end
+            self:Show(true)
+        else
+            if not hidden then
+                self:SetAttribute("statehidden", true)
+                changed = true
+            end
+            self:Hide(true)
+        end
+
+        if not changed then
+            local token = self:GetAttribute("eab-pagesync-token") or 0
+            self:SetAttribute("eab-pagesync-token", token == 0 and 1 or 0)
+        end
+    ]]):format(NUM_ACTIONBAR_BUTTONS))
+
+    btn:SetAttributeNoHandler("_eabPageSyncInstalled", true)
 end
 
 -------------------------------------------------------------------------------
@@ -5668,6 +5762,10 @@ local function ApplyAll()
     end
 
     local inCombat = InCombatLockdown()
+
+    if not inCombat then
+        EAB_VTABLE.MainBarPageSync.InstallAll()
+    end
 
     for _, info in ipairs(BAR_CONFIG) do
         local key = info.key
