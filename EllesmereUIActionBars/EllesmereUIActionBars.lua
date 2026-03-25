@@ -6828,27 +6828,51 @@ function EAB:FinishSetup()
                 return
             end
             if InCombatLockdown() then
-                -- Combat-safe path: update textures and usability per-button
+                -- Combat-safe path: update textures and visual state per-button
                 -- without touching protected frame operations (Show/Hide/SetParent).
                 -- This allows pet abilities to appear when summoning a pet mid-combat.
                 local hasPetBar = PetHasActionBar()
                 for i = 1, NUM_PET_ACTION_SLOTS do
                     local btn = _G["PetActionButton" .. i]
                     if btn then
-                        local name, texture, isToken, isActive, autoCast, autoCastEnabled = GetPetActionInfo(i)
+                        local name, texture, isToken, isActive, autoCastAllowed, autoCastEnabled = GetPetActionInfo(i)
                         if hasPetBar and texture then
                             if isToken then btn.icon:SetTexture(_G[texture])
                             else btn.icon:SetTexture(texture) end
+                            -- Dim icon when the ability is not currently usable.
+                            local usable = GetPetActionSlotUsable(i)
+                            local shade = usable and 1 or 0.4
+                            btn.icon:SetVertexColor(shade, shade, shade)
                             btn.icon:Show()
-                            if btn.AutoCastShine then
-                                if autoCastEnabled then
-                                    AutoCastShine_AutoCastStart(btn.AutoCastShine)
-                                else
-                                    AutoCastShine_AutoCastStop(btn.AutoCastShine)
-                                end
+                            -- AutoCastOverlay (AutoCastOverlayMixin) replaced the old
+                            -- AutoCastShine API in modern WoW. SetShown controls the
+                            -- corner-ring frame; ShowAutoCastEnabled starts/stops the
+                            -- rotating shine animation.
+                            if btn.AutoCastOverlay then
+                                btn.AutoCastOverlay:SetShown(autoCastAllowed)
+                                btn.AutoCastOverlay:ShowAutoCastEnabled(autoCastEnabled)
                             end
                         else
                             btn.icon:Hide()
+                            if btn.AutoCastOverlay then btn.AutoCastOverlay:Hide() end
+                        end
+                        -- Reflect the active state so pet mode buttons (Passive /
+                        -- Assist / Defend) highlight the currently selected mode.
+                        -- Attack actions flash instead of showing the full highlight.
+                        -- SetChecked / StartFlash / StopFlash are visual-only and safe
+                        -- to call during combat lockdown.
+                        if isActive then
+                            if IsPetAttackAction(i) then
+                                btn:StartFlash()
+                                btn:GetCheckedTexture():SetAlpha(0.5)
+                            else
+                                btn:StopFlash()
+                                btn:GetCheckedTexture():SetAlpha(1.0)
+                            end
+                            btn:SetChecked(true)
+                        else
+                            btn:StopFlash()
+                            btn:SetChecked(false)
                         end
                         -- Update cooldown
                         if btn.cooldown then
