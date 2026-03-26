@@ -384,6 +384,28 @@ end
 --- Check if a spell is ACTIVELY tracked in the correct Blizzard CDM viewer.
 --- Returns true only if the spell has a live frame in the viewer.
 --- Used by spell picker popups and overlays.
+--- Check if a spell exists in ANY Blizzard CDM category (learned or not).
+--- Returns true if the spell is configured in Blizzard CDM at all.
+function ns.IsSpellInAnyCDMCategory(spellID)
+    if not spellID or spellID <= 0 then return false end
+    if not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCategorySet then return false end
+    for cat = 0, 3 do
+        local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+        if allIDs then
+            for _, cdID in ipairs(allIDs) do
+                local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                if info then
+                    if info.spellID == spellID then return true end
+                    local sid = ns.ResolveInfoSpellID(info)
+                    if sid == spellID then return true end
+                    if info.overrideSpellID == spellID then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
 function ns.IsSpellTrackedForBarType(spellID, barType)
     if not spellID or spellID <= 0 then return false end
     if barType == "buffs" then
@@ -410,16 +432,18 @@ function ns.AddPresetToBar(barKey, preset)
     local isCustomBuff = bd and bd.barType == "custom_buff"
 
     if isCustomBuff then
-        -- Add primary ID only (preview shows one icon).
-        -- Store all variant IDs so the aura check can match any of them.
-        local primaryID = preset.spellIDs[1]
-        for _, existing in ipairs(spellList) do
-            if existing == primaryID then return false, "exists" end
+        if preset.glowBased then
+            -- Glow-based presets removed (Time Spiral etc.)
+            return false
+        else
+            local primaryID = preset.spellIDs[1]
+            for _, existing in ipairs(spellList) do
+                if existing == primaryID then return false, "exists" end
+            end
+            spellList[#spellList + 1] = primaryID
+            if not sd.spellDurations then sd.spellDurations = {} end
+            sd.spellDurations[primaryID] = preset.duration or 30
         end
-        spellList[#spellList + 1] = primaryID
-        -- Store variant list for multi-ID aura checking
-        if not sd.presetVariants then sd.presetVariants = {} end
-        sd.presetVariants[primaryID] = preset.spellIDs
     else
         -- Legacy: add primary ID with duration/group metadata
         local primaryID = preset.spellIDs[1]

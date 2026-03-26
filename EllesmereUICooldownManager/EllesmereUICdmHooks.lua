@@ -98,6 +98,40 @@ _racialCdListener:SetScript("OnEvent", function()
     for _, f in pairs(_presetFrames) do
         if f._isRacialFrame then f._racialCdDirty = true end
     end
+    if QueueCustomBuffUpdate then QueueCustomBuffUpdate() end
+end)
+
+-- UNIT_SPELLCAST_SUCCEEDED: fires the EXACT spell ID that was cast.
+-- Used by Custom Aura Bars to detect which specific spell was used
+-- (potions share cooldowns, so SPELL_UPDATE_COOLDOWN can't distinguish).
+-- Works in combat. Accumulates cast IDs into a set for batched processing.
+local _pendingCastIDs = {}
+local _customBuffDirty = false
+local _customBuffFrame = CreateFrame("Frame")
+_customBuffFrame:Hide()
+local CUSTOM_BUFF_THROTTLE = 0.05
+local _lastCustomBuffTime = 0
+_customBuffFrame:SetScript("OnUpdate", function(self)
+    if not _customBuffDirty then self:Hide(); return end
+    local now = GetTime()
+    if now - _lastCustomBuffTime < CUSTOM_BUFF_THROTTLE then return end
+    _customBuffDirty = false
+    _lastCustomBuffTime = now
+    if ns.UpdateCustomBuffBars then ns.UpdateCustomBuffBars() end
+end)
+
+local function QueueCustomBuffUpdate()
+    _customBuffDirty = true
+    _customBuffFrame:Show()
+end
+
+local _spellCastListener = CreateFrame("Frame")
+_spellCastListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+_spellCastListener:SetScript("OnEvent", function(_, _, _, _, spellID)
+    if spellID then
+        _pendingCastIDs[spellID] = true
+        QueueCustomBuffUpdate()
+    end
 end)
 
 -- (Preset buff frame system removed — presets are no longer injected.
@@ -455,7 +489,7 @@ local function DecorateFrame(frame, barData)
         fd.cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
         fd.cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
         fd.cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
-        local isBuff = (barData.barType == "buffs" or barData.key == "buffs")
+        local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)
     end
 
@@ -500,7 +534,7 @@ function ns.RebuildSpellRouteMap()
             local sd = ns.GetBarSpellData(bd.key)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
-                    if sid and sid > 0 then
+                    if type(sid) == "number" and sid > 0 then
                         _spellRouteMap[sid] = bd.key
                         if _FindOverride then
                             local ovr = _FindOverride(sid)
@@ -643,6 +677,9 @@ end
 --  6. Move unclaimed frames offscreen
 -------------------------------------------------------------------------------
 local function CollectAndReanchor()
+    -- Suspend all hook logic while Blizzard CDM settings is open to prevent taint
+    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then return end
+
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.enabled then return end
 
@@ -673,7 +710,7 @@ local function CollectAndReanchor()
                     -- Hook aura events on each child (once) for re-layout
                     if not frame._euiBuffHooked then
                         frame._euiBuffHooked = true
-                        local function BuffChanged() CollectAndReanchor() end
+                        local function BuffChanged() if ns.QueueReanchor then ns.QueueReanchor() end end
                         if frame.OnActiveStateChanged then hooksecurefunc(frame, "OnActiveStateChanged", BuffChanged) end
                         if frame.OnUnitAuraAddedEvent then hooksecurefunc(frame, "OnUnitAuraAddedEvent", BuffChanged) end
                         if frame.OnUnitAuraRemovedEvent then hooksecurefunc(frame, "OnUnitAuraRemovedEvent", BuffChanged) end
@@ -838,18 +875,44 @@ local function CollectAndReanchor()
                                 end
                             end
                             if f then
-                                -- Check cooldown (try base + alt item IDs)
-                                local start, dur, enable = C_Item.GetItemCooldown(itemID)
+                                -- Check cooldown (try C_Container first, then C_Item, then alts)
+                                local getContainerCD = C_Container and C_Container.GetItemCooldown
+                                local start, dur, enable
+                                if getContainerCD then
+                                    start, dur, enable = getContainerCD(itemID)
+                                end
+                                if not (start and dur and dur > 1.5) then
+                                    start, dur, enable = C_Item.GetItemCooldown(itemID)
+                                end
                                 if not (start and dur and dur > 1.5) and f._presetData and f._presetData.altItemIDs then
                                     for _, altID in ipairs(f._presetData.altItemIDs) do
-                                        start, dur, enable = C_Item.GetItemCooldown(altID)
+                                        if getContainerCD then
+                                            start, dur, enable = getContainerCD(altID)
+                                        end
+                                        if not (start and dur and dur > 1.5) then
+                                            start, dur, enable = C_Item.GetItemCooldown(altID)
+                                        end
                                         if start and dur and dur > 1.5 then break end
                                     end
                                 end
                                 if start and dur and dur > 1.5 and enable then
                                     f._cooldown:SetCooldown(start, dur)
+                                    f._cdStart = start; f._cdDur = dur
+                                elseif f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
+                                    -- Item consumed but cached cooldown still active; don't clear
                                 else
                                     f._cooldown:Clear()
+                                    f._cdStart = nil; f._cdDur = nil
+                                end
+                                -- Gray out healthstones if not in bags
+                                if f._presetData and (f._presetData.key == "healthstone" or f._presetData.key == "demonic_healthstone") then
+                                    local inBags = C_Item.GetItemCount(itemID) > 0
+                                    if not inBags and f._presetData.altItemIDs then
+                                        for _, altID in ipairs(f._presetData.altItemIDs) do
+                                            if C_Item.GetItemCount(altID) > 0 then inBags = true; break end
+                                        end
+                                    end
+                                    if f._tex then f._tex:SetDesaturated(not inBags) end
                                 end
                                 DecorateFrame(f, barData); f:Show()
                                 list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
@@ -897,9 +960,10 @@ local function CollectAndReanchor()
                                             f.cooldownID = nil; f.cooldownInfo = nil
                                             f.layoutIndex = 99999
                                             _presetFrames[fkey] = f
+                                            -- Cache spell icon on creation
+                                            local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                                            if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
                                         end
-                                        local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
-                                        if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
                                         -- Set duration from aura data (nil when EUI preview)
                                         if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
                                             local start = aura.expirationTime - aura.duration
@@ -1004,11 +1068,9 @@ local function CollectAndReanchor()
                         usedFrames[frame] = true
                         DecorateFrame(frame, barData)
                         if frame:GetScale() ~= 1 then frame:SetScale(1) end
-                        if frame:GetParent() ~= container then
-                            local fc2 = FC(frame)
-                            if not fc2._origParent then fc2._origParent = frame:GetParent() end
-                            frame:SetParent(container)
-                        end
+                        -- No SetParent — it taints the frame (causes secret value
+                        -- errors on charges/hasTotem). Blizzard's Layout may
+                        -- reposition frames, but our reanchor fixes them back.
                         FC(frame).barKey = barKey
                         FC(frame).spellID = entry.baseSpellID or entry.spellID
                         icons[count] = frame
@@ -1177,61 +1239,61 @@ function ns.RefreshAllOverlays()
     end
 end
 
+-- CheckAura removed — custom aura bars now use cooldown-based detection.
+
 -------------------------------------------------------------------------------
 --  UpdateCustomBuffBars
---  Dedicated update for custom_buff bars. Runs ONLY from UNIT_AURA and
---  explicit events — never from Layout hooks. This prevents transient
---  aura check failures from hiding frames during combat.
+--  Dedicated update for custom_buff (Custom Aura) bars.
+--  Uses SPELL_UPDATE_COOLDOWN to detect spell usage, then shows icon with
+--  a hardcoded duration (reverse cooldown swipe). No C_UnitAuras.
+--  Triggered by the racial cooldown listener (SPELL_UPDATE_COOLDOWN).
 -------------------------------------------------------------------------------
+
+-- Active timers: [barKey:sid] = { start = GetTime(), duration = N }
+local _customAuraTimers = {}
+
 local function UpdateCustomBuffBars()
+    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then return end
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return end
     local LayoutCDMBar = ns.LayoutCDMBar
     local RefreshCDMIconAppearance = ns.RefreshCDMIconAppearance
     local euiOpen = EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown()
-
-    -- Build a reverse lookup from BUFF_BAR_PRESETS for variant matching.
-    -- This covers bars created before presetVariants was stored per-bar.
-    local presetsByPrimary = {}
-    local presets = ns.BUFF_BAR_PRESETS
-    if presets then
-        for _, pr in ipairs(presets) do
-            if pr.spellIDs and pr.spellIDs[1] then
-                presetsByPrimary[pr.spellIDs[1]] = pr.spellIDs
-            end
-        end
-    end
+    local now = GetTime()
 
     for _, barData in ipairs(p.cdmBars.bars) do
         if barData.enabled and barData.barType == "custom_buff" then
             local barKey = barData.key
             local container = cdmBarFrames[barKey]
-            if container then  -- skip this bar if no container, don't break the loop
+            if container then
                 local sd = ns.GetBarSpellData(barKey)
-                local spellList = sd and sd.assignedSpells
-                if spellList and #spellList > 0 then
+                local spellList = sd and sd.assignedSpells or {}
 
                 local icons = cdmBarIcons[barKey]
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local count = 0
 
                 for _, sid in ipairs(spellList) do
-                    if sid and sid > 0 then
-                        -- Check primary spell ID
-                        local aura = C_UnitAuras.GetPlayerAuraBySpellID(sid)
-                        -- Check preset variants (stored per-bar or from global presets)
-                        if not aura then
-                            local variants = (sd.presetVariants and sd.presetVariants[sid])
-                                          or presetsByPrimary[sid]
-                            if variants then
-                                for _, varSid in ipairs(variants) do
-                                    aura = C_UnitAuras.GetPlayerAuraBySpellID(varSid)
-                                    if aura then break end
-                                end
-                            end
+                    if type(sid) == "number" and sid > 0 then
+                        local duration = sd.spellDurations and sd.spellDurations[sid] or 0
+                        if duration > 0 then
+                        local timerKey = barKey .. ":" .. sid
+                        local timer = _customAuraTimers[timerKey]
+
+                        -- Detect via UNIT_SPELLCAST_SUCCEEDED: exact spell match.
+                        -- _pendingCastIDs accumulates cast IDs from the event handler.
+                        if _pendingCastIDs[sid] and duration > 0 then
+                            _customAuraTimers[timerKey] = {
+                                start = now,
+                                duration = duration,
+                            }
+                            timer = _customAuraTimers[timerKey]
                         end
 
-                        if aura or euiOpen then
+                        local isActive = timer and duration > 0
+                            and (now - timer.start) < timer.duration
+
+                        if isActive or euiOpen then
                             local fkey = barKey .. ":custombuff:" .. sid
                             local f = _presetFrames[fkey]
                             if not f then
@@ -1249,13 +1311,16 @@ local function UpdateCustomBuffBars()
                                 f.cooldownID = nil; f.cooldownInfo = nil
                                 f.layoutIndex = 99999
                                 _presetFrames[fkey] = f
+                                -- Hook OnCooldownDone to trigger update when timer expires
+                                cd:HookScript("OnCooldownDone", function()
+                                    C_Timer.After(0, QueueCustomBuffUpdate)
+                                end)
+                                -- Cache spell icon on creation
+                                local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                                if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
                             end
-                            local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
-                            if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
-                            -- Set cooldown swipe from aura duration
-                            if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
-                                local start = aura.expirationTime - aura.duration
-                                f._cooldown:SetCooldown(start, aura.duration)
+                            if isActive then
+                                f._cooldown:SetCooldown(timer.start, timer.duration)
                             else
                                 f._cooldown:Clear()
                             end
@@ -1263,10 +1328,15 @@ local function UpdateCustomBuffBars()
                             count = count + 1
                             icons[count] = f
                         else
+                            -- Expired or never started
                             local fkey = barKey .. ":custombuff:" .. sid
                             local f = _presetFrames[fkey]
                             if f then f:Hide() end
+                            if timer and not isActive then
+                                _customAuraTimers[timerKey] = nil
+                            end
                         end
+                        end -- duration > 0 (skip glow reps)
                     end
                 end
 
@@ -1284,10 +1354,11 @@ local function UpdateCustomBuffBars()
                 end
                 container._prevVisibleCount = count
 
-                end -- spellList check
             end -- container check
         end
     end
+    -- Consume pending cast IDs so they don't re-trigger on next call
+    wipe(_pendingCastIDs)
 end
 ns.UpdateCustomBuffBars = UpdateCustomBuffBars
 
@@ -1296,43 +1367,9 @@ ns.UpdateCustomBuffBars = UpdateCustomBuffBars
 --  Only registers UNIT_AURA when at least one custom_buff bar has spells.
 --  Debounced to avoid excessive reanchors from aura ticks.
 -------------------------------------------------------------------------------
-local _customBuffAuraFrame = nil
-local _customBuffAuraRegistered = false
-local _customBuffAuraDebounce = nil
-
-function ns.UpdateCustomBuffAuraTracking()
-    local p = ECME and ECME.db and ECME.db.profile
-    local needTracking = false
-    if p and p.cdmBars and p.cdmBars.bars then
-        for _, bd in ipairs(p.cdmBars.bars) do
-            if bd.enabled and bd.barType == "custom_buff" then
-                local sd = ns.GetBarSpellData(bd.key)
-                if sd and sd.assignedSpells and #sd.assignedSpells > 0 then
-                    needTracking = true; break
-                end
-            end
-        end
-    end
-    if needTracking and not _customBuffAuraRegistered then
-        if not _customBuffAuraFrame then
-            _customBuffAuraFrame = CreateFrame("Frame")
-            _customBuffAuraFrame:SetScript("OnEvent", function()
-                if _customBuffAuraDebounce then return end
-                _customBuffAuraDebounce = C_Timer.After(0.05, function()
-                    _customBuffAuraDebounce = nil
-                    UpdateCustomBuffBars()
-                end)
-            end)
-        end
-        _customBuffAuraFrame:RegisterUnitEvent("UNIT_AURA", "player")
-        _customBuffAuraRegistered = true
-    elseif not needTracking and _customBuffAuraRegistered then
-        if _customBuffAuraFrame then
-            _customBuffAuraFrame:UnregisterAllEvents()
-        end
-        _customBuffAuraRegistered = false
-    end
-end
+-- UNIT_AURA removed — custom aura bars use SPELL_UPDATE_COOLDOWN instead.
+-- UpdateCustomBuffAuraTracking kept as no-op for callers that reference it.
+function ns.UpdateCustomBuffAuraTracking() end
 
 --- Queue a reanchor for the next OnUpdate frame.
 local function QueueReanchor()
@@ -1341,9 +1378,14 @@ local function QueueReanchor()
 end
 ns.QueueReanchor = QueueReanchor
 
+local REANCHOR_THROTTLE = 0.05
+local _lastReanchorTime = 0
 local function ProcessReanchorQueue(self)
     if not reanchorDirty then self:Hide(); return end
+    local now = GetTime()
+    if now - _lastReanchorTime < REANCHOR_THROTTLE then return end
     reanchorDirty = false
+    _lastReanchorTime = now
     CollectAndReanchor()
     if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
 end
@@ -1383,25 +1425,31 @@ function ns.SetupViewerHooks()
     if CooldownViewerSettings then
         CooldownViewerSettings:HookScript("OnHide", function()
             C_Timer.After(0.3, QueueReanchor)
+            -- Prompt reload after editing Blizzard CDM settings
+            EllesmereUI:ShowConfirmPopup({
+                title = "Reload Required",
+                message = "Changes to the Blizzard Cooldown Manager require a UI reload to avoid potential errors.",
+                confirmText = "Reload Now",
+                cancelText = "Later",
+                onConfirm = function() ReloadUI() end,
+            })
         end)
     end
 
-    -- EUI options panel: reanchor when opened/closed so inactive buff
-    -- preview (50% alpha) and overlays update. Out-of-combat only.
-    if EllesmereUI._mainFrame then
-        EllesmereUI._mainFrame:HookScript("OnShow", function()
-            C_Timer.After(0.1, function()
-                QueueReanchor()
-                UpdateCustomBuffBars()
-            end)
+    -- EUI options panel: reanchor when opened/closed so custom aura
+    -- preview icons and overlays update correctly.
+    EllesmereUI:RegisterOnShow(function()
+        C_Timer.After(0.1, function()
+            QueueReanchor()
+            UpdateCustomBuffBars()
         end)
-        EllesmereUI._mainFrame:HookScript("OnHide", function()
-            C_Timer.After(0.1, function()
-                QueueReanchor()
-                UpdateCustomBuffBars()
-            end)
+    end)
+    EllesmereUI:RegisterOnHide(function()
+        C_Timer.After(0.1, function()
+            QueueReanchor()
+            UpdateCustomBuffBars()
         end)
-    end
+    end)
 
     -- Buff icon detection is handled by per-frame hooks installed in
     -- CollectAndReanchor (OnActiveStateChanged, OnUnitAuraAddedEvent,

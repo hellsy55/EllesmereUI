@@ -171,15 +171,12 @@ local _myRacials = {}
 local _myRacialsSet = {}
 
 
--- Buff bar presets (shared by CDM buff bars and Tracking Bars)
+-- Custom Aura Bar presets (potions with hardcoded durations).
+-- Detection: SPELL_UPDATE_COOLDOWN (spell goes on CD = just used).
+-- Display: reverse cooldown swipe for the duration.
+-- Bloodlust/Time Spiral/warlock pets removed — they can't be tracked
+-- via cooldown detection (they're cast by OTHER players or have no CD).
 local BUFF_BAR_PRESETS = {
-    {
-        key      = "bloodlust",
-        name     = UnitFactionGroup("player") == "Horde" and "Bloodlust" or "Heroism",
-        icon     = 132313,
-        spellIDs = { 2825, 32182, 80353, 264667, 390386, 381301, 444062, 444257 },
-        duration = 40,
-    },
     {
         key      = "lights_potential",
         name     = "Light's Potential",
@@ -200,19 +197,6 @@ local BUFF_BAR_PRESETS = {
         icon     = 134764,
         spellIDs = { 371125, 431424, 371133, 371134, 1236551 },
         duration = 18,
-    },
-    {
-        key         = "time_spiral",
-        name        = "Time Spiral",
-        icon        = 4622479,
-        glowBased   = true,
-        glowSpellIDs = {
-            48265, 195072, 189110, 1850, 252216, 358267, 186257, 1953,
-            212653, 361138, 119085, 190784, 73325, 2983, 192063, 58875,
-            79206, 48020, 6544,
-        },
-        spellIDs = {},
-        duration = 10,
     },
 }
 ns.BUFF_BAR_PRESETS = BUFF_BAR_PRESETS
@@ -253,6 +237,21 @@ local CDM_ITEM_PRESETS = {
         icon     = 134764,
         itemID   = 211756,
         altItemIDs = { 241304, 241305 },
+    },
+    {
+        key      = "healthstone",
+        name     = "Healthstone",
+        icon     = 538745,
+        itemID   = 5512,
+        spellID  = 6262,
+        altItemIDs = { 224464 },
+    },
+    {
+        key      = "demonic_healthstone",
+        name     = "Demonic Healthstone",
+        itemID   = 224464,
+        spellID  = 452930,
+        altItemIDs = { 5512 },
     },
 }
 ns.CDM_ITEM_PRESETS = CDM_ITEM_PRESETS
@@ -1593,6 +1592,7 @@ local function EnforceCooldownViewerEditModeSettings()
     _editModePolicyApplied = true
 end
 
+
 -------------------------------------------------------------------------------
 --  SyncHideWhenInactive
 --  Sets Blizzard's Edit Mode HideWhenInactive to match our profile setting,
@@ -2013,10 +2013,29 @@ BuildCDMBar = function(barIndex)
             if panelOpen then
                 frame._mouseHiddenByPanel = true
                 if frame:GetAlpha() > 0 then frame:SetAlpha(0) end
+                -- Reset icon strata while panel is open
+                local icons = cdmBarIcons[key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] and icons[ii]:GetFrameStrata() == "TOOLTIP" then
+                            icons[ii]:SetFrameStrata("LOW")
+                            icons[ii]:SetFrameLevel(5 + ii)
+                        end
+                    end
+                end
                 return
             elseif frame._mouseHiddenByPanel then
-                -- Panel just closed: restore visibility
+                -- Panel just closed: restore visibility and icon strata
                 frame._mouseHiddenByPanel = false
+                local icons = cdmBarIcons[key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] then
+                            icons[ii]:SetFrameStrata("TOOLTIP")
+                            icons[ii]:SetFrameLevel(9980 + ii)
+                        end
+                    end
+                end
                 _CDMApplyVisibility()
             end
             local s = UIParent:GetEffectiveScale()
@@ -2328,10 +2347,21 @@ LayoutCDMBar = function(barKey)
         return bottomRowCount
     end
 
+    -- Elevate icon strata for cursor-anchored bars (icons aren't parented
+    -- to the container, so they don't inherit its TOOLTIP strata).
+    local isMouseBar = barData.anchorTo == "mouse"
+
     -- Position each icon: fill bottom-up so bottom rows are full,
     -- top row gets the remainder. Center any row with fewer icons than stride.
     for i, icon in ipairs(visibleIcons) do
         icon:SetSize(iconW, iconH)
+        if isMouseBar then
+            icon:SetFrameStrata("TOOLTIP")
+            icon:SetFrameLevel(9980 + i)
+        elseif icon:GetFrameStrata() == "TOOLTIP" then
+            icon:SetFrameStrata("LOW")
+            icon:SetFrameLevel(5 + i)
+        end
         icon:ClearAllPoints()
 
         -- Map sequential index to bottom-up grid position.
@@ -2549,55 +2579,74 @@ end
 ns.ApplyUntrackedOverlay = ApplyUntrackedOverlay
 
 -------------------------------------------------------------------------------
---  Toggle tooltip OnUpdate for all icons on a bar.
---  When enabled, each icon polls IsMouseOver every frame.
---  When disabled, the OnUpdate is nil -- zero performance cost.
+--  CDM Tooltip System
+--  Single global OnUpdate handler instead of per-icon. Checks which icon
+--  (if any) the mouse is over, only when at least one bar has tooltips on.
 -------------------------------------------------------------------------------
-local _cdmTooltipOnUpdate = function(self)
-    -- Suppress tooltips while in edit / unlock mode
-    local sfd = _getFD(self)
+local _tooltipBars = {}  -- [barKey] = true for bars with tooltips enabled
+local _tooltipFrame = CreateFrame("Frame")
+_tooltipFrame:Hide()
+local _tooltipCurrentIcon = nil
+
+_tooltipFrame:SetScript("OnUpdate", function()
     if EllesmereUI and EllesmereUI._unlockActive then
-        local shown = sfd and sfd.tooltipShown or self._tooltipShown
-        if shown then
+        if _tooltipCurrentIcon then
             GameTooltip:Hide()
-            if sfd then sfd.tooltipShown = false else self._tooltipShown = false end
+            _tooltipCurrentIcon = nil
         end
         return
     end
-    local over = self:IsMouseOver()
-    local shown = sfd and sfd.tooltipShown or self._tooltipShown
-    if over and not shown then
-        local sfc = _ecmeFC[self]
-        local sid = sfc and sfc.spellID or self._spellID
+    -- Find the icon under the mouse
+    local found = nil
+    for barKey in pairs(_tooltipBars) do
+        local icons = cdmBarIcons[barKey]
+        if icons then
+            for i = 1, #icons do
+                local icon = icons[i]
+                if icon and icon:IsShown() and icon:IsMouseOver() then
+                    found = icon
+                    break
+                end
+            end
+            if found then break end
+        end
+    end
+    if found and found ~= _tooltipCurrentIcon then
+        local sfc = _ecmeFC[found]
+        local sid = sfc and sfc.spellID or found._spellID
         if sid and sid > 0 then
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+            GameTooltip:SetOwner(found, "ANCHOR_CURSOR")
             GameTooltip:SetSpellByID(sid)
             GameTooltip:Show()
-            if sfd then sfd.tooltipShown = true else self._tooltipShown = true end
+            _tooltipCurrentIcon = found
         end
-    elseif not over and shown then
+    elseif not found and _tooltipCurrentIcon then
         GameTooltip:Hide()
-        if sfd then sfd.tooltipShown = false else self._tooltipShown = false end
+        _tooltipCurrentIcon = nil
     end
-end
+end)
 
 local function ApplyCDMTooltipState(barKey)
-    local icons = cdmBarIcons[barKey]
-    if not icons then return end
     local bd = barDataByKey[barKey]
     local enabled = bd and bd.showTooltip
-    for _, icon in ipairs(icons) do
-        if enabled then
-            icon:SetScript("OnUpdate", _cdmTooltipOnUpdate)
-        else
-            icon:SetScript("OnUpdate", nil)
-            local ifd = _getFD(icon)
-            local shown = ifd and ifd.tooltipShown or icon._tooltipShown
-            if shown then
+    if enabled then
+        _tooltipBars[barKey] = true
+    else
+        _tooltipBars[barKey] = nil
+        -- Clear tooltip if it's showing for an icon on this bar
+        if _tooltipCurrentIcon then
+            local sfc = _ecmeFC[_tooltipCurrentIcon]
+            if sfc and sfc.barKey == barKey then
                 GameTooltip:Hide()
-                if ifd then ifd.tooltipShown = false else icon._tooltipShown = false end
+                _tooltipCurrentIcon = nil
             end
         end
+    end
+    -- Show/hide the global tooltip frame based on whether any bar wants tooltips
+    if next(_tooltipBars) then
+        _tooltipFrame:Show()
+    else
+        _tooltipFrame:Hide()
     end
 end
 ns.ApplyCDMTooltipState = ApplyCDMTooltipState
@@ -3116,10 +3165,15 @@ _CDMApplyVisibility = function()
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(vis == "mouseover") end
                 frame._visHidden = true
             else
+                local wasHidden = frame._visHidden
                 _CDMStopFade(frame)
                 frame:SetAlpha(barData.barBgAlpha or 1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
+                -- Icons were moved offscreen by the hooks tick while hidden;
+                -- reposition them immediately so they don't wait for the
+                -- next CDM viewer update (which target changes don't trigger).
+                if wasHidden then LayoutCDMBar(barData.key) end
             end
 
             end -- unlockActive else
@@ -4205,7 +4259,7 @@ do
         local corruptBar = nil
         local corruptSpell = nil
         for _, barData in ipairs(pp.cdmBars.bars) do
-            if MAIN_BAR_KEYS[barData.key] then
+            if MAIN_BAR_KEYS[barData.key] and TALENT_AWARE_BAR_TYPES[barData.key] then
                 local sd = ns.GetBarSpellData(barData.key)
                 if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
@@ -4358,9 +4412,50 @@ function ECME:CDMFinishSetup()
         end
     end
 
+    -- Migrate: remove Bloodlust/Time Spiral/warlock presets from custom_buff bars
+    -- (these can't be tracked via cooldown detection).
+    do
+        local removedPresets = { [2825] = true, [32182] = true, [80353] = true,
+            [264667] = true, [390386] = true, [381301] = true, [444062] = true, [444257] = true, -- Bloodlust variants
+            [104316] = true, [265187] = true, [264119] = true, [111898] = true, -- Warlock pets
+        }
+        local removedPopularKeys = { bloodlust = true, time_spiral = true,
+            call_dreadstalkers = true, demonic_tyrant = true,
+            summon_vilefiend = true, grimoire_felguard = true }
+        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+        if sa and sa.specProfiles then
+            for _, prof in pairs(sa.specProfiles) do
+                -- Clean CDM bar assignedSpells
+                if prof.barSpells then
+                    for bk, bs in pairs(prof.barSpells) do
+                        if bs.assignedSpells then
+                            for i = #bs.assignedSpells, 1, -1 do
+                                if removedPresets[bs.assignedSpells[i]] then
+                                    table.remove(bs.assignedSpells, i)
+                                end
+                            end
+                        end
+                        bs.presetVariants = nil
+                    end
+                end
+                -- Clean TBB Tracking Bars: remove ALL preset/custom bars.
+                -- TBB should only mirror Blizzard's BuffBar viewer.
+                -- Custom tracking now belongs on Custom Aura Bars.
+                if prof.trackedBuffBars and prof.trackedBuffBars.bars then
+                    for i = #prof.trackedBuffBars.bars, 1, -1 do
+                        local bar = prof.trackedBuffBars.bars[i]
+                        if bar.popularKey or bar.customDuration then
+                            table.remove(prof.trackedBuffBars.bars, i)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Migrate: cleanse custom spells (presets, custom spell IDs) off ALL
     -- buff-type bars across ALL spec profiles. Buff bars are now exclusively
-    -- Blizzard CDM-driven. Custom spells belong on Custom Buff Bars.
+    -- Blizzard CDM-driven. Custom spells belong on Custom Aura Bars.
     do
         local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
         if sa and sa.specProfiles then

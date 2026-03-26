@@ -4969,47 +4969,25 @@ local function UpdateFlipbook(btn)
     end
 
     if p.procGlowEnabled == false then
-        -- Custom shapes always use Shape Glow even if custom proc glow is "off"
+        -- "Default" glow: use our glow library with Modern WoW Glow (#6)
+        -- which looks identical to Blizzard's native glow but renders
+        -- independently (Blizzard's SpellActivationAlert doesn't self-activate
+        -- in Midnight). Same approach CDM uses — always reliable.
         if not (btn._eabShapeMask and btn._eabShapeApplied) then
-            -- Clean up our custom glow layers.
-            if btn._eabGlowWrapper then
-                StopAllProceduralGlows(btn._eabGlowWrapper)
-                btn._eabGlowWrapper:Hide()
+            if not btn._eabGlowWrapper then
+                local wrapper = CreateFrame("Frame", nil, btn)
+                wrapper:SetAllPoints(btn)
+                wrapper:SetFrameLevel(btn:GetFrameLevel() + 2)
+                wrapper:SetAlpha(0)
+                btn._eabGlowWrapper = wrapper
             end
-            -- Blizzard's ActionButtonSpellAlertManager:ShowAlert no longer
-            -- activates the SpellActivationAlert frame in Midnight. Drive
-            -- the native flipbook glow ourselves: reset any prior custom
-            -- tinting, show the frame, and play the start-burst animation.
-            if region.ProcLoopFlipbook then
-                region.ProcLoopFlipbook:SetDesaturated(false)
-                region.ProcLoopFlipbook:SetVertexColor(1, 1, 1)
-                region.ProcLoopFlipbook:SetScale(1)
-                region.ProcLoopFlipbook:Show()
-            end
-            if region.ProcStartFlipbook then
-                region.ProcStartFlipbook:SetDesaturated(false)
-                region.ProcStartFlipbook:SetVertexColor(1, 1, 1)
-                region.ProcStartFlipbook:SetScale(1)
-                region.ProcStartFlipbook:Show()
-            end
-            if region.ProcLoop then
-                local loopFlip = GetFlipBookAnim(region.ProcLoop)
-                if loopFlip then loopFlip:SetDuration(1.0) end
-            end
-            if region.ProcStartAnim then
-                local startFlip = GetFlipBookAnim(region.ProcStartAnim)
-                if startFlip then startFlip:SetDuration(0.702) end
-            end
-            region:SetScale(1)
-            region:SetAlpha(1)
-            region:Show()
-            btn._eabCustomizedFlipbook = nil
-            -- Play the start-burst; on finish it transitions to the loop.
-            if region.ProcStartAnim then
-                region.ProcStartAnim:Play()
-            elseif region.ProcLoop then
-                region.ProcLoop:Play()
-            end
+            local wrapper = btn._eabGlowWrapper
+            _G_Glows.StopAllGlows(wrapper)
+            -- Style 6 = Modern WoW Glow, gold color (same as Blizzard default)
+            _G_Glows.StartGlow(wrapper, 6, _ufBtnW, 1, 0.788, 0.137, nil, _ufBtnH)
+            -- Suppress Blizzard's native SpellActivationAlert
+            region:SetAlpha(0)
+            btn._eabCustomizedFlipbook = true
             return
         end
     end
@@ -5218,14 +5196,30 @@ function EAB:RefreshProcGlows()
 end
 
 function EAB:ScanExistingProcs()
+    local found = 0
+    local total = 0
     for _, info in ipairs(BAR_CONFIG) do
         local buttons = barButtons[info.key]
         if buttons then
             for i = 1, #buttons do
                 local btn = buttons[i]
-                if btn and btn.SpellActivationAlert and btn.SpellActivationAlert:IsShown() then
-                    _procState.active[btn] = true
-                    UpdateFlipbook(btn)
+                if btn and btn._eabSquared then
+                    total = total + 1
+                    local saShown = btn.SpellActivationAlert and btn.SpellActivationAlert:IsShown()
+                    local action = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
+                    local spellID
+                    if action and HasAction and HasAction(action) then
+                        local actionType, id = GetActionInfo(action)
+                        if actionType == "spell" then spellID = id end
+                    end
+                    local overlayed = spellID and C_SpellActivationOverlay
+                        and C_SpellActivationOverlay.IsSpellOverlayed
+                        and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
+                    if saShown or overlayed then
+                        found = found + 1
+                        _procState.active[btn] = true
+                        UpdateFlipbook(btn)
+                    end
                 end
             end
         end
@@ -6350,6 +6344,8 @@ function EAB:FinishSetup()
             ApplyKeyDownCVar()
             self:HookProcGlow()
             self:ScanExistingProcs()
+            -- Re-scan after a delay to catch procs that Blizzard populates late
+            C_Timer_After(2, function() self:ScanExistingProcs() end)
             EAB.AnchorVehicleButton()
             -- Our fresh EABButton frames are not registered with
             -- ActionBarButtonEventsFrame (doing so causes taint), so

@@ -1015,21 +1015,12 @@ function ns.UpdateTrackedBuffBarTimers()
             local blzChild = FindChild(cfg)
             local isActive = IsActive(cfg)
 
-            -- Fallback for popular presets: direct aura check
-            if not isActive and not blzChild and cfg.popularKey then
-                if cfg.spellIDs then
-                    for _, sid in ipairs(cfg.spellIDs) do
-                        if sid and sid > 0 then
-                            local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
-                            if ok and aura then isActive = true; break end
-                        end
-                    end
-                end
-            end
+            -- Preset detection removed from TBB — presets now belong on
+            -- Custom Aura Bars. TBB only mirrors Blizzard's BuffBar viewer.
+            local auraData = nil
 
             -- Read Blizzard's StatusBar (the data source)
             local blizzBar = blzChild and blzChild.Bar
-            -- Secret-safe check: does the bar have duration data?
             local barHasData = false
             if blizzBar then
                 local ok, gt = pcall(function() return blizzBar:GetMinMaxValues() > 0 end)
@@ -1136,12 +1127,23 @@ function ns.UpdateTrackedBuffBarTimers()
                         ClearPandemic(bar)
                     end
                 else
-                    -- Active but no Blizzard bar (preset aura fallback):
-                    -- show full bar, no timer
-                    sb:SetMinMaxValues(0, 1)
-                    sb:SetValue(1)
-                    if bar._timerText then bar._timerText:Hide() end
-                    if bar._spark then bar._spark:Hide() end
+                    -- Active but no Blizzard bar: use auraData for duration
+                    if auraData and auraData.duration and auraData.duration > 0 and auraData.expirationTime then
+                        local now = GetTime()
+                        local remaining = auraData.expirationTime - now
+                        if remaining < 0 then remaining = 0 end
+                        sb:SetMinMaxValues(0, auraData.duration)
+                        sb:SetValue(remaining)
+                        if cfg.showSpark and bar._spark then bar._spark:Show() end
+                        if bar._timerText and bar._timerText:IsShown() then
+                            bar._timerText:SetText(FormatTime(remaining))
+                        end
+                    else
+                        sb:SetMinMaxValues(0, 1)
+                        sb:SetValue(1)
+                        if bar._timerText then bar._timerText:Hide() end
+                        if bar._spark then bar._spark:Hide() end
+                    end
                     if bar._pandemicGlowActive then ClearPandemic(bar) end
                 end
 

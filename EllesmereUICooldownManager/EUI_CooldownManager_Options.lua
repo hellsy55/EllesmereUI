@@ -1686,9 +1686,10 @@ initFrame:SetScript("OnEvent", function(self)
         if _tbbSpellPickerMenu then _tbbSpellPickerMenu:Hide() end
 
         local tracked, untracked = ns.GetAllCDMBuffSpells()
-        local popular   = ns.BUFF_BAR_PRESETS or {}
+        -- Presets removed from TBB — they belong on Custom Aura Bars now.
+        local popular = {}
 
-        local hasAny = #tracked > 0 or #untracked > 0 or #popular > 0
+        local hasAny = #tracked > 0 or #untracked > 0
         if not hasAny then return end
 
         local mBgR  = EllesmereUI.DD_BG_R  or 0.075
@@ -4378,6 +4379,67 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
+            -- Healthstone / Demonic Healthstone
+            for _, hsEntry in ipairs({ { id = 5512, fallback = "Healthstone" }, { id = 224464, fallback = "Demonic Healthstone" } }) do
+                local hsItemID = hsEntry.id
+                local hsNegID = -hsItemID
+                local hsName = C_Item.GetItemNameByID(hsItemID) or hsEntry.fallback
+                local hsTex = C_Item.GetItemIconByID(hsItemID)
+                local hsAdded = alreadyOnBar[hsNegID]
+                local hsOther = not hsAdded and usedOnOtherBar[hsNegID]
+                local hsDisabled = hsAdded or hsOther
+
+                local hi = CreateFrame("Button", nil, inner)
+                hi:SetHeight(ITEM_H)
+                hi:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+                hi:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+                hi:SetFrameLevel(menu:GetFrameLevel() + 2)
+                local hiLbl = hi:CreateFontString(nil, "OVERLAY")
+                hiLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                hiLbl:SetPoint("LEFT", 10, 0)
+                hiLbl:SetJustifyH("LEFT")
+                hiLbl:SetText(hsName)
+                if hsTex then
+                    local hiIco = hi:CreateTexture(nil, "ARTWORK")
+                    hiIco:SetSize(ITEM_H - 2, ITEM_H - 2)
+                    hiIco:SetPoint("RIGHT", hi, "RIGHT", -6, 0)
+                    hiIco:SetTexture(hsTex)
+                    hiIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    if hsDisabled then hiIco:SetDesaturated(true); hiIco:SetAlpha(0.4) end
+                end
+                local hiHl = hi:CreateTexture(nil, "ARTWORK")
+                hiHl:SetAllPoints(); hiHl:SetColorTexture(1, 1, 1, 0); hiHl:SetAlpha(0)
+                if hsDisabled then
+                    hiLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
+                    local hsTooltipName = hsAdded and (bd and (bd.name or bd.key) or barKey) or hsOther
+                    hi:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(hi, "Already on " .. hsTooltipName)
+                    end)
+                    hi:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                else
+                    hiLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                    hi:SetScript("OnEnter", function()
+                        hiLbl:SetTextColor(1, 1, 1, 1)
+                        hiHl:SetColorTexture(1, 1, 1, hlA); hiHl:SetAlpha(1)
+                    end)
+                    hi:SetScript("OnLeave", function()
+                        hiLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                        hiHl:SetAlpha(0)
+                    end)
+                    hi:SetScript("OnClick", function()
+                        menu:Hide()
+                        EnsureAssignedSpells(barKey)
+                        ns.AddTrackedSpell(barKey, hsNegID)
+                        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                        Refresh()
+                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                        UpdateCDMPreviewAndResize()
+                    end)
+                end
+                allItems[#allItems + 1] = hi
+                mH = mH + ITEM_H
+            end
+
             -- "Potions" flyout subnav
             local _potionsSub
             local itemPresets = ns.CDM_ITEM_PRESETS
@@ -4439,6 +4501,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     local subH = 4
                     for _, preset in ipairs(itemPresets) do
+                        if preset.key ~= "healthstone" and preset.key ~= "demonic_healthstone" then
                         local pID = -(preset.itemID)
                         local isAdded = alreadyOnBar[pID]
                         local pOtherBar = not isAdded and usedOnOtherBar[pID]
@@ -4502,6 +4565,7 @@ initFrame:SetScript("OnEvent", function(self)
                             end)
                         end
                         subH = subH + SUB_ITEM_H
+                        end -- healthstone filter
                     end
 
                     local totalSubH = subH + 4
@@ -4559,8 +4623,8 @@ initFrame:SetScript("OnEvent", function(self)
             local _, _pClass = UnitClass("player")
             for _, preset in ipairs(ns.BUFF_BAR_PRESETS) do
                 if not preset.class or preset.class == _pClass then
-                    local primaryID = preset.spellIDs[1]
-                    local isAdded = alreadyTracked[primaryID]
+                    local primaryID = preset.spellIDs and preset.spellIDs[1]
+                    local isAdded = primaryID and alreadyTracked[primaryID]
 
                     local si = CreateFrame("Button", nil, inner)
                     si:SetHeight(ITEM_H)
@@ -5698,14 +5762,21 @@ initFrame:SetScript("OnEvent", function(self)
             -- Custom buff bars skip this — their spells aren't in Blizzard CDM.
             local tracked = rawTracked
             local isCustomBuffBar = (bd.barType == "custom_buff")
+            -- Filter out grayed-out (untalented) spells that ARE in Blizzard CDM.
+            -- Spells NOT in CDM at all (racials, custom IDs, potions) always pass.
             if not isCustomBuffBar and #rawTracked > 0 then
                 tracked = {}
                 for _, sid in ipairs(rawTracked) do
                     if not sid or sid <= 0 then
                         tracked[#tracked + 1] = sid
                     elseif ns.IsSpellKnownInCDM(sid) then
+                        -- Known in CDM = pass
+                        tracked[#tracked + 1] = sid
+                    elseif not ns.IsSpellInAnyCDMCategory(sid) then
+                        -- Not in CDM at all = custom/racial/external = pass
                         tracked[#tracked + 1] = sid
                     end
+                    -- else: in CDM but not known = grayed out = skip
                 end
             end
             local count = #tracked

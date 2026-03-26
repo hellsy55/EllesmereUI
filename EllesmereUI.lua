@@ -5955,6 +5955,7 @@ local function ShowSidebarUnlockTip()
 end
 
 function EllesmereUI:Show()
+    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     self:EnsureLoaded()
     CreateMainFrame()
     RefreshSidebarStates()
@@ -5964,6 +5965,7 @@ end
 function EllesmereUI:Hide()   if mainFrame then mainFrame:Hide() end end
 function EllesmereUI:Toggle()
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
+    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     self:EnsureLoaded()
     CreateMainFrame()
     if mainFrame:IsShown() then
@@ -6026,7 +6028,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.5.7"
+EllesmereUI.VERSION = "5.5.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6214,6 +6216,49 @@ SlashCmdList.EUIOPTIONS = function()
     EllesmereUI:Toggle()
 end
 
+-- Debug: /euimem toggles per-second memory delta readout
+SLASH_EUIMEM1 = "/euimem"
+SlashCmdList.EUIMEM = function()
+    if EllesmereUI._memTicker then
+        EllesmereUI._memTicker:Cancel()
+        EllesmereUI._memTicker = nil
+        print("|cff00ff00[EUI Mem]|r Stopped.")
+        return
+    end
+    local addons = {}
+    for i = 1, C_AddOns.GetNumAddOns() do
+        local name = C_AddOns.GetAddOnInfo(i)
+        if name and name:find("^Ellesmere") and C_AddOns.IsAddOnLoaded(i) then
+            addons[#addons + 1] = name
+        end
+    end
+    UpdateAddOnMemoryUsage()
+    local lastMem = {}
+    for _, name in ipairs(addons) do
+        lastMem[name] = GetAddOnMemoryUsage(name)
+    end
+    print("|cff00ff00[EUI Mem]|r Tracking " .. #addons .. " addons. /euimem to stop.")
+    EllesmereUI._memTicker = C_Timer.NewTicker(3, function()
+        UpdateAddOnMemoryUsage()
+        local totalDelta = 0
+        local parts = {}
+        for _, name in ipairs(addons) do
+            local cur = GetAddOnMemoryUsage(name)
+            local delta = cur - (lastMem[name] or cur)
+            lastMem[name] = cur
+            totalDelta = totalDelta + delta
+            if math.abs(delta) > 0.5 then
+                local short = name:gsub("^EllesmereUI", "")
+                if short == "" then short = "Core" end
+                parts[#parts + 1] = string.format("%s %+.1fkb", short, delta)
+            end
+        end
+        local color = totalDelta > 5 and "ffff6060" or totalDelta > 1 and "ffffff60" or "ff60ff60"
+        local detail = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
+        print(string.format("|c%s[EUI Mem]|r %+.1f kb/s%s", color, totalDelta, detail))
+    end)
+end
+
 -- Quick-access: /ee opens global settings
 SLASH_EUIQUICK1 = "/ee"
 SlashCmdList.EUIQUICK = function()
@@ -6294,6 +6339,7 @@ function EllesmereUI:ShowModule(folderName)
         print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
+    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
     self:EnsureLoaded()
     CreateMainFrame()
