@@ -6868,8 +6868,9 @@ initFrame:SetScript("OnEvent", function(self)
             ["5"]       = "GCD",
             ["7"]       = "Classic WoW Glow",
             none        = "No Animation",
+            hideActive  = "Hide Active State",
         }
-        local ACTIVE_ANIM_ORDER = { "blizzard", "1", "---", "3", "4", "5", "7", "none" }
+        local ACTIVE_ANIM_ORDER = { "blizzard", "hideActive", "1", "---", "3", "4", "5", "7", "none" }
 
         local function IsCustomShape()
             local s = BD().iconShape or "none"

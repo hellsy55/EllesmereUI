@@ -501,6 +501,51 @@ local function DecorateFrame(frame, barData)
         fd.cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)
+
+        -- Active state animation: respond to Blizzard cooldown updates
+        local function OnCooldownSet()
+            local fc = _ecmeFC[frame]
+            local bd = fc and fc.barKey and barDataByKey[fc.barKey]
+            if not bd then return end
+            local anim = bd.activeStateAnim or "blizzard"
+
+            if frame.wasSetFromAura then
+                if anim == "hideActive" then
+                    -- Reset to normal CD appearance (black swipe, not reversed)
+                    fd.cooldown:SetReverse(false)
+                    fd.cooldown:SetSwipeColor(0, 0, 0, bd.swipeAlpha or 0.7)
+                end
+                -- Custom glow animations
+                local glowIdx = tonumber(anim)
+                if glowIdx and fd.glowOverlay and not fd.isActive then
+                    local cr, cg, cb = 1.0, 0.85, 0.0
+                    if bd.activeAnimClassColor then
+                        local _, ct = UnitClass("player")
+                        if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
+                    elseif bd.activeAnimR then
+                        cr, cg, cb = bd.activeAnimR, bd.activeAnimG or 0.85, bd.activeAnimB or 0.0
+                    end
+                    fd.glowOverlay:SetAlpha(1)
+                    ns.StartNativeGlow(fd.glowOverlay, glowIdx, cr, cg, cb)
+                    fd.isActive = true
+                end
+            else
+                -- Not active: stop any custom glow
+                if fd.isActive and fd.glowOverlay then
+                    ns.StopNativeGlow(fd.glowOverlay)
+                    fd.isActive = false
+                end
+            end
+        end
+        hooksecurefunc(fd.cooldown, "SetCooldown", OnCooldownSet)
+        if fd.cooldown.Clear then
+            hooksecurefunc(fd.cooldown, "Clear", function()
+                if fd.isActive and fd.glowOverlay then
+                    ns.StopNativeGlow(fd.glowOverlay)
+                    fd.isActive = false
+                end
+            end)
+        end
     end
 
     hookFrameData[frame] = fd
@@ -881,6 +926,12 @@ local function CollectAndReanchor()
                                     f._presetItemID = itemID; f._presetData = preset
                                     f.cooldownID = nil; f.cooldownInfo = nil
                                     f.layoutIndex = 99999
+                                    -- Item count text (styled like Blizzard charge text)
+                                    local countFS = f:CreateFontString(nil, "OVERLAY")
+                                    countFS:SetFont(GetCDMFont(), 11, "OUTLINE")
+                                    countFS:SetShadowOffset(0, 0)
+                                    countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
+                                    f._itemCountText = countFS
                                     _presetFrames[fkey] = f
                                 end
                             end
@@ -923,6 +974,23 @@ local function CollectAndReanchor()
                                         end
                                     end
                                     if f._tex then f._tex:SetDesaturated(not inBags) end
+                                end
+                                -- Update item count (sum primary + all alt item IDs)
+                                if f._itemCountText then
+                                    local total = C_Item.GetItemCount(itemID) or 0
+                                    if f._presetData and f._presetData.altItemIDs then
+                                        for _, altID in ipairs(f._presetData.altItemIDs) do
+                                            total = total + (C_Item.GetItemCount(altID) or 0)
+                                        end
+                                    end
+                                    if total > 1 then
+                                        f._itemCountText:SetText(total)
+                                        f._itemCountText:Show()
+                                    else
+                                        f._itemCountText:SetText("")
+                                        f._itemCountText:Hide()
+                                    end
+                                    if f._tex then f._tex:SetDesaturated(total == 0) end
                                 end
                                 DecorateFrame(f, barData); f:Show()
                                 list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)

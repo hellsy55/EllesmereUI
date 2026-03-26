@@ -2926,6 +2926,12 @@ local function RefreshCDMIconAppearance(barKey)
             chargeFS:ClearAllPoints()
             chargeFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
         end
+        -- Item count text (potions/healthstones)
+        if icon._itemCountText then
+            SetBlizzCDMFont(icon._itemCountText, scFont, scSize, scR, scG, scB)
+            icon._itemCountText:ClearAllPoints()
+            icon._itemCountText:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+        end
 
         -- Update keybind text style
         if kbText then
@@ -3371,18 +3377,6 @@ BuildAllCDMBars = function()
     end
 
     local p = ECME.db.profile
-
-    -- Migration: hideActive removed in 5.5.4 — reset to blizzard default
-    do
-        local bars = p.cdmBars and p.cdmBars.bars
-        if bars then
-            for _, bd in ipairs(bars) do
-                if bd.activeStateAnim == "hideActive" then
-                    bd.activeStateAnim = "blizzard"
-                end
-            end
-        end
-    end
 
     -- Migration: remove misc bars and unanchor anything that referenced them
     do
