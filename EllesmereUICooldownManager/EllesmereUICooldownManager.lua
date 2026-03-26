@@ -1711,8 +1711,8 @@ HideBlizzardCDM = function()
                 frame:ClearAllPoints()
                 frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
             end
-            frame:EnableMouse(false)
-            if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+            pcall(frame.EnableMouse, frame, false)
+            if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
         end
     end
 end
@@ -2281,6 +2281,28 @@ LayoutCDMBar = function(barKey)
     -- toggle IsShown independently -- we position everything we own.
     local visibleIcons = icons
     local count = #visibleIcons
+    -- For non-dynamic bars (cd/utility), use assignedSpells count as minimum
+    -- size so the bar never shrinks during transitional states.
+    -- Skip trinket slots whose trinket isn't on-use (they don't render).
+    local isDynamic = (barData.barType == "buffs" or barKey == "buffs" or barData.barType == "custom_buff")
+    local sizeCount = count
+    if not isDynamic then
+        local sd = ns.GetBarSpellData(barKey)
+        if sd and sd.assignedSpells then
+            local visibleAssigned = 0
+            for _, sid in ipairs(sd.assignedSpells) do
+                if sid == -13 or sid == -14 then
+                    local slot = -sid
+                    local tf = ns._trinketFrames and ns._trinketFrames[slot]
+                    local hasItem = GetInventoryItemID("player", slot) ~= nil
+                    if hasItem and tf and tf._trinketIsOnUse then visibleAssigned = visibleAssigned + 1 end
+                elseif sid and sid ~= 0 then
+                    visibleAssigned = visibleAssigned + 1
+                end
+            end
+            sizeCount = math.max(count, visibleAssigned)
+        end
+    end
     if count == 0 then
         local curW = frame:GetWidth() or 0
         local curH = frame:GetHeight() or 0
@@ -2301,7 +2323,7 @@ LayoutCDMBar = function(barKey)
 
     -- Bar has visible icons -- ensure it is visible (unless visibility is "never")
     local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
-    local stride, _, customTopCount = ComputeTopRowStride(barData, count)
+    local stride, _, customTopCount = ComputeTopRowStride(barData, sizeCount)
 
     -- Container size (already snapped values)
     local totalW, totalH
@@ -3138,7 +3160,9 @@ _CDMApplyVisibility = function()
             if inVehicle then
                 shouldHide = true
             -- Priority 2: visibility options (checkbox dropdown)
-            elseif EllesmereUI.CheckVisibilityOptions(barData) then
+            -- Buff bars skip these options (dynamic icon count + layout issues)
+            elseif (barData.barType ~= "buffs" and barData.key ~= "buffs")
+                and EllesmereUI.CheckVisibilityOptions(barData) then
                 shouldHide = true
             -- Priority 3: visibility mode dropdown
             elseif vis == "never" then
@@ -4151,6 +4175,7 @@ local function TalentAwareReconcile()
         end
     end
 
+    ns._lastReconciledSpec = ns.GetActiveSpecKey()
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     BuildAllCDMBars()
 end
@@ -4744,6 +4769,16 @@ function ECME:CDMFinishSetup()
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     ns.SetupViewerHooks()
 
+    -- Edit mode close: rebuild all bars (Blizzard may reposition CDM viewers)
+    if EditModeManagerFrame then
+        EditModeManagerFrame:HookScript("OnHide", function()
+            C_Timer.After(0.3, function()
+                BuildAllCDMBars()
+                if ns.QueueReanchor then ns.QueueReanchor() end
+            end)
+        end)
+    end
+
     -- Register UNIT_AURA tracking if custom buff bars have spells
     if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
 
@@ -4906,6 +4941,8 @@ eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
 eventFrame:RegisterEvent("STOP_MOVIE")
+-- Equipment changes: trinket/weapon swaps update trinket frames and reanchor
+eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -5022,6 +5059,12 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end
         return
     end
+    if event == "PLAYER_EQUIPMENT_CHANGED" then
+        if InCombatLockdown() then return end
+        BuildAllCDMBars()
+        if ns.QueueReanchor then ns.QueueReanchor() end
+        return
+    end
     if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
         _CDMApplyVisibility()
         if event == "UPDATE_SHAPESHIFT_FORM" then
@@ -5097,11 +5140,17 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             end
         end
         if scheduleReconcile and RECONCILE.pending then
-            C_Timer.After(0.2, function()
-                if RECONCILE.pending then
-                    ns.RequestTalentReconcile("SPELLS_CHANGED")
-                end
-            end)
+            -- Only reconcile if the spec actually changed, not for
+            -- equipment swaps that temporarily remove spells.
+            local currentSpec = ns.GetActiveSpecKey()
+            local lastSpec = ns._lastReconciledSpec
+            if currentSpec ~= lastSpec then
+                C_Timer.After(0.2, function()
+                    if RECONCILE.pending then
+                        ns.RequestTalentReconcile("SPELLS_CHANGED")
+                    end
+                end)
+            end
         end
         return
     end

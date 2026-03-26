@@ -27,8 +27,13 @@ local function Tex(id)
     if t then texCache[id] = t end; return t
 end
 
+local _cachedPlayerClass
 local function GetPlayerClass()
-    local _, cls = UnitClass("player"); return cls
+    if not _cachedPlayerClass then
+        local _, cls = UnitClass("player")
+        _cachedPlayerClass = cls
+    end
+    return _cachedPlayerClass
 end
 
 local function GetSpecID()
@@ -1599,6 +1604,7 @@ if inInstance or rb.showNonInstanced then
                     local isTargetSpell = (buff.check == "huntersMark")
                     missing[#missing+1] = {
                         cat = "raidbuff", data = buff, scale = rb.scale or 1.0,
+                        dismissKey = buff.key and ("raidbuff:" .. buff.key) or nil,
                         setup = function(btn)
                             SetIconSpell(btn, buff.castSpell, Tex(buff.castSpell), buff.name)
                             if isTargetSpell and not InCombat() then
@@ -2175,13 +2181,25 @@ local function Refresh()
     end
 end
 
+local REFRESH_THROTTLE = 0.2
+local _lastRefreshTime = 0
+local _refreshTimerActive = false
+local function _doRefresh()
+    _refreshTimerActive = false
+    refreshQueued = false
+    _lastRefreshTime = GetTime()
+    Refresh()
+end
 local function RequestRefresh()
     if refreshQueued then return end
     refreshQueued = true
-    C_Timer.After(0, function()
-        refreshQueued = false
-        Refresh()
-    end)
+    local elapsed = GetTime() - _lastRefreshTime
+    if elapsed >= REFRESH_THROTTLE then
+        C_Timer.After(0, _doRefresh)
+    elseif not _refreshTimerActive then
+        _refreshTimerActive = true
+        C_Timer.After(REFRESH_THROTTLE - elapsed, _doRefresh)
+    end
 end
 
 
@@ -2727,7 +2745,29 @@ function EABR:OnEnable()
     local _lastRangeSet = {}   -- [unitToken] = true/false (last known in-range state)
     local _rangeAccum   = 0    -- seconds since last poll
 
+    -- Pre-build unit token strings to avoid per-poll allocations
+    local _raidTokens = {}
+    local _partyTokens = {}
+    for i = 1, 40 do _raidTokens[i] = "raid" .. i end
+    for i = 1, 4 do _partyTokens[i] = "party" .. i end
+
     local rangeFrame = CreateFrame("Frame")
+    local _rangeChanged = false
+    local function _checkUnit(u)
+        if not UnitExists(u) then
+            if _lastRangeSet[u] ~= nil then
+                _lastRangeSet[u] = nil
+                _rangeChanged = true
+            end
+            return
+        end
+        local state = _unitInRange(u)
+        if _lastRangeSet[u] ~= state then
+            _lastRangeSet[u] = state
+            _rangeChanged = true
+        end
+    end
+
     rangeFrame:SetScript("OnUpdate", function(_, elapsed)
         -- Only poll OOC and when in a group (avoids all taint risk in combat).
         if InCombat() or not IsInGroup() then
@@ -2738,29 +2778,14 @@ function EABR:OnEnable()
         if _rangeAccum < 0.5 then return end
         _rangeAccum = 0
 
-        local changed = false
-        local function checkUnit(u)
-            if not UnitExists(u) then
-                if _lastRangeSet[u] ~= nil then
-                    _lastRangeSet[u] = nil
-                    changed = true
-                end
-                return
-            end
-            local state = _unitInRange(u)
-            if _lastRangeSet[u] ~= state then
-                _lastRangeSet[u] = state
-                changed = true
-            end
-        end
-
+        _rangeChanged = false
         if IsInRaid() then
-            for i = 1, GetNumGroupMembers() do checkUnit("raid"..i) end
+            for i = 1, GetNumGroupMembers() do _checkUnit(_raidTokens[i]) end
         else
-            for i = 1, GetNumSubgroupMembers() do checkUnit("party"..i) end
+            for i = 1, GetNumSubgroupMembers() do _checkUnit(_partyTokens[i]) end
         end
 
-        if changed then RequestRefresh() end
+        if _rangeChanged then RequestRefresh() end
     end)
 end
 
@@ -2819,7 +2844,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
 
     if e == "UNIT_AURA" then
         -- arg1 = unit token. Ignore non-group units (enemies, NPCs, pets).
-        local isEvoker = GetPlayerClass() == "EVOKER"
+        local isEvoker = _cachedPlayerClass == "EVOKER"
         if arg1 == "player" then
             if isEvoker and InCombat() and IsInGroup() then
                 for _, id in ipairs(_ownOnRaidIDs) do
@@ -2830,7 +2855,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
                 end
             end
             RequestRefresh()
-        elseif arg1 and (arg1:match("^party%d") or arg1:match("^raid%d")) then
+        elseif arg1 and (arg1:find("^party%d") or arg1:find("^raid%d")) then
             if isEvoker and InCombat() and IsInGroup() then
                 for _, id in ipairs(_ownOnRaidIDs) do
                     if not _preCombatOwnOnRaidCache[id] then
@@ -2858,30 +2883,32 @@ end)
 -- Item use tracking via bag snapshot diffing on BAG_UPDATE_DELAYED
 local lastBagSnapshot = {}
 
-local function SnapshotBags()
-    local snap = {}
+local _bagSnapReuse = {}
+local function SnapshotBags(out)
+    wipe(out)
     for bag = 0, 4 do
         local numSlots = C_Container and C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container and C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
-                snap[info.itemID] = (snap[info.itemID] or 0) + info.stackCount
+                out[info.itemID] = (out[info.itemID] or 0) + info.stackCount
             end
         end
     end
-    return snap
 end
 
 local function DetectUsedItem()
     if not db or not db.char then return end
-    local newSnap = SnapshotBags()
+    SnapshotBags(_bagSnapReuse)
     for itemID, oldCount in pairs(lastBagSnapshot) do
-        local newCount = newSnap[itemID] or 0
+        local newCount = _bagSnapReuse[itemID] or 0
         if newCount < oldCount then
             TrackItemUse(itemID)
         end
     end
-    lastBagSnapshot = newSnap
+    -- Copy new snapshot into lastBagSnapshot (reuse table)
+    wipe(lastBagSnapshot)
+    for k, v in pairs(_bagSnapReuse) do lastBagSnapshot[k] = v end
 end
 
 local bagTrackFrame = CreateFrame("Frame")
@@ -2889,7 +2916,7 @@ bagTrackFrame:RegisterEvent("BAG_UPDATE_DELAYED")
 bagTrackFrame:RegisterEvent("PLAYER_LOGIN")
 bagTrackFrame:SetScript("OnEvent", function(_, ev)
     if ev == "PLAYER_LOGIN" then
-        C_Timer.After(1, function() lastBagSnapshot = SnapshotBags() end)
+        C_Timer.After(1, function() SnapshotBags(lastBagSnapshot) end)
     elseif ev == "BAG_UPDATE_DELAYED" then
         DetectUsedItem()
     end

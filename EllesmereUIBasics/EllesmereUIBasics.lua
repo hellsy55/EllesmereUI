@@ -1763,6 +1763,13 @@ mouseoverPoll:SetScript("OnUpdate", function(_, dt)
     end
 end)
 
+-- Pre-allocated tables for mouseoverTargets (avoids creating new tables every call)
+local _moCache = {}
+local function _moEntry(f)
+    if not _moCache[f] then _moCache[f] = { frame = f } end
+    return _moCache[f]
+end
+
 local function RebuildMouseoverTargets()
     wipe(mouseoverTargets)
     if not EBS.db then return end
@@ -1770,19 +1777,19 @@ local function RebuildMouseoverTargets()
     -- Chat: use first skinned chat frame as hover anchor, apply alpha to all
     if not TEMP_DISABLED.chat and prof.chat and prof.chat.enabled and prof.chat.visibility == "mouseover" then
         for chatFrame in pairs(skinnedChatFrames) do
-            mouseoverTargets[#mouseoverTargets + 1] = { frame = chatFrame }
+            mouseoverTargets[#mouseoverTargets + 1] = _moEntry(chatFrame)
         end
     end
     -- Minimap
     if prof.minimap and prof.minimap.enabled and prof.minimap.visibility == "mouseover" then
         if Minimap then
-            mouseoverTargets[#mouseoverTargets + 1] = { frame = Minimap }
+            mouseoverTargets[#mouseoverTargets + 1] = _moEntry(Minimap)
         end
     end
     -- Friends
     if not TEMP_DISABLED.friends and prof.friends and prof.friends.enabled and prof.friends.visibility == "mouseover" then
         if FriendsFrame then
-            mouseoverTargets[#mouseoverTargets + 1] = { frame = FriendsFrame }
+            mouseoverTargets[#mouseoverTargets + 1] = _moEntry(FriendsFrame)
         end
     end
     if #mouseoverTargets > 0 then

@@ -142,6 +142,7 @@ end)
 --  Custom frames for equipped on-use trinkets (slot 13/14).
 -------------------------------------------------------------------------------
 local _trinketFrames = {}
+ns._trinketFrames = _trinketFrames
 local _trinketItemCache = { [13] = nil, [14] = nil }
 
 local function GetOrCreateTrinketFrame(slotID)
@@ -194,28 +195,35 @@ local function UpdateTrinketFrame(slotID)
     f._trinketSpellID = spellID
     local isRealOnUse = false
     if spellID and spellID > 0 then
-        local tipData = C_TooltipInfo and C_TooltipInfo.GetItemByID(itemID)
-        if tipData and tipData.lines then
-            for _, tipLine in ipairs(tipData.lines) do
-                local lt = tipLine.leftText
-                if lt and lt:find("Cooldown%)") then
-                    local cdStr = lt:match("%((.+Cooldown)%)")
-                    if cdStr then
-                        local totalSec = 0
-                        for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
-                            local n = tonumber(num)
-                            if n then
-                                local u = unit:lower()
-                                if u == "min" then totalSec = totalSec + n * 60
-                                elseif u == "sec" then totalSec = totalSec + n
-                                elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+        local locale = GetLocale()
+        if locale == "enUS" or locale == "enGB" then
+            -- English: parse tooltip for cooldown duration >= 20s
+            local tipData = C_TooltipInfo and C_TooltipInfo.GetItemByID(itemID)
+            if tipData and tipData.lines then
+                for _, tipLine in ipairs(tipData.lines) do
+                    local lt = tipLine.leftText
+                    if lt and lt:find("Cooldown%)") then
+                        local cdStr = lt:match("%((.+Cooldown)%)")
+                        if cdStr then
+                            local totalSec = 0
+                            for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
+                                local n = tonumber(num)
+                                if n then
+                                    local u = unit:lower()
+                                    if u == "min" then totalSec = totalSec + n * 60
+                                    elseif u == "sec" then totalSec = totalSec + n
+                                    elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                                    end
                                 end
                             end
+                            if totalSec >= 20 then isRealOnUse = true end
                         end
-                        if totalSec >= 20 then isRealOnUse = true end
                     end
                 end
             end
+        else
+            -- Non-English: treat any trinket with a spell as on-use
+            isRealOnUse = true
         end
     end
     f._trinketIsOnUse = isRealOnUse
@@ -233,6 +241,8 @@ local function UpdateTrinketCooldown(slotID)
         return false
     end
 end
+
+ns.UpdateTrinketFrame = UpdateTrinketFrame
 
 -- Event frame for trinket updates
 local _trinketEventFrame = CreateFrame("Frame")

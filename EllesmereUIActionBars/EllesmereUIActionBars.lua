@@ -6811,8 +6811,15 @@ function EAB:FinishSetup()
     -- PET_BAR_UPDATE_USABLE fires when action usability changes (energy/focus
     -- state, etc.) so icon dimming stays current. UNIT_AURA "pet" fires when
     -- an aura on the pet changes, which can also affect ability usability.
+    local _petUpdateQueued = false
     local function UpdatePetBar(_, event)
+        -- UNIT_AURA fires very frequently; throttle to one update per frame
+        if event == "UNIT_AURA" or event == "PET_BAR_UPDATE_USABLE" then
+            if _petUpdateQueued then return end
+            _petUpdateQueued = true
+        end
         C_Timer_After(0, function()
+            _petUpdateQueued = false
             if event == "PET_BAR_UPDATE_COOLDOWN" then
                 -- Cooldown-only path: safe during combat, no taint risk.
                 -- Update each button's cooldown frame directly.
@@ -6859,13 +6866,14 @@ function EAB:FinishSetup()
                         -- Attack actions flash instead of showing the full highlight.
                         -- SetChecked / StartFlash / StopFlash are visual-only and safe
                         -- to call during combat lockdown.
+                        local ct = btn:GetCheckedTexture()
                         if isActive then
                             if IsPetAttackAction(i) then
                                 btn:StartFlash()
-                                btn:GetCheckedTexture():SetAlpha(0.5)
+                                if ct then ct:SetAlpha(0.5) end
                             else
                                 btn:StopFlash()
-                                btn:GetCheckedTexture():SetAlpha(1.0)
+                                if ct then ct:SetAlpha(1.0) end
                             end
                             btn:SetChecked(true)
                         else

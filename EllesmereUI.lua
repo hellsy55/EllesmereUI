@@ -1914,6 +1914,7 @@ function EllesmereUI.MakeUnlockElement(opts)
         linkedKeys    = opts.linkedKeys,
         noResize          = opts.noResize,
         linkedDimensions  = opts.linkedDimensions,
+        noAnchorTarget    = opts.noAnchorTarget,
     }
 end
 
@@ -6028,7 +6029,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.5.8"
+EllesmereUI.VERSION = "5.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6222,7 +6223,7 @@ SlashCmdList.EUIMEM = function()
     if EllesmereUI._memTicker then
         EllesmereUI._memTicker:Cancel()
         EllesmereUI._memTicker = nil
-        print("|cff00ff00[EUI Mem]|r Stopped.")
+        print("|cff00ff00[EUI Memory Tracker]|r Stopped.")
         return
     end
     local addons = {}
@@ -6237,25 +6238,48 @@ SlashCmdList.EUIMEM = function()
     for _, name in ipairs(addons) do
         lastMem[name] = GetAddOnMemoryUsage(name)
     end
-    print("|cff00ff00[EUI Mem]|r Tracking " .. #addons .. " addons. /euimem to stop.")
-    EllesmereUI._memTicker = C_Timer.NewTicker(3, function()
+    print("|cff00ff00[EUI Memory Tracker]|r Tracking " .. #addons .. " addons. /euimem to stop.")
+    local MEM_INTERVAL = 10
+    local sampleCount = 0
+    local accumMem = {}
+    for _, name in ipairs(addons) do accumMem[name] = 0 end
+    EllesmereUI._memTicker = C_Timer.NewTicker(1, function()
         UpdateAddOnMemoryUsage()
-        local totalDelta = 0
-        local parts = {}
+        sampleCount = sampleCount + 1
         for _, name in ipairs(addons) do
             local cur = GetAddOnMemoryUsage(name)
             local delta = cur - (lastMem[name] or cur)
             lastMem[name] = cur
-            totalDelta = totalDelta + delta
-            if math.abs(delta) > 0.5 then
+            accumMem[name] = accumMem[name] + delta
+        end
+        if sampleCount < MEM_INTERVAL then return end
+        -- Print averages (skip GC frames where total is negative)
+        local totalAvg = 0
+        for _, name in ipairs(addons) do
+            totalAvg = totalAvg + accumMem[name] / MEM_INTERVAL
+        end
+        if totalAvg < 0 then
+            for _, name in ipairs(addons) do accumMem[name] = 0 end
+            sampleCount = 0
+            return
+        end
+        totalAvg = 0
+        local lines = {}
+        for _, name in ipairs(addons) do
+            local avg = accumMem[name] / MEM_INTERVAL
+            totalAvg = totalAvg + avg
+            if true then
                 local short = name:gsub("^EllesmereUI", "")
                 if short == "" then short = "Core" end
-                parts[#parts + 1] = string.format("%s %+.1fkb", short, delta)
+                local c = math.abs(avg) > 10 and "ffff6060" or math.abs(avg) > 5 and "ffffff60" or "ff60ff60"
+                lines[#lines + 1] = string.format("  |c%s%s|r %+.1f kb/s", c, short, avg)
             end
+            accumMem[name] = 0
         end
-        local color = totalDelta > 5 and "ffff6060" or totalDelta > 1 and "ffffff60" or "ff60ff60"
-        local detail = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
-        print(string.format("|c%s[EUI Mem]|r %+.1f kb/s%s", color, totalDelta, detail))
+        sampleCount = 0
+        local totalColor = math.abs(totalAvg) > 40 and "ffff6060" or math.abs(totalAvg) > 25 and "ffffff60" or "ff60ff60"
+        print(string.format("|c%s[EUI Memory Tracker]|r %+.1f kb/s avg", totalColor, totalAvg))
+        for _, line in ipairs(lines) do print(line) end
     end)
 end
 
@@ -6538,8 +6562,14 @@ do
         statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
         statsFrame:RegisterEvent("COMBAT_RATING_UPDATE")
         statsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        local _statsThrottled = false
         statsFrame:SetScript("OnEvent", function()
-            UpdateSecondaryStats()
+            if _statsThrottled then return end
+            _statsThrottled = true
+            C_Timer.After(0.5, function()
+                _statsThrottled = false
+                UpdateSecondaryStats()
+            end)
         end)
         statsFrame:Show()
         UpdateSecondaryStats()

@@ -3968,32 +3968,45 @@ initFrame:SetScript("OnEvent", function(self)
             local function ResolveBagItems()
                 local results = {}
                 local allResolved = true
+                local _isEnglish = (GetLocale() == "enUS" or GetLocale() == "enGB")
                 for _, cand in ipairs(_candidateItems) do
-                    local tipData = C_TooltipInfo.GetItemByID(cand.itemID)
-                    if tipData and tipData.lines then
-                        local cdSec = nil
-                        for _, line in ipairs(tipData.lines) do
-                            local text = line.leftText
-                            if text and text:find("Cooldown%)") then
-                                local cdStr = text:match(".*%((.+Cooldown)%)")
-                                if cdStr then
-                                    local totalSec = 0
-                                    for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
-                                        local n = tonumber(num)
-                                        if n then
-                                            local u = unit:lower()
-                                            if u == "min" then totalSec = totalSec + n * 60
-                                            elseif u == "sec" then totalSec = totalSec + n
-                                            elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                    local passFilter = false
+                    if cand.isTrinket then
+                        passFilter = true
+                    elseif _isEnglish then
+                        -- English: parse tooltip for cooldown duration
+                        local tipData = C_TooltipInfo.GetItemByID(cand.itemID)
+                        if tipData and tipData.lines then
+                            for _, line in ipairs(tipData.lines) do
+                                local text = line.leftText
+                                if text and text:find("Cooldown%)") then
+                                    local cdStr = text:match(".*%((.+Cooldown)%)")
+                                    if cdStr then
+                                        local totalSec = 0
+                                        for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
+                                            local n = tonumber(num)
+                                            if n then
+                                                local u = unit:lower()
+                                                if u == "min" then totalSec = totalSec + n * 60
+                                                elseif u == "sec" then totalSec = totalSec + n
+                                                elseif u == "hr" or u == "hour" then totalSec = totalSec + n * 3600
+                                                end
                                             end
                                         end
+                                        if totalSec >= MIN_CD_SEC and totalSec <= MAX_CD_SEC then passFilter = true end
+                                        break
                                     end
-                                    if totalSec > 0 then cdSec = totalSec end
-                                    break
                                 end
                             end
+                        else
+                            allResolved = false
                         end
-                        if cand.isTrinket or (cdSec and cdSec >= MIN_CD_SEC and cdSec <= MAX_CD_SEC) then
+                    elseif cand.spellID and cand.spellID > 0 then
+                        -- Non-English: any item with a spell effect passes
+                        passFilter = true
+                    end
+                    do
+                        if passFilter then
                             local tex = C_Item.GetItemIconByID(cand.itemID)
                             local itemName = C_Item.GetItemNameByID(cand.itemID)
                             local displayName
@@ -4007,8 +4020,6 @@ initFrame:SetScript("OnEvent", function(self)
                                 icon = tex, spellID = cand.spellID, isTrinket = cand.isTrinket,
                             }
                         end
-                    else
-                        allResolved = false
                     end
                 end
                 local PRIORITY_COUNT = #ITEM_PRIORITY_NAMES
@@ -4442,6 +4453,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- "Potions" flyout subnav
             local _potionsSub
+            menu._potionsSub = nil  -- reference for OnUpdate close-check
             local itemPresets = ns.CDM_ITEM_PRESETS
             if itemPresets and #itemPresets > 0 then
                 local potItem = CreateFrame("Button", nil, inner)
@@ -4469,6 +4481,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local function ShowPotionsSub()
                     if not _potionsSub then
                         _potionsSub = CreateFrame("Frame", nil, menu)
+                        menu._potionsSub = _potionsSub
                         _potionsSub:SetFrameStrata("FULLSCREEN_DIALOG")
                         _potionsSub:SetFrameLevel(menu:GetFrameLevel() + 5)
                         _potionsSub:SetClampedToScreen(true)
@@ -4882,7 +4895,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Close on left-click outside (non-blocking, preserves world interactions)
         menu:SetScript("OnUpdate", function(m)
-            local overSub = _customTrackingSub and _customTrackingSub:IsShown() and _customTrackingSub:IsMouseOver()
+            local overSub = (_customTrackingSub and _customTrackingSub:IsShown() and _customTrackingSub:IsMouseOver())
+                or (m._potionsSub and m._potionsSub:IsShown() and m._potionsSub:IsMouseOver())
             if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and not overSub and IsMouseButtonDown("LeftButton") then
                 m:Hide()
             end
@@ -6522,6 +6536,15 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rightRgn = visRow._rightRegion
             if rightRgn._control then rightRgn._control:Hide() end
+            if isBuffBar then
+                -- Buff bars don't support visibility options (their icon count
+                -- is dynamic and these options cause layout issues).
+                local disabledLbl = rightRgn:CreateFontString(nil, "OVERLAY")
+                disabledLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                disabledLbl:SetPoint("RIGHT", rightRgn, "RIGHT", -20, 0)
+                disabledLbl:SetTextColor(0.4, 0.4, 0.4, 0.6)
+                disabledLbl:SetText("N/A for Buff Bars")
+            else
             local visItems = EllesmereUI.VIS_OPT_ITEMS
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                 rightRgn, 210, rightRgn:GetFrameLevel() + 2,
@@ -6536,6 +6559,7 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+            end
         end
 
         -- Sync icon on Visibility (left)
@@ -6561,8 +6585,8 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Sync icon on Visibility Options (right)
-        do
+        -- Sync icon on Visibility Options (right) -- not for buff bars
+        if not isBuffBar then do
             local rgn = visRow._rightRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
@@ -6590,7 +6614,7 @@ initFrame:SetScript("OnEvent", function(self)
                     ns.CDMApplyVisibility(); EllesmereUI:RefreshPage()
                 end,
             })
-        end
+        end end
 
         -- Row 2: Anchor to Cursor | Cursor Position (cog: X + Y)
         local cursorRow

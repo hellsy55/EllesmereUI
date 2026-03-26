@@ -4564,7 +4564,7 @@ local function ReloadFrames()
                                 buffCbOff = -cbH
                             end
                             -- Only reanchor + ForceUpdate when layout actually changed
-                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. buffCbOff .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
+                            local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, buffCbOff, bgx or 0, bgy or 0, settings.maxBuffs or 4, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0)
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
                                 frame.Buffs.size = settings.buffSize or 22
@@ -4915,7 +4915,7 @@ local function ReloadFrames()
                                     liveCbOff = -cbH
                                 end
                             end
-                            local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 20) .. liveCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
+                            local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 20, liveCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0)
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
                                 frame.Buffs.size = settings.buffSize or 22
@@ -4962,7 +4962,7 @@ local function ReloadFrames()
                                     liveDbCbOff = -cbH
                                 end
                             end
-                            local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 20) .. liveDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
+                            local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 20, liveDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
                                 frame.Debuffs.size = settings.debuffSize or 22
@@ -5253,7 +5253,7 @@ local function ReloadFrames()
                                 focusDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. focusDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, focusDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
                             frame.Debuffs.size = settings.debuffSize or 22
@@ -5290,7 +5290,7 @@ local function ReloadFrames()
                                 focusBfCbOff = -cbH
                             end
                         end
-                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. focusBfCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
+                        local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 4, focusBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0)
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
                             frame.Buffs.size = settings.buffSize or 22
@@ -5528,7 +5528,7 @@ local function ReloadFrames()
                                 liveDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 10) .. liveDbCbOff .. (settings.debuffSize or 22) .. (settings.debuffOffsetX or 0) .. (settings.debuffOffsetY or 0) .. (settings.onlyPlayerDebuffs and "1" or "0")
+                        local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, liveDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
                             frame.Debuffs.size = settings.debuffSize or 22
@@ -5565,7 +5565,7 @@ local function ReloadFrames()
                                 bossBfCbOff = -cbH
                             end
                         end
-                        local buffKey = (bia or "") .. (bfp or "") .. (box or 0) .. (boy or 0) .. (bgx or 0) .. (bgy or 0) .. (settings.maxBuffs or 4) .. bossBfCbOff .. (settings.buffSize or 22) .. (settings.buffOffsetX or 0) .. (settings.buffOffsetY or 0)
+                        local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 4, bossBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0)
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
                             frame.Buffs.size = settings.buffSize or 22
