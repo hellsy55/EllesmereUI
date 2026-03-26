@@ -52,19 +52,25 @@ end
 
 --- Get barGlows data from SavedVariables (with lazy init)
 function ns.GetBarGlows()
+    -- Bar glows are fully spec-specific, stored in specProfiles[specKey].barGlows
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey() or "0"
+    if specKey == "0" then return { enabled = true, selectedBar = 1, assignments = {} } end
     if not EllesmereUIDB then return { enabled = true, selectedBar = 1, assignments = {} } end
     if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+        EllesmereUIDB.spellAssignments = { specProfiles = {} }
     end
     local sa = EllesmereUIDB.spellAssignments
-    if not sa.barGlows or not next(sa.barGlows) then
-        sa.barGlows = {
+    if not sa.specProfiles then sa.specProfiles = {} end
+    if not sa.specProfiles[specKey] then sa.specProfiles[specKey] = { barSpells = {} } end
+    local prof = sa.specProfiles[specKey]
+    if not prof.barGlows or not next(prof.barGlows) then
+        prof.barGlows = {
             enabled = true,
             selectedBar = 101,
             assignments = {},
         }
     end
-    return sa.barGlows
+    return prof.barGlows
 end
 
 --- Get assignments for a specific action bar button
@@ -76,8 +82,7 @@ end
 
 --- Returns true if the user has at least one bar glow assignment
 function ns.HasBarGlowAssignments()
-    if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return false end
-    local bg = EllesmereUIDB.spellAssignments.barGlows
+    local bg = ns.GetBarGlows()
     if not bg or not bg.assignments then return false end
     for _, buffList in pairs(bg.assignments) do
         if buffList and #buffList > 0 then return true end

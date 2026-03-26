@@ -6026,7 +6026,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.5.6"
+EllesmereUI.VERSION = "5.5.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6957,6 +6957,18 @@ EllesmereUI.VIS_VALUES = {
     solo       = "Solo",
 }
 EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
+
+-- CDM variant (no mouseover -- CDM bars don't support mouseover visibility)
+EllesmereUI.VIS_VALUES_CDM = {
+    never          = "Never",
+    always         = "Always",
+    in_combat      = "In Combat",
+    out_of_combat  = "Out of Combat",
+    in_raid        = "In Raid Group",
+    in_party       = "In Party",
+    solo           = "Solo",
+}
+EllesmereUI.VIS_ORDER_CDM = { "never", "always", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
 -- Basics-only variant (includes Disable Module)
 EllesmereUI.VIS_VALUES_BASICS = {

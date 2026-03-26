@@ -5103,24 +5103,24 @@ local function UpdateFlipbook(btn)
         if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
         if region.ProcStartFlipbook then region.ProcStartFlipbook:Hide() end
 
-        local sz = min(_ufBtnW, _ufBtnH)
+        local bW, bH = _ufBtnW, _ufBtnH
 
         if loopEntry.procedural then
             local N = 8
             local th = 2
             local period = 4
-            local lineLen = floor((sz + sz) * (2 / N - 0.1))
-            lineLen = min(lineLen, sz)
+            local lineLen = floor((bW + bH) * (2 / N - 0.1))
+            lineLen = min(lineLen, min(bW, bH))
             if lineLen < 1 then lineLen = 1 end
-            _G_Glows.StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb)
+            _G_Glows.StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, bW, bH)
         elseif loopEntry.buttonGlow then
-            _G_Glows.StartButtonGlow(wrapper, sz, cr, cg, cb)
+            _G_Glows.StartButtonGlow(wrapper, bW, cr, cg, cb, nil, bH)
         elseif loopEntry.autocast then
-            _G_Glows.StartAutoCastShine(wrapper, sz, cr, cg, cb, 1.0)
+            _G_Glows.StartAutoCastShine(wrapper, bW, cr, cg, cb, 1.0, bH)
         elseif loopEntry.shapeGlow then
             local maskPath = btn._eabShapeMaskPath or SHAPE_MASKS[btn._eabShapeName or ""]
             local borderPath = SHAPE_BORDERS[btn._eabShapeName or ""]
-            _G_Glows.StartShapeGlow(wrapper, sz, cr, cg, cb, 1.20, {
+            _G_Glows.StartShapeGlow(wrapper, min(bW, bH), cr, cg, cb, 1.20, {
                 maskPath   = maskPath,
                 borderPath = borderPath,
                 shapeMask  = btn._eabShapeMask,
@@ -5145,10 +5145,9 @@ local function UpdateFlipbook(btn)
             if lf then lf:SetDuration(0) end
         end
 
-        local sz = min(_ufBtnW, _ufBtnH)
         _G_Glows.StopAllGlows(wrapper)
         wrapper:Show()
-        _G_Glows.StartFlipBookGlow(wrapper, sz, loopEntry, cr, cg, cb)
+        _G_Glows.StartFlipBookGlow(wrapper, _ufBtnW, loopEntry, cr, cg, cb, _ufBtnH)
         if wrapper._eabOwnMask then
             MaskFrameTextures(wrapper, wrapper._eabOwnMask)
         end

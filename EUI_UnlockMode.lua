@@ -4855,6 +4855,15 @@ local function CreateMover(barKey)
                     local pm = pickModeMover
                     local pmKey = pm._barKey
 
+                    -- Reject elements marked as non-anchorable (e.g. buff bars
+                    -- whose icon count changes dynamically with auras).
+                    local targetEl = registeredElements[targetKey]
+                    if targetEl and targetEl.noAnchorTarget then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        return
+                    end
+
                     -- Circular anchor detection: walk the target's anchor chain
                     -- to make sure it doesn't eventually point back to pmKey
                     local circular = false

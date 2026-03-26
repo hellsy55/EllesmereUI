@@ -467,19 +467,10 @@ function EllesmereUI.ApplyProfileData(profileData)
             local db = dbByFolder[entry.folder]
             if db then
                 local profile = db.profile
-                -- Preserve spec-specific CDM data that is not included in exports
-                local savedTBB, savedTBBPos
-                if entry.folder == "EllesmereUICooldownManager" then
-                    savedTBB    = profile.trackedBuffBars
-                    savedTBBPos = profile.tbbPositions
-                end
+                -- TBB and barGlows are spec-specific (in spellAssignments),
+                -- not in profile. No save/restore needed on profile switch.
                 for k in pairs(profile) do profile[k] = nil end
                 for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
-                -- Restore spec-specific data after profile wipe
-                if entry.folder == "EllesmereUICooldownManager" then
-                    if not profile.trackedBuffBars then profile.trackedBuffBars = savedTBB end
-                    if not profile.tbbPositions    then profile.tbbPositions    = savedTBBPos end
-                end
                 if db._profileDefaults then
                     EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                 end
@@ -844,7 +835,7 @@ end
 function EllesmereUI.ApplyImportedSpecProfiles(importedSpellAssignments, selectedSpecs)
     if not importedSpellAssignments or not importedSpellAssignments.specProfiles then return end
     if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+        EllesmereUIDB.spellAssignments = { specProfiles = {} }
     end
     local sa = EllesmereUIDB.spellAssignments
     if not sa.specProfiles then sa.specProfiles = {} end
@@ -981,7 +972,7 @@ function EllesmereUI.ExportCurrentProfile(selectedSpecs)
     if sa then
         profileData.spellAssignments = {
             specProfiles = DeepCopy(sa.specProfiles or {}),
-            barGlows = DeepCopy(sa.barGlows or {}),
+            -- barGlows excluded from export (spec-specific, stored in specProfiles)
         }
         -- Filter by selected specs if provided
         if selectedSpecs and profileData.spellAssignments.specProfiles then
@@ -1110,7 +1101,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         -- Write spell assignments to dedicated store
         if payload.data.spellAssignments then
             if not EllesmereUIDB.spellAssignments then
-                EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                EllesmereUIDB.spellAssignments = { specProfiles = {} }
             end
             local sa = EllesmereUIDB.spellAssignments
             local imported = payload.data.spellAssignments
@@ -1120,7 +1111,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
                 end
             end
             if imported.barGlows and next(imported.barGlows) then
-                sa.barGlows = DeepCopy(imported.barGlows)
+                -- barGlows is now per-spec in specProfiles, not global. Skip import.
             end
         end
         -- Backward compat: extract specProfiles from CDM addon data (pre-migration format)
@@ -1128,7 +1119,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             local cdm = payload.data.addons["EllesmereUICooldownManager"]
             if cdm.specProfiles then
                 if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
                 end
                 for key, data in pairs(cdm.specProfiles) do
                     if not EllesmereUIDB.spellAssignments.specProfiles[key] then
@@ -1138,10 +1129,10 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             end
             if cdm.barGlows then
                 if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
                 end
                 if not next(EllesmereUIDB.spellAssignments.barGlows or {}) then
-                    EllesmereUIDB.spellAssignments.barGlows = DeepCopy(cdm.barGlows)
+                    -- barGlows is now per-spec in specProfiles, not global. Skip import.
                 end
             end
         end
@@ -1194,7 +1185,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         -- Write spell assignments to dedicated store
         if payload.data and payload.data.spellAssignments then
             if not EllesmereUIDB.spellAssignments then
-                EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                EllesmereUIDB.spellAssignments = { specProfiles = {} }
             end
             local sa = EllesmereUIDB.spellAssignments
             local imported = payload.data.spellAssignments
@@ -1204,7 +1195,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
                 end
             end
             if imported.barGlows and next(imported.barGlows) then
-                sa.barGlows = DeepCopy(imported.barGlows)
+                -- barGlows is now per-spec in specProfiles, not global. Skip import.
             end
         end
         -- Backward compat: extract specProfiles from CDM addon data (pre-migration format)
@@ -1212,7 +1203,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             local cdm = payload.data.addons["EllesmereUICooldownManager"]
             if cdm.specProfiles then
                 if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
                 end
                 for key, data in pairs(cdm.specProfiles) do
                     if not EllesmereUIDB.spellAssignments.specProfiles[key] then
@@ -1222,10 +1213,10 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             end
             if cdm.barGlows then
                 if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {}, barGlows = {} }
+                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
                 end
                 if not next(EllesmereUIDB.spellAssignments.barGlows or {}) then
-                    EllesmereUIDB.spellAssignments.barGlows = DeepCopy(cdm.barGlows)
+                    -- barGlows is now per-spec in specProfiles, not global. Skip import.
                 end
             end
         end

@@ -2229,6 +2229,7 @@ local function RegisterUnlockElements()
             label = "AuraBuff Reminders",
             group = "AuraBuff Reminders",
             order = 600,
+            noAnchorTarget = true,  -- icon count changes dynamically with auras
             getFrame = function() return iconAnchor end,
             getSize = function()
                 local p = db.profile.display

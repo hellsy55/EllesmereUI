@@ -101,10 +101,10 @@ local function _AntsOnUpdate(self, elapsed)
         -- "secret number" tainted dimensions from GetSize).
         w = tonumber(tostring(w)) or 0
         h = tonumber(tostring(h)) or 0
-        -- Fallback to the sz passed at start time (SetAllPoints wrappers
+        -- Fallback to the w/h passed at start time (SetAllPoints wrappers
         -- may return 0 before layout resolves)
-        if w * h == 0 and d.fallbackSz and d.fallbackSz > 0 then
-            w = d.fallbackSz; h = d.fallbackSz
+        if w * h == 0 and d.fallbackW and d.fallbackW > 0 then
+            w = d.fallbackW; h = d.fallbackH or d.fallbackW
         end
         if w * h == 0 then return end
         local PP = EllesmereUI.PP
@@ -141,13 +141,14 @@ local function _AntsOnUpdate(self, elapsed)
     end
 end
 
-local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, sz)
+local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, szOrW, szH)
     if not wrapper._euiAntsData then
         wrapper._euiAntsData = { lines = {}, N = 0, timer = 0, w = 0, h = 0 }
     end
     local d = wrapper._euiAntsData
     d.N = N; d.th = th; d.period = period; d.lineLen = lineLen
-    d.w = 0; d.h = 0; d.onePixel = nil; d.fallbackSz = sz or 0  -- reset so OnUpdate re-snaps to physical pixels
+    d.w = 0; d.h = 0; d.onePixel = nil
+    d.fallbackW = szOrW or 0; d.fallbackH = szH or szOrW or 0
     local totalTex = N * 2
     for i = 1, totalTex do
         if not d.lines[i] then
@@ -155,7 +156,7 @@ local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, 
             tex:SetColorTexture(1, 1, 1, 1)
             d.lines[i] = tex
         end
-        d.lines[i]:SetVertexColor(cr, cg, cb, 1)
+        d.lines[i]:SetVertexColor(cr or 1, cg or 1, cb or 1, 1)
         d.lines[i]:Show()
     end
     for i = totalTex + 1, #d.lines do d.lines[i]:Hide() end
@@ -179,8 +180,10 @@ local function _ButtonGlowOnUpdate(self, elapsed)
     AnimateTexCoords(d.ants, 256, 256, 48, 48, 22, elapsed, 0.01)
 end
 
-local function StartButtonGlow(wrapper, sz, cr, cg, cb, scale)
+local function StartButtonGlow(wrapper, szOrW, cr, cg, cb, scale, szH)
     scale = scale or 1.0
+    local w = szOrW or 36
+    local h = szH or w
     if not wrapper._euiBgData then
         local glow = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         glow:SetTexture(ICON_ALERT_TEX)
@@ -196,12 +199,12 @@ local function StartButtonGlow(wrapper, sz, cr, cg, cb, scale)
     local d = wrapper._euiBgData
     -- The ants texture has transparent padding baked into its frames,
     -- so we scale up to compensate and match the button edge visually.
-    local antsSz = sz * 1.35
-    local glowSz = antsSz * 1.3
-    d.glow:SetSize(glowSz, glowSz)
+    local antsW, antsH = w * 1.35, h * 1.35
+    local glowW, glowH = antsW * 1.3, antsH * 1.3
+    d.glow:SetSize(glowW, glowH)
     d.glow:SetDesaturated(true); d.glow:SetVertexColor(cr, cg, cb, 1)
     d.glow:SetAlpha(1); d.glow:Show()
-    d.ants:SetSize(antsSz, antsSz)
+    d.ants:SetSize(antsW, antsH)
     d.ants:SetDesaturated(true); d.ants:SetVertexColor(cr, cg, cb, 1)
     d.ants:SetAlpha(1); d.ants:Show()
     wrapper:SetScript("OnUpdate", _ButtonGlowOnUpdate)
@@ -258,10 +261,10 @@ local function _AutoCastOnUpdate(self, elapsed)
         -- "secret number" tainted dimensions from GetSize).
         w = tonumber(tostring(w)) or 0
         h = tonumber(tostring(h)) or 0
-        -- Fallback to the sz passed at start time (SetAllPoints wrappers
+        -- Fallback to the w/h passed at start time (SetAllPoints wrappers
         -- may return 0 before layout resolves)
-        if w * h == 0 and d.fallbackSz and d.fallbackSz > 0 then
-            w = d.fallbackSz; h = d.fallbackSz
+        if w * h == 0 and d.fallbackW and d.fallbackW > 0 then
+            w = d.fallbackW; h = d.fallbackH or d.fallbackW
         end
         if w * h == 0 then return end
         d.w = w; d.h = h
@@ -286,7 +289,7 @@ local function _AutoCastOnUpdate(self, elapsed)
     end
 end
 
-local function StartAutoCastShine(wrapper, sz, cr, cg, cb, scale)
+local function StartAutoCastShine(wrapper, szOrW, cr, cg, cb, scale, szH)
     scale = scale or 1.0
     local dotsPerLayer = 4
     local totalDots = dotsPerLayer * 4
@@ -317,7 +320,7 @@ local function StartAutoCastShine(wrapper, sz, cr, cg, cb, scale)
         d.sparkles[idx]:Show()
     end
     for idx = totalDots + 1, #d.sparkles do d.sparkles[idx]:Hide() end
-    d.w = 0; d.h = 0; d.fallbackSz = sz or 0
+    d.w = 0; d.h = 0; d.fallbackW = szOrW or 0; d.fallbackH = szH or szOrW or 0
     wrapper:SetScript("OnUpdate", _AutoCastOnUpdate)
 end
 
@@ -433,11 +436,14 @@ end
 --  Handles atlas-based and raw-texture FlipBook animations (GCD, Modern WoW
 --  Glow, Classic WoW Glow, and any future FlipBook styles).
 -------------------------------------------------------------------------------
-local function StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
+local function StartFlipBookGlow(wrapper, szOrW, entry, cr, cg, cb, szH)
     -- FlipBook frames have transparent padding baked in. Each atlas
     -- has a different amount, so the style entry carries a texPadding
     -- multiplier (defaults to 1 = no compensation).
-    local texSz = sz * (entry.texPadding or 1)
+    local w = szOrW or 36
+    local h = szH or w
+    local texW = w * (entry.texPadding or 1)
+    local texH = h * (entry.texPadding or 1)
 
     if not wrapper._euiFlipData then
         local tex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -448,7 +454,7 @@ local function StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
         wrapper._euiFlipData = { tex = tex, ag = ag, anim = anim }
     end
     local d = wrapper._euiFlipData
-    d.tex:SetSize(texSz, texSz)
+    d.tex:SetSize(texW, texH)
     if entry.atlas then
         d.tex:SetAtlas(entry.atlas)
     elseif entry.texture then
@@ -477,7 +483,7 @@ local function StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
             local aAnim = aAg:CreateAnimation("FlipBook")
             d.ants = aTex; d.antsAg = aAg; d.antsAnim = aAnim
         end
-        d.ants:SetSize(texSz, texSz)
+        d.ants:SetSize(texW, texH)
         d.ants:SetAtlas(entry.atlas)
         d.ants:SetDesaturated(false)
         d.ants:SetVertexColor(1, 1, 1)
@@ -532,13 +538,14 @@ end
 --    .N, .th, .period — pixel glow tuning
 --    .maskPath, .borderPath, .shapeMask — shape glow textures
 -------------------------------------------------------------------------------
-local function StartGlow(wrapper, styleIdx, sz, cr, cg, cb, opts)
+local function StartGlow(wrapper, styleIdx, szOrW, cr, cg, cb, opts, szH)
     if not wrapper then return end
     styleIdx = tonumber(styleIdx) or 1
     if styleIdx < 1 or styleIdx > #GLOW_STYLES then styleIdx = 1 end
     local entry = GLOW_STYLES[styleIdx]
     opts = opts or {}
-    sz = sz or 36
+    local w = szOrW or 36
+    local h = szH or w
     cr = cr or 1; cg = cg or 1; cb = cb or 1
 
     -- Stop any previous glow
@@ -548,28 +555,29 @@ local function StartGlow(wrapper, styleIdx, sz, cr, cg, cb, opts)
         local N       = opts.N or 8
         local th      = opts.th or 2
         local period  = opts.period or 4
-        local lineLen = floor((sz + sz) * (2 / N - 0.1))
-        lineLen = min(lineLen, sz)
+        local lineLen = floor((w + h) * (2 / N - 0.1))
+        lineLen = min(lineLen, min(w, h))
         if lineLen < 1 then lineLen = 1 end
-        StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, sz)
+        StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, w, h)
 
     elseif entry.buttonGlow then
-        StartButtonGlow(wrapper, sz, cr, cg, cb)
+        StartButtonGlow(wrapper, w, cr, cg, cb, nil, h)
 
     elseif entry.autocast then
-        StartAutoCastShine(wrapper, sz, cr, cg, cb, 1.0)
+        StartAutoCastShine(wrapper, w, cr, cg, cb, 1.0, h)
 
     elseif entry.shapeGlow then
-        StartShapeGlow(wrapper, sz, cr, cg, cb, 1.20, opts)
+        StartShapeGlow(wrapper, w, cr, cg, cb, 1.20, opts)
 
     else
         -- FlipBook mode (GCD, Modern WoW Glow, Classic WoW Glow, etc.)
-        StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
+        StartFlipBookGlow(wrapper, w, entry, cr, cg, cb, h)
     end
 
     wrapper._euiGlowActive = true
     wrapper:SetAlpha(1)
-    wrapper:Show()
+    -- No Show() — wrapper should already be shown. Toggling visibility
+    -- on children of Blizzard viewer frames triggers Layout cascades.
 end
 
 local function StopGlow(wrapper)
