@@ -2226,6 +2226,13 @@ local function UpdateSecondaryResource()
                         else
                             ft:SetVertexColor(r, g, b, a)
                         end
+                    elseif sp.thresholdEnabled and powerType == "SOUL_FRAGMENTS_DEVOURER" then
+                        local threshVal = sp.thresholdCount or 30
+                        if cur >= threshVal then
+                            ft:SetVertexColor(sp.thresholdR or 1, sp.thresholdG or 0.2, sp.thresholdB or 0.2, sp.thresholdA or 1)
+                        else
+                            ft:SetVertexColor(r, g, b, a)
+                        end
                     else
                         ft:SetVertexColor(r, g, b, a)
                     end
