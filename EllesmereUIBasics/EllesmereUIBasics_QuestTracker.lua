@@ -2565,6 +2565,8 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
+        SCENARIO_CRITERIA_UPDATE = true,
+        SCENARIO_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
