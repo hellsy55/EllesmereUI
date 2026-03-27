@@ -359,51 +359,71 @@ end
 ---   CD/utility bar: must be in Essential/Utility viewer
 ---   Buff bar: must be in BuffIcon viewer (not just Tracked Bars)
 ---   TBB: must be in BuffBar viewer (not just Tracked Buffs)
---- Check if a spell is KNOWN (not grayed out) in Blizzard CDM.
---- Uses GetCooldownViewerCategorySet(cat, false) which returns only learned spells.
-function ns.IsSpellKnownInCDM(spellID)
-    if not spellID or spellID <= 0 then return false end
-    if not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCategorySet then return true end
+--- Cached spell lookup sets. Rebuilt once per RebuildCDMSpellCaches() call
+--- instead of doing full category scans per-frame.
+local _knownSpellSet = {}    -- learned spells (cat, false)
+local _allSpellSet = {}      -- all spells including unlearned (cat, true)
+local _cdmSpellCacheDirty = true
+
+function ns.MarkCDMSpellCacheDirty()
+    _cdmSpellCacheDirty = true
+end
+
+local function RebuildCDMSpellCaches()
+    if not _cdmSpellCacheDirty then return end
+    _cdmSpellCacheDirty = false
+    wipe(_knownSpellSet)
+    wipe(_allSpellSet)
+    if not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCategorySet then return end
+    local gci = C_CooldownViewer.GetCooldownViewerCooldownInfo
+    if not gci then return end
     for cat = 0, 3 do
         local knownIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, false)
         if knownIDs then
             for _, cdID in ipairs(knownIDs) do
-                local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                local info = gci(cdID)
                 if info then
+                    if info.spellID and info.spellID > 0 then
+                        _knownSpellSet[info.spellID] = true
+                    end
+                    if info.overrideSpellID and info.overrideSpellID > 0 then
+                        _knownSpellSet[info.overrideSpellID] = true
+                    end
                     local sid = ns.ResolveInfoSpellID(info)
-                    if sid == spellID then return true end
-                    if info.spellID == spellID then return true end
-                    if info.overrideSpellID == spellID then return true end
+                    if sid and sid > 0 then _knownSpellSet[sid] = true end
                 end
             end
         end
-    end
-    return false
-end
-
---- Check if a spell is ACTIVELY tracked in the correct Blizzard CDM viewer.
---- Returns true only if the spell has a live frame in the viewer.
---- Used by spell picker popups and overlays.
---- Check if a spell exists in ANY Blizzard CDM category (learned or not).
---- Returns true if the spell is configured in Blizzard CDM at all.
-function ns.IsSpellInAnyCDMCategory(spellID)
-    if not spellID or spellID <= 0 then return false end
-    if not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCategorySet then return false end
-    for cat = 0, 3 do
         local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
         if allIDs then
             for _, cdID in ipairs(allIDs) do
-                local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                local info = gci(cdID)
                 if info then
-                    if info.spellID == spellID then return true end
+                    if info.spellID and info.spellID > 0 then
+                        _allSpellSet[info.spellID] = true
+                    end
+                    if info.overrideSpellID and info.overrideSpellID > 0 then
+                        _allSpellSet[info.overrideSpellID] = true
+                    end
                     local sid = ns.ResolveInfoSpellID(info)
-                    if sid == spellID then return true end
-                    if info.overrideSpellID == spellID then return true end
+                    if sid and sid > 0 then _allSpellSet[sid] = true end
                 end
             end
         end
     end
-    return false
+end
+ns.RebuildCDMSpellCaches = RebuildCDMSpellCaches
+
+function ns.IsSpellKnownInCDM(spellID)
+    if not spellID or spellID <= 0 then return false end
+    RebuildCDMSpellCaches()
+    return _knownSpellSet[spellID] == true
+end
+
+function ns.IsSpellInAnyCDMCategory(spellID)
+    if not spellID or spellID <= 0 then return false end
+    RebuildCDMSpellCaches()
+    return _allSpellSet[spellID] == true
 end
 
 function ns.IsSpellTrackedForBarType(spellID, barType)
@@ -411,9 +431,13 @@ function ns.IsSpellTrackedForBarType(spellID, barType)
     if barType == "buffs" then
         return ns._tickBuffIconTrackedSet[spellID] and true or false
     elseif barType == "tbb" then
-        return ns._tickBarViewerCache[spellID] and true or false
+        -- Frame-based: iterate BuffBarCooldownViewer pool with robust
+        -- multi-field matching instead of spell-ID cache lookup.
+        return ns.IsSpellInBuffBarViewer and ns.IsSpellInBuffBarViewer(spellID) or false
     else
-        return ns._tickCDUtilTrackedSet[spellID] and true or false
+        -- Frame-based: iterate Essential/Utility viewer pools with robust
+        -- multi-field matching instead of spell-ID cache lookup.
+        return ns.IsSpellInCDUtilViewer and ns.IsSpellInCDUtilViewer(spellID) or false
     end
 end
 

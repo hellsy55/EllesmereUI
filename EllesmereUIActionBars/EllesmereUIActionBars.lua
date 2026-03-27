@@ -37,6 +37,9 @@ local wipe, tinsert = wipe, table.insert
 local InCombatLockdown = InCombatLockdown
 local hooksecurefunc = hooksecurefunc
 local C_Timer_After = C_Timer.After
+
+-- Weak-keyed set: tracks which Blizzard bar frames have UpdateShownButtons hooked
+local _eabHookedBars = setmetatable({}, { __mode = "k" })
 local RegisterStateDriver = RegisterStateDriver
 local RegisterAttributeDriver = RegisterAttributeDriver
 local GetBindingKey = GetBindingKey
@@ -1505,13 +1508,9 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- by global name and already calls DoModeChange on them. Setting the
         -- flag would cause EAB_UpdateQuickKeybindButtons to double-toggle
         -- their QKB highlight.
-        -- Break the .bar reference so ActionBarActionButtonMixin:UpdateAction
-        -- does not call self.bar:UpdateShownButtons() on the hidden Blizzard
-        -- bar frame. Blizzard sets this as lowercase .bar (ActionBar.lua:33).
-        -- This is a plain Lua field (not a protected attribute), so it must
-        -- be cleared unconditionally — including the combat-reload path where
-        -- Blizzard's OnLoad has already set btn.bar to the stock bar frame.
-        btn.bar = nil
+        -- DON'T clear btn.bar -- writing nil to this Blizzard-read field taints
+        -- the frame table and propagates taint to CooldownViewer frames.
+        -- Instead, UpdateShownButtons is neutralized via hook (see below).
         if not skipProtected then
             -- Clear statehidden set during HideBlizzardBars so the button
             -- becomes visible again under our control.
@@ -1915,8 +1914,6 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local btn = _G["StanceButton" .. i]
             if btn then
-                btn._skipFlyout = true
-                btn.commandName = BINDING_MAP[key] .. i
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "stance")
@@ -1930,8 +1927,6 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local btn = _G["PetActionButton" .. i]
             if btn then
-                btn._skipFlyout = true
-                btn.commandName = BINDING_MAP[key] .. i
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "pet")
@@ -1979,12 +1974,15 @@ local function SetupBar(info, skipProtected)
                 end
 
             if btn then
-                -- commandName is a plain Lua field (not a protected attribute),
-                -- set unconditionally so the skipProtected combat-reload path
-                -- also gets it. This is the single authoritative assignment.
-                local bindPrefix = BINDING_MAP[key]
-                if bindPrefix then
-                    btn.commandName = bindPrefix .. i
+                -- commandName: only set on our OWN buttons (non-native).
+                -- Native Blizzard buttons already have commandName set by
+                -- Blizzard's OnLoad. Re-setting it taints the frame table.
+                if not info.nativeActionPage and not info.nativeMainBar
+                   and not info.isStance and not info.isPetBar then
+                    local bindPrefix = BINDING_MAP[key]
+                    if bindPrefix then
+                        btn.commandName = bindPrefix .. i
+                    end
                 end
                 -- RegisterForClicks and EnableMouseWheel are not protected
                 if btn.RegisterForClicks then
@@ -2038,6 +2036,27 @@ local function SetupBar(info, skipProtected)
         local blizzBar = _G[info.blizzFrame]
         if blizzBar and blizzBar.actionButtons and type(blizzBar.actionButtons) == "table" then
             table.wipe(blizzBar.actionButtons)
+        end
+    end
+
+    -- Hook UpdateShownButtons on the Blizzard bar to prevent it from hiding
+    -- buttons we've reparented to our bar. For non-native bars, actionButtons
+    -- was wiped above so this is redundant. For native bars, actionButtons is
+    -- intact (needed for keyboard dispatch), so the hook re-shows any buttons
+    -- that UpdateShownButtons hid. Uses a weak-keyed set to hook only once.
+    if not skipProtected then
+        local blizzBar = _G[info.blizzFrame]
+        if blizzBar and blizzBar.UpdateShownButtons and not _eabHookedBars[blizzBar] then
+            _eabHookedBars[blizzBar] = true
+            local barBtns = buttons
+            hooksecurefunc(blizzBar, "UpdateShownButtons", function()
+                if InCombatLockdown() then return end
+                for _, b in ipairs(barBtns) do
+                    if b and b:GetParent() ~= blizzBar then
+                        b:Show()
+                    end
+                end
+            end)
         end
     end
 

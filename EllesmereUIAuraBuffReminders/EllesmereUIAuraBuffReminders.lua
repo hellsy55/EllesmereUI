@@ -928,8 +928,7 @@ local function PlayerHasFlaskBuff()
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local sid = aura.spellId
-        local sidOk, inSet = pcall(function() return sid and FLASK_BUFF_ID_SET[sid] end)
-        if sidOk and inSet then return true end
+        if sid and not issecretvalue(sid) and FLASK_BUFF_ID_SET[sid] then return true end
         local aName = aura.name
         if aName and not issecretvalue(aName) and (FLASK_NAME_SET[aName] or aName:find("Flask")) then return true end
     end
@@ -2622,8 +2621,7 @@ function EABR:OnEnable()
             local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
             if not aura then break end
             local sid = aura.spellId
-            local sidOk, inSet = pcall(function() return sid and FLASK_BUFF_ID_SET[sid] end)
-            if sidOk and inSet then return true end
+            if sid and not issecretvalue(sid) and FLASK_BUFF_ID_SET[sid] then return true end
             local aName = aura.name
             if aName and not issecretvalue(aName) and (FLASK_NAME_SET[aName] or aName:find("Flask")) then return true end
         end
@@ -2645,18 +2643,41 @@ function EABR:OnEnable()
             local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
             if not aura then break end
             local sid = aura.spellId
-            local sidOk, inSet = pcall(function() return sid and _runeBuffIDSet[sid] end)
-            if sidOk and inSet then return true end
+            if sid and not issecretvalue(sid) and _runeBuffIDSet[sid] then return true end
         end
         return false
     end
+    -- Update snapshots on player aura changes (event-driven, no polling).
+    local function _updateSnapshots()
+        if C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive then
+            local pvpActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.PvPMatch)
+            local cmActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.ChallengeMode)
+            if not pvpActive then
+                _pvpSnap.flaskActive = _scanFlaskOOC()
+            end
+            if not cmActive then
+                _cmSnap.flaskActive = _scanFlaskOOC()
+                _cmSnap.foodActive = _scanFoodOOC()
+                _cmSnap.runeActive = _scanRuneOOC()
+            end
+        end
+    end
+    local _snapFrame = CreateFrame("Frame")
+    _snapFrame:RegisterEvent("UNIT_AURA")
+    _snapFrame:SetScript("OnEvent", function(_, _, unit)
+        if unit == "player" then _updateSnapshots() end
+    end)
+    -- Initial scan
+    _updateSnapshots()
+
+    -- Lightweight poll: only detect restriction state transitions (no aura scans).
     _pvpPollFrame:SetScript("OnUpdate", function(_, elapsed)
         if not (C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive) then return end
         _pvpSnap.pollAccum = _pvpSnap.pollAccum + elapsed
         if _pvpSnap.pollAccum < 1.0 then return end
         _pvpSnap.pollAccum = 0
 
-        -- PvP
+        -- PvP state transitions
         local pvpActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.PvPMatch)
         if pvpActive and not _pvpSnap.wasRestricted then
             _pvpSnap.wasRestricted = true
@@ -2664,11 +2685,9 @@ function EABR:OnEnable()
             _pvpSnap.wasRestricted = false
             _pvpSnap.flaskActive = false
             RequestRefresh()
-        elseif not pvpActive then
-            _pvpSnap.flaskActive = _scanFlaskOOC()
         end
 
-        -- M+ ChallengeMode
+        -- M+ state transitions
         local cmActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.ChallengeMode)
         if cmActive and not _cmSnap.wasRestricted then
             _cmSnap.wasRestricted = true
@@ -2678,10 +2697,6 @@ function EABR:OnEnable()
             _cmSnap.foodActive = false
             _cmSnap.runeActive = false
             RequestRefresh()
-        elseif not cmActive then
-            _cmSnap.flaskActive = _scanFlaskOOC()
-            _cmSnap.foodActive = _scanFoodOOC()
-            _cmSnap.runeActive = _scanRuneOOC()
         end
     end)
     _G._EABR_RequestRefresh = RequestRefresh

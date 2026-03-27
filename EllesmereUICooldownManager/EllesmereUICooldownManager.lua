@@ -839,7 +839,7 @@ local function GetActionButton(bar, i)
     local cacheKey = bar * 100 + i
     if actionButtonCache[cacheKey] then return actionButtonCache[cacheKey] end
     -- Try EABButton first (EllesmereUIActionBars creates these when Blizzard
-    -- buttons are unavailable, e.g. when Dominos hides ActionButton1-12)
+    -- buttons are unavailable, e.g. when another addon hides ActionButton1-12)
     local eabSlot = (eabSlotOffsets[bar] or 0) + i
     local btn = _G["EABButton" .. eabSlot]
     -- Fall back to standard Blizzard button names
@@ -1579,15 +1579,9 @@ local function EnforceCooldownViewerEditModeSettings()
 
     if changed then
         C_EditMode.SaveLayouts(layoutInfo)
-        -- Force Blizzard to apply at runtime
-        if EditModeManagerFrame then
-            if not issecurevariable(DropDownList1, "numButtons") then
-                pcall(ShowUIPanel, AddonList)
-                pcall(HideUIPanel, AddonList)
-            end
-            pcall(ShowUIPanel, EditModeManagerFrame)
-            pcall(HideUIPanel, EditModeManagerFrame)
-        end
+        -- Just save, don't force-apply at runtime.
+        -- ShowUIPanel/HideUIPanel on EditModeManagerFrame causes taint.
+        -- Blizzard applies the saved layout on next login/reload naturally.
     end
     _editModePolicyApplied = true
 end
@@ -1659,17 +1653,9 @@ function ns.SyncHideWhenInactive(forceValue)
         end
     end
 
-    -- Always save + force apply (even if data matches, Blizzard may not
-    -- have applied it to live frames yet after a reload)
+    -- Save layout. Don't force-apply via ShowUIPanel/HideUIPanel --
+    -- that causes taint. Blizzard applies saved layouts naturally.
     pcall(C_EditMode.SaveLayouts, layoutInfo)
-    if EditModeManagerFrame then
-        if not issecurevariable(DropDownList1, "numButtons") then
-            pcall(ShowUIPanel, AddonList)
-            pcall(HideUIPanel, AddonList)
-        end
-        pcall(ShowUIPanel, EditModeManagerFrame)
-        pcall(HideUIPanel, EditModeManagerFrame)
-    end
     if ns.QueueReanchor then ns.QueueReanchor() end
 end
 
@@ -2463,22 +2449,18 @@ end
 --  Hides EllesmereUI options panel first so the Blizzard UI is visible.
 -------------------------------------------------------------------------------
 local function OpenBlizzardCDMTab(isBuff)
+    -- Just toggle Blizzard's CDM settings panel.
+    -- Do NOT call SetCurrentCategories/SetDisplayMode/ClearDisplayCategories
+    -- after opening -- those taint the CDM frame pool.
+    if not CooldownViewerSettings then return end
     if EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
         EllesmereUI._mainFrame:Hide()
     end
-    if not CooldownViewerSettings then return end
-    CooldownViewerSettings:Show()
-    C_Timer.After(0.1, function()
-        local cvs = CooldownViewerSettings
-        cvs:ClearDisplayCategories()
-        if isBuff then
-            cvs:SetCurrentCategories({2, 3, -2})
-            cvs:SetDisplayMode("auras")
-        else
-            cvs:SetCurrentCategories({0, 1, -1})
-            cvs:SetDisplayMode("spells")
-        end
-    end)
+    if CooldownViewerSettings:IsShown() then
+        CooldownViewerSettings:Hide()
+    else
+        CooldownViewerSettings:Show()
+    end
 end
 ns.OpenBlizzardCDMTab = OpenBlizzardCDMTab
 
@@ -2607,6 +2589,7 @@ local function ApplyUntrackedOverlay(ourIcon, isUntracked)
     end
 end
 ns.ApplyUntrackedOverlay = ApplyUntrackedOverlay
+
 
 -------------------------------------------------------------------------------
 --  CDM Tooltip System
@@ -2876,6 +2859,11 @@ local function RefreshCDMIconAppearance(barKey)
         local glowOv = fd and fd.glowOverlay or icon._glowOverlay
         local kbText = fd and fd.keybindText or icon._keybindText
         local txOverlay = fd and fd.textOverlay or icon._textOverlay
+        -- Scale compensation: fonts render at the frame's native scale,
+        -- so multiply sizes by 1/scale to match the visual icon size.
+        local iconScale = icon:GetScale() or 1
+        if iconScale < 0.01 then iconScale = 1 end
+        local fontScale = 1 / iconScale
         -- Update texture zoom
         if tex then
             tex:ClearAllPoints()
@@ -2892,7 +2880,7 @@ local function RefreshCDMIconAppearance(barKey)
             -- Apply cooldown text font directly (old tick loop is gone)
             if barData.showCooldownText then
                 local cdFont = GetCDMFont()
-                local cdSize = barData.cooldownFontSize or 12
+                local cdSize = (barData.cooldownFontSize or 12) * fontScale
                 local cdR = barData.cooldownTextR or 1
                 local cdG = barData.cooldownTextG or 1
                 local cdB = barData.cooldownTextB or 1
@@ -2917,7 +2905,7 @@ local function RefreshCDMIconAppearance(barKey)
         end
         -- Style Blizzard's native stack/charge text elements
         local scFont = GetCDMFont()
-        local scSize = barData.stackCountSize or 11
+        local scSize = (barData.stackCountSize or 11) * fontScale
         local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
         local scX, scY = barData.stackCountX or 0, (barData.stackCountY or 0) + 2
         -- Applications (buff stacks / aura applications)
@@ -2943,7 +2931,7 @@ local function RefreshCDMIconAppearance(barKey)
 
         -- Update keybind text style
         if kbText then
-            kbText:SetFont(GetCDMFont(), barData.keybindSize or 10, "OUTLINE")
+            kbText:SetFont(GetCDMFont(), (barData.keybindSize or 10) * fontScale, "OUTLINE")
             kbText:SetShadowOffset(0, 0)
             kbText:ClearAllPoints()
             kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", barData.keybindOffsetX or 2, barData.keybindOffsetY or -2)
@@ -3327,6 +3315,15 @@ local function RebuildKeybindCache()
                     if name and not _cdmKeybindCache[name] then
                         _cdmKeybindCache[name] = formatted
                     end
+                    -- Also store under override/base so talent-swapped spells find the keybind
+                    local ovr = C_Spell.GetOverrideSpell and C_Spell.GetOverrideSpell(spellID)
+                    if ovr and ovr ~= spellID and not _cdmKeybindCache[ovr] then
+                        _cdmKeybindCache[ovr] = formatted
+                    end
+                    local base = C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(spellID)
+                    if base and base ~= spellID and not _cdmKeybindCache[base] then
+                        _cdmKeybindCache[base] = formatted
+                    end
                 end
             end
         end
@@ -3345,6 +3342,14 @@ local function ApplyCachedKeybinds()
                 local sid = ifc and ifc.spellID or icon._spellID
                 if bd and bd.showKeybind and sid then
                     local key = _cdmKeybindCache[sid]
+                    if not key then
+                        local ovr = C_Spell.GetOverrideSpell and C_Spell.GetOverrideSpell(sid)
+                        if ovr and ovr ~= sid then key = _cdmKeybindCache[ovr] end
+                    end
+                    if not key then
+                        local base = C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(sid)
+                        if base and base ~= sid then key = _cdmKeybindCache[base] end
+                    end
                     local name = C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
                     if not key and name then key = _cdmKeybindCache[name] end
                     if key then
@@ -3631,7 +3636,8 @@ function ns.RepopulateFromBlizzard()
     if not specKey or specKey == "0" then return end
 
     for _, barData in ipairs(p.cdmBars.bars) do
-        if MAIN_BAR_KEYS[barData.key] then
+        -- Skip the main buffs bar -- it auto-shows all CDM buffs, no assignments.
+        if MAIN_BAR_KEYS[barData.key] and barData.key ~= "buffs" then
             local sd = ns.GetBarSpellData(barData.key)
             if sd then
                 sd.assignedSpells = nil
@@ -3906,6 +3912,7 @@ function ECME:OnEnable()
             end
         end
     end
+
 
     -- Enable CDM cooldown viewer (keep Blizzard CDM running in background
     -- so we can read its children even while hidden)
@@ -4366,6 +4373,63 @@ do
 end
 
 function ECME:CDMFinishSetup()
+    -- ONE-TIME MIGRATION: wipe all buff bar data across ALL specs.
+    -- Removes extra buff bars from the bar list and clears assignedSpells
+    -- for all buff-type bars in every spec profile. The new system has the
+    -- main "buffs" bar auto-show everything from CDM with no assignments.
+    do
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if not EllesmereUIDB._buffBarMigrationV2Done then
+            EllesmereUIDB._buffBarMigrationV2Done = true
+
+            -- Collect the keys of all extra buff bars being removed so we
+            -- can also clean their spell assignments. Custom bars use keys
+            -- like "custom_5_1234" so we can't rely on name patterns.
+            local removedBuffBarKeys = {}
+
+            -- 1. Remove extra buff bars from the bar list (all profiles)
+            local function WipeBuffBarsFromProfile(p)
+                if not p or not p.cdmBars or not p.cdmBars.bars then return end
+                local kept = {}
+                for _, bd in ipairs(p.cdmBars.bars) do
+                    if bd.barType == "buffs" and bd.key ~= "buffs" then
+                        removedBuffBarKeys[bd.key] = true
+                    else
+                        kept[#kept + 1] = bd
+                    end
+                end
+                p.cdmBars.bars = kept
+            end
+
+            -- Current profile
+            WipeBuffBarsFromProfile(self.db and self.db.profile)
+
+            -- All other profiles in the DB
+            if EllesmereUIDB and EllesmereUIDB.profiles then
+                for _, prof in pairs(EllesmereUIDB.profiles) do
+                    WipeBuffBarsFromProfile(prof)
+                end
+            end
+
+            -- 2. Clear spell assignments for all buff-type bars
+            local store = EllesmereUIDB.spellAssignments
+            if store and store.specProfiles then
+                for _, specProf in pairs(store.specProfiles) do
+                    if specProf.barSpells then
+                        -- Clear main buffs bar assignments (auto-populated now)
+                        if specProf.barSpells["buffs"] then
+                            specProf.barSpells["buffs"].assignedSpells = nil
+                        end
+                        -- Remove spell data for every extra buff bar we deleted
+                        for removedKey in pairs(removedBuffBarKeys) do
+                            specProf.barSpells[removedKey] = nil
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Migrate: mouseover visibility is no longer supported on CDM bars.
     -- Move any bars using it to "always".
     do
@@ -4489,46 +4553,9 @@ function ECME:CDMFinishSetup()
 
     -- Migrate: cleanse custom spells (presets, custom spell IDs) off ALL
     -- buff-type bars across ALL spec profiles. Buff bars are now exclusively
-    -- Blizzard CDM-driven. Custom spells belong on Custom Aura Bars.
-    do
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        if sa and sa.specProfiles then
-            local p = self.db and self.db.profile
-            -- Find buff bar keys from the bar config
-            local buffBarKeys = {}
-            if p and p.cdmBars and p.cdmBars.bars then
-                for _, bd in ipairs(p.cdmBars.bars) do
-                    if bd.barType == "buffs" or bd.key == "buffs" then
-                        buffBarKeys[bd.key] = true
-                    end
-                end
-            end
-            -- Cleanse assignedSpells on buff bars in ALL spec profiles
-            if next(buffBarKeys) then
-                for specKey, prof in pairs(sa.specProfiles) do
-                    if prof.barSpells then
-                        for bk in pairs(buffBarKeys) do
-                            local bs = prof.barSpells[bk]
-                            if bs and bs.assignedSpells then
-                                -- Remove custom entries: negative IDs (items/trinkets)
-                                -- and spells with customSpellDurations (presets)
-                                local clean = {}
-                                for _, sid in ipairs(bs.assignedSpells) do
-                                    if sid and sid > 0 and not (bs.customSpellDurations and bs.customSpellDurations[sid]) then
-                                        clean[#clean + 1] = sid
-                                    end
-                                end
-                                bs.assignedSpells = clean
-                                -- Clear custom spell metadata
-                                bs.customSpellDurations = nil
-                                bs.customSpellGroups = nil
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
+    -- (Old buff bar cleanse migration removed -- the main buffs bar no longer
+    -- uses assignedSpells. Secondary buff bars are user-created and should
+    -- not be auto-cleansed.)
 
     -- This is the one-time construction hub for a normal login/reload enable:
     -- preload unlock helpers, build the initial bar set, spin up the periodic
@@ -4546,6 +4573,7 @@ function ECME:CDMFinishSetup()
     do
         local p = ECME.db and ECME.db.profile
         if p and p.cdmBars and p.cdmBars.enabled and EllesmereUIDB then
+
             local charKey = ns.GetCharKey()
             local specKey = ns.GetActiveSpecKey()
             local cache = EllesmereUIDB.cdmCachedBarSizes
@@ -4729,10 +4757,11 @@ function ECME:CDMFinishSetup()
             end
         end
 
-        -- Fix CDM buff bar assignedSpells
+        -- Fix CDM buff bar assignedSpells (secondary buff bars only).
+        -- The main "buffs" bar no longer uses assignedSpells.
         local p = ECME.db.profile
         for _, barData in ipairs(p.cdmBars.bars) do
-            if barData.barType == "buffs" or barData.key == "buffs" then
+            if (barData.barType == "buffs" or barData.key == "buffs") and barData.key ~= "buffs" then
                 local sd = ns.GetBarSpellData(barData.key)
                 if sd then CleanSpellList(sd.assignedSpells) end
             end
@@ -4778,15 +4807,9 @@ function ECME:CDMFinishSetup()
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     ns.SetupViewerHooks()
 
-    -- Edit mode close: rebuild all bars (Blizzard may reposition CDM viewers)
-    if EditModeManagerFrame then
-        EditModeManagerFrame:HookScript("OnHide", function()
-            C_Timer.After(0.3, function()
-                BuildAllCDMBars()
-                if ns.QueueReanchor then ns.QueueReanchor() end
-            end)
-        end)
-    end
+    -- Edit mode close: no forced rebuild needed. The reanchor naturally skips
+    -- inactive buff frames with hideWhenInactive (ghost frames from Edit Mode)
+    -- and alpha-0s them as unclaimed. Normal hooks handle the rest.
 
     -- Register UNIT_AURA tracking if custom buff bars have spells
     if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
@@ -5015,6 +5038,11 @@ local function ScheduleTalentRebuild()
         end
         -- Rebuild keybind cache (talent swap may change action slot contents)
         UpdateCDMKeybinds()
+        -- Invalidate TBB frame cache + spell caches, then reanchor so
+        -- overlays re-evaluate against the new viewer pool state.
+        if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
+        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+        if ns.QueueReanchor then ns.QueueReanchor() end
     end)
 end
 

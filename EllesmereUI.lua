@@ -5956,7 +5956,6 @@ local function ShowSidebarUnlockTip()
 end
 
 function EllesmereUI:Show()
-    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     self:EnsureLoaded()
     CreateMainFrame()
     RefreshSidebarStates()
@@ -5966,7 +5965,6 @@ end
 function EllesmereUI:Hide()   if mainFrame then mainFrame:Hide() end end
 function EllesmereUI:Toggle()
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
-    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     self:EnsureLoaded()
     CreateMainFrame()
     if mainFrame:IsShown() then
@@ -6029,7 +6027,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.6.2"
+EllesmereUI.VERSION = "5.6.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6117,6 +6115,7 @@ if not _G._EUI_ConflictChecked then
             { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" } },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager" } },
+            { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
             { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager" } },
             { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager" } },
         }
@@ -6363,7 +6362,6 @@ function EllesmereUI:ShowModule(folderName)
         print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
-    if CooldownViewerSettings and CooldownViewerSettings:IsShown() then CooldownViewerSettings:Hide() end
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
     self:EnsureLoaded()
     CreateMainFrame()

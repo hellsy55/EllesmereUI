@@ -129,12 +129,13 @@ function ns.GetAllCDMBuffSpells()
     -- Only spells in the BuffBar viewer (vi=4) count as tracked for TBB.
     -- BuffIcon viewer spells go to untracked (fires popup to add to
     -- Blizzard's tracked bars first).
-    local barViewerCache = ns._tickBarViewerCache
+    -- Uses frame-based matching (IsSpellInBuffBarViewer) instead of
+    -- spell-ID cache lookup for robust ID resolution.
+    local IsInViewer = ns.IsSpellInBuffBarViewer
     local tracked, untracked = {}, {}
     for _, entry in ipairs(trackedOrder) do
         local sid = entry.spellID
-        local inTracked = sid and barViewerCache and barViewerCache[sid]
-        if inTracked then
+        if sid and IsInViewer and IsInViewer(sid) then
             tracked[#tracked + 1] = entry
         else
             untracked[#untracked + 1] = entry
