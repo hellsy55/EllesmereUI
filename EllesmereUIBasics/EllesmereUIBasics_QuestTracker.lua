@@ -1227,10 +1227,16 @@ local function GetTrackedRecipes()
 
     local tracked = C_TradeSkillUI.GetRecipesTracked(false)
     local recraft = C_TradeSkillUI.GetRecipesTracked(true)
-    if recraft then for _, v in ipairs(recraft) do
-        if type(v) == "table" then v._isRecraft = true end
-        tracked[#tracked + 1] = v
-    end end
+    
+    -- Build a set of recipeIDs that are from the recraft list
+    local recraftIDs = {}
+    if recraft then 
+        for _, v in ipairs(recraft) do
+            local rid = type(v) == "table" and (v.recipeID or v.recipeSchematicID) or v
+            if rid then recraftIDs[rid] = true end
+            tracked[#tracked + 1] = v
+        end 
+    end
     if not tracked or #tracked == 0 then return _recipes end
 
     local listN = 0
@@ -1246,7 +1252,7 @@ local function GetTrackedRecipes()
                     _recipe_entries[listN] = entry
                 end
                 entry.recipeID = recipeID
-                entry.isRecraft = (type(tracked_entry) == "table" and tracked_entry._isRecraft) or false
+                entry.isRecraft = recraftIDs[recipeID] or false
                 entry.name = schematic.name or ("Recipe #"..recipeID)
                 local reagentN = 0
                 if schematic.reagentSlotSchematics then
@@ -2565,6 +2571,8 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
+        SCENARIO_CRITERIA_UPDATE = true,
+        SCENARIO_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
