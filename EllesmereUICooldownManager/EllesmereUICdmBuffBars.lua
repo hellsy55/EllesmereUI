@@ -105,6 +105,16 @@ end
 -- Pandemic threshold: glow when remaining% <= this value (30%)
 local PANDEMIC_THRESHOLD = 0.30
 
+--- Check if a spell is in the pandemic window via C_UnitAuras.
+--- Returns true if the aura exists, has duration, and remaining <= 30%.
+function ns.IsInPandemicWindow(spellID)
+    if not spellID or spellID <= 0 then return false end
+    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+    if not aura or not aura.duration or aura.duration <= 0 or not aura.expirationTime then return false end
+    local rem = aura.expirationTime - GetTime()
+    return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
+end
+
 -------------------------------------------------------------------------------
 --  Popular Buffs (derived from BUFF_BAR_PRESETS, with compat alias)
 -------------------------------------------------------------------------------
@@ -854,9 +864,10 @@ local function UpdatePandemic(bar, cfg)
     end
 
     local style = cfg.pandemicGlowStyle or 1
-    -- Only pixel glow (1) and autocast (4) render on wide rectangles
-    if not (bar._icon and bar._icon:IsShown()) and style ~= 1 and style ~= 4 then
-        style = 1
+    -- Bars (no icon): only pixel glow (1) and autocast (4) render on rectangles
+    -- Icons: all styles allowed
+    if not (bar._icon and bar._icon:IsShown()) then
+        if style ~= 1 and style ~= 4 then style = 1 end
     end
 
     -- Start/restart glow on style or target change
@@ -928,6 +939,7 @@ local function ShowTBBUntrackedOverlay(bar, cfg)
         bar._untrackedOverlay = ov
     end
     bar._untrackedOverlay:Show()
+    if not bar:IsShown() then bar:Show() end
 end
 
 local function HideTBBUntrackedOverlay(bar)
@@ -1027,7 +1039,28 @@ function ns.UpdateTrackedBuffBarTimers()
                 barHasData = ok and gt
             end
 
+            -- Direct aura check: if the aura is gone, treat as inactive
+            -- regardless of stale caches. Ensures bars hide instantly on expiry.
             if isActive or barHasData then
+                local auraFound = false
+                if cfg.spellIDs then
+                    for _, sid in ipairs(cfg.spellIDs) do
+                        if C_UnitAuras.GetPlayerAuraBySpellID(sid) then auraFound = true; break end
+                    end
+                elseif cfg.spellID and cfg.spellID > 0 then
+                    auraFound = C_UnitAuras.GetPlayerAuraBySpellID(cfg.spellID) ~= nil
+                end
+                if not auraFound then
+                    isActive = false
+                    barHasData = false
+                end
+            end
+
+            -- If untracked overlay is showing, keep it visible regardless of aura state
+            local untrackedShowing = bar._untrackedOverlay and bar._untrackedOverlay:IsShown()
+            if untrackedShowing then
+                if not bar:IsShown() then bar:Show() end
+            elseif isActive or barHasData then
                 HideTBBUntrackedOverlay(bar)
                 if not bar:IsShown() then bar:Show() end
                 local sb = bar._bar
@@ -1106,20 +1139,11 @@ function ns.UpdateTrackedBuffBarTimers()
                         bar._timerText:Hide()
                     end
 
-                    -- Pandemic glow (secret-safe via pcall for the comparison only)
+                    -- Pandemic glow (via C_UnitAuras)
                     if _anyPandemic and cfg.pandemicGlow then
-                        local okP, remainPct = pcall(function() return bVal / bMax end)
-                        if okP and remainPct then
-                            local okC, inWindow = pcall(function() return remainPct > 0 and remainPct <= PANDEMIC_THRESHOLD end)
-                            if okC and inWindow then
-                                if not bar._pandemicGlowActive then UpdatePandemic(bar, cfg) end
-                                if bar._pandemicGlowTarget then
-                                    local okA, a = pcall(function() return 1 - (remainPct / PANDEMIC_THRESHOLD) end)
-                                    if okA and a then bar._pandemicGlowTarget:SetAlpha(a) end
-                                end
-                            elseif bar._pandemicGlowActive then
-                                ClearPandemic(bar)
-                            end
+                        if ns.IsInPandemicWindow(cfg.spellID) then
+                            if not bar._pandemicGlowActive then UpdatePandemic(bar, cfg) end
+                            if bar._pandemicGlowTarget then bar._pandemicGlowTarget:SetAlpha(1) end
                         elseif bar._pandemicGlowActive then
                             ClearPandemic(bar)
                         end
@@ -1167,10 +1191,12 @@ function ns.UpdateTrackedBuffBarTimers()
                 if bar._stacksText then bar._stacksText:Hide() end
                 bar._stackCount = 0
 
-                -- Overlay handled by RefreshAllOverlays (centralized in hooks file).
-                -- Just hide the bar when inactive (no overlay logic here).
-                HideTBBUntrackedOverlay(bar)
-                if bar:IsShown() then bar:Hide() end
+                -- Keep bar visible if untracked overlay is shown
+                if bar._untrackedOverlay and bar._untrackedOverlay:IsShown() then
+                    if not bar:IsShown() then bar:Show() end
+                else
+                    if bar:IsShown() then bar:Hide() end
+                end
             end
         end
     end

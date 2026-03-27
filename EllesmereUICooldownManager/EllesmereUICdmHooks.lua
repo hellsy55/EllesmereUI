@@ -416,7 +416,6 @@ local function DecorateFrame(frame, barData)
     fd.tex = iconWidget
     fd.cooldown = frame.Cooldown
 
-    frame:SetScale(1)
     HideBlizzardDecorations(frame)
 
     -- Background
@@ -564,6 +563,13 @@ local function CategorizeFrame(frame, viewerBarKey)
 
     -- Check if any bar claims this spell (cross-viewer routing)
     local claimBarKey = _spellRouteMap[baseSID] or _spellRouteMap[displaySID]
+    -- Fallback: check aura ID (picker stores aura IDs, CDM resolves differently)
+    if not claimBarKey and ns.ResolveChildSpellID then
+        local childSID = ns.ResolveChildSpellID(frame)
+        if childSID and childSID > 0 then
+            claimBarKey = _spellRouteMap[childSID]
+        end
+    end
     if claimBarKey then
         local claimBD = barDataByKey[claimBarKey]
         local claimType = claimBD and claimBD.barType or claimBarKey
@@ -602,6 +608,7 @@ function ns.RebuildSpellRouteMap()
             end
         end
     end
+
 end
 
 -------------------------------------------------------------------------------
@@ -853,6 +860,7 @@ local function CollectAndReanchor()
                 -- Filter list by assignedSpells (if set)
                 if spellList and #spellList > 0 then
                     local allowSet = _scratch_allowSet; wipe(allowSet)
+                    -- Build allow set from assigned spell IDs + their overrides
                     for _, sid in ipairs(spellList) do
                         if sid and sid > 0 then
                             allowSet[sid] = true
@@ -860,13 +868,21 @@ local function CollectAndReanchor()
                                 local ovr = _FindOverride(sid)
                                 if ovr and ovr > 0 then allowSet[ovr] = true end
                             end
+                            -- Bridge: also allow the CDM info ID for this spell.
+                            -- The picker stores aura IDs but the layout resolves
+                            -- CDM IDs which can differ (e.g. Fingers of Frost).
+                            local nm = C_Spell.GetSpellName(sid)
+                            if nm then allowSet[nm] = true end
                         end
                     end
                     local filtered = _scratch_filtered; wipe(filtered)
                     for _, entry in ipairs(list) do
-                        if allowSet[entry.spellID] or allowSet[entry.baseSpellID] then
-                            filtered[#filtered + 1] = entry
+                        local pass = allowSet[entry.spellID] or allowSet[entry.baseSpellID]
+                        if not pass then
+                            local nm = C_Spell.GetSpellName(entry.spellID)
+                            if nm and allowSet[nm] then pass = true end
                         end
+                        if pass then filtered[#filtered + 1] = entry end
                     end
                     list = filtered
                 end
@@ -1104,6 +1120,9 @@ local function CollectAndReanchor()
                 for _, entry in ipairs(list) do
                     if entry.spellID and not entryBySpell[entry.spellID] then entryBySpell[entry.spellID] = entry end
                     if entry.baseSpellID and not entryBySpell[entry.baseSpellID] then entryBySpell[entry.baseSpellID] = entry end
+                    -- Also key by name to bridge aura ID / CDM ID mismatches
+                    local nm = C_Spell.GetSpellName(entry.spellID)
+                    if nm and not entryBySpell[nm] then entryBySpell[nm] = entry end
                 end
 
                 if spellList and #spellList > 0 then
@@ -1115,12 +1134,17 @@ local function CollectAndReanchor()
                                 local ovr = _FindOverride(sid)
                                 if ovr and ovr > 0 then entry = entryBySpell[ovr] end
                             end
+                            -- Fallback: match by spell name
+                            if not entry and sid > 0 then
+                                local nm = C_Spell.GetSpellName(sid)
+                                if nm then entry = entryBySpell[nm] end
+                            end
                             if entry and not usedFrames[entry.frame] then
                                 count = count + 1
                                 local frame = entry.frame
                                 usedFrames[frame] = true
                                 DecorateFrame(frame, barData)
-                                if frame:GetScale() ~= 1 then frame:SetScale(1) end
+                                -- Scale handled in LayoutCDMBar
                                 -- No SetParent — it taints the frame (causes secret value
                                 -- errors on charges/hasTotem). Blizzard's Layout may
                                 -- reposition frames, but our reanchor fixes them back.
@@ -1476,6 +1500,102 @@ function ns.SetupViewerHooks()
     reanchorFrame = CreateFrame("Frame")
     reanchorFrame:SetScript("OnUpdate", ProcessReanchorQueue)
     reanchorFrame:Hide()
+
+    -- CDM buff bar ticker: staleness check + pandemic glow.
+    -- Runs every 0.1s. Detects expired auras that Blizzard didn't clean up
+    -- and manages pandemic glow on icons.
+    do
+        local cdmBuffTickFrame = CreateFrame("Frame")
+        local cdmBuffAccum = 0
+        cdmBuffTickFrame:SetScript("OnUpdate", function(_, elapsed)
+            cdmBuffAccum = cdmBuffAccum + elapsed
+            if cdmBuffAccum < 0.1 then return end
+            cdmBuffAccum = 0
+            local p = ECME and ECME.db and ECME.db.profile
+            if not p or not p.cdmBars or not p.cdmBars.bars then return end
+            local needsReanchor = false
+            for _, bd in ipairs(p.cdmBars.bars) do
+                if bd.enabled then
+                    local isBuff = (bd.barType == "buffs" or bd.key == "buffs")
+                    local icons = cdmBarIcons[bd.key]
+                    if icons then
+                        for fi = 1, #icons do
+                            local frame = icons[fi]
+                            if frame and frame:IsShown() then
+                                local fc = _ecmeFC[frame]
+                                local sid = fc and fc.resolvedSid
+                                local fd = hookFrameData[frame]
+
+                                -- Staleness: if aura is gone, queue reanchor
+                                if isBuff and sid and sid > 0 then
+                                    if not C_UnitAuras.GetPlayerAuraBySpellID(sid) then
+                                        needsReanchor = true
+                                    end
+                                end
+
+                                -- Buff glow (any visible icon on a buff bar)
+                                local buffGlowType = isBuff and (bd.buffGlowType or 0) or 0
+                                if buffGlowType > 0 and fd then
+                                    if not fd.buffGlowActive then
+                                        if not fd.buffGlowOverlay then
+                                            local ov = CreateFrame("Frame", nil, frame)
+                                            ov:SetAllPoints(frame)
+                                            ov:SetFrameLevel(frame:GetFrameLevel() + 7)
+                                            ov:EnableMouse(false)
+                                            fd.buffGlowOverlay = ov
+                                        end
+                                        local cr, cg, cb = bd.buffGlowR or 1.0, bd.buffGlowG or 0.776, bd.buffGlowB or 0.376
+                                        if bd.buffGlowClassColor then
+                                            local _, ct = UnitClass("player")
+                                            if ct then
+                                                local cc = RAID_CLASS_COLORS[ct]
+                                                if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                                            end
+                                        end
+                                        fd.buffGlowOverlay:SetAlpha(1)
+                                        ns.StartNativeGlow(fd.buffGlowOverlay, buffGlowType, cr, cg, cb)
+                                        fd.buffGlowActive = true
+                                    end
+                                elseif fd and fd.buffGlowActive and fd.buffGlowOverlay then
+                                    ns.StopNativeGlow(fd.buffGlowOverlay)
+                                    fd.buffGlowActive = false
+                                end
+
+                                -- Pandemic glow
+                                if bd.pandemicGlow and sid and sid > 0 and fd then
+                                    if ns.IsInPandemicWindow(sid) then
+                                        if not fd.pandemicGlowActive then
+                                            if not fd.pandemicOverlay then
+                                                local ov = CreateFrame("Frame", nil, frame)
+                                                ov:SetAllPoints(frame)
+                                                ov:SetFrameLevel(frame:GetFrameLevel() + 8)
+                                                ov:EnableMouse(false)
+                                                fd.pandemicOverlay = ov
+                                            end
+                                            local c = bd.pandemicGlowColor or { r = 1, g = 1, b = 0 }
+                                            local style = bd.pandemicGlowStyle or 1
+                                            local glowOpts = (style == 1) and {
+                                                N      = bd.pandemicGlowLines or 8,
+                                                th     = bd.pandemicGlowThickness or 2,
+                                                period = bd.pandemicGlowSpeed or 4,
+                                            } or nil
+                                            fd.pandemicOverlay:SetAlpha(1)
+                                            ns.StartNativeGlow(fd.pandemicOverlay, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
+                                            fd.pandemicGlowActive = true
+                                        end
+                                    elseif fd.pandemicGlowActive and fd.pandemicOverlay then
+                                        ns.StopNativeGlow(fd.pandemicOverlay)
+                                        fd.pandemicGlowActive = false
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            if needsReanchor then QueueReanchor() end
+        end)
+    end
 
     ns.SyncViewerToContainer = function() end
 

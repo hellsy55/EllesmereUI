@@ -252,7 +252,7 @@ local function _AutoCastOnUpdate(self, elapsed)
         if layerPhase[layer] > 1 then layerPhase[layer] = layerPhase[layer] - 1 end
     end
     d._accum = (d._accum or 0) + elapsed
-    if d._accum < 0.033 then return end
+    if d._accum < 0.016 then return end
     d._accum = 0
     local w, h = d.w, d.h
     if w * h == 0 then

@@ -2376,7 +2376,15 @@ LayoutCDMBar = function(barKey)
     -- Position each icon: fill bottom-up so bottom rows are full,
     -- top row gets the remainder. Center any row with fewer icons than stride.
     for i, icon in ipairs(visibleIcons) do
-        icon:SetSize(iconW, iconH)
+        -- Compensate for Blizzard's per-icon scale so visual size matches.
+        -- Both SetSize and SetPoint offsets are in the frame's scaled space,
+        -- so divide everything by the scale factor.
+        local iconScale = icon:GetScale() or 1
+        if iconScale < 0.01 then iconScale = 1 end
+        local iS = 1 / iconScale
+        icon:SetSize(iconW * iS, iconH * iS)
+        local scaledStepW = stepW * iS
+        local scaledStepH = stepH * iS
         if isMouseBar then
             icon:SetFrameStrata("TOOLTIP")
             icon:SetFrameLevel(9980 + i)
@@ -2406,43 +2414,43 @@ LayoutCDMBar = function(barKey)
         if grow == "RIGHT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * stepW / 2, 1)
+                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                col * stepW + rowOffset,
-                -(row * stepH))
+                col * scaledStepW + rowOffset,
+                -(row * scaledStepH))
         elseif grow == "LEFT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * stepW / 2, 1)
+                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT",
-                -(col * stepW + rowOffset),
-                -(row * stepH))
+                -(col * scaledStepW + rowOffset),
+                -(row * scaledStepH))
         elseif grow == "DOWN" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * stepH / 2, 1)
+                rowOffset = SnapForScale((stride - rowCount) * scaledStepH / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                row * stepW,
-                -(col * stepH + rowOffset))
+                row * scaledStepW,
+                -(col * scaledStepH + rowOffset))
         elseif grow == "UP" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * stepH / 2, 1)
+                rowOffset = SnapForScale((stride - rowCount) * scaledStepH / 2, 1)
             end
             icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT",
-                row * stepW,
-                col * stepH + rowOffset)
+                row * scaledStepW,
+                col * scaledStepH + rowOffset)
         elseif grow == "CENTER" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * stepW / 2, 1)
+                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "CENTER",
-                col * stepW + rowOffset - totalW / 2,
-                -(row * stepH) + totalH / 2)
+                col * scaledStepW + rowOffset - (totalW / 2) * iS,
+                -(row * scaledStepH) + (totalH / 2) * iS)
         end
     end
 end
@@ -4431,8 +4439,11 @@ function ECME:CDMFinishSetup()
         end
     end
 
-    -- Migrate: remove Bloodlust/Time Spiral/warlock presets from custom_buff bars
-    -- (these can't be tracked via cooldown detection).
+    -- Migrate: remove Bloodlust/Time Spiral/warlock presets from all bars
+    -- (these can't be tracked via cooldown detection). Only removes preset
+    -- versions (customSpellDurations entry), not real class spells like a
+    -- Shaman's Heroism or a Warlock's pet summons. Safe to run every login
+    -- because these presets were removed from the picker entirely.
     do
         local removedPresets = { [2825] = true, [32182] = true, [80353] = true,
             [264667] = true, [390386] = true, [381301] = true, [444062] = true, [444257] = true, -- Bloodlust variants
@@ -4444,26 +4455,30 @@ function ECME:CDMFinishSetup()
         local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
         if sa and sa.specProfiles then
             for _, prof in pairs(sa.specProfiles) do
-                -- Clean CDM bar assignedSpells
+                -- Clean preset versions of these spells from ALL bars.
+                -- Only remove if customSpellDurations has an entry for the
+                -- spell (meaning it was added as a preset, not a real class
+                -- spell like a Shaman's Heroism or a Warlock's pet summons).
                 if prof.barSpells then
                     for bk, bs in pairs(prof.barSpells) do
-                        if bs.assignedSpells then
+                        if bs.assignedSpells and bs.customSpellDurations then
                             for i = #bs.assignedSpells, 1, -1 do
-                                if removedPresets[bs.assignedSpells[i]] then
+                                local sid = bs.assignedSpells[i]
+                                if removedPresets[sid] and bs.customSpellDurations[sid] then
                                     table.remove(bs.assignedSpells, i)
+                                    bs.customSpellDurations[sid] = nil
                                 end
                             end
                         end
                         bs.presetVariants = nil
                     end
                 end
-                -- Clean TBB Tracking Bars: remove ALL preset/custom bars.
-                -- TBB should only mirror Blizzard's BuffBar viewer.
-                -- Custom tracking now belongs on Custom Aura Bars.
+                -- Clean only removed presets from TBB (bloodlust, time spiral,
+                -- warlock pets). Other popular presets (potions etc.) are kept.
                 if prof.trackedBuffBars and prof.trackedBuffBars.bars then
                     for i = #prof.trackedBuffBars.bars, 1, -1 do
                         local bar = prof.trackedBuffBars.bars[i]
-                        if bar.popularKey or bar.customDuration then
+                        if bar.popularKey and removedPopularKeys[bar.popularKey] then
                             table.remove(prof.trackedBuffBars.bars, i)
                         end
                     end

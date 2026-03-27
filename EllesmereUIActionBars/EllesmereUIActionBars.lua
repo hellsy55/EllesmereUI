@@ -4983,6 +4983,8 @@ local function UpdateFlipbook(btn)
             end
             local wrapper = btn._eabGlowWrapper
             _G_Glows.StopAllGlows(wrapper)
+            wrapper:SetAlpha(1)
+            wrapper:Show()
             -- Style 6 = Modern WoW Glow, gold color (same as Blizzard default)
             _G_Glows.StartGlow(wrapper, 6, _ufBtnW, 1, 0.788, 0.137, nil, _ufBtnH)
             -- Suppress Blizzard's native SpellActivationAlert
@@ -5037,49 +5039,11 @@ local function UpdateFlipbook(btn)
 
     if loopEntry.procedural or loopEntry.buttonGlow or loopEntry.autocast or loopEntry.shapeGlow then
         btn._eabCustomizedFlipbook = true
-        if region.ProcStartFlipbook then region.ProcStartFlipbook:Hide() end
-        if region.ProcStartAnim then
-            local startFlip = GetFlipBookAnim(region.ProcStartAnim)
-            if startFlip then startFlip:SetDuration(0) end
-        end
-        if region.ProcLoop then
-            local loopFlip = GetFlipBookAnim(region.ProcLoop)
-            if loopFlip then loopFlip:SetDuration(0) end
-        end
-        if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
-
-        if region.ProcStartAnim and not region._eabStartFinishHooked then
-            region.ProcStartAnim:HookScript("OnFinished", function()
-                if _procState.active[btn] then
-                    local pp = EAB.db and EAB.db.profile
-                    if pp and pp.procGlowEnabled ~= false then
-                        if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
-                        if region.ProcLoop then
-                            local lf = GetFlipBookAnim(region.ProcLoop)
-                            if lf then lf:SetDuration(0) end
-                        end
-                    end
-                end
-            end)
-            region._eabStartFinishHooked = true
-        end
-
-        if region.ProcLoop and not region._eabLoopPlayHooked then
-            region.ProcLoop:HookScript("OnPlay", function()
-                if _procState.active[btn] then
-                    local pp = EAB.db and EAB.db.profile
-                    if pp and pp.procGlowEnabled ~= false then
-                        if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
-                    end
-                end
-            end)
-            region._eabLoopPlayHooked = true
-        end
+        -- Suppress Blizzard's native flipbook visuals (hide textures, not durations)
+        region:SetAlpha(0)
 
         StopAllProceduralGlows(wrapper)
         wrapper:Show()
-        if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
-        if region.ProcStartFlipbook then region.ProcStartFlipbook:Hide() end
 
         local bW, bH = _ufBtnW, _ufBtnH
 
@@ -5110,18 +5074,9 @@ local function UpdateFlipbook(btn)
     else
         -- FlipBook styles: render on our own wrapper (SetAllPoints on btn)
         -- so the glow matches the button size with no scale math.
-        -- Hide Blizzard's flipbooks entirely.
+        -- Suppress Blizzard's native flipbook visuals.
         btn._eabCustomizedFlipbook = true
-        if region.ProcStartFlipbook then region.ProcStartFlipbook:Hide() end
-        if region.ProcLoopFlipbook then region.ProcLoopFlipbook:Hide() end
-        if region.ProcStartAnim then
-            local sf = GetFlipBookAnim(region.ProcStartAnim)
-            if sf then sf:SetDuration(0) end
-        end
-        if region.ProcLoop then
-            local lf = GetFlipBookAnim(region.ProcLoop)
-            if lf then lf:SetDuration(0) end
-        end
+        region:SetAlpha(0)
 
         _G_Glows.StopAllGlows(wrapper)
         wrapper:Show()
@@ -5166,11 +5121,10 @@ function EAB:HookProcGlow()
                             StopAllProceduralGlows(btn._eabGlowWrapper)
                             btn._eabGlowWrapper:Hide()
                         end
-                        -- Stop the native flipbook glow we may have started
+                        -- Reset Blizzard's SpellActivationAlert for next proc cycle
                         local sa = btn.SpellActivationAlert
                         if sa then
-                            if sa.ProcStartAnim then sa.ProcStartAnim:Stop() end
-                            if sa.ProcLoop then sa.ProcLoop:Stop() end
+                            sa:SetAlpha(1)
                             sa:Hide()
                         end
                     end

@@ -174,6 +174,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
+    -- Bar-only pandemic glow: only Pixel Glow and Auto-Cast Shine work on rectangles
+    local PAN_GLOW_BAR_VALUES = { [0] = "None", [1] = "Pixel Glow", [4] = "Auto-Cast Shine" }
+    local PAN_GLOW_BAR_ORDER  = { 0, 1, 4 }
+
     -- Get nameplate profile from central DB
     local function GetNPProfile()
         if not EllesmereUIDB or not EllesmereUIDB.profiles then return nil end
@@ -1686,8 +1690,7 @@ initFrame:SetScript("OnEvent", function(self)
         if _tbbSpellPickerMenu then _tbbSpellPickerMenu:Hide() end
 
         local tracked, untracked = ns.GetAllCDMBuffSpells()
-        -- Presets removed from TBB — they belong on Custom Aura Bars now.
-        local popular = {}
+        local popular = ns.TBB_POPULAR_BUFFS or {}
 
         local hasAny = #tracked > 0 or #untracked > 0
         if not hasAny then return end
@@ -3248,7 +3251,7 @@ initFrame:SetScript("OnEvent", function(self)
             local tbbPanRow
             tbbPanRow, h = W:DualRow(parent, y,
                 { type = "dropdown", text = "Pandemic Glow",
-                  values = PAN_GLOW_VALUES, order = PAN_GLOW_ORDER,
+                  values = PAN_GLOW_BAR_VALUES, order = PAN_GLOW_BAR_ORDER,
                   getValue = function()
                       local bd = SelectedTBB(); if not bd then return 0 end
                       if bd.pandemicGlow ~= true then return 0 end
@@ -3689,6 +3692,15 @@ initFrame:SetScript("OnEvent", function(self)
             menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
             menu._anchorFrame = anchorFrame
             _spellPickerMenu = menu
+            -- Close on left-click outside (non-blocking, preserves world interactions)
+            menu:SetScript("OnUpdate", function(m)
+                if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                    m:Hide()
+                end
+            end)
+            menu:SetScript("OnHide", function(m)
+                m:SetScript("OnUpdate", nil)
+            end)
             menu:Show()
             return
         end
