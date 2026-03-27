@@ -2686,51 +2686,8 @@ local function StyleFullFrame(frame, unit)
         frame.Castbar = CreateCastBar(frame, unit, settings)
         SetupShowOnCastBar(frame, "player")
 
-        -- Always create player buffs; oUF element disabled later if not wanted
-        do
-            local auraSize = settings.buffSize or 22
-            local gap = 1
-            local perRow = 7
-            local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
-                settings.buffAnchor, settings.buffGrowth
-            )
-            -- Offset bottom-anchored buffs below castbar when locked to frame
-            local buffCbOffset = 0
-            if (settings.buffAnchor == "bottomleft" or settings.buffAnchor == "bottomright"
-                or settings.buffAnchor == "left" or settings.buffAnchor == "right")
-                and settings.showPlayerCastbar then
-                local cbH = settings.playerCastbarHeight or 0
-                if cbH <= 0 then cbH = 14 end
-                buffCbOffset = -cbH
-            end
-            local buffs = CreateFrame("Frame", nil, frame)
-            buffs:SetPoint(bia, frame, bfp, box * gap + (settings.buffOffsetX or 0), boy * gap + buffCbOffset + (settings.buffOffsetY or 0))
-            buffs:SetSize(frame:GetWidth(), auraSize)
-            buffs.size = auraSize
-            buffs.spacing = gap
-            buffs.num = settings.maxBuffs or 4
-            buffs["size-x"] = perRow
-            buffs.initialAnchor = bia
-            buffs.growthX = bgx
-            buffs.growthY = bgy
-            buffs.filter = "HELPFUL"
-            buffs.PostCreateButton = function(_, button)
-                if not button then return end
-                if button.Icon then button.Icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
-                if button.Cooldown then
-                    button.Cooldown:SetDrawEdge(false)
-                    button.Cooldown:SetReverse(true)
-                    button.Cooldown:SetHideCountdownNumbers(true)
-                end
-                if not button.Border then
-                    button.Border = CreateFrame("Frame", nil, button)
-                    button.Border:SetAllPoints()
-                    button.Border:SetFrameLevel(button:GetFrameLevel() + 1)
-                    PP.CreateBorder(button.Border, 0, 0, 0, 1)
-                end
-            end
-            frame.Buffs = buffs
-        end
+        -- Create player buffs and debuffs using shared aura setup
+        CreateTargetAuras(frame, unit)
     elseif unit == "target" then
         local pSide = settings.portraitSide or "right"
         -- For attached, "top" falls back to default side
@@ -4583,6 +4540,44 @@ local function ReloadFrames()
                             end
                             frame.Buffs:Hide()
                             frame.Buffs.num = 0
+                        end
+                    end
+
+                    -- Live toggle player debuffs
+                    if frame.Debuffs then
+                        local dAnc = settings.debuffAnchor or "none"
+                        if dAnc == "none" then
+                            if frame:IsElementEnabled("Debuffs") then
+                                frame:DisableElement("Debuffs")
+                            end
+                            frame.Debuffs:Hide()
+                            frame.Debuffs.num = 0
+                        else
+                            if not frame:IsElementEnabled("Debuffs") then
+                                frame:EnableElement("Debuffs")
+                            end
+                            frame.Debuffs:Show()
+                            frame.Debuffs.num = settings.maxDebuffs or 10
+                            local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings.debuffGrowth or "auto")
+                            local debuffCbOff = 0
+                            if (dAnc == "bottomleft" or dAnc == "bottomright") and settings.showPlayerCastbar then
+                                local cbH = settings.playerCastbarHeight or 0
+                                if cbH <= 0 then cbH = 14 end
+                                debuffCbOff = -cbH
+                            end
+                            local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, debuffCbOff, dgx or 0, dgy or 0, settings.maxDebuffs or 10, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0)
+                            if frame.Debuffs._lastDebuffKey ~= debuffKey then
+                                frame.Debuffs._lastDebuffKey = debuffKey
+                                frame.Debuffs.size = settings.debuffSize or 22
+                                frame.Debuffs:ClearAllPoints()
+                                frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + debuffCbOff + (settings.debuffOffsetY or 0))
+                                frame.Debuffs.initialAnchor = dia
+                                frame.Debuffs.growthX = dgx
+                                frame.Debuffs.growthY = dgy
+                                if frame.Debuffs.ForceUpdate then
+                                    frame.Debuffs:ForceUpdate()
+                                end
+                            end
                         end
                     end
 
