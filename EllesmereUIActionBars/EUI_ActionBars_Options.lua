@@ -199,6 +199,10 @@ initFrame:SetScript("OnEvent", function(self)
     -- Hide overlay when the panel is closed
     EllesmereUI:RegisterOnHide(HideEditOverlay)
 
+    -- Sync Edit Mode icon counts when the settings panel closes
+    -- (user may have changed numIcons for a bar)
+    EllesmereUI:RegisterOnHide(function() EAB:SyncEditModeIcons() end)
+
     ---------------------------------------------------------------------------
     --  Live Preview System
     --

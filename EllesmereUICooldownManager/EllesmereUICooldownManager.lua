@@ -14,8 +14,7 @@ ns.ECME = ECME
 -- round to nearest integer, convert back.
 local function SnapForScale(x, barScale)
     if x == 0 then return 0 end
-    local es = (UIParent:GetScale() or 1) * (barScale or 1)
-    return EllesmereUI.PP.SnapForES(x, es)
+    return math.floor(x + 0.5)
 end
 
 local floor = math.floor
@@ -1749,6 +1748,8 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
 
     -- If stored as CENTER/CENTER, convert to grow-direction-aware anchor
     -- so the fixed edge stays put when bar width changes across specs.
+    -- Use settings-derived dimensions (not frame:GetWidth) so the result
+    -- is deterministic regardless of which icons have loaded.
     if pos.point == "CENTER" and (pos.relPoint == "CENTER" or not pos.relPoint) then
         local bd = barKey and barDataByKey[barKey]
         local grow = bd and bd.growDirection or "CENTER"
@@ -1768,7 +1769,6 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
             anchor = "BOTTOM"
             py = py - fh / 2
         end
-        -- CENTER grow: keep anchor as CENTER (no adjustment needed)
     end
 
     frame:ClearAllPoints()

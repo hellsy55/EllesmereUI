@@ -681,16 +681,17 @@ do
     --  Convenience wrappers — pixel-snapped frame geometry
     ---------------------------------------------------------------------------
     function PP.Size(frame, w, h)
-        local sw = PP.Scale(w)
-        frame:SetSize(sw, h and PP.Scale(h) or sw)
+        local sw = math.floor(w + 0.5)
+        local sh = h and math.floor(h + 0.5) or sw
+        frame:SetSize(sw, sh)
     end
 
     function PP.Width(frame, w)
-        frame:SetWidth(PP.Scale(w))
+        frame:SetWidth(math.floor(w + 0.5))
     end
 
     function PP.Height(frame, h)
-        frame:SetHeight(PP.Scale(h))
+        frame:SetHeight(math.floor(h + 0.5))
     end
 
     function PP.Point(obj, anchor, p1, p2, p3, p4)

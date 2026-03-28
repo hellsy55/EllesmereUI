@@ -2039,22 +2039,6 @@ local function SetupBar(info, skipProtected)
         end
     end
 
-    -- Force numButtonsShowable to 12 on the Blizzard bar so that
-    -- UpdateShownButtons (called on every OnEnter) never hides buttons
-    -- beyond the Edit Mode icon count. This is a plain Lua field (not a
-    -- secure attribute), so writing it does not cause taint.
-    -- EUI handles hiding extras beyond the user's numIcons in LayoutBar.
-    if not skipProtected then
-        local blizzBar = _G[info.blizzFrame]
-        if blizzBar then
-            blizzBar.numButtonsShowable = info.count
-        end
-        -- MainBar: also set on MainActionBar (separate frame from MainMenuBar)
-        if info.nativeMainBar and _G.MainActionBar then
-            _G.MainActionBar.numButtonsShowable = info.count
-        end
-    end
-
     -- Store original button size before any shape/scale modifications.
     -- StanceButtons and PetActionButtons are 30x30; action buttons are 45x45.
     -- Round to nearest integer to eliminate floating-point noise from Blizzard's
@@ -2236,8 +2220,7 @@ end
 -- physical pixels, eliminating sub-pixel drift between siblings.
 local function SnapForScale(x, barScale)
     if x == 0 then return 0 end
-    local es = (UIParent:GetScale() or 1) * (barScale or 1)
-    return PP.SnapForES(x, es)
+    return math.floor(x + 0.5)
 end
 
 
@@ -4097,6 +4080,7 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
 end
 
 function EAB_VTABLE.Hover.FadeOut(barKey, state)
+    if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
         state.fadeDir = "out"
@@ -5753,6 +5737,21 @@ local function OnGridChange()
             end
         end
     end
+
+    -- Force all mouseover bars to full opacity during drag so users can
+    -- see where to drop spells. FadeOut is blocked while _gridState.shown
+    -- is true (see below). OnGridHide restores normal fade behavior.
+    for _, info in ipairs(BAR_CONFIG) do
+        local s = EAB.db.profile.bars[info.key]
+        if s and s.mouseoverEnabled then
+            local frame = barFrames[info.key]
+            if frame then
+                StopFade(frame)
+                frame:SetAlpha(1)
+                if info.key == "MainBar" then SyncPagingAlpha(1) end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -6232,6 +6231,92 @@ function EAB:OnFirstLogin()
     self:FinishSetup()
 end
 
+-------------------------------------------------------------------------------
+--  Edit Mode Icon Count Sync
+--  When EUI's configured icon count for a bar exceeds Edit Mode's setting,
+--  update the Edit Mode layout data via C_EditMode.SaveLayouts so Blizzard's
+--  own code applies the higher count (untainted). This avoids writing
+--  numButtonsShowable directly from addon code which causes taint.
+-------------------------------------------------------------------------------
+local _editModeIconSyncDone = false
+
+local function SyncEditModeIconCounts()
+    if InCombatLockdown() then return end
+    if not C_EditMode or not C_EditMode.GetLayouts or not C_EditMode.SaveLayouts then return end
+
+    local ok, layoutInfo = pcall(C_EditMode.GetLayouts)
+    if not ok or type(layoutInfo) ~= "table" or type(layoutInfo.layouts) ~= "table" then return end
+
+    -- Build desired icon counts keyed by systemIndex (all bars are system 0).
+    -- MainMenuBar has no system; MainActionBar is system=0 systemIndex=1.
+    local desired = {}
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local s = EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
+            local euiCount = s and (s.overrideNumIcons or s.numIcons) or info.count
+            if not euiCount or euiCount < 1 then euiCount = info.count end
+            local blizzBar = _G[info.blizzFrame]
+            if blizzBar and blizzBar.system == 0 and blizzBar.systemIndex then
+                desired[blizzBar.systemIndex] = euiCount
+            end
+            if info.nativeMainBar and _G.MainActionBar then
+                local mab = _G.MainActionBar
+                if mab.system == 0 and mab.systemIndex then
+                    desired[mab.systemIndex] = euiCount
+                end
+            end
+        end
+    end
+
+    -- Setting 2 = NumIcons. GetSettingValue(bar, 2) returns the actual count
+    -- (6-12), so the raw layout value appears to be the actual count too.
+    local ICON_COUNT_SETTING = 2
+    local changed = false
+
+    -- Check ALL layouts so switching never reverts to fewer icons.
+    for _, layout in ipairs(layoutInfo.layouts) do
+        if type(layout.systems) == "table" then
+            for _, sysInfo in ipairs(layout.systems) do
+                if sysInfo.system == 0 and sysInfo.systemIndex and type(sysInfo.settings) == "table" then
+                    local want = desired[sysInfo.systemIndex]
+                    if want then
+                        for _, s in ipairs(sysInfo.settings) do
+                            if s.setting == ICON_COUNT_SETTING and s.value < want then
+                                s.value = want
+                                changed = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if changed then
+        C_EditMode.SaveLayouts(layoutInfo)
+        -- Force Blizzard to re-apply the saved layout so numButtonsShowable
+        -- gets set natively (untainted).
+        pcall(ShowUIPanel, EditModeManagerFrame)
+        pcall(HideUIPanel, EditModeManagerFrame)
+    end
+
+    _editModeIconSyncDone = true
+end
+
+function EAB:SyncEditModeIcons()
+    if InCombatLockdown() then
+        local f = CreateFrame("Frame")
+        f:RegisterEvent("PLAYER_REGEN_ENABLED")
+        f:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            self:SetScript("OnEvent", nil)
+            SyncEditModeIconCounts()
+        end)
+        return
+    end
+    SyncEditModeIconCounts()
+end
+
 -- The actual bar creation, positioning, and event registration.
 function EAB:FinishSetup()
     -- Prepare secure handler refs (must happen before any setup path)
@@ -6327,6 +6412,7 @@ function EAB:FinishSetup()
         local function DoVisuals()
             ApplyAll()
             ApplyKeyDownCVar()
+            self:SyncEditModeIcons()
             self:HookProcGlow()
             self:ScanExistingProcs()
             -- Re-scan after a delay to catch procs that Blizzard populates late
@@ -6764,6 +6850,17 @@ function EAB:FinishSetup()
 
         for _, info in ipairs(BAR_CONFIG) do
             self:ApplyAlwaysShowButtons(info.key)
+        end
+
+        -- Restore mouseover fade on bars that were forced visible during drag
+        for _, info in ipairs(BAR_CONFIG) do
+            local s = EAB.db.profile.bars[info.key]
+            if s and s.mouseoverEnabled then
+                local state = hoverStates[info.key]
+                if state and not state.isHovered then
+                    EAB_VTABLE.Hover.FadeOut(info.key, state)
+                end
+            end
         end
     end
     self:RegisterEvent("ACTIONBAR_HIDEGRID", OnGridHide)

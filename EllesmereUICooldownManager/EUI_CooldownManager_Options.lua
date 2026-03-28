@@ -7298,6 +7298,24 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(function() updateGlowSwatch(); updateClassSwatch(); UpdateBuffGlowState() end)
                 UpdateBuffGlowState()
             end
+
+            -- Icon Spacing | Icon Zoom row for buff bars
+            _, h = W:DualRow(parent, y,
+                { type="slider", text="Icon Spacing",
+                  min=-10, max=20, step=1,
+                  getValue=function() return BD().spacing or 2 end,
+                  setValue=function(v)
+                      BD().spacing = v
+                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                  end },
+                { type="slider", text="Icon Zoom",
+                  min=0, max=0.20, step=0.01,
+                  getValue=function() return BD().iconZoom or 0.08 end,
+                  setValue=function(v)
+                      BD().iconZoom = v
+                      ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                  end });  y = y - h
+
         else
         scaleAnimRow, h = W:DualRow(parent, y,
             { type="slider", text="Icon Scale",

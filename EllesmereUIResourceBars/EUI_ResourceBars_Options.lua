@@ -936,6 +936,16 @@ initFrame:SetScript("OnEvent", function(self)
         local _syncRows = {}
 
         -- Bar texture dropdown values (built from _ERB globals)
+        -- Re-append SharedMedia textures now (options open later than init,
+        -- so SM packs that register textures lazily are available by now).
+        if EllesmereUI.AppendSharedMediaTextures then
+            EllesmereUI.AppendSharedMediaTextures(
+                _G._ERB_BarTextureNames or {},
+                _G._ERB_BarTextureOrder or {},
+                nil,
+                _G._ERB_BarTextures
+            )
+        end
         local hbtValues = {}
         local hbtOrder = {}
         do
