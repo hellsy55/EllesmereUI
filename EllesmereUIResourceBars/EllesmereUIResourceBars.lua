@@ -883,8 +883,8 @@ local function RegisterUnlockElements()
             key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
             getFrame = function() return healthBar end,
             getSize  = function() local s = S(); return s.width, s.height end,
-            setWidth = function(_, w) S().width = w; Rebuild() end,
-            setHeight = function(_, h) S().height = h; Rebuild() end,
+            setWidth = function(_, w) S().width = floor(w + 0.5); Rebuild() end,
+            setHeight = function(_, h) S().height = floor(h + 0.5); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -899,8 +899,8 @@ local function RegisterUnlockElements()
             key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
             getFrame = function() return primaryBar end,
             getSize  = function() local s = S(); return s.width, s.height end,
-            setWidth = function(_, w) S().width = w; Rebuild() end,
-            setHeight = function(_, h) S().height = h; Rebuild() end,
+            setWidth = function(_, w) S().width = floor(w + 0.5); Rebuild() end,
+            setHeight = function(_, h) S().height = floor(h + 0.5); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -922,6 +922,7 @@ local function RegisterUnlockElements()
                 return s.pipWidth, s.pipHeight
             end,
             setWidth = function(_, w)
+                w = floor(w + 0.5)
                 local s = S()
                 if cachedSecondary and cachedSecondary.type == "bar" then
                     ERB.db.profile.primary.width = w
@@ -930,7 +931,7 @@ local function RegisterUnlockElements()
                 end
                 Rebuild()
             end,
-            setHeight = function(_, h) S().pipHeight = h; Rebuild() end,
+            setHeight = function(_, h) S().pipHeight = floor(h + 0.5); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -1546,8 +1547,11 @@ local function BuildBars()
         end
 
         -- Frame dimensions: vertical flips width/height axes
+        -- Round to whole logical pixels so all elements size consistently.
         local frameW = isVertical and pipH or totalW
         local frameH = isVertical and totalW or pipH
+        frameW = floor(frameW + 0.5)
+        frameH = floor(frameH + 0.5)
 
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
         if secondaryAnchorKey ~= "none" then
@@ -3777,6 +3781,13 @@ end
 -------------------------------------------------------------------------------
 function ERB:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIResourceBarsDB", DEFAULTS, true)
+
+    -- Round width/height to whole pixels (one-time migration)
+    local p = self.db.profile
+    local sizeKeys = { "width", "height", "pipWidth", "pipHeight" }
+    if p and EllesmereUI.RoundSizeFields then
+        EllesmereUI.RoundSizeFields(sizeKeys, { p.primary, p.secondary, p.health, p.castBar })
+    end
 
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end

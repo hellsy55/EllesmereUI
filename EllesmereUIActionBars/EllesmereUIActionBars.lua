@@ -2039,24 +2039,19 @@ local function SetupBar(info, skipProtected)
         end
     end
 
-    -- Hook UpdateShownButtons on the Blizzard bar to prevent it from hiding
-    -- buttons we've reparented to our bar. For non-native bars, actionButtons
-    -- was wiped above so this is redundant. For native bars, actionButtons is
-    -- intact (needed for keyboard dispatch), so the hook re-shows any buttons
-    -- that UpdateShownButtons hid. Uses a weak-keyed set to hook only once.
+    -- Force numButtonsShowable to 12 on the Blizzard bar so that
+    -- UpdateShownButtons (called on every OnEnter) never hides buttons
+    -- beyond the Edit Mode icon count. This is a plain Lua field (not a
+    -- secure attribute), so writing it does not cause taint.
+    -- EUI handles hiding extras beyond the user's numIcons in LayoutBar.
     if not skipProtected then
         local blizzBar = _G[info.blizzFrame]
-        if blizzBar and blizzBar.UpdateShownButtons and not _eabHookedBars[blizzBar] then
-            _eabHookedBars[blizzBar] = true
-            local barBtns = buttons
-            hooksecurefunc(blizzBar, "UpdateShownButtons", function()
-                if InCombatLockdown() then return end
-                for _, b in ipairs(barBtns) do
-                    if b and b:GetParent() ~= blizzBar then
-                        b:Show()
-                    end
-                end
-            end)
+        if blizzBar then
+            blizzBar.numButtonsShowable = info.count
+        end
+        -- MainBar: also set on MainActionBar (separate frame from MainMenuBar)
+        if info.nativeMainBar and _G.MainActionBar then
+            _G.MainActionBar.numButtonsShowable = info.count
         end
     end
 
@@ -2463,6 +2458,13 @@ local function LayoutBar(key)
             -- Resize the autocast overlay to match the button size
             if btn.AutoCastOverlay then
                 btn.AutoCastOverlay:SetAllPoints(btn)
+            end
+
+            -- Scale TargetReticleAnimFrame proportionally. Blizzard
+            -- designed it at 128x128 for the default 45x45 button.
+            -- Scaling by btnW/45 keeps the same visual proportions.
+            if btn.TargetReticleAnimFrame then
+                btn.TargetReticleAnimFrame:SetScale(btnW / 45)
             end
 
             -- Pin SpellActivationAlert to button bounds when using custom proc
@@ -6066,6 +6068,16 @@ function EAB:OnInitialize()
         or (rawDB.profiles and not next(rawDB.profiles))
 
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIActionBarsDB", defaults, true)
+
+    -- Round width/height to whole pixels (one-time migration)
+    if self.db.profile and self.db.profile.bars and EllesmereUI.RoundSizeFields then
+        local sizeKeys = { "buttonWidth", "buttonHeight" }
+        for _, barSettings in pairs(self.db.profile.bars) do
+            if type(barSettings) == "table" then
+                EllesmereUI.RoundSizeFields(sizeKeys, { barSettings })
+            end
+        end
+    end
 
     -- Mark whether we need to capture Blizzard layout on first install.
     -- The actual capture is deferred to PLAYER_ENTERING_WORLD when

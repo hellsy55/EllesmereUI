@@ -7,6 +7,25 @@
 --  version 5) guarantees every user starts from a clean slate.
 --------------------------------------------------------------------------------
 
+local floor = math.floor
+
+--- Round all width/height values in a table to whole pixels.
+--- Call from each child addon's OnInitialize after its DB is loaded.
+--- keys: list of field names to round (e.g. {"width", "height"})
+--- tables: list of profile sub-tables to scan
+function EllesmereUI.RoundSizeFields(keys, tables)
+    for _, tbl in ipairs(tables) do
+        if type(tbl) == "table" then
+            for _, key in ipairs(keys) do
+                local v = tbl[key]
+                if type(v) == "number" then
+                    tbl[key] = floor(v + 0.5)
+                end
+            end
+        end
+    end
+end
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
