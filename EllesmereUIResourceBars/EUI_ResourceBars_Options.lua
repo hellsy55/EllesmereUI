@@ -1594,6 +1594,19 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateCogDisThresh()
         end
 
+        -- Row: Anchor to Cursor | Cursor Position (cog: X + Y)
+        do
+            local _, cursorH = EllesmereUI.BuildCursorAnchorRow({
+                W = W, parent = parent, y = y,
+                getData = function() local p = DB(); return p and p.secondary or {} end,
+                onApply = function() RebuildClass(); SmoothRefresh() end,
+                makeCogBtn = MakeCogBtn,
+                disabledFn = function() local p = DB(); return p and not p.secondary.enabled end,
+                disabledTip = "Enable Class Resource",
+            })
+            y = y - cursorH
+        end
+
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -2078,6 +2091,22 @@ initFrame:SetScript("OnEvent", function(self)
             UpdatePowerThreshCogDis()
         end
 
+        -- Row: Anchor to Cursor | Cursor Position (cog: X + Y)
+        do
+            local _, cursorH = EllesmereUI.BuildCursorAnchorRow({
+                W = W, parent = parent, y = y,
+                getData = function() local p = DB(); return p and p.primary or {} end,
+                onApply = function() RebuildPower(); SmoothRefresh() end,
+                makeCogBtn = MakeCogBtn,
+                disabledFn = function()
+                    if noPrimaryPower then return true end
+                    local p = DB(); return p and not p.primary.enabled
+                end,
+                disabledTip = "Enable Power Bar",
+            })
+            y = y - cursorH
+        end
+
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -2458,6 +2487,19 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:HookScript("OnShow", UpdateHealthThreshSwDis)
             EllesmereUI.RegisterWidgetRefresh(UpdateHealthThreshSwDis)
             UpdateHealthThreshSwDis()
+        end
+
+        -- Row: Anchor to Cursor | Cursor Position (cog: X + Y)
+        do
+            local _, cursorH = EllesmereUI.BuildCursorAnchorRow({
+                W = W, parent = parent, y = y,
+                getData = function() local p = DB(); return p and p.health or {} end,
+                onApply = function() RebuildHealth(); SmoothRefresh() end,
+                makeCogBtn = MakeCogBtn,
+                disabledFn = function() local p = DB(); return p and not p.health.enabled end,
+                disabledTip = "Enable Health Bar",
+            })
+            y = y - cursorH
         end
 
         _, h = W:Spacer(parent, y, 16);  y = y - h

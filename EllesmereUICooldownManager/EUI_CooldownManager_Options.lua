@@ -6960,68 +6960,17 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Row 2: Anchor to Cursor | Cursor Position (cog: X + Y)
-        local cursorRow
-        cursorRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Anchor to Cursor",
-              getValue=function() return BD().anchorTo == "mouse" end,
-              setValue=function(v)
-                  BD().anchorTo = v and "mouse" or "none"
-                  ns.BuildAllCDMBars(); ns.RegisterCDMUnlockElements()
-                  Refresh(); EllesmereUI:RefreshPage(true)
-              end },
-            { type="dropdown", text="Cursor Position",
-              values={ left="Left", right="Right", top="Top", bottom="Bottom" },
-              order={ "left", "right", "top", "bottom" },
-              disabled=function() return BD().anchorTo ~= "mouse" end,
-              disabledTooltip=EllesmereUI.DisabledTooltip("Anchor to Cursor"),
-              getValue=function() return BD().anchorPosition or "right" end,
-              setValue=function(v)
-                  BD().anchorPosition = v
-                  ns.BuildAllCDMBars(); Refresh()
-              end });  y = y - h
-
-        -- "(Applies on Window Close)" subtitle on the Anchor to Cursor toggle label
         do
-            local suffix = cursorRow._leftRegion:CreateFontString(nil, "OVERLAY")
-            suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
-            suffix:SetTextColor(1, 1, 1, 0.35)
-            suffix:SetText("(Applies on Window Close)")
-            local anchorLabel
-            for i = 1, cursorRow._leftRegion:GetNumRegions() do
-                local reg = select(i, cursorRow._leftRegion:GetRegions())
-                if reg and reg.GetText and reg:GetText() == "Anchor to Cursor" then
-                    anchorLabel = reg
-                    break
-                end
-            end
-            if anchorLabel then
-                suffix:SetPoint("LEFT", anchorLabel, "RIGHT", 5, 0)
-            else
-                suffix:SetPoint("LEFT", cursorRow._leftRegion, "LEFT", 120, 0)
-            end
-        end
-
-        -- Inline cog on Cursor Position (right) — X + Y offsets
-        do
-            local rightRgn = cursorRow._rightRegion
-            local _, cursorCogShow = EllesmereUI.BuildCogPopup({
-                title = "Cursor Offset",
-                rows = {
-                    { type="slider", label="X Offset", min=-125, max=125, step=1,
-                      get=function() return BD().anchorOffsetX or 0 end,
-                      set=function(v)
-                          BD().anchorOffsetX = v
-                          ns.BuildAllCDMBars(); Refresh()
-                      end },
-                    { type="slider", label="Y Offset", min=-125, max=125, step=1,
-                      get=function() return BD().anchorOffsetY or 0 end,
-                      set=function(v)
-                          BD().anchorOffsetY = v
-                          ns.BuildAllCDMBars(); Refresh()
-                      end },
-                },
+            local _, cursorH = EllesmereUI.BuildCursorAnchorRow({
+                W = W, parent = parent, y = y,
+                getData = BD,
+                onApply = function()
+                    ns.BuildAllCDMBars(); ns.RegisterCDMUnlockElements()
+                    Refresh()
+                end,
+                makeCogBtn = MakeCogBtn,
             })
-            MakeCogBtn(rightRgn, cursorCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+            y = y - cursorH
         end
 
         local opacityRow

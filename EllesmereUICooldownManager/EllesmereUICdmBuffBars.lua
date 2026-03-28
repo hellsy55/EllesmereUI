@@ -793,27 +793,25 @@ local function FindChild(cfg)
     -- Fast path: cached result from previous match (hit or miss).
     if cfg._linkedGen == _findChildGeneration then
         local cached = cfg._linkedFrame
-        if cached then
-            if cached.cooldownID == cfg._linkedCdID then
-                return cached
-            end
-        else
-            -- Cached miss: no matching frame existed last scan. Skip until
-            -- generation changes (reanchor fires when CDM state changes).
-            return nil
+        if cached and cached.cooldownID == cfg._linkedCdID then
+            return cached
         end
+        -- Cache miss or stale cooldownID: fall through to rescan.
+        -- Don't cache misses -- the pool is tiny (3-5 frames) and
+        -- buffs like totems can appear without triggering a reanchor.
     end
-    -- Full scan: iterate pool once, match by spell ID variants
-    local viewer = _G["BuffBarCooldownViewer"]
-    if not viewer or not viewer.itemFramePool then return nil end
+    -- Full scan: iterate BuffBarCooldownViewer pool (TBB's own viewer).
     cfg._linkedFrame = nil
     cfg._linkedCdID = nil
     cfg._linkedGen = _findChildGeneration
-    for frame in viewer.itemFramePool:EnumerateActive() do
-        if MatchFrameToConfig(frame, cfg) then
-            cfg._linkedFrame = frame
-            cfg._linkedCdID = frame.cooldownID
-            return frame
+    local viewer = _G["BuffBarCooldownViewer"]
+    if viewer and viewer.itemFramePool then
+        for frame in viewer.itemFramePool:EnumerateActive() do
+            if MatchFrameToConfig(frame, cfg) then
+                cfg._linkedFrame = frame
+                cfg._linkedCdID = frame.cooldownID
+                return frame
+            end
         end
     end
     -- No match found: cached as nil. Won't re-scan until next generation.
@@ -1090,9 +1088,6 @@ function ns.UpdateTrackedBuffBarTimers()
         else
             local blzChild = FindChild(cfg)
 
-            -- Active check: trust Blizzard's frame visibility, not spell IDs.
-            -- Same principle as buff icons -- the frame IS the data.
-            -- Nil guard: IsShown can be absent on tainted Blizzard frames.
             local isActive = blzChild and blzChild.IsShown and blzChild:IsShown() or false
 
             -- Read Blizzard's StatusBar (the data source for fill/timer)

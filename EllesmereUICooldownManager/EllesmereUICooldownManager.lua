@@ -1294,21 +1294,20 @@ local function InstallProcGlowHooks()
             cdmChild.SpellActivationAlert:Hide()
         end
 
-        -- Defer by one frame so the icon mapping from UpdateCDMBarIcons is current
-        C_Timer.After(0, function()
-            local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
-            if not ourIcon then return end
-            -- Re-suppress Blizzard alert (may have been re-shown)
-            if cdmChild.SpellActivationAlert then
-                cdmChild.SpellActivationAlert:SetAlpha(0)
-                cdmChild.SpellActivationAlert:Hide()
-            end
-            local cr, cg, cb = PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3]
-            ShowProcGlow(ourIcon, cr, cg, cb)
-            -- Force icon texture re-evaluation so override textures apply immediately
-            local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
-            ourIcon._lastTex = nil
-        end)
+        -- Apply immediately: find our icon and show the proc glow.
+        -- No defer needed -- icon mapping is current from the last reanchor.
+        local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
+        if not ourIcon then return end
+        -- Re-suppress Blizzard alert
+        if cdmChild.SpellActivationAlert then
+            cdmChild.SpellActivationAlert:SetAlpha(0)
+            cdmChild.SpellActivationAlert:Hide()
+        end
+        local cr, cg, cb = PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3]
+        ShowProcGlow(ourIcon, cr, cg, cb)
+        -- Force icon texture re-evaluation so override textures apply immediately
+        local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
+        ourIcon._lastTex = nil
     end)
 
     hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(_, frame)
@@ -1319,21 +1318,9 @@ local function InstallProcGlowHooks()
         local fd = ourIcon and _getFD(ourIcon)
         if not ourIcon or not (fd and fd.procGlowActive) then return end
 
-        -- Guard: CDM may fire HideAlert during internal refresh cycles even though
-        -- the spell is still procced. Check IsSpellOverlayed before killing the glow.
-        local spellID = ResolveBlizzChildSpellID(cdmChild)
-        if spellID and C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed then
-            local ok, overlayed = pcall(C_SpellActivationOverlay.IsSpellOverlayed, spellID)
-            if ok and overlayed then
-                -- Spell still active  suppress Blizzard's alert again and keep our glow
-                if cdmChild.SpellActivationAlert then
-                    cdmChild.SpellActivationAlert:SetAlpha(0)
-                    cdmChild.SpellActivationAlert:Hide()
-                end
-                return
-            end
-        end
-
+        -- Trust Blizzard's HideAlert: stop our glow immediately.
+        -- If Blizzard re-fires ShowAlert during an internal refresh,
+        -- the glow restarts naturally on the next frame.
         StopProcGlow(ourIcon)
         -- Force icon texture re-evaluation so the original texture restores immediately
         local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end

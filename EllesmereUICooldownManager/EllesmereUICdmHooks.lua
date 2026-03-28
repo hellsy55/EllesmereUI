@@ -825,10 +825,6 @@ local function CollectAndReanchor()
                     local isBuff = (defaultBarKey == "buffs")
                     if isBuff and not frame:IsShown() then
                         -- Blizzard hid this buff. Skip it.
-                    elseif isBuff and frame.hideWhenInactive
-                        and frame.wasSetFromAura ~= true
-                        and frame.auraInstanceID == nil then
-                        -- Inactive buff with hideWhenInactive (ghost from Edit Mode). Skip it.
                     else
                     local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
                     if targetBar and displaySID and displaySID > 0 then
@@ -1679,9 +1675,15 @@ function ns.SetupViewerHooks()
 
     -- 4b. Delayed reanchor on load: catch frames created after initial setup.
     -- Some buff frames (e.g. Dread Plague) may not exist until Blizzard's
-    -- viewer finishes its deferred layout pass.
-    C_Timer.After(1, QueueReanchor)
-    C_Timer.After(3, QueueReanchor)
+    -- viewer finishes its deferred layout pass. Also invalidate TBB cache
+    -- so tracking bars re-scan for late-loading BuffBar viewer frames.
+    local function DelayedFullRefresh()
+        if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
+        QueueReanchor()
+    end
+    C_Timer.After(1, DelayedFullRefresh)
+    C_Timer.After(3, DelayedFullRefresh)
+    C_Timer.After(6, DelayedFullRefresh)
 
     -- 5. Buff ticker: staleness check + buff/pandemic glow (0.1s)
     do
@@ -1770,39 +1772,53 @@ function ns.SetupViewerHooks()
                                 -- Active state animation (CD/utility only, polled)
                                 if not isBuff and fd then
                                     local anim = bd.activeStateAnim or "blizzard"
-                                    local isActive = frame.wasSetFromAura == true or frame.auraInstanceID ~= nil
-                                    if isActive then
-                                        -- hideActive: hook SetCooldown so we override immediately
-                                        -- (polling alone causes 1-frame blink on ability use).
-                                        -- Hook is set up here (OnUpdate, non-secure) not in
-                                        -- DecorateFrame (reanchor chain) to avoid taint.
-                                        if anim == "hideActive" and fd.cooldown then
-                                            if not fd.hideActiveHooked then
-                                                fd.hideActiveHooked = true
-                                                hooksecurefunc(fd.cooldown, "SetCooldown", function(cd)
+
+                                    -- Install hooks ONCE on first tick (outside
+                                    -- reanchor chain to avoid taint). Hooks are
+                                    -- always present so they intercept the very
+                                    -- first SetCooldown/SetDesaturated call when
+                                    -- a spell procs -- no 1-frame flash.
+                                    if not fd.hideActiveHooked and fd.cooldown then
+                                        fd.hideActiveHooked = true
+                                        hooksecurefunc(fd.cooldown, "SetCooldown", function(cd)
+                                            -- wasSetFromAura is a boolean (never a
+                                            -- secret value), safe to read in hooks.
+                                            -- This fires immediately on Blizzard's
+                                            -- SetCooldown, eliminating the 1-frame flash.
+                                            if not frame.wasSetFromAura then return end
+                                            local hfc = _ecmeFC[frame]
+                                            local hbd = hfc and hfc.barKey and barDataByKey[hfc.barKey]
+                                            local hAnim = hbd and hbd.activeStateAnim or "blizzard"
+                                            if hAnim == "hideActive" then
+                                                cd:SetReverse(false)
+                                                cd:SetSwipeColor(0, 0, 0, hbd and hbd.swipeAlpha or 0.7)
+                                                if hbd and hbd.desaturateOnCD then
                                                     local hfd = hookFrameData[frame]
-                                                    if hfd and hfd.isActive then
-                                                        cd:SetReverse(false)
-                                                        local hfc = _ecmeFC[frame]
-                                                        local hbd = hfc and hfc.barKey and barDataByKey[hfc.barKey]
-                                                        cd:SetSwipeColor(0, 0, 0, hbd and hbd.swipeAlpha or 0.7)
-                                                    end
-                                                end)
-                                                if fd.tex and fd.tex.SetDesaturated then
-                                                    local _inDesatHook = false
-                                                    hooksecurefunc(fd.tex, "SetDesaturated", function(self, val)
-                                                        if _inDesatHook then return end
-                                                        local hfd = hookFrameData[frame]
-                                                        local hfc = _ecmeFC[frame]
-                                                        local hbd = hfc and hfc.barKey and barDataByKey[hfc.barKey]
-                                                        if hfd and hfd.isActive and hbd and hbd.desaturateOnCD and not val then
-                                                            _inDesatHook = true
-                                                            self:SetDesaturated(true)
-                                                            _inDesatHook = false
-                                                        end
-                                                    end)
+                                                    local tex = hfd and hfd.tex
+                                                    if tex then tex:SetDesaturated(true) end
                                                 end
                                             end
+                                        end)
+                                        if fd.tex and fd.tex.SetDesaturated then
+                                            local _inDesatHook = false
+                                            hooksecurefunc(fd.tex, "SetDesaturated", function(self, val)
+                                                if _inDesatHook then return end
+                                                if not frame.wasSetFromAura then return end
+                                                local hfc = _ecmeFC[frame]
+                                                local hbd = hfc and hfc.barKey and barDataByKey[hfc.barKey]
+                                                if hbd and hbd.activeStateAnim == "hideActive"
+                                                    and hbd.desaturateOnCD and not val then
+                                                    _inDesatHook = true
+                                                    self:SetDesaturated(true)
+                                                    _inDesatHook = false
+                                                end
+                                            end)
+                                        end
+                                    end
+
+                                    local isActive = frame.wasSetFromAura == true or frame.auraInstanceID ~= nil
+                                    if isActive then
+                                        if anim == "hideActive" and fd.cooldown then
                                             fd.cooldown:SetReverse(false)
                                             fd.cooldown:SetSwipeColor(0, 0, 0, bd.swipeAlpha or 0.7)
                                         end

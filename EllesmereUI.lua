@@ -6027,7 +6027,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.6.6"
+EllesmereUI.VERSION = "5.6.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6111,8 +6111,23 @@ if not _G._EUI_ConflictChecked then
             { addon = "Platynator",               label = "Platynator",                 targets = { "EllesmereUINameplates" } },
             { addon = "Plater",                   label = "Plater Nameplates",          targets = { "EllesmereUINameplates" } },
             { addon = "Kui_Nameplates",            label = "KUI Nameplates",             targets = { "EllesmereUINameplates" } },
+            { addon = "TidyPlates",               label = "TidyPlates",                 targets = { "EllesmereUINameplates" } },
+            { addon = "TidyPlates_ThreatPlates",  label = "TidyPlates ThreatPlates",    targets = { "EllesmereUINameplates" } },
+            { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
+            { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
             { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" } },
+            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" } },
+            -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIBasics" } },
+            -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIBasics" } },
+            -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIBasics" } },
+            -- { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIBasics" } },
+            -- { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBasics" } },
+            -- { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBasics" } },
+            -- { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBasics" } },
+            -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBasics" } },
+            -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBasics" } },
+            -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBasics" } },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },

@@ -5133,6 +5133,95 @@ EllesmereUI.DisabledTooltip     = DisabledTooltip
 EllesmereUI.BuildSegmentedControl = BuildSegmentedControl
 
 -------------------------------------------------------------------------------
+--  BuildCursorAnchorRow
+--  Shared "Anchor to Cursor" row used by CDM, Resource Bars, and any future
+--  section that supports cursor anchoring.
+--
+--  opts:
+--    W           = widget factory (the W: table from options page)
+--    parent      = parent frame
+--    getData     = function() -> settings table with anchorTo, anchorPosition,
+--                                anchorOffsetX, anchorOffsetY
+--    onApply     = function() -> rebuild/refresh after value change
+--    makeCogBtn  = function(rgn, showFn, anchorTo, iconPath) -> local cog builder
+--    disabledFn  = (optional) function() -> true when the whole row is disabled
+--    disabledTip = (optional) tooltip string for disabled state
+--
+--  Returns: row, height (same as W:DualRow)
+-------------------------------------------------------------------------------
+local function BuildCursorAnchorRow(opts)
+    local W          = opts.W
+    local parent     = opts.parent
+    local getData    = opts.getData
+    local onApply    = opts.onApply
+    local makeCogBtn = opts.makeCogBtn
+
+    local row, h = W:DualRow(parent, opts.y,
+        { type = "toggle", text = "Anchor to Cursor",
+          disabled = opts.disabledFn,
+          disabledTooltip = opts.disabledTip,
+          getValue = function() return getData().anchorTo == "mouse" end,
+          setValue = function(v)
+              getData().anchorTo = v and "mouse" or "none"
+              onApply()
+              EllesmereUI:RefreshPage(true)
+          end },
+        { type = "dropdown", text = "Cursor Position",
+          values = { left = "Left", right = "Right", top = "Top", bottom = "Bottom" },
+          order = { "left", "right", "top", "bottom" },
+          disabled = function()
+              if opts.disabledFn and opts.disabledFn() then return true end
+              return getData().anchorTo ~= "mouse"
+          end,
+          disabledTooltip = DisabledTooltip("Anchor to Cursor"),
+          getValue = function() return getData().anchorPosition or "right" end,
+          setValue = function(v)
+              getData().anchorPosition = v
+              onApply()
+          end })
+
+    -- "(Applies on Window Close)" subtitle
+    do
+        local suffix = row._leftRegion:CreateFontString(nil, "OVERLAY")
+        suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+        suffix:SetTextColor(1, 1, 1, 0.35)
+        suffix:SetText("(Applies on Window Close)")
+        local anchorLabel
+        for i = 1, row._leftRegion:GetNumRegions() do
+            local reg = select(i, row._leftRegion:GetRegions())
+            if reg and reg.GetText and reg:GetText() == "Anchor to Cursor" then
+                anchorLabel = reg; break
+            end
+        end
+        if anchorLabel then
+            suffix:SetPoint("LEFT", anchorLabel, "RIGHT", 5, 0)
+        else
+            suffix:SetPoint("LEFT", row._leftRegion, "LEFT", 120, 0)
+        end
+    end
+
+    -- Inline cog: X + Y offsets
+    do
+        local rightRgn = row._rightRegion
+        local _, cogShow = BuildCogPopup({
+            title = "Cursor Offset",
+            rows = {
+                { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
+                  get = function() return getData().anchorOffsetX or 0 end,
+                  set = function(v) getData().anchorOffsetX = v; onApply() end },
+                { type = "slider", label = "Y Offset", min = -125, max = 125, step = 1,
+                  get = function() return getData().anchorOffsetY or 0 end,
+                  set = function(v) getData().anchorOffsetY = v; onApply() end },
+            },
+        })
+        makeCogBtn(rightRgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+    end
+
+    return row, h
+end
+EllesmereUI.BuildCursorAnchorRow = BuildCursorAnchorRow
+
+-------------------------------------------------------------------------------
 --  SharedMedia helpers: append LSM fonts/textures to dropdown tables
 --  Called from each options file after building its local font/texture tables.
 -------------------------------------------------------------------------------
