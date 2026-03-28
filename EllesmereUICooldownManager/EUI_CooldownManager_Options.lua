@@ -6889,15 +6889,6 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rightRgn = visRow._rightRegion
             if rightRgn._control then rightRgn._control:Hide() end
-            if isBuffBar then
-                -- Buff bars don't support visibility options (their icon count
-                -- is dynamic and these options cause layout issues).
-                local disabledLbl = rightRgn:CreateFontString(nil, "OVERLAY")
-                disabledLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                disabledLbl:SetPoint("RIGHT", rightRgn, "RIGHT", -20, 0)
-                disabledLbl:SetTextColor(0.4, 0.4, 0.4, 0.6)
-                disabledLbl:SetText("N/A for Buff Bars")
-            else
             local visItems = EllesmereUI.VIS_OPT_ITEMS
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                 rightRgn, 210, rightRgn:GetFrameLevel() + 2,
@@ -6912,7 +6903,6 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
-            end
         end
 
         -- Sync icon on Visibility (left)
@@ -6938,8 +6928,8 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Sync icon on Visibility Options (right) -- not for buff bars
-        if not isBuffBar then do
+        -- Sync icon on Visibility Options (right)
+        do
             local rgn = visRow._rightRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
@@ -6967,7 +6957,7 @@ initFrame:SetScript("OnEvent", function(self)
                     ns.CDMApplyVisibility(); EllesmereUI:RefreshPage()
                 end,
             })
-        end end
+        end
 
         -- Row 2: Anchor to Cursor | Cursor Position (cog: X + Y)
         local cursorRow

@@ -107,6 +107,8 @@ local PANDEMIC_THRESHOLD = 0.30
 
 --- Check if a spell is in the pandemic window via C_UnitAuras.
 --- Returns true if the aura exists, has duration, and remaining <= 30%.
+--- Only checks player auras; target debuffs use Blizzard's native
+--- PandemicIcon on CDM frames (avoids tainted secret values).
 function ns.IsInPandemicWindow(spellID)
     if not spellID or spellID <= 0 then return false end
     local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
@@ -1176,8 +1178,13 @@ function ns.UpdateTrackedBuffBarTimers()
                     end
 
                     -- Pandemic glow (via C_UnitAuras, combat-safe)
+                    -- Also check Blizzard's PandemicIcon on the source
+                    -- frame for debuffs (avoids tainted secret values).
                     if _anyPandemic and cfg.pandemicGlow then
-                        if ns.IsInPandemicWindow(cfg.spellID) then
+                        local inPandemic = ns.IsInPandemicWindow(cfg.spellID)
+                            or (blzChild and blzChild.PandemicIcon
+                                and blzChild.PandemicIcon:IsShown())
+                        if inPandemic then
                             if not bar._pandemicGlowActive then UpdatePandemic(bar, cfg) end
                             if bar._pandemicGlowTarget then bar._pandemicGlowTarget:SetAlpha(1) end
                         elseif bar._pandemicGlowActive then

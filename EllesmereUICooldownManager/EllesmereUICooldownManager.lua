@@ -3032,13 +3032,10 @@ local function _CDMFadeTo(frame, toAlpha, duration)
         frame._cdmFadeAG:SetScript("OnFinished", function()
             local a = frame._cdmFadeAG._toAlpha or toAlpha
             frame:SetAlpha(a)
-            -- Sync icons on finish (they're parented to viewer, not container)
-            local icons = cdmBarIcons[frame._barKey]
-            if icons then
-                for i = 1, #icons do
-                    if icons[i] then icons[i]:SetAlpha(a) end
-                end
-            end
+            -- Sync viewer alpha so all child icons inherit it at once
+            local vn = BLIZZ_CDM_FRAMES[frame._barKey]
+            local vf = vn and _G[vn]
+            if vf then vf:SetAlpha(a > 0 and 1 or 0) end
             frame._cdmFadeSyncing = nil
         end)
     end
@@ -3056,13 +3053,11 @@ local function _CDMFadeTo(frame, toAlpha, duration)
         frame._cdmFadeSyncUpdate = true
         frame:HookScript("OnUpdate", function(self)
             if not self._cdmFadeSyncing then return end
+            -- Sync viewer alpha each frame so icons fade with the container
             local a = self:GetAlpha()
-            local icons = cdmBarIcons[self._barKey]
-            if icons then
-                for i = 1, #icons do
-                    if icons[i] then icons[i]:SetAlpha(a) end
-                end
-            end
+            local vn = BLIZZ_CDM_FRAMES[self._barKey]
+            local vf = vn and _G[vn]
+            if vf then vf:SetAlpha(a > 0 and 1 or 0) end
         end)
     end
     ag:Restart()
@@ -3162,9 +3157,7 @@ _CDMApplyVisibility = function()
             if inVehicle then
                 shouldHide = true
             -- Priority 2: visibility options (checkbox dropdown)
-            -- Buff bars skip these options (dynamic icon count + layout issues)
-            elseif (barData.barType ~= "buffs" and barData.key ~= "buffs")
-                and EllesmereUI.CheckVisibilityOptions(barData) then
+            elseif EllesmereUI.CheckVisibilityOptions(barData) then
                 shouldHide = true
             -- Priority 3: visibility mode dropdown
             elseif vis == "never" then
@@ -3204,24 +3197,13 @@ _CDMApplyVisibility = function()
 
             end -- unlockActive else
 
-            -- Sync icon alpha/visibility with the container.
-            -- Icons are parented to the viewer (not the container),
-            -- so they don't inherit the container's alpha. We must
-            -- propagate it explicitly.
-            local containerAlpha = frame:GetAlpha()
-            local icons = cdmBarIcons[barData.key]
-            if icons then
-                for i = 1, #icons do
-                    local icon = icons[i]
-                    if icon then
-                        if frame._visHidden then
-                            icon:Hide()
-                        else
-                            icon:Show()
-                            icon:SetAlpha(containerAlpha)
-                        end
-                    end
-                end
+            -- Icons are parented to the Blizzard viewer, so they inherit
+            -- the viewer's alpha. One SetAlpha on the viewer controls all
+            -- icons at once -- no per-icon loops, no taint.
+            local viewerName = BLIZZ_CDM_FRAMES[barData.key]
+            local viewer = viewerName and _G[viewerName]
+            if viewer then
+                viewer:SetAlpha(frame._visHidden and 0 or 1)
             end
         end
     end
@@ -4634,52 +4616,11 @@ function ECME:CDMFinishSetup()
     BuildAllCDMBars()
 
     -- Initialize Tracking Bars
-    -- Validate existing TBB bars: remove any whose spells don't exist
-    -- Validate TBB bars: remove any whose spells don't exist
-    -- for the current character's class.
-    do
-        local tbb = ns.GetTrackedBuffBars()
-        local hasNoBars = (not tbb) or (not tbb.bars) or (#tbb.bars == 0)
-        if hasNoBars then
-            -- GetTrackedBuffBars already initializes with empty bars
-        elseif tbb and tbb.bars and #tbb.bars > 0 then
-            -- Build set of all class spells for validation
-            local classSpells = {}
-            if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
-                for cat = 0, 3 do
-                    local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
-                    if allIDs then
-                        for _, cdID in ipairs(allIDs) do
-                            local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                            if info then
-                                if info.spellID and info.spellID > 0 then classSpells[info.spellID] = true end
-                                if info.overrideSpellID and info.overrideSpellID > 0 then classSpells[info.overrideSpellID] = true end
-                            end
-                        end
-                    end
-                end
-            end
-            -- Remove bars whose spell isn't valid for this character
-            if next(classSpells) then
-                for i = #tbb.bars, 1, -1 do
-                    local bar = tbb.bars[i]
-                    local valid = false
-                    if bar.popularKey then
-                        valid = true  -- presets are class-agnostic
-                    elseif bar.spellIDs then
-                        for _, sid in ipairs(bar.spellIDs) do
-                            if classSpells[sid] then valid = true; break end
-                        end
-                    elseif bar.spellID and bar.spellID > 0 then
-                        valid = classSpells[bar.spellID]
-                    end
-                    if not valid then
-                        table.remove(tbb.bars, i)
-                    end
-                end
-            end
-        end
-    end
+    -- GetTrackedBuffBars auto-initializes empty bars if none exist.
+    -- No validation/removal: TBB bars can track any buff (procs,
+    -- external buffs, food, etc.) not just CDM viewer spells.
+    -- Bars with no active aura simply stay hidden at runtime.
+    ns.GetTrackedBuffBars()
 
     -- Fix misattributed buff spells: if a user has a spellID that shares
     -- a name with another spellID on the same bar, keep the one that's

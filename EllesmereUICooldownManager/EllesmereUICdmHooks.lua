@@ -882,7 +882,6 @@ local function CollectAndReanchor()
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
             local container = cdmBarFrames[barKey]
             if container then
-                local barHidden = container._visHidden
                 local sd = ns.GetBarSpellData(barKey)
                 local spellList = sd and sd.assignedSpells
                 local barType = barData.barType or barKey
@@ -1175,15 +1174,20 @@ local function CollectAndReanchor()
                                 FC(frame).barKey = barKey
                                 FC(frame).spellID = entry.baseSpellID or entry.spellID
                                 icons[count] = frame
-                                local isOurs = frame._isRacialFrame or frame._isTrinketFrame
+                                -- Show + alpha 1 so the icon is "on". The viewer's
+                                -- alpha is the sole visibility switch.
+                                frame:SetAlpha(1)
+                                frame:Show()
+                                -- Reparent custom frames (trinkets, racials, etc.)
+                                -- to the viewer so they inherit viewer alpha.
+                                if frame._isRacialFrame or frame._isTrinketFrame
                                     or frame._isPresetFrame or frame._isItemPresetFrame
-                                    or frame._isCustomSpellFrame
-                                if barHidden then
-                                    frame:SetAlpha(0)
-                                    if isOurs then frame:Hide() end
-                                else
-                                    frame:SetAlpha(1)
-                                    if isOurs then frame:Show() end
+                                    or frame._isCustomSpellFrame then
+                                    local vn = ns.BLIZZ_CDM_FRAMES and ns.BLIZZ_CDM_FRAMES[barKey]
+                                    local vf = vn and _G[vn]
+                                    if vf and frame:GetParent() ~= vf then
+                                        frame:SetParent(vf)
+                                    end
                                 end
                             end
                         end
@@ -1199,11 +1203,8 @@ local function CollectAndReanchor()
                         FC(frame).barKey = barKey
                         FC(frame).spellID = entry.baseSpellID or entry.spellID
                         icons[count] = frame
-                        if barHidden then
-                            frame:SetAlpha(0)
-                        else
-                            frame:SetAlpha(1)
-                        end
+                        frame:SetAlpha(1)
+                        frame:Show()
                         -- Kill any stale untracked overlay on buff bar frames
                         local ov = frame._untrackedOverlay
                         if not ov then
@@ -1706,13 +1707,6 @@ function ns.SetupViewerHooks()
                                 local sid = fc and fc.resolvedSid
                                 local fd = hookFrameData[frame]
 
-                                -- Staleness: if aura is gone, queue reanchor
-                                if isBuff and sid and sid > 0 then
-                                    if not C_UnitAuras.GetPlayerAuraBySpellID(sid) then
-                                        needsReanchor = true
-                                    end
-                                end
-
                                 -- Buff glow
                                 local buffGlowType = isBuff and (bd.buffGlowType or 0) or 0
                                 if buffGlowType > 0 and fd then
@@ -1743,7 +1737,11 @@ function ns.SetupViewerHooks()
 
                                 -- Pandemic glow
                                 if bd.pandemicGlow and sid and sid > 0 and fd then
-                                    if ns.IsInPandemicWindow(sid) then
+                                    -- Check our own detection + Blizzard's native
+                                    -- PandemicIcon (covers debuffs on target)
+                                    local inPandemic = ns.IsInPandemicWindow(sid)
+                                        or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
+                                    if inPandemic then
                                         if not fd.pandemicGlowActive then
                                             if not fd.pandemicOverlay then
                                                 local ov = CreateFrame("Frame", nil, frame)
