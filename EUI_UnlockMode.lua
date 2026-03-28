@@ -1049,6 +1049,45 @@ local function FlashRedBorder(m)
     end)
 end
 
+-- Rejection helpers packed into a single table to avoid upvalue pressure.
+-- ShowTooltip: shows EllesmereUI's standard tooltip at cursor, auto-hides after 5s.
+-- IsActionBar: returns true for action bars 1-8.
+local RejectH = {}
+function RejectH.ShowTooltip(text)
+    if not RejectH._anchor then
+        RejectH._anchor = CreateFrame("Frame", nil, UIParent)
+        RejectH._anchor:SetSize(1, 1)
+        RejectH._timer = CreateFrame("Frame")
+    end
+    local sc = UIParent:GetEffectiveScale()
+    local mx, my = GetCursorPosition()
+    RejectH._anchor:ClearAllPoints()
+    RejectH._anchor:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", mx / sc, my / sc)
+    EllesmereUI.ShowWidgetTooltip(RejectH._anchor, text, {})
+    -- Follow cursor and auto-hide after 5 seconds
+    local elapsed = 0
+    RejectH._timer:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed >= 3 then
+            EllesmereUI.HideWidgetTooltip()
+            self:SetScript("OnUpdate", nil)
+            return
+        end
+        local s = UIParent:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        RejectH._anchor:ClearAllPoints()
+        RejectH._anchor:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", cx / s, cy / s)
+    end)
+end
+function RejectH.IsActionBar(barKey)
+    if barKey == "MainBar" then return true end
+    if barKey:sub(1, 3) == "Bar" then
+        local n = tonumber(barKey:sub(4))
+        return n and n >= 2 and n <= 8
+    end
+    return false
+end
+
 -- Apply an anchor relationship: position the child element relative to the target
 -- side: "LEFT", "RIGHT", "TOP", "BOTTOM" -- child is placed on that side of the target
 -- offsetX/offsetY: if present, position child relative to the anchor edge
@@ -1485,6 +1524,14 @@ function EllesmereUI.ApplyElementPosition(barKey)
     local frame = GetBarFrame(barKey)
     if not frame then return false end
 
+    -- Pixel-snap helper (used for all SetPoint calls below)
+    local PPa = EllesmereUI and EllesmereUI.PP
+    local es = frame:GetEffectiveScale()
+    local function snap(v)
+        if PPa and PPa.SnapForES then return PPa.SnapForES(v or 0, es) end
+        return v or 0
+    end
+
     -- Check for native anchor relationship (v2 format has childPoint/targetPoint)
     local anchorDB = GetAnchorDB()
     local ai = anchorDB and anchorDB[barKey]
@@ -1494,7 +1541,7 @@ function EllesmereUI.ApplyElementPosition(barKey)
             pcall(function()
                 frame:ClearAllPoints()
                 frame:SetPoint(ai.childPoint, targetFrame, ai.targetPoint,
-                               ai.offsetX or 0, ai.offsetY or 0)
+                               snap(ai.offsetX), snap(ai.offsetY))
             end)
             return true
         end
@@ -1520,9 +1567,9 @@ function EllesmereUI.ApplyElementPosition(barKey)
             -- Apply CENTER first so frame has valid bounds
             pcall(function()
                 frame:ClearAllPoints()
-                frame:SetPoint("CENTER", UIParent, "CENTER", pos.x or 0, pos.y or 0)
+                frame:SetPoint("CENTER", UIParent, "CENTER", snap(pos.x), snap(pos.y))
             end)
-            -- Read live bounds and compute edge anchor
+            -- Read live bounds and compute edge anchor (ComputeSetPointForAnchor snaps internally)
             local pt, rpt, px, py = ComputeSetPointForAnchor(frame, desiredAnchor)
             if pt then
                 pcall(function()
@@ -1538,11 +1585,11 @@ function EllesmereUI.ApplyElementPosition(barKey)
         end
     end
 
-    -- Direct apply: stored values are exact SetPoint args
+    -- Direct apply: snap stored values to physical pixel grid
     pcall(function()
         frame:ClearAllPoints()
         frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point,
-                       pos.x or 0, pos.y or 0)
+                       snap(pos.x), snap(pos.y))
     end)
     return true
 end
@@ -1744,8 +1791,15 @@ EllesmereUI.ConvertToCenterPos = ConvertToCenterPos
 EllesmereUI.ApplyCenterPosition = ApplyCenterPosition
 
 SaveBarPosition = function(barKey, point, relPoint, x, y)
-    -- v2: Store raw SetPoint args. The correct anchor (grow-direction edge,
-    -- CENTER, etc.) is determined at save time, not at load time.
+    -- v2: Store exact SetPoint args, snapped to physical pixel grid.
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES then
+        local frame = GetBarFrame(barKey)
+        local es = frame and frame:GetEffectiveScale()
+                   or (UIParent and UIParent:GetEffectiveScale() or 1)
+        x = PPa.SnapForES(x or 0, es)
+        y = PPa.SnapForES(y or 0, es)
+    end
     local elem = registeredElements[barKey]
     if elem and elem.savePosition then
         elem.savePosition(barKey, point, relPoint, x, y)
@@ -1839,6 +1893,44 @@ local function ApplySavedPositions()
         end
     end
 
+    -- One-time migration: snap all stored positions to physical pixel grid.
+    -- After this, SaveBarPosition snaps on every save so data stays clean.
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES and EllesmereUIDB and EllesmereUIDB.posPixelSnapped ~= 2 then
+        local uiES = UIParent:GetEffectiveScale()
+        -- Action bar positions
+        local posDB = GetPositionDB()
+        if posDB then
+            for _, pos in pairs(posDB) do
+                if pos.x then pos.x = PPa.SnapForES(pos.x, uiES) end
+                if pos.y then pos.y = PPa.SnapForES(pos.y, uiES) end
+            end
+        end
+        -- Registered element positions (CDM, unit frames, resource bars, etc.)
+        RebuildRegisteredOrder()
+        for _, key in ipairs(registeredOrder) do
+            local elem = registeredElements[key]
+            if elem and elem.loadPosition and elem.savePosition then
+                local pos = elem.loadPosition(key)
+                if pos and pos.x and pos.y then
+                    local sx = PPa.SnapForES(pos.x, uiES)
+                    local sy = PPa.SnapForES(pos.y, uiES)
+                    if sx ~= pos.x or sy ~= pos.y then
+                        elem.savePosition(key, pos.point, pos.relPoint, sx, sy)
+                    end
+                end
+            end
+        end
+        -- Anchor offsets
+        if anchorDB then
+            for _, info in pairs(anchorDB) do
+                if info.offsetX then info.offsetX = PPa.SnapForES(info.offsetX, uiES) end
+                if info.offsetY then info.offsetY = PPa.SnapForES(info.offsetY, uiES) end
+            end
+        end
+        EllesmereUIDB.posPixelSnapped = 2
+    end
+
     -- Phase 1: Action bars -- apply stored positions directly
     local posDB = GetPositionDB()
     if posDB then
@@ -1895,15 +1987,21 @@ local function ApplySavedPositions()
     -- Phase 4: Native anchoring -- one SetPoint per anchored element, WoW
     -- handles all future updates when targets move or resize.
     if anchorDB then
+        local PPa = EllesmereUI and EllesmereUI.PP
         for childKey, info in pairs(anchorDB) do
             if info.target and info.childPoint and info.targetPoint then
                 local childFrame = GetBarFrame(childKey)
                 local targetFrame = GetBarFrame(info.target)
                 if childFrame and targetFrame then
+                    local ox, oy = info.offsetX or 0, info.offsetY or 0
+                    if PPa and PPa.SnapForES then
+                        local es = childFrame:GetEffectiveScale()
+                        ox = PPa.SnapForES(ox, es)
+                        oy = PPa.SnapForES(oy, es)
+                    end
                     pcall(function()
                         childFrame:ClearAllPoints()
-                        childFrame:SetPoint(info.childPoint, targetFrame, info.targetPoint,
-                                            info.offsetX or 0, info.offsetY or 0)
+                        childFrame:SetPoint(info.childPoint, targetFrame, info.targetPoint, ox, oy)
                     end)
                 end
             end
@@ -2682,9 +2780,11 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
         local oCY = (oT + oB) * 0.5
 
         -- X-axis: dragged {left, center, right} vs target {left, center, right}
+        -- Track which dragged edge matched: 1=left, 2=center, 3=right
         local dragXEdges = { dL, cx, dR }
         local targXEdges = { oL, oCX, oR }
-        for _, de in ipairs(dragXEdges) do
+        local snapXEdgeIdx = nil
+        for di, de in ipairs(dragXEdges) do
             for _, te in ipairs(targXEdges) do
                 local dx = de - te
                 local adx = abs(dx)
@@ -2692,14 +2792,17 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
                     bestDistX = adx
                     bestDX = dx
                     snapXLinePos = te
+                    snapXEdgeIdx = di
                 end
             end
         end
 
         -- Y-axis: dragged {top, center, bottom} vs target {top, center, bottom}
+        -- Track which dragged edge matched: 1=top, 2=center, 3=bottom
         local dragYEdges = { dT, cy, dB }
         local targYEdges = { oT, oCY, oB }
-        for _, de in ipairs(dragYEdges) do
+        local snapYEdgeIdx = nil
+        for di, de in ipairs(dragYEdges) do
             for _, te in ipairs(targYEdges) do
                 local dy = de - te
                 local ady = abs(dy)
@@ -2707,6 +2810,7 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
                     bestDistY = ady
                     bestDY = dy
                     snapYLinePos = te
+                    snapYEdgeIdx = di
                 end
             end
         end
@@ -2721,9 +2825,11 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
     -- Record guide line positions for ShowAlignmentGuides
     if bestDistX < SNAP_THRESH and snapXLinePos then
         lastSnapInfo.snapXPos = snapXLinePos
+        lastSnapInfo.xEdge = snapXEdgeIdx  -- 1=left, 2=center, 3=right
     end
     if bestDistY < SNAP_THRESH and snapYLinePos then
         lastSnapInfo.snapYPos = snapYLinePos
+        lastSnapInfo.yEdge = snapYEdgeIdx  -- 1=top, 2=center, 3=bottom
     end
 
     return snapX, snapY
@@ -4325,8 +4431,10 @@ local function CreateMover(barKey)
         self._dragStartCY = cy
 
         -- Snap mover to cursor immediately so there's no one-frame lag
-        local halfW0 = round(self:GetWidth() / 2)
-        local halfH0 = round(self:GetHeight() / 2)
+        -- Use exact half-dimensions (not rounded) so snap edges match bar edges.
+        -- Rounding introduces a 0.5px mismatch that SnapForES amplifies to 1px.
+        local halfW0 = self:GetWidth() / 2
+        local halfH0 = self:GetHeight() / 2
         self._dragHalfW = halfW0
         self._dragHalfH = halfH0
         local snap0X, snap0Y = SnapPosition(self._barKey, cx, cy, halfW0, halfH0)
@@ -4736,6 +4844,13 @@ local function CreateMover(barKey)
                 local targetKey = self._barKey
 
                 if pickMode == "widthMatch" then
+                    -- Action bars 1-8 can only width match to other action bars 1-8
+                    if RejectH.IsActionBar(sourceKey) and not RejectH.IsActionBar(targetKey) then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        RejectH.ShowTooltip("Action Bars can only width match\nto other Action Bars")
+                        return
+                    end
                     MatchH.SetWidthMatch(sourceKey, targetKey)
                     MatchH.ApplyWidthMatch(sourceKey, targetKey)
                     hasChanges = true
@@ -4778,6 +4893,8 @@ local function CreateMover(barKey)
                     if targetEl and targetEl.noAnchorTarget then
                         CancelPickMode()
                         FlashRedBorder(self)
+                        local targetLabel = GetBarLabel(targetKey) or targetKey
+                        RejectH.ShowTooltip("Elements cannot be anchored to\n" .. targetLabel)
                         return
                     end
 
@@ -4795,6 +4912,7 @@ local function CreateMover(barKey)
                     if circular then
                         CancelPickMode()
                         FlashRedBorder(self)
+                        RejectH.ShowTooltip("This would create a circular anchor")
                         return
                     end
 
@@ -4810,6 +4928,7 @@ local function CreateMover(barKey)
                         if aInfo.target == targetKey and ancestorDepth >= 2 then
                             CancelPickMode()
                             FlashRedBorder(self)
+                            RejectH.ShowTooltip("This would create a circular anchor")
                             return
                         end
                         aWalk = aInfo.target
@@ -6932,12 +7051,16 @@ local function SnapshotPositions()
         end
     end
 
-    -- Snapshot anchor data so we can revert on discard
+    -- Snapshot anchor data so we can revert on discard (include v2 fields)
     wipe(snapshotAnchors)
     local anchorDB = GetAnchorDB()
     if anchorDB then
         for childKey, info in pairs(anchorDB) do
-            snapshotAnchors[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
+            snapshotAnchors[childKey] = {
+                target = info.target, side = info.side,
+                offsetX = info.offsetX, offsetY = info.offsetY,
+                childPoint = info.childPoint, targetPoint = info.targetPoint,
+            }
         end
     end
 
@@ -7056,16 +7179,19 @@ local function CommitPositions()
     end
 end
 
--- Revert bars to their snapshot positions (discard all pending changes)
+-- Revert bars to their snapshot positions (discard all pending changes).
+-- Strategy: restore ALL DB state from snapshots, then run the same
+-- ApplySavedPositions pass used on login. One code path, no special cases.
 local function RevertPositions()
     if InCombatLockdown() then return end
-    -- Restore action bar saved DB to snapshot state
+
+    -- 1) Restore action bar position DB
     local db = GetPositionDB()
     if db then
         for barKey, _ in pairs(pendingPositions) do
             if not registeredElements[barKey] then
-                if snapshotPositions[barKey] then
-                    local snap = snapshotPositions[barKey]
+                local snap = snapshotPositions[barKey]
+                if snap then
                     db[barKey] = { point = snap.point, relPoint = snap.relPoint, x = snap.x, y = snap.y }
                 else
                     db[barKey] = nil
@@ -7073,8 +7199,9 @@ local function RevertPositions()
             end
         end
     end
-    -- Revert action bar scale is no longer needed (scale removed)
-    -- Revert registered elements via their savePosition callback
+
+    -- 2) Restore registered element positions via savePosition callbacks
+    EllesmereUI._propagatingSave = true
     for barKey, _ in pairs(pendingPositions) do
         local elem = registeredElements[barKey]
         if elem and elem.savePosition then
@@ -7084,34 +7211,22 @@ local function RevertPositions()
             end
         end
     end
-    -- Move all frames back to their original positions.
-    -- Force SetPoint directly -- do NOT use ApplyCenterPosition which
-    -- skips anchored elements (they need reverting too).
-    for barKey, _ in pairs(pendingPositions) do
-        local bar = GetBarFrame(barKey)
-        if bar then
-            local snap = snapshotPositions[barKey]
-            if snap then
-                pcall(function()
-                    bar:ClearAllPoints()
-                    bar:SetPoint(snap.point, UIParent, snap.relPoint, snap.x, snap.y)
-                end)
-            elseif bar.UpdateGridLayout then
-                pcall(bar.UpdateGridLayout, bar)
-            end
-        end
-    end
+    EllesmereUI._propagatingSave = false
 
-    -- Revert anchor data to snapshot state
+    -- 3) Restore anchor data (before positioning so native anchoring works)
     local anchorDB = GetAnchorDB()
     if anchorDB then
         wipe(anchorDB)
         for childKey, info in pairs(snapshotAnchors) do
-            anchorDB[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
+            anchorDB[childKey] = {
+                target = info.target, side = info.side,
+                offsetX = info.offsetX, offsetY = info.offsetY,
+                childPoint = info.childPoint, targetPoint = info.targetPoint,
+            }
         end
     end
 
-    -- Revert element sizes to snapshot state
+    -- 4) Restore element sizes
     for key, snap in pairs(snapshotSizes) do
         local elem = registeredElements[key]
         if elem then
@@ -7124,7 +7239,7 @@ local function RevertPositions()
         end
     end
 
-    -- Revert width/height match DBs to snapshot state
+    -- 5) Restore width/height match DBs
     local wmDB = MatchH.GetWidthMatchDB()
     if wmDB then
         wipe(wmDB)
@@ -7134,6 +7249,24 @@ local function RevertPositions()
     if hmDB then
         wipe(hmDB)
         for k, v in pairs(snapshotHeightMatch) do hmDB[k] = v end
+    end
+
+    -- 6) Re-apply positions for changed elements only (avoid touching
+    -- secure frames we didn't change, which causes taint).
+    -- Trigger CDM rebuild first so bars are sized before positioning.
+    local didCDMRebuild = false
+    for barKey in pairs(pendingPositions) do
+        if not didCDMRebuild and type(barKey) == "string" and barKey:sub(1, 4) == "CDM_" then
+            local elem = registeredElements[barKey]
+            if elem and elem.applyPosition then
+                pcall(elem.applyPosition, barKey)
+            end
+            didCDMRebuild = true  -- one rebuild covers all CDM bars
+        end
+    end
+    -- Now apply final positions from the restored DB
+    for barKey in pairs(pendingPositions) do
+        EllesmereUI.ApplyElementPosition(barKey)
     end
 end
 
@@ -8238,10 +8371,11 @@ function ns.OpenUnlockMode()
             unlockFrame._anchorLineFrame:Show()
         end
 
-        -- ReapplyAllAnchors during open sets hasChanges; reset it since
-        -- the user hasn't actually changed anything yet.
-        hasChanges = false
-        wipe(pendingPositions)
+        -- ReapplyAllAnchors during open may set hasChanges; reset ONLY if
+        -- the user hasn't already interacted (e.g. dragged during animation).
+        if not next(pendingPositions) then
+            hasChanges = false
+        end
 
         -- Auto-select a mover if requested (e.g. from cog popup link)
         if EllesmereUI._unlockAutoSelectKey then
