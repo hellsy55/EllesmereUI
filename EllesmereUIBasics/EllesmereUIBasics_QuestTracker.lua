@@ -1227,16 +1227,10 @@ local function GetTrackedRecipes()
 
     local tracked = C_TradeSkillUI.GetRecipesTracked(false)
     local recraft = C_TradeSkillUI.GetRecipesTracked(true)
-    
-    -- Build a set of recipeIDs that are from the recraft list
-    local recraftIDs = {}
-    if recraft then 
-        for _, v in ipairs(recraft) do
-            local rid = type(v) == "table" and (v.recipeID or v.recipeSchematicID) or v
-            if rid then recraftIDs[rid] = true end
-            tracked[#tracked + 1] = v
-        end 
-    end
+    if recraft then for _, v in ipairs(recraft) do
+        if type(v) == "table" then v._isRecraft = true end
+        tracked[#tracked + 1] = v
+    end end
     if not tracked or #tracked == 0 then return _recipes end
 
     local listN = 0
@@ -1252,7 +1246,7 @@ local function GetTrackedRecipes()
                     _recipe_entries[listN] = entry
                 end
                 entry.recipeID = recipeID
-                entry.isRecraft = recraftIDs[recipeID] or false
+                entry.isRecraft = (type(tracked_entry) == "table" and tracked_entry._isRecraft) or false
                 entry.name = schematic.name or ("Recipe #"..recipeID)
                 local reagentN = 0
                 if schematic.reagentSlotSchematics then
@@ -2412,55 +2406,48 @@ function EQT:Init()
     self.frame:SetHeight(Cfg("height") or 500)
     self:ApplyPosition()
 
-    -- Hide/show Blizzard ObjectiveTrackerFrame based on setting.
-    -- IMPORTANT: Do NOT reparent ObjectiveTrackerFrame -- it's a secure frame.
-    -- Reparenting taints the entire hierarchy, breaking minimap buttons and
-    -- UI widgets. Instead, move off-screen + disable mouse + zero alpha.
+    -- Hide/show Blizzard ObjectiveTrackerFrame based on setting
+    -- We move it far off-screen so its children can't intercept clicks.
+    if not EQT._hiddenFrame then
+        EQT._hiddenFrame = CreateFrame("Frame")
+        EQT._hiddenFrame:Hide()
+    end
     local function ApplyBlizzardTrackerVisibility()
         local ot = _G.ObjectiveTrackerFrame
         if not ot then return end
+        -- Never hide Blizzard's tracker during M+ keystones -- the
+        -- scenario timer (M+ timer, death count, affixes) lives inside
+        -- ObjectiveTrackerFrame and must remain visible.
         local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
         if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
-            if not ot._eqtHidden then
-                ot._eqtHidden = true
-                ot._eqtOrigAlpha = ot:GetAlpha()
+            if not ot._eqtOrigParent then
+                ot._eqtOrigParent = ot:GetParent()
             end
-            ot:SetAlpha(0)
-            ot:EnableMouse(false)
-            ot:EnableMouseWheel(false)
-            -- Move far off-screen so children can't intercept clicks
-            if not InCombatLockdown() then
-                ot:ClearAllPoints()
-                ot:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 0)
-            end
+            ot:SetParent(EQT._hiddenFrame)
         else
-            if ot._eqtHidden then
-                ot._eqtHidden = nil
-                ot:SetAlpha(ot._eqtOrigAlpha or 1)
-                ot:EnableMouse(true)
-                ot:EnableMouseWheel(true)
-                -- Restore original position (let Blizzard's layout handle it)
-                if not InCombatLockdown() and ot.SetManagedMode then
-                    pcall(ot.SetManagedMode, ot, true)
-                end
+            if ot._eqtOrigParent then
+                ot:SetParent(ot._eqtOrigParent)
             end
+            ot:SetAlpha(1)
         end
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
-    -- Hook Show so Blizzard/unlock mode can't restore visibility
+    -- Hook Show so Blizzard/unlock mode can't restore it
     local ot = _G.ObjectiveTrackerFrame
     if ot then
         local suppressing = false
         local function SuppressBlizzTracker()
             if suppressing then return end
+            -- Don't suppress during M+ -- the timer must stay visible.
             local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
                 and C_ChallengeMode.IsChallengeModeActive()
             if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
                 suppressing = true
-                ot:SetAlpha(0)
-                ot:EnableMouse(false)
-                ot:EnableMouseWheel(false)
+                if not ot._eqtOrigParent then
+                    ot._eqtOrigParent = ot:GetParent()
+                end
+                ot:SetParent(EQT._hiddenFrame)
                 suppressing = false
             end
         end
@@ -2578,8 +2565,6 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
-        SCENARIO_CRITERIA_UPDATE = true,
-        SCENARIO_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {

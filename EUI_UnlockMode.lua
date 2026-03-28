@@ -54,9 +54,10 @@ if EllesmereUI._unlockModeLoaded then return end
 EllesmereUI._unlockModeLoaded = true
 
 -------------------------------------------------------------------------------
---  v2 Early stub: ReapplyOwnAnchor (pre-EnsureLoaded)
---  Uses native WoW frame anchoring if v2 format fields are present.
---  The deferred block replaces this with the full implementation.
+--  Lightweight anchor reapply stub (pre-EnsureLoaded)
+--  Allows child addons (CDM, etc.) to reposition anchored elements on login
+--  before the full unlock mode body has been loaded. The deferred block
+--  replaces this with the full implementation.
 -------------------------------------------------------------------------------
 if not EllesmereUI.ReapplyOwnAnchor then
     EllesmereUI.ReapplyOwnAnchor = function(key)
@@ -64,33 +65,149 @@ if not EllesmereUI.ReapplyOwnAnchor then
         local info = EllesmereUIDB.unlockAnchors[key]
         if not info or not info.target then return end
 
-        -- v2 format: use native WoW anchoring
-        if info.childPoint and info.targetPoint then
-            local elems = EllesmereUI._unlockRegisteredElements
-            local childElem = elems and elems[key]
-            local targetElem = elems and elems[info.target]
-            local childBar = childElem and childElem.getFrame and childElem.getFrame(key)
-            local targetBar = targetElem and targetElem.getFrame and targetElem.getFrame(info.target)
-            if childBar and targetBar then
-                pcall(function()
-                    childBar:ClearAllPoints()
-                    childBar:SetPoint(info.childPoint, targetBar, info.targetPoint,
-                                      info.offsetX or 0, info.offsetY or 0)
-                end)
+        -- Resolve child and target frames via registered elements
+        local elems = EllesmereUI._unlockRegisteredElements
+        local childElem = elems and elems[key]
+        local targetElem = elems and elems[info.target]
+        local childBar = childElem and childElem.getFrame and childElem.getFrame(key)
+        local targetBar = targetElem and targetElem.getFrame and targetElem.getFrame(info.target)
+        if not childBar or not targetBar then return end
+        if not targetBar:GetLeft() then return end
+
+        local side = info.side
+        local uiS = UIParent:GetEffectiveScale()
+        local tS = targetBar:GetEffectiveScale()
+        local cS = childBar:GetEffectiveScale()
+
+        local tL = (targetBar:GetLeft() or 0) * tS / uiS
+        local tR = (targetBar:GetRight() or 0) * tS / uiS
+        local tT = (targetBar:GetTop() or 0) * tS / uiS
+        local tB = (targetBar:GetBottom() or 0) * tS / uiS
+        local tCX = (tL + tR) / 2
+        local tCY = (tT + tB) / 2
+
+        local cW = (childBar:GetWidth() or 50) * cS / uiS
+        local cH = (childBar:GetHeight() or 50) * cS / uiS
+
+        local cx, cy
+        if info.offsetX and info.offsetY then
+            if side == "LEFT" then
+                cx = tL + info.offsetX - cW / 2
+                cy = tCY + info.offsetY
+            elseif side == "RIGHT" then
+                cx = tR + info.offsetX + cW / 2
+                cy = tCY + info.offsetY
+            elseif side == "TOP" then
+                cx = tCX + info.offsetX
+                cy = tT + info.offsetY + cH / 2
+            elseif side == "BOTTOM" then
+                cx = tCX + info.offsetX
+                cy = tB + info.offsetY - cH / 2
+            else
+                cx = tCX + info.offsetX
+                cy = tCY + info.offsetY
             end
-            return
+        else
+            if side == "LEFT" then
+                cx = tL - cW / 2; cy = tCY
+            elseif side == "RIGHT" then
+                cx = tR + cW / 2; cy = tCY
+            elseif side == "TOP" then
+                cx = tCX; cy = tT + cH / 2
+            elseif side == "BOTTOM" then
+                cx = tCX; cy = tB - cH / 2
+            else
+                cx = tCX; cy = tCY
+            end
         end
+
+        local uiW, uiH = UIParent:GetSize()
+        local centerX = cx - uiW / 2
+        local centerY = cy - uiH / 2
+
+        pcall(function()
+            childBar:ClearAllPoints()
+            childBar:SetPoint("CENTER", UIParent, "CENTER", centerX, centerY)
+        end)
     end
 end
 
 -------------------------------------------------------------------------------
---  v2 Early stub: NotifyElementResized
---  No position re-application needed. Edge anchors are stable on resize,
---  native WoW anchoring handles anchored elements automatically.
---  The deferred block replaces this with the full implementation.
+--  Early stub: NotifyElementResized
+--  Handles grow-direction-aware repositioning before unlock mode fully loads.
+--  The deferred block overwrites this with the full implementation.
 -------------------------------------------------------------------------------
 if not EllesmereUI.NotifyElementResized then
-    EllesmereUI.NotifyElementResized = function() end  -- no-op until deferred body loads
+    EllesmereUI.NotifyElementResized = function(key)
+        if not EllesmereUIDB then return end
+        -- Skip if anchored (early ReapplyOwnAnchor handles those)
+        local anchors = EllesmereUIDB.unlockAnchors
+        if anchors and anchors[key] and anchors[key].target then return end
+
+        -- Read grow direction from the bar's per-profile settings
+        local growDir
+        if key == "EQT_Tracker" then growDir = "DOWN"
+        elseif key:sub(1, 4) == "CDM_" then
+            local rawKey = key:sub(5)
+            local cdm = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon and EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
+            local cdmBars = cdm and cdm.db and cdm.db.profile and cdm.db.profile.cdmBars
+            if cdmBars and cdmBars.bars then
+                for _, bar in ipairs(cdmBars.bars) do
+                    if bar.key == rawKey then
+                        local g = bar.growDirection
+                        if g then growDir = g end
+                        break
+                    end
+                end
+            end
+        else
+            local eab = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
+            local s = eab and eab.db and eab.db.profile and eab.db.profile.bars and eab.db.profile.bars[key]
+            if s then
+                local g = (s.growDirection or "up"):upper()
+                if g ~= "UP" then growDir = g end
+            end
+        end
+        if not growDir or growDir == "CENTER" then return end
+
+        -- Find the frame via registered elements
+        local elems = EllesmereUI._unlockRegisteredElements
+        local elem = elems and elems[key]
+        local frame = elem and elem.getFrame and elem.getFrame(key)
+        if not frame or not frame:GetCenter() then return end
+
+        -- Load saved position
+        local pos
+        if elem and elem.loadPosition then
+            pos = elem.loadPosition(key)
+        else
+            local eab = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
+            local db = eab and eab.db and eab.db.profile and eab.db.profile.barPositions
+            pos = db and db[key]
+        end
+        if not pos or pos.point ~= "CENTER" or pos.relPoint ~= "CENTER" then return end
+
+        local cx, cy = pos.x or 0, pos.y or 0
+        local fw = frame:GetWidth() or 0
+        local fh = frame:GetHeight() or 0
+        local anchor, adjX, adjY
+        if growDir == "RIGHT" then
+            anchor = "LEFT"; adjX = cx - fw / 2; adjY = cy
+        elseif growDir == "LEFT" then
+            anchor = "RIGHT"; adjX = cx + fw / 2; adjY = cy
+        elseif growDir == "DOWN" then
+            anchor = "TOP"; adjX = cx; adjY = cy + fh / 2
+        elseif growDir == "UP" then
+            anchor = "BOTTOM"; adjX = cx; adjY = cy - fh / 2
+        else
+            return
+        end
+
+        pcall(function()
+            frame:ClearAllPoints()
+            frame:SetPoint(anchor, UIParent, "CENTER", adjX, adjY)
+        end)
+    end
 end
 
 -- Early stub: IsUnlockAnchored
@@ -731,10 +848,12 @@ function MatchH.ApplyWidthMatch(sourceKey, targetKey)
                 _propagatingMatch = true
                 pcall(sourceElem.setWidth, sourceKey, targetW)
                 _propagatingMatch = false
-                -- v2: Re-apply stored position in case the rebuild changed anchors.
-                -- Edge-anchored elements are stable on resize, so this is a no-op
-                -- for most elements but guards against rebuild-induced anchor changes.
-                EllesmereUI.ApplyElementPosition(sourceKey)
+                if sourceElem.loadPosition then
+                    local pos = sourceElem.loadPosition(sourceKey)
+                    if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
+                        ApplyCenterPosition(sourceKey, pos)
+                    end
+                end
             end
         end
     end
@@ -770,7 +889,12 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
                 _propagatingMatch = true
                 pcall(sourceElem.setHeight, sourceKey, targetH)
                 _propagatingMatch = false
-                EllesmereUI.ApplyElementPosition(sourceKey)
+                if sourceElem.loadPosition then
+                    local pos = sourceElem.loadPosition(sourceKey)
+                    if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
+                        ApplyCenterPosition(sourceKey, pos)
+                    end
+                end
             end
         end
     end
@@ -829,13 +953,13 @@ function EllesmereUI.PropagateWidthMatch(key)
             if tKey == parentKey and not visited[childKey] then
                 visited[childKey] = true
                 MatchH.ApplyWidthMatch(childKey, parentKey)
+                _pendingAnchorKeys[childKey] = "width"
                 pushChildren(childKey)
             end
         end
     end
     pushChildren(key)
-    -- v2: No ScheduleAnchorBatch. Native WoW anchoring handles position
-    -- updates automatically when frames resize.
+    ScheduleAnchorBatch()
 end
 
 function EllesmereUI.PropagateHeightMatch(key)
@@ -847,11 +971,13 @@ function EllesmereUI.PropagateHeightMatch(key)
             if tKey == parentKey and not visited[childKey] then
                 visited[childKey] = true
                 MatchH.ApplyHeightMatch(childKey, parentKey)
+                _pendingAnchorKeys[childKey] = "height"
                 pushChildren(childKey)
             end
         end
     end
     pushChildren(key)
+    ScheduleAnchorBatch()
 end
 
 -- DEBUG: confirm propagation functions are defined at file-load time
@@ -873,9 +999,10 @@ EllesmereUI._layoutBarResizing = nil
 
 function EllesmereUI.NotifyElementResized(key)
     if isUnlocked then return end  -- unlock mode owns positioning
-    -- Skip if we're inside a width/height match propagation to avoid loops
+    -- Skip if we're inside a width/height match propagation to avoid loops:
+    -- setWidth/setHeight -> rebuild -> OnSizeChanged -> NotifyElementResized
     if _propagatingMatch then return end
-    -- Skip if LayoutBar is handling its own sizing
+    -- Skip position re-application if LayoutBar is handling it
     if EllesmereUI._layoutBarResizing == key then return end
     -- Throttle: skip if we just processed this key
     local now = GetTime()
@@ -884,34 +1011,81 @@ function EllesmereUI.NotifyElementResized(key)
     end
     _resizeNotifyThrottle[key] = now
 
-    _resizeLastSize[key] = { w = (GetBarFrame(key) or {}).GetWidth and GetBarFrame(key):GetWidth() or 0,
-                             h = (GetBarFrame(key) or {}).GetHeight and GetBarFrame(key):GetHeight() or 0 }
+    -- Detect which axis changed by comparing to last known size
+    local bar = GetBarFrame(key)
+    local curW = bar and bar:GetWidth() or 0
+    local curH = bar and bar:GetHeight() or 0
+    local prev = _resizeLastSize[key]
+    local widthChanged = not prev or math.abs(curW - prev.w) > 0.5
+    local heightChanged = not prev or math.abs(curH - prev.h) > 0.5
 
-    -- v2: NO position re-application on resize.
-    -- - Anchored elements use native WoW SetPoint to target frame; WoW
-    --   automatically updates position when either frame resizes.
-    -- - Edge-anchored elements (grow direction) keep their fixed edge;
-    --   width changes grow in the correct direction with no repositioning.
-    -- - CENTER-anchored elements grow symmetrically by default.
+    _resizeLastSize[key] = { w = curW, h = curH }
 
-    -- Only propagate width/height matches to dependent elements.
+    -- Reapply own anchor first (if this element is anchored to something,
+    -- its position may need adjusting after its own size changed).
+    -- For unanchored elements, re-apply the stored CENTER position so the
+    -- WoW anchor stays CENTER after addon rebuilds that may use TOPLEFT.
+    local anchorDB = GetAnchorDB()
+    local ownAnchor = anchorDB and anchorDB[key]
+    if ownAnchor and ownAnchor.target then
+        if EllesmereUI.ReapplyOwnAnchor then
+            EllesmereUI.ReapplyOwnAnchor(key)
+        end
+    else
+        -- Unanchored: re-apply stored CENTER position
+        local elem = registeredElements[key]
+        local pos
+        if elem and elem.loadPosition then
+            pos = elem.loadPosition(key)
+        else
+            local db = GetPositionDB()
+            pos = db and db[key]
+        end
+        if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
+            ApplyCenterPosition(key, pos)
+        end
+    end
+
+    -- Propagate width/height matches to dependents
     local wdb = MatchH.GetWidthMatchDB()
     if wdb then
+        local hasChildren = false
         for childKey, tKey in pairs(wdb) do
-            if tKey == key then
-                EllesmereUI.PropagateWidthMatch(key)
-                break
-            end
+            if tKey == key then hasChildren = true; break end
+        end
+        if hasChildren then
+            EllesmereUI.PropagateWidthMatch(key)
         end
     end
     local hdb = MatchH.GetHeightMatchDB()
     if hdb then
+        local hasChildren = false
         for childKey, tKey in pairs(hdb) do
-            if tKey == key then
-                EllesmereUI.PropagateHeightMatch(key)
-                break
-            end
+            if tKey == key then hasChildren = true; break end
         end
+        if hasChildren then
+            EllesmereUI.PropagateHeightMatch(key)
+        end
+    end
+
+    -- Propagate anchor chain to children anchored to this element
+    -- Use detected axis so children on the unaffected axis don't move
+    local axis
+    if widthChanged and heightChanged then
+        axis = "all"
+    elseif widthChanged then
+        axis = "width"
+    elseif heightChanged then
+        axis = "height"
+    end
+    if axis then
+        local existing = _pendingAnchorKeys[key]
+        if existing and existing ~= axis then
+            _pendingAnchorKeys[key] = "all"
+        else
+            _pendingAnchorKeys[key] = axis
+        end
+        ScheduleAnchorBatch()
     end
 end
 
@@ -1047,45 +1221,6 @@ local function FlashRedBorder(m)
             self:SetScript("OnUpdate", nil)
         end
     end)
-end
-
--- Rejection helpers packed into a single table to avoid upvalue pressure.
--- ShowTooltip: shows EllesmereUI's standard tooltip at cursor, auto-hides after 5s.
--- IsActionBar: returns true for action bars 1-8.
-local RejectH = {}
-function RejectH.ShowTooltip(text)
-    if not RejectH._anchor then
-        RejectH._anchor = CreateFrame("Frame", nil, UIParent)
-        RejectH._anchor:SetSize(1, 1)
-        RejectH._timer = CreateFrame("Frame")
-    end
-    local sc = UIParent:GetEffectiveScale()
-    local mx, my = GetCursorPosition()
-    RejectH._anchor:ClearAllPoints()
-    RejectH._anchor:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", mx / sc, my / sc)
-    EllesmereUI.ShowWidgetTooltip(RejectH._anchor, text, {})
-    -- Follow cursor and auto-hide after 5 seconds
-    local elapsed = 0
-    RejectH._timer:SetScript("OnUpdate", function(self, dt)
-        elapsed = elapsed + dt
-        if elapsed >= 3 then
-            EllesmereUI.HideWidgetTooltip()
-            self:SetScript("OnUpdate", nil)
-            return
-        end
-        local s = UIParent:GetEffectiveScale()
-        local cx, cy = GetCursorPosition()
-        RejectH._anchor:ClearAllPoints()
-        RejectH._anchor:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", cx / s, cy / s)
-    end)
-end
-function RejectH.IsActionBar(barKey)
-    if barKey == "MainBar" then return true end
-    if barKey:sub(1, 3) == "Bar" then
-        local n = tonumber(barKey:sub(4))
-        return n and n >= 2 and n <= 8
-    end
-    return false
 end
 
 -- Apply an anchor relationship: position the child element relative to the target
@@ -1411,222 +1546,10 @@ GetPositionDB = function()
 end
 
 -------------------------------------------------------------------------------
---  v2 Direct SetPoint Position System
---  Positions are stored as EXACT SetPoint args: {point, relPoint, x, y}
---  No conversion on load. Each element is positioned ONCE with stored values.
---  Grow-direction edge anchors and native frame anchoring are computed at
---  SAVE time (unlock mode exit), not at load time.
--------------------------------------------------------------------------------
-
--- Convert anchor side to child/target SetPoint anchor names
-local function SideToAnchorPoints(side)
-    if side == "LEFT" then return "RIGHT", "LEFT"
-    elseif side == "RIGHT" then return "LEFT", "RIGHT"
-    elseif side == "TOP" then return "BOTTOM", "TOP"
-    elseif side == "BOTTOM" then return "TOP", "BOTTOM"
-    else return "CENTER", "CENTER"
-    end
-end
-
--- Determine the desired SetPoint anchor for a bar based on its grow direction.
--- Grow RIGHT = fixed LEFT edge, grow LEFT = fixed RIGHT edge, etc.
-local function GetDesiredAnchor(barKey)
-    local growDir = GetBarGrowDirActual(barKey)
-    if growDir == "RIGHT" then return "LEFT"
-    elseif growDir == "LEFT" then return "RIGHT"
-    elseif growDir == "DOWN" then return "TOP"
-    elseif growDir == "UP" then return "BOTTOM"
-    else return "CENTER"
-    end
-end
-
--- Compute SetPoint args for a desired anchor from live frame bounds.
--- Returns point, "CENTER", x, y for frame:SetPoint(point, UIParent, "CENTER", x, y)
-local function ComputeSetPointForAnchor(frame, desiredAnchor)
-    if not frame or not frame:GetLeft() then return nil end
-    local fL = frame:GetLeft()
-    local fR = frame:GetRight()
-    local fT = frame:GetTop()
-    local fB = frame:GetBottom()
-    local fCX = (fL + fR) / 2
-    local fCY = (fT + fB) / 2
-    local uiW, uiH = UIParent:GetSize()
-    local halfW, halfH = uiW / 2, uiH / 2
-
-    local x, y
-    if desiredAnchor == "LEFT" then
-        x, y = fL - halfW, fCY - halfH
-    elseif desiredAnchor == "RIGHT" then
-        x, y = fR - halfW, fCY - halfH
-    elseif desiredAnchor == "TOP" then
-        x, y = fCX - halfW, fT - halfH
-    elseif desiredAnchor == "BOTTOM" then
-        x, y = fCX - halfW, fB - halfH
-    else -- CENTER
-        x, y = fCX - halfW, fCY - halfH
-    end
-
-    -- Snap to physical pixel grid
-    local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and PPa.SnapForES then
-        local es = frame:GetEffectiveScale()
-        x = PPa.SnapForES(x, es)
-        y = PPa.SnapForES(y, es)
-    end
-
-    return desiredAnchor, "CENTER", x, y
-end
-
--- Compute native SetPoint offset for an anchored element.
--- Returns childPoint, targetPoint, offsetX, offsetY
-local function ComputeNativeAnchorOffset(childFrame, targetFrame, side)
-    if not childFrame or not childFrame:GetLeft() then return nil end
-    if not targetFrame or not targetFrame:GetLeft() then return nil end
-
-    local childPt, targetPt = SideToAnchorPoints(side)
-
-    local cL, cR = childFrame:GetLeft(), childFrame:GetRight()
-    local cT, cB = childFrame:GetTop(), childFrame:GetBottom()
-    local tL, tR = targetFrame:GetLeft(), targetFrame:GetRight()
-    local tT, tB = targetFrame:GetTop(), targetFrame:GetBottom()
-    local cCX, cCY = (cL + cR) / 2, (cT + cB) / 2
-    local tCX, tCY = (tL + tR) / 2, (tT + tB) / 2
-
-    local x, y
-    if side == "LEFT" then
-        x = cR - tL; y = cCY - tCY
-    elseif side == "RIGHT" then
-        x = cL - tR; y = cCY - tCY
-    elseif side == "TOP" then
-        x = cCX - tCX; y = cB - tT
-    elseif side == "BOTTOM" then
-        x = cCX - tCX; y = cT - tB
-    else
-        x = cCX - tCX; y = cCY - tCY
-    end
-
-    -- Snap to pixel grid
-    local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and PPa.SnapForES then
-        local es = childFrame:GetEffectiveScale()
-        x = PPa.SnapForES(x, es)
-        y = PPa.SnapForES(y, es)
-    end
-
-    return childPt, targetPt, x, y
-end
-
--- THE global apply function. Each element positioned exactly ONCE.
--- Anchored elements use native WoW frame anchoring (SetPoint to target frame).
--- Unanchored elements use stored SetPoint args directly.
-function EllesmereUI.ApplyElementPosition(barKey)
-    if InCombatLockdown() then return false end
-    local frame = GetBarFrame(barKey)
-    if not frame then return false end
-
-    -- Pixel-snap helper (used for all SetPoint calls below)
-    local PPa = EllesmereUI and EllesmereUI.PP
-    local es = frame:GetEffectiveScale()
-    local function snap(v)
-        if PPa and PPa.SnapForES then return PPa.SnapForES(v or 0, es) end
-        return v or 0
-    end
-
-    -- Check for native anchor relationship (v2 format has childPoint/targetPoint)
-    local anchorDB = GetAnchorDB()
-    local ai = anchorDB and anchorDB[barKey]
-    if ai and ai.target and ai.childPoint and ai.targetPoint then
-        local targetFrame = GetBarFrame(ai.target)
-        if targetFrame then
-            pcall(function()
-                frame:ClearAllPoints()
-                frame:SetPoint(ai.childPoint, targetFrame, ai.targetPoint,
-                               snap(ai.offsetX), snap(ai.offsetY))
-            end)
-            return true
-        end
-    end
-
-    -- Unanchored: load from element's own storage
-    local pos
-    local elem = registeredElements[barKey]
-    if elem and elem.loadPosition then
-        pos = elem.loadPosition(barKey)
-    else
-        local db = GetPositionDB()
-        pos = db and db[barKey]
-    end
-    if not pos or not pos.point then return false end
-
-    -- Lazy migration: if stored as CENTER/CENTER but element has a grow
-    -- direction, this is an old-format position. Convert to edge anchor,
-    -- apply, and save back so it never needs converting again.
-    if pos.point == "CENTER" and pos.relPoint == "CENTER" then
-        local desiredAnchor = GetDesiredAnchor(barKey)
-        if desiredAnchor ~= "CENTER" then
-            -- Apply CENTER first so frame has valid bounds
-            pcall(function()
-                frame:ClearAllPoints()
-                frame:SetPoint("CENTER", UIParent, "CENTER", snap(pos.x), snap(pos.y))
-            end)
-            -- Read live bounds and compute edge anchor (ComputeSetPointForAnchor snaps internally)
-            local pt, rpt, px, py = ComputeSetPointForAnchor(frame, desiredAnchor)
-            if pt then
-                pcall(function()
-                    frame:ClearAllPoints()
-                    frame:SetPoint(pt, UIParent, rpt, px, py)
-                end)
-                -- Save back in new format (suppress rebuild)
-                EllesmereUI._propagatingSave = true
-                SaveBarPosition(barKey, pt, rpt, px, py)
-                EllesmereUI._propagatingSave = false
-                return true
-            end
-        end
-    end
-
-    -- Direct apply: snap stored values to physical pixel grid
-    pcall(function()
-        frame:ClearAllPoints()
-        frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point,
-                       snap(pos.x), snap(pos.y))
-    end)
-    return true
-end
-
--- Save a single element's current position with the correct anchor.
--- Reads live frame bounds and determines edge anchor from grow direction.
-function EllesmereUI.SaveElementPosition(barKey)
-    local frame = GetBarFrame(barKey)
-    if not frame or not frame:GetLeft() then return end
-
-    local desiredAnchor = GetDesiredAnchor(barKey)
-    local pt, rpt, x, y = ComputeSetPointForAnchor(frame, desiredAnchor)
-    if pt then
-        SaveBarPosition(barKey, pt, rpt, x, y)
-    end
-end
-
--- Save native anchor offset for an anchored element.
--- Reads live frame bounds and computes SetPoint args.
-function EllesmereUI.SaveAnchorOffset(childKey)
-    local anchorDB = GetAnchorDB()
-    local ai = anchorDB and anchorDB[childKey]
-    if not ai or not ai.target or not ai.side then return end
-
-    local childFrame = GetBarFrame(childKey)
-    local targetFrame = GetBarFrame(ai.target)
-    local childPt, targetPt, x, y = ComputeNativeAnchorOffset(childFrame, targetFrame, ai.side)
-    if childPt then
-        ai.childPoint = childPt
-        ai.targetPoint = targetPt
-        ai.offsetX = x
-        ai.offsetY = y
-    end
-end
-
--------------------------------------------------------------------------------
---  Legacy position helpers (used for lazy migration only)
+--  Centralized grow-direction position system
+--  All elements store positions as CENTER/CENTER (offset from UIParent center).
+--  On apply, the system picks the correct SetPoint anchor based on whether
+--  the element has an unlock-mode anchor relationship.
 -------------------------------------------------------------------------------
 
 -- Convert any anchor-point position to CENTER/CENTER format.
@@ -1786,29 +1709,24 @@ ApplyCenterPosition = function(barKey, pos)
     return true
 end
 
--- Legacy: kept for unlock mode internals, NOT used on login/load path
+-- Expose on EllesmereUI for child addons
 EllesmereUI.ConvertToCenterPos = ConvertToCenterPos
 EllesmereUI.ApplyCenterPosition = ApplyCenterPosition
 
 SaveBarPosition = function(barKey, point, relPoint, x, y)
-    -- v2: Store exact SetPoint args, snapped to physical pixel grid.
-    local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and PPa.SnapForES then
-        local frame = GetBarFrame(barKey)
-        local es = frame and frame:GetEffectiveScale()
-                   or (UIParent and UIParent:GetEffectiveScale() or 1)
-        x = PPa.SnapForES(x or 0, es)
-        y = PPa.SnapForES(y or 0, es)
-    end
+    -- Convert to CENTER/CENTER before storing
+    local cp, crp, cx, cy = ConvertToCenterPos(barKey, point, relPoint, x, y)
+
+    -- Registered element?
     local elem = registeredElements[barKey]
     if elem and elem.savePosition then
-        elem.savePosition(barKey, point, relPoint, x, y)
+        elem.savePosition(barKey, cp, crp, cx, cy)
         return
     end
     -- Action bar fallback
     local db = GetPositionDB()
     if not db then return end
-    db[barKey] = { point = point, relPoint = relPoint, x = x, y = y }
+    db[barKey] = { point = cp, relPoint = crp, x = cx, y = cy }
 end
 EllesmereUI.SaveBarPosition = SaveBarPosition
 
@@ -1872,139 +1790,127 @@ end
 --  Apply saved positions on login / reload
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
---  v2: Apply saved positions on login / reload -- single-pass, no timers
---  1. Let each addon build/init its frames via applyPosition
---  2. Apply final position via ApplyElementPosition (one SetPoint, done)
---  3. Apply width/height matches
---  4. Apply native anchoring for anchored elements (WoW handles updates)
+--  Lazy migration: convert positions to CENTER/CENTER format on the fly.
+--  Works per-profile -- no global flag needed. Positions are converted
+--  when first applied, then saved back in CENTER format.
 -------------------------------------------------------------------------------
+local function MigrateAndApplyPosition(barKey, pos, frame)
+    if not pos or not pos.point then return false end
+    -- Already CENTER/CENTER: apply directly
+    if pos.point == "CENTER" and pos.relPoint == "CENTER" then
+        return ApplyCenterPosition(barKey, pos)
+    end
+    -- Legacy format: apply in old format first so frame has valid bounds
+    if frame then
+        pcall(function()
+            frame:ClearAllPoints()
+            frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        end)
+    end
+    -- Convert to CENTER using live frame bounds (most accurate)
+    local cp, crp, cx, cy = ConvertToCenterPos(barKey, pos.point, pos.relPoint, pos.x, pos.y)
+    -- Save back in CENTER format (suppress rebuilds during migration)
+    EllesmereUI._propagatingSave = true
+    local elem = registeredElements[barKey]
+    if elem and elem.savePosition then
+        elem.savePosition(barKey, cp, crp, cx, cy)
+    else
+        local db = GetPositionDB()
+        if db then
+            db[barKey] = { point = cp, relPoint = crp, x = cx, y = cy }
+        end
+    end
+    EllesmereUI._propagatingSave = false
+    -- Now apply with centralized grow logic
+    return ApplyCenterPosition(barKey, { point = cp, relPoint = crp, x = cx, y = cy })
+end
+
 local function ApplySavedPositions()
     if InCombatLockdown() then return end
 
-    -- Migrate anchor DB entries: add childPoint/targetPoint if missing (v1 -> v2)
-    local anchorDB = GetAnchorDB()
-    if anchorDB then
-        for childKey, info in pairs(anchorDB) do
-            if info.target and info.side and not info.childPoint then
-                local cp, tp = SideToAnchorPoints(info.side)
-                info.childPoint = cp
-                info.targetPoint = tp
-            end
-        end
-    end
-
-    -- One-time migration: snap all stored positions to physical pixel grid.
-    -- After this, SaveBarPosition snaps on every save so data stays clean.
-    local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and PPa.SnapForES and EllesmereUIDB and EllesmereUIDB.posPixelSnapped ~= 2 then
-        local uiES = UIParent:GetEffectiveScale()
-        -- Action bar positions
-        local posDB = GetPositionDB()
-        if posDB then
-            for _, pos in pairs(posDB) do
-                if pos.x then pos.x = PPa.SnapForES(pos.x, uiES) end
-                if pos.y then pos.y = PPa.SnapForES(pos.y, uiES) end
-            end
-        end
-        -- Registered element positions (CDM, unit frames, resource bars, etc.)
-        RebuildRegisteredOrder()
-        for _, key in ipairs(registeredOrder) do
-            local elem = registeredElements[key]
-            if elem and elem.loadPosition and elem.savePosition then
-                local pos = elem.loadPosition(key)
-                if pos and pos.x and pos.y then
-                    local sx = PPa.SnapForES(pos.x, uiES)
-                    local sy = PPa.SnapForES(pos.y, uiES)
-                    if sx ~= pos.x or sy ~= pos.y then
-                        elem.savePosition(key, pos.point, pos.relPoint, sx, sy)
-                    end
-                end
-            end
-        end
-        -- Anchor offsets
-        if anchorDB then
-            for _, info in pairs(anchorDB) do
-                if info.offsetX then info.offsetX = PPa.SnapForES(info.offsetX, uiES) end
-                if info.offsetY then info.offsetY = PPa.SnapForES(info.offsetY, uiES) end
-            end
-        end
-        EllesmereUIDB.posPixelSnapped = 2
-    end
-
-    -- Phase 1: Action bars -- apply stored positions directly
-    local posDB = GetPositionDB()
-    if posDB then
-        for barKey, pos in pairs(posDB) do
-            -- Skip anchored bars (handled in Phase 4)
-            if not (anchorDB and anchorDB[barKey] and anchorDB[barKey].target) then
-                local bar = GetBarFrame(barKey)
-                if bar and pos.point then
-                    -- ApplyElementPosition handles lazy migration (CENTER -> edge)
-                    EllesmereUI.ApplyElementPosition(barKey)
-                end
-            end
+    -- Action bars: apply from barPositions DB with lazy migration
+    local db = GetPositionDB()
+    if db then
+        for barKey, pos in pairs(db) do
+            local bar = GetBarFrame(barKey)
+            MigrateAndApplyPosition(barKey, pos, bar)
         end
     end
     -- Hook all known action bar frames for auto-propagation on resize
     for barKey in pairs(BAR_LOOKUP) do
         HookFrameSizeChanged(barKey)
     end
-
-    -- Phase 2: Registered elements -- build/init, then apply position
+    -- Registered elements: let each addon apply its own positions first
+    -- (some addons like CDM need applyPosition to build/initialize frames),
+    -- then override with centralized grow-direction-aware positioning.
     RebuildRegisteredOrder()
     for _, key in ipairs(registeredOrder) do
         local elem = registeredElements[key]
         if elem then
+            -- Let addon initialize/build (e.g. CDM's BuildAllCDMBars)
+            if elem.applyPosition then
+                pcall(elem.applyPosition, key)
+            end
+            -- Skip centralized override for addon-internally-anchored elements
+            -- (e.g. Resource Bars anchored to each other via anchorTo setting)
             local addonAnchored = elem.isAnchored and elem.isAnchored(key)
-            local unlockAnchored = anchorDB and anchorDB[key] and anchorDB[key].target
-
+            -- Also skip elements anchored via the unlock mode anchor system
+            local unlockAnchored = false
+            if not addonAnchored then
+                local adb = GetAnchorDB()
+                local ai = adb and adb[key]
+                if ai and ai.target then unlockAnchored = true end
+            end
             if not addonAnchored and not unlockAnchored then
-                -- Unanchored: let addon build/init, then apply final position
-                if elem.applyPosition then
-                    pcall(elem.applyPosition, key)
-                end
-                -- Override with centralized position (handles lazy migration)
-                EllesmereUI.ApplyElementPosition(key)
-            elseif not unlockAnchored and addonAnchored then
-                -- Addon-internally-anchored (e.g. resource bars anchorTo):
-                -- let addon handle everything
-                if elem.applyPosition then
-                    pcall(elem.applyPosition, key)
-                end
-            else
-                -- Unlock-anchored: build/init only (position set in Phase 4)
-                if elem.applyPosition then
-                    pcall(elem.applyPosition, key)
+                -- Override position with centralized grow-direction logic
+                local pos = elem.loadPosition and elem.loadPosition(key)
+                if pos then
+                    local frame = GetBarFrame(key)
+                    MigrateAndApplyPosition(key, pos, frame)
                 end
             end
         end
+        -- Install OnSizeChanged hook so future resizes auto-propagate
         HookFrameSizeChanged(key)
     end
 
-    -- Phase 3: Width/height matches (now that all frames are sized)
+    -- Apply all width/height matches now that positions are set
     ApplyAllWidthHeightMatches()
 
-    -- Phase 4: Native anchoring -- one SetPoint per anchored element, WoW
-    -- handles all future updates when targets move or resize.
-    if anchorDB then
-        local PPa = EllesmereUI and EllesmereUI.PP
-        for childKey, info in pairs(anchorDB) do
-            if info.target and info.childPoint and info.targetPoint then
-                local childFrame = GetBarFrame(childKey)
-                local targetFrame = GetBarFrame(info.target)
-                if childFrame and targetFrame then
-                    local ox, oy = info.offsetX or 0, info.offsetY or 0
-                    if PPa and PPa.SnapForES then
-                        local es = childFrame:GetEffectiveScale()
-                        ox = PPa.SnapForES(ox, es)
-                        oy = PPa.SnapForES(oy, es)
-                    end
-                    pcall(function()
-                        childFrame:ClearAllPoints()
-                        childFrame:SetPoint(info.childPoint, targetFrame, info.targetPoint, ox, oy)
-                    end)
+    -- Reapply all anchor positions (anchored elements need to follow their targets)
+    local adb = GetAnchorDB()
+    if adb then
+        local unresolved = {}
+        for childKey, info in pairs(adb) do
+            if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
+                ApplyAnchorPosition(childKey, info.target, info.side)
+                -- Check if it actually resolved (target had valid bounds)
+                local target = GetBarFrame(info.target)
+                if not target:GetLeft() then
+                    unresolved[childKey] = info
                 end
             end
+        end
+        -- Retry unresolved anchors until all targets have valid layout
+        if next(unresolved) then
+            local retries = 0
+            local function RetryAnchors()
+                retries = retries + 1
+                local still = {}
+                for childKey, info in pairs(unresolved) do
+                    local target = GetBarFrame(info.target)
+                    if target and target:GetLeft() then
+                        ApplyAnchorPosition(childKey, info.target, info.side)
+                    else
+                        still[childKey] = info
+                    end
+                end
+                unresolved = still
+                if next(unresolved) and retries < 20 then
+                    C_Timer.After(0.1, RetryAnchors)
+                end
+            end
+            C_Timer.After(0, RetryAnchors)
         end
     end
 end
@@ -2049,8 +1955,14 @@ local function InstallAnchorGuard(bar, barKey)
             -- Defer so we don't taint the secure execution context
             C_Timer.After(0, function()
                 if InCombatLockdown() then return end
-                -- v2: Apply stored SetPoint args directly (no conversion)
-                EllesmereUI.ApplyElementPosition(barKey)
+                -- Use centralized apply for grow-direction-aware positioning
+                if not ApplyCenterPosition(barKey, db[barKey]) then
+                    pcall(function()
+                        self:ClearAllPoints()
+                        self:SetPoint(db[barKey].point, UIParent, db[barKey].relPoint,
+                                      db[barKey].x, db[barKey].y)
+                    end)
+                end
             end)
         end
     end)
@@ -2102,15 +2014,27 @@ end
 -- Fallback: when action bars is disabled, ApplySavedPositions never runs
 -- because it is only hooked into EAB.ApplyAll / OnInitialize. Register a
 -- PLAYER_ENTERING_WORLD listener so positions, width/height matches, and
--- native anchoring are still applied for CDM, resource bars, etc.
+-- anchor chains are still applied for CDM, resource bars, etc.
 if not EAB then
     local _posFrame = CreateFrame("Frame")
     _posFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     _posFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        -- v2: Single delayed call. No retry timers, no ReapplyAllUnlockAnchors.
-        -- Native WoW anchoring (SetPoint to target frame) resolves automatically.
-        C_Timer.After(1, ApplySavedPositions)
+        -- Delay so child addons have time to register their unlock elements
+        C_Timer.After(1, function()
+            ApplySavedPositions()
+            -- Reapply anchors after positions are set
+            if EllesmereUI.ReapplyAllUnlockAnchors then
+                EllesmereUI.ReapplyAllUnlockAnchors()
+            end
+        end)
+        -- Safety net: reapply anchors after all child addons have
+        -- registered their unlock elements and built frames.
+        C_Timer.After(2, function()
+            if EllesmereUI.ReapplyAllUnlockAnchors then
+                EllesmereUI.ReapplyAllUnlockAnchors()
+            end
+        end)
     end)
 end
 
@@ -2780,11 +2704,9 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
         local oCY = (oT + oB) * 0.5
 
         -- X-axis: dragged {left, center, right} vs target {left, center, right}
-        -- Track which dragged edge matched: 1=left, 2=center, 3=right
         local dragXEdges = { dL, cx, dR }
         local targXEdges = { oL, oCX, oR }
-        local snapXEdgeIdx = nil
-        for di, de in ipairs(dragXEdges) do
+        for _, de in ipairs(dragXEdges) do
             for _, te in ipairs(targXEdges) do
                 local dx = de - te
                 local adx = abs(dx)
@@ -2792,17 +2714,14 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
                     bestDistX = adx
                     bestDX = dx
                     snapXLinePos = te
-                    snapXEdgeIdx = di
                 end
             end
         end
 
         -- Y-axis: dragged {top, center, bottom} vs target {top, center, bottom}
-        -- Track which dragged edge matched: 1=top, 2=center, 3=bottom
         local dragYEdges = { dT, cy, dB }
         local targYEdges = { oT, oCY, oB }
-        local snapYEdgeIdx = nil
-        for di, de in ipairs(dragYEdges) do
+        for _, de in ipairs(dragYEdges) do
             for _, te in ipairs(targYEdges) do
                 local dy = de - te
                 local ady = abs(dy)
@@ -2810,7 +2729,6 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
                     bestDistY = ady
                     bestDY = dy
                     snapYLinePos = te
-                    snapYEdgeIdx = di
                 end
             end
         end
@@ -2825,11 +2743,9 @@ local function SnapPosition(dragKey, cx, cy, halfW, halfH)
     -- Record guide line positions for ShowAlignmentGuides
     if bestDistX < SNAP_THRESH and snapXLinePos then
         lastSnapInfo.snapXPos = snapXLinePos
-        lastSnapInfo.xEdge = snapXEdgeIdx  -- 1=left, 2=center, 3=right
     end
     if bestDistY < SNAP_THRESH and snapYLinePos then
         lastSnapInfo.snapYPos = snapYLinePos
-        lastSnapInfo.yEdge = snapYEdgeIdx  -- 1=top, 2=center, 3=bottom
     end
 
     return snapX, snapY
@@ -4431,10 +4347,8 @@ local function CreateMover(barKey)
         self._dragStartCY = cy
 
         -- Snap mover to cursor immediately so there's no one-frame lag
-        -- Use exact half-dimensions (not rounded) so snap edges match bar edges.
-        -- Rounding introduces a 0.5px mismatch that SnapForES amplifies to 1px.
-        local halfW0 = self:GetWidth() / 2
-        local halfH0 = self:GetHeight() / 2
+        local halfW0 = round(self:GetWidth() / 2)
+        local halfH0 = round(self:GetHeight() / 2)
         self._dragHalfW = halfW0
         self._dragHalfH = halfH0
         local snap0X, snap0Y = SnapPosition(self._barKey, cx, cy, halfW0, halfH0)
@@ -4844,13 +4758,6 @@ local function CreateMover(barKey)
                 local targetKey = self._barKey
 
                 if pickMode == "widthMatch" then
-                    -- Action bars 1-8 can only width match to other action bars 1-8
-                    if RejectH.IsActionBar(sourceKey) and not RejectH.IsActionBar(targetKey) then
-                        CancelPickMode()
-                        FlashRedBorder(self)
-                        RejectH.ShowTooltip("Action Bars can only width match\nto other Action Bars")
-                        return
-                    end
                     MatchH.SetWidthMatch(sourceKey, targetKey)
                     MatchH.ApplyWidthMatch(sourceKey, targetKey)
                     hasChanges = true
@@ -4893,8 +4800,6 @@ local function CreateMover(barKey)
                     if targetEl and targetEl.noAnchorTarget then
                         CancelPickMode()
                         FlashRedBorder(self)
-                        local targetLabel = GetBarLabel(targetKey) or targetKey
-                        RejectH.ShowTooltip("Elements cannot be anchored to\n" .. targetLabel)
                         return
                     end
 
@@ -4912,7 +4817,6 @@ local function CreateMover(barKey)
                     if circular then
                         CancelPickMode()
                         FlashRedBorder(self)
-                        RejectH.ShowTooltip("This would create a circular anchor")
                         return
                     end
 
@@ -4928,7 +4832,6 @@ local function CreateMover(barKey)
                         if aInfo.target == targetKey and ancestorDepth >= 2 then
                             CancelPickMode()
                             FlashRedBorder(self)
-                            RejectH.ShowTooltip("This would create a circular anchor")
                             return
                         end
                         aWalk = aInfo.target
@@ -7051,16 +6954,12 @@ local function SnapshotPositions()
         end
     end
 
-    -- Snapshot anchor data so we can revert on discard (include v2 fields)
+    -- Snapshot anchor data so we can revert on discard
     wipe(snapshotAnchors)
     local anchorDB = GetAnchorDB()
     if anchorDB then
         for childKey, info in pairs(anchorDB) do
-            snapshotAnchors[childKey] = {
-                target = info.target, side = info.side,
-                offsetX = info.offsetX, offsetY = info.offsetY,
-                childPoint = info.childPoint, targetPoint = info.targetPoint,
-            }
+            snapshotAnchors[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
         end
     end
 
@@ -7090,8 +6989,6 @@ local function SnapshotPositions()
 end
 
 -- Commit pending positions to SavedVariables
--- v2: Converts from drag-time anchors (TOPLEFT, CENTER, etc.) to the correct
--- grow-direction-aware anchor (LEFT for grow RIGHT, etc.) before saving.
 local function CommitPositions()
     -- Suppress per-save rebuilds (e.g. CDM's BuildAllCDMBars) so that
     -- all positions are written first, then a single rebuild runs at the end.
@@ -7100,49 +6997,23 @@ local function CommitPositions()
         if pos == "RESET" then
             ClearBarPosition(barKey)
         else
-            -- Check if this element is anchored (anchor positions are separate)
-            local anchorDB = GetAnchorDB()
-            local ai = anchorDB and anchorDB[barKey]
-            if ai and ai.target then
-                -- Anchored element: save native anchor offset from live frame bounds
-                EllesmereUI.SaveAnchorOffset(barKey)
-            else
-                -- Unanchored element: determine correct anchor from grow direction,
-                -- re-anchor the frame, and save the exact SetPoint args.
-                local frame = GetBarFrame(barKey)
-                if frame and frame:GetLeft() then
-                    local desiredAnchor = GetDesiredAnchor(barKey)
-                    local pt, rpt, x, y = ComputeSetPointForAnchor(frame, desiredAnchor)
-                    if pt then
-                        -- Apply final anchor so frame is set correctly going forward
-                        pcall(function()
-                            frame:ClearAllPoints()
-                            frame:SetPoint(pt, UIParent, rpt, x, y)
-                        end)
-                        SaveBarPosition(barKey, pt, rpt, x, y)
-                    end
+            local elem = registeredElements[barKey]
+            local pt, rpt, px, py = pos.point, pos.relPoint, pos.x, pos.y
+            -- If position wasn't dragged, fill from snapshot
+            if elem and not pt then
+                local snap = snapshotPositions[barKey]
+                if snap then
+                    pt, rpt, px, py = snap.point, snap.relPoint or snap.point, snap.x, snap.y
                 else
-                    -- Frame not visible: save whatever we have from the drag
-                    local elem = registeredElements[barKey]
-                    local pt, rpt, px, py = pos.point, pos.relPoint, pos.x, pos.y
-                    if elem and not pt then
-                        local snap = snapshotPositions[barKey]
-                        if snap then
-                            pt, rpt, px, py = snap.point, snap.relPoint or snap.point, snap.x, snap.y
-                        else
-                            local lp = elem.loadPosition and elem.loadPosition(barKey)
-                            if lp then
-                                pt, rpt, px, py = lp.point, lp.relPoint or lp.point, lp.x, lp.y
-                            end
-                        end
-                    end
-                    if pt then
-                        SaveBarPosition(barKey, pt, rpt, px, py)
+                    -- Fallback: read from loadPosition
+                    local lp = elem.loadPosition and elem.loadPosition(barKey)
+                    if lp then
+                        pt, rpt, px, py = lp.point, lp.relPoint or lp.point, lp.x, lp.y
                     end
                 end
             end
+            SaveBarPosition(barKey, pt, rpt, px, py)
             -- Install anchor guard for action bar positions
-            local elem = registeredElements[barKey]
             if not elem then
                 local bar = GetBarFrame(barKey)
                 if bar then InstallAnchorGuard(bar, barKey) end
@@ -7152,6 +7023,8 @@ local function CommitPositions()
     EllesmereUI._propagatingSave = false
 
     -- Single rebuild now that all positions are committed.
+    -- CDM savePos normally calls BuildAllCDMBars per save, but we
+    -- suppressed that above to avoid partial-state rebuilds.
     for barKey in pairs(pendingPositions) do
         if type(barKey) == "string" and barKey:sub(1, 4) == "CDM_" then
             local elem = registeredElements[barKey]
@@ -7179,19 +7052,16 @@ local function CommitPositions()
     end
 end
 
--- Revert bars to their snapshot positions (discard all pending changes).
--- Strategy: restore ALL DB state from snapshots, then run the same
--- ApplySavedPositions pass used on login. One code path, no special cases.
+-- Revert bars to their snapshot positions (discard all pending changes)
 local function RevertPositions()
     if InCombatLockdown() then return end
-
-    -- 1) Restore action bar position DB
+    -- Restore action bar saved DB to snapshot state
     local db = GetPositionDB()
     if db then
         for barKey, _ in pairs(pendingPositions) do
             if not registeredElements[barKey] then
-                local snap = snapshotPositions[barKey]
-                if snap then
+                if snapshotPositions[barKey] then
+                    local snap = snapshotPositions[barKey]
                     db[barKey] = { point = snap.point, relPoint = snap.relPoint, x = snap.x, y = snap.y }
                 else
                     db[barKey] = nil
@@ -7199,9 +7069,8 @@ local function RevertPositions()
             end
         end
     end
-
-    -- 2) Restore registered element positions via savePosition callbacks
-    EllesmereUI._propagatingSave = true
+    -- Revert action bar scale is no longer needed (scale removed)
+    -- Revert registered elements via their savePosition callback
     for barKey, _ in pairs(pendingPositions) do
         local elem = registeredElements[barKey]
         if elem and elem.savePosition then
@@ -7211,22 +7080,34 @@ local function RevertPositions()
             end
         end
     end
-    EllesmereUI._propagatingSave = false
+    -- Move all frames back to their original positions.
+    -- Force SetPoint directly -- do NOT use ApplyCenterPosition which
+    -- skips anchored elements (they need reverting too).
+    for barKey, _ in pairs(pendingPositions) do
+        local bar = GetBarFrame(barKey)
+        if bar then
+            local snap = snapshotPositions[barKey]
+            if snap then
+                pcall(function()
+                    bar:ClearAllPoints()
+                    bar:SetPoint(snap.point, UIParent, snap.relPoint, snap.x, snap.y)
+                end)
+            elseif bar.UpdateGridLayout then
+                pcall(bar.UpdateGridLayout, bar)
+            end
+        end
+    end
 
-    -- 3) Restore anchor data (before positioning so native anchoring works)
+    -- Revert anchor data to snapshot state
     local anchorDB = GetAnchorDB()
     if anchorDB then
         wipe(anchorDB)
         for childKey, info in pairs(snapshotAnchors) do
-            anchorDB[childKey] = {
-                target = info.target, side = info.side,
-                offsetX = info.offsetX, offsetY = info.offsetY,
-                childPoint = info.childPoint, targetPoint = info.targetPoint,
-            }
+            anchorDB[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
         end
     end
 
-    -- 4) Restore element sizes
+    -- Revert element sizes to snapshot state
     for key, snap in pairs(snapshotSizes) do
         local elem = registeredElements[key]
         if elem then
@@ -7239,7 +7120,7 @@ local function RevertPositions()
         end
     end
 
-    -- 5) Restore width/height match DBs
+    -- Revert width/height match DBs to snapshot state
     local wmDB = MatchH.GetWidthMatchDB()
     if wmDB then
         wipe(wmDB)
@@ -7249,24 +7130,6 @@ local function RevertPositions()
     if hmDB then
         wipe(hmDB)
         for k, v in pairs(snapshotHeightMatch) do hmDB[k] = v end
-    end
-
-    -- 6) Re-apply positions for changed elements only (avoid touching
-    -- secure frames we didn't change, which causes taint).
-    -- Trigger CDM rebuild first so bars are sized before positioning.
-    local didCDMRebuild = false
-    for barKey in pairs(pendingPositions) do
-        if not didCDMRebuild and type(barKey) == "string" and barKey:sub(1, 4) == "CDM_" then
-            local elem = registeredElements[barKey]
-            if elem and elem.applyPosition then
-                pcall(elem.applyPosition, barKey)
-            end
-            didCDMRebuild = true  -- one rebuild covers all CDM bars
-        end
-    end
-    -- Now apply final positions from the restored DB
-    for barKey in pairs(pendingPositions) do
-        EllesmereUI.ApplyElementPosition(barKey)
     end
 end
 
@@ -8371,11 +8234,10 @@ function ns.OpenUnlockMode()
             unlockFrame._anchorLineFrame:Show()
         end
 
-        -- ReapplyAllAnchors during open may set hasChanges; reset ONLY if
-        -- the user hasn't already interacted (e.g. dragged during animation).
-        if not next(pendingPositions) then
-            hasChanges = false
-        end
+        -- ReapplyAllAnchors during open sets hasChanges; reset it since
+        -- the user hasn't actually changed anything yet.
+        hasChanges = false
+        wipe(pendingPositions)
 
         -- Auto-select a mover if requested (e.g. from cog popup link)
         if EllesmereUI._unlockAutoSelectKey then

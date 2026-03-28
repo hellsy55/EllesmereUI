@@ -3894,10 +3894,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
                   end
                   UpdatePreview(); EllesmereUI:RefreshPage()
-              end,
-              disabled=function() return SVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
-            },
+              end },
             { type="dropdown", text="Right Text", values=healthTextValues, order=healthTextOrder,
               getValue=function() return SVal("rightTextContent", "both") end,
               setValue=function(v)
@@ -3907,10 +3904,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
                   end
                   UpdatePreview(); EllesmereUI:RefreshPage()
-              end,
-              disabled=function() return SVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
-            });  y = y - h
+              end });  y = y - h
         -- Sync icons: Left Text (left) and Right Text (right)
         do
             local rgn = sharedTextRow._leftRegion

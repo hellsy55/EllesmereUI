@@ -3478,15 +3478,13 @@ BuildAllCDMBars = function()
             end
         end
     end
-    -- v2: Native WoW anchoring handles anchored CDM bars automatically.
-    -- Re-apply positions for any unlock-anchored bars so the native SetPoint
-    -- to the target frame is established after all bars are sized.
-    if EllesmereUI.ApplyElementPosition then
+    -- Second pass: reapply unlock-mode anchors now that ALL bars are
+    -- positioned and sized.  The first pass (inside LayoutCDMBar) may
+    -- have run ReapplyOwnAnchor before the target bar was repositioned
+    -- (e.g. cooldowns processed before utility).  This corrects that.
+    if EllesmereUI.ReapplyOwnAnchor then
         for _, barData in ipairs(p.cdmBars.bars) do
-            local unlockKey = "CDM_" .. barData.key
-            if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey) then
-                EllesmereUI.ApplyElementPosition(unlockKey)
-            end
+            EllesmereUI.ReapplyOwnAnchor("CDM_" .. barData.key)
         end
     end
     _CDMApplyVisibility()
@@ -3743,7 +3741,7 @@ RegisterCDMUnlockElements = function()
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     local p = ECME.db.profile
-                    -- v2: stores exact SetPoint args (grow-direction edge anchor)
+                    -- Centralized system already converts to CENTER/CENTER
                     p.cdmBarPositions[key] = { point = point, relPoint = relPoint, x = x, y = y }
                     -- Skip rebuild when called from anchor propagation or while
                     -- unlock mode is active (unlock mode owns positioning then).

@@ -1537,9 +1537,14 @@ local function BuildBars()
         local pipOri = sp.pipOrientation or "HORIZONTAL"
         local isVertical = (pipOri ~= "HORIZONTAL")
         local isReversed = (pipOri == "VERTICAL_UP")
-        local totalW = sp.pipWidth or 214
+        local totalW
 
         local isBarType = cachedSecondary.type == "bar"
+        if isBarType then
+            totalW = ERB.db.profile.primary.width or 214
+        else
+            totalW = sp.pipWidth or 214
+        end
 
         -- Frame dimensions: vertical flips width/height axes
         -- Round to whole logical pixels so all elements size consistently.
@@ -1594,7 +1599,7 @@ local function BuildBars()
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
 
             if not secondaryBar then
-                secondaryBar = CreateStatusBar(secondaryFrame, "ERB_SecondaryBar", frameW, frameH,
+                secondaryBar = CreateStatusBar(secondaryFrame, "ERB_SecondaryBar", totalW, pipH,
                     0, 0, 0, 0, 0)
                 secondaryBar:SetMinMaxValues(0, maxPts)
                 secondaryBar:SetValue(0)
@@ -1610,14 +1615,14 @@ local function BuildBars()
                     secondaryBar:SetMinMaxValues(0, actualMax)
                 end
             end
-            secondaryBar:SetSize(frameW, frameH)
+            secondaryBar:SetSize(totalW, pipH)
             secondaryBar:ClearAllPoints()
             secondaryBar:SetAllPoints(secondaryFrame)
 
             -- Bar texture and orientation must be applied before colors since
             -- SetStatusBarTexture and SetRotatesTexture both reset vertex color
             ApplyBarTexture(secondaryBar, g.barTexture or "none")
-            ApplyBarOrientation(secondaryBar, pipOri)
+            ApplyBarOrientation(secondaryBar, p.general.orientation)
 
             -- Colors
             local pc = POWER_COLORS[cachedSecondary.power]
