@@ -7908,9 +7908,11 @@ _blizzMovableCombatFrame:SetScript("OnEvent", function()
     end
     wipe(_blizzMovablePendingOOC)
 
-    -- Reapply all unlock-mode anchors now that protected frames can be moved.
-    if EllesmereUI.ReapplyAllUnlockAnchors then
-        EllesmereUI.ReapplyAllUnlockAnchors()
+    -- v2: Reapply positions for protected frames that were deferred during combat.
+    -- Native WoW anchoring handles anchored elements automatically, but
+    -- unanchored protected frames may need their stored position re-applied.
+    if EllesmereUI._applySavedPositions then
+        EllesmereUI._applySavedPositions()
     end
 
     -- Re-disable mouse on ExtraActionBarFrame after combat ends.
