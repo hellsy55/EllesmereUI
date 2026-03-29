@@ -765,33 +765,28 @@ local _lastSpecSwitchTime = 0
 local function SwitchSpecProfile(newSpecKey)
     _lastSpecSwitchTime = GetTime()
 
+    -- Block reanchors so stale data doesn't cause flicker
+    ns._specChangePending = true
+
     local p = ECME.db.profile
     local oldSpecKey = ns.GetActiveSpecKey()
 
-    -- Save non-spell per-spec data for the old spec
+    -- Save old spec, switch to new spec, load new spec
     if oldSpecKey and oldSpecKey ~= "0" then
         SaveCurrentSpecProfile()
     end
-
-    -- Update active spec (per-character)
     ns.SetActiveSpecKey(newSpecKey)
     EnsureSpec(p, newSpecKey)
-
-    -- Load non-spell per-spec data for the new spec
     LoadSpecProfile(newSpecKey)
 
-    -- Rebuild all CDM systems (deferred so Blizzard CDM frames are ready)
+    -- Deferred rebuild (Blizzard CDM needs time to update its frames)
     C_Timer.After(0.5, function()
-        BuildAllCDMBars()
+        ns._specChangePending = false
+        ns.FullCDMRebuild("spec_switch")
         RegisterCDMUnlockElements()
-        -- Rebuild Bar Glows + Tracking Bars for the new spec
-        -- (LoadSpecProfile already restored their data from specProfiles)
-        if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
-        if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
-        -- Sync Edit Mode HideWhenInactive to the new profile's setting
-        if ns.SyncHideWhenInactive then ns.SyncHideWhenInactive() end
-        -- Queue reanchor so viewer hooks pick up the new spec's frames
-        if ns.QueueReanchor then ns.QueueReanchor() end
+
+        -- Catch frames Blizzard populates after our initial rebuild
+        C_Timer.After(1, function() if ns.QueueReanchor then ns.QueueReanchor() end end)
 
         -- Refresh options panel if open
         if EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
@@ -1150,8 +1145,7 @@ end
 -- in the global store and will be read directly by BuildAllCDMBars.
 _G._ECME_LoadSpecProfile = function(specKey)
     LoadSpecProfile(specKey)
-    BuildAllCDMBars()
-    if ns.SyncHideWhenInactive then ns.SyncHideWhenInactive() end
+    ns.FullCDMRebuild("profile_import")
 end
 -- Global accessor: get the current spec key string (e.g. "250")
 _G._ECME_GetCurrentSpecKey = function()
@@ -1510,12 +1504,22 @@ end
 --  Ensures viewers are set to "Always Visible" so Blizzard's hideWhenInactive
 --  and visibility modes don't interfere with CDM's frame management.
 -------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+--  EnforceCooldownViewerEditModeSettings (one-shot)
+--  Runs ONCE on initialization to set desired Edit Mode settings:
+--    - VisibleSetting = Always on ALL viewers
+--    - HideWhenInactive = 1 on buff viewers (BuffIcon + BuffBar)
+--  SaveLayouts is called at most once, during init. Never at runtime.
+--  This prevents tainting Blizzard frame properties (isActive, etc.)
+--  which happens when SaveLayouts triggers a layout reapply from addon code.
+-------------------------------------------------------------------------------
 local _editModePolicyApplied = false
 local function EnforceCooldownViewerEditModeSettings()
     if _editModePolicyApplied then return end
     if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
             and Enum and Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
-            and Enum.EditModeCooldownViewerSetting and Enum.CooldownViewerVisibleSetting) then
+            and Enum.EditModeCooldownViewerSetting and Enum.CooldownViewerVisibleSetting
+            and Enum.EditModeCooldownViewerSystemIndices) then
         return
     end
 
@@ -1539,108 +1543,78 @@ local function EnforceCooldownViewerEditModeSettings()
     local cooldownSystem = Enum.EditModeSystem.CooldownViewer
     local visSetting  = Enum.EditModeCooldownViewerSetting.VisibleSetting
     local visAlways   = Enum.CooldownViewerVisibleSetting.Always
+    local hideEnum    = Enum.EditModeCooldownViewerSetting.HideWhenInactive
+    local buffIconIdx = Enum.EditModeCooldownViewerSystemIndices.BuffIcon
+    local buffBarIdx  = Enum.EditModeCooldownViewerSystemIndices.BuffBar
 
-    -- Force VisibleSetting=Always on ALL viewers so Blizzard always
-    -- provides frames for us to reskin. HideWhenInactive is a separate
-    -- per-icon setting that works independently of VisibleSetting.
+    local function UpsertSetting(settings, settingEnum, desiredValue)
+        for _, s in ipairs(settings) do
+            if s.setting == settingEnum then
+                if s.value ~= desiredValue then
+                    s.value = desiredValue
+                    return true
+                end
+                return false
+            end
+        end
+        settings[#settings + 1] = { setting = settingEnum, value = desiredValue }
+        return true
+    end
+
     for _, sysInfo in ipairs(activeLayout.systems) do
         if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
-            local found = false
-            for _, s in ipairs(sysInfo.settings) do
-                if s.setting == visSetting then
-                    found = true
-                    if s.value ~= visAlways then
-                        s.value = visAlways
-                        changed = true
-                    end
-                    break
-                end
-            end
-            if not found then
-                sysInfo.settings[#sysInfo.settings + 1] = { setting = visSetting, value = visAlways }
+            -- VisibleSetting=Always on ALL viewers
+            if UpsertSetting(sysInfo.settings, visSetting, visAlways) then
                 changed = true
+            end
+            -- HideWhenInactive=1 on buff viewers only
+            if sysInfo.systemIndex == buffIconIdx or sysInfo.systemIndex == buffBarIdx then
+                if UpsertSetting(sysInfo.settings, hideEnum, 1) then
+                    changed = true
+                end
             end
         end
     end
 
-    if changed then
-        C_EditMode.SaveLayouts(layoutInfo)
-        -- Just save, don't force-apply at runtime.
-        -- ShowUIPanel/HideUIPanel on EditModeManagerFrame causes taint.
-        -- Blizzard applies the saved layout on next login/reload naturally.
-    end
     _editModePolicyApplied = true
-end
+    if not changed then return end
 
+    -- Save the corrected layout. Blizzard won't visually apply this until
+    -- the next login/reload, so we force a reload via popup.
+    C_EditMode.SaveLayouts(layoutInfo)
 
--------------------------------------------------------------------------------
---  SyncHideWhenInactive
---  Sets Blizzard's Edit Mode HideWhenInactive to match our profile setting,
---  then forces Blizzard to apply it at runtime via the ShowUIPanel trick
---  (learned from LibEditModeOverride). Blizzard owns all show/hide logic.
--------------------------------------------------------------------------------
-function ns.SyncHideWhenInactive(forceValue)
-    if not C_EditMode or not C_EditMode.GetLayouts or not C_EditMode.SaveLayouts then return end
-    local ok, layoutInfo = pcall(C_EditMode.GetLayouts)
-    if not ok or not layoutInfo then return end
-
-    -- Merge preset layouts so activeLayout index resolves correctly
-    if EditModePresetLayoutManager and EditModePresetLayoutManager.GetCopyOfPresetLayouts then
-        local presets = EditModePresetLayoutManager:GetCopyOfPresetLayouts()
-        if type(presets) == "table" then
-            tAppendAll(presets, layoutInfo.layouts)
-            layoutInfo.layouts = presets
+    -- Show a forced (non-dismissable) reload popup
+    C_Timer.After(0, function()
+        if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then
+            ReloadUI()
+            return
         end
-    end
-
-    local activeIdx = layoutInfo.activeLayout
-    if not activeIdx or type(activeIdx) ~= "number" then return end
-    local activeLayout = layoutInfo.layouts and layoutInfo.layouts[activeIdx]
-    if not activeLayout or not activeLayout.systems then return end
-
-    -- Always HideWhenInactive=1 for buff viewers. No user toggle.
-    local targetHide = 1
-
-    local cooldownSystem = Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
-    local hideEnum = Enum.EditModeCooldownViewerSetting and Enum.EditModeCooldownViewerSetting.HideWhenInactive
-    local visEnum = Enum.EditModeCooldownViewerSetting and Enum.EditModeCooldownViewerSetting.VisibleSetting
-    local buffIconIdx = Enum.EditModeCooldownViewerSystemIndices and Enum.EditModeCooldownViewerSystemIndices.BuffIcon
-    local buffBarIdx = Enum.EditModeCooldownViewerSystemIndices and Enum.EditModeCooldownViewerSystemIndices.BuffBar
-    if not cooldownSystem or not hideEnum then return end
-
-    -- Only set HideWhenInactive on buff viewers. VisibleSetting stays
-    -- at Always (set by EnforceCooldownViewerEditModeSettings) so
-    -- Blizzard always provides frames for us to reskin.
-    local changed = false
-    for _, systemInfo in ipairs(activeLayout.systems) do
-        if systemInfo.system == cooldownSystem
-           and (systemInfo.systemIndex == buffIconIdx or systemInfo.systemIndex == buffBarIdx)
-           and type(systemInfo.settings) == "table" then
-            local found = false
-            for _, setting in ipairs(systemInfo.settings) do
-                if setting.setting == hideEnum then
-                    found = true
-                    if setting.value ~= targetHide then
-                        setting.value = targetHide
-                        changed = true
-                    end
-                    break
-                end
+        EllesmereUI:ShowConfirmPopup({
+            title = "Edit Mode Update",
+            message = "EllesmereUI has updated your Cooldown Manager Edit Mode settings to ensure cooldown tracking works correctly.\n\nA UI reload is required for the changes to take effect.",
+            confirmText = "Reload UI",
+            onConfirm = function() ReloadUI() end,
+        })
+        -- Force: no cancel, no escape, no click-outside dismiss
+        local popup = _G["EUIConfirmPopup"]
+        if popup then
+            -- Hide cancel button
+            if popup._cancelBtn then popup._cancelBtn:Hide() end
+            -- Center the confirm button
+            if popup._confirmBtn then
+                popup._confirmBtn:ClearAllPoints()
+                popup._confirmBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 13)
             end
-            if not found then
-                systemInfo.settings[#systemInfo.settings + 1] = { setting = hideEnum, value = targetHide }
-                changed = true
+            -- Block escape key
+            popup:SetScript("OnKeyDown", function(self, key)
+                self:SetPropagateKeyboardInput(key ~= "ESCAPE")
+            end)
+            -- Block click-outside dismiss
+            if popup._dimmer then
+                popup._dimmer:SetScript("OnMouseDown", nil)
             end
         end
-    end
-
-    -- Only save if something actually changed. SaveLayouts triggers
-    -- Blizzard's layout reapply which repositions all Edit Mode frames
-    -- and can break anchored element positions.
-    if changed then
-        pcall(C_EditMode.SaveLayouts, layoutInfo)
-    end
-    if ns.QueueReanchor then ns.QueueReanchor() end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -3550,6 +3524,55 @@ ns.FindPlayerUnitFrame = EllesmereUI.FindPlayerUnitFrame
 ns.RestoreBlizzardCDM = RestoreBlizzardCDM
 ns.HideBlizzardCDM = HideBlizzardCDM
 
+-------------------------------------------------------------------------------
+--  FullCDMRebuild
+--  The ONE function for "something changed". Treats every call the same:
+--  wipe all caches, clear stale frames, rebuild bars, rebuild TBB,
+--  reanchor, reapply visibility, update keybinds. Identical result to
+--  a fresh login. Use this for spec switch, talent change, zone
+--  transition, profile import, equipment change, etc.
+--  For cosmetic-only changes (icon size, fonts, glows) call
+--  BuildAllCDMBars() directly.
+-------------------------------------------------------------------------------
+local _rebuildGen = 0
+
+function ns.FullCDMRebuild(reason)
+    _rebuildGen = _rebuildGen + 1
+
+    -- 1. Wipe all caches
+    if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+    if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
+
+    -- 2. Clear old preset frames (trinkets, racials, custom spells)
+    if ns._presetFrames then
+        for _, f in pairs(ns._presetFrames) do
+            f:Hide()
+            f:ClearAllPoints()
+        end
+        wipe(ns._presetFrames)
+    end
+
+    -- 3. Rebuild route maps (must happen before BuildAllCDMBars)
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+
+    -- 4. Rebuild all bar frames
+    BuildAllCDMBars()
+
+    -- 5. Rebuild tracked buff bars
+    if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
+
+    -- 6. Reanchor
+    if ns.QueueReanchor then ns.QueueReanchor() end
+
+    -- 7. Glows + visibility
+    if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+    _CDMApplyVisibility()
+end
+
+function ns.GetRebuildGen()
+    return _rebuildGen
+end
+
 -- Interactive Preview Helpers loaded from EllesmereUICdmSpellPicker.lua
 
 -------------------------------------------------------------------------------
@@ -3614,12 +3637,10 @@ function ns.RepopulateFromBlizzard()
         end
     end
 
-    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-    BuildAllCDMBars()
+    ns.FullCDMRebuild("repopulate")
     -- Run CollectAndReanchor immediately so live icons are populated
     -- before the options page refreshes the preview.
     if ns.CollectAndReanchor then ns.CollectAndReanchor() end
-    _CDMApplyVisibility()
 
     C_Timer.After(1, function()
         local sk = ns.GetActiveSpecKey()
@@ -3836,12 +3857,7 @@ function ECME:OnInitialize()
     -- Expose for options
     _G._ECME_AceDB = self.db
     _G._ECME_Apply = function()
-        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-        BuildAllCDMBars()
-        if ns.QueueReanchor then ns.QueueReanchor() end
-        _CDMApplyVisibility()
-        if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
-        if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
+        ns.FullCDMRebuild("apply")
         if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
         if ns.UpdateCustomBuffBars then ns.UpdateCustomBuffBars() end
     end
@@ -3886,11 +3902,6 @@ function ECME:OnEnable()
     if C_CVar and C_CVar.SetCVar then
         pcall(C_CVar.SetCVar, "cooldownViewerEnabled", "1")
     end
-
-    -- Sync Blizzard's Edit Mode HideWhenInactive to our profile setting.
-    C_Timer.After(1, function()
-        ns.SyncHideWhenInactive()
-    end)
 
     -- Detect spec/character change since last session and swap profiles
     local p = ECME.db.profile
@@ -4152,8 +4163,7 @@ local function TalentAwareReconcile()
     end
 
     ns._lastReconciledSpec = ns.GetActiveSpecKey()
-    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-    BuildAllCDMBars()
+    ns.FullCDMRebuild("talent_reconcile")
 end
 
 function ns.RequestTalentReconcile(reason)
@@ -4295,8 +4305,7 @@ do
             end
 
             local function DoCorruptionRecovery()
-                BuildAllCDMBars()
-                if ns.QueueReanchor then ns.QueueReanchor() end
+                ns.FullCDMRebuild("corruption_recovery")
                 C_Timer.After(3, function()
                     local sk = ns.GetActiveSpecKey()
                     if sk and sk ~= "0" then
@@ -4598,7 +4607,7 @@ function ECME:CDMFinishSetup()
         end
     end
 
-    BuildAllCDMBars()
+    ns.FullCDMRebuild("init")
 
     -- Initialize Tracking Bars
     -- GetTrackedBuffBars auto-initializes empty bars if none exist.
@@ -4729,8 +4738,7 @@ function ECME:CDMFinishSetup()
     end
     if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
 
-    -- Build initial spell route map and hook Blizzard CDM viewer pools
-    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    -- Hook Blizzard CDM viewer pools (route map already built by FullCDMRebuild)
     ns.SetupViewerHooks()
 
     -- Edit mode close: no forced rebuild needed. The reanchor naturally skips
@@ -5052,15 +5060,15 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         _inCombat = InCombatLockdown and InCombatLockdown() or false
         RECONCILE.lastZoneInAt = GetTime()
         -- Validate spec on every zone-in (catches auto spec swaps, login, etc.)
+        local gen = ns.GetRebuildGen()
         C_Timer.After(0.5, function()
+            if ns.GetRebuildGen() ~= gen then return end  -- another rebuild already ran
             ValidateSpec()
-            -- If spec was already correct, just rebuild bars
             if not _specValidated then return end
             local newSpecKey = GetCurrentSpecKey()
             local p = ECME.db and ECME.db.profile
             if p and newSpecKey == ns.GetActiveSpecKey() then
-                BuildAllCDMBars()
-                if ns.QueueReanchor then ns.QueueReanchor() end
+                ns.FullCDMRebuild("zone_in")
                 if RECONCILE.pending then
                     C_Timer.After(0.5, function()
                         if RECONCILE.pending then
@@ -5138,7 +5146,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             SetActiveSpec()
             _specValidated = true
             C_Timer.After(0.5, function()
-                BuildAllCDMBars()
+                ns.FullCDMRebuild("spec_same_key")
                 -- Re-apply width/height matches after bars settle
                 C_Timer.After(0.3, function()
                     if EllesmereUI.ApplyAllWidthHeightMatches then

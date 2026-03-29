@@ -168,11 +168,17 @@ EllesmereUI._Serializer = Serializer
 -------------------------------------------------------------------------------
 --  Deep copy utility
 -------------------------------------------------------------------------------
-local function DeepCopy(src)
+local function DeepCopy(src, seen)
     if type(src) ~= "table" then return src end
+    if seen and seen[src] then return seen[src] end
+    if not seen then seen = {} end
     local copy = {}
+    seen[src] = copy
     for k, v in pairs(src) do
-        copy[k] = DeepCopy(v)
+        -- Skip frame references and other userdata that can't be serialized
+        if type(v) ~= "userdata" and type(v) ~= "function" then
+            copy[k] = DeepCopy(v, seen)
+        end
     end
     return copy
 end

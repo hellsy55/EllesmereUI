@@ -789,36 +789,36 @@ local function MatchFrameToConfig(frame, cfg)
 end
 
 local _findChildGeneration = 0
+-- Frame cache lives in a separate table, never on the config (which is in
+-- SavedVariables). Prevents frame references from leaking into serialization.
+local _findChildCache = {}
+
 function ns.InvalidateTBBFrameCache()
     _findChildGeneration = _findChildGeneration + 1
+    wipe(_findChildCache)
 end
 
 local function FindChild(cfg)
     -- Fast path: cached result from previous match (hit or miss).
-    if cfg._linkedGen == _findChildGeneration then
-        local cached = cfg._linkedFrame
-        if cached and cached.cooldownID == cfg._linkedCdID then
-            return cached
+    local cached = _findChildCache[cfg]
+    if cached and cached.gen == _findChildGeneration then
+        if cached.frame and cached.frame.cooldownID == cached.cdID then
+            return cached.frame
         end
-        -- Cache miss or stale cooldownID: fall through to rescan.
-        -- Don't cache misses -- the pool is tiny (3-5 frames) and
-        -- buffs like totems can appear without triggering a reanchor.
     end
     -- Full scan: iterate BuffBarCooldownViewer pool (TBB's own viewer).
-    cfg._linkedFrame = nil
-    cfg._linkedCdID = nil
-    cfg._linkedGen = _findChildGeneration
+    local entry = { gen = _findChildGeneration, frame = nil, cdID = nil }
+    _findChildCache[cfg] = entry
     local viewer = _G["BuffBarCooldownViewer"]
     if viewer and viewer.itemFramePool then
         for frame in viewer.itemFramePool:EnumerateActive() do
             if MatchFrameToConfig(frame, cfg) then
-                cfg._linkedFrame = frame
-                cfg._linkedCdID = frame.cooldownID
+                entry.frame = frame
+                entry.cdID = frame.cooldownID
                 return frame
             end
         end
     end
-    -- No match found: cached as nil. Won't re-scan until next generation.
     return nil
 end
 ns.FindTBBChild = FindChild

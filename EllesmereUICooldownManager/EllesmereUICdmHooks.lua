@@ -378,8 +378,7 @@ local function HideBlizzardDecorations(frame)
     alphaZero(frame.Border)
     if frame.SpellActivationAlert then
         frame.SpellActivationAlert:SetAlpha(0)
-        frame.SpellActivationAlert:SetAllPoints(frame)
-        frame.SpellActivationAlert:SetScale(1)
+        frame.SpellActivationAlert:Hide()
     end
     alphaZero(frame.Shadow)
     alphaZero(frame.IconShadow)
@@ -800,7 +799,8 @@ local reanchorFrame = nil
 local viewerHooksInstalled = false
 
 local function CollectAndReanchor()
-    -- if CooldownViewerSettings and CooldownViewerSettings:IsShown() then return end
+    -- Block reanchors during spec transitions
+    if ns._specChangePending then return end
 
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.enabled then return end
@@ -1184,14 +1184,13 @@ local function CollectAndReanchor()
                                 frame:SetAlpha(1)
                                 frame:Show()
                                 -- Reparent custom frames (trinkets, racials, etc.)
-                                -- to the viewer so they inherit viewer alpha.
+                                -- to our container. Never parent to Blizzard viewers
+                                -- as that taints the secure frame tree.
                                 if frame._isRacialFrame or frame._isTrinketFrame
                                     or frame._isPresetFrame or frame._isItemPresetFrame
                                     or frame._isCustomSpellFrame then
-                                    local vn = ns.BLIZZ_CDM_FRAMES and ns.BLIZZ_CDM_FRAMES[barKey]
-                                    local vf = vn and _G[vn]
-                                    if vf and frame:GetParent() ~= vf then
-                                        frame:SetParent(vf)
+                                    if frame:GetParent() ~= container then
+                                        frame:SetParent(container)
                                     end
                                 end
                             end
@@ -1230,26 +1229,16 @@ local function CollectAndReanchor()
                     icons[i] = nil
                 end
 
-                -- Twin-frame positioning: when a spell transforms, Blizzard
-                -- creates two frames with the same cooldownID. We claimed one;
-                -- position any unclaimed twins to the same slot so Blizzard
-                -- can control which is visible.
+                -- Twin-frame positioning disabled: SetAllPoints/SetFrameLevel
+                -- on unclaimed Blizzard frames causes taint propagation.
+                -- Spell transforms are handled by OnCooldownIDSet clearing
+                -- the stale _cdidRouteMap entry instead.
                 if not isBuff then
                     for _, entry in ipairs(list) do
                         local f = entry.frame
-                        if f and not usedFrames[f] and f.cooldownID then
-                            for ci = 1, count do
-                                local claimed = icons[ci]
-                                if claimed and claimed.cooldownID == f.cooldownID then
-                                    DecorateFrame(f, barData)
-                                    f:ClearAllPoints()
-                                    f:SetAllPoints(claimed)
-                                    f:SetFrameLevel(claimed:GetFrameLevel() + 10)
-                                    f:SetAlpha(1)
-                                    usedFrames[f] = true
-                                    break
-                                end
-                            end
+                        if f and not usedFrames[f] then
+                            usedFrames[f] = true
+                            f:SetAlpha(0)
                         end
                     end
                 end
@@ -1301,14 +1290,7 @@ local function CollectAndReanchor()
     end
 
     -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
-    -- Two-pass safety: only hide frames unclaimed for TWO consecutive reanchors.
-    -- This prevents flicker from spell transforms and rapid state changes where
-    -- a frame is temporarily unclaimed for one cycle then reclaimed on the next.
-    -- Uses our own side table (FC) — no writes to Blizzard frames on first miss.
-    -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
     -- Time-based safety: only hide frames unclaimed for 1+ seconds.
-    -- This prevents hiding during rapid init/transform cycles where
-    -- frames are temporarily unclaimed but get reclaimed within a second.
     local now = GetTime()
     for frame in pairs(allActiveFrames) do
         local fc = FC(frame)
@@ -1542,6 +1524,7 @@ local REANCHOR_THROTTLE = 0.15
 local _lastReanchorTime = 0
 
 local function QueueReanchor()
+    if ns._specChangePending then return end
     reanchorDirty = true
     if reanchorFrame then reanchorFrame:Show() end
 end
@@ -1579,6 +1562,7 @@ function ns.SetupViewerHooks()
     --    Reset frame spell cache so the next reanchor re-resolves the spellID
     --    (handles spell transforms like Avenging Crusader -> Crusader Strike).
     local function ResetFrameAndReanchor(frame)
+        if ns._specChangePending then return end
         if frame then
             local fc = _ecmeFC[frame]
             if fc then
@@ -1652,32 +1636,21 @@ function ns.SetupViewerHooks()
         end
     end
 
-    -- 3. Viewer Layout hooks: immediate re-layout + queued reanchor.
-    -- Re-apply our icon positions immediately so frames don't flash to
-    -- Blizzard positions. Also queue a full reanchor for structural changes.
-    for viewerName in pairs(VIEWER_TO_BAR) do
-        local viewer = _G[viewerName]
-        if viewer and viewer.Layout then
-            hooksecurefunc(viewer, "Layout", function()
-                local LCB = ns.LayoutCDMBar
-                if LCB then
-                    for barKey, icons in pairs(cdmBarIcons) do
-                        if icons and #icons > 0 then
-                            LCB(barKey)
-                        end
-                    end
-                end
-                QueueReanchor()
-            end)
-        end
-    end
-
-    -- 3b. Sync viewers to our containers.
-    -- Viewer is positioned on top of our bar container so Blizzard's
-    -- internal icon positioning is co-located with ours.
-    for viewerName, barKey in pairs(VIEWER_TO_BAR) do
+    -- 3. Viewer Layout hooks (Essential + Utility only).
+    -- Buff viewers are dynamic and positioned per-frame by CollectAndReanchor;
+    -- hooking Layout on them causes taint when Blizzard calls it internally.
+    local SYNC_VIEWERS = {
+        EssentialCooldownViewer = "cooldowns",
+        UtilityCooldownViewer   = "utility",
+    }
+    for viewerName, barKey in pairs(SYNC_VIEWERS) do
         local viewer = _G[viewerName]
         if viewer then
+            if viewer.RefreshLayout then
+                hooksecurefunc(viewer, "RefreshLayout", function()
+                    QueueReanchor()
+                end)
+            end
             local function SyncViewerToBar()
                 if InCombatLockdown() then return end
                 local container = cdmBarFrames[barKey]
@@ -1919,6 +1892,19 @@ function ns.SetupViewerHooks()
             UpdateCustomBuffBars()
         end)
     end)
+
+    -- Edit Mode close: full rebuild to restore CDM after Blizzard repositioned viewers.
+    -- FullCDMRebuild is combat-safe (only touches our own frames).
+    do
+        local emf = _G.EditModeManagerFrame
+        if emf then
+            hooksecurefunc(emf, "Hide", function()
+                C_Timer.After(0.1, function()
+                    if ns.FullCDMRebuild then ns.FullCDMRebuild("editmode_close") end
+                end)
+            end)
+        end
+    end
 
     -- Lock EditMode for CDM frames (prevent user changes, avoid taint)
     ns.SetupEditModeLock()
