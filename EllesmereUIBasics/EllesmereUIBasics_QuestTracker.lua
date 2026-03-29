@@ -810,9 +810,11 @@ local function GetScenarioSection()
                         })
                     end
                 elseif numRequired > 0 then
-                    -- Only use quantityString prefix when it adds meaningful info (not just "0" or "1")
+                    -- Config option: useQuantityString
+                    -- true  = use WoW's quantityString when available (shows "2", "3", etc.)
+                    -- false = always use explicit "x/y" format (shows "2/7", "3/7", etc.)
                     local qs = crit.quantityString
-                    local useQS = qs and qs ~= "" and qs ~= "0" and qs ~= "1"
+                    local useQS = Cfg("useQuantityString") and qs and qs ~= ""
                     if useQS then
                         displayText = qs .. " " .. desc
                     else
@@ -2571,6 +2573,8 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
+        SCENARIO_CRITERIA_UPDATE = true,
+        SCENARIO_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
