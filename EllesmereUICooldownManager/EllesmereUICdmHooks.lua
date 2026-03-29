@@ -1090,10 +1090,10 @@ local function CollectAndReanchor()
                                     end
                                 else
                                     -- Skip spells the player doesn't currently know (e.g. talented out)
-                                    if ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
+                                    local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
+                                    if not isRacial and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
                                         -- pass: don't inject frame for unknown spell
                                     else
-                                    local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
                                     local f = _presetFrames[fkey]
                                     if not f then
@@ -1296,10 +1296,27 @@ local function CollectAndReanchor()
         end
     end
 
-    -- 5. Alpha cleanup: unclaimed frames -> alpha 0
+    -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
+    -- Skip frames that are routed to our bars (temporarily unclaimed during
+    -- spell transforms) or are our own custom frames (racials, trinkets, etc.).
     for frame in pairs(allActiveFrames) do
         if not _scratch_usedFrames[frame] then
-            frame:SetAlpha(0)
+            -- Never alpha-0 our own custom frames
+            if frame._isRacialFrame or frame._isTrinketFrame
+               or frame._isPresetFrame or frame._isItemPresetFrame
+               or frame._isCustomSpellFrame then
+                -- Custom frame — managed by injection, not viewer claims
+            else
+                local cdID = frame.cooldownID
+                local routed = cdID and _cdidRouteMap[cdID]
+                if not routed then
+                    local sid = frame._spellID or (frame.cooldownInfo and frame.cooldownInfo.spellID)
+                    routed = sid and _spellRouteMap[sid]
+                end
+                if not routed then
+                    frame:SetAlpha(0)
+                end
+            end
         end
     end
 
@@ -1565,6 +1582,13 @@ function ns.SetupViewerHooks()
             end
             local fd = hookFrameData[frame]
             if fd then fd.decorated = nil end
+            -- Clear stale cooldownID route so next reanchor resolves fresh.
+            -- Prevents spell transforms (e.g. Thunder Clap → Thunder Blast)
+            -- from routing to the wrong bar via cached cooldownID.
+            local cdID = frame.cooldownID
+            if cdID and _cdidRouteMap[cdID] then
+                _cdidRouteMap[cdID] = nil
+            end
         end
         QueueReanchor()
     end

@@ -1735,15 +1735,23 @@ ApplyCenterPosition = function(barKey, pos)
 
     pcall(function()
         if InCombatLockdown() and frame:IsProtected() then
-            local deferFrame = CreateFrame("Frame")
-            deferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-            deferFrame:SetScript("OnEvent", function(self)
-                self:UnregisterAllEvents()
-                pcall(function()
-                    frame:ClearAllPoints()
-                    frame:SetPoint(anchor, UIParent, "CENTER", adjX, adjY)
+            -- Store on the frame so repeated calls overwrite instead of stacking
+            if not frame._euiCombatDefer then
+                frame._euiCombatDefer = CreateFrame("Frame")
+                frame._euiCombatDefer:RegisterEvent("PLAYER_REGEN_ENABLED")
+                frame._euiCombatDefer:SetScript("OnEvent", function(self)
+                    self:UnregisterAllEvents()
+                    local args = self._args
+                    if args then
+                        pcall(function()
+                            args.f:ClearAllPoints()
+                            args.f:SetPoint(args.a, UIParent, "CENTER", args.x, args.y)
+                        end)
+                    end
+                    self._args = nil
                 end)
-            end)
+            end
+            frame._euiCombatDefer._args = { f = frame, a = anchor, x = adjX, y = adjY }
             return
         end
         frame:ClearAllPoints()
@@ -1930,12 +1938,34 @@ local function ApplySavedPositions()
     -- Apply all width/height matches now that positions are set
     ApplyAllWidthHeightMatches()
 
-    -- Reapply all anchor positions (anchored elements need to follow their targets)
+    -- Reapply all anchor positions sorted by dependency depth.
+    -- Parents must be positioned before children so children read correct bounds.
     local adb = GetAnchorDB()
     if adb then
-        local unresolved = {}
+        -- Build dependency-sorted list: elements with no anchored parent first
+        local sorted = {}
+        local visited = {}
+        local function addWithDeps(childKey, info, depth)
+            if visited[childKey] then return end
+            if depth > 20 then return end  -- circular guard
+            visited[childKey] = true
+            -- If our target is also anchored, process it first
+            local targetInfo = adb[info.target]
+            if targetInfo and targetInfo.target and not visited[info.target] then
+                addWithDeps(info.target, targetInfo, depth + 1)
+            end
+            sorted[#sorted + 1] = { key = childKey, info = info }
+        end
         for childKey, info in pairs(adb) do
-            if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
+            if info.target then
+                addWithDeps(childKey, info, 0)
+            end
+        end
+
+        local unresolved = {}
+        for _, entry in ipairs(sorted) do
+            local childKey, info = entry.key, entry.info
+            if GetBarFrame(childKey) and GetBarFrame(info.target) then
                 local target = GetBarFrame(info.target)
                 if target:GetLeft() then
                     ApplyAnchorPosition(childKey, info.target, info.side)
@@ -7199,21 +7229,24 @@ local function RevertPositions()
         end
     end
 
-    -- 6) Reposition all changed elements through normal path
+    -- 6) Reposition unanchored elements through normal path.
+    -- Skip anchored elements — step 7 handles them via ApplyAnchorPosition.
     for barKey, _ in pairs(pendingPositions) do
-        local bar = GetBarFrame(barKey)
-        if bar then
-            local snap = snapshotPositions[barKey]
-            if snap then
-                -- Use ApplyCenterPosition for grow-direction-aware positioning
-                if not ApplyCenterPosition(barKey, snap) then
-                    pcall(function()
-                        bar:ClearAllPoints()
-                        bar:SetPoint(snap.point, UIParent, snap.relPoint, snap.x, snap.y)
-                    end)
+        local ai = anchorDB and anchorDB[barKey]
+        if not (ai and ai.target) then
+            local bar = GetBarFrame(barKey)
+            if bar then
+                local snap = snapshotPositions[barKey]
+                if snap and not snap._fromLiveFrame then
+                    if not ApplyCenterPosition(barKey, snap) then
+                        pcall(function()
+                            bar:ClearAllPoints()
+                            bar:SetPoint(snap.point, UIParent, snap.relPoint, snap.x, snap.y)
+                        end)
+                    end
+                elseif bar.UpdateGridLayout then
+                    pcall(bar.UpdateGridLayout, bar)
                 end
-            elseif bar.UpdateGridLayout then
-                pcall(bar.UpdateGridLayout, bar)
             end
         end
     end
