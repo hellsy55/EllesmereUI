@@ -6676,12 +6676,13 @@ function EAB:FinishSetup()
                         end
                         frame:SetFrameStrata("HIGH")
                     end
-                    -- Show mouseover-faded bars
+                    -- Show mouseover-faded bars at full opacity
                     if s.mouseoverEnabled then
                         StopFade(frame)
-                        frame:SetAlpha(s.mouseoverAlpha or 1)
+                        local fullAlpha = s._savedBarAlpha or 1
+                        frame:SetAlpha(fullAlpha)
                         if state then state.fadeDir = "in" end
-                        if key == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
+                        if key == "MainBar" then SyncPagingAlpha(fullAlpha) end
                     end
                 else
                     -- Restore original strata (only if we changed it)

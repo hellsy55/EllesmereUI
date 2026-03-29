@@ -376,7 +376,11 @@ local function HideBlizzardDecorations(frame)
         if child then child:SetAlpha(0) end
     end
     alphaZero(frame.Border)
-    alphaZero(frame.SpellActivationAlert)
+    if frame.SpellActivationAlert then
+        frame.SpellActivationAlert:SetAlpha(0)
+        frame.SpellActivationAlert:SetAllPoints(frame)
+        frame.SpellActivationAlert:SetScale(1)
+    end
     alphaZero(frame.Shadow)
     alphaZero(frame.IconShadow)
     alphaZero(frame.DebuffBorder)
@@ -1297,25 +1301,28 @@ local function CollectAndReanchor()
     end
 
     -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
-    -- Skip frames that are routed to our bars (temporarily unclaimed during
-    -- spell transforms) or are our own custom frames (racials, trinkets, etc.).
+    -- Two-pass safety: only hide frames unclaimed for TWO consecutive reanchors.
+    -- This prevents flicker from spell transforms and rapid state changes where
+    -- a frame is temporarily unclaimed for one cycle then reclaimed on the next.
+    -- Uses our own side table (FC) — no writes to Blizzard frames on first miss.
+    -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
+    -- Time-based safety: only hide frames unclaimed for 1+ seconds.
+    -- This prevents hiding during rapid init/transform cycles where
+    -- frames are temporarily unclaimed but get reclaimed within a second.
+    local now = GetTime()
     for frame in pairs(allActiveFrames) do
-        if not _scratch_usedFrames[frame] then
-            -- Never alpha-0 our own custom frames
-            if frame._isRacialFrame or frame._isTrinketFrame
+        local fc = FC(frame)
+        if _scratch_usedFrames[frame] then
+            fc._unclaimedSince = nil
+        elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
-                -- Custom frame — managed by injection, not viewer claims
-            else
-                local cdID = frame.cooldownID
-                local routed = cdID and _cdidRouteMap[cdID]
-                if not routed then
-                    local sid = frame._spellID or (frame.cooldownInfo and frame.cooldownInfo.spellID)
-                    routed = sid and _spellRouteMap[sid]
-                end
-                if not routed then
-                    frame:SetAlpha(0)
-                end
+            -- Custom frames: never alpha-0
+        else
+            if not fc._unclaimedSince then
+                fc._unclaimedSince = now
+            elseif now - fc._unclaimedSince >= 1.0 then
+                frame:SetAlpha(0)
             end
         end
     end

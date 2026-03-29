@@ -632,7 +632,11 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     if cfg.showSpark then
         local sparkAnchor = (bar._gradientActive and bar._gradClip) or fillTex
         bar._spark:SetSize(8, h)
-        bar._spark:SetRotation(0)
+        if isVert then
+            bar._spark:SetRotation(math.pi / 2)
+        else
+            bar._spark:SetRotation(0)
+        end
         bar._spark:ClearAllPoints()
         if isVert then
             bar._spark:SetPoint("CENTER", sparkAnchor, "TOP", 0, 0)
