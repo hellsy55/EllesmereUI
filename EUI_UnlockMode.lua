@@ -1725,6 +1725,14 @@ ApplyCenterPosition = function(barKey, pos)
         end
     end
 
+    -- Snap to physical pixel grid so the edge position is deterministic
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES and adjX and adjY then
+        local es = frame:GetEffectiveScale()
+        adjX = PPa.SnapForES(adjX, es)
+        adjY = PPa.SnapForES(adjY, es)
+    end
+
     pcall(function()
         if InCombatLockdown() and frame:IsProtected() then
             local deferFrame = CreateFrame("Frame")
@@ -1751,6 +1759,16 @@ EllesmereUI.ApplyCenterPosition = ApplyCenterPosition
 SaveBarPosition = function(barKey, point, relPoint, x, y)
     -- Convert to CENTER/CENTER before storing
     local cp, crp, cx, cy = ConvertToCenterPos(barKey, point, relPoint, x, y)
+
+    -- Snap to physical pixel grid so stored values are clean whole-pixel
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES and cx and cy then
+        local frame = GetBarFrame(barKey)
+        local es = frame and frame:GetEffectiveScale()
+                   or (UIParent and UIParent:GetEffectiveScale() or 1)
+        cx = PPa.SnapForES(cx, es)
+        cy = PPa.SnapForES(cy, es)
+    end
 
     -- Registered element?
     local elem = registeredElements[barKey]
@@ -1918,15 +1936,14 @@ local function ApplySavedPositions()
         local unresolved = {}
         for childKey, info in pairs(adb) do
             if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
-                ApplyAnchorPosition(childKey, info.target, info.side)
-                -- Check if it actually resolved (target had valid bounds)
                 local target = GetBarFrame(info.target)
-                if not target:GetLeft() then
+                if target:GetLeft() then
+                    ApplyAnchorPosition(childKey, info.target, info.side)
+                else
                     unresolved[childKey] = info
                 end
             end
         end
-        -- Retry unresolved anchors until all targets have valid layout
         if next(unresolved) then
             local retries = 0
             local function RetryAnchors()
@@ -2899,33 +2916,33 @@ local function NudgeMover(dx, dy)
     local m = selectedMover
     if not m or InCombatLockdown() then return end
 
-    -- Simple: read bar's current position, add dx/dy, reposition.
-    -- Same as dragging but with a fixed 1px step.
+    -- Read bar's current position, add dx/dy, reposition.
     local bar = GetBarFrame(m._barKey)
     if not bar then return end
 
-    local pt, _, relPt, offX, offY = bar:GetPoint(1)
-    if not pt then return end
-
-    -- Move the bar by dx/dy in UIParent space
-    pcall(function()
-        bar:ClearAllPoints()
-        bar:SetPoint(pt, UIParent, relPt, offX + dx, offY + dy)
-    end)
-
-    -- Store pending position
-    pendingPositions[m._barKey] = {
-        point = pt, relPoint = relPt,
-        x = offX + dx, y = offY + dy,
-    }
-    hasChanges = true
-
-    -- Update anchor offset if anchored
     local ai = GetAnchorInfo(m._barKey)
     if ai and ai.target then
+        -- Anchored: adjust offset relative to target frame (not UIParent).
+        -- Reading GetPoint(1) on an anchored element returns args relative to
+        -- the target frame — applying those to UIParent teleports the bar.
         ai.offsetX = (ai.offsetX or 0) + dx
         ai.offsetY = (ai.offsetY or 0) + dy
+        ApplyAnchorPosition(m._barKey, ai.target, ai.side)
+        pendingPositions[m._barKey] = { _anchored = true }
+    else
+        -- Unanchored: read current position, add dx/dy
+        local pt, _, relPt, offX, offY = bar:GetPoint(1)
+        if not pt then return end
+        pcall(function()
+            bar:ClearAllPoints()
+            bar:SetPoint(pt, UIParent, relPt, offX + dx, offY + dy)
+        end)
+        pendingPositions[m._barKey] = {
+            point = pt, relPoint = relPt,
+            x = offX + dx, y = offY + dy,
+        }
     end
+    hasChanges = true
 
     -- Reanchor mover to bar
     m:ClearAllPoints()

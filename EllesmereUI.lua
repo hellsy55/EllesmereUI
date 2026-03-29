@@ -253,7 +253,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png",      comingSoon = true },
     { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
     { folder = "EllesmereUIResourceBars",      display = "Resource Bars",      search_name = "EllesmereUI Resource Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
-    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png"         },
+    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png",         maintenance = true },
     { folder = "EllesmereUIBasics",            display = "Basics",             search_name = "EllesmereUI Basics",             icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
@@ -3603,8 +3603,8 @@ local function CreateMainFrame()
         dlIcon:Hide()
         btn._dlIcon = dlIcon
 
-        -- Power toggle button (not shown for comingSoon or alwaysLoaded entries)
-        if not info.comingSoon and not info.alwaysLoaded then
+        -- Power toggle button (not shown for comingSoon, maintenance, or alwaysLoaded entries)
+        if not info.comingSoon and not info.maintenance and not info.alwaysLoaded then
             -- Register helper once (on EllesmereUI to avoid new upvalues)
             if not EllesmereUI._addonToggleInit then
                 EllesmereUI._addonToggleInit = true
@@ -3671,6 +3671,7 @@ local function CreateMainFrame()
         btn._loaded = false
         btn._alwaysLoaded = info.alwaysLoaded or false
         btn._comingSoon = info.comingSoon or false
+        btn._maintenance = info.maintenance or false
 
         -- Hover highlight
         local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
@@ -3680,6 +3681,12 @@ local function CreateMainFrame()
             if self._comingSoon then
                 if EllesmereUI.ShowWidgetTooltip then
                     EllesmereUI.ShowWidgetTooltip(self, "Coming soon")
+                end
+                return
+            end
+            if self._maintenance then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "In Maintenance")
                 end
                 return
             end
@@ -3698,6 +3705,7 @@ local function CreateMainFrame()
         btn:SetScript("OnLeave", function(self)
             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             if self._comingSoon then return end
+            if self._maintenance then return end
             if self._notEnabled then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
@@ -3712,6 +3720,7 @@ local function CreateMainFrame()
         end)
         btn:SetScript("OnClick", function(self)
             if self._comingSoon then return end
+            if self._maintenance then return end
             if self._notEnabled then return end
             if self._loaded and modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
@@ -5787,14 +5796,23 @@ local function RefreshSidebarStates()
     -- Two-pass: enabled addons first (roster order), disabled addons after
     local enabledList = {}
     local disabledList = {}
+    local maintenanceList = {}
+    local comingSoonList = {}
     for _, info in ipairs(ADDON_ROSTER) do
         local loaded = info.alwaysLoaded or IsAddonLoaded(info.folder)
-        if loaded then
+        if info.maintenance then
+            maintenanceList[#maintenanceList + 1] = info
+        elseif info.comingSoon then
+            comingSoonList[#comingSoonList + 1] = info
+        elseif loaded then
             enabledList[#enabledList + 1] = info
         else
             disabledList[#disabledList + 1] = info
         end
     end
+    -- Order: enabled, disabled, maintenance, coming soon
+    for _, info in ipairs(maintenanceList) do disabledList[#disabledList + 1] = info end
+    for _, info in ipairs(comingSoonList) do disabledList[#disabledList + 1] = info end
 
     local rowIndex = 0
     for _, info in ipairs(enabledList) do
@@ -6028,7 +6046,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.7.4"
+EllesmereUI.VERSION = "5.7.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

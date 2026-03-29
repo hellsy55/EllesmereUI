@@ -2932,6 +2932,15 @@ initFrame:SetScript("OnEvent", function(self)
         -- Wipe click mappings (shared with display page)
         wipe(_clickMappings)
 
+        -- Re-append SharedMedia textures for cast bar (catches lazy-registered SM packs)
+        if EllesmereUI.AppendSharedMediaTextures then
+            EllesmereUI.AppendSharedMediaTextures(
+                _G._ERB_CastBarTextureNames or {},
+                _G._ERB_CastBarTextureOrder or {},
+                nil,
+                _G._ERB_CastBarTextures
+            )
+        end
         -- Texture dropdown values (same as nameplates)
         local texValues = {}
         local texOrder = {}

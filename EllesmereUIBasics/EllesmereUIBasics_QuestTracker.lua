@@ -1326,7 +1326,7 @@ function EQT:Refresh(skipAlphaFlash)
     local cc      = db.completedColor or C.complete
     local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
     local ffs     = db.focusedFontSize
-    local fbgA    = (db.focusBgOpacity or 25) / 100
+    local fbgA    = (db.focusBgOpacity or 0) / 100
     local iqSize  = db.questItemSize or 22
     local sc      = db.secColor or C.section
     local compFS  = db.completedFontSize
@@ -1932,7 +1932,7 @@ function EQT:RefreshProgress()
     local cc      = db.completedColor or C.complete
     local fc      = db.focusedColor or { r=0.871, g=0.251, b=1.0 }
     local ffs     = db.focusedFontSize
-    local fbgA    = (db.focusBgOpacity or 25) / 100
+    local fbgA    = (db.focusBgOpacity or 0) / 100
     local compFS  = db.completedFontSize
     local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
 

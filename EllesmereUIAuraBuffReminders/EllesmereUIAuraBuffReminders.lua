@@ -1,3 +1,5 @@
+-- Module disabled: in maintenance. Early return prevents all file-scope code.
+do return end
 -------------------------------------------------------------------------------
 --  EllesmereUIAuraBuffReminders.lua
 --  Complete AuraBuff Reminders: Raid Buffs, Auras, Consumables

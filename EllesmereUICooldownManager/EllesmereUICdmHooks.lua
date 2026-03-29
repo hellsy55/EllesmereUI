@@ -1089,6 +1089,10 @@ local function CollectAndReanchor()
                                         list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
                                     end
                                 else
+                                    -- Skip spells the player doesn't currently know (e.g. talented out)
+                                    if ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
+                                        -- pass: don't inject frame for unknown spell
+                                    else
                                     local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
                                     local f = _presetFrames[fkey]
@@ -1121,6 +1125,7 @@ local function CollectAndReanchor()
                                     list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
                                 end
                             end
+                                    end -- IsSpellKnownInCDM check
                         end
                     end
                 end
