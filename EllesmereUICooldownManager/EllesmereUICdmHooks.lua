@@ -784,9 +784,47 @@ ns._presetFrames = _presetFrames
 local _racialCdListener = CreateFrame("Frame")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
+_racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
 _racialCdListener:SetScript("OnEvent", function()
-    for _, f in pairs(_presetFrames) do
-        if f._isRacialFrame then f._racialCdDirty = true end
+    -- Directly update cooldowns on existing preset frames instead of
+    -- waiting for CollectAndReanchor (which only runs on viewer changes).
+    for fkey, f in pairs(_presetFrames) do
+        if f:IsShown() then
+            if f._isRacialFrame or f._isCustomSpellFrame then
+                local sid = fkey:match(":(%d+)$")
+                sid = sid and tonumber(sid)
+                if sid then
+                    local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
+                    if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
+                        f._cooldown:SetCooldownFromDurationObject(durObj, true)
+                    end
+                end
+            elseif f._isItemPresetFrame and f._presetItemID then
+                local itemID = f._presetItemID
+                local getContainerCD = C_Container and C_Container.GetItemCooldown
+                local start, dur
+                if getContainerCD then
+                    start, dur = getContainerCD(itemID)
+                end
+                if not (start and dur and dur > 1.5) then
+                    start, dur = C_Item.GetItemCooldown(itemID)
+                end
+                if not (start and dur and dur > 1.5) and f._presetData and f._presetData.altItemIDs then
+                    for _, altID in ipairs(f._presetData.altItemIDs) do
+                        if getContainerCD then start, dur = getContainerCD(altID) end
+                        if not (start and dur and dur > 1.5) then start, dur = C_Item.GetItemCooldown(altID) end
+                        if start and dur and dur > 1.5 then break end
+                    end
+                end
+                if start and dur and dur > 1.5 then
+                    f._cooldown:SetCooldown(start, dur)
+                    f._cdStart = start; f._cdDur = dur
+                elseif not (f._cdStart and f._cdDur and GetTime() < f._cdStart + f._cdDur) then
+                    f._cooldown:Clear()
+                    f._cdStart = nil; f._cdDur = nil
+                end
+            end
+        end
     end
     if QueueCustomBuffUpdate then QueueCustomBuffUpdate() end
 end)
