@@ -313,6 +313,7 @@ SpellUsedOnAnyOtherBar = function(spellID, excludeBarKey)
     local p = ECME.db.profile
     local excludeType = GetBarType(excludeBarKey)
     local excludeIsBuff = (excludeType == "buffs")
+    local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
 
     -- Check CDM bars (same family only)
     for _, b in ipairs(p.cdmBars.bars) do
@@ -324,6 +325,11 @@ SpellUsedOnAnyOtherBar = function(spellID, excludeBarKey)
                 if sd and sd.assignedSpells then
                     for _, sid in ipairs(sd.assignedSpells) do
                         if sid == spellID then return b.name or b.key end
+                        -- Also match talent overrides (e.g. Avenging Wrath → Avenging Crusader)
+                        if _FindOverride and sid > 0 then
+                            local ovr = _FindOverride(sid)
+                            if ovr and ovr > 0 and ovr == spellID then return b.name or b.key end
+                        end
                     end
                 end
             end
@@ -610,8 +616,7 @@ function ns.AddCDMBar(barType, name, numRows)
         borderClassColor = false, borderThickness = "thin",
         bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
         iconZoom = 0.08, iconShape = "none",
-        verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
-        barBgR = 0, barBgG = 0, barBgB = 0,
+        verticalOrientation = false, barBgEnabled = false,        barBgR = 0, barBgG = 0, barBgB = 0,
         showCooldownText = true, cooldownFontSize = 12,
         showCharges = true, chargeFontSize = 11,
         desaturateOnCD = true, swipeAlpha = 0.7,

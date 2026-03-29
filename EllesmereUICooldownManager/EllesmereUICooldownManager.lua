@@ -290,8 +290,7 @@ local DEFAULTS = {
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
                     iconZoom = 0.08, iconShape = "none",
-                    verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
-                    barBgR = 0, barBgG = 0, barBgB = 0,
+                    verticalOrientation = false, barBgEnabled = false,                    barBgR = 0, barBgG = 0, barBgB = 0,
                     borderThickness = "thin",
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
@@ -309,8 +308,7 @@ local DEFAULTS = {
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
                     iconZoom = 0.08, iconShape = "none",
-                    verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
-                    barBgR = 0, barBgG = 0, barBgB = 0,
+                    verticalOrientation = false, barBgEnabled = false,                    barBgR = 0, barBgG = 0, barBgB = 0,
                     borderThickness = "thin",
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
@@ -328,8 +326,7 @@ local DEFAULTS = {
                     borderClassColor = false,
                     bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
                     iconZoom = 0.08, iconShape = "none",
-                    verticalOrientation = false, barBgEnabled = false, barBgAlpha = 1.0,
-                    barBgR = 0, barBgG = 0, barBgB = 0,
+                    verticalOrientation = false, barBgEnabled = false,                    barBgR = 0, barBgG = 0, barBgB = 0,
                     borderThickness = "thin",
                     anchorTo = "none", anchorPosition = "left",
                     anchorOffsetX = 0, anchorOffsetY = 0,
@@ -785,8 +782,12 @@ local function SwitchSpecProfile(newSpecKey)
         ns.FullCDMRebuild("spec_switch")
         RegisterCDMUnlockElements()
 
-        -- Catch frames Blizzard populates after our initial rebuild
-        C_Timer.After(1, function() if ns.QueueReanchor then ns.QueueReanchor() end end)
+        -- Catch frames Blizzard populates after our initial rebuild.
+        -- Rebuild route map again since spell overrides may have changed.
+        C_Timer.After(1, function()
+            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
+        end)
 
         -- Refresh options panel if open
         if EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
@@ -3049,7 +3050,7 @@ local function _CDMAttachHoverHooks(barKey)
             if barData and (barData.barVisibility or "always") == "mouseover" and state.fadeDir ~= "in" then
                 state.fadeDir = "in"
                 _CDMStopFade(frame)
-                _CDMFadeTo(frame, barData.barBgAlpha or 1, 0.15)
+                _CDMFadeTo(frame, 1, 0.15)
             end
         end
 
@@ -3104,7 +3105,7 @@ _CDMApplyVisibility = function()
             -- Unlock mode: bars must stay visible for dragging
             if unlockActive then
                 _CDMStopFade(frame)
-                frame:SetAlpha(barData.barBgAlpha or 1)
+                frame:SetAlpha(1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
             else
@@ -3145,7 +3146,7 @@ _CDMApplyVisibility = function()
             else
                 local wasHidden = frame._visHidden
                 _CDMStopFade(frame)
-                frame:SetAlpha(barData.barBgAlpha or 1)
+                frame:SetAlpha(1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
                 -- Icons were moved offscreen by the hooks tick while hidden;
@@ -5046,6 +5047,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
         _CDMApplyVisibility()
         if event == "UPDATE_SHAPESHIFT_FORM" then
+            -- Form swap changes spell overrides (e.g. druid forms).
+            -- Rebuild route map so transformed spells route correctly.
+            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
             C_Timer.After(0.5, UpdateCDMKeybinds)
         end
         return

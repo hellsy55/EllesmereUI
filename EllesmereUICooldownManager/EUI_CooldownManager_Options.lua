@@ -6547,8 +6547,7 @@ initFrame:SetScript("OnEvent", function(self)
                 pvBarBg:Hide()
             end
 
-            -- Bar opacity affects entire preview
-            self:SetAlpha(bd.barBgAlpha or 1)
+            self:SetAlpha(1)
 
             -- Buff bar info text
             if not self._buffInfoText then
@@ -7134,48 +7133,24 @@ initFrame:SetScript("OnEvent", function(self)
 
         local opacityRow
         opacityRow, h = W:DualRow(parent, y,
-            { type="slider", text="Bar Opacity",
-              min=0, max=100, step=5,
-              getValue=function() return math.floor((BD().barBgAlpha or 1) * 100 + 0.5) end,
-              setValue=function(v)
-                  BD().barBgAlpha = v / 100
-                  ns.BuildAllCDMBars(); Refresh()
-                  UpdateCDMPreview()
-              end },
             { type="toggle", text="Bar Background",
               getValue=function() return BD().barBgEnabled == true end,
               setValue=function(v)
                   BD().barBgEnabled = v
                   ns.BuildAllCDMBars(); Refresh()
                   UpdateCDMPreview(); EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Vertical Orientation",
+              getValue=function() return BD().verticalOrientation end,
+              setValue=function(v)
+                  BD().verticalOrientation = v
+                  BD().growDirection = v and "DOWN" or "RIGHT"
+                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
-        -- Sync icon on Bar Opacity (left)
+        -- Inline color swatch on Bar Background (left)
         do
             local rgn = opacityRow._leftRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Opacity to all Bars",
-                isSynced = function()
-                    local v = BD().barBgAlpha or 1
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.barBgAlpha or 1) ~= v then return false end
-                    end
-                    return true
-                end,
-                onClick = function()
-                    local v = BD().barBgAlpha or 1
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do b.barBgAlpha = v end
-                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
-                end,
-            })
-        end
-
-        -- Inline color swatch on Bar Background (right)
-        do
-            local rgn = opacityRow._rightRegion
             local ctrl = rgn and rgn._control
             if ctrl and EllesmereUI.BuildColorSwatch then
                 local bgSwatch, updateBgSwatch = EllesmereUI.BuildColorSwatch(
@@ -7205,7 +7180,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 3: Number of Rows | Vertical Orientation
+        -- Row 3: Number of Rows
         local numRowsRow
         numRowsRow, h = W:DualRow(parent, y,
             { type="slider", text="Number of Rows",
@@ -7217,13 +7192,7 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   EllesmereUI:RefreshPage()
               end },
-            { type="toggle", text="Vertical Orientation",
-              getValue=function() return BD().verticalOrientation end,
-              setValue=function(v)
-                  BD().verticalOrientation = v
-                  BD().growDirection = v and "DOWN" or "RIGHT"
-                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-              end });  y = y - h
+            { type="label", text="" });  y = y - h
 
         -- Inline cog on Number of Rows: Custom Top Row Count (only relevant when numRows == 2)
         do

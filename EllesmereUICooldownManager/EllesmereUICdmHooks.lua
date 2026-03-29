@@ -1219,14 +1219,20 @@ local function CollectAndReanchor()
                     end
                 end
 
-                -- Clear excess icons (alpha 0, no offscreen positioning)
-                for i = count + 1, #icons do
-                    local icon = icons[i]
-                    if icon then
-                        icon:ClearAllPoints()
-                        icon:SetAlpha(0)
+                -- Clear excess icons (alpha 0, no offscreen positioning).
+                -- Skip for buff bars: Blizzard's viewer can be mid-update
+                -- during OnActiveStateChanged, causing EnumerateActive to
+                -- return a partial set. The 1s alpha-0 cleanup handles
+                -- truly unclaimed buff frames instead.
+                if not isBuff then
+                    for i = count + 1, #icons do
+                        local icon = icons[i]
+                        if icon then
+                            icon:ClearAllPoints()
+                            icon:SetAlpha(0)
+                        end
+                        icons[i] = nil
                     end
-                    icons[i] = nil
                 end
 
                 -- Mark unclaimed frames as used so the alpha-0 cleanup
@@ -1286,16 +1292,24 @@ local function CollectAndReanchor()
 
     -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
     -- Time-based safety: only hide frames unclaimed for 1+ seconds.
+    -- Alpha-0 unclaimed CD/utility frames only.
+    -- Buff frames are never touched: Blizzard controls their visibility.
+    local buffViewer = _G["BuffIconCooldownViewer"]
+    local barViewer  = _G["BuffBarCooldownViewer"]
     local now = GetTime()
     for frame in pairs(allActiveFrames) do
-        local fc = FC(frame)
-        if _scratch_usedFrames[frame] then
+        local vf = frame.viewerFrame
+        if vf == buffViewer or vf == barViewer then
+            -- Buff frame: Blizzard owns visibility, never alpha-0
+        elseif _scratch_usedFrames[frame] then
+            local fc = FC(frame)
             fc._unclaimedSince = nil
         elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
             -- Custom frames: never alpha-0
         else
+            local fc = FC(frame)
             if not fc._unclaimedSince then
                 fc._unclaimedSince = now
             elseif now - fc._unclaimedSince >= 1.0 then
@@ -1644,9 +1658,16 @@ function ns.SetupViewerHooks()
             end
             -- Re-apply our icon positions immediately when Blizzard
             -- re-layouts so frames don't flash to Blizzard positions.
+            -- Re-layout ALL bars (including custom bars that share this viewer).
             hooksecurefunc(viewer, "Layout", function()
                 local LCB = ns.LayoutCDMBar
-                if LCB then LCB(barKey) end
+                if LCB then
+                    for bk, icons in pairs(cdmBarIcons) do
+                        if icons and #icons > 0 then
+                            LCB(bk)
+                        end
+                    end
+                end
             end)
             local function SyncViewerToBar()
                 if InCombatLockdown() then return end

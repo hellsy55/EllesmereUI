@@ -2857,7 +2857,13 @@ local function MakeButtonSquare(btn)
         btn._eabIntHooked = true
     end
     if btn.SlotBackground then
-        btn.SlotBackground:Hide()
+        btn.SlotBackground:SetAlpha(0)
+        if not btn._eabSlotBgHooked then
+            btn._eabSlotBgHooked = true
+            hooksecurefunc(btn.SlotBackground, "SetAlpha", function(self, a)
+                if a ~= 0 then self:SetAlpha(0) end
+            end)
+        end
         if not btn._eabSlotBG then
             local bg = btn:CreateTexture(nil, "BACKGROUND", nil, -1)
             bg:SetAllPoints(btn)
@@ -2865,7 +2871,15 @@ local function MakeButtonSquare(btn)
             btn._eabSlotBG = bg
         end
     end
-    if btn.SlotArt then btn.SlotArt:Hide() end
+    if btn.SlotArt then
+        btn.SlotArt:SetAlpha(0)
+        if not btn._eabSlotArtHooked then
+            btn._eabSlotArtHooked = true
+            hooksecurefunc(btn.SlotArt, "SetAlpha", function(self, a)
+                if a ~= 0 then self:SetAlpha(0) end
+            end)
+        end
+    end
     -- Hook Border to suppress Blizzard's item quality overlay (Dragonflight+).
     -- Blizzard calls Border:SetAtlas()/Show() on various refreshes. EAB owns
     -- the visible border entirely, so the Blizzard overlay must stay hidden.
