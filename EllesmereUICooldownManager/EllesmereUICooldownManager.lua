@@ -779,8 +779,20 @@ local function SwitchSpecProfile(newSpecKey)
     -- Deferred rebuild (Blizzard CDM needs time to update its frames)
     C_Timer.After(0.5, function()
         ns._specChangePending = false
+        -- Clear the flag that told RefreshAllAddons to skip CDM. The profile
+        -- system may have switched db.profile before CDM's handler ran; now
+        -- that the active spec key is correct, we can rebuild safely.
+        if EllesmereUI then EllesmereUI._specProfileSwitching = false end
         ns.FullCDMRebuild("spec_switch")
         RegisterCDMUnlockElements()
+
+        -- CDM frames just moved to their new-profile positions. Re-sync
+        -- any external bars (resource bars, cast bar) that anchor to CDM
+        -- bars via the unlock system -- they rebuilt earlier (in
+        -- RefreshAllAddons) against stale CDM positions.
+        if EllesmereUI.ResyncAnchorOffsets then
+            EllesmereUI.ResyncAnchorOffsets()
+        end
 
         -- Catch frames Blizzard populates after our initial rebuild.
         -- Rebuild route map again since spell overrides may have changed.
@@ -1292,11 +1304,6 @@ local function InstallProcGlowHooks()
         -- No defer needed -- icon mapping is current from the last reanchor.
         local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
         if not ourIcon then return end
-        -- Re-suppress Blizzard alert
-        if cdmChild.SpellActivationAlert then
-            cdmChild.SpellActivationAlert:SetAlpha(0)
-            cdmChild.SpellActivationAlert:Hide()
-        end
         local cr, cg, cb = PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3]
         ShowProcGlow(ourIcon, cr, cg, cb)
         -- Force icon texture re-evaluation so override textures apply immediately
@@ -1721,26 +1728,30 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
 
     -- If stored as CENTER/CENTER, convert to grow-direction-aware anchor
     -- so the fixed edge stays put when bar width changes across specs.
-    -- Use settings-derived dimensions (not frame:GetWidth) so the result
-    -- is deterministic regardless of which icons have loaded.
+    -- Skip conversion for dynamic bars (buffs/custom_buff) whose icon count
+    -- varies at runtime -- using frame:GetWidth() would produce a different
+    -- offset every time the count changes, causing the bar to jump.
     if pos.point == "CENTER" and (pos.relPoint == "CENTER" or not pos.relPoint) then
         local bd = barKey and barDataByKey[barKey]
-        local grow = bd and bd.growDirection or "CENTER"
-        local fw = frame:GetWidth() or 0
-        local fh = frame:GetHeight() or 0
+        local isDynamic = bd and (bd.barType == "buffs" or barKey == "buffs" or bd.barType == "custom_buff")
+        if not isDynamic then
+            local grow = bd and bd.growDirection or "CENTER"
+            local fw = frame:GetWidth() or 0
+            local fh = frame:GetHeight() or 0
 
-        if grow == "RIGHT" then
-            anchor = "LEFT"
-            px = px - fw / 2
-        elseif grow == "LEFT" then
-            anchor = "RIGHT"
-            px = px + fw / 2
-        elseif grow == "DOWN" then
-            anchor = "TOP"
-            py = py + fh / 2
-        elseif grow == "UP" then
-            anchor = "BOTTOM"
-            py = py - fh / 2
+            if grow == "RIGHT" then
+                anchor = "LEFT"
+                px = px - fw / 2
+            elseif grow == "LEFT" then
+                anchor = "RIGHT"
+                px = px + fw / 2
+            elseif grow == "DOWN" then
+                anchor = "TOP"
+                py = py + fh / 2
+            elseif grow == "UP" then
+                anchor = "BOTTOM"
+                py = py - fh / 2
+            end
         end
     end
 
@@ -1759,10 +1770,15 @@ local function SaveCDMBarPosition(barKey, frame)
 
     -- Determine anchor point from grow direction so the bar's near edge
     -- stays fixed when icon count changes across specs.
+    -- Dynamic bars (buffs/custom_buff) always save as CENTER -- their icon
+    -- count varies at runtime, so edge-based anchors would drift.
     local bd = barDataByKey[barKey]
+    local isDynamic = bd and (bd.barType == "buffs" or barKey == "buffs" or bd.barType == "custom_buff")
     local grow = bd and bd.growDirection or "CENTER"
     local pt
-    if     grow == "RIGHT" then pt = "LEFT"
+    if isDynamic then
+        pt = "CENTER"
+    elseif grow == "RIGHT" then pt = "LEFT"
     elseif grow == "LEFT"  then pt = "RIGHT"
     elseif grow == "DOWN"  then pt = "TOP"
     elseif grow == "UP"    then pt = "BOTTOM"
@@ -2258,12 +2274,15 @@ LayoutCDMBar = function(barKey)
             frame._prevLayoutW = fallbackW
             frame._prevLayoutH = fallbackH
         end
-        -- Keep the frame at its current size so anchor math has valid bounds.
-        -- Alpha-zero hides it visually while preserving layout dimensions.
-        EllesmereUI.SetElementVisibility(frame, false)
+        -- Dynamic bars (buffs): never hide the container. Blizzard's viewer
+        -- can return a partial set mid-update, causing a transient count of 0.
+        -- Hiding the container would kill all icons (they're anchored to it)
+        -- and nothing restores it until the next FullCDMRebuild.
+        -- Static bars (cd/utility): safe to hide, count 0 is stable.
+        if not isDynamic then
+            EllesmereUI.SetElementVisibility(frame, false)
+        end
         if frame._barBg then frame._barBg:Hide() end
-        -- No propagation needed: frame stays at its current size (alpha-zero),
-        -- so anchored children remain in their correct positions.
         return
     end
 
@@ -2397,6 +2416,16 @@ LayoutCDMBar = function(barKey)
             icon:SetPoint("TOPLEFT", frame, "CENTER",
                 col * scaledStepW + rowOffset - (totalW / 2) * iS,
                 -(row * scaledStepH) + (totalH / 2) * iS)
+        end
+
+        -- Store the anchor we just set so the SetPoint hook can force
+        -- Blizzard back to this position if it tries to move the icon.
+        local fd = _getFD(icon)
+        if fd then
+            local pt, _, rp, ox, oy = icon:GetPoint(1)
+            if pt then
+                fd._cdmAnchor = { pt, frame, rp, ox, oy }
+            end
         end
     end
 end
@@ -2902,14 +2931,16 @@ local function RefreshCDMIconAppearance(barKey)
         local shape = barData.iconShape or "none"
         ApplyShapeToCDMIcon(icon, shape, barData)
 
-        -- Reset active state so glow type change takes effect on next tick.
+        -- Reset glow so glow type change takes effect on next tick.
+        -- Do NOT reset isActive -- that causes a 1-frame flash where the
+        -- ticker sees the transition as "inactive" and un-desaturates the
+        -- icon before re-detecting active on the next frame.
         -- Preserve proc glow across rebuilds to avoid visible blink at load-in.
         local ifd = _getFD(icon)
         local hadProcGlow = ifd and ifd.procGlowActive
         if glowOv then
             StopNativeGlow(glowOv)
         end
-        if ifd then ifd.isActive = false end
         if hadProcGlow and glowOv then
             StartNativeGlow(glowOv, PROC_GLOW_STYLE, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
             if ifd then ifd.procGlowActive = true end
@@ -3143,28 +3174,75 @@ _CDMApplyVisibility = function()
                 frame:SetAlpha(0)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(vis == "mouseover") end
                 frame._visHidden = true
+                -- Hide this bar's icons individually. The viewer may stay
+                -- at alpha 1 (other bars need it), so icon alpha must be
+                -- managed per-bar.
+                local icons = cdmBarIcons[barData.key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] then icons[ii]:SetAlpha(0) end
+                    end
+                end
             else
                 local wasHidden = frame._visHidden
                 _CDMStopFade(frame)
                 frame:SetAlpha(1)
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
-                -- Icons were moved offscreen by the hooks tick while hidden;
-                -- reposition them immediately so they don't wait for the
-                -- next CDM viewer update (which target changes don't trigger).
-                if wasHidden then LayoutCDMBar(barData.key) end
+                -- Restore icon alpha and reposition
+                if wasHidden then
+                    local icons = cdmBarIcons[barData.key]
+                    if icons then
+                        for ii = 1, #icons do
+                            if icons[ii] then icons[ii]:SetAlpha(1) end
+                        end
+                    end
+                    LayoutCDMBar(barData.key)
+                end
             end
 
             end -- unlockActive else
+        end
+    end
 
-            -- Icons are parented to the Blizzard viewer, so they inherit
-            -- the viewer's alpha. One SetAlpha on the viewer controls all
-            -- icons at once -- no per-icon loops, no taint.
-            local viewerName = BLIZZ_CDM_FRAMES[barData.key]
-            local viewer = viewerName and _G[viewerName]
-            if viewer then
-                viewer:SetAlpha(frame._visHidden and 0 or 1)
+    -- Viewer alpha: icons are parented to Blizzard viewers and inherit
+    -- their alpha. Only hide a viewer if ALL bars that use its icons are
+    -- hidden. Otherwise a hidden default bar (e.g. "buffs" set to "never")
+    -- would kill icons on visible custom bars that share the same viewer.
+    for viewerBarKey, viewerName in pairs(BLIZZ_CDM_FRAMES) do
+        local viewer = _G[viewerName]
+        if viewer then
+            -- Check if ANY bar that routes icons from this viewer is visible
+            -- Each bar has independent visibility. The viewer must stay
+            -- visible if ANY bar that uses its icons is visible.
+            -- Viewer-to-bar mapping: cooldowns/utility bars use
+            -- Essential/Utility viewers. Buff bars use BuffIcon viewer.
+            -- custom_buff bars use their own frames (not the viewer).
+            local anyVisible = false
+            for _, barData in ipairs(p.cdmBars.bars) do
+                if barData.enabled then
+                    local frame = cdmBarFrames[barData.key]
+                    if frame and not frame._visHidden then
+                        local bk = barData.key
+                        -- Does this bar use this viewer's icons?
+                        if bk == viewerBarKey then
+                            -- Default bar matches its viewer directly
+                            anyVisible = true; break
+                        end
+                        -- Custom bars: check which viewer they route from.
+                        -- CD/utility custom bars route from Essential or
+                        -- Utility viewer based on their assigned spells'
+                        -- categories. For simplicity, any non-buff custom
+                        -- bar counts for both CD and utility viewers.
+                        local bt = barData.barType
+                        if bt and bt ~= "buffs" and bt ~= "custom_buff"
+                            and (viewerBarKey == "cooldowns" or viewerBarKey == "utility") then
+                            anyVisible = true; break
+                        end
+                    end
+                end
             end
+            viewer:SetAlpha(anyVisible and 1 or 0)
         end
     end
 end
@@ -3370,18 +3448,22 @@ BuildAllCDMBars = function()
         return
     end
 
-    -- Hide ALL existing bar frames and icons before rebuilding. This ensures
-    -- bars from a previous spec or deleted bars get fully cleaned up.
-    -- Icons include CDM-owned frames (trinkets, racials, placeholders) that
-    -- aren't in the viewer pool and won't be caught by unclaimed-frame cleanup.
-    for key, frame in pairs(cdmBarFrames) do
-        EllesmereUI.SetElementVisibility(frame, false)
-    end
+    -- Detach icons from bars before rebuilding. BuildCDMBar handles
+    -- per-bar enable/disable visibility. No blanket alpha wipe needed --
+    -- that causes a 1-frame blink on every FullCDMRebuild.
+    local buffViewer = _G["BuffIconCooldownViewer"]
+    local barViewer  = _G["BuffBarCooldownViewer"]
     for key, icons in pairs(cdmBarIcons) do
         for i = 1, #icons do
-            if icons[i] then
-                icons[i]:Hide()
-                icons[i]:ClearAllPoints()
+            local icon = icons[i]
+            if icon then
+                local vf = icon.viewerFrame
+                if vf == buffViewer or vf == barViewer then
+                    icon:ClearAllPoints()
+                else
+                    icon:Hide()
+                    icon:ClearAllPoints()
+                end
             end
         end
     end
@@ -3467,7 +3549,6 @@ BuildAllCDMBars = function()
             EllesmereUI.ReapplyOwnAnchor("CDM_" .. barData.key)
         end
     end
-    _CDMApplyVisibility()
     UpdateCDMKeybinds()
 
     -- Ensure vehicle/petbattle proxy exists to trigger _CDMApplyVisibility on state change
@@ -3572,9 +3653,8 @@ function ns.FullCDMRebuild(reason)
     -- 6. Reanchor
     if ns.QueueReanchor then ns.QueueReanchor() end
 
-    -- 7. Glows + visibility
+    -- 7. Glows (visibility already applied by BuildAllCDMBars)
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
-    _CDMApplyVisibility()
 end
 
 function ns.GetRebuildGen()
@@ -5056,8 +5136,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then
-        _inCombat = (event == "PLAYER_REGEN_DISABLED")
-        _CDMApplyVisibility()
+        if event == "PLAYER_REGEN_DISABLED" then
+            _inCombat = true
+            _CDMApplyVisibility()
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            -- Buffer combat exit: brief out-of-combat blips (mob dies,
+            -- re-aggro) shouldn't flash visibility changes.
+            C_Timer.After(0.1, function()
+                if not InCombatLockdown() then
+                    _inCombat = false
+                    _CDMApplyVisibility()
+                end
+            end)
+        else
+            _CDMApplyVisibility()
+        end
         -- Flush deferred TBB rebuild that was queued during combat
         if event == "PLAYER_REGEN_ENABLED" and ns.IsTBBRebuildPending and ns.IsTBBRebuildPending() then
             if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
@@ -5157,7 +5250,11 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             SetActiveSpec()
             _specValidated = true
             C_Timer.After(0.5, function()
+                if EllesmereUI then EllesmereUI._specProfileSwitching = false end
                 ns.FullCDMRebuild("spec_same_key")
+                if EllesmereUI and EllesmereUI.ResyncAnchorOffsets then
+                    EllesmereUI.ResyncAnchorOffsets()
+                end
                 -- Re-apply width/height matches after bars settle
                 C_Timer.After(0.3, function()
                     if EllesmereUI.ApplyAllWidthHeightMatches then
@@ -5179,6 +5276,35 @@ end)
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
+-- DEBUG: /cdmwatchbuffs to trace everything touching the buff bar
+-- Auto-watch buffs bar for disappearing issues
+C_Timer.After(3, function()
+    local frame = cdmBarFrames["buffs"]
+    if not frame then return end
+    local viewer = _G["BuffIconCooldownViewer"]
+    hooksecurefunc(frame, "SetAlpha", function(_, a)
+        if a == 0 or a < 0.5 then
+            print(("[CDM DEBUG] buffs SetAlpha(%s) from:\n%s"):format(tostring(a), debugstack(2, 4, 0)))
+        end
+    end)
+    hooksecurefunc(frame, "Hide", function()
+        print(("[CDM DEBUG] buffs Hide() from:\n%s"):format(debugstack(2, 4, 0)))
+    end)
+    if viewer then
+        hooksecurefunc(viewer, "SetAlpha", function(_, a)
+            if a == 0 or a < 0.5 then
+                print(("[CDM DEBUG] BuffIconViewer SetAlpha(%s) from:\n%s"):format(tostring(a), debugstack(2, 4, 0)))
+            end
+        end)
+    end
+    -- Watch individual buff icon alpha changes (only log alpha 0)
+    hooksecurefunc(frame, "SetSize", function(_, w, h)
+        if w and w < 2 then
+            print(("[CDM DEBUG] buffs SetSize(%s,%s) from:\n%s"):format(tostring(w), tostring(h), debugstack(2, 3, 0)))
+        end
+    end)
+end)
+
 SLASH_ECME1 = "/ecme"
 SLASH_ECME2 = "/cdmeffects"
 SLASH_ECME3 = "/cdm"

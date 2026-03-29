@@ -183,11 +183,22 @@ function ns.RebuildSpellRouteMap()
                     if type(sid) == "number" and sid > 0 then
                         _spellRouteMap[sid] = bd.key
                         spellToBar[sid] = bd.key
+                        -- Forward: stored spell -> current override
                         if _FindOverride then
                             local ovr = _FindOverride(sid)
                             if ovr and ovr > 0 and ovr ~= sid then
                                 _spellRouteMap[ovr] = bd.key
                                 spellToBar[ovr] = bd.key
+                            end
+                        end
+                        -- Reverse: stored spell may be the override form
+                        -- (added while transformed). Resolve the base spell
+                        -- so the cooldownID lookup can match via info.spellID.
+                        if C_Spell and C_Spell.GetBaseSpell then
+                            local base = C_Spell.GetBaseSpell(sid)
+                            if base and base > 0 and base ~= sid then
+                                _spellRouteMap[base] = bd.key
+                                spellToBar[base] = bd.key
                             end
                         end
                     end
@@ -440,6 +451,55 @@ local function DecorateFrame(frame, barData)
 
     HideBlizzardDecorations(frame)
 
+    -- Hook SetPoint: when Blizzard repositions this frame (via Layout,
+    -- RefreshLayout, or internal updates), force it back to the stored
+    -- CDM anchor position if Blizzard tries to reposition it.
+    if not fd._setPointHooked then
+        fd._setPointHooked = true
+        hooksecurefunc(frame, "SetPoint", function(_, point, relativeTo)
+            local anchor = fd._cdmAnchor
+            if not anchor then return end
+            -- If relativeTo is already our bar container, this is our own
+            -- SetPoint call from LayoutCDMBar. Don't intercept.
+            if relativeTo == anchor[2] then return end
+            -- Blizzard is trying to move us. Force back to CDM position.
+            frame:ClearAllPoints()
+            frame:SetPoint(anchor[1], anchor[2], anchor[3], anchor[4], anchor[5])
+        end)
+    end
+
+    -- Hook SetDesaturated on the icon texture: when hideActive is enabled,
+    -- force desaturation back immediately if Blizzard tries to un-desaturate.
+    -- Same pattern as the SetSwipeColor hook -- prevents 1-frame flash.
+    if iconWidget and iconWidget.SetDesaturated and not fd._desatHooked then
+        fd._desatHooked = true
+        hooksecurefunc(iconWidget, "SetDesaturated", function()
+            if fd._inDesatHook then return end
+            local fc2 = _ecmeFC[frame]
+            local bk = fc2 and fc2.barKey
+            local bd2 = bk and barDataByKey[bk]
+            if not bd2 then return end
+            local anim = bd2.activeStateAnim or "blizzard"
+            if anim ~= "hideActive" then return end
+            -- Only override when the spell is actually active (swipe color
+            -- red channel != 0). Normal cooldown desat is left alone.
+            local swipeColor = frame.cooldownSwipeColor
+            if not swipeColor or type(swipeColor) == "number" then return end
+            if not swipeColor.GetRGBA then return end
+            local r = swipeColor:GetRGBA()
+            if not r or type(r) ~= "number" or issecretvalue(r) then return end
+            if r == 0 then return end
+            -- Spell is active: force desat + suppress alert
+            fd._inDesatHook = true
+            iconWidget:SetDesaturated(true)
+            if frame.SpellActivationAlert then
+                frame.SpellActivationAlert:SetAlpha(0)
+                frame.SpellActivationAlert:Hide()
+            end
+            fd._inDesatHook = false
+        end)
+    end
+
     if not fd.bg then
         local bg = frame:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
@@ -510,13 +570,42 @@ local function DecorateFrame(frame, barData)
 
     if fd.cooldown then
         fd.cooldown:SetDrawEdge(false)
-        fd.cooldown:SetDrawSwipe(true)
+        -- Swipe starts disabled. CollectAndReanchor enables it once the
+        -- frame is claimed and positioned on a bar. This prevents a flash
+        -- of black swipe at the Blizzard viewer's default position before
+        -- our reanchor runs.
+        fd.cooldown:SetDrawSwipe(false)
         fd.cooldown:SetDrawBling(false)
         fd.cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
         fd.cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
-        -- Do NOT call SetHideCountdownNumbers -- use SetCountdownFont
-        -- to redirect the countdown text. SetHideCountdownNumbers can taint.
-        -- fd.cooldown:SetHideCountdownNumbers(not barData.showCooldownText)
+        -- Hook SetSwipeColor: when Blizzard changes the swipe color (e.g.
+        -- red for active state), force it back to our color immediately.
+        -- Without this, Blizzard's colored swipe renders for 1 frame before
+        -- the ticker catches it.
+        if not fd._swipeColorHooked then
+            fd._swipeColorHooked = true
+            local cd = fd.cooldown
+            hooksecurefunc(cd, "SetSwipeColor", function(_, r, g, b, a)
+                if fd._inSwipeHook then return end
+                local fc2 = _ecmeFC[frame]
+                local bk = fc2 and fc2.barKey
+                local bd2 = bk and barDataByKey[bk]
+                local sa = bd2 and bd2.swipeAlpha or 0.7
+                if r == 0 and g == 0 and b == 0 and a == sa then return end
+                fd._inSwipeHook = true
+                cd:SetSwipeColor(0, 0, 0, sa)
+                fd._inSwipeHook = false
+            end)
+            -- Force swipe always visible. Blizzard disables swipe on charge
+            -- spells while recharging. We always want it shown.
+            hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
+                if fd._inSwipeHook then return end
+                if show then return end
+                fd._inSwipeHook = true
+                cd:SetDrawSwipe(true)
+                fd._inSwipeHook = false
+            end)
+        end
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)
 
@@ -1179,10 +1268,11 @@ local function CollectAndReanchor()
                                 FC(frame).barKey = barKey
                                 FC(frame).spellID = entry.baseSpellID or entry.spellID
                                 icons[count] = frame
-                                -- Show + alpha 1 so the icon is "on". The viewer's
-                                -- alpha is the sole visibility switch.
                                 frame:SetAlpha(1)
                                 frame:Show()
+                                if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                                    frame.Cooldown:SetDrawSwipe(true)
+                                end
                                 -- Reparent custom frames (trinkets, racials, etc.)
                                 -- to our container. Never parent to Blizzard viewers
                                 -- as that taints the secure frame tree.
@@ -1209,6 +1299,9 @@ local function CollectAndReanchor()
                         icons[count] = frame
                         frame:SetAlpha(1)
                         frame:Show()
+                        if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                            frame.Cooldown:SetDrawSwipe(true)
+                        end
                         -- Kill any stale untracked overlay on buff bar frames
                         local ov = frame._untrackedOverlay
                         if not ov then
@@ -1219,20 +1312,27 @@ local function CollectAndReanchor()
                     end
                 end
 
-                -- Clear excess icons (alpha 0, no offscreen positioning).
-                -- Skip for buff bars: Blizzard's viewer can be mid-update
-                -- during OnActiveStateChanged, causing EnumerateActive to
-                -- return a partial set. The 1s alpha-0 cleanup handles
-                -- truly unclaimed buff frames instead.
-                if not isBuff then
-                    for i = count + 1, #icons do
-                        local icon = icons[i]
-                        if icon then
+                -- Clear excess icons. Buff frames: Blizzard owns their
+                -- lifecycle, only disable swipe. CD/utility: hide.
+                for i = count + 1, #icons do
+                    local icon = icons[i]
+                    if icon then
+                        -- Clear stored anchor so SetPoint hook stops intercepting
+                        local efd = hookFrameData[icon]
+                        if efd then efd._cdmAnchor = nil end
+                        if isBuff then
+                            if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
+                                icon.Cooldown:SetDrawSwipe(false)
+                            end
+                        else
                             icon:ClearAllPoints()
-                            icon:SetAlpha(0)
+                            icon:Hide()
+                            if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
+                                icon.Cooldown:SetDrawSwipe(false)
+                            end
                         end
-                        icons[i] = nil
                     end
+                    icons[i] = nil
                 end
 
                 -- Mark unclaimed frames as used so the alpha-0 cleanup
@@ -1272,12 +1372,25 @@ local function CollectAndReanchor()
     -- Clean up empty bars
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and not barLists[bd.key] then
+            local isBuff_cleanup = (bd.barType == "buffs" or bd.key == "buffs")
             local icons = cdmBarIcons[bd.key]
             if icons then
                 for i = 1, #icons do
                     if icons[i] then
-                        icons[i]:ClearAllPoints()
-                        icons[i]:SetAlpha(0)
+                        local efd = hookFrameData[icons[i]]
+                        if efd then efd._cdmAnchor = nil end
+                        if isBuff_cleanup then
+                            -- Buff: only disable swipe, Blizzard owns the rest
+                            if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
+                                icons[i].Cooldown:SetDrawSwipe(false)
+                            end
+                        else
+                            icons[i]:ClearAllPoints()
+                            icons[i]:Hide()
+                            if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
+                                icons[i].Cooldown:SetDrawSwipe(false)
+                            end
+                        end
                     end
                     icons[i] = nil
                 end
@@ -1290,33 +1403,41 @@ local function CollectAndReanchor()
         end
     end
 
-    -- 5. Alpha cleanup: unclaimed frames -> alpha 0.
-    -- Time-based safety: only hide frames unclaimed for 1+ seconds.
-    -- Alpha-0 unclaimed CD/utility frames only.
-    -- Buff frames are never touched: Blizzard controls their visibility.
+    -- 5. Cleanup unclaimed frames.
+    -- Buff frames: Blizzard fully owns their lifecycle. Only disable the
+    -- swipe to prevent ghost swipe artifacts. Never ClearAllPoints, SetAlpha,
+    -- or Hide -- Blizzard needs the frame intact to re-show on aura updates.
+    -- CD/utility frames: we own these, hide immediately.
     local buffViewer = _G["BuffIconCooldownViewer"]
     local barViewer  = _G["BuffBarCooldownViewer"]
-    local now = GetTime()
     for frame in pairs(allActiveFrames) do
-        local vf = frame.viewerFrame
-        if vf == buffViewer or vf == barViewer then
-            -- Buff frame: Blizzard owns visibility, never alpha-0
-        elseif _scratch_usedFrames[frame] then
-            local fc = FC(frame)
-            fc._unclaimedSince = nil
+        if _scratch_usedFrames[frame] then
+            -- Claimed: leave alone
         elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
-            -- Custom frames: never alpha-0
+            -- Custom frames: managed by their own systems
         else
-            local fc = FC(frame)
-            if not fc._unclaimedSince then
-                fc._unclaimedSince = now
-            elseif now - fc._unclaimedSince >= 1.0 then
-                frame:SetAlpha(0)
+            -- Clear stored anchor so SetPoint hook stops intercepting
+            local efd = hookFrameData[frame]
+            if efd then efd._cdmAnchor = nil end
+            local vf = frame.viewerFrame
+            if vf == buffViewer or vf == barViewer then
+                -- Buff frame: only disable swipe, touch nothing else
+                if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                    frame.Cooldown:SetDrawSwipe(false)
+                end
+            else
+                frame:ClearAllPoints()
+                frame:Hide()
+                if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                    frame.Cooldown:SetDrawSwipe(false)
+                end
             end
         end
     end
+
+    if not ns._initialReanchorDone then ns._initialReanchorDone = true end
 
     if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
     ns.RefreshAllOverlays()
@@ -1546,7 +1667,6 @@ local function ProcessReanchorQueue(self)
     reanchorDirty = false
     _lastReanchorTime = now
     CollectAndReanchor()
-    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
 end
 
 -------------------------------------------------------------------------------
@@ -1638,6 +1758,24 @@ function ns.SetupViewerHooks()
             end)
             -- Hook existing frames too
             if isBuff then InstallBuffFrameHooks(v) end
+
+            -- Intercept newly acquired frames the instant Blizzard creates
+            -- them, before they render at the viewer's default position.
+            -- Alpha 0 until our reanchor claims and positions them.
+            -- Skip during init: on /reload ALL frames are acquired at once
+            -- and our reanchor hasn't run yet, so blanking them would hide
+            -- all buffs until the first buff change.
+            if v.OnAcquireItemFrame then
+                hooksecurefunc(v, "OnAcquireItemFrame", function(_, itemFrame)
+                    if not ns._initialReanchorDone then return end
+                    if itemFrame then
+                        itemFrame:SetAlpha(0)
+                        if itemFrame.Cooldown and itemFrame.Cooldown.SetDrawSwipe then
+                            itemFrame.Cooldown:SetDrawSwipe(false)
+                        end
+                    end
+                end)
+            end
         end
     end
 
@@ -1686,6 +1824,18 @@ function ns.SetupViewerHooks()
             end)
             SyncViewerToBar()
         end
+    end
+
+    -- 3b. Buff viewer RefreshLayout hook: run an IMMEDIATE reanchor (not
+    -- queued) so icons are repositioned before the frame renders. Without
+    -- this, new buff icons flash at Blizzard's default viewer position for
+    -- up to 0.15s until the throttled reanchor fires.
+    local buffViewer = _G["BuffIconCooldownViewer"]
+    if buffViewer and buffViewer.RefreshLayout then
+        hooksecurefunc(buffViewer, "RefreshLayout", function()
+            if ns._specChangePending then return end
+            CollectAndReanchor()
+        end)
     end
 
     -- 4. CooldownViewerSettings show/hide: force reanchor.

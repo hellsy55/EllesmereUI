@@ -6827,6 +6827,19 @@ function EAB:FinishSetup()
     self:RegisterEvent("ACTIONBAR_PAGE_CHANGED", QueueAlwaysShowButtonsRefresh)
     self:RegisterEvent("UPDATE_BONUS_ACTIONBAR", QueueAlwaysShowButtonsRefresh)
 
+    -- Spec swap: Blizzard may re-show SlotArt/SlotBackground or change button
+    -- regions after our hooks ran. Deferred re-apply ensures our cosmetic
+    -- overrides (squaring, borders, slot art hiding) are re-enforced after
+    -- Blizzard finishes processing the spec change.
+    self:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function()
+        C_Timer.After(0.5, function()
+            if not InCombatLockdown() then
+                ApplyAll()
+                RestoreBarPositions()
+            end
+        end)
+    end)
+
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA", function()
         self:UpdateHousingVisibility()
     end)
