@@ -4992,8 +4992,9 @@ local function CreateMover(barKey)
                             SetAnchorInfo(pmKey, targetKey, sideVal)
                             -- Apply the anchor position
                             ApplyAnchorPosition(pmKey, targetKey, sideVal)
-                            -- Propagate to children so they follow immediately
-                            PropagateAnchorChain(pmKey)
+                            -- Propagate to children after layout flushes so
+                            -- they read the correct bounds from the newly-anchored parent
+                            C_Timer.After(0, function() PropagateAnchorChain(pmKey) end)
                             hasChanges = true
                             -- Refresh the anchored mover's text
                             if movers[pmKey] and movers[pmKey].RefreshAnchoredText then

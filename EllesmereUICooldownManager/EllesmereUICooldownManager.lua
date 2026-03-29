@@ -1598,13 +1598,8 @@ function ns.SyncHideWhenInactive(forceValue)
     local activeLayout = layoutInfo.layouts and layoutInfo.layouts[activeIdx]
     if not activeLayout or not activeLayout.systems then return end
 
-    local targetHide
-    if forceValue ~= nil then
-        targetHide = forceValue
-    else
-        local p = ECME.db and ECME.db.profile
-        targetHide = (p and p.cdmBars and p.cdmBars.hideBuffsWhenInactive) and 1 or 0
-    end
+    -- Always HideWhenInactive=1 for buff viewers. No user toggle.
+    local targetHide = 1
 
     local cooldownSystem = Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
     local hideEnum = Enum.EditModeCooldownViewerSetting and Enum.EditModeCooldownViewerSetting.HideWhenInactive
@@ -1639,9 +1634,12 @@ function ns.SyncHideWhenInactive(forceValue)
         end
     end
 
-    -- Save layout. Don't force-apply via ShowUIPanel/HideUIPanel --
-    -- that causes taint. Blizzard applies saved layouts naturally.
-    pcall(C_EditMode.SaveLayouts, layoutInfo)
+    -- Only save if something actually changed. SaveLayouts triggers
+    -- Blizzard's layout reapply which repositions all Edit Mode frames
+    -- and can break anchored element positions.
+    if changed then
+        pcall(C_EditMode.SaveLayouts, layoutInfo)
+    end
     if ns.QueueReanchor then ns.QueueReanchor() end
 end
 

@@ -7284,23 +7284,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Hide Buffs When Inactive (global setting, applies to all buff bars)
         if barData.barType == "buffs" or barData.key == "buffs" then
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Hide Buffs When Inactive",
-                  tooltip = "Global setting that applies to all buff bars.\nControls Blizzard's Edit Mode visibility for buff icons.",
-                  getValue=function()
-                      local p = ns.ECME and ns.ECME.db and ns.ECME.db.profile
-                      return p and p.cdmBars and p.cdmBars.hideBuffsWhenInactive == true
-                  end,
-                  setValue=function(v)
-                      local p = ns.ECME and ns.ECME.db and ns.ECME.db.profile
-                      if p and p.cdmBars then
-                          p.cdmBars.hideBuffsWhenInactive = v
-                      end
-                      if ns.SyncHideWhenInactive then ns.SyncHideWhenInactive() end
-                      Refresh()
-                  end },
-                { type="label", text="" }
-            );  y = y - h
+            -- Hide Buffs When Inactive toggle removed: always forced ON.
         end
 
         _, h = W:Spacer(parent, y, 8);  y = y - h
