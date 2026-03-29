@@ -5277,33 +5277,6 @@ end)
 --  Slash commands
 -------------------------------------------------------------------------------
 -- DEBUG: /cdmwatchbuffs to trace everything touching the buff bar
--- Auto-watch buffs bar for disappearing issues
-C_Timer.After(3, function()
-    local frame = cdmBarFrames["buffs"]
-    if not frame then return end
-    local viewer = _G["BuffIconCooldownViewer"]
-    hooksecurefunc(frame, "SetAlpha", function(_, a)
-        if a == 0 or a < 0.5 then
-            print(("[CDM DEBUG] buffs SetAlpha(%s) from:\n%s"):format(tostring(a), debugstack(2, 4, 0)))
-        end
-    end)
-    hooksecurefunc(frame, "Hide", function()
-        print(("[CDM DEBUG] buffs Hide() from:\n%s"):format(debugstack(2, 4, 0)))
-    end)
-    if viewer then
-        hooksecurefunc(viewer, "SetAlpha", function(_, a)
-            if a == 0 or a < 0.5 then
-                print(("[CDM DEBUG] BuffIconViewer SetAlpha(%s) from:\n%s"):format(tostring(a), debugstack(2, 4, 0)))
-            end
-        end)
-    end
-    -- Watch individual buff icon alpha changes (only log alpha 0)
-    hooksecurefunc(frame, "SetSize", function(_, w, h)
-        if w and w < 2 then
-            print(("[CDM DEBUG] buffs SetSize(%s,%s) from:\n%s"):format(tostring(w), tostring(h), debugstack(2, 3, 0)))
-        end
-    end)
-end)
 
 SLASH_ECME1 = "/ecme"
 SLASH_ECME2 = "/cdmeffects"
