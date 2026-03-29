@@ -3399,8 +3399,10 @@ initFrame:SetScript("OnEvent", function(self)
     local function UpdateCDMPreviewAndResize()
         UpdateCDMPreview()
         if _cdmPreview and _cdmHeaderFixedH > 0 then
-            local newTotal = _cdmHeaderFixedH + _cdmPreview:GetHeight() * (_cdmPreview:GetScale() or 1)
-            EllesmereUI:UpdateContentHeaderHeight(newTotal)
+            -- Wrapper height is already capped by the Update function's resize logic
+            local wrapperH = _cdmPreview._wrapper and _cdmPreview._wrapper:GetHeight()
+                             or math.min(_cdmPreview:GetHeight() * (_cdmPreview:GetScale() or 1), 200)
+            EllesmereUI:UpdateContentHeaderHeight(_cdmHeaderFixedH + wrapperH)
         end
     end
 
@@ -5152,16 +5154,159 @@ initFrame:SetScript("OnEvent", function(self)
         local PAD = EllesmereUI.CONTENT_PAD or 10
 
         -- Create preview container scale to match real in-game icon sizes
-        local pf = CreateFrame("Frame", nil, parent)
-        pf:SetClipsChildren(false)
-
         local previewScale = UIParent:GetEffectiveScale() / parent:GetEffectiveScale()
-        pf:SetScale(previewScale)
-
         local localParentW = (parent:GetWidth() - PAD * 2) / previewScale
         local initH = (barData.iconSize or 36) + 10
+
+        -- Max visible height for the preview area (in parent-space pixels)
+        local PREVIEW_MAX_H = 200
+
+        -- Wrapper frame at parent scale; holds the scroll frame and scrollbar
+        local wrapper = CreateFrame("Frame", nil, parent)
+        wrapper:SetPoint("TOPLEFT", parent, "TOPLEFT", PAD, yOff)
+        wrapper:SetSize(parent:GetWidth() - PAD * 2, PREVIEW_MAX_H)
+        wrapper:SetClipsChildren(true)
+
+        local pf = CreateFrame("Frame", nil, parent)
+        pf:SetClipsChildren(false)
+        pf:SetScale(previewScale)
         pf:SetSize(localParentW, initH)
-        PP.Point(pf, "TOPLEFT", parent, "TOPLEFT", PAD / previewScale, yOff / previewScale)
+
+        local sf = CreateFrame("ScrollFrame", nil, wrapper)
+        sf:SetAllPoints()
+        sf:SetScrollChild(pf)
+        sf:EnableMouseWheel(true)
+
+        -- Thin scrollbar track (4px, right side)
+        local pvTrack = CreateFrame("Frame", nil, wrapper)
+        pvTrack:SetWidth(4)
+        pvTrack:SetPoint("TOPRIGHT", wrapper, "TOPRIGHT", -2, -2)
+        pvTrack:SetPoint("BOTTOMRIGHT", wrapper, "BOTTOMRIGHT", -2, 2)
+        pvTrack:SetFrameLevel(wrapper:GetFrameLevel() + 5)
+        do
+            local bg = pvTrack:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(1, 1, 1, 0.02)
+        end
+        pvTrack:Hide()
+
+        local pvThumb = CreateFrame("Button", nil, pvTrack)
+        pvThumb:SetWidth(4)
+        pvThumb:SetFrameLevel(pvTrack:GetFrameLevel() + 1)
+        pvThumb:EnableMouse(true)
+        pvThumb:RegisterForDrag("LeftButton")
+        pvThumb:SetScript("OnDragStart", function() end)
+        pvThumb:SetScript("OnDragStop", function() end)
+        do
+            local t = pvThumb:CreateTexture(nil, "ARTWORK")
+            t:SetAllPoints()
+            t:SetColorTexture(1, 1, 1, 0.27)
+        end
+
+        -- Smooth scroll state
+        local pvScrollTarget = 0
+        local pvSmoothing = false
+        local PV_SCROLL_STEP = 40
+        local PV_SMOOTH_SPEED = 12
+        local pvSmoothFrame = CreateFrame("Frame")
+        pvSmoothFrame:Hide()
+
+        local function UpdatePVThumb()
+            local maxScroll = EllesmereUI.SafeScrollRange(sf)
+            if maxScroll <= 0 then pvTrack:Hide(); return end
+            pvTrack:Show()
+            local trackH = pvTrack:GetHeight()
+            local visH = sf:GetHeight()
+            local ratio = visH / (visH + maxScroll)
+            local thumbH = math.max(20, trackH * ratio)
+            pvThumb:SetHeight(thumbH)
+            local curScroll = 0
+            do
+                local ok, val = pcall(sf.GetVerticalScroll, sf)
+                if ok and val then
+                    local ok2, n = pcall(tonumber, val)
+                    if ok2 and n then curScroll = n end
+                end
+            end
+            local scrollRatio = curScroll / maxScroll
+            local maxTravel = trackH - thumbH
+            pvThumb:ClearAllPoints()
+            pvThumb:SetPoint("TOP", pvTrack, "TOP", 0, -(scrollRatio * maxTravel))
+        end
+
+        pvSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+            local cur = sf:GetVerticalScroll()
+            local maxScroll = EllesmereUI.SafeScrollRange(sf)
+            pvScrollTarget = math.max(0, math.min(maxScroll, pvScrollTarget))
+            local diff = pvScrollTarget - cur
+            if math.abs(diff) < 0.3 then
+                sf:SetVerticalScroll(pvScrollTarget)
+                UpdatePVThumb()
+                pvSmoothing = false
+                pvSmoothFrame:Hide()
+                return
+            end
+            local newScroll = cur + diff * math.min(1, PV_SMOOTH_SPEED * elapsed)
+            newScroll = math.max(0, math.min(maxScroll, newScroll))
+            sf:SetVerticalScroll(newScroll)
+            UpdatePVThumb()
+        end)
+
+        local function PVSmoothScrollTo(target)
+            local maxScroll = EllesmereUI.SafeScrollRange(sf)
+            pvScrollTarget = math.max(0, math.min(maxScroll, target))
+            if not pvSmoothing then
+                pvSmoothing = true
+                pvSmoothFrame:Show()
+            end
+        end
+
+        sf:SetScript("OnMouseWheel", function(self, delta)
+            local maxScroll = EllesmereUI.SafeScrollRange(self)
+            if maxScroll <= 0 then return end
+            local base = pvSmoothing and pvScrollTarget or self:GetVerticalScroll()
+            PVSmoothScrollTo(base - delta * PV_SCROLL_STEP)
+        end)
+        sf:SetScript("OnScrollRangeChanged", UpdatePVThumb)
+
+        -- Thumb drag
+        pvThumb:SetScript("OnMouseDown", function(self, button)
+            if button ~= "LeftButton" then return end
+            pvSmoothing = false
+            pvSmoothFrame:Hide()
+            local _, cursorY = GetCursorPosition()
+            local dragStartY = cursorY / self:GetEffectiveScale()
+            local dragStartScroll = sf:GetVerticalScroll()
+            self:SetScript("OnUpdate", function(self2)
+                if not IsMouseButtonDown("LeftButton") then
+                    self2:SetScript("OnUpdate", nil)
+                    return
+                end
+                local _, cy = GetCursorPosition()
+                cy = cy / self2:GetEffectiveScale()
+                local deltaY = dragStartY - cy
+                local trackH = pvTrack:GetHeight()
+                local maxTravel = trackH - self2:GetHeight()
+                if maxTravel <= 0 then return end
+                local maxScroll = EllesmereUI.SafeScrollRange(sf)
+                local newScroll = math.max(0, math.min(maxScroll,
+                    dragStartScroll + (deltaY / maxTravel) * maxScroll))
+                pvScrollTarget = newScroll
+                sf:SetVerticalScroll(newScroll)
+                UpdatePVThumb()
+            end)
+        end)
+        pvThumb:SetScript("OnMouseUp", function(self, button)
+            if button ~= "LeftButton" then return end
+            self:SetScript("OnUpdate", nil)
+        end)
+
+        -- Store refs for height management after Update()
+        pf._wrapper = wrapper
+        pf._scrollFrame = sf
+        pf._previewScale = previewScale
+        pf._PREVIEW_MAX_H = PREVIEW_MAX_H
+        pf._updatePVThumb = UpdatePVThumb
 
         -- Pixel-snap helper for the preview's effective scale
         local function Snap(val)
@@ -6452,6 +6597,19 @@ initFrame:SetScript("OnEvent", function(self)
                 self:SetHeight(totalH + 10)
             end
 
+            -- Resize wrapper to min(content, max) and toggle scrollbar
+            local parentH = self:GetHeight() * (self._previewScale or 1)
+            local maxH = self._PREVIEW_MAX_H or 200
+            if parentH > maxH then
+                -- Add bottom padding so info text is fully visible when scrolled down
+                self:SetHeight(self:GetHeight() + 30)
+                self._wrapper:SetHeight(maxH)
+            else
+                self._wrapper:SetHeight(parentH)
+                if self._scrollFrame then self._scrollFrame:SetVerticalScroll(0) end
+            end
+            if self._updatePVThumb then self._updatePVThumb() end
+
             -- Restart active state preview on first icon if toggled on
             if _cdmActivePreviewOn then
                 StopActiveStatePreview()
@@ -6467,7 +6625,8 @@ initFrame:SetScript("OnEvent", function(self)
         if _cdmActivePreviewOn then
             StartActiveStatePreview()
         end
-        return pf:GetHeight() * previewScale
+        -- Return wrapper height (already capped by Update's resize logic)
+        return wrapper:GetHeight()
     end
 
     local function BuildCDMBarsPage(pageName, parent, yOffset)

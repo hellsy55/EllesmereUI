@@ -1696,19 +1696,26 @@ local function UpdateBordersForScale(frame, unit)
     -- 9) Inset the clip container by half a physical pixel. This is
     -- sub-pixel and invisible, but guarantees the GPU clips any StatusBar
     -- texture rounding that pushes the fill past the frame edge.
+    -- Skip the inset on the portrait side so the health bar stays flush
+    -- with the portrait (which is anchored to the frame, not _barClip).
     if frame._barClip and frame.Health then
         local es = frame:GetEffectiveScale()
         local halfPixel = es > 0 and (PP.perfect / es) * 0.5 or PP.mult * 0.5
+        local clipL, clipR = halfPixel, halfPixel
+        if showPortrait and isAttached and frame.Portrait and frame.Portrait.backdrop then
+            if effectiveSide == "left" then clipL = 0
+            elseif effectiveSide == "right" then clipR = 0 end
+        end
         frame._barClip:ClearAllPoints()
-        frame._barClip:SetPoint("TOPLEFT", frame, "TOPLEFT", halfPixel, -halfPixel)
-        frame._barClip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -halfPixel, halfPixel)
+        frame._barClip:SetPoint("TOPLEFT", frame, "TOPLEFT", clipL, -halfPixel)
+        frame._barClip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -clipR, halfPixel)
         -- Re-anchor health bar to clip so coordinates are consistent
         local xOff = frame.Health._xOffset or 0
         local rInset = frame.Health._rightInset or 0
         local topOff = frame.Health._topOffset or 0
         frame.Health:ClearAllPoints()
-        PP.Point(frame.Health, "TOPLEFT", frame._barClip, "TOPLEFT", xOff, -topOff)
-        PP.Point(frame.Health, "RIGHT", frame._barClip, "RIGHT", -rInset, 0)
+        frame.Health:SetPoint("TOPLEFT", frame._barClip, "TOPLEFT", xOff, PP.Scale(-topOff))
+        frame.Health:SetPoint("RIGHT", frame._barClip, "RIGHT", -rInset, 0)
         PP.Height(frame.Health, settings.healthHeight)
     end
 end
@@ -2686,51 +2693,8 @@ local function StyleFullFrame(frame, unit)
         frame.Castbar = CreateCastBar(frame, unit, settings)
         SetupShowOnCastBar(frame, "player")
 
-        -- Always create player buffs; oUF element disabled later if not wanted
-        do
-            local auraSize = settings.buffSize or 22
-            local gap = 1
-            local perRow = 7
-            local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
-                settings.buffAnchor, settings.buffGrowth
-            )
-            -- Offset bottom-anchored buffs below castbar when locked to frame
-            local buffCbOffset = 0
-            if (settings.buffAnchor == "bottomleft" or settings.buffAnchor == "bottomright"
-                or settings.buffAnchor == "left" or settings.buffAnchor == "right")
-                and settings.showPlayerCastbar then
-                local cbH = settings.playerCastbarHeight or 0
-                if cbH <= 0 then cbH = 14 end
-                buffCbOffset = -cbH
-            end
-            local buffs = CreateFrame("Frame", nil, frame)
-            buffs:SetPoint(bia, frame, bfp, box * gap + (settings.buffOffsetX or 0), boy * gap + buffCbOffset + (settings.buffOffsetY or 0))
-            buffs:SetSize(frame:GetWidth(), auraSize)
-            buffs.size = auraSize
-            buffs.spacing = gap
-            buffs.num = settings.maxBuffs or 4
-            buffs["size-x"] = perRow
-            buffs.initialAnchor = bia
-            buffs.growthX = bgx
-            buffs.growthY = bgy
-            buffs.filter = "HELPFUL"
-            buffs.PostCreateButton = function(_, button)
-                if not button then return end
-                if button.Icon then button.Icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
-                if button.Cooldown then
-                    button.Cooldown:SetDrawEdge(false)
-                    button.Cooldown:SetReverse(true)
-                    button.Cooldown:SetHideCountdownNumbers(true)
-                end
-                if not button.Border then
-                    button.Border = CreateFrame("Frame", nil, button)
-                    button.Border:SetAllPoints()
-                    button.Border:SetFrameLevel(button:GetFrameLevel() + 1)
-                    PP.CreateBorder(button.Border, 0, 0, 0, 1)
-                end
-            end
-            frame.Buffs = buffs
-        end
+        -- Create player buffs and debuffs using shared aura setup
+        CreateTargetAuras(frame, unit)
     elseif unit == "target" then
         local pSide = settings.portraitSide or "right"
         -- For attached, "top" falls back to default side
@@ -4388,8 +4352,8 @@ local function ReloadFrames()
                         local powerAboveOff = (ppPos == "above") and settings.powerHeight or 0
                         local hTopOff = cpAboveH + powerAboveOff + (btbPos == "top" and settings.bottomTextBar and (settings.bottomTextBarHeight or 16) or 0)
                         frame.Health._topOffset = hTopOff
-                        PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", healthXOffset, -hTopOff)
-                        PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -healthRightInset, 0)
+                        frame.Health:SetPoint("TOPLEFT", frame, "TOPLEFT", healthXOffset, PP.Scale(-hTopOff))
+                        frame.Health:SetPoint("RIGHT", frame, "RIGHT", -healthRightInset, 0)
                         PP.Height(frame.Health, settings.healthHeight)
                     end
                     if frame.Power then
@@ -4586,6 +4550,44 @@ local function ReloadFrames()
                         end
                     end
 
+                    -- Live toggle player debuffs
+                    if frame.Debuffs then
+                        local dAnc = settings.debuffAnchor or "none"
+                        if dAnc == "none" then
+                            if frame:IsElementEnabled("Debuffs") then
+                                frame:DisableElement("Debuffs")
+                            end
+                            frame.Debuffs:Hide()
+                            frame.Debuffs.num = 0
+                        else
+                            if not frame:IsElementEnabled("Debuffs") then
+                                frame:EnableElement("Debuffs")
+                            end
+                            frame.Debuffs:Show()
+                            frame.Debuffs.num = settings.maxDebuffs or 10
+                            local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings.debuffGrowth or "auto")
+                            local debuffCbOff = 0
+                            if (dAnc == "bottomleft" or dAnc == "bottomright") and settings.showPlayerCastbar then
+                                local cbH = settings.playerCastbarHeight or 0
+                                if cbH <= 0 then cbH = 14 end
+                                debuffCbOff = -cbH
+                            end
+                            local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, debuffCbOff, dgx or 0, dgy or 0, settings.maxDebuffs or 10, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0)
+                            if frame.Debuffs._lastDebuffKey ~= debuffKey then
+                                frame.Debuffs._lastDebuffKey = debuffKey
+                                frame.Debuffs.size = settings.debuffSize or 22
+                                frame.Debuffs:ClearAllPoints()
+                                frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + debuffCbOff + (settings.debuffOffsetY or 0))
+                                frame.Debuffs.initialAnchor = dia
+                                frame.Debuffs.growthX = dgx
+                                frame.Debuffs.growthY = dgy
+                                if frame.Debuffs.ForceUpdate then
+                                    frame.Debuffs:ForceUpdate()
+                                end
+                            end
+                        end
+                    end
+
                     -- Reposition name and health text (player)
                     if frame._applyTextTags then
                         frame._applyTextTags(settings.leftTextContent or "name", settings.rightTextContent or "both", settings.centerTextContent or "none")
@@ -4712,8 +4714,8 @@ local function ReloadFrames()
                         frame.Health._xOffset = healthXOffset
                         frame.Health._rightInset = healthRightInset
                         frame.Health._topOffset = tTopOff
-                        PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", healthXOffset, -tTopOff)
-                        PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -healthRightInset, 0)
+                        frame.Health:SetPoint("TOPLEFT", frame, "TOPLEFT", healthXOffset, PP.Scale(-tTopOff))
+                        frame.Health:SetPoint("RIGHT", frame, "RIGHT", -healthRightInset, 0)
                         PP.Height(frame.Health, settings.healthHeight)
                     end
                     if frame.Power then
@@ -6098,8 +6100,8 @@ function InitializeFrames()
             end
             local cpPush = pipH + btbOff
             anchorFrame:ClearAllPoints()
-            PP.Point(anchorFrame, "TOPLEFT", frames.player, "TOPLEFT", anchorFrame._xOffset or 0, -cpPush)
-            PP.Point(anchorFrame, "RIGHT", frames.player, "RIGHT", -(anchorFrame._rightInset or 0), 0)
+            anchorFrame:SetPoint("TOPLEFT", frames.player, "TOPLEFT", anchorFrame._xOffset or 0, PP.Scale(-cpPush))
+            anchorFrame:SetPoint("RIGHT", frames.player, "RIGHT", -(anchorFrame._rightInset or 0), 0)
             PP.Point(bar, "BOTTOMLEFT", anchorFrame, "TOPLEFT", 0, 0)
             PP.Point(bar, "BOTTOMRIGHT", anchorFrame, "TOPRIGHT", 0, 0)
             local fw = db.profile.player.frameWidth or 181
@@ -6124,8 +6126,8 @@ function InitializeFrames()
                     btbOff = db.profile.player.bottomTextBarHeight or 16
                 end
                 frames.player.Health:ClearAllPoints()
-                PP.Point(frames.player.Health, "TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, -btbOff)
-                PP.Point(frames.player.Health, "RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
+                frames.player.Health:SetPoint("TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, PP.Scale(-btbOff))
+                frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
             -- Center on health bar (ignores portrait)
             PP.Point(bar, "BOTTOM", frames.player.Health, "TOP", offsetX, offsetY)
@@ -6139,8 +6141,8 @@ function InitializeFrames()
                     btbOff = db.profile.player.bottomTextBarHeight or 16
                 end
                 frames.player.Health:ClearAllPoints()
-                PP.Point(frames.player.Health, "TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, -btbOff)
-                PP.Point(frames.player.Health, "RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
+                frames.player.Health:SetPoint("TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, PP.Scale(-btbOff))
+                frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
             bar:SetParent(UIParent)
             local pos = db.profile.positions.classPower
@@ -6160,10 +6162,10 @@ function InitializeFrames()
                     btbOff = db.profile.player.bottomTextBarHeight or 16
                 end
                 frames.player.Health:ClearAllPoints()
-                PP.Point(frames.player.Health, "TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, -btbOff)
-                PP.Point(frames.player.Health, "RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
+                frames.player.Health:SetPoint("TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, PP.Scale(-btbOff))
+                frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
-            -- "bottom" position ? flush with bottom of frame; shifts below castbar when visible (unless user set Y offset)
+            -- "bottom" position -- flush with bottom of frame; shifts below castbar when visible (unless user set Y offset)
             bar:SetParent(frames.player)
             if bar._bottomBdrFrame then bar._bottomBdrFrame:Hide() end
             local function AnchorBottom()
@@ -6256,8 +6258,8 @@ function InitializeFrames()
                     btbOff = db.profile.player.bottomTextBarHeight or 16
                 end
                 frames.player.Health:ClearAllPoints()
-                PP.Point(frames.player.Health, "TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, -btbOff)
-                PP.Point(frames.player.Health, "RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
+                frames.player.Health:SetPoint("TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, PP.Scale(-btbOff))
+                frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
             ResizeFrameForClassPower(0)
             return

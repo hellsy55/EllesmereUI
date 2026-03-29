@@ -176,7 +176,7 @@ function ns.RebuildSpellRouteMap()
     local spellToBar = {}
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and bd.key ~= "buffs" then
+        if bd.enabled and bd.barType ~= "buffs" and bd.barType ~= "custom_buff" then
             local sd = ns.GetBarSpellData(bd.key)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
