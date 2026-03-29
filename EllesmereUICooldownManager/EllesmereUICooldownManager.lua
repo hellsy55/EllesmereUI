@@ -3551,6 +3551,46 @@ BuildAllCDMBars = function()
     end
     UpdateCDMKeybinds()
 
+    -- Re-hide bars whose visibility setting says they should be hidden.
+    -- Only hides -- never shows or changes alpha on bars that should be visible.
+    -- Without this, rebuilds leave all icons at alpha 1 even when the bar
+    -- is set to "in combat only", "never", etc.
+    for _, barData in ipairs(p.cdmBars.bars) do
+        local frame = cdmBarFrames[barData.key]
+        if frame and barData.enabled then
+            local vis = barData.barVisibility or "always"
+            local shouldHide = false
+            if _cdmInVehicle then
+                shouldHide = true
+            elseif EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(barData) then
+                shouldHide = true
+            elseif vis == "never" then
+                shouldHide = true
+            elseif vis == "in_combat" then
+                shouldHide = not _inCombat
+            elseif vis == "out_of_combat" then
+                shouldHide = _inCombat
+            elseif vis == "in_raid" then
+                shouldHide = not (IsInRaid and IsInRaid() or false)
+            elseif vis == "in_party" then
+                local inRaid = IsInRaid and IsInRaid() or false
+                shouldHide = not ((not inRaid and (IsInGroup and IsInGroup() or false)) or inRaid)
+            elseif vis == "solo" then
+                shouldHide = (IsInRaid and IsInRaid()) or (IsInGroup and IsInGroup()) or false
+            end
+            if shouldHide then
+                frame:SetAlpha(0)
+                frame._visHidden = true
+                local icons = cdmBarIcons[barData.key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] then icons[ii]:SetAlpha(0) end
+                    end
+                end
+            end
+        end
+    end
+
     -- Ensure vehicle/petbattle proxy exists to trigger _CDMApplyVisibility on state change
     if not _cdmVehicleProxy then
         _cdmVehicleProxy = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
