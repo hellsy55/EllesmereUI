@@ -5156,6 +5156,47 @@ function EAB:HookProcGlow()
     end
 end
 
+-- Validate active proc glows against IsSpellOverlayed ground truth.
+-- Cleans up stale glows when HideAlert doesn't fire reliably.
+-- Wrapped in do..end to avoid adding locals to the main chunk (200 limit).
+do
+    local function ValidateProcGlows()
+        for btn in pairs(_procState.active) do
+            if btn._eabSquared then
+                local action = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
+                local spellID
+                if action and HasAction and HasAction(action) then
+                    local actionType, id = GetActionInfo(action)
+                    if actionType == "spell" then spellID = id end
+                end
+                local overlayed = spellID and C_SpellActivationOverlay
+                    and C_SpellActivationOverlay.IsSpellOverlayed
+                    and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
+                if not overlayed then
+                    _procState.active[btn] = nil
+                    if btn._eabGlowWrapper then
+                        StopAllProceduralGlows(btn._eabGlowWrapper)
+                        btn._eabGlowWrapper:Hide()
+                    end
+                    local sa = btn.SpellActivationAlert
+                    if sa then sa:SetAlpha(1); sa:Hide() end
+                end
+            end
+        end
+    end
+
+    local validator = CreateFrame("Frame")
+    validator:RegisterUnitEvent("UNIT_AURA", "player")
+    validator:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
+    validator:RegisterEvent("SPELL_UPDATE_USABLE")
+    validator:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+    validator:SetScript("OnEvent", function()
+        if next(_procState.active) then
+            ValidateProcGlows()
+        end
+    end)
+end
+
 function EAB:RefreshProcGlows()
     for _, info in ipairs(BAR_CONFIG) do
         local buttons = barButtons[info.key]

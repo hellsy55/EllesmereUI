@@ -6046,7 +6046,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.8.8"
+EllesmereUI.VERSION = "5.8.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6152,6 +6152,10 @@ if not _G._EUI_ConflictChecked then
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
             { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager" } },
             { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager" } },
+            { addon = "EllesmereBarGlows",        label = "Ellesmere's CDM Bar Glows",  targets = "all" },
+            { addon = "EllesmereNameplates",        label = "Ellesmere's Nameplates",  targets = "all" },
+            { addon = "EllesmereActionBars",        label = "Ellesmere's Action Bars",  targets = "all" },
+            { addon = "EllesmereUnitFrames",        label = "Ellesmere's Unit Frames",  targets = "all" },
         }
 
         local exempt = { EllesmereUIPartyMode = true }

@@ -790,7 +790,7 @@ _racialCdListener:SetScript("OnEvent", function()
     -- waiting for CollectAndReanchor (which only runs on viewer changes).
     for fkey, f in pairs(_presetFrames) do
         if f:IsShown() then
-            if f._isRacialFrame or f._isCustomSpellFrame then
+            if (f._isRacialFrame or f._isCustomSpellFrame) and not f._isCustomBuffFrame then
                 local sid = fkey:match(":(%d+)$")
                 sid = sid and tonumber(sid)
                 if sid then
@@ -1545,6 +1545,7 @@ local function UpdateCustomBuffBars()
                                     cd:SetReverse(true)
                                     f.Cooldown = cd; f._cooldown = cd
                                     f._isCustomSpellFrame = true
+                                    f._isCustomBuffFrame = true
                                     f.cooldownID = nil; f.cooldownInfo = nil
                                     f.layoutIndex = 99999
                                     _presetFrames[fkey] = f

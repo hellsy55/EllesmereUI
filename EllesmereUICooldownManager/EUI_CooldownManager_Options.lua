@@ -6796,8 +6796,8 @@ initFrame:SetScript("OnEvent", function(self)
                     iHl:SetAllPoints(); iHl:SetColorTexture(1, 1, 1, 1)
                     iHl:SetAlpha(idx == selectedCDMBarIndex and selA or 0)
 
-                    -- Delete button for custom bars (X icon, same as preset delete)
-                    local delBtn
+                    -- Delete + Rename buttons for custom bars
+                    local delBtn, editBtn
                     if isCustom then
                         delBtn = CreateFrame("Button", nil, item)
                         delBtn:SetSize(ICON_SZ, ICON_SZ)
@@ -6809,18 +6809,50 @@ initFrame:SetScript("OnEvent", function(self)
                         if delIcon.SetSnapToPixelGrid then delIcon:SetSnapToPixelGrid(false); delIcon:SetTexelSnappingBias(0) end
                         delIcon:SetTexture(MEDIA .. "icons\\eui-close.png")
                         delBtn:SetAlpha(0.75)
-                        iLbl:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
 
-                        delBtn:SetScript("OnEnter", function()
-                            delBtn:SetAlpha(1)
+                        editBtn = CreateFrame("Button", nil, item)
+                        editBtn:SetSize(ICON_SZ, ICON_SZ)
+                        editBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+                        editBtn:SetFrameLevel(item:GetFrameLevel() + 2)
+                        local edIcon = editBtn:CreateTexture(nil, "OVERLAY")
+                        edIcon:SetSize(ICON_SZ, ICON_SZ)
+                        edIcon:SetPoint("CENTER", editBtn, "CENTER", 0, 0)
+                        if edIcon.SetSnapToPixelGrid then edIcon:SetSnapToPixelGrid(false); edIcon:SetTexelSnappingBias(0) end
+                        edIcon:SetTexture(MEDIA .. "icons\\eui-edit.png")
+                        editBtn:SetAlpha(0.75)
+
+                        iLbl:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
+
+                        local function InlineBtnEnter(self)
+                            self:SetAlpha(1)
                             iLbl:SetTextColor(1, 1, 1, 1)
                             iHl:SetAlpha(hlA)
-                        end)
-                        delBtn:SetScript("OnLeave", function()
-                            if item:IsMouseOver() then return end
-                            delBtn:SetAlpha(0.75)
+                            delBtn:SetAlpha(0.85); editBtn:SetAlpha(0.85)
+                        end
+                        local function InlineBtnLeave(self)
+                            if item:IsMouseOver() or delBtn:IsMouseOver() or editBtn:IsMouseOver() then
+                                self:SetAlpha(0.85); return
+                            end
+                            delBtn:SetAlpha(0.75); editBtn:SetAlpha(0.75)
                             iLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                             iHl:SetAlpha(idx == selectedCDMBarIndex and selA or 0)
+                        end
+
+                        delBtn:SetScript("OnEnter", function(self)
+                            InlineBtnEnter(self)
+                            EllesmereUI.ShowWidgetTooltip(self, "Delete")
+                        end)
+                        delBtn:SetScript("OnLeave", function(self)
+                            InlineBtnLeave(self)
+                            EllesmereUI.HideWidgetTooltip()
+                        end)
+                        editBtn:SetScript("OnEnter", function(self)
+                            InlineBtnEnter(self)
+                            EllesmereUI.ShowWidgetTooltip(self, "Rename")
+                        end)
+                        editBtn:SetScript("OnLeave", function(self)
+                            InlineBtnLeave(self)
+                            EllesmereUI.HideWidgetTooltip()
                         end)
                         delBtn:SetScript("OnClick", function()
                             menu:Hide()
@@ -6844,17 +6876,43 @@ initFrame:SetScript("OnEvent", function(self)
                                 end,
                             })
                         end)
+                        editBtn:SetScript("OnClick", function()
+                            menu:Hide()
+                            local oldName = b.name or b.key
+                            EllesmereUI:ShowInputPopup({
+                                title = "Rename Bar",
+                                message = "Enter a new name for \"" .. oldName .. "\":",
+                                placeholder = oldName,
+                                confirmText = "Rename",
+                                cancelText = "Cancel",
+                                onConfirm = function(newName)
+                                    newName = newName and strtrim(newName) or ""
+                                    if newName == "" or newName == oldName then return end
+                                    b.name = newName
+                                    EllesmereUI:InvalidateContentHeaderCache()
+                                    EllesmereUI:SetContentHeader(_cdmHeaderBuilder)
+                                    EllesmereUI:RefreshPage(true)
+                                    if ns.RegisterCDMUnlockElements then
+                                        ns.RegisterCDMUnlockElements()
+                                    end
+                                end,
+                            })
+                        end)
                     end
 
                     item:SetScript("OnEnter", function()
                         iLbl:SetTextColor(1, 1, 1, 1)
                         iHl:SetAlpha(hlA)
                         if delBtn then delBtn:SetAlpha(1) end
+                        if editBtn then editBtn:SetAlpha(1) end
                     end)
                     item:SetScript("OnLeave", function()
+                        if delBtn and delBtn:IsMouseOver() then return end
+                        if editBtn and editBtn:IsMouseOver() then return end
                         iLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                         iHl:SetAlpha(idx == selectedCDMBarIndex and selA or 0)
                         if delBtn then delBtn:SetAlpha(0.75) end
+                        if editBtn then editBtn:SetAlpha(0.75) end
                     end)
                     item:SetScript("OnClick", function()
                         menu:Hide()

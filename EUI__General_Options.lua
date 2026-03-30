@@ -3827,7 +3827,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                             local kbBtn = CreateFrame("Button", nil, itm)
                             kbBtn:SetSize(X_SZ, X_SZ)
-                            kbBtn:SetPoint("RIGHT", xBtn, "LEFT", -4, 0)
+                            kbBtn:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
                             kbBtn:SetFrameLevel(itm:GetFrameLevel() + 2)
                             local kbIcon = kbBtn:CreateTexture(nil, "OVERLAY")
                             kbIcon:SetAllPoints()
@@ -3837,11 +3837,11 @@ initFrame:SetScript("OnEvent", function(self)
                             itm._kbBtn = kbBtn
 
                             local function IsOverInlineBtn()
-                                return xBtn:IsMouseOver() or kbBtn:IsMouseOver()
+                                return xBtn:IsMouseOver() or editBtn:IsMouseOver() or kbBtn:IsMouseOver()
                             end
 
                             local function SetAllInlineAlpha(a)
-                                xBtn:SetAlpha(a); kbBtn:SetAlpha(a)
+                                xBtn:SetAlpha(a); editBtn:SetAlpha(a); kbBtn:SetAlpha(a)
                             end
 
                             itm:SetScript("OnEnter", function()
@@ -3877,6 +3877,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 EllesmereUI.ShowWidgetTooltip(self, "Delete")
                             end)
                             xBtn:SetScript("OnLeave", function(self)
+                                InlineBtnLeave(self)
+                                EllesmereUI.HideWidgetTooltip()
+                            end)
+                            editBtn:SetScript("OnEnter", function(self)
+                                InlineBtnEnter(self)
+                                EllesmereUI.ShowWidgetTooltip(self, "Rename")
+                            end)
+                            editBtn:SetScript("OnLeave", function(self)
                                 InlineBtnLeave(self)
                                 EllesmereUI.HideWidgetTooltip()
                             end)
@@ -3916,19 +3924,20 @@ initFrame:SetScript("OnEvent", function(self)
                         else
                             local iLbl, iHl, iXBtn, iEditBtn, iKbBtn = itm._lbl, itm._hl, itm._xBtn, itm._editBtn, itm._kbBtn
                             iLbl:SetTextColor(1, 1, 1, EllesmereUI.TEXT_DIM_A)
-                            iEditBtn:Hide()  -- rename disabled; name is set at creation
                             if capName == "Default" then
                                 iXBtn:Hide()
+                                iEditBtn:Hide()
                                 iKbBtn:Hide()
                             else
                                 iXBtn:Show()
+                                iEditBtn:Show()
                                 iKbBtn:Show()
                             end
                             local function IsOverInline()
-                                return iXBtn:IsMouseOver() or iKbBtn:IsMouseOver()
+                                return iXBtn:IsMouseOver() or iEditBtn:IsMouseOver() or iKbBtn:IsMouseOver()
                             end
                             local function SetAllAlpha(a)
-                                iXBtn:SetAlpha(a); iKbBtn:SetAlpha(a)
+                                iXBtn:SetAlpha(a); iEditBtn:SetAlpha(a); iKbBtn:SetAlpha(a)
                             end
                             itm:SetScript("OnEnter", function()
                                 iLbl:SetTextColor(1, 1, 1, 1)
@@ -3976,6 +3985,33 @@ initFrame:SetScript("OnEvent", function(self)
                                             EllesmereUI.SwitchProfile("Default")
                                             EllesmereUI.RefreshAllAddons()
                                         end
+                                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
+                                        EllesmereUI:InvalidatePageCache()
+                                        EllesmereUI:RefreshPage(true)
+                                    end,
+                                })
+                            end)
+                            iEditBtn:SetScript("OnClick", function()
+                                menu:Hide()
+                                EllesmereUI:ShowInputPopup({
+                                    title       = "Rename Profile",
+                                    message     = "Enter a new name for \"" .. capName .. "\":",
+                                    placeholder = capName,
+                                    confirmText = "Rename",
+                                    cancelText  = "Cancel",
+                                    onConfirm   = function(newName)
+                                        newName = newName and strtrim(newName) or ""
+                                        if newName == "" or newName == capName then return end
+                                        if newName == "Default" then
+                                            print("|cffff6060[EllesmereUI]|r Cannot rename to \"Default\".")
+                                            return
+                                        end
+                                        local _, profiles = EllesmereUI.GetProfileList()
+                                        if profiles and profiles[newName] then
+                                            print("|cffff6060[EllesmereUI]|r A profile named \"" .. newName .. "\" already exists.")
+                                            return
+                                        end
+                                        EllesmereUI.RenameProfile(capName, newName)
                                         ddLabel:SetText(EllesmereUI.GetActiveProfileName())
                                         EllesmereUI:InvalidatePageCache()
                                         EllesmereUI:RefreshPage(true)
