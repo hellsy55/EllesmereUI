@@ -1,5 +1,3 @@
--- Module disabled: in maintenance. Early return prevents all file-scope code.
-do return end
 -------------------------------------------------------------------------------
 --  EllesmereUIAuraBuffReminders.lua
 --  Complete AuraBuff Reminders: Raid Buffs, Auras, Consumables
@@ -14,6 +12,8 @@ local EABR = EllesmereUI.Lite.NewAddon("EllesmereUIAuraBuffReminders")
 local Known = function(id) return id and (IsPlayerSpell(id) or IsSpellKnown(id)) end
 local InCombat = function() return InCombatLockdown and InCombatLockdown() end
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
+local isSecret = issecretvalue or function() return false end
+local AURA_SCAN_LIMIT = 255  -- Midnight supports more than the legacy 40 buff limit
 local DEFAULT_GLOW_COLOR = {r=1, g=0.776, b=0.376}
 local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 
@@ -211,10 +211,6 @@ end
 -------------------------------------------------------------------------------
 --  Talent query helpers
 -------------------------------------------------------------------------------
-local function GetCurrentInstanceName()
-    local name = GetInstanceInfo()
-    return name
-end
 
 -------------------------------------------------------------------------------
 --  Aura query helpers (secret-value safe, Midnight 12.0)
@@ -266,6 +262,8 @@ local NON_SECRET_SPELL_IDS = {
     -- Midnight Flasks (PvE and PvP variants; non-secret in 12.0)
     [1235110]=true, [1235108]=true, [1235111]=true, [1235057]=true, [1239355]=true,
     [1235113]=true, [1235114]=true, [1235115]=true, [1235116]=true,
+    -- Partnered Trinket (Emerald Coach's Whistle)
+    [383798]=true,
 }
 
 -------------------------------------------------------------------------------
@@ -288,11 +286,11 @@ local function SnapshotPlayerAuras()
     end
     -- Also snapshot non-whitelisted auras (e.g. Devotion Aura) that become
     -- secret when a party member enters combat before the local player does.
-    for i = 1, 40 do
+    for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local sid = aura.spellId
-        if sid and not issecretvalue(sid) and not NON_SECRET_SPELL_IDS[sid] then
+        if sid and not isSecret(sid) and not NON_SECRET_SPELL_IDS[sid] then
             _preCombatAuraCache[sid] = true
         end
     end
@@ -300,59 +298,68 @@ end
 
 -- Pre-combat snapshot for ownOnRaid buffs (Source of Magic, Blistering Scales).
 local _preCombatOwnOnRaidCache = {}  -- [spellID] = true/false
-local _ownOnRaidIDs = { 369459, 360827 }  -- Source of Magic, Blistering Scales
+local _ownOnRaidIDs = { 369459, 360827, 474754 }  -- Source of Magic, Blistering Scales, Symbiotic Relationship
 local SnapshotOwnOnRaidBuffs  -- forward declaration; defined after _unitHasBuffFromPlayer
 
 -- Pre-allocated scratch tables for hot per-Refresh functions (avoids GC churn)
 local _idLookupScratch  = {}
 local _lookupScratch    = {}
 
+-------------------------------------------------------------------------------
+--  Per-refresh aura helpers (zero-allocation where possible).
+--  Instead of scanning all auras into a cache (which creates ~20-40 API
+--  tables per refresh), we use targeted GetPlayerAuraBySpellID lookups
+--  and only fall back to GetAuraDataByIndex for name-based checks.
+-------------------------------------------------------------------------------
+local _AC = { valid = false, nameScanned = false, byName = {} }
+
+-- BuildPlayerAuraCache: lightweight reset. The expensive name scan is
+-- deferred to the first function that actually needs it (lazy).
+local function BuildPlayerAuraCache()
+    _AC.valid = not InCombat()
+    _AC.nameScanned = false
+    -- srcByID is only needed by PlayerHasSelfCastAuraByID; wiped lazily there
+end
+
+-- Lazy name scan: only runs once per refresh, only when a name-based
+-- check (PlayerHasWellFed, PlayerHasFlaskBuff, PlayerHasBuffByName) needs it.
+function _AC.ensureNames()
+    if _AC.nameScanned then return end
+    _AC.nameScanned = true
+    wipe(_AC.byName)
+    if InCombat() then return end
+    for i = 1, AURA_SCAN_LIMIT do
+        local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+        if not aura then break end
+        local aName = aura.name
+        if aName and not isSecret(aName) then
+            _AC.byName[aName] = true
+        end
+    end
+end
+
 local function PlayerHasAuraByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     local inCombat = InCombat()
+    -- Direct API lookup via GetPlayerAuraBySpellID (zero allocation, works OOC and
+    -- in combat for whitelisted IDs). Non-whitelisted IDs fall back to snapshot.
     for j = 1, #spellIDs do
         local id = spellIDs[j]
         if NON_SECRET_SPELL_IDS[id] then
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok then
-                if result ~= nil then
-                    -- Got something back from the API
-                    local secret = issecretvalue(result)
-                    if not secret then
-                        return true   -- live non-secret data says buff is present
-                    end
-                    -- Secret value API confirms aura exists but won't reveal data
-                    return true
-                end
-                -- nil: not found or contextually secret. Use snapshot in combat.
+                if result ~= nil then return true end
                 if inCombat and _preCombatAuraCache[id] then return true end
             else
-                -- pcall failed API restricted; use snapshot in combat
                 if inCombat and _preCombatAuraCache[id] then return true end
             end
-        end
-    end
-    -- Fallback for non-whitelisted IDs. Use snapshot if spellIds are secret
-    -- (e.g. party member in combat before local player).
-    local anySecretSpellIds = false
-    if not inCombat then
-        for i = 1, 40 do
-            local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-            if not aura then break end
-            local sid = aura.spellId
-            if sid and not issecretvalue(sid) then
-                for j = 1, #spellIDs do
-                    if not NON_SECRET_SPELL_IDS[spellIDs[j]] and sid == spellIDs[j] then return true end
-                end
-            elseif sid and issecretvalue(sid) then
-                anySecretSpellIds = true
-            end
-        end
-    end
-    if inCombat or anySecretSpellIds then
-        for j = 1, #spellIDs do
-            local id = spellIDs[j]
-            if not NON_SECRET_SPELL_IDS[id] and _preCombatAuraCache[id] then return true end
+        elseif not inCombat then
+            -- Non-whitelisted OOC: use GetPlayerAuraBySpellID anyway (may return
+            -- secret values, but non-nil means the aura exists)
+            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+            if ok and result ~= nil then return true end
+        else
+            if _preCombatAuraCache[id] then return true end
         end
     end
     return false
@@ -369,11 +376,7 @@ local function _unitHasBuff(u, spellIDs)
             if NON_SECRET_SPELL_IDS[id] then
                 local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
                 if ok then
-                    if result ~= nil then
-                        local secret = issecretvalue(result)
-                        if not secret then return true end
-                        return true  -- secret value still means aura exists
-                    end
+                    if result ~= nil then return true end
                     if inCombat and _preCombatAuraCache[id] then return true end
                 else
                     if inCombat and _preCombatAuraCache[id] then return true end
@@ -387,19 +390,20 @@ local function _unitHasBuff(u, spellIDs)
             local id = spellIDs[j]
             if NON_SECRET_SPELL_IDS[id] then
                 local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, u, id)
-                if ok and result ~= nil and not issecretvalue(result) then
+                if ok and result ~= nil and not isSecret(result) then
                     return true
                 end
             end
         end
     end
     -- Iterate auras for non-whitelisted IDs (only works out of combat)
-    if not inCombat then
-        for i = 1, 40 do
+    -- Skip iteration for player (GetPlayerAuraBySpellID above covers all IDs)
+    if not inCombat and not UnitIsUnit(u, "player") then
+        for i = 1, AURA_SCAN_LIMIT do
             local aura = C_UnitAuras.GetAuraDataByIndex(u, i, "HELPFUL")
             if not aura then break end
             local sid = aura.spellId
-            if sid and not issecretvalue(sid) then
+            if sid and not isSecret(sid) then
                 for j = 1, #spellIDs do if sid == spellIDs[j] then return true end end
             end
         end
@@ -420,26 +424,26 @@ local function _unitHasBuffFromPlayer(u, spellIDs)
         for id in pairs(idLookup) do
             if NON_SECRET_SPELL_IDS[id] then
                 local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-                if ok and aura ~= nil and not issecretvalue(aura) then
+                if ok and aura ~= nil and not isSecret(aura) then
                     local fromMe = aura.isFromPlayerOrPlayerPet
-                    if fromMe and not issecretvalue(fromMe) and fromMe == true then
+                    if fromMe and not isSecret(fromMe) and fromMe == true then
                         return true
                     end
                     local src = aura.sourceUnit
-                    if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+                    if src and not isSecret(src) and UnitIsUnit(src, "player") then
                         return true
                     end
                 end
             end
         end
         if not inCombat then
-            for i = 1, 40 do
+            for i = 1, AURA_SCAN_LIMIT do
                 local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
                 if not aura then break end
                 local sid = aura.spellId
-                if sid and not issecretvalue(sid) and idLookup[sid] then
+                if sid and not isSecret(sid) and idLookup[sid] then
                     local src = aura.sourceUnit
-                    if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+                    if src and not isSecret(src) and UnitIsUnit(src, "player") then
                         return true
                     end
                 end
@@ -449,13 +453,13 @@ local function _unitHasBuffFromPlayer(u, spellIDs)
     end
 
     if inCombat then return false end  -- sourceUnit secret in combat, caller uses snapshot
-    for i = 1, 40 do
+    for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex(u, i, "HELPFUL")
         if not aura then break end
         local sid = aura.spellId
-        if sid and not issecretvalue(sid) and idLookup[sid] then
+        if sid and not isSecret(sid) and idLookup[sid] then
             local src = aura.sourceUnit
-            if src and not issecretvalue(src) then
+            if src and not isSecret(src) then
                 if UnitIsUnit(src, "player") then return true end
             else
                 return true  -- sourceUnit unavailable OOC, assume ours
@@ -467,19 +471,21 @@ end
 
 -- Assign the SnapshotOwnOnRaidBuffs function (forward-declared earlier,
 -- now that _unitHasBuffFromPlayer is defined).
+local _snapScratch = {}  -- reused for SnapshotOwnOnRaidBuffs
 SnapshotOwnOnRaidBuffs = function()
     wipe(_preCombatOwnOnRaidCache)
     for _, id in ipairs(_ownOnRaidIDs) do
         local found = false
-        if _unitHasBuffFromPlayer("player", {id}) then found = true end
+        _snapScratch[1] = id
+        if _unitHasBuffFromPlayer("player", _snapScratch) then found = true end
         if not found then
             if IsInRaid() then
                 for i = 1, GetNumGroupMembers() do
-                    if _unitHasBuffFromPlayer("raid"..i, {id}) then found = true; break end
+                    if _unitHasBuffFromPlayer("raid"..i, _snapScratch) then found = true; break end
                 end
             elseif IsInGroup() then
                 for i = 1, GetNumSubgroupMembers() do
-                    if _unitHasBuffFromPlayer("party"..i, {id}) then found = true; break end
+                    if _unitHasBuffFromPlayer("party"..i, _snapScratch) then found = true; break end
                 end
             end
         end
@@ -492,18 +498,18 @@ end
 local function PlayerHasSelfCastAuraByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     if InCombat() then return false end  -- safety: can't read sourceUnit in combat
-    local lookup = _lookupScratch
-    wipe(lookup)
-    for j = 1, #spellIDs do lookup[spellIDs[j]] = true end
-    for i = 1, 40 do
-        local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-        if not aura then break end
-        local sid = aura.spellId
-        if sid and not issecretvalue(sid) and lookup[sid] then
+    -- Direct ID lookup: for whitelisted IDs, GetPlayerAuraBySpellID returns
+    -- the full aura data including sourceUnit (zero iteration needed).
+    for j = 1, #spellIDs do
+        local id = spellIDs[j]
+        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+        if ok and aura ~= nil and not isSecret(aura) then
             local src = aura.sourceUnit
-            if src and not issecretvalue(src) and UnitIsUnit(src, "player") then
+            if src and not isSecret(src) and UnitIsUnit(src, "player") then
                 return true
             end
+            -- If sourceUnit is unavailable OOC, assume ours
+            if not src or isSecret(src) then return true end
         end
     end
     return false
@@ -590,11 +596,11 @@ local function TargetHasDebuffByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     if not UnitExists("target") or UnitIsFriend("player", "target") then return true end
     if InCombat() then return true end  -- can't read debuffs in combat, suppress reminder
-    for i = 1, 40 do
+    for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex("target", i, "HARMFUL")
         if not aura then break end
         local sid = aura.spellId
-        if sid and not issecretvalue(sid) then
+        if sid and not isSecret(sid) then
             for j = 1, #spellIDs do if sid == spellIDs[j] then return true end end
         end
     end
@@ -604,18 +610,18 @@ end
 -------------------------------------------------------------------------------
 --  Weapon type classification (for weapon enchant matching)
 -------------------------------------------------------------------------------
-local WEAPON_CLASS_ID = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or 2
-local W = (Enum and Enum.ItemWeaponSubclass) or {}
-
-local function setFrom(...)
-    local t = {}
-    for i = 1, select("#", ...) do local v = select(i, ...); if v ~= nil then t[v] = true end end
-    return t
+local BLADED_SET, BLUNT_SET, RANGED_SET
+do
+    local W = (Enum and Enum.ItemWeaponSubclass) or {}
+    local function setFrom(...)
+        local t = {}
+        for i = 1, select("#", ...) do local v = select(i, ...); if v ~= nil then t[v] = true end end
+        return t
+    end
+    BLADED_SET = setFrom(W.Axe1H, W.Axe2H, W.Sword1H, W.Sword2H, W.Dagger, W.Polearm, W.Warglaive)
+    BLUNT_SET  = setFrom(W.Mace1H, W.Mace2H, W.Staff, W.Fist)
+    RANGED_SET = setFrom(W.Bow, W.Gun, W.Crossbow, W.Wand)
 end
-
-local BLADED_SET = setFrom(W.Axe1H, W.Axe2H, W.Sword1H, W.Sword2H, W.Dagger, W.Polearm, W.Warglaive)
-local BLUNT_SET  = setFrom(W.Mace1H, W.Mace2H, W.Staff, W.Fist)
-local RANGED_SET = setFrom(W.Bow, W.Gun, W.Crossbow, W.Wand)
 
 local function GetWeaponCategory(slotID)
     local itemID = GetInventoryItemID("player", slotID)
@@ -626,7 +632,7 @@ local function GetWeaponCategory(slotID)
     else
         _, _, _, equipLoc, _, classID, subClassID = GetItemInfoInstant(itemID)
     end
-    if not classID or classID ~= WEAPON_CLASS_ID then return nil end
+    if not classID or classID ~= ((Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or 2) then return nil end
     if equipLoc == "INVTYPE_SHIELD" or equipLoc == "INVTYPE_HOLDABLE" then return nil end
     if subClassID and BLADED_SET[subClassID] then return "BLADED" end
     if subClassID and BLUNT_SET[subClassID]  then return "BLUNT" end
@@ -654,10 +660,9 @@ local RAID_BUFFS = {
 --  SPELL DATA Auras (some non-secret, some still OOC-only)
 -------------------------------------------------------------------------------
 local AURAS = {
-    -- Symbiotic Relationship: non-secret (474754) player-only check
-    -- (applies to both player and target; if player has it, target does too)
+    -- Symbiotic Relationship: cast on a group member, check if anyone has it from us
     { key="symbiotic",  class="DRUID",   name="Symbiotic Relationship", castSpell=474750, buffIDs={474754},
-      check="player", combatOk=true, requireInstanceGroup=true },
+      check="ownOnRaid", combatOk=true, requireInstanceGroup=true },
     -- Warrior stances: NOT on non-secret list, OOC only
     { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
       check="player", specs={73}, combatOk=false },
@@ -666,8 +671,9 @@ local AURAS = {
     -- Shadowform: OOC only. Void Form (194249) also satisfies the check.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false },
-    -- Devotion Aura: simple player buff check, OOC only
-    { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,    buffIDs={465},
+    -- Paladin Aura: in dungeons/raids only Devotion satisfies; elsewhere any aura works
+    { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,
+      buffIDs={465, 32223, 317920}, instanceBuffIDs={465},
       check="player", combatOk=false },
     -- Beacon of Light: standalone IsSpellOverlayed system (not checked by CollectAuras)
     { key="bol",        class="PALADIN", name="Beacon of Light",   castSpell=53563,  buffIDs={53563},
@@ -684,6 +690,24 @@ local AURAS = {
       buffIDs={360827}, check="ownOnRaid", combatOk=true,
       requireInstanceGroup=true },
 }
+
+-------------------------------------------------------------------------------
+--  Healthstone / Soulstone / Partnered Trinket tracking
+-------------------------------------------------------------------------------
+-- Healthstone: check if player has one in bags (itemID 5512)
+local HEALTHSTONE_ITEM_IDS = { 5512, 224464 }  -- Healthstone, Demonic Healthstone
+
+-- Partnered Trinket: Emerald Coaches Whistle (buff 383798, icon 134157, 60 min)
+local PARTNERED_TRINKET = {
+    key = "coaches_whistle", name = "Emerald Coach's Whistle",
+    buffID = 383798, buffIDs = {383798}, icon = 134157, duration = 3600,
+}
+
+-- Pet tracking: Hunter pets, Warlock pets
+local PET_CLASSES = { HUNTER = true, WARLOCK = true }
+
+-- Classes with custom weapon imbue systems (skip generic weapon enchant reminder)
+local _IMBUE_CLASSES = { ROGUE=true, PALADIN=true, SHAMAN=true, DEATHKNIGHT=true }
 
 -------------------------------------------------------------------------------
 --  SPELL DATA Consumables (OOC only, not during keystones)
@@ -774,26 +798,20 @@ local FLASK_ITEMS = {
     { key="thalassian_horror", buffID=1239355, name="Vicious Thalassian Flask of Honor",
       items={241334} },
 }
-local FLASK_BUFF_IDS = {}
 local FLASK_BUFF_ID_SET = {}
 local FLASK_NAME_SET = {}
 for _, f in ipairs(FLASK_ITEMS) do
-    FLASK_BUFF_IDS[#FLASK_BUFF_IDS+1] = f.buffID
     FLASK_BUFF_ID_SET[f.buffID] = true
     FLASK_NAME_SET[f.name] = true
 end
 -- TWW flask buff IDs (detection only, so we don't false-positive when a
 -- player still has a TWW flask active)
-local TWW_FLASK_BUFF_IDS = {432473, 432021, 431974, 431973, 431972, 431971}
-for _, id in ipairs(TWW_FLASK_BUFF_IDS) do
-    FLASK_BUFF_IDS[#FLASK_BUFF_IDS+1] = id
+for _, id in ipairs({432473, 432021, 431974, 431973, 431972, 431971}) do
     FLASK_BUFF_ID_SET[id] = true
 end
 -- PvP-morphed Midnight flask buff IDs (Blizzard replaces the PvE buff ID with
 -- a separate PvP variant inside arenas and battlegrounds)
-local PVP_FLASK_BUFF_IDS = {1235113, 1235114, 1235115, 1235116}
-for _, id in ipairs(PVP_FLASK_BUFF_IDS) do
-    FLASK_BUFF_IDS[#FLASK_BUFF_IDS+1] = id
+for _, id in ipairs({1235113, 1235114, 1235115, 1235116}) do
     FLASK_BUFF_ID_SET[id] = true
 end
 
@@ -885,39 +903,59 @@ local WEAPON_ENCHANT_CHOICES = {
     { key="weighted_boomshots",      name="Weighted Boomshots" },
 }
 
--- Augment Runes
-local AUGMENT_RUNE_VOID   = 259085  -- Void-Touched Augment Rune (Midnight)
-local AUGMENT_RUNE_ETHER  = 243191  -- Ethereal Augment Rune (TWW)
+-- Augment Runes (item IDs inlined at usage site in CollectConsumables)
 local RUNE_BUFF_IDS = {1264426, 453250, 1234969, 1242347, 393438, 347901}
 
 -- Inky Black Potion
 local INKY_BLACK_ITEM = 124640
-local INKY_BLACK_BUFF = {124640}  -- The buff from Inky Black Potion
 
 -------------------------------------------------------------------------------
 --  Helpers: Well Fed / Flask buff detection (by name, not spell ID secret)
 -------------------------------------------------------------------------------
 local function PlayerHasBuffByName(buffName)
-    for i = 1, 40 do
+    if _AC.valid then
+        _AC.ensureNames()
+        return _AC.byName[buffName] or false
+    end
+    for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local aName = aura.name
-        if aName and not issecretvalue(aName) and aName == buffName then return true end
+        if aName and not isSecret(aName) and aName == buffName then return true end
     end
     return false
+end
+
+-- Build localized well-fed name set from known spell IDs (multi-language safe)
+local _wellFedNames = {}
+do
+    local wellFedSpellIDs = { 455369, 462187 }  -- "Well Fed", "Hearty Well Fed"
+    for _, id in ipairs(wellFedSpellIDs) do
+        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+        local name = info and info.name
+        if name then _wellFedNames[name] = true end
+    end
+    -- Hardcoded English fallback in case spell info isn't available yet
+    _wellFedNames["Well Fed"] = true
+    _wellFedNames["Hearty Well Fed"] = true
 end
 
 local function PlayerHasWellFed()
     if InCombat() then return true end  -- never show food reminder in combat
     if InMythicPlusKey() then return _cmSnap.foodActive end
     if InPvPInstance() then return true end  -- food not trackable in PvP, suppress
-    for i = 1, 40 do
+    if _AC.valid then
+        _AC.ensureNames()
+        for name in pairs(_wellFedNames) do
+            if _AC.byName[name] then return true end
+        end
+        return false
+    end
+    for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local aName = aura.name
-        if aName and not issecretvalue(aName) then
-            if aName == "Well Fed" or aName == "Hearty Well Fed" then return true end
-        end
+        if aName and not isSecret(aName) and _wellFedNames[aName] then return true end
     end
     return false
 end
@@ -926,13 +964,17 @@ local function PlayerHasFlaskBuff()
     -- Aura API is fully locked in PvP and M+ keystones; use snapshots instead.
     if InPvPInstance() then return _pvpSnap.flaskActive end
     if InMythicPlusKey() then return _cmSnap.flaskActive end
-    for i = 1, 40 do
-        local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-        if not aura then break end
-        local sid = aura.spellId
-        if sid and not issecretvalue(sid) and FLASK_BUFF_ID_SET[sid] then return true end
-        local aName = aura.name
-        if aName and not issecretvalue(aName) and (FLASK_NAME_SET[aName] or aName:find("Flask")) then return true end
+    -- Direct ID lookup for known flask buff IDs (zero allocation)
+    for id in pairs(FLASK_BUFF_ID_SET) do
+        local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+        if ok and result ~= nil then return true end
+    end
+    -- Name-based fallback for flasks not in our ID set (lazy scan)
+    if _AC.valid then
+        _AC.ensureNames()
+        for aName in pairs(_AC.byName) do
+            if FLASK_NAME_SET[aName] or aName:find("Flask") then return true end
+        end
     end
     return false
 end
@@ -1031,32 +1073,23 @@ end
 -------------------------------------------------------------------------------
 --  Glow Engines provided by shared EllesmereUI_Glows.lua
 -------------------------------------------------------------------------------
-local _G_Glows = EllesmereUI.Glows
-
-local function StartPixelGlow(wrapper, sz, cr, cg, cb)
-    local N, th, period = 8, 2, 4
-    local lineLen = floor((sz+sz)*(2/N-0.1)); lineLen = min(lineLen, sz); if lineLen < 1 then lineLen = 1 end
-    _G_Glows.StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, sz)
-end
-local function StopPixelGlow(wrapper) _G_Glows.StopProceduralAnts(wrapper) end
-
-local function StartButtonGlow(wrapper, sz, cr, cg, cb, scale)
-    _G_Glows.StartButtonGlow(wrapper, sz, cr, cg, cb, scale)
-end
-local function StopButtonGlow(wrapper) _G_Glows.StopButtonGlow(wrapper) end
-
-local function StartAutoCastShine(wrapper, sz, cr, cg, cb, scale)
-    _G_Glows.StartAutoCastShine(wrapper, sz, cr, cg, cb, scale)
-end
-local function StopAutoCastShine(wrapper) _G_Glows.StopAutoCastShine(wrapper) end
-
-local function StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
-    _G_Glows.StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb)
-end
-local function StopFlipBookGlow(wrapper) _G_Glows.StopFlipBookGlow(wrapper) end
-
-local function StopAllGlows(wrapper)
-    _G_Glows.StopAllGlows(wrapper)
+local StartPixelGlow, StopPixelGlow, StartButtonGlow, StopButtonGlow
+local StartAutoCastShine, StopAutoCastShine, StartFlipBookGlow, StopFlipBookGlow, StopAllGlows
+do
+    local G = EllesmereUI.Glows
+    StartPixelGlow = function(wrapper, sz, cr, cg, cb)
+        local N, th, period = 8, 2, 4
+        local lineLen = floor((sz+sz)*(2/N-0.1)); lineLen = min(lineLen, sz); if lineLen < 1 then lineLen = 1 end
+        G.StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, sz)
+    end
+    StopPixelGlow = function(wrapper) G.StopProceduralAnts(wrapper) end
+    StartButtonGlow = function(wrapper, sz, cr, cg, cb, scale) G.StartButtonGlow(wrapper, sz, cr, cg, cb, scale) end
+    StopButtonGlow = function(wrapper) G.StopButtonGlow(wrapper) end
+    StartAutoCastShine = function(wrapper, sz, cr, cg, cb, scale) G.StartAutoCastShine(wrapper, sz, cr, cg, cb, scale) end
+    StopAutoCastShine = function(wrapper) G.StopAutoCastShine(wrapper) end
+    StartFlipBookGlow = function(wrapper, sz, entry, cr, cg, cb) G.StartFlipBookGlow(wrapper, sz, entry, cr, cg, cb) end
+    StopFlipBookGlow = function(wrapper) G.StopFlipBookGlow(wrapper) end
+    StopAllGlows = function(wrapper) G.StopAllGlows(wrapper) end
 end
 
 
@@ -1425,6 +1458,19 @@ local function GetOrCreateTalentIcon(index)
 end
 
 -- Configure a button for spell casting
+-- Set icon to a plain texture (no click action)
+local function SetIconTexture(btn, texture, label)
+    if not InCombat() then
+        btn:SetAttribute("type", nil)
+        btn:SetAttribute("spell", nil)
+        btn:SetAttribute("item", nil)
+        btn:SetAttribute("macrotext", nil)
+    end
+    btn._icon:SetTexture(texture or 134400)
+    btn._tooltipSpell = nil
+    btn._tooltipItem = nil
+end
+
 local function SetIconSpell(btn, spellID, texture, label)
     if not InCombat() then
         btn:SetAttribute("type", "spell")
@@ -1468,6 +1514,54 @@ end
 
 
 -------------------------------------------------------------------------------
+--  Data-driven setup: eliminates per-refresh closure + table allocations
+-------------------------------------------------------------------------------
+-- Pre-allocated entry pool + data-driven setup (eliminates per-refresh closures)
+local AcquireEntry, ResetEntryPool, ApplySetup
+do
+    local pool = {}
+    local inUse = 0
+
+    AcquireEntry = function()
+        inUse = inUse + 1
+        local e = pool[inUse]
+        if not e then
+            e = {}
+            pool[inUse] = e
+        end
+        e.mode = nil; e.spellID = nil; e.itemID = nil; e.macro = nil
+        e.texture = nil; e.label = nil; e.unit = nil; e.desaturated = false
+        e.tooltipItem = nil
+        e.cat = nil; e.data = nil; e.scale = 1.0; e.dismissKey = nil
+        return e
+    end
+
+    ResetEntryPool = function()
+        inUse = 0
+    end
+
+    ApplySetup = function(btn, m)
+        local mode = m.mode
+        if mode == "spell" then
+            SetIconSpell(btn, m.spellID, m.texture or Tex(m.spellID), m.label)
+            if m.unit and not InCombat() then
+                btn:SetAttribute("unit", m.unit)
+            end
+        elseif mode == "item" then
+            SetIconItem(btn, m.itemID, m.texture, m.label)
+        elseif mode == "macro" then
+            SetIconMacro(btn, m.macro, m.texture, nil)
+            btn._tooltipItem = m.tooltipItem
+        else -- "texture"
+            SetIconTexture(btn, m.texture, m.label)
+            if m.spellID then btn._tooltipSpell = m.spellID end
+        end
+        btn._text:SetText(m.label or "")
+        btn._icon:SetDesaturated(m.desaturated or false)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Core Refresh Logic
 -------------------------------------------------------------------------------
 local refreshQueued = false
@@ -1477,7 +1571,7 @@ local function HideAllIcons()
     if InCombat() then return end  -- cannot hide SecureActionButtons in combat
     for i = 1, #activeIcons do
         local btn = activeIcons[i]
-        if btn then RemoveGlow(btn); btn._text:SetText(""); btn:Hide() end
+        if btn then RemoveGlow(btn); btn._text:SetText(""); btn._icon:SetDesaturated(false); btn:Hide() end
     end
     wipe(activeIcons)
     for i = 1, #talentActiveIcons do
@@ -1493,14 +1587,27 @@ local function ResizeAnchorCentered(newW, newH)
     iconAnchor:SetSize(newW, newH)
 end
 
+local _layoutScratch = {}  -- reused each call
 local function LayoutIcons()
-    local count = #activeIcons; if count == 0 then return end
+    -- Merge beacon icons into the layout so everything is one continuous row.
+    -- Beacon logic is untouched; we just include visible beacon frames in positioning.
+    local allIcons = _layoutScratch
+    wipe(allIcons)
+    for _, btn in ipairs(activeIcons) do allIcons[#allIcons+1] = btn end
+    if _beaconIcons then
+        for _, id in ipairs(BEACON_ALL or {}) do
+            if _beaconIconState and _beaconIconState[id] and _beaconIcons[id] then
+                allIcons[#allIcons+1] = _beaconIcons[id]
+            end
+        end
+    end
+    local count = #allIcons; if count == 0 then return end
     local p = db.profile.display
     local spacing = p.iconSpacing or 8
     local baseScale = p.scale or 1.0
     local sz = floor(ICON_SIZE * baseScale + 0.5)
     local totalW = (count * sz) + ((count-1) * spacing)
-    for i, btn in ipairs(activeIcons) do
+    for i, btn in ipairs(allIcons) do
         btn:SetSize(sz, sz)
         btn:SetAlpha(p.opacity or 1.0)
         btn:ClearAllPoints()
@@ -1512,10 +1619,10 @@ local function LayoutIcons()
     ResizeAnchorCentered(totalW, sz + textH)
 end
 
-local function ShowIcon(iconIdx, setupFn, dismissKey)
+local function ShowIcon(iconIdx, m)
     local btn = GetOrCreateIcon(iconIdx)
-    btn._dismissKey = dismissKey or nil
-    setupFn(btn)
+    btn._dismissKey = m.dismissKey or nil
+    ApplySetup(btn, m)
     local p = db.profile.display
     local glowType = p.glowType or 0
     local gc = p.glowColor or DEFAULT_GLOW_COLOR
@@ -1555,9 +1662,9 @@ local function LayoutTalentIcons()
     end
 end
 
-local function ShowTalentIcon(iconIdx, setupFn)
+local function ShowTalentIcon(iconIdx, m)
     local btn = GetOrCreateTalentIcon(iconIdx)
-    setupFn(btn)
+    ApplySetup(btn, m)
     local p = db.profile.display
     local glowType = p.glowType or 0
     local gc = p.glowColor or DEFAULT_GLOW_COLOR
@@ -1618,18 +1725,13 @@ if inInstance or rb.showNonInstanced then
                     isMissing = not PlayerHasAuraByID(buff.buffIDs)
                 end
                 if isMissing then
-                    local isTargetSpell = (buff.check == "huntersMark")
-                    missing[#missing+1] = {
-                        cat = "raidbuff", data = buff, scale = rb.scale or 1.0,
-                        dismissKey = buff.key and ("raidbuff:" .. buff.key) or nil,
-                        setup = function(btn)
-                            SetIconSpell(btn, buff.castSpell, Tex(buff.castSpell), buff.name)
-                            if isTargetSpell and not InCombat() then
-                                btn:SetAttribute("unit", "target")
-                            end
-                            btn._text:SetText(ShortLabel(buff.name))
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "spell"; e.spellID = buff.castSpell
+                    e.label = ShortLabel(buff.name)
+                    if buff.check == "huntersMark" then e.unit = "target" end
+                    e.cat = "raidbuff"; e.data = buff; e.scale = rb.scale or 1.0
+                    e.dismissKey = buff.key and ("raidbuff:" .. buff.key) or nil
+                    missing[#missing+1] = e
                 end
             end
         end
@@ -1692,16 +1794,16 @@ if inInstance or au.showNonInstanced then
                         -- Player must have the buff from their OWN cast
                         isMissing = not PlayerHasSelfCastAuraByID(aura.buffIDs)
                     else
-                        isMissing = not PlayerHasAuraByID(aura.buffIDs)
+                        -- Use instance-specific buff list if available and in instance
+                        local checkIDs = (inInstance and aura.instanceBuffIDs) or aura.buffIDs
+                        isMissing = not PlayerHasAuraByID(checkIDs)
                     end
                     if isMissing then
-                        missing[#missing+1] = {
-                            cat = "aura", data = aura, scale = au.scale or 1.0,
-                            setup = function(btn)
-                                SetIconSpell(btn, aura.castSpell, Tex(aura.castSpell), aura.name)
-                                btn._text:SetText(ShortLabel(aura.name))
-                            end,
-                        }
+                        local e = AcquireEntry()
+                        e.mode = "spell"; e.spellID = aura.castSpell
+                        e.label = ShortLabel(aura.name)
+                        e.cat = "aura"; e.data = aura; e.scale = au.scale or 1.0
+                        missing[#missing+1] = e
                     end
                 end
             end
@@ -1724,13 +1826,11 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 for _, poison in ipairs(ROGUE_POISONS) do
                     if co.enabled[poison.key] and Known(poison.castSpell) then
                         if not PlayerHasAuraByID(poison.buffIDs) then
-                            missing[#missing+1] = {
-                                cat = "consumable", data = poison, scale = co.scale or 1.0,
-                                setup = function(btn)
-                                    SetIconSpell(btn, poison.castSpell, Tex(poison.castSpell), poison.name)
-                                    btn._text:SetText(ShortLabel(poison.name, "ROGUE"))
-                                end,
-                            }
+                            local e = AcquireEntry()
+                            e.mode = "spell"; e.spellID = poison.castSpell
+                            e.label = ShortLabel(poison.name, "ROGUE")
+                            e.cat = "consumable"; e.data = poison; e.scale = co.scale or 1.0
+                            missing[#missing+1] = e
                         end
                     end
                 end
@@ -1742,31 +1842,30 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                     if co.enabled[rite.key] and Known(rite.castSpell) then
                         local hasMH = GetWeaponEnchantInfo()
                         if not hasMH then
-                            missing[#missing+1] = {
-                                cat = "consumable", data = rite, scale = co.scale or 1.0,
-                                setup = function(btn)
-                                    SetIconSpell(btn, rite.castSpell, Tex(rite.castSpell), rite.name)
-                                    btn._text:SetText(ShortLabel(rite.name))
-                                end,
-                            }
+                            local e = AcquireEntry()
+                            e.mode = "spell"; e.spellID = rite.castSpell
+                            e.label = ShortLabel(rite.name)
+                            e.cat = "consumable"; e.data = rite; e.scale = co.scale or 1.0
+                            missing[#missing+1] = e
                         end
                     end
                 end
             end
 
-            -- Shaman Imbues
+            -- Shaman Imbues (check both main hand and off-hand)
             if playerClass == "SHAMAN" then
+                local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
                 for _, imbue in ipairs(SHAMAN_IMBUES) do
                     if co.enabled[imbue.key] and Known(imbue.castSpell) then
-                        local hasMH = GetWeaponEnchantInfo()
-                        if not hasMH then
-                            missing[#missing+1] = {
-                                cat = "consumable", data = imbue, scale = co.scale or 1.0,
-                                setup = function(btn)
-                                    SetIconSpell(btn, imbue.castSpell, Tex(imbue.castSpell), imbue.name)
-                                    btn._text:SetText(ShortLabel(imbue.name, "SHAMAN_IMBUE"))
-                                end,
-                            }
+                        -- Show reminder if either hand is missing an imbue
+                        local needsMH = not hasMH
+                        local needsOH = not hasOH and (GetInventoryItemID("player", 17) ~= nil)
+                        if needsMH or needsOH then
+                            local e = AcquireEntry()
+                            e.mode = "spell"; e.spellID = imbue.castSpell
+                            e.label = ShortLabel(imbue.name, "SHAMAN_IMBUE")
+                            e.cat = "consumable"; e.data = imbue; e.scale = co.scale or 1.0
+                            missing[#missing+1] = e
                         end
                     end
                 end
@@ -1782,13 +1881,11 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                         end
                         if specOk then
                             if not PlayerHasAuraByID(shield.buffIDs) then
-                                missing[#missing+1] = {
-                                    cat = "consumable", data = shield, scale = co.scale or 1.0,
-                                    setup = function(btn)
-                                        SetIconSpell(btn, shield.castSpell, Tex(shield.castSpell), shield.name)
-                                        btn._text:SetText(ShortLabel(shield.name, "SHAMAN_SHIELD"))
-                                    end,
-                                }
+                                local e = AcquireEntry()
+                                e.mode = "spell"; e.spellID = shield.castSpell
+                                e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
+                                e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
+                                missing[#missing+1] = e
                             end
                         end
                     end
@@ -1814,26 +1911,27 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             if showRune then
                 local hasRuneBuff = InMythicPlusKey() and _cmSnap.runeActive or PlayerHasAuraByID(RUNE_BUFF_IDS)
                 if not hasRuneBuff then
-                    local voidCount = GetItemCount(AUGMENT_RUNE_VOID, false) or 0
-                    local etherCount = GetItemCount(AUGMENT_RUNE_ETHER, false) or 0
+                    local voidCount = GetItemCount(259085, false) or 0
+                    local etherCount = GetItemCount(243191, false) or 0
                     local runeItem = nil
-                    if voidCount > 0 then runeItem = AUGMENT_RUNE_VOID
-                    elseif etherCount > 0 then runeItem = AUGMENT_RUNE_ETHER end
+                    if voidCount > 0 then runeItem = 259085       -- Void-Touched Augment Rune
+                    elseif etherCount > 0 then runeItem = 243191  -- Ethereal Augment Rune
+                    end
                     if runeItem then
-                        missing[#missing+1] = {
-                            cat = "consumable", dismissKey = "consumable:rune", scale = co.scale or 1.0,
-                            setup = function(btn)
-                                SetIconItem(btn, runeItem, GetItemIcon(runeItem), "Augment Rune")
-                                btn._text:SetText(ShortLabel("Augment Rune"))
-                            end,
-                        }
+                        local e = AcquireEntry()
+                        e.mode = "item"; e.itemID = runeItem
+                        e.texture = GetItemIcon(runeItem); e.label = ShortLabel("Augment Rune")
+                        e.cat = "consumable"; e.scale = co.scale or 1.0
+                        e.dismissKey = "consumable:rune"
+                        missing[#missing+1] = e
                     end
                 end
             end
         end
 
         -- Weapon Enchants (temp weapon enchant items)
-        if co.enabled.weapon_enchant then
+        -- Skip for classes with their own imbue system (poisons, rites, imbues, runeforging)
+        if co.enabled.weapon_enchant and not _IMBUE_CLASSES[playerClass] then
             local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
             local mhCat = GetWeaponCategory(16)
             local ohCat = GetWeaponCategory(17)
@@ -1852,27 +1950,41 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 local preferredKey = co.preferredWeaponEnchant or "last_used"
                 local lastUsedID = db.char and db.char.lastUsedWeaponEnchant or nil
                 local bestItemID = FindWeaponEnchantItem(preferredKey, lastUsedID, targetCat)
+                local hasBags = (bestItemID ~= nil)
                 if not bestItemID then
-                    -- Fallback: any matching weapon enchant in bags
-                    for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
-                        local wt = we.weaponType
-                        if ((wt == "NEUTRAL") or (wt == targetCat)) and (GetItemCount(we.itemID, false) or 0) > 0 then
-                            bestItemID = we.itemID; break
+                    -- Resolve display item even when out of stock
+                    if preferredKey == "last_used" then
+                        bestItemID = lastUsedID
+                    else
+                        for _, choice in ipairs(WEAPON_ENCHANT_CHOICES) do
+                            if choice.key == preferredKey then
+                                for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
+                                    if we.name == choice.name then bestItemID = we.itemID; break end
+                                end
+                                break
+                            end
+                        end
+                    end
+                    -- Final fallback: first matching weapon enchant in data table
+                    if not bestItemID then
+                        for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
+                            if we.weaponType == "NEUTRAL" or we.weaponType == targetCat then
+                                bestItemID = we.itemID; break
+                            end
                         end
                     end
                 end
                 if bestItemID then
-                    local slot = targetSlot
-                    local bestIcon = GetItemIcon(bestItemID) or 134400
-                    missing[#missing+1] = {
-                        cat = "consumable", dismissKey = "consumable:weapon_enchant", scale = co.scale or 1.0,
-                        setup = function(btn)
-                            local macro = "/use item:" .. bestItemID .. "\n/use " .. slot
-                            SetIconMacro(btn, macro, bestIcon, nil)
-                            btn._tooltipItem = bestItemID
-                            btn._text:SetText(ShortLabel("Weapon Enchant"))
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "macro"
+                    e.macro = "/use item:" .. bestItemID .. "\n/use " .. targetSlot
+                    e.texture = GetItemIcon(bestItemID) or 134400
+                    e.label = ShortLabel("Weapon Enchant")
+                    e.tooltipItem = bestItemID
+                    e.desaturated = not hasBags
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:weapon_enchant"
+                    missing[#missing+1] = e
                 end
             end
         end
@@ -1883,15 +1995,30 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 local preferredKey = co.preferredFlask or "last_used"
                 local lastUsedID = db.char and db.char.lastUsedFlask or nil
                 local flaskItemID = FindFlaskItem(preferredKey, lastUsedID)
+                local hasBags = (flaskItemID ~= nil)
+                -- Resolve display item even when out of stock
+                if not flaskItemID then
+                    if preferredKey == "last_used" then
+                        flaskItemID = lastUsedID
+                    else
+                        for _, f in ipairs(FLASK_ITEMS) do
+                            if f.key == preferredKey then flaskItemID = f.items[1]; break end
+                        end
+                    end
+                    -- Final fallback: first flask in data table
+                    if not flaskItemID and FLASK_ITEMS[1] then
+                        flaskItemID = FLASK_ITEMS[1].items[1]
+                    end
+                end
                 if flaskItemID then
-                    local flaskIcon = GetItemIcon(flaskItemID) or 134830
-                    missing[#missing+1] = {
-                        cat = "consumable", dismissKey = "consumable:flask", scale = co.scale or 1.0,
-                        setup = function(btn)
-                            SetIconItem(btn, flaskItemID, flaskIcon, "Flask")
-                            btn._text:SetText("Flask")
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "item"; e.itemID = flaskItemID
+                    e.texture = GetItemIcon(flaskItemID) or 134830
+                    e.label = "Flask"
+                    e.desaturated = not hasBags
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:flask"
+                    missing[#missing+1] = e
                 end
             end
         end
@@ -1903,14 +2030,13 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 local lastUsedID = db.char and db.char.lastUsedFood or nil
                 local foodItemID = FindFoodItem(preferredKey, lastUsedID)
                 if foodItemID then
-                    local foodIcon = GetItemIcon(foodItemID) or 134062
-                    missing[#missing+1] = {
-                        cat = "consumable", dismissKey = "consumable:food", scale = co.scale or 1.0,
-                        setup = function(btn)
-                            SetIconItem(btn, foodItemID, foodIcon, "Food")
-                            btn._text:SetText("Food")
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "item"; e.itemID = foodItemID
+                    e.texture = GetItemIcon(foodItemID) or 134062
+                    e.label = "Food"
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:food"
+                    missing[#missing+1] = e
                 end
             end
         end
@@ -1931,13 +2057,13 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                     local hasPotion = (GetItemCount(INKY_BLACK_ITEM, false) or 0) > 0
                     local hasBuff = PlayerHasBuffByName("Inky Black Potion")
                     if not hasBuff and hasPotion then
-                        missing[#missing+1] = {
-                            cat = "consumable", dismissKey = "consumable:inky_black", scale = co.scale or 1.0,
-                            setup = function(btn)
-                                SetIconItem(btn, INKY_BLACK_ITEM, GetItemIcon(INKY_BLACK_ITEM), "Inky Black Potion")
-                                btn._text:SetText(ShortLabel("Inky Black Potion"))
-                            end,
-                        }
+                        local e = AcquireEntry()
+                        e.mode = "item"; e.itemID = INKY_BLACK_ITEM
+                        e.texture = GetItemIcon(INKY_BLACK_ITEM)
+                        e.label = ShortLabel("Inky Black Potion")
+                        e.cat = "consumable"; e.scale = co.scale or 1.0
+                        e.dismissKey = "consumable:inky_black"
+                        missing[#missing+1] = e
                     end
                 end
             end
@@ -1964,15 +2090,103 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                         isMissing = not PlayerHasAuraByID(shield.buffIDs)
                     end
                     if isMissing then
-                        missing[#missing+1] = {
-                            cat = "consumable", data = shield, scale = co.scale or 1.0,
-                            setup = function(btn)
-                                SetIconSpell(btn, shield.castSpell, Tex(shield.castSpell), shield.name)
-                                btn._text:SetText(ShortLabel(shield.name, "SHAMAN_SHIELD"))
-                            end,
-                        }
+                        local e = AcquireEntry()
+                        e.mode = "spell"; e.spellID = shield.castSpell
+                        e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
+                        e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
+                        missing[#missing+1] = e
                     end
                 end
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Healthstone in bags (OOC only, instance + group)
+    ---------------------------------------------------------------------------
+    if not inCombat and inInstance and (IsInGroup() or IsInRaid()) then
+        local co = db.profile.consumables
+        if co and co.enabled and co.enabled.healthstone ~= false then
+            -- Only remind if a Warlock is in the group
+            local hasWarlock = false
+            if IsInRaid() then
+                for i = 1, GetNumGroupMembers() do
+                    local _, cls = UnitClass("raid"..i)
+                    if cls == "WARLOCK" then hasWarlock = true; break end
+                end
+            else
+                if GetPlayerClass() == "WARLOCK" then
+                    hasWarlock = true
+                else
+                    for i = 1, GetNumSubgroupMembers() do
+                        local _, cls = UnitClass("party"..i)
+                        if cls == "WARLOCK" then hasWarlock = true; break end
+                    end
+                end
+            end
+            local hasHealthstone = false
+            for _, itemID in ipairs(HEALTHSTONE_ITEM_IDS) do
+                if C_Item.GetItemCount(itemID) > 0 then hasHealthstone = true; break end
+            end
+            if hasWarlock and not hasHealthstone then
+                local e = AcquireEntry()
+                e.mode = "texture"; e.texture = 538745
+                e.label = "HS"
+                e.cat = "consumable"; e.scale = co.scale or 1.0
+                missing[#missing+1] = e
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Pet reminder (Hunter/Warlock, OOC only)
+    ---------------------------------------------------------------------------
+    if not inCombat and PET_CLASSES[playerClass] then
+        local co = db.profile.consumables
+        if co and co.enabled and co.enabled.pet ~= false then
+            if not (UnitExists("pet") and not UnitIsDeadOrGhost("pet")) then
+                local e = AcquireEntry()
+                e.mode = "texture"
+                e.texture = playerClass == "HUNTER" and 132161 or 136218
+                e.label = "Pet"
+                e.cat = "consumable"; e.scale = co.scale or 1.0
+                missing[#missing+1] = e
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Partnered Trinket: Emerald Coach's Whistle (combat-safe via snapshot)
+    ---------------------------------------------------------------------------
+    do
+        local co = db.profile.consumables
+        if co and co.enabled and co.enabled.coaches_whistle ~= false
+           and inInstance and (IsInGroup() or IsInRaid())
+           and (GetInventoryItemID("player", 13) == 193718 or GetInventoryItemID("player", 14) == 193718) then
+            local hasBuff = PlayerHasAuraByID(PARTNERED_TRINKET.buffIDs)
+            if not hasBuff then
+                local e = AcquireEntry()
+                e.mode = "texture"; e.texture = PARTNERED_TRINKET.icon
+                e.label = "Whistle"
+                e.cat = "consumable"; e.scale = co.scale or 1.0
+                missing[#missing+1] = e
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  DK Runeforging (OOC only, check weapon enchant)
+    ---------------------------------------------------------------------------
+    if not inCombat and playerClass == "DEATHKNIGHT" then
+        local co = db.profile.consumables
+        if co and co.enabled and co.enabled.runeforge ~= false then
+            local hasMH = GetWeaponEnchantInfo()
+            if not hasMH then
+                local e = AcquireEntry()
+                e.mode = "texture"; e.texture = 135957
+                e.label = "Rune"
+                e.cat = "consumable"; e.scale = co.scale or 1.0
+                missing[#missing+1] = e
             end
         end
     end
@@ -1983,7 +2197,7 @@ local function CollectTalentReminders(talentMissing, inInstance, inKeystone, inC
 if not inKeystone and not inCombat and inInstance then
     local reminders = db.profile.talentReminders
     if reminders and #reminders > 0 then
-        local currentInstance = GetCurrentInstanceName()
+        local currentInstance = GetInstanceInfo()
         local currentMapID = C_Map.GetBestMapForUnit("player")
         if currentInstance then
             for _, reminder in ipairs(reminders) do
@@ -2009,43 +2223,21 @@ if not inKeystone and not inCombat and inInstance then
                 local hasTalent = IsPlayerSpell(reminder.spellID) or IsSpellKnown(reminder.spellID)
 
                 if zoneMatch and not hasTalent then
-                    local rSpellID = reminder.spellID
-                    local rSpellName = reminder.spellName or "Unknown"
-                    local rIcon = Tex(rSpellID) or 134400
-                    talentMissing[#talentMissing+1] = {
-                        cat = "talent", scale = 1.0,
-                        setup = function(btn)
-                            if not InCombat() then
-                                btn:SetAttribute("type", nil)
-                                btn:SetAttribute("spell", nil)
-                                btn:SetAttribute("item", nil)
-                                btn:SetAttribute("macrotext", nil)
-                            end
-                            btn._icon:SetTexture(rIcon)
-                            btn._tooltipSpell = rSpellID
-                            btn._tooltipItem = nil
-                            btn._text:SetText(rSpellName)
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "texture"
+                    e.texture = Tex(reminder.spellID) or 134400
+                    e.spellID = reminder.spellID
+                    e.label = reminder.spellName or "Unknown"
+                    e.cat = "talent"; e.scale = 1.0
+                    talentMissing[#talentMissing+1] = e
                 elseif not zoneMatch and reminder.showNotNeeded and hasTalent then
-                    local rSpellID = reminder.spellID
-                    local rSpellName = (reminder.spellName or "Unknown")
-                    local rIcon = Tex(rSpellID) or 134400
-                    talentMissing[#talentMissing+1] = {
-                        cat = "talent", scale = 1.0,
-                        setup = function(btn)
-                            if not InCombat() then
-                                btn:SetAttribute("type", nil)
-                                btn:SetAttribute("spell", nil)
-                                btn:SetAttribute("item", nil)
-                                btn:SetAttribute("macrotext", nil)
-                            end
-                            btn._icon:SetTexture(rIcon)
-                            btn._tooltipSpell = rSpellID
-                            btn._tooltipItem = nil
-                            btn._text:SetText(rSpellName .. " (N/N)")
-                        end,
-                    }
+                    local e = AcquireEntry()
+                    e.mode = "texture"
+                    e.texture = Tex(reminder.spellID) or 134400
+                    e.spellID = reminder.spellID
+                    e.label = (reminder.spellName or "Unknown") .. " (N/N)"
+                    e.cat = "talent"; e.scale = 1.0
+                    talentMissing[#talentMissing+1] = e
                 end
             end
         end
@@ -2075,7 +2267,23 @@ local function Refresh()
         return
     end
 
+    -- Suppress while dead or in a rested area (city/inn)
+    if UnitIsDeadOrGhost("player") then
+        HideCombatIcons(); HideCursorIcons(); HideAllIcons(); return
+    end
+    if IsResting() and not InCombat() then
+        HideCombatIcons(); HideCursorIcons(); HideAllIcons(); return
+    end
+
     CacheInstanceInfo()
+
+    -- MEMORY PROBES (temporary -- remove after diagnosis)
+    local _memProbe = _G._EABR_MemProbe
+    local _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7
+    if _memProbe then collectgarbage("stop"); _m0 = collectgarbage("count") end
+
+    BuildPlayerAuraCache()
+    if _memProbe then _m1 = collectgarbage("count") end
 
     local playerClass = GetPlayerClass()
     local specID = GetSpecID()
@@ -2083,7 +2291,8 @@ local function Refresh()
     local inKeystone = InMythicPlusKey()
     local inCombat = InCombat()
 
-    -- Collect missing reminders
+    -- Collect missing reminders (reuse pooled entry tables)
+    ResetEntryPool()
     local missing = _refreshMissing
     wipe(missing)
 
@@ -2091,23 +2300,33 @@ local function Refresh()
     --  1) Raid Buffs
     ---------------------------------------------------------------------------
     CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
+    if _memProbe then _m2 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  2) Auras
+    --  2) Auras (suppressed in M+ keystones)
     ---------------------------------------------------------------------------
-    CollectAuras(missing, playerClass, specID, inInstance, inCombat)
+    if not inKeystone then
+        CollectAuras(missing, playerClass, specID, inInstance, inCombat)
+    end
+    if _memProbe then _m3 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  3) Consumables
+    --  3) Consumables (suppressed in M+ keystones)
     ---------------------------------------------------------------------------
-    CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
+    if not inKeystone then
+        CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
+    end
+    if _memProbe then _m4 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  4) Talent Reminders
+    --  4) Talent Reminders (suppressed in M+ keystones)
     ---------------------------------------------------------------------------
     local talentMissing = _refreshTalentMissing
     wipe(talentMissing)
-    CollectTalentReminders(talentMissing, inInstance, inKeystone, inCombat)
+    if not inKeystone then
+        CollectTalentReminders(talentMissing, inInstance, inKeystone, inCombat)
+    end
+    if _memProbe then _m5 = collectgarbage("count") end
 
 
     ---------------------------------------------------------------------------
@@ -2168,7 +2387,7 @@ local function Refresh()
             local dk = m.dismissKey or (m.data and m.data.key and (m.cat .. ":" .. m.data.key)) or nil
             if not dk or not _dismissedUntilLoad[dk] then
                 iconIdx = iconIdx + 1
-                ShowIcon(iconIdx, m.setup, dk)
+                ShowIcon(iconIdx, m)
             end
         end
         if iconIdx > 0 then
@@ -2184,15 +2403,39 @@ local function Refresh()
     -- Talent reminders on a separate anchor below the main icons
     if #talentMissing > 0 and talentIconAnchor then
         for i, m in ipairs(talentMissing) do
-            ShowTalentIcon(i, m.setup)
+            ShowTalentIcon(i, m)
         end
         LayoutTalentIcons()
         EllesmereUI.SetElementVisibility(talentIconAnchor, true)
     end
+
+    -- MEMORY PROBE REPORT (temporary)
+    if _memProbe then
+        _m6 = collectgarbage("count")
+        collectgarbage("restart")
+        _memProbe.n = (_memProbe.n or 0) + 1
+        _memProbe.auraCache  = (_memProbe.auraCache  or 0) + (_m1 - _m0)
+        _memProbe.raidBuffs  = (_memProbe.raidBuffs  or 0) + (_m2 - _m1)
+        _memProbe.auras      = (_memProbe.auras      or 0) + (_m3 - _m2)
+        _memProbe.consumables= (_memProbe.consumables or 0) + (_m4 - _m3)
+        _memProbe.talents    = (_memProbe.talents    or 0) + (_m5 - _m4)
+        _memProbe.display    = (_memProbe.display    or 0) + (_m6 - _m5)
+        _memProbe.total      = (_memProbe.total      or 0) + (_m6 - _m0)
+        if _memProbe.n >= 20 then
+            local n = _memProbe.n
+            print(string.format("|cff00ff00[ABR Mem/call]|r cache=%.2f rb=%.2f aura=%.2f cons=%.2f tal=%.2f disp=%.2f |cffffffTOTAL=%.2f KB|r",
+                _memProbe.auraCache/n, _memProbe.raidBuffs/n, _memProbe.auras/n,
+                _memProbe.consumables/n, _memProbe.talents/n, _memProbe.display/n,
+                _memProbe.total/n))
+            _memProbe.n = 0; _memProbe.auraCache = 0; _memProbe.raidBuffs = 0
+            _memProbe.auras = 0; _memProbe.consumables = 0; _memProbe.talents = 0
+            _memProbe.display = 0; _memProbe.total = 0
+        end
+    end
 end
 
 local REFRESH_THROTTLE_COMBAT = 0.2
-local REFRESH_THROTTLE_OOC    = 1.0
+local REFRESH_THROTTLE_OOC    = 0.25
 local _lastRefreshTime = 0
 local _refreshTimerActive = false
 local function _doRefresh()
@@ -2320,25 +2563,19 @@ end
 -------------------------------------------------------------------------------
 --  Last-Used Item Tracking (per-character)
 -------------------------------------------------------------------------------
-local FLASK_ITEM_SET = {}
-for _, f in ipairs(FLASK_ITEMS) do
-    for _, id in ipairs(f.items) do FLASK_ITEM_SET[id] = true end
-end
-
-local FOOD_ITEM_SET = {}
-for _, f in ipairs(FOOD_ITEMS) do FOOD_ITEM_SET[f.itemID] = true end
-
-local WEAPON_ENCHANT_ITEM_SET = {}
-for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do WEAPON_ENCHANT_ITEM_SET[we.itemID] = true end
-
-local function TrackItemUse(itemID)
-    if not db or not db.char then return end
-    if FLASK_ITEM_SET[itemID] then
-        db.char.lastUsedFlask = itemID
-    elseif FOOD_ITEM_SET[itemID] then
-        db.char.lastUsedFood = itemID
-    elseif WEAPON_ENCHANT_ITEM_SET[itemID] then
-        db.char.lastUsedWeaponEnchant = itemID
+local TrackItemUse
+do
+    local flaskSet, foodSet, weSet = {}, {}, {}
+    for _, f in ipairs(FLASK_ITEMS) do
+        for _, id in ipairs(f.items) do flaskSet[id] = true end
+    end
+    for _, f in ipairs(FOOD_ITEMS) do foodSet[f.itemID] = true end
+    for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do weSet[we.itemID] = true end
+    TrackItemUse = function(itemID)
+        if not db or not db.char then return end
+        if flaskSet[itemID] then db.char.lastUsedFlask = itemID
+        elseif foodSet[itemID] then db.char.lastUsedFood = itemID
+        elseif weSet[itemID] then db.char.lastUsedWeaponEnchant = itemID end
     end
 end
 
@@ -2412,26 +2649,12 @@ local function BeaconMakeIcon(spellID)
 end
 
 local function BeaconLayoutIcons()
-    local visible = {}
-    for _, id in ipairs(BEACON_ALL) do
-        if _beaconIconState[id] then visible[#visible+1] = _beaconIcons[id] end
-    end
-    local count = #visible
-    if count == 0 then if _beaconAnchor then EllesmereUI.SetElementVisibility(_beaconAnchor, false) end; return end
-    if not _beaconAnchor then return end
-    EllesmereUI.SetElementVisibility(_beaconAnchor, true)
-    local p = db and db.profile.display
-    local spacing = p and p.iconSpacing or 8
-    local baseScale = (p and p.scale or 1.0) * (db and db.profile.auras and db.profile.auras.scale or 1.0)
-    local sz = floor(ICON_SIZE * baseScale + 0.5)
-    local totalW = (count * sz) + ((count - 1) * spacing)
-    local startX = -(totalW / 2) + (sz / 2)
-    for i, f in ipairs(visible) do
-        f:SetSize(sz, sz)
-        f:SetAlpha(p and p.opacity or 1.0)
-        f:ClearAllPoints()
-        f:SetPoint("CENTER", _beaconAnchor, "CENTER", startX + (i - 1) * (sz + spacing), 0)
-    end
+    -- Beacon icons are now merged into the main LayoutIcons row.
+    -- Just trigger a main refresh so they appear in the unified line.
+    -- Hide the separate beacon anchor since we don't use it anymore.
+    if _beaconAnchor then EllesmereUI.SetElementVisibility(_beaconAnchor, false) end
+    -- Re-layout main icons to include/exclude beacon icons
+    LayoutIcons()
 end
 
 local function BeaconApplyGlow(f, show)
@@ -2616,36 +2839,27 @@ function EABR:OnEnable()
     -- Expose globals for options
     _G._EABR_AceDB = db
 
-    -- Snapshot flask/food before PvP and M+ restrictions activate.
-    -- Uses direct aura scan to avoid circular calls into PlayerHasFlaskBuff.
+    -- Snapshot flask/food/rune before PvP and M+ restrictions activate.
+    -- Uses zero-allocation GetPlayerAuraBySpellID lookups instead of iterating.
     local function _scanFlaskOOC()
-        for i = 1, 40 do
-            local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-            if not aura then break end
-            local sid = aura.spellId
-            if sid and not issecretvalue(sid) and FLASK_BUFF_ID_SET[sid] then return true end
-            local aName = aura.name
-            if aName and not issecretvalue(aName) and (FLASK_NAME_SET[aName] or aName:find("Flask")) then return true end
+        for id in pairs(FLASK_BUFF_ID_SET) do
+            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+            if ok and result ~= nil then return true end
         end
         return false
     end
+    local _wellFedSpellIDs = { 455369, 462187 }
     local function _scanFoodOOC()
-        for i = 1, 40 do
-            local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-            if not aura then break end
-            local aName = aura.name
-            if aName and not issecretvalue(aName) and (aName == "Well Fed" or aName == "Hearty Well Fed") then return true end
+        for _, id in ipairs(_wellFedSpellIDs) do
+            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+            if ok and result ~= nil then return true end
         end
         return false
     end
-    local _runeBuffIDSet = {}
-    for _, id in ipairs(RUNE_BUFF_IDS) do _runeBuffIDSet[id] = true end
     local function _scanRuneOOC()
-        for i = 1, 40 do
-            local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-            if not aura then break end
-            local sid = aura.spellId
-            if sid and not issecretvalue(sid) and _runeBuffIDSet[sid] then return true end
+        for _, id in ipairs(RUNE_BUFF_IDS) do
+            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+            if ok and result ~= nil then return true end
         end
         return false
     end
@@ -2940,7 +3154,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
             if isEvoker and InCombat() and IsInGroup() then
                 for _, id in ipairs(_ownOnRaidIDs) do
                     local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-                    if ok and result ~= nil and not issecretvalue(result) then
+                    if ok and result ~= nil and not isSecret(result) then
                         _preCombatOwnOnRaidCache[id] = true
                     end
                 end
@@ -2951,7 +3165,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
                 for _, id in ipairs(_ownOnRaidIDs) do
                     if not _preCombatOwnOnRaidCache[id] then
                         local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, arg1, id)
-                        if ok and result ~= nil and not issecretvalue(result) then
+                        if ok and result ~= nil and not isSecret(result) then
                             _preCombatOwnOnRaidCache[id] = true
                         end
                     end
@@ -3035,3 +3249,20 @@ mainFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
 mainFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
 mainFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 mainFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+mainFrame:RegisterEvent("PLAYER_DEAD")
+mainFrame:RegisterEvent("PLAYER_ALIVE")
+mainFrame:RegisterEvent("PLAYER_UNGHOST")
+mainFrame:RegisterEvent("BAG_UPDATE")
+mainFrame:RegisterEvent("BAG_UPDATE_COOLDOWN")
+
+-- Temporary: /abrmem toggles per-Refresh memory probes
+SLASH_ABRMEM1 = "/abrmem"
+SlashCmdList.ABRMEM = function()
+    if _G._EABR_MemProbe then
+        _G._EABR_MemProbe = nil
+        print("|cff00ff00[ABR]|r Memory probes OFF")
+    else
+        _G._EABR_MemProbe = { n=0 }
+        print("|cff00ff00[ABR]|r Memory probes ON -- will print every 20 refreshes")
+    end
+end

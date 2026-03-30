@@ -380,9 +380,10 @@ local function HideChatButton(btn)
     btn:SetAlpha(0)
     if not chatButtonHooks[btn] then
         hooksecurefunc(btn, "Show", function(self)
+            if InCombatLockdown() then return end
             if _G._EBS_AceDB and _G._EBS_AceDB.profile.chat.hideButtons then
-                self:Hide()
                 self:SetAlpha(0)
+                self:EnableMouse(false)
             end
         end)
         chatButtonHooks[btn] = true
@@ -536,13 +537,14 @@ local function HideMinimapButton(name)
     btn:SetAlpha(0)
     if not minimapButtonHooks[name] then
         hooksecurefunc(btn, "Show", function(self)
+            if InCombatLockdown() then return end
             local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
             if not mp then return end
             for _, entry in ipairs(minimapButtonMap) do
                 for _, btnName in ipairs(entry.names) do
                     if btnName == name and mp[entry.key] then
-                        self:Hide()
                         self:SetAlpha(0)
+                        self:EnableMouse(false)
                         return
                     end
                 end
@@ -809,6 +811,14 @@ local function CreateFlyoutToggle()
 
     btn:SetScript("OnClick", ToggleFlyoutPanel)
 
+    -- Safety: ensure mouse stays enabled. Some Blizzard code or addon hooks
+    -- on minimap children can disable mouse input. Re-assert on every Show.
+    btn:HookScript("OnShow", function(self)
+        if not self:IsMouseEnabled() then
+            self:EnableMouse(true)
+        end
+    end)
+
     flyoutToggle = btn
     flyoutOwnedFrames[btn] = true
     return btn
@@ -930,12 +940,13 @@ local function HideMinimapChild(btn)
     btn:SetAlpha(0)
     if not addonButtonHooks[btn] then
         hooksecurefunc(btn, "Show", function(self)
+            if InCombatLockdown() then return end
             -- Allow showing when parented to the flyout panel
             if self:GetParent() == flyoutPanel then return end
             local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
             if mp and mp.enabled and not flyoutOwnedFrames[self] then
-                self:Hide()
                 self:SetAlpha(0)
+                self:EnableMouse(false)
             end
         end)
         addonButtonHooks[btn] = true
@@ -1044,11 +1055,14 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local mailFrame = indicator and indicator.MailFrame
     local craftingFrame = indicator and indicator.CraftingOrderFrame
 
-    -- Reparent all indicator children onto minimap (cluster is hidden)
-    if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
-    if gameTime then gameTime:SetParent(minimap); gameTime:SetFrameLevel(flvl + 1) end
-    if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
-    if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
+    -- Reparent indicator children onto minimap (cluster is hidden).
+    -- Guard with InCombatLockdown to avoid tainting during protected operations.
+    if not InCombatLockdown() then
+        if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
+        if gameTime then gameTime:SetParent(minimap); gameTime:SetFrameLevel(flvl + 1) end
+        if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
+        if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
+    end
     -- Difficulty flag (instance type/size indicator)
     local diffFrame = (MinimapCluster and MinimapCluster.InstanceDifficulty) or _G.MiniMapInstanceDifficulty
     if diffFrame then
@@ -1329,11 +1343,13 @@ local function ApplyMinimap()
     local needsClusterHide = MinimapCluster and MinimapCluster:IsShown()
     if needsReparent or needsClusterHide then
         C_Timer.After(0, function()
+            if InCombatLockdown() then return end
             if needsReparent and minimap:GetParent() ~= UIParent then
                 minimap:SetParent(UIParent)
             end
             if needsClusterHide and MinimapCluster then
-                MinimapCluster:Hide()
+                MinimapCluster:SetAlpha(0)
+                MinimapCluster:EnableMouse(false)
             end
         end)
     end
@@ -1983,25 +1999,18 @@ function EBS:OnEnable()
                             SkinFriendsFrame()
                         end
                     end)
-                end
-            end)
-
-            -- Also hook ShowUIPanel as a fallback.
-            -- Guard with InCombatLockdown to avoid contributing taint during
-            -- protected UI panel open sequences (e.g. World Map open triggering
-            -- dungeon pin SetPropagateMouseClicks ADDON_ACTION_BLOCKED).
-            if ShowUIPanel then
-                hooksecurefunc("ShowUIPanel", function(frame)
-                    if frame == FriendsFrame and not friendsSkinned then
-                        if InCombatLockdown() then return end
-                        C_Timer.After(0, function()
-                            if EBS.db.profile.friends.enabled then
-                                SkinFriendsFrame()
+                    -- Hook FriendsFrame's own OnShow as fallback for future opens.
+                    -- Do NOT hook the global ShowUIPanel — that taints every panel
+                    -- open (World Map, etc.) causing ADDON_ACTION_BLOCKED.
+                    if FriendsFrame then
+                        FriendsFrame:HookScript("OnShow", function()
+                            if not friendsSkinned and EBS.db.profile.friends.enabled then
+                                C_Timer.After(0, SkinFriendsFrame)
                             end
                         end)
                     end
-                end)
-            end
+                end
+            end)
         else
             SkinFriendsFrame()
         end

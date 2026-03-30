@@ -2033,9 +2033,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Register the module
     ---------------------------------------------------------------------------
-    -- Module disabled: in maintenance. Sidebar button stays grayed out.
-    -- EllesmereUI:RegisterModule("EllesmereUIAuraBuffReminders", {
-    do return end
     EllesmereUI:RegisterModule("EllesmereUIAuraBuffReminders", {
         title       = "Auras, Buffs & Consumables",
         description = "AuraBuff Reminders: Raid Buffs, Auras, and Consumables.",

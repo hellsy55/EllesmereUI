@@ -253,7 +253,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png",      comingSoon = true },
     { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
     { folder = "EllesmereUIResourceBars",      display = "Resource Bars",      search_name = "EllesmereUI Resource Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
-    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png",         maintenance = true },
+    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
     { folder = "EllesmereUIBasics",            display = "Basics",             search_name = "EllesmereUI Basics",             icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
@@ -6046,7 +6046,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "5.9.1"
+EllesmereUI.VERSION = "5.9.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

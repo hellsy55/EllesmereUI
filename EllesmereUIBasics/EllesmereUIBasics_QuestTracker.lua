@@ -214,13 +214,34 @@ local function ShowContextMenu(anchor, items)
         btn:SetPoint("TOPLEFT", ctxMenu, "TOPLEFT", MENU_PAD, -(MENU_PAD + (i - 1) * ITEM_H))
         btn._hl:SetColorTexture(1, 1, 1, 0)
         SetFontSafe(btn._lbl, GlobalFont(), 12, OutlineFlag())
-        btn._lbl:SetTextColor(1, 1, 1, 1)
         btn._lbl:SetText(item.text)
-        btn._onClick = item.onClick
-        btn:SetScript("OnClick", function()
-            ctxMenu:Hide()
-            if btn._onClick then btn._onClick() end
-        end)
+        local disabled = item.isDisabled and item.isDisabled()
+        if disabled then
+            btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
+            btn._onClick = nil
+            btn:SetScript("OnClick", nil)
+            btn:SetScript("OnEnter", function()
+                btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
+            end)
+            btn:SetScript("OnLeave", function()
+                btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
+            end)
+        else
+            btn._lbl:SetTextColor(1, 1, 1, 1)
+            btn._onClick = item.onClick
+            btn:SetScript("OnClick", function()
+                ctxMenu:Hide()
+                if btn._onClick then btn._onClick() end
+            end)
+            btn:SetScript("OnEnter", function()
+                btn._hl:SetColorTexture(1, 1, 1, E.DD_ITEM_HL_A)
+                btn._lbl:SetTextColor(acR, acG, acB, 1)
+            end)
+            btn:SetScript("OnLeave", function()
+                btn._hl:SetColorTexture(1, 1, 1, 0)
+                btn._lbl:SetTextColor(1, 1, 1, 1)
+            end)
+        end
         btn:Show()
     end
 
@@ -346,10 +367,27 @@ local function TitleRowOnClick(self, btn)
             { text = "Untrack Quest", onClick = function()
                 RemoveWatch(qID); EQT:SetDirty(true)
             end },
+            { text = "Share Quest", onClick = function()
+                if C_QuestLog.IsPushableQuest and C_QuestLog.IsPushableQuest(qID) then
+                    C_QuestLog.SetSelectedQuest(qID)
+                    QuestLogPushQuest()
+                end
+            end, isDisabled = function()
+                return not IsInGroup() or not (C_QuestLog.IsPushableQuest and C_QuestLog.IsPushableQuest(qID))
+            end },
             { text = "Abandon Quest", onClick = function()
                 C_QuestLog.SetSelectedQuest(qID)
                 C_QuestLog.SetAbandonQuest()
-                StaticPopup_Show("ABANDON_QUEST", C_QuestLog.GetTitleForQuestID(qID))
+                local questTitle = C_QuestLog.GetTitleForQuestID(qID) or "this quest"
+                EllesmereUI:ShowConfirmPopup({
+                    title = "Abandon Quest",
+                    message = "Are you sure you want to abandon \"" .. questTitle .. "\"?",
+                    confirmText = "Abandon",
+                    cancelText = "Cancel",
+                    onConfirm = function()
+                        C_QuestLog.AbandonQuest()
+                    end,
+                })
             end },
         })
     elseif IsShiftKeyDown() then
@@ -370,7 +408,8 @@ local function TitleRowOnClick(self, btn)
             C_SuperTrack.SetSuperTrackedQuestID(qID)
         end
         if WorldMapFrame and WorldMapFrame:IsShown() then
-            HideUIPanel(WorldMapFrame)
+            -- Use Toggle instead of protected HideUIPanel to avoid taint
+            WorldMapFrame:Hide()
         else
             if C_QuestLog.SetSelectedQuest then
                 C_QuestLog.SetSelectedQuest(qID)
@@ -379,8 +418,6 @@ local function TitleRowOnClick(self, btn)
                 QuestMapFrame_OpenToQuestDetails(qID)
             elseif OpenQuestLog then
                 OpenQuestLog(qID)
-            elseif WorldMapFrame then
-                ShowUIPanel(WorldMapFrame)
             end
         end
     end
@@ -416,7 +453,12 @@ local function AcquireRow(parent)
     return r
 end
 local function ReleaseRow(r)
-    r.frame:Hide(); r.frame:ClearAllPoints(); r.frame:SetScript("OnClick", nil)
+    r.frame:Hide(); r.frame:ClearAllPoints()
+    r.frame:SetScript("OnClick", nil)
+    r.frame:SetScript("OnEnter", nil)
+    r.frame:SetScript("OnLeave", nil)
+    r.frame:EnableMouse(false)
+    r.frame._questID = nil
     r.frame._isAutoComplete = nil; r.frame._isComplete = nil
     r.frame._recipeID = nil; r.frame._isRecraft = nil
     r._baseR, r._baseG, r._baseB = nil, nil, nil
@@ -428,6 +470,9 @@ local function ReleaseRow(r)
     if r.barBg       then r.barBg:Hide()       end
     if r.barFill     then r.barFill:Hide()     end
     if r.pctFS       then r.pctFS:Hide()       end
+    -- Clean up quest icon and LFG button
+    if r._questIcon  then r._questIcon:Hide()  end
+    if r._lfgBtn     then r._lfgBtn:Hide()     end
     -- Clean up banner sub-widgets
     if r.bannerBg    then r.bannerBg:Hide()    end
     if r.bannerAccent then r.bannerAccent:Hide() end
@@ -810,13 +855,7 @@ local function GetScenarioSection()
                         })
                     end
                 elseif numRequired > 0 then
-                    local qs = crit.quantityString
-                    local useQS = qs and qs ~= "" and qs ~= "0" and qs ~= "1"
-                    if useQS then
-                        displayText = qs .. " " .. desc
-                    else
-                        displayText = string.format("%d/%d %s", numFulfilled, numRequired, desc)
-                    end
+                    displayText = string.format("%d/%d %s", numFulfilled, numRequired, desc)
                     if not seenText[displayText] then
                         seenText[displayText] = true
                         local isBar = numRequired > 1
@@ -962,33 +1001,30 @@ end
 -- Quest type icon atlases
 -------------------------------------------------------------------------------
 local QUEST_ICON_ATLAS = {
-    important  = "importantavailablequesticon",
-    legendary  = "legendaryavailablequesticon",
-    campaign   = "CampaignAvailableQuestIcon",
-    calling    = "CampaignAvailableDailyQuestIcon",
-    questline  = "questlog-storylineicon",
-    daily      = "Recurringavailablequesticon",
-    weekly     = "Recurringavailablequesticon",
-    recurring  = "Recurringavailablequesticon",
-    meta       = "Wrapperavailablequesticon",
-    dungeon    = "worldquest-icon-dungeon",
-    raid       = "worldquest-icon-raid",
-    normal     = "QuestNormal",
+    campaign   = "Crosshair_campaignquest_32",
+    legendary  = "Crosshair_legendaryquest_32",
+    important  = "Crosshair_important_48",
+    recurring  = "Crosshair_Recurring_48",
+    daily      = "Crosshair_Recurring_48",
+    weekly     = "Crosshair_Recurring_48",
+    meta       = "Crosshair_Wrapper_48",
 }
 
 local QUEST_TURNIN_ATLAS = {
-    important  = "UI-QuestPoiImportant-QuestBangTurnIn",
-    legendary  = "UI-QuestPoiLegendary-QuestBangTurnIn",
-    campaign   = "UI-QuestPoiCampaign-QuestBangTurnIn",
-    calling    = "UI-DailyQuestPoiCampaign-QuestBangTurnIn",
-    daily      = "UI-QuestPoiRecurring-QuestBangTurnIn",
-    weekly     = "UI-QuestPoiRecurring-QuestBangTurnIn",
-    recurring  = "UI-QuestPoiRecurring-QuestBangTurnIn",
-    meta       = "UI-QuestPoiWrapper-QuestBangTurnIn",
-    normal     = "UI-QuestIcon-TurnIn-Normal",
-    questline  = "UI-QuestIcon-TurnIn-Normal",
-    dungeon    = "UI-QuestIcon-TurnIn-Normal",
-    raid       = "UI-QuestIcon-TurnIn-Normal",
+    campaign   = "Crosshair_campaignquestturnin_32",
+    legendary  = "Crosshair_legendaryquestturnin_32",
+    important  = "Crosshair_importantturnin_48",
+    recurring  = "Crosshair_Recurringturnin_48",
+    daily      = "Crosshair_Recurringturnin_48",
+    weekly     = "Crosshair_Recurringturnin_48",
+    meta       = "Crosshair_Wrapperturnin_48",
+}
+
+local QUEST_ICON_SIZE_OVERRIDE = {
+    recurring  = 18,
+    daily      = 18,
+    weekly     = 18,
+    important  = 22,
 }
 
 local QUEST_ICON_SIZE   = 16
@@ -1034,9 +1070,9 @@ local function GetQuestIconAtlas(questID)
     end
 
     if done and QUEST_TURNIN_ATLAS[key] then
-        return QUEST_TURNIN_ATLAS[key], true
+        return QUEST_TURNIN_ATLAS[key], true, key
     end
-    return QUEST_ICON_ATLAS[key], false
+    return QUEST_ICON_ATLAS[key], false, key
 end
 
 -------------------------------------------------------------------------------
@@ -1113,24 +1149,25 @@ function EQT:ClearSectionCache()
     RebuildZoneSnapshot()
 end
 
-local _ql_watched, _ql_zone, _ql_world, _ql_prey, _ql_seen = {}, {}, {}, {}, {}
+local _ql_active, _ql_watched, _ql_zone, _ql_world, _ql_prey, _ql_seen = {}, {}, {}, {}, {}, {}
 local _questListsCached = false
 
 local function GetQuestLists()
     -- Return cached lists for progress-only refreshes
     if _questListsCached and not _structuralDirty then
-        return _ql_watched, _ql_zone, _ql_world, _ql_prey
+        return _ql_active, _ql_watched, _ql_zone, _ql_world, _ql_prey
     end
 
     -- Recycle previous entries back to pools before wiping
-    RecycleQuestData({ _ql_watched, _ql_zone, _ql_world, _ql_prey })
+    RecycleQuestData({ _ql_active, _ql_watched, _ql_zone, _ql_world, _ql_prey })
+    local active  = _ql_active
     local watched = _ql_watched
     local zone    = _ql_zone
     local world   = _ql_world
     local prey    = _ql_prey
     local seen    = wipe(_ql_seen)
 
-    if not C_QuestLog then return watched, zone, world, prey end
+    if not C_QuestLog then return active, watched, zone, world, prey end
     local entries = ScanQuestLog()
     local db = DB()
     local cfgPrey  = db.showPreyQuests
@@ -1155,8 +1192,14 @@ local function GetQuestLists()
 
                 local onMap = zoneQuestSnapshot[qID]
 
+                -- Active world quest: task quests the player is physically inside
+                local isActiveWQ = info.isTask and C_TaskQuest
+                    and C_TaskQuest.IsActive and C_TaskQuest.IsActive(qID)
+
                 local section
-                if cfgPrey and IsPreyQuest(qID, info) then
+                if isActiveWQ then
+                    section = "active"
+                elseif cfgPrey and IsPreyQuest(qID, info) then
                     section = "prey"
                 elseif tracked then
                     if cfgZone and onMap and not info.isTask then
@@ -1168,21 +1211,27 @@ local function GetQuestLists()
                     if cfgWorld and not IsInternalTitle(info.title) then
                         section = "world"
                     end
-                elseif onMap then
+                elseif onMap and tracked then
                     if cfgZone then
                         section = "zone"
                     end
                 end
 
+                -- Don't cache active WQ section -- it changes dynamically
+                -- as the player moves in/out of quest areas.
                 local cached = questSectionCache[qID]
-                if cached then
+                if cached and not isActiveWQ then
                     section = cached
                 end
 
                 if section then
-                    questSectionCache[qID] = section
+                    if section ~= "active" then
+                        questSectionCache[qID] = section
+                    end
                     seen[qID] = true
-                    if section == "prey" then
+                    if section == "active" then
+                        BuildEntry(info, qID, active)
+                    elseif section == "prey" then
                         BuildEntry(info, qID, prey)
                     elseif section == "zone" then
                         BuildEntry(info, qID, zone)
@@ -1197,7 +1246,7 @@ local function GetQuestLists()
     end
 
     _questListsCached = true
-    return watched, zone, world, prey
+    return active, watched, zone, world, prey
 end
 
 -------------------------------------------------------------------------------
@@ -1519,7 +1568,23 @@ function EQT:Refresh(skipAlphaFlash)
         r.barFill:ClearAllPoints()
         r.barFill:SetPoint("TOPLEFT", r.barBg, "TOPLEFT", 0, 0)
         r.barFill:SetHeight(BAR_H)
-        r.barFill:SetWidth(math.max(1, barW * pct))
+        local targetW = math.max(1, barW * pct)
+        local prevW = r._barTargetW or targetW
+        if prevW ~= targetW then
+            local startW = r.barFill:GetWidth() or prevW
+            local elapsed = 0
+            local fill = r.barFill
+            r.frame:SetScript("OnUpdate", function(self, dt)
+                elapsed = elapsed + dt
+                local t = math.min(elapsed / 0.3, 1)
+                fill:SetWidth(math.max(1, startW + (targetW - startW) * t))
+                if t >= 1 then self:SetScript("OnUpdate", nil) end
+            end)
+        else
+            r.barFill:SetWidth(targetW)
+            r.frame:SetScript("OnUpdate", nil)
+        end
+        r._barTargetW = targetW
         r.barFill:Show()
 
         -- Percentage text (reuse existing font string)
@@ -1556,18 +1621,29 @@ function EQT:Refresh(skipAlphaFlash)
         r.text:SetTextColor(cr, cg, cb)
         r._baseR, r._baseG, r._baseB = cr, cg, cb
         ApplyFontShadow(r.text)
-        -- Inject quest type icon at end of title text
-        if qID then
-            local atlas, isTurnIn = GetQuestIconAtlas(qID)
-            if atlas then
-                local sz = isTurnIn and TURNIN_ICON_SIZE or QUEST_ICON_SIZE
-                text = text .. " |A:" .. atlas .. ":" .. sz .. ":" .. sz .. ":0:0|a"
-            end
-        end
         r.text:SetText(text)
         r.text:Show()
         local item = db.showQuestItems and qID and GetQuestItem(qID)
-        local rightPad = item and (iqSize + ITEM_PAD * 2) or 0
+        -- Quest type icon (separate texture, far right)
+        local questAtlas, isTurnIn, questKey
+        if qID then questAtlas, isTurnIn, questKey = GetQuestIconAtlas(qID) end
+        local iconPad = 0
+        if questAtlas then
+            if not r._questIcon then
+                local ico = r.frame:CreateTexture(nil, "OVERLAY")
+                r._questIcon = ico
+            end
+            local ICON_SZ = (questKey and QUEST_ICON_SIZE_OVERRIDE[questKey]) or 20
+            r._questIcon:SetSize(ICON_SZ, ICON_SZ)
+            r._questIcon:SetAtlas(questAtlas)
+            r._questIcon:ClearAllPoints()
+            r._questIcon:SetPoint("RIGHT", r.frame, "RIGHT", -2, 0)
+            r._questIcon:Show()
+            iconPad = ICON_SZ + 4
+        elseif r._questIcon then
+            r._questIcon:Hide()
+        end
+        local rightPad = (item and (iqSize + ITEM_PAD * 2) or 0) + iconPad
         r.text:ClearAllPoints()
         r.text:SetPoint("TOPLEFT",  r.frame, "TOPLEFT",  2, 0)
         r.text:SetPoint("TOPRIGHT", r.frame, "TOPRIGHT", -rightPad, 0)
@@ -1614,6 +1690,57 @@ function EQT:Refresh(skipAlphaFlash)
             elseif btn._chargeFS then btn._chargeFS:Hide() end
             self.itemBtns[#self.itemBtns + 1] = btn
         end
+        -- Find Group eyeball button for elite world quests
+        if qID then
+            local tag = C_QuestLog.GetQuestTagInfo and C_QuestLog.GetQuestTagInfo(qID)
+            local showGroupFinder = tag and tag.isElite and tag.worldQuestType
+            local activityID = showGroupFinder
+            if activityID then
+                if not r._lfgBtn then
+                    local btn = CreateFrame("Button", nil, r.frame)
+                    btn:SetSize(20, 20)
+                    btn:SetFrameLevel(r.frame:GetFrameLevel() + 3)
+                    local ico = btn:CreateTexture(nil, "ARTWORK")
+                    ico:SetAllPoints()
+                    ico:SetAtlas("socialqueuing-icon-eye")
+                    btn._ico = ico
+                    btn:SetAlpha(1)
+                    btn:SetScript("OnEnter", function(self)
+                        EllesmereUI.ShowWidgetTooltip(self, "Find a Group")
+                    end)
+                    btn:SetScript("OnLeave", function(self)
+                        EllesmereUI.HideWidgetTooltip()
+                    end)
+                    r._lfgBtn = btn
+                end
+                r._lfgBtn:ClearAllPoints()
+                local anchor = item and self.itemBtns[#self.itemBtns] or r.frame
+                local anchorPt = item and "LEFT" or "RIGHT"
+                local oX = item and -4 or -2
+                r._lfgBtn:SetPoint("RIGHT", anchor, anchorPt, oX, 0)
+                local capturedQID = qID
+                r._lfgBtn:SetScript("OnClick", function()
+                    if LFGListUtil_FindQuestGroup then
+                        LFGListUtil_FindQuestGroup(capturedQID)
+                    elseif C_LFGList and C_LFGList.Search then
+                        -- Fallback: open group finder with quest name search
+                        local title = C_QuestLog.GetTitleForQuestID(capturedQID)
+                        if title then
+                            C_LFGList.Search(1, title) -- 1 = Quests category
+                            if PVEFrame_ToggleFrame then
+                                PVEFrame_ToggleFrame("GroupFinderFrame", _G.LFGListPVEStub)
+                            end
+                        end
+                    end
+                end)
+                r._lfgBtn:Show()
+            elseif r._lfgBtn then
+                r._lfgBtn:Hide()
+            end
+        elseif r._lfgBtn then
+            r._lfgBtn:Hide()
+        end
+
         if qID then
             r.frame._questID = qID; r.frame:EnableMouse(true)
             r.frame._isAutoComplete = isAutoComplete
@@ -1707,7 +1834,7 @@ function EQT:Refresh(skipAlphaFlash)
         end
     end
 
-    local watched, zone, world, prey = GetQuestLists()
+    local active, watched, zone, world, prey = GetQuestLists()
     local scenario = GetScenarioSection()
     local recipes = GetTrackedRecipes()
 
@@ -1768,8 +1895,8 @@ function EQT:Refresh(skipAlphaFlash)
                 r.bannerAccent = r.frame:CreateTexture(nil, "BORDER")
             end
             r.bannerAccent:SetWidth(2)
-            r.bannerAccent:SetPoint("TOPLEFT",    r.frame, "TOPLEFT",  0, 0)
-            r.bannerAccent:SetPoint("BOTTOMLEFT", r.frame, "BOTTOMLEFT", 0, 0)
+            r.bannerAccent:SetPoint("TOPRIGHT",    r.frame, "TOPRIGHT",  0, 0)
+            r.bannerAccent:SetPoint("BOTTOMRIGHT", r.frame, "BOTTOMRIGHT", 0, 0)
             r.bannerAccent:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 0.9)
             r.bannerAccent:Show()
 
@@ -1796,7 +1923,7 @@ function EQT:Refresh(skipAlphaFlash)
                 r.tierFS:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
                 r.tierFS:SetText(scenario.bannerTier)
                 r.tierFS:ClearAllPoints()
-                r.tierFS:SetPoint("TOPRIGHT", r.frame, "TOPRIGHT", -8, -6)
+                r.tierFS:SetPoint("RIGHT", r.frame, "RIGHT", -13, 0)
                 r.tierFS:Show()
             end
 
@@ -1844,8 +1971,14 @@ function EQT:Refresh(skipAlphaFlash)
         end -- if not dc
     end
 
-    -- Order: Recipes (top), Delves, Zone Quests, World Quests, Quests (bottom)
+    -- Order: Recipes (top), Delves, Active WQ, Prey, Zone, World, Quests (bottom)
     local anyAbove = #recipes > 0 or scenario ~= nil
+
+    if #active > 0 then
+        if anyAbove then yOff = yOff + 4 end; anyAbove = true
+        AddCollapsibleSection("ACTIVE WORLD QUEST", false)
+        RenderList(active, 0)
+    end
 
     if db.showPreyQuests and #prey > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
@@ -1879,7 +2012,7 @@ function EQT:Refresh(skipAlphaFlash)
         end)
         if not qc then RenderList(watched, 0) end
     end
-    local hasContent = scenario or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0
+    local hasContent = scenario or #active > 0 or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0
     if not hasContent then
         if f.inner then f.inner:Hide() end
         if f.bg then f.bg:Hide() end
@@ -2432,40 +2565,80 @@ function EQT:Init()
         -- ObjectiveTrackerFrame and must remain visible.
         local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
+        -- Use alpha + mouse disable instead of SetParent to avoid tainting
+        -- the ObjectiveTracker frame hierarchy. SetParent on a Blizzard frame
+        -- taints its ancestry and causes LayoutFrame/MoneyFrame taint errors.
         if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
-            if not ot._eqtOrigParent then
-                ot._eqtOrigParent = ot:GetParent()
+            ot:SetAlpha(0)
+            ot:EnableMouse(false)
+            if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
+            ot._eqtHidden = true
+            -- Persistent enforcer: Blizzard restores alpha on various updates.
+            -- Poll at low frequency to re-suppress.
+            if not ot._eqtEnforcer then
+                ot._eqtEnforcer = CreateFrame("Frame")
             end
-            ot:SetParent(EQT._hiddenFrame)
+            ot._eqtEnforcer:SetScript("OnUpdate", function()
+                if ot:GetAlpha() > 0 then
+                    ot:SetAlpha(0)
+                    ot:EnableMouse(false)
+                    if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
+                end
+            end)
+            ot._eqtEnforcer:Show()
         else
-            if ot._eqtOrigParent then
-                ot:SetParent(ot._eqtOrigParent)
+            if ot._eqtHidden then
+                ot:SetAlpha(1)
+                ot:EnableMouse(true)
+                if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
+                ot._eqtHidden = false
+                if ot._eqtEnforcer then
+                    ot._eqtEnforcer:SetScript("OnUpdate", nil)
+                    ot._eqtEnforcer:Hide()
+                end
             end
-            ot:SetAlpha(1)
         end
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
-    -- Hook Show so Blizzard/unlock mode can't restore it
+    -- Re-suppress when Blizzard restores alpha (e.g. Edit Mode, cinematic end).
+    -- Use a lightweight alpha watch instead of hooking Show (which taints the
+    -- secure frame's execution context).
     local ot = _G.ObjectiveTrackerFrame
     if ot then
-        local suppressing = false
-        local function SuppressBlizzTracker()
-            if suppressing then return end
-            -- Don't suppress during M+ -- the timer must stay visible.
-            local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-                and C_ChallengeMode.IsChallengeModeActive()
-            if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
-                suppressing = true
-                if not ot._eqtOrigParent then
-                    ot._eqtOrigParent = ot:GetParent()
-                end
-                ot:SetParent(EQT._hiddenFrame)
-                suppressing = false
-            end
-        end
-        hooksecurefunc(ot, "Show", SuppressBlizzTracker)
+        local suppressFrame = CreateFrame("Frame")
+        suppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        suppressFrame:RegisterEvent("CINEMATIC_STOP")
+        suppressFrame:RegisterEvent("STOP_MOVIE")
+        suppressFrame:SetScript("OnEvent", function()
+            C_Timer.After(0, ApplyBlizzardTrackerVisibility)
+        end)
     end
     C_Timer.After(1, ApplyBlizzardTrackerVisibility)
+
+    -- SplashFrame taint fix: Blizzard's SplashFrame:OnHide calls
+    -- ObjectiveTrackerFrame:Update() which taints the Quest Button and
+    -- downstream layout/money frames. Replace OnHide with a clone that
+    -- omits the ObjectiveTrackerFrame:Update() call.
+    do
+        local sf = _G.SplashFrame
+        if sf then
+            sf:SetScript("OnHide", function(frame)
+                local fromGameMenu = frame.screenInfo and frame.screenInfo.gameMenuRequest
+                frame.screenInfo = nil
+                C_TalkingHead_SetConversationsDeferred(false)
+                if _G.AlertFrame and _G.AlertFrame.SetAlertsEnabled then
+                    _G.AlertFrame:SetAlertsEnabled(true, "splashFrame")
+                end
+                -- ObjectiveTrackerFrame:Update() intentionally omitted (causes taint)
+                if fromGameMenu and not frame.showingQuestDialog and not InCombatLockdown() then
+                    if _G.GameMenuFrame then
+                        ShowUIPanel(_G.GameMenuFrame)
+                    end
+                end
+                frame.showingQuestDialog = nil
+            end)
+        end
+    end
 
     -- Visibility system: check mode + options + instance hiding
     local qtMouseoverActive = false
@@ -2553,7 +2726,7 @@ function EQT:Init()
         "TASK_PROGRESS_UPDATE","WORLD_QUEST_UPDATE",
         "TASK_IS_TOO_DIFFERENT","SCENARIO_CRITERIA_UPDATE","SCENARIO_UPDATE",
         "SCENARIO_COMPLETED","CRITERIA_COMPLETE","CHALLENGE_MODE_START","CHALLENGE_MODE_COMPLETED",
-        "UI_WIDGET_UNIT_CHANGED",
+        "UI_WIDGET_UNIT_CHANGED","UPDATE_UI_WIDGET",
         "QUEST_DATA_LOAD_RESULT","QUEST_POI_UPDATE","AREA_POIS_UPDATED",
         "SUPER_TRACKING_CHANGED",
         "TRACKED_RECIPE_UPDATE",
@@ -2596,6 +2769,7 @@ function EQT:Init()
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
         SCENARIO_UPDATE = true,
+        SCENARIO_CRITERIA_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
@@ -2603,6 +2777,9 @@ function EQT:Init()
         SCENARIO_UPDATE = true,
         SCENARIO_COMPLETED = true,
         PLAYER_ENTERING_WORLD = true,
+        ZONE_CHANGED = true,
+        ZONE_CHANGED_NEW_AREA = true,
+        UPDATE_UI_WIDGET = true,
     }
     w:SetScript("OnEvent", function(_, event)
         -- M+ start/end: re-evaluate both Blizzard tracker visibility (so
@@ -2629,10 +2806,9 @@ function EQT:Init()
         if event == "TASK_PROGRESS_UPDATE" or event == "WORLD_QUEST_UPDATE" then
             InvalidateQuestLogCache()
             _questListsCached = false
-            -- Use SetDirty (deferred) so GetQuestProgressBarPercent has time to
-            -- populate before the rebuild reads it. Calling Refresh() synchronously
-            -- on the event races the engine update and reads 0 out of combat.
-            EQT:SetDirty(false)
+            -- Structural dirty: active world quest section depends on
+            -- C_TaskQuest.IsActive which changes with task progress.
+            EQT:SetDirty(true)
             if EQT.UpdateQuestItemAttribute then EQT.UpdateQuestItemAttribute() end
             return
         end
