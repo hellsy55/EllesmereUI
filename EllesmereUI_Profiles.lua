@@ -273,6 +273,28 @@ local function RepointAllDBs(profileName)
         EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
         EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
     end
+    -- Seed castbar anchor defaults if the profile predates them.
+    -- These follow the same per-profile unlockLayout system as all
+    -- other elements — this just ensures old profiles get the defaults.
+    do
+        local anchors = EllesmereUIDB.unlockAnchors
+        local wMatch  = EllesmereUIDB.unlockWidthMatch
+        if anchors and wMatch then
+            local CB_DEFAULTS = {
+                { cb = "playerCastbar", parent = "player" },
+                { cb = "targetCastbar", parent = "target" },
+                { cb = "focusCastbar",  parent = "focus" },
+            }
+            for _, def in ipairs(CB_DEFAULTS) do
+                if not anchors[def.cb] then
+                    anchors[def.cb] = { target = def.parent, side = "BOTTOM" }
+                end
+                if not wMatch[def.cb] then
+                    wMatch[def.cb] = def.parent
+                end
+            end
+        end
+    end
     -- Restore fonts and custom colors from the profile
     if profileData.fonts then
         local fontsDB = EllesmereUI.GetFontsDB()

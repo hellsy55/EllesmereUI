@@ -5791,6 +5791,218 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().kickTickEnabled = v
               end });  y = y - h
 
+        -- Important Cast Glow dropdown + inline color swatch + cog
+        do
+            local function impCastOff()
+                local db = DB()
+                local on = db and db.importantCastGlow
+                if on == nil then on = defaults.importantCastGlow end
+                return not on
+            end
+            local function impCastAntsOff()
+                if impCastOff() then return true end
+                local raw = DB().importantCastGlowStyle or defaults.importantCastGlowStyle
+                return type(raw) ~= "number" or raw ~= 1
+            end
+
+            local impGlowValues = { [0] = "None", [1] = "Pixel Glow", [4] = "Auto-Cast Shine" }
+            local impGlowOrder = { 0, 1, 4 }
+
+            local impGlowRow
+            impGlowRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Important Cast Glow",
+                  values=impGlowValues, order=impGlowOrder,
+                  getValue=function()
+                    if impCastOff() then return 0 end
+                    return DB().importantCastGlowStyle or defaults.importantCastGlowStyle or 1
+                  end,
+                  setValue=function(v)
+                    if v == 0 then
+                        DB().importantCastGlow = false
+                    else
+                        DB().importantCastGlow = true
+                        DB().importantCastGlowStyle = v
+                    end
+                    RefreshAllPlates()
+                    C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+                  end,
+                  tooltip="Show a glow on the cast bar when the enemy is casting a spell Blizzard marks as important." },
+                { type="label", text="" });  y = y - h
+
+            -- Inline color swatch
+            do
+                local leftRgn = impGlowRow._leftRegion
+                local ctrl = leftRgn and leftRgn._control
+                if ctrl and EllesmereUI.BuildColorSwatch then
+                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                        leftRgn, impGlowRow:GetFrameLevel() + 3,
+                        function()
+                            local c = DB().importantCastGlowColor or defaults.importantCastGlowColor
+                            return c.r or 1, c.g or 0.2, c.b or 0.2
+                        end,
+                        function(r, g, b)
+                            DB().importantCastGlowColor = { r = r, g = g, b = b }
+                            RefreshAllPlates()
+                        end, nil, 20)
+                    PP.Point(swatch, "RIGHT", ctrl, "LEFT", -12, 0)
+                    leftRgn._lastInline = swatch
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        local off = impCastOff()
+                        swatch:SetAlpha(off and 0.15 or 1)
+                        swatch:EnableMouse(not off)
+                        updateSwatch()
+                    end)
+                    swatch:SetAlpha(impCastOff() and 0.15 or 1)
+                    swatch:EnableMouse(not impCastOff())
+                end
+            end
+
+            -- Cog popup for Pixel Glow settings (Lines, Thickness, Speed)
+            do
+                local icgPopup, icgPopupOwner
+                local function ShowImpCastGlowPopup(anchorBtn)
+                    if not icgPopup then
+                        local SolidTex   = EllesmereUI.SolidTex
+                        local MakeBorder = EllesmereUI.MakeBorder
+                        local MakeFont   = EllesmereUI.MakeFont
+                        local BuildSliderCore = EllesmereUI.BuildSliderCore
+                        local BORDER_COLOR   = EllesmereUI.BORDER_COLOR
+
+                        local SIDE_PAD = 14; local TOP_PAD = 14
+                        local TITLE_H = 11; local TITLE_GAP = 10; local GAP = 10
+                        local ROW_H = 24; local POPUP_INPUT_A = 0.55
+                        local INPUT_W = 34; local SLIDER_INPUT_GAP = 8; local LABEL_SLIDER_GAP = 12
+                        local MIN_POPUP_W = 180
+
+                        local totalH = TOP_PAD + TITLE_H + TITLE_GAP + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H + TOP_PAD
+
+                        local pf = CreateFrame("Frame", nil, UIParent)
+                        pf:SetSize(260, totalH); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(200)
+                        pf:EnableMouse(true); pf:Hide()
+
+                        local bg = SolidTex(pf, "BACKGROUND", 0.06, 0.08, 0.10, 0.95); bg:SetAllPoints()
+                        MakeBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
+
+                        local titleFS = MakeFont(pf, 11, "", 1, 1, 1); titleFS:SetAlpha(0.7)
+                        titleFS:SetPoint("TOP", pf, "TOP", 0, -TOP_PAD); titleFS:SetText("Pixel Glow Settings")
+
+                        local tmpFS = pf:CreateFontString(nil, "OVERLAY")
+                        tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                        local maxLblW = 0
+                        for _, txt in ipairs({"Lines", "Thickness", "Speed"}) do
+                            tmpFS:SetText(txt); local w = tmpFS:GetStringWidth(); if w > maxLblW then maxLblW = w end
+                        end
+                        tmpFS:Hide(); if maxLblW < 10 then maxLblW = 60 end
+
+                        local SLIDER_LEFT = SIDE_PAD + maxLblW + LABEL_SLIDER_GAP
+                        local SLIDER_W = math.max(80, 260 - SLIDER_LEFT - SLIDER_INPUT_GAP - INPUT_W - SIDE_PAD)
+                        local POPUP_W = math.max(MIN_POPUP_W, SLIDER_LEFT + SLIDER_W + SLIDER_INPUT_GAP + INPUT_W + SIDE_PAD)
+                        pf:SetWidth(POPUP_W)
+
+                        local r1Y = -(TOP_PAD + TITLE_H + TITLE_GAP + GAP)
+                        local lbl1 = MakeFont(pf, 11, nil, 1, 1, 1); lbl1:SetAlpha(0.6)
+                        lbl1:SetText("Lines"); lbl1:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r1Y)
+                        local t1, v1 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
+                            2, 16, 1,
+                            function() return DB().importantCastGlowLines or defaults.importantCastGlowLines or 8 end,
+                            function(v) DB().importantCastGlowLines = v; RefreshAllPlates() end, true)
+                        t1:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r1Y - 2)
+                        v1:ClearAllPoints(); v1:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r1Y)
+
+                        local r2Y = r1Y - ROW_H - GAP
+                        local lbl2 = MakeFont(pf, 11, nil, 1, 1, 1); lbl2:SetAlpha(0.6)
+                        lbl2:SetText("Thickness"); lbl2:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r2Y)
+                        local t2, v2 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
+                            1, 4, 1,
+                            function() return DB().importantCastGlowThickness or defaults.importantCastGlowThickness or 2 end,
+                            function(v) DB().importantCastGlowThickness = v; RefreshAllPlates() end, true)
+                        t2:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r2Y - 2)
+                        v2:ClearAllPoints(); v2:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r2Y)
+
+                        local r3Y = r2Y - ROW_H - GAP
+                        local lbl3 = MakeFont(pf, 11, nil, 1, 1, 1); lbl3:SetAlpha(0.6)
+                        lbl3:SetText("Speed"); lbl3:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r3Y)
+                        local t3, v3 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
+                            1, 8, 1,
+                            function() local s = DB().importantCastGlowSpeed or defaults.importantCastGlowSpeed or 4; return 9 - s end,
+                            function(v) DB().importantCastGlowSpeed = 9 - v; RefreshAllPlates() end, true)
+                        t3:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r3Y - 2)
+                        v3:ClearAllPoints(); v3:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r3Y)
+
+                        local wasDown = false
+                        pf:SetScript("OnHide", function(self)
+                            self:SetScript("OnUpdate", nil)
+                            if icgPopupOwner then icgPopupOwner:SetAlpha(0.4) end
+                            icgPopupOwner = nil
+                        end)
+                        pf._clickOutside = function(self)
+                            local down = IsMouseButtonDown("LeftButton")
+                            if down and not wasDown then
+                                if not self:IsMouseOver() and not (icgPopupOwner and icgPopupOwner:IsMouseOver()) then
+                                    self:Hide()
+                                end
+                            end
+                            wasDown = down
+                        end
+                        if EllesmereUI._mainFrame then
+                            EllesmereUI._mainFrame:HookScript("OnHide", function()
+                                if pf:IsShown() then pf:Hide() end
+                            end)
+                        end
+                        icgPopup = pf
+                    end
+
+                    if icgPopupOwner == anchorBtn and icgPopup:IsShown() then
+                        icgPopup:Hide(); return
+                    end
+                    icgPopupOwner = anchorBtn
+
+                    icgPopup:ClearAllPoints()
+                    icgPopup:SetPoint("BOTTOM", anchorBtn, "TOP", 0, 6)
+                    icgPopup:SetAlpha(0); icgPopup:Show()
+                    local elapsed = 0
+                    icgPopup:SetScript("OnUpdate", function(self, dt)
+                        elapsed = elapsed + dt; local t = math.min(elapsed / 0.15, 1)
+                        self:SetAlpha(t); self:ClearAllPoints()
+                        self:SetPoint("BOTTOM", anchorBtn, "TOP", 0, 6 + (-8 * (1 - t)))
+                        if t >= 1 then self:SetScript("OnUpdate", self._clickOutside) end
+                    end)
+                end
+
+                local leftRgn = impGlowRow._leftRegion
+                local COGS_ICON = EllesmereUI.COGS_ICON
+                local cogBtn = CreateFrame("Button", nil, leftRgn)
+                cogBtn:SetSize(26, 26)
+                if leftRgn._lastInline then
+                    PP.Point(cogBtn, "RIGHT", leftRgn._lastInline, "LEFT", -6, 0)
+                else
+                    PP.Point(cogBtn, "RIGHT", leftRgn._control, "LEFT", -8, 0)
+                end
+                cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(COGS_ICON)
+                if cogTex.SetSnapToPixelGrid then cogTex:SetSnapToPixelGrid(false); cogTex:SetTexelSnappingBias(0) end
+                cogBtn:SetAlpha(0.4)
+                cogBtn:SetScript("OnClick", function(self) ShowImpCastGlowPopup(self) end)
+                cogBtn:SetScript("OnEnter", function(self)
+                    self:SetAlpha(1)
+                    EllesmereUI.ShowWidgetTooltip(self, "Pixel Glow Settings")
+                end)
+                cogBtn:SetScript("OnLeave", function(self)
+                    self:SetAlpha(0.4)
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                -- Disable cog when not using pixel glow
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    local off = impCastAntsOff()
+                    cogBtn:SetAlpha(off and 0.15 or 0.4)
+                    cogBtn:EnableMouse(not off)
+                end)
+                cogBtn:SetAlpha(impCastAntsOff() and 0.15 or 0.4)
+                cogBtn:EnableMouse(not impCastAntsOff())
+            end
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
@@ -5908,6 +6120,50 @@ initFrame:SetScript("OnEvent", function(self)
                 updateSwatch()
             end)
             local off = isClassicTankAggroDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Row 3: Off-Tank Aggro (left only)
+        local function isOffTankDisabled()
+            local db = DB()
+            if db and db.offTankAggroEnabled ~= nil then return not db.offTankAggroEnabled end
+            return not defaults.offTankAggroEnabled
+        end
+
+        local offTankRow
+        offTankRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Special \"Off-Tank\" Color",
+              tooltip="Shows a special color for nameplates that another tank in your raid has aggro on.",
+              getValue=function()
+                local db = DB()
+                if db and db.offTankAggroEnabled ~= nil then return db.offTankAggroEnabled end
+                return defaults.offTankAggroEnabled
+              end,
+              setValue=function(v)
+                DB().offTankAggroEnabled = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+
+        -- Inline color swatch
+        do
+            local leftRgn = offTankRow._leftRegion
+            local otColorGet = function() return DBColor("offTankAggro") end
+            local otColorSet = function(r, g, b)
+                DB().offTankAggro = { r = r, g = g, b = b }
+                RefreshAllPlates()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, otColorGet, otColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isOffTankDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isOffTankDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
         end

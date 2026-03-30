@@ -2250,10 +2250,20 @@ end
 local function ApplyCastbarUnlockPos(castbarBg, unit)
     local key = CastbarUnlockKey(unit)
     if not key then return false end
+    -- If the castbar is anchored to another element via the unlock system,
+    -- let the anchor system position it — don't apply the positions entry
+    -- which may be stale/corrupted CENTER/CENTER with no offsets.
+    local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
+    if anchors and anchors[key] and anchors[key].target then
+        -- Return true to skip default positioning — the unlock system's
+        -- ReapplyOwnAnchor will handle the actual position.
+        return true
+    end
     local pos = db and db.profile and db.profile.positions and db.profile.positions[key]
     if not pos then return false end
+    if not pos.x and not pos.y then return false end
     castbarBg:ClearAllPoints()
-    castbarBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+    castbarBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
     return true
 end
 

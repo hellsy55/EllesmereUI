@@ -7025,6 +7025,46 @@ initFrame:SetScript("OnEvent", function(self)
                 BossCogBtn(leftRgn, bBuffCogShowRaw)
             end
 
+            -- Raid Marker
+            do
+                local function bossRmOff()
+                    return db.profile.boss.raidMarkerEnabled == false
+                end
+                local bossRmRow
+                bossRmRow, hh = Ww:DualRow(pp, yy,
+                    { type="toggle", text="Show Raid Marker",
+                      tooltip="Shows the raid target marker icon on boss frames.",
+                      getValue=function() return db.profile.boss.raidMarkerEnabled ~= false end,
+                      setValue=function(v)
+                        db.profile.boss.raidMarkerEnabled = v
+                        ReloadAndUpdate()
+                        EllesmereUI:RefreshPage()
+                      end },
+                    { type="slider", text="Marker Size", min=12, max=48, step=1,
+                      disabled=bossRmOff, disabledTooltip="Raid Marker",
+                      getValue=function() return db.profile.boss.raidMarkerSize or 28 end,
+                      setValue=function(v) db.profile.boss.raidMarkerSize = v; ReloadAndUpdate() end });  yy = yy - hh
+
+                -- Inline color-swatch-style X/Y cog
+                do
+                    local _, bossRmCogShow = EllesmereUI.BuildCogPopup({
+                        title = "Raid Marker Position",
+                        rows = {
+                            { type="slider", label="X Offset", min=-50, max=50, step=1,
+                              get=function() return db.profile.boss.raidMarkerX or 0 end,
+                              set=function(v) db.profile.boss.raidMarkerX = v; ReloadAndUpdate() end },
+                            { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                              get=function() return db.profile.boss.raidMarkerY or 0 end,
+                              set=function(v) db.profile.boss.raidMarkerY = v; ReloadAndUpdate() end },
+                            { type="dropdown", label="Alignment", values={ left="Left", center="Center", right="Right" }, order={ "left", "center", "right" },
+                              get=function() return db.profile.boss.raidMarkerAlign or "left" end,
+                              set=function(v) db.profile.boss.raidMarkerAlign = v; ReloadAndUpdate() end },
+                        },
+                    })
+                    BossCogBtn(bossRmRow._leftRegion, bossRmCogShow)
+                end
+            end
+
             -- Cogwheel on Debuffs Location
             do
                 local rightRgn = bossAuraRow._rightRegion

@@ -2634,6 +2634,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.verticalOrientation = v; RefreshTBB()
+                  EllesmereUI:RefreshPage()
               end },
             { type = "dropdown", text = "Bar Texture",
               values = texValues, order = texOrder,

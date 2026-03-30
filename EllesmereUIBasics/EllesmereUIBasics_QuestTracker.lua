@@ -810,11 +810,8 @@ local function GetScenarioSection()
                         })
                     end
                 elseif numRequired > 0 then
-                    -- Config option: useQuantityString
-                    -- true  = use WoW's quantityString when available (shows "2", "3", etc.)
-                    -- false = always use explicit "x/y" format (shows "2/7", "3/7", etc.)
                     local qs = crit.quantityString
-                    local useQS = Cfg("useQuantityString") and qs and qs ~= ""
+                    local useQS = qs and qs ~= "" and qs ~= "0" and qs ~= "1"
                     if useQS then
                         displayText = qs .. " " .. desc
                     else
@@ -1230,12 +1227,9 @@ local function GetTrackedRecipes()
     local tracked = C_TradeSkillUI.GetRecipesTracked(false)
     local recraft = C_TradeSkillUI.GetRecipesTracked(true)
 
-    -- Build a set of recipeIDs that are from the recraft list
-    local recraftIDs = {}
     if recraft then
         for _, v in ipairs(recraft) do
-            local rid = type(v) == "table" and (v.recipeID or v.recipeSchematicID) or v
-            if rid then recraftIDs[rid] = true end
+            if type(v) == "table" then v._isRecraft = true end
             tracked[#tracked + 1] = v
         end
     end
@@ -1254,7 +1248,7 @@ local function GetTrackedRecipes()
                     _recipe_entries[listN] = entry
                 end
                 entry.recipeID = recipeID
-                entry.isRecraft = recraftIDs[recipeID] or false
+                entry.isRecraft = (type(tracked_entry) == "table" and tracked_entry._isRecraft) or false
                 entry.name = schematic.name or ("Recipe #"..recipeID)
                 local reagentN = 0
                 if schematic.reagentSlotSchematics then
@@ -1312,7 +1306,17 @@ local BAR_PAD  = 2   -- gap between text and bar
 -- Forward declaration; defined after BuildFrame
 local UpdateInnerAlignment
 
+-- Combat deferral: Refresh touches secure quest item buttons (SetAttribute),
+-- which is forbidden during combat. Defer until PLAYER_REGEN_ENABLED.
+local _refreshPendingAfterCombat = false
+local _refreshSkipAlphaFlash = false
+
 function EQT:Refresh(skipAlphaFlash)
+    if InCombatLockdown() then
+        _refreshPendingAfterCombat = true
+        _refreshSkipAlphaFlash = skipAlphaFlash
+        return
+    end
     local f = self.frame
     if not f then return end
     -- Full rebuild: invalidate caches so data is fresh
@@ -2465,22 +2469,38 @@ function EQT:Init()
 
     -- Visibility system: check mode + options + instance hiding
     local qtMouseoverActive = false
+    local qtMouseoverShown = false
+    local qtMouseoverPoller = CreateFrame("Frame")
+    qtMouseoverPoller:Hide()
+    qtMouseoverPoller:SetScript("OnUpdate", function(_, dt)
+        if not qtMouseoverActive then
+            qtMouseoverPoller:Hide()
+            return
+        end
+        if EQT.frame:IsMouseOver() then
+            if not qtMouseoverShown then
+                qtMouseoverShown = true
+                EQT.frame:SetAlpha(1)
+            end
+        else
+            if qtMouseoverShown then
+                qtMouseoverShown = false
+                EQT.frame:SetAlpha(0)
+            end
+        end
+    end)
+    -- Child OnEnter/OnLeave still call these to immediately show on
+    -- hover of interactive elements (buttons, scroll area). The poller
+    -- handles the fade-out so it doesn't get stuck.
     local function QTMouseoverIn()
         if not qtMouseoverActive then return end
+        qtMouseoverShown = true
         EQT.frame:SetAlpha(1)
+        qtMouseoverPoller:Show()
     end
     local function QTMouseoverOut()
-        if not qtMouseoverActive then return end
-        C_Timer.After(0, function()
-            if not qtMouseoverActive then return end
-            if not self.frame:IsMouseOver() then
-                self.frame:SetAlpha(0)
-            end
-        end)
+        -- Poller will handle fade-out via IsMouseOver check
     end
-    -- Mouseover visibility propagates from interactive children only.
-    -- Do NOT hook OnEnter/OnLeave on inner/sf -- that re-enables mouse
-    -- and blocks clicks through to the game world.
     EQT._qtMouseoverIn = QTMouseoverIn
     EQT._qtMouseoverOut = QTMouseoverOut
 
@@ -2500,9 +2520,11 @@ function EQT:Init()
             qtMouseoverActive = true
             EQT.frame:Show()
             EQT.frame:SetAlpha(0)
+            qtMouseoverPoller:Show()
             return
         end
         qtMouseoverActive = false
+        qtMouseoverPoller:Hide()
         EQT.frame:SetAlpha(1)
         local show = true
         if mode == "never" then
@@ -2573,7 +2595,6 @@ function EQT:Init()
         QUEST_TURNED_IN = true,
         QUEST_WATCH_LIST_CHANGED = true,
         SCENARIO_COMPLETED = true,
-        SCENARIO_CRITERIA_UPDATE = true,
         SCENARIO_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
     }
@@ -2914,6 +2935,12 @@ function EQT:Init()
             ApplyQuestItemHotkey()
             questItemDirty = true
             UpdateQuestItemAttribute()
+            if _refreshPendingAfterCombat then
+                _refreshPendingAfterCombat = false
+                C_Timer.After(0, function()
+                    EQT:Refresh(_refreshSkipAlphaFlash)
+                end)
+            end
             return
         end
 

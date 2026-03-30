@@ -1279,6 +1279,24 @@ function ns.BuildTrackedBuffBars()
 
     local p = ECME.db.profile
 
+    -- Migration: fix swapped width/height from unlock mode resize bug.
+    -- Horizontal bars should be wider than tall; vertical bars taller than wide.
+    do
+        local tbb = ns.GetTrackedBuffBars()
+        local bars = tbb and tbb.bars
+        if bars then
+            for _, cfg in ipairs(bars) do
+                local w = cfg.width or 200
+                local h = cfg.height or 24
+                if not cfg.verticalOrientation and h > w then
+                    cfg.width, cfg.height = h, w
+                elseif cfg.verticalOrientation and w > h then
+                    cfg.width, cfg.height = h, w
+                end
+            end
+        end
+    end
+
     -- If user chose "Use Blizzard CDM Bars", hide all TBB frames and bail
     if p.cdmBars and p.cdmBars.useBlizzardBuffBars then
         for i = 1, #tbbFrames do
@@ -1413,6 +1431,7 @@ function ns.RegisterTBBUnlockElements()
                 label = "Tracking Bar: " .. (cfg.name or ("Bar " .. idx)),
                 group = "Cooldown Manager",
                 order = 650,
+                noAnchorTarget = true,
                 isHidden = function()
                     local t = ns.GetTrackedBuffBars()
                     local b = t and t.bars
@@ -1427,12 +1446,18 @@ function ns.RegisterTBBUnlockElements()
                 setWidth = function(_, w)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if c then c.width = w; ns.BuildTrackedBuffBars() end
+                    if not c then return end
+                    -- Visual width maps to height (thickness) when vertical
+                    if c.verticalOrientation then c.height = w else c.width = w end
+                    ns.BuildTrackedBuffBars()
                 end,
                 setHeight = function(_, h)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if c then c.height = h; ns.BuildTrackedBuffBars() end
+                    if not c then return end
+                    -- Visual height maps to width (length) when vertical
+                    if c.verticalOrientation then c.width = h else c.height = h end
+                    ns.BuildTrackedBuffBars()
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     local pos = ns.GetTBBPositions()

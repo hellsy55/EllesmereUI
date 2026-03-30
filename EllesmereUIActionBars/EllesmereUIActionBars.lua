@@ -2452,6 +2452,13 @@ local function LayoutBar(key)
                 btn.TargetReticleAnimFrame:SetScale(btnW / 45)
             end
 
+            -- Scale AssistedCombatHighlightFrame proportionally.
+            -- Blizzard creates this lazily at default 45x45 size and
+            -- anchors at CENTER. Scale it to match our button size.
+            if btn.AssistedCombatHighlightFrame then
+                btn.AssistedCombatHighlightFrame:SetScale(btnW / 45)
+            end
+
             -- Pin SpellActivationAlert to button bounds when using custom proc
             -- glows. When custom glows are off, leave Blizzard's alert
             -- completely untouched so the native glow sizes itself correctly.
@@ -3852,8 +3859,14 @@ local function ApplyRangeTint(btn, outOfRange, barSettings)
         ico:SetVertexColor(c.r, c.g, c.b)
         btn._eabRangeTinted = true
     elseif btn._eabRangeTinted then
-        ico:SetVertexColor(1, 1, 1)
         btn._eabRangeTinted = nil
+        -- Let Blizzard's UpdateUsable set the correct color (may be dimmed
+        -- for insufficient resources) instead of forcing full white.
+        if btn.UpdateUsable then
+            btn:UpdateUsable()
+        else
+            ico:SetVertexColor(1, 1, 1)
+        end
     end
 end
 
@@ -3889,9 +3902,13 @@ local function DisableRangeCheckForBar(barKey)
             end
         end
         if btn._eabRangeTinted then
-            local ico = btn.icon or btn.Icon
-            if ico then ico:SetVertexColor(1, 1, 1) end
             btn._eabRangeTinted = nil
+            if btn.UpdateUsable then
+                btn:UpdateUsable()
+            else
+                local ico = btn.icon or btn.Icon
+                if ico then ico:SetVertexColor(1, 1, 1) end
+            end
         end
     end
 end
@@ -5113,88 +5130,166 @@ local function UpdateFlipbook(btn)
     end
 end
 
+-- Resolve the spellID for a button. Mirrors Bartender's Action.GetSpellId:
+-- GetActionInfo for direct spells, GetMacroSpell fallback for macros.
+-- Stored on _procState to avoid adding a top-level local (200 limit).
+_procState.GetButtonSpellID = function(btn)
+    local slot = GetButtonActionSlot(btn)
+    if not slot or not HasAction or not HasAction(slot) then return nil end
+    local actionType, id, subType = GetActionInfo(slot)
+    if actionType == "spell" then
+        return id
+    elseif actionType == "macro" then
+        if subType == "spell" then
+            return id
+        else
+            return (GetMacroSpell(id))
+        end
+    end
+    return nil
+end
+
+-- Proc glow via SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events.
+-- Loops all buttons to find matches by spellID.
 function EAB:HookProcGlow()
     if _procState.hooked then return end
     _procState.hooked = true
 
-    if ActionButtonSpellAlertManager then
-        if ActionButtonSpellAlertManager.ShowAlert then
-            hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(_, btn)
-                if not btn then return end
-                if not btn._eabSquared then return end
-                if not btn._eabShowAlertFn then
-                    btn._eabShowAlertFn = function()
-                        _procState.active[btn] = true
-                        UpdateFlipbook(btn)
-                    end
-                end
-                C_Timer_After(0, btn._eabShowAlertFn)
-            end)
+    local function ShowGlow(btn)
+        _procState.active[btn] = true
+        UpdateFlipbook(btn)
+    end
+
+    local function HideGlow(btn)
+        _procState.active[btn] = nil
+        if btn._eabGlowWrapper then
+            StopAllProceduralGlows(btn._eabGlowWrapper)
+            btn._eabGlowWrapper:Hide()
         end
-        if ActionButtonSpellAlertManager.HideAlert then
-            hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(_, btn)
-                if not btn then return end
-                if not btn._eabSquared then return end
-                if not btn._eabHideAlertFn then
-                    btn._eabHideAlertFn = function()
-                        _procState.active[btn] = nil
-                        if btn._eabGlowWrapper then
-                            StopAllProceduralGlows(btn._eabGlowWrapper)
-                            btn._eabGlowWrapper:Hide()
-                        end
-                        -- Reset Blizzard's SpellActivationAlert for next proc cycle
-                        local sa = btn.SpellActivationAlert
-                        if sa then
-                            sa:SetAlpha(1)
-                            sa:Hide()
-                        end
-                    end
-                end
-                C_Timer_After(0, btn._eabHideAlertFn)
-            end)
+        local sa = btn.SpellActivationAlert
+        if sa then sa:SetAlpha(1); sa:Hide() end
+    end
+    local GetButtonSpellID = _procState.GetButtonSpellID
+
+    -- Check IsSpellOverlayed ground truth for a single button.
+    -- Used after slot changes to sync glow state with new spell.
+    local function UpdateOverlayGlow(btn)
+        local spellID = GetButtonSpellID(btn)
+        local overlayed = spellID and C_SpellActivationOverlay
+            and C_SpellActivationOverlay.IsSpellOverlayed
+            and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
+        if overlayed then
+            ShowGlow(btn)
+        elseif _procState.active[btn] then
+            HideGlow(btn)
         end
     end
-end
 
--- Validate active proc glows against IsSpellOverlayed ground truth.
--- Cleans up stale glows when HideAlert doesn't fire reliably.
--- Wrapped in do..end to avoid adding locals to the main chunk (200 limit).
-do
-    local function ValidateProcGlows()
-        for btn in pairs(_procState.active) do
-            if btn._eabSquared then
-                local action = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
-                local spellID
-                if action and HasAction and HasAction(action) then
-                    local actionType, id = GetActionInfo(action)
-                    if actionType == "spell" then spellID = id end
-                end
-                local overlayed = spellID and C_SpellActivationOverlay
-                    and C_SpellActivationOverlay.IsSpellOverlayed
-                    and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
-                if not overlayed then
-                    _procState.active[btn] = nil
-                    if btn._eabGlowWrapper then
-                        StopAllProceduralGlows(btn._eabGlowWrapper)
-                        btn._eabGlowWrapper:Hide()
+    local glowFrame = CreateFrame("Frame")
+    glowFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+    glowFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
+    glowFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+    glowFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+    glowFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    glowFrame:SetScript("OnEvent", function(_, event, arg1)
+        if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" then
+            -- Defer re-scan: the bar may not have finished paging yet
+            -- when the event fires, so slot->spell mappings are stale.
+            C_Timer_After(0, function()
+                -- Clear glows that no longer match, add new ones
+                for btn in pairs(_procState.active) do
+                    local id = GetButtonSpellID(btn)
+                    if not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
+                        HideGlow(btn)
                     end
-                    local sa = btn.SpellActivationAlert
-                    if sa then sa:SetAlpha(1); sa:Hide() end
+                end
+                for _, info in ipairs(BAR_CONFIG) do
+                    local buttons = barButtons[info.key]
+                    if buttons then
+                        for _, btn in ipairs(buttons) do
+                            if btn and btn._eabSquared and not _procState.active[btn] then
+                                UpdateOverlayGlow(btn)
+                            end
+                        end
+                    end
+                end
+            end)
+            return
+        end
+        local isShow = (event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+        for _, info in ipairs(BAR_CONFIG) do
+            local buttons = barButtons[info.key]
+            if buttons then
+                for _, btn in ipairs(buttons) do
+                    if btn and btn._eabSquared then
+                        local id = GetButtonSpellID(btn)
+                        if id and id == arg1 then
+                            if isShow then ShowGlow(btn) else HideGlow(btn) end
+                        end
+                    end
                 end
             end
         end
-    end
+    end)
 
-    local validator = CreateFrame("Frame")
-    validator:RegisterUnitEvent("UNIT_AURA", "player")
-    validator:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
-    validator:RegisterEvent("SPELL_UPDATE_USABLE")
-    validator:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-    validator:SetScript("OnEvent", function()
-        if next(_procState.active) then
-            ValidateProcGlows()
+    -- Suppress Blizzard's native SpellActivationAlert on our buttons
+    -- since we render our own glow via UpdateFlipbook.
+    if ActionButtonSpellAlertManager and ActionButtonSpellAlertManager.ShowAlert then
+        hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(_, btn)
+            if btn and btn._eabSquared and btn.SpellActivationAlert then
+                btn.SpellActivationAlert:SetAlpha(0)
+            end
+        end)
+    end
+end
+
+-- Throttled usability refresh: UNIT_POWER_FREQUENT fires every resource
+-- tick, so we throttle to max once per 0.15s. Calls Blizzard's own
+-- UpdateUsable() which is what ACTIONBAR_UPDATE_USABLE would trigger.
+do
+    local USABLE_THROTTLE = 0.15
+    local lastUsableTime = 0
+    local usableFrame = CreateFrame("Frame")
+    usableFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
+    usableFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+    usableFrame:SetScript("OnEvent", function()
+        local now = GetTime()
+        if now - lastUsableTime < USABLE_THROTTLE then return end
+        lastUsableTime = now
+        for _, info in ipairs(BAR_CONFIG) do
+            local buttons = barButtons[info.key]
+            if buttons then
+                for i = 1, #buttons do
+                    local btn = buttons[i]
+                    if btn and btn.UpdateUsable then
+                        btn:UpdateUsable()
+                    end
+                end
+            end
         end
     end)
+end
+
+-- Hook AssistedCombatManager to scale the highlight frame when Blizzard
+-- creates it lazily on first use. Uses UpdateAllAssistedHighlightFramesForSpell
+-- which fires whenever the highlighted spell changes.
+do
+    if AssistedCombatManager and AssistedCombatManager.UpdateAllAssistedHighlightFramesForSpell then
+        hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedHighlightFramesForSpell", function()
+            for _, info in ipairs(BAR_CONFIG) do
+                local buttons = barButtons[info.key]
+                if buttons then
+                    for i = 1, #buttons do
+                        local btn = buttons[i]
+                        if btn and btn._eabSquared and btn.AssistedCombatHighlightFrame then
+                            local w = btn:GetWidth() or 45
+                            btn.AssistedCombatHighlightFrame:SetScale(w / 45)
+                        end
+                    end
+                end
+            end
+        end)
+    end
 end
 
 function EAB:RefreshProcGlows()
@@ -5221,17 +5316,11 @@ function EAB:ScanExistingProcs()
                 local btn = buttons[i]
                 if btn and btn._eabSquared then
                     total = total + 1
-                    local saShown = btn.SpellActivationAlert and btn.SpellActivationAlert:IsShown()
-                    local action = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
-                    local spellID
-                    if action and HasAction and HasAction(action) then
-                        local actionType, id = GetActionInfo(action)
-                        if actionType == "spell" then spellID = id end
-                    end
+                    local spellID = _procState.GetButtonSpellID(btn)
                     local overlayed = spellID and C_SpellActivationOverlay
                         and C_SpellActivationOverlay.IsSpellOverlayed
                         and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
-                    if saShown or overlayed then
+                    if overlayed then
                         found = found + 1
                         _procState.active[btn] = true
                         UpdateFlipbook(btn)
@@ -5738,6 +5827,11 @@ end
 
 local function OnGridChange()
     if InCombatLockdown() then return end
+    -- Throttle: bag addons fire ACTIONBAR_SHOWGRID hundreds of times
+    -- per sort pass via PickupContainerItem, causing "script ran too long".
+    local now = GetTime()
+    if _gridState.shown and _gridState._lastTime and (now - _gridState._lastTime) < 0.1 then return end
+    _gridState._lastTime = now
     _gridState.shown = true
 
     -- Propagate showgrid to the controller so the secure environment

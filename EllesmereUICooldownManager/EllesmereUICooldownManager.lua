@@ -3231,13 +3231,16 @@ _CDMApplyVisibility = function()
                         end
                         -- Custom bars: check which viewer they route from.
                         -- CD/utility custom bars route from Essential or
-                        -- Utility viewer based on their assigned spells'
-                        -- categories. For simplicity, any non-buff custom
-                        -- bar counts for both CD and utility viewers.
+                        -- Utility viewer based on their assigned spells.
+                        -- Custom buffs bars route from the BuffIcon viewer.
+                        -- custom_buff (aura timer) bars use own frames, not viewers.
                         local bt = barData.barType
-                        if bt and bt ~= "buffs" and bt ~= "custom_buff"
-                            and (viewerBarKey == "cooldowns" or viewerBarKey == "utility") then
-                            anyVisible = true; break
+                        if bt ~= "custom_buff" then
+                            if bt == "buffs" and viewerBarKey == "buffs" then
+                                anyVisible = true; break
+                            elseif bt ~= "buffs" and (viewerBarKey == "cooldowns" or viewerBarKey == "utility") then
+                                anyVisible = true; break
+                            end
                         end
                     end
                 end
@@ -3436,6 +3439,37 @@ BuildAllCDMBars = function()
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.activeStateAnim == "none" then
             bd.activeStateAnim = "hideActive"
+        end
+    end
+
+    -- Migration: repair bars missing `key` field.
+    -- Lite DB delta-save can strip `key` when it matches the default template.
+    -- If the merge fails to restore it, bars become identity-less stubs and
+    -- visibility/routing breaks. Assign missing core keys in order.
+    do
+        local bars = p.cdmBars and p.cdmBars.bars
+        if bars then
+            local CORE_KEYS = { "cooldowns", "utility", "buffs" }
+            local CORE_NAMES = { cooldowns = "Cooldowns", utility = "Utility", buffs = "Buffs" }
+            local present = {}
+            for _, bd in ipairs(bars) do
+                if bd.key then present[bd.key] = true end
+            end
+            local missing = {}
+            for _, ck in ipairs(CORE_KEYS) do
+                if not present[ck] then missing[#missing + 1] = ck end
+            end
+            if #missing > 0 then
+                local mi = 1
+                for _, bd in ipairs(bars) do
+                    if not bd.key and mi <= #missing then
+                        bd.key = missing[mi]
+                        bd.name = bd.name or CORE_NAMES[missing[mi]]
+                        if bd.enabled == nil then bd.enabled = true end
+                        mi = mi + 1
+                    end
+                end
+            end
         end
     end
 
@@ -3966,6 +4000,61 @@ function ECME:OnInitialize()
                         b = barData.pandemicB or 0,
                     }
                     barData.pandemicGlowStyle = barData.pandemicGlowStyle or 1
+                end
+            end
+        end
+    end
+
+    -- Migration: repair bars missing `key` across ALL profiles (not just active).
+    -- The BuildAllCDMBars migration only fixes the active profile. Inactive
+    -- profiles with keyless stubs stay broken until switched to.
+    if EllesmereUIDB and EllesmereUIDB.profiles then
+        local CORE_KEYS = { "cooldowns", "utility", "buffs" }
+        local CORE_NAMES = { cooldowns = "Cooldowns", utility = "Utility", buffs = "Buffs" }
+        for _, profileData in pairs(EllesmereUIDB.profiles) do
+            local cdmData = profileData.addons and profileData.addons["EllesmereUICooldownManager"]
+            local bars = cdmData and cdmData.cdmBars and cdmData.cdmBars.bars
+            if bars then
+                local present = {}
+                for _, bd in ipairs(bars) do
+                    if bd.key then present[bd.key] = true end
+                end
+                local missing = {}
+                for _, ck in ipairs(CORE_KEYS) do
+                    if not present[ck] then missing[#missing + 1] = ck end
+                end
+                if #missing > 0 then
+                    local mi = 1
+                    for _, bd in ipairs(bars) do
+                        if not bd.key and mi <= #missing then
+                            bd.key = missing[mi]
+                            bd.name = bd.name or CORE_NAMES[missing[mi]]
+                            if bd.enabled == nil then bd.enabled = true end
+                            mi = mi + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Migration: strip stale _linkedFrame/_linkedCdID/_linkedGen from TBB
+    -- bar configs inside spellAssignments. These are vestiges of removed code
+    -- that serialized entire Blizzard frame trees (800-1200 lines each),
+    -- causing performance issues on any deep-copy or iteration of spec data.
+    do
+        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+        local specProfiles = sa and sa.specProfiles
+        if specProfiles then
+            for _, specData in pairs(specProfiles) do
+                local tbb = specData.trackedBuffBars
+                local tbbBars = tbb and tbb.bars
+                if tbbBars then
+                    for _, barCfg in ipairs(tbbBars) do
+                        barCfg._linkedFrame = nil
+                        barCfg._linkedCdID = nil
+                        barCfg._linkedGen = nil
+                    end
                 end
             end
         end

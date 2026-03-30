@@ -84,6 +84,8 @@ local defaults = {
     tankNoAggro = { r = 1.00, g = 0.22, b = 0.17 },
     dpsNearAggro = { r = 0.81, g = 0.72, b = 0.19 },
     dpsHasAggro = { r = 1.00, g = 0.50, b = 0.00 },
+    offTankAggro = { r = 0.188, g = 0.761, b = 0.812 },
+    offTankAggroEnabled = true,
     interruptReady = { r = 0.92, g = 0.35, b = 0.20 },  
     castBar = { r = 0.70, g = 0.40, b = 0.90 },
     castBarUninterruptible = { r = 0.45, g = 0.45, b = 0.45 },
@@ -183,6 +185,12 @@ local defaults = {
     hashLineColor = { r = 1, g = 1, b = 1 },
     kickTickEnabled = true,
     kickTickColor = { r = 1, g = 1, b = 1 },
+    importantCastGlow = true,
+    importantCastGlowStyle = 1,
+    importantCastGlowColor = { r = 1, g = 0.2, b = 0.2 },
+    importantCastGlowLines = 8,
+    importantCastGlowThickness = 2,
+    importantCastGlowSpeed = 4,
     -- Core Positions: slot-based size + XY offsets
     topSlotSize = 26,        topSlotXOffset = 0,      topSlotYOffset = 0,
     rightSlotSize = 24,      rightSlotXOffset = 0,    rightSlotYOffset = 0,
@@ -2427,7 +2435,13 @@ local function GetReactionColor(unit)
                         local c = _C("tankNoAggro")
                         return c.r, c.g, c.b
                     end
-                    -- Another tank has aggro -- fall through, no warning color
+                    -- Another tank has aggro -- show off-tank color if enabled
+                    local otEnabled = db.offTankAggroEnabled
+                    if otEnabled == nil then otEnabled = defaults.offTankAggroEnabled end
+                    if otEnabled then
+                        local c = _C("offTankAggro")
+                        return c.r, c.g, c.b
+                    end
                 end
                 -- Classic tank aggro: has-aggro overrides all mob-type colors
                 if status >= 3 then
@@ -3713,15 +3727,83 @@ function NameplateFrame:UpdateAuras(updateInfo)
     -- Reposition target arrows outside the outermost side auras
     PositionArrowsOutsideAuras(self)
 end
+function NameplateFrame:UpdateImportantCastGlow(spellID)
+    local cfg = p or defaults
+    local enabled = cfg.importantCastGlow
+    if enabled == nil then enabled = defaults.importantCastGlow end
+    if not enabled then self:ClearImportantCastGlow(); return end
+
+    if not C_Spell or not C_Spell.IsSpellImportant then
+        self:ClearImportantCastGlow(); return
+    end
+
+    if not self._importantCastOverlay then
+        local ov = CreateFrame("Frame", nil, self.cast)
+        ov:SetAllPoints(self.cast)
+        ov:SetFrameLevel(self.cast:GetFrameLevel() + 5)
+        ov:EnableMouse(false)
+        self._importantCastOverlay = ov
+    end
+
+    local Glows = _G_Glows or EllesmereUI.Glows
+    if not Glows then return end
+
+    local style = cfg.importantCastGlowStyle or defaults.importantCastGlowStyle or 1
+    if style ~= 1 and style ~= 4 then style = 1 end
+    local c = cfg.importantCastGlowColor or defaults.importantCastGlowColor or { r = 1, g = 0.2, b = 0.2 }
+
+    -- Ensure glow animation is running (idempotent if already active)
+    if not self._importantGlowActive or self._importantGlowStyle ~= style then
+        Glows.StopAllGlows(self._importantCastOverlay)
+        local pW, pH = self.cast:GetWidth(), self.cast:GetHeight()
+        if pW < 5 then pW = 100 end
+        if pH < 5 then pH = 14 end
+        if style == 4 then
+            (StartAutoCastShine or Glows.StartAutoCastShine)(self._importantCastOverlay, pW, c.r, c.g, c.b, 1.0, pH)
+        else
+            local N = cfg.importantCastGlowLines or defaults.importantCastGlowLines or 8
+            local th = cfg.importantCastGlowThickness or defaults.importantCastGlowThickness or 2
+            local period = cfg.importantCastGlowSpeed or defaults.importantCastGlowSpeed or 4
+            local lineLen = math.floor((pW + pH) * (2 / N - 0.1))
+            lineLen = math.min(lineLen, math.min(pW, pH))
+            if lineLen < 1 then lineLen = 1 end
+            (StartProceduralAnts or Glows.StartProceduralAnts)(self._importantCastOverlay, N, th, period, lineLen, c.r, c.g, c.b, pW, pH)
+        end
+        self._importantGlowActive = true
+        self._importantGlowStyle = style
+    end
+
+    -- SetAlphaFromBoolean handles the secret boolean taint-free.
+    -- Important = alpha 1 (glow visible), not important = alpha 0 (glow hidden).
+    self._importantCastOverlay:Show()
+    local ok, isImportant = pcall(C_Spell.IsSpellImportant, spellID or 0)
+    if ok then
+        self._importantCastOverlay:SetAlphaFromBoolean(isImportant)
+    else
+        self._importantCastOverlay:SetAlpha(0)
+    end
+end
+
+function NameplateFrame:ClearImportantCastGlow()
+    if self._importantGlowActive and self._importantCastOverlay then
+        local Glows = _G_Glows or EllesmereUI.Glows
+        if Glows then Glows.StopAllGlows(self._importantCastOverlay) end
+        self._importantCastOverlay:SetAlpha(0)
+        self._importantCastOverlay:Hide()
+        self._importantGlowActive = false
+        self._importantGlowStyle = nil
+    end
+end
+
 function NameplateFrame:UpdateCast()
     if not self.unit then
         self.cast:Hide()
         return
     end
-    local name, _, texture, _, _, _, _, kickProtected = UnitCastingInfo(self.unit)
+    local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
     local isChannel = false
     if type(name) == "nil" then
-        name, _, texture, _, _, _, kickProtected = UnitChannelInfo(self.unit)
+        name, _, texture, _, _, _, kickProtected, castSpellID = UnitChannelInfo(self.unit)
         isChannel = true
     end
     if type(name) == "nil" then
@@ -3740,6 +3822,7 @@ function NameplateFrame:UpdateCast()
         end
         self.isCasting = false
         self:HideKickTick()
+        self:ClearImportantCastGlow()
         self:ApplyScale()
         -- Reposition class power pips (cast bar gone, pips move back to health bar)
         if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
@@ -3839,6 +3922,8 @@ function NameplateFrame:UpdateCast()
     end
     self:ApplyScale()
     self:UpdateKickTick(kickProtected, isChannel)
+    -- Important cast glow
+    self:UpdateImportantCastGlow(castSpellID)
     -- Reposition class power pips (cast bar now visible, pips move below it)
     if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
         UpdateClassPowerOnPlate(self)

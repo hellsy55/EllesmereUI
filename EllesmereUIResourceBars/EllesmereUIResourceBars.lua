@@ -972,6 +972,7 @@ local function RegisterUnlockElements()
         end
         elements[#elements + 1] = MK({
             key = "ERB_CastBar", label = "Cast Bar", group = "Resource Bars", order = 504,
+            noAnchorTarget = true,
             getFrame = function() return castBarFrame end,
             getSize  = function()
                 local cb = S()
