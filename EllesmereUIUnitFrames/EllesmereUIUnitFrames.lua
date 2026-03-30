@@ -168,6 +168,11 @@ local defaults = {
             raidMarkerAlign = "right",
             raidMarkerX = 0,
             raidMarkerY = 0,
+            leaderIndicatorEnabled = true,
+            leaderIndicatorSize = 16,
+            leaderIndicatorPosition = "topleft",
+            leaderIndicatorX = 0,
+            leaderIndicatorY = 0,
         },
         target = {
             frameWidth = 181,
@@ -5729,6 +5734,11 @@ local function ReloadFrames()
         end
     end
 
+    -- Refresh leader indicator on player frame after settings change
+    if frames.player and frames.player._applyLeaderIndicator then
+        frames.player._applyLeaderIndicator()
+    end
+
     ---------------------------------------------------------------------------
     --  Live-update raid target marker icon (size / alignment / X / Y / enabled)
     --  for player, target, and focus frames.  Uses oUF's EnableElement /
@@ -5980,6 +5990,76 @@ function InitializeFrames()
 
             local restEnabled = EllesmereUIDB and EllesmereUIDB.showRestedIndicator == true
             if restEnabled and IsResting() then pf._restIndicator:Show() else pf._restIndicator:Hide() end
+        end
+    end
+
+    -- Leader indicator on player frame (shows crown icon when player is group/raid leader)
+    do
+        local pf = frames.player
+        local ps = db.profile.player
+        if pf and pf.Health then
+            -- Create holder frame ONCE
+            if not pf._leaderHolder then
+                pf._leaderHolder = CreateFrame("Frame", nil, pf)
+                pf._leaderHolder:SetAllPoints(pf)
+                local leaderTex = pf._leaderHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+                leaderTex:Hide()
+                pf._leaderIndicator = leaderTex
+                -- Assign to oUF element so it auto-updates via LeaderIndicator element
+                pf.LeaderIndicator = leaderTex
+            end
+            pf._leaderHolder:SetFrameLevel(pf:GetFrameLevel() + 21)
+
+            -- Helper: apply size, position, and visibility
+            local function ApplyLeaderIndicator()
+                local enabled = ps.leaderIndicatorEnabled ~= false
+                local sz = ps.leaderIndicatorSize or 16
+                local pos = ps.leaderIndicatorPosition or "topleft"
+                local ox = ps.leaderIndicatorX or 0
+                local oy = ps.leaderIndicatorY or 0
+
+                local leader = pf._leaderIndicator
+                leader:SetSize(sz, sz)
+                leader:ClearAllPoints()
+
+                -- Anchor based on position setting
+                local anchorPoint, relPoint
+                if pos == "topleft" then
+                    anchorPoint, relPoint = "TOPLEFT", "TOPLEFT"
+                elseif pos == "topright" then
+                    anchorPoint, relPoint = "TOPRIGHT", "TOPRIGHT"
+                elseif pos == "bottomleft" then
+                    anchorPoint, relPoint = "BOTTOMLEFT", "BOTTOMLEFT"
+                elseif pos == "bottomright" then
+                    anchorPoint, relPoint = "BOTTOMRIGHT", "BOTTOMRIGHT"
+                elseif pos == "portrait" and pf.Portrait and pf.Portrait.backdrop then
+                    leader:SetPoint("CENTER", pf.Portrait.backdrop, "CENTER", ox, oy)
+                    if enabled then
+                        pf:EnableElement("LeaderIndicator")
+                        pf.LeaderIndicator:ForceUpdate()
+                    else
+                        pf:DisableElement("LeaderIndicator")
+                        leader:Hide()
+                    end
+                    return
+                else
+                    anchorPoint, relPoint = "TOPLEFT", "TOPLEFT"
+                end
+
+                leader:SetPoint(anchorPoint, pf.Health or pf, relPoint, ox, oy)
+
+                if enabled then
+                    pf:EnableElement("LeaderIndicator")
+                    pf.LeaderIndicator:ForceUpdate()
+                else
+                    pf:DisableElement("LeaderIndicator")
+                    leader:Hide()
+                end
+            end
+            pf._applyLeaderIndicator = ApplyLeaderIndicator
+
+            -- Initial application
+            ApplyLeaderIndicator()
         end
     end
 

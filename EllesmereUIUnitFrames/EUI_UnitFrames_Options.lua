@@ -2776,6 +2776,11 @@ initFrame:SetScript("OnEvent", function(self)
         combatIndicatorSize    = { player=true },
         combatIndicatorX       = { player=true },
         combatIndicatorY       = { player=true },
+        leaderIndicatorEnabled = { player=true },
+        leaderIndicatorSize    = { player=true },
+        leaderIndicatorPosition= { player=true },
+        leaderIndicatorX       = { player=true },
+        leaderIndicatorY       = { player=true },
         buffAnchor           = { player=true, target=true, focus=true },
         buffGrowth           = { player=true, target=true, focus=true },
         maxBuffs             = { player=true, target=true, focus=true },
@@ -6476,6 +6481,72 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateRmCogState()
         end
 
+        -- Row 5: Leader Indicator toggle | Icon Size slider + inline directions cog (X/Y)
+        -- Only visible for player unit
+        local sharedAddRow5
+        local function leaderIndOff()
+            return SValSupported("leaderIndicatorEnabled", true) == false
+        end
+        local function isPlayerUnit()
+            return selectedUnit == "player"
+        end
+        if isPlayerUnit() then
+            sharedAddRow5, h = W:DualRow(parent, y,
+                { type="toggle", text="Leader Indicator",
+                  getValue=function() return SValSupported("leaderIndicatorEnabled", true) end,
+                  setValue=function(v)
+                      SSetSupported("leaderIndicatorEnabled", v)
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Icon Size", min=8, max=48, step=1,
+                  disabled=leaderIndOff, disabledTooltip="Leader Indicator",
+                  getValue=function() return SValSupported("leaderIndicatorSize", 16) end,
+                  setValue=function(v) SSetSupported("leaderIndicatorSize", v) end });  y = y - h
+            SApplySupport(sharedAddRow5._leftRegion, "leaderIndicatorEnabled")
+            SApplySupport(sharedAddRow5._rightRegion, "leaderIndicatorSize")
+            do
+                local rgn = sharedAddRow5._rightRegion
+                local leaderPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["portrait"]="Portrait" }
+                local leaderPosOrder = { "topleft", "topright", "bottomleft", "bottomright", "portrait" }
+                local _, leaderCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Leader Indicator Settings",
+                    rows = {
+                        { type="dropdown", label="Position", values=leaderPosValues, order=leaderPosOrder,
+                          get=function() return SValSupported("leaderIndicatorPosition", "topleft") end,
+                          set=function(v) SSetSupported("leaderIndicatorPosition", v) end },
+                        { type="slider", label="X Offset", min=-200, max=200, step=1,
+                          get=function() return SValSupported("leaderIndicatorX", 0) end,
+                          set=function(v) SSetSupported("leaderIndicatorX", v) end },
+                        { type="slider", label="Y Offset", min=-200, max=200, step=1,
+                          get=function() return SValSupported("leaderIndicatorY", 0) end,
+                          set=function(v) SSetSupported("leaderIndicatorY", v) end },
+                    },
+                })
+                local leaderCogBtn = MakeCogBtn(rgn, leaderCogShow)
+                local function UpdateLeaderCogState()
+                    local off = leaderIndOff()
+                    leaderCogBtn:SetAlpha(off and 0.15 or 0.4)
+                end
+                leaderCogBtn:SetScript("OnEnter", function(self)
+                    if leaderIndOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Leader Indicator"))
+                    else
+                        self:SetAlpha(0.7)
+                    end
+                end)
+                leaderCogBtn:SetScript("OnLeave", function(self)
+                    EllesmereUI.HideWidgetTooltip()
+                    UpdateLeaderCogState()
+                end)
+                leaderCogBtn:SetScript("OnClick", function(self)
+                    if leaderIndOff() then return end
+                    leaderCogShow(self)
+                end)
+                EllesmereUI.RegisterWidgetRefresh(UpdateLeaderCogState)
+                UpdateLeaderCogState()
+            end
+        end
+
         -------------------------------------------------------------------
         --  Return click mapping targets + total height
         -------------------------------------------------------------------
@@ -6497,6 +6568,7 @@ initFrame:SetScript("OnEvent", function(self)
             buffIcon     = { section = sharedAddHeader,      target = sharedAddRow2, slotSide = "left" },
             debuffIcon   = { section = sharedAddHeader,      target = sharedAddRow3, slotSide = "left" },
             raidMarker   = { section = sharedAddHeader,      target = sharedAddRow4, slotSide = "left" },
+            leaderIndicator = { section = sharedAddHeader,   target = sharedAddRow5, slotSide = "left" },
             castBar      = { section = sharedCastHeader,     target = sharedCastRow1 },
             castIcon     = { section = sharedCastHeader,     target = sharedCastRow1 },
             castName     = { section = sharedCastHeader,     target = sharedCastRow1 },
