@@ -706,9 +706,10 @@ initFrame:SetScript("OnEvent", function(self)
 
         side = side or "left"
 
-        -- FoT/ToT and Pet previews: no portrait or power bar
+        -- FoT/ToT and Pet previews: no portrait, power bar, or debuffs
         local noPortraitPreview = (unitKey == "targettarget" or unitKey == "pet")
         local noPowerPreview = (unitKey == "targettarget" or unitKey == "pet")
+        local noDebuffPreview = (unitKey == "targettarget" or unitKey == "pet")
 
         local hasPortraitSupport = not noPortraitPreview and (settings.showPortrait ~= nil or settings.portraitMode ~= nil)
         local showPortrait = hasPortraitSupport and (db.profile.portraitStyle or "attached") ~= "none"
@@ -1587,7 +1588,7 @@ initFrame:SetScript("OnEvent", function(self)
                 tex:SetTexture(previewDebuffIcons[i] or 136116)
                 df._iconTex = tex
                 debuffIcons[i] = df
-                if (settings.debuffAnchor or "bottomleft") == "none" then df:Hide() end
+                if noDebuffPreview or (settings.debuffAnchor or "bottomleft") == "none" then df:Hide() end
             end
         end
 
@@ -2330,7 +2331,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Debuff icons -- reposition based on anchor/growth/size/offset settings
             local debuffExtra = 0
-            if #debuffIcons > 0 then
+            if #debuffIcons > 0 and not noDebuffPreview then
                 local dAnc = s.debuffAnchor or "bottomleft"
                 local maxDeb = s.maxDebuffs or 10
                 local previewDebuffLimit = 5
@@ -6983,6 +6984,12 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
                 cogBtn:SetScript("OnClick", function(self) showFn(self) end)
             end
+            _, hh = Ww:DualRow(pp, yy,
+                { type="slider", text="Vertical Spacing", min=20, max=200, step=1,
+                  getValue=function() return db.profile.bossSpacing or 80 end,
+                  setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end },
+                { type="label", text="" });  yy = yy - hh
+
             local bossAuraRow
             bossAuraRow, hh = Ww:DualRow(pp, yy,
                 { type="dropdown", text="Buffs Location", values=buffAnchorValues, order=buffAnchorOrder,

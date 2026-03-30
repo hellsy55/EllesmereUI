@@ -502,17 +502,20 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     local sb = bar._bar
     if not sb then return end
 
+    -- width/height are always visual dimensions (what you see on screen).
+    -- Horizontal: width = long side, height = short side.
+    -- Vertical: width = short side, height = long side.
     local w = cfg.width or 200
-    local h = cfg.height or 18
+    local h = cfg.height or 24
     local isVert = cfg.verticalOrientation
     bar._lastVertical = isVert
     local iconMode = cfg.iconDisplay or "none"
     local hasIcon = iconMode ~= "none"
-    local iSize = h
+    local iSize = isVert and w or h
 
-    -- Size wrapFrame to cover bar + icon
+    -- Size wrapFrame: always width x height as stored
     if isVert then
-        bar:SetSize(h, hasIcon and (w + iSize) or w)
+        bar:SetSize(w, hasIcon and (h + iSize) or h)
     else
         bar:SetSize(hasIcon and (w + iSize) or w, h)
     end
@@ -522,11 +525,13 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     if hasIcon then
         if isVert then
             if iconMode == "left" then
-                sb:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, iSize)
-            else
+                -- Left = Top for vertical
                 sb:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, -iSize)
                 sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+            else
+                -- Right = Bottom for vertical
+                sb:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+                sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, iSize)
             end
         else
             if iconMode == "left" then
@@ -631,11 +636,12 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     -- Spark
     if cfg.showSpark then
         local sparkAnchor = (bar._gradientActive and bar._gradClip) or fillTex
-        bar._spark:SetSize(8, h)
         if isVert then
-            bar._spark:SetRotation(math.pi / 2)
+            bar._spark:SetSize(w, 8)
+            bar._spark:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
         else
-            bar._spark:SetRotation(0)
+            bar._spark:SetSize(8, h)
+            bar._spark:SetTexCoord(0, 0, 0, 1, 1, 0, 1, 1)
         end
         bar._spark:ClearAllPoints()
         if isVert then
@@ -682,9 +688,9 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         bar._icon:ClearAllPoints()
         if isVert then
             if iconMode == "left" then
-                bar._icon:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
-            else
                 bar._icon:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            else
+                bar._icon:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
             end
         else
             if iconMode == "left" then
@@ -1446,18 +1452,12 @@ function ns.RegisterTBBUnlockElements()
                 setWidth = function(_, w)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if not c then return end
-                    -- Visual width maps to height (thickness) when vertical
-                    if c.verticalOrientation then c.height = w else c.width = w end
-                    ns.BuildTrackedBuffBars()
+                    if c then c.width = w; ns.BuildTrackedBuffBars() end
                 end,
                 setHeight = function(_, h)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if not c then return end
-                    -- Visual height maps to width (length) when vertical
-                    if c.verticalOrientation then c.width = h else c.height = h end
-                    ns.BuildTrackedBuffBars()
+                    if c then c.height = h; ns.BuildTrackedBuffBars() end
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     local pos = ns.GetTBBPositions()

@@ -571,7 +571,7 @@ local defaults = {
             boss = { point = "CENTER", relPoint = "CENTER", x = 661, y = 251 },
             classPower = { point = "CENTER", relPoint = "CENTER", x = 0, y = -220 },
         },
-        bossSpacing = 60,
+        bossSpacing = 80,
     }
 }
 local frames = {}

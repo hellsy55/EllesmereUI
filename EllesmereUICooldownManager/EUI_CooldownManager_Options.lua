@@ -2291,10 +2291,12 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(ddBtn, "TOP", hdr, "TOP", 0, fy)
             fy = fy - DD_H - 15
 
-            -- Bar preview (uses bar's actual dimensions; always rendered horizontal)
+            -- Bar preview: always rendered as horizontal regardless of orientation
             local bd = SelectedTBB()
-            local PREVIEW_H = bd and bd.height or 24
-            local PREVIEW_W = bd and bd.width or 270
+            local rawW = bd and bd.width or 270
+            local rawH = bd and bd.height or 24
+            local PREVIEW_W = math.max(rawW, rawH)
+            local PREVIEW_H = math.min(rawW, rawH)
             if PREVIEW_W > (hdrW - PAD * 2) then PREVIEW_W = hdrW - PAD * 2 end
 
             local pvFrame = CreateFrame("Frame", nil, hdr)
@@ -2307,6 +2309,7 @@ initFrame:SetScript("OnEvent", function(self)
                 pvBar:SetAllPoints()
                 local texPath = EllesmereUI.ResolveTexturePath(ns.TBB_TEXTURES, bd.texture or "none", "Interface\\Buttons\\WHITE8x8")
                 pvBar:SetStatusBarTexture(texPath)
+                pvBar:SetOrientation("HORIZONTAL")
                 pvBar:SetMinMaxValues(0, 1)
                 pvBar:SetValue(0.65)
                 local pvFillR, pvFillG, pvFillB, pvFillA = bd.fillR or 0.05, bd.fillG or 0.82, bd.fillB or 0.62, bd.fillA or 1
@@ -2428,7 +2431,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Icon preview: parented to hdr so it can sit outside pvFrame bounds.
                 -- Size always matches bar height.
-                local pvIconMode = (not bd.verticalOrientation) and (bd.iconDisplay or "none") or "none"
+                local pvIconMode = bd.iconDisplay or "none"
                 _tbbPvIcon = nil
                 local pvIconFrame = nil
                 local hasIcon = (bd.spellID and bd.spellID > 0) or bd.glowBased
@@ -2633,6 +2636,8 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() local bd = SelectedTBB(); return bd and bd.verticalOrientation end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
+                  -- Swap width/height so visual dimensions stay correct
+                  bd.width, bd.height = (bd.height or 24), (bd.width or 200)
                   bd.verticalOrientation = v; RefreshTBB()
                   EllesmereUI:RefreshPage()
               end },
@@ -2934,7 +2939,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Show Icon | Opacity
         _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Show Icon",
-              values = { none = "None", left = "Left", right = "Right" },
+              values = { none = "None", left = "Left (Top)", right = "Right (Bottom)" },
               order = { "none", "left", "right" },
               getValue = function() local bd = SelectedTBB(); return bd and bd.iconDisplay or "none" end,
               setValue = function(v)
