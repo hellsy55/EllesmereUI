@@ -7563,23 +7563,6 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                   local bd = BD()
-                  local wasOff = (bd.activeStateAnim == "blizzard") or (bd.activeStateAnim == "none") or not bd.activeStateAnim
-                  local turningOn = wasOff and tonumber(v) ~= nil
-                  if turningOn then
-                      EllesmereUI:ShowConfirmPopup({
-                          title       = "Active State Animation",
-                          message     = "Custom active state animations may cause a slight loss in performance efficiency. Do you want to enable it?",
-                          confirmText = "Enable",
-                          cancelText  = "Cancel",
-                          onConfirm   = function()
-                              bd.activeStateAnim = v; ns.BuildAllCDMBars()
-                              if _cdmActivePreviewOn and _cdmPreview then StopActiveStatePreview(); StartActiveStatePreview() end
-                              Refresh(); EllesmereUI:RefreshPage()
-                          end,
-                          onCancel = function() if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end end,
-                      })
-                      return
-                  end
                   bd.activeStateAnim = v; ns.BuildAllCDMBars()
                   if _cdmActivePreviewOn and _cdmPreview then StopActiveStatePreview(); StartActiveStatePreview() end
                   Refresh()

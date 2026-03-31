@@ -1611,7 +1611,8 @@ local function LayoutIcons()
     local allIcons = _layoutScratch
     wipe(allIcons)
     for _, btn in ipairs(activeIcons) do allIcons[#allIcons+1] = btn end
-    if _B.icons then
+    local beaconsOnCursor = db and db.profile.display.cursorAttach and cursorAnchor
+    if _B.icons and not beaconsOnCursor then
         for _, id in ipairs(_B.ALL or {}) do
             if _B.iconState and _B.iconState[id] and _B.icons[id] then
                 allIcons[#allIcons+1] = _B.icons[id]
@@ -2709,6 +2710,43 @@ local function BeaconLayoutIcons()
     -- Just trigger a main refresh so they appear in the unified line.
     -- Hide the separate beacon anchor since we don't use it anymore.
     if _B.anchor then EllesmereUI.SetElementVisibility(_B.anchor, false) end
+
+    -- When cursor-attached, position beacon icons at the cursor anchor
+    local useCursor = db and db.profile.display.cursorAttach and cursorAnchor
+    if useCursor then
+        local visIcons = {}
+        for _, id in ipairs(_B.ALL or {}) do
+            if _B.iconState and _B.iconState[id] and _B.icons[id] then
+                visIcons[#visIcons + 1] = _B.icons[id]
+            end
+        end
+        if #visIcons > 0 then
+            local p = db.profile.display
+            local spacing = p.iconSpacing or 8
+            local baseScale = p.scale or 1.0
+            local sz = floor(ICON_SIZE * baseScale + 0.5)
+            local totalW = (#visIcons * sz) + ((#visIcons - 1) * spacing)
+            local startX = -(totalW / 2) + (sz / 2)
+            for i, f in ipairs(visIcons) do
+                f:SetSize(sz, sz)
+                f:SetAlpha(p.opacity or 1.0)
+                f:SetFrameStrata("TOOLTIP")
+                f:SetFrameLevel(9980)
+                f:ClearAllPoints()
+                f:SetPoint("CENTER", cursorAnchor, "CENTER", startX + (i - 1) * (sz + spacing), -(sz + 8))
+            end
+            EllesmereUI.SetElementVisibility(cursorAnchor, true)
+        end
+        return
+    end
+
+    -- Restore beacon icons to normal strata after leaving cursor mode
+    for _, id in ipairs(_B.ALL or {}) do
+        if _B.icons and _B.icons[id] then
+            _B.icons[id]:SetFrameStrata("HIGH")
+            _B.icons[id]:SetFrameLevel(120)
+        end
+    end
     -- Re-layout main icons to include/exclude beacon icons
     LayoutIcons()
 end
@@ -3028,14 +3066,27 @@ function EABR:OnEnable()
     combatAnchor:Show()
     EllesmereUI.SetElementVisibility(combatAnchor, false)
 
-    -- Cursor anchor: parents to EllesmereUICursorFrame if available.
-    local cursorParent = _G.EllesmereUICursorFrame or UIParent
-    cursorAnchor = CreateFrame("Frame", "EABR_CursorAnchor", cursorParent)
+    -- Cursor anchor: tracks cursor position via OnUpdate (same as CDM).
+    cursorAnchor = CreateFrame("Frame", "EABR_CursorAnchor", UIParent)
     cursorAnchor:SetSize(1, 1)
     cursorAnchor:SetFrameStrata("TOOLTIP")
     cursorAnchor:SetFrameLevel(9980)
     cursorAnchor:EnableMouse(false)
-    cursorAnchor:SetPoint("CENTER", cursorParent, "CENTER", 0, 60)
+    cursorAnchor:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    do
+        local lastMX, lastMY
+        cursorAnchor:SetScript("OnUpdate", function()
+            local s = UIParent:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            cx = floor(cx / s + 0.5)
+            cy = floor(cy / s + 0.5)
+            if cx ~= lastMX or cy ~= lastMY then
+                lastMX, lastMY = cx, cy
+                cursorAnchor:ClearAllPoints()
+                cursorAnchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy + 60)
+            end
+        end)
+    end
     cursorAnchor:Show()
     EllesmereUI.SetElementVisibility(cursorAnchor, false)
 

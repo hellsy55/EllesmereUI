@@ -4791,6 +4791,20 @@ initFrame:SetScript("OnEvent", function(self)
             if s <= 0 then s = 1 end
             return math.floor(val * s + 0.5) / s
         end
+        -- Destroy any stale hit overlays from a previous BuildDisplayPage call
+        -- (RefreshPage can re-call buildPage without cleaning the preview).
+        if activePreview and activePreview._hitOverlays then
+            for i = 1, #activePreview._hitOverlays do
+                local ov = activePreview._hitOverlays[i]
+                ov:EnableMouse(false)
+                ov:Hide()
+                ov:SetParent(nil)
+            end
+            wipe(activePreview._hitOverlays)
+        end
+
+        local allOverlays = {}
+
         local function CreateHitOverlay(element, mappingKey, isText, frameLevelOverride, opts)
             local anchor = isText and element:GetParent() or element
             -- If the element is a Texture (not a Frame), parent to its owner frame
@@ -4851,6 +4865,9 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetScript("OnEnter", function() brd:Show() end)
             btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
+            allOverlays[#allOverlays + 1] = btn
+            if hlBase ~= btn then allOverlays[#allOverlays + 1] = hlBase end
+            allOverlays[#allOverlays + 1] = hlCont
             return btn
         end
 
@@ -4917,6 +4934,7 @@ initFrame:SetScript("OnEvent", function(self)
                     iconOv:SetScript("OnEnter", function() ioBrd:Show() end)
                     iconOv:SetScript("OnLeave", function() ioBrd:Hide() end)
                     iconOv:SetScript("OnMouseDown", function() NavigateToSetting("castIcon") end)
+                    allOverlays[#allOverlays + 1] = iconOv
                 end
                 -- Cast bar overlay (bar only, not icon)
                 local castOverlay = CreateFrame("Button", nil, pv._cast:GetParent())
@@ -4928,6 +4946,7 @@ initFrame:SetScript("OnEvent", function(self)
                 castOverlay:SetScript("OnEnter", function() coBrd:Show() end)
                 castOverlay:SetScript("OnLeave", function() coBrd:Hide() end)
                 castOverlay:SetScript("OnMouseDown", function() NavigateToSetting("castBar") end)
+                allOverlays[#allOverlays + 1] = castOverlay
             end
             -- Cast spell name and target text (above the cast bar overlay)
             local castTextLevel = (castOverlayLevel or 30) + 5
@@ -5009,6 +5028,7 @@ initFrame:SetScript("OnEvent", function(self)
                     cpBtn:SetScript("OnLeave", function() HideCPHL() end)
                     cpBtn:SetScript("OnMouseDown", function() NavigateToSetting("classResource") end)
                     cpOverlay = cpBtn
+                    allOverlays[#allOverlays + 1] = cpBtn
                     -- Disable hover/click when class resource setting is off
                     local function UpdateCPOverlay()
                         local off = DBVal("showClassPower") ~= true
@@ -5058,10 +5078,13 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Only show when arrows are visible
                 if not pv._arrows.left:IsShown() then arrowBtn:Hide() end
                 arrowOverlay = arrowBtn
+                allOverlays[#allOverlays + 1] = arrowBtn
             end
             pv._arrowOverlay = arrowOverlay
             -- Store text overlays for size refresh on preview update
             pv._textOverlays = textOverlays
+            -- Store all overlays for cleanup on next rebuild
+            pv._hitOverlays = allOverlays
         end
 
         return math.abs(y)

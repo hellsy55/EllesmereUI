@@ -6046,7 +6046,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.0.1"
+EllesmereUI.VERSION = "6.0.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6148,10 +6148,10 @@ if not _G._EUI_ConflictChecked then
             -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBasics" } },
             -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBasics" } },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
-            { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager" } },
+            { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
-            { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager" } },
-            { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager" } },
+            { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
+            { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "EllesmereBarGlows",        label = "Ellesmere's CDM Bar Glows",  targets = "all" },
             { addon = "EllesmereNameplates",        label = "Ellesmere's Nameplates",  targets = "all" },
             { addon = "EllesmereActionBars",        label = "Ellesmere's Action Bars",  targets = "all" },
