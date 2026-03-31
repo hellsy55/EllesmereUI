@@ -1055,14 +1055,20 @@ end
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+initFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         ns.UpdateFriendlyNameplateSystem()
-    elseif event == "PLAYER_ENTERING_WORLD" then
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         -- Re-evaluate the friendly system on every zone transition so
         -- follower dungeons (and similar) correctly disable/enable it.
         ns.UpdateFriendlyNameplateSystem()
+        -- Delayed re-check: instance/follower dungeon state may not be
+        -- available yet when PLAYER_ENTERING_WORLD first fires on zone-in.
+        C_Timer.After(1, function()
+            ns.UpdateFriendlyNameplateSystem()
+        end)
         -- Sweep every zone transition / reload to pick up any plates that
         -- were missed during the initial enable or that appeared between
         -- PLAYER_LOGIN and the world being fully rendered.
