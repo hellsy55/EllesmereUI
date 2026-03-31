@@ -478,6 +478,8 @@ local function ReleaseRow(r)
     if r.bannerAccent then r.bannerAccent:Hide() end
     if r.bannerIcon  then r.bannerIcon:Hide()  end
     if r.tierFS      then r.tierFS:Hide()      end
+    if r.livesFS     then r.livesFS:Hide()     end
+    if r.heartIcon   then r.heartIcon:Hide()   end
     rowPool[#rowPool + 1] = r
 end
 local function ReleaseAll()

@@ -3708,9 +3708,9 @@ function EAB:ApplyAlwaysShowButtons(barKey)
                     btn:SetAttribute("showgrid", 1)
                     btn:Show()
                 end
-                if not s.mouseoverEnabled then
-                    btn:SetAlpha(1)
-                end
+                -- Always restore button alpha to 1. The bar frame's own
+                -- alpha (via mouseover fade) handles overall visibility.
+                btn:SetAlpha(1)
                 -- Restore mouse state based on bar's click-through setting
                 SafeEnableMouse(btn, clickable)
                 lastVisible = i
@@ -4105,6 +4105,7 @@ end
 function EAB_VTABLE.Hover.FadeIn(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
+        print("|cff00ff00[EAB HOVER]|r FadeIn " .. barKey .. " " .. debugstack(2, 1, 0))
         state.fadeDir = "in"
         StopFade(state.frame)
         FadeTo(state.frame, 1, s.mouseoverSpeed or 0.15)
@@ -4116,6 +4117,7 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
+        print("|cffff0000[EAB HOVER]|r FadeOut " .. barKey .. " " .. debugstack(2, 1, 0))
         state.fadeDir = "out"
         StopFade(state.frame)
         FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15)
@@ -5889,20 +5891,9 @@ local function OnGridChange()
         end
     end
 
-    -- Force all mouseover bars to full opacity during drag so users can
-    -- see where to drop spells. FadeOut is blocked while _gridState.shown
-    -- is true (see below). OnGridHide restores normal fade behavior.
-    for _, info in ipairs(BAR_CONFIG) do
-        local s = EAB.db.profile.bars[info.key]
-        if s and s.mouseoverEnabled then
-            local frame = barFrames[info.key]
-            if frame then
-                StopFade(frame)
-                frame:SetAlpha(1)
-                if info.key == "MainBar" then SyncPagingAlpha(1) end
-            end
-        end
-    end
+    -- Mouseover bar forcing moved to CURSOR_CHANGED handler, which only
+    -- fires for real cursor drags. ACTIONBAR_SHOWGRID also fires for
+    -- equipment changes, bag sorts, etc. which should not affect mouseover.
 end
 
 -------------------------------------------------------------------------------
@@ -6784,7 +6775,7 @@ function EAB:FinishSetup()
     -- Also show mouseover-faded bars while dragging so the player can drop
     -- spells/items onto them.  Purely visual -- no secure frame access.
     local DRAG_TYPES = {
-        spell = true, item = true, macro = true,
+        spell = true, macro = true,
         petaction = true, mount = true, companion = true,
     }
     _dragState.visible = false
@@ -6870,6 +6861,19 @@ function EAB:FinishSetup()
                 SetDragVisible(true)
                 if not _gridState.shown then
                     OnGridChange()
+                end
+                -- Force mouseover bars visible during real cursor drags
+                _gridState._mouseoverForced = true
+                for _, info in ipairs(BAR_CONFIG) do
+                    local s = EAB.db.profile.bars[info.key]
+                    if s and s.mouseoverEnabled then
+                        local frame = barFrames[info.key]
+                        if frame then
+                            StopFade(frame)
+                            frame:SetAlpha(1)
+                            if info.key == "MainBar" then SyncPagingAlpha(1) end
+                        end
+                    end
                 end
             end
         else
@@ -7017,17 +7021,29 @@ function EAB:FinishSetup()
             end
         end
 
-        for _, info in ipairs(BAR_CONFIG) do
-            self:ApplyAlwaysShowButtons(info.key)
-        end
+        -- Defer visibility update by one frame so ACTIONBAR_SLOT_CHANGED
+        -- processes first. Without this, a spell dropped onto a previously
+        -- empty slot is not yet registered when ApplyAlwaysShowButtons runs,
+        -- causing the button to be hidden as empty.
+        C_Timer.After(0, function()
+            if InCombatLockdown() then return end
+            for _, info2 in ipairs(BAR_CONFIG) do
+                self:ApplyAlwaysShowButtons(info2.key)
+            end
+        end)
 
-        -- Restore mouseover fade on bars that were forced visible during drag
-        for _, info in ipairs(BAR_CONFIG) do
-            local s = EAB.db.profile.bars[info.key]
-            if s and s.mouseoverEnabled then
-                local state = hoverStates[info.key]
-                if state and not state.isHovered then
-                    EAB_VTABLE.Hover.FadeOut(info.key, state)
+        -- Restore mouseover fade on bars that were forced visible during drag.
+        -- Only needed if a real cursor drag happened (CURSOR_CHANGED forced them).
+        -- _gridState tracks whether forcing occurred via the CURSOR_CHANGED path.
+        if _gridState._mouseoverForced then
+            _gridState._mouseoverForced = false
+            for _, info in ipairs(BAR_CONFIG) do
+                local s = EAB.db.profile.bars[info.key]
+                if s and s.mouseoverEnabled then
+                    local state = hoverStates[info.key]
+                    if state and not state.isHovered then
+                        EAB_VTABLE.Hover.FadeOut(info.key, state)
+                    end
                 end
             end
         end

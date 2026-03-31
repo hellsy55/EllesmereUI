@@ -3163,11 +3163,13 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
-        _eabrInCombat = true
         _huntersMarkNeeded = true
-        FadeOutSecureIcons()
+        -- Hide secure buttons BEFORE setting combat flag (HideAllIcons
+        -- checks InCombat and returns early if true). PLAYER_REGEN_DISABLED
+        -- fires before InCombatLockdown() returns true, so Hide() is safe.
         HideAllIcons()
         HideCursorIcons()
+        _eabrInCombat = true
         SnapshotPlayerAuras()
         SnapshotOwnOnRaidBuffs()
         return
