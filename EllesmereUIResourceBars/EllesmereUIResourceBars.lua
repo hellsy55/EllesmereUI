@@ -1802,6 +1802,10 @@ local function BuildBars()
         if not secondaryFrame._barBorder then
             secondaryFrame._barBorder = MakePixelBorder(secondaryFrame,
                 sp.borderR, sp.borderG, sp.borderB, sp.borderA, sp.borderSize)
+            -- Ensure border frame is above bar-type secondaries (Brewmaster/Elemental)
+            if secondaryFrame._barBorder._frame then
+                secondaryFrame._barBorder._frame:SetFrameLevel(secondaryFrame:GetFrameLevel() + 5)
+            end
         end
         if sp.borderSize > 0 then
             secondaryFrame._barBorder:SetSize(sp.borderSize)
