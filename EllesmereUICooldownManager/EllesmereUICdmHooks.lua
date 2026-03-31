@@ -1793,6 +1793,7 @@ function ns.SetupViewerHooks()
     -- 2. Pool acquire hooks: detect new frames + install per-frame hooks
     -- Track which frames have been hooked (weak-keyed, no taint)
     local _activeStateHooked = setmetatable({}, { __mode = "k" })
+    local _activeStateReanchorPending = false
 
     local function InstallBuffFrameHooks(viewer)
         if not viewer or not viewer.itemFramePool then return end
@@ -1800,10 +1801,18 @@ function ns.SetupViewerHooks()
             if not _activeStateHooked[frame] then
                 _activeStateHooked[frame] = true
                 -- Hook OnActiveStateChanged: Blizzard calls this when a buff
-                -- becomes active/inactive. Queue reanchor so we update layout.
+                -- becomes active/inactive. Run a full reanchor so new/removed
+                -- icons get collected and centered. Batched via C_Timer to
+                -- collapse the spam (fires many times per frame).
                 if frame.OnActiveStateChanged then
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
                         ReapplyPositions()
+                        if _activeStateReanchorPending then return end
+                        _activeStateReanchorPending = true
+                        C_Timer.After(0, function()
+                            _activeStateReanchorPending = false
+                            CollectAndReanchor()
+                        end)
                     end)
                 end
             end
@@ -1892,13 +1901,20 @@ function ns.SetupViewerHooks()
         end
     end
 
-    -- 3b. Buff viewer RefreshLayout hook: run an IMMEDIATE reanchor (not
+    -- 3b. Buff viewer RefreshLayout hooks: run an IMMEDIATE reanchor (not
     -- queued) so icons are repositioned before the frame renders. Without
     -- this, new buff icons flash at Blizzard's default viewer position for
-    -- up to 0.15s until the throttled reanchor fires.
+    -- up to 0.2s until the throttled reanchor fires.
     local buffViewer = _G["BuffIconCooldownViewer"]
     if buffViewer and buffViewer.RefreshLayout then
         hooksecurefunc(buffViewer, "RefreshLayout", function()
+            if ns._specChangePending then return end
+            CollectAndReanchor()
+        end)
+    end
+    local buffBarViewer = _G["BuffBarCooldownViewer"]
+    if buffBarViewer and buffBarViewer.RefreshLayout then
+        hooksecurefunc(buffBarViewer, "RefreshLayout", function()
             if ns._specChangePending then return end
             CollectAndReanchor()
         end)
@@ -2071,29 +2087,6 @@ function ns.SetupViewerHooks()
                 end
             end
             if needsReanchor then QueueReanchor() end
-            -- Refresh active aura cache for bar glows (lightweight: just
-            -- checks wasSetFromAura/auraInstanceID on already-iterated icons)
-            wipe(_activeCache)
-            for _, bd2 in ipairs(p.cdmBars.bars) do
-                if bd2.enabled then
-                    local icons2 = cdmBarIcons[bd2.key]
-                    if icons2 then
-                        for fi2 = 1, #icons2 do
-                            local fr = icons2[fi2]
-                            if fr and (fr.wasSetFromAura == true or fr.auraInstanceID ~= nil) then
-                                local fc = _ecmeFC[fr]
-                                local sid = fc and fc.resolvedSid
-                                if sid and sid > 0 then
-                                    _activeCache[sid] = true
-                                    local base = fc.baseSpellID
-                                    if base and base > 0 then _activeCache[base] = true end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
             MemDelta("BuffTicker")
         end)
     end

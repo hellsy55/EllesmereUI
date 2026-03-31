@@ -222,6 +222,7 @@ local function UpdateOverlayVisuals()
             local mode = entry.mode or "ACTIVE"
 
             -- Check if aura/buff is active via the CDM active cache
+            -- (populated each tick from viewer frames with auraInstanceID)
             local auraActive = false
             if spellID and spellID > 0 then
                 local cache = ns._tickBlizzActiveCache
