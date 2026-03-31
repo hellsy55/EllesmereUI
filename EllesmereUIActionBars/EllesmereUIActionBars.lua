@@ -4105,7 +4105,7 @@ end
 function EAB_VTABLE.Hover.FadeIn(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
-        print("|cff00ff00[EAB HOVER]|r FadeIn " .. barKey .. " " .. debugstack(2, 1, 0))
+
         state.fadeDir = "in"
         StopFade(state.frame)
         FadeTo(state.frame, 1, s.mouseoverSpeed or 0.15)
@@ -4117,7 +4117,7 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
-        print("|cffff0000[EAB HOVER]|r FadeOut " .. barKey .. " " .. debugstack(2, 1, 0))
+
         state.fadeDir = "out"
         StopFade(state.frame)
         FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15)
