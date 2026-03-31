@@ -2715,11 +2715,9 @@ function EQT:Init()
 
     local function UpdateQTVisibility()
         if not EQT.frame then return end
-        if Cfg("enabled") == false then EQT.frame:Hide(); qtMouseoverActive = false; return end
-        -- Instance hiding (raids, M+) works even in combat -- EQT.frame is
-        -- our own unprotected frame, so Hide() is always safe.
-        if IsInHiddenInstance() then EQT.frame:Hide(); qtMouseoverActive = false; return end
         if InCombatLockdown() then return end
+        if Cfg("enabled") == false then EQT.frame:Hide(); qtMouseoverActive = false; return end
+        if IsInHiddenInstance() then EQT.frame:Hide(); qtMouseoverActive = false; return end
         local qt = DB()
         if EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(qt) then
             EQT.frame:Hide(); qtMouseoverActive = false; return

@@ -264,7 +264,7 @@ local NON_SECRET_SPELL_IDS = {
     [1235110]=true, [1235108]=true, [1235111]=true, [1235057]=true, [1239355]=true,
     [1235113]=true, [1235114]=true, [1235115]=true, [1235116]=true,
     -- Partnered Trinket (Emerald Coach's Whistle)
-    [383798]=true,
+    [383798]=true, [389581]=true,
 }
 
 -------------------------------------------------------------------------------
@@ -701,7 +701,7 @@ local HEALTHSTONE_ITEM_IDS = { 5512, 224464 }  -- Healthstone, Demonic Healthsto
 -- Partnered Trinket: Emerald Coaches Whistle (buff 383798, icon 134157, 60 min)
 local PARTNERED_TRINKET = {
     key = "coaches_whistle", name = "Emerald Coach's Whistle",
-    buffID = 383798, buffIDs = {383798}, icon = 134157, duration = 3600,
+    buffID = 389581, buffIDs = {389581, 383798}, icon = 134157, duration = 3600,
 }
 
 -- Pet tracking: Hunter pets, Warlock pets
@@ -1584,7 +1584,7 @@ local function HideAllIcons()
 end
 
 local function ResizeAnchorCentered(newW, newH)
-    if not iconAnchor then return end
+    if not iconAnchor or InCombatLockdown() then return end
     iconAnchor:SetSize(newW, newH)
 end
 
