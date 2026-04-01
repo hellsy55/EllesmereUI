@@ -382,7 +382,7 @@ do
     end
 
     local _, playerClass = UnitClass("player")
-    -- { spellID, category ("Magic", "Enrage", or "Both"), requiredClass or nil }
+    -- { spellID, category ("Magic", "Enrage", or "Both"), requiredClass or nil, requiredTalent or nil }
     local OFFENSIVE_DISPEL_SPELLS = {
         { 370,    "Magic",  nil       },  -- Purge (Shaman)
         { 378773, "Magic",  nil       },  -- Greater Purge (Shaman)
@@ -392,23 +392,31 @@ do
         { 19801,  "Both",   nil       },  -- Tranquilizing Shot (Hunter)
         { 2908,   "Enrage", nil       },  -- Soothe (Druid)
         { 30449,  "Magic",  nil       },  -- Spellsteal (Mage)
+        { 115078, "Enrage", "MONK", 450432 },  -- Paralysis (w/ Pressure Points talent)
     }
     local canDispelMagic, canDispelEnrage = false, false
     local function RebuildDispelTypes()
         canDispelMagic, canDispelEnrage = false, false
         for _, entry in ipairs(OFFENSIVE_DISPEL_SPELLS) do
-            local spellID, cat, reqClass = entry[1], entry[2], entry[3]
+            local spellID, cat, reqClass, reqTalent = entry[1], entry[2], entry[3], entry[4]
             if reqClass and playerClass ~= reqClass then
                 -- skip: wrong class for this spell
             else
                 local known = false
-                if reqClass then
+                if reqClass and not reqTalent then
                     -- Class-gated pet spell: check via pet bank
                     if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
                         and Enum and Enum.SpellBookSpellBank then
                         known = C_SpellBook.IsSpellKnownOrInSpellBook(spellID, Enum.SpellBookSpellBank.Pet)
                     elseif IsSpellKnown then
                         known = IsSpellKnown(spellID, true)
+                    end
+                elseif reqTalent then
+                    -- Talent-gated: check if the talent is known
+                    if IsPlayerSpell then
+                        known = IsPlayerSpell(reqTalent)
+                    elseif IsSpellKnown then
+                        known = IsSpellKnown(reqTalent, false)
                     end
                 elseif C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
                     known = C_SpellBook.IsSpellKnownOrInSpellBook(spellID)
