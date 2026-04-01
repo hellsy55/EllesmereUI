@@ -172,6 +172,29 @@ function ns.RebuildSpellRouteMap()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
+    -- Pre-build a reverse override map from CDM cooldownInfo:
+    -- overrideSpellID -> base spellID. This handles conditional overrides
+    -- (e.g. Glacial Spike -> Frostbolt) that C_Spell.GetBaseSpell may not
+    -- resolve because the override is state-dependent, not a spell chain.
+    local overrideToBase = {}
+    local gcs0 = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+    local gci0 = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    if gcs0 and gci0 then
+        for cat = 0, 3 do
+            local allIDs = gcs0(cat, true)
+            if allIDs then
+                for _, cdID in ipairs(allIDs) do
+                    local info = gci0(cdID)
+                    if info and info.overrideSpellID and info.overrideSpellID > 0
+                       and info.spellID and info.spellID > 0
+                       and info.overrideSpellID ~= info.spellID then
+                        overrideToBase[info.overrideSpellID] = info.spellID
+                    end
+                end
+            end
+        end
+    end
+
     -- Step 1: build spellID -> barKey from assignedSpells (for options/preview)
     local spellToBar = {}
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
@@ -194,12 +217,20 @@ function ns.RebuildSpellRouteMap()
                         -- Reverse: stored spell may be the override form
                         -- (added while transformed). Resolve the base spell
                         -- so the cooldownID lookup can match via info.spellID.
+                        -- Try C_Spell.GetBaseSpell first, fall back to the
+                        -- CDM cooldownInfo reverse map for conditional overrides
+                        -- (e.g. Glacial Spike, Frostfire Bolt).
+                        local base
                         if C_Spell and C_Spell.GetBaseSpell then
-                            local base = C_Spell.GetBaseSpell(sid)
-                            if base and base > 0 and base ~= sid then
-                                _spellRouteMap[base] = bd.key
-                                spellToBar[base] = bd.key
-                            end
+                            base = C_Spell.GetBaseSpell(sid)
+                            if base == sid then base = nil end
+                        end
+                        if not base then
+                            base = overrideToBase[sid]
+                        end
+                        if base and base > 0 and base ~= sid then
+                            _spellRouteMap[base] = bd.key
+                            spellToBar[base] = bd.key
                         end
                     end
                 end
@@ -748,9 +779,11 @@ local function UpdateTrinketCooldown(slotID)
     local start, dur, enable = GetInventoryItemCooldown("player", slotID)
     if start and dur and dur > 1.5 and enable == 1 then
         f._cooldown:SetCooldown(start, dur)
+        if f._tex then f._tex:SetDesaturated(true) end
         return true
     else
         f._cooldown:Clear()
+        if f._tex then f._tex:SetDesaturated(false) end
         return false
     end
 end
@@ -764,10 +797,35 @@ _trinketEventFrame:SetScript("OnEvent", function(_, event, arg1)
         if arg1 == 13 or arg1 == 14 then
             UpdateTrinketFrame(arg1)
             if ns.QueueReanchor then ns.QueueReanchor() end
+            local f = _trinketFrames[arg1]
+            if f and f._trinketSpellID and not f._trinketIsOnUse then
+                local slot = arg1
+                C_Timer.After(1, function()
+                    UpdateTrinketFrame(slot)
+                    if ns.QueueReanchor then ns.QueueReanchor() end
+                end)
+            end
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
         UpdateTrinketFrame(13)
         UpdateTrinketFrame(14)
+        -- Tooltip data may not be cached yet on login, causing on-use
+        -- detection to fail. Retry only for trinkets that have a spell
+        -- but weren't detected as on-use (tooltip wasn't ready).
+        local needsRetry = false
+        for _, slot in ipairs({13, 14}) do
+            local f = _trinketFrames[slot]
+            if f and f._trinketSpellID and not f._trinketIsOnUse then
+                needsRetry = true
+            end
+        end
+        if needsRetry then
+            C_Timer.After(2, function()
+                UpdateTrinketFrame(13)
+                UpdateTrinketFrame(14)
+                if ns.QueueReanchor then ns.QueueReanchor() end
+            end)
+        end
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         for _, slot in ipairs({13, 14}) do
             if _trinketFrames[slot] and _trinketFrames[slot]._trinketIsOnUse then
@@ -776,6 +834,30 @@ _trinketEventFrame:SetScript("OnEvent", function(_, event, arg1)
         end
     end
 end)
+
+-------------------------------------------------------------------------------
+--  Desaturation curve for custom frames (taint-safe).
+--  Step curve: 0 when no cooldown, 1 immediately when cooldown active.
+--  EvaluateRemainingDuration on a DurationObject handles secret values
+--  internally so we never compare secret numbers ourselves.
+-------------------------------------------------------------------------------
+local _desatCurve
+if C_CurveUtil and C_CurveUtil.CreateCurve then
+    _desatCurve = C_CurveUtil.CreateCurve()
+    _desatCurve:SetType(Enum.LuaCurveType.Step)
+    _desatCurve:AddPoint(0, 0)
+    _desatCurve:AddPoint(0.001, 1)
+end
+
+local function ApplySpellDesaturation(f, durObj)
+    if not f._tex then return end
+    if durObj and _desatCurve and durObj.EvaluateRemainingDuration then
+        local val = durObj:EvaluateRemainingDuration(_desatCurve, 0)
+        f._tex:SetDesaturation(val or 0)
+    else
+        f._tex:SetDesaturation(0)
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Preset/Custom Frames
@@ -800,6 +882,7 @@ _racialCdListener:SetScript("OnEvent", function()
                     if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
                         f._cooldown:SetCooldownFromDurationObject(durObj, true)
                     end
+                    ApplySpellDesaturation(f, durObj)
                 end
             elseif f._isItemPresetFrame and f._presetItemID then
                 local itemID = f._presetItemID
@@ -825,6 +908,9 @@ _racialCdListener:SetScript("OnEvent", function()
                     f._cooldown:Clear()
                     f._cdStart = nil; f._cdDur = nil
                 end
+                -- Desaturate when on cooldown (matches Blizzard CDM behavior)
+                local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
+                if f._tex then f._tex:SetDesaturated(itemOnCD and true or false) end
             end
         end
     end
@@ -1064,7 +1150,8 @@ local function CollectAndReanchor()
                         if sid and (sid == -13 or sid == -14) then
                             local slot = -sid
                             local tf = _trinketFrames[slot]
-                            if not tf then tf = GetOrCreateTrinketFrame(slot); UpdateTrinketFrame(slot) end
+                            if not tf then tf = GetOrCreateTrinketFrame(slot) end
+                            UpdateTrinketFrame(slot)
                             if _trinketItemCache[slot] and tf._trinketIsOnUse then
                                 UpdateTrinketCooldown(slot)
                                 DecorateFrame(tf, barData)
@@ -1143,6 +1230,8 @@ local function CollectAndReanchor()
                                     f._cooldown:Clear()
                                     f._cdStart = nil; f._cdDur = nil
                                 end
+                                -- Desaturate icon when on cooldown (matches Blizzard CDM behavior)
+                                local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
                                 if f._presetData and (f._presetData.key == "healthstone" or f._presetData.key == "demonic_healthstone") then
                                     local inBags = C_Item.GetItemCount(itemID) > 0
                                     if not inBags and f._presetData.altItemIDs then
@@ -1150,7 +1239,7 @@ local function CollectAndReanchor()
                                             if C_Item.GetItemCount(altID) > 0 then inBags = true; break end
                                         end
                                     end
-                                    if f._tex then f._tex:SetDesaturated(not inBags) end
+                                    if f._tex then f._tex:SetDesaturated(not inBags or itemOnCD) end
                                 end
                                 if f._itemCountText then
                                     local total = C_Item.GetItemCount(itemID) or 0
@@ -1166,7 +1255,7 @@ local function CollectAndReanchor()
                                         f._itemCountText:SetText("")
                                         f._itemCountText:Hide()
                                     end
-                                    if f._tex then f._tex:SetDesaturated(total == 0) end
+                                    if f._tex then f._tex:SetDesaturated(total == 0 or itemOnCD) end
                                 end
                                 DecorateFrame(f, barData); f:Show()
                                 list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
@@ -1238,6 +1327,9 @@ local function CollectAndReanchor()
                                         local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
                                         cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
                                         cd:SetHideCountdownNumbers(true)
+                                        cd:SetScript("OnCooldownDone", function()
+                                            if f._tex then f._tex:SetDesaturation(0) end
+                                        end)
                                         f.Cooldown = cd; f._cooldown = cd
                                         f._isRacialFrame = isRacial or nil
                                         f._isCustomSpellFrame = not isRacial or nil
@@ -1252,6 +1344,7 @@ local function CollectAndReanchor()
                                         if durObj and f._cooldown.SetCooldownFromDurationObject then
                                             f._cooldown:SetCooldownFromDurationObject(durObj, true)
                                         end
+                                        ApplySpellDesaturation(f, durObj)
                                         f._cdSet = true; f._racialCdDirty = false
                                     end
                                     DecorateFrame(f, barData); f:Show()

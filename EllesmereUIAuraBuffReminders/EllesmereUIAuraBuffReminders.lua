@@ -662,9 +662,9 @@ local RAID_BUFFS = {
 --  SPELL DATA Auras (some non-secret, some still OOC-only)
 -------------------------------------------------------------------------------
 local AURAS = {
-    -- Symbiotic Relationship: cast on a group member, check if anyone has it from us
+    -- Symbiotic Relationship: player gets a buff when active
     { key="symbiotic",  class="DRUID",   name="Symbiotic Relationship", castSpell=474750, buffIDs={474754},
-      check="ownOnRaid", combatOk=true, requireInstanceGroup=true },
+      check="player", combatOk=false },
     -- Warrior stances: NOT on non-secret list, OOC only
     { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
       check="player", specs={73}, combatOk=false },
@@ -1877,15 +1877,22 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 end
             end
 
-            -- Shaman Imbues (check both main hand and off-hand)
+            -- Shaman Imbues: match each imbue by its wepEnchID against
+            -- both weapon slots. GetWeaponEnchantInfo returns the specific
+            -- enchant ID on each hand (4th and 8th return values).
             if playerClass == "SHAMAN" then
-                local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
+                local hasMH, _, _, mhEnchID, hasOH, _, _, ohEnchID = GetWeaponEnchantInfo()
                 for _, imbue in ipairs(SHAMAN_IMBUES) do
                     if co.enabled[imbue.key] and Known(imbue.castSpell) then
-                        -- Show reminder if either hand is missing an imbue
-                        local needsMH = not hasMH
-                        local needsOH = not hasOH and (GetInventoryItemID("player", 17) ~= nil)
-                        if needsMH or needsOH then
+                        local found = false
+                        if imbue.wepEnchID then
+                            for _, eid in ipairs(imbue.wepEnchID) do
+                                if eid > 0 and ((hasMH and mhEnchID == eid) or (hasOH and ohEnchID == eid)) then
+                                    found = true; break
+                                end
+                            end
+                        end
+                        if not found then
                             local e = AcquireEntry()
                             e.mode = "spell"; e.spellID = imbue.castSpell
                             e.label = ShortLabel(imbue.name, "SHAMAN_IMBUE")
@@ -2336,6 +2343,11 @@ local function Refresh()
 
     CacheInstanceInfo()
 
+    -- Suppress all non-beacon reminders in PvP instances (arenas/battlegrounds).
+    if InPvPInstance() then
+        HideCombatIcons(); HideCursorIcons(); HideAllIcons(); return
+    end
+
     -- MEMORY PROBES (temporary -- remove after diagnosis)
     local _memProbe = _G._EABR_MemProbe
     local _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7
@@ -2660,6 +2672,10 @@ local IsSpellOverlayed = (C_SpellActivationOverlay and C_SpellActivationOverlay.
 local function BeaconUpdateInstanceCache()
     local _, instanceType, difficultyID = GetInstanceInfo()
     difficultyID = tonumber(difficultyID) or 0
+    -- PvP instances (arenas/BGs) have difficultyID 0 but are still valid
+    if instanceType == "pvp" or instanceType == "arena" then
+        _B.cachedInInstance = true; return
+    end
     if difficultyID == 0 then _B.cachedInInstance = false; return end
     if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
         _B.cachedInInstance = false; return

@@ -499,6 +499,36 @@ function ns.AddTrackedSpell(barKey, id)
     local sd = ns.GetBarSpellData(barKey)
     if not sd then return false end
     if not sd.assignedSpells then sd.assignedSpells = {} end
+
+    -- If this spell is a conditional override (e.g. Glacial Spike),
+    -- store the base spell (e.g. Frostbolt) instead. The base spell
+    -- is stable across state changes; the route map's forward lookup
+    -- (FindSpellOverrideByID) maps base -> active override at runtime.
+    if id > 0 and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+       and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        local bd0 = barDataByKey[barKey]
+        local barType = bd0 and bd0.barType
+        -- Only for Essential/Utility bars (main and custom CD/utility)
+        if barType ~= "buffs" and barType ~= "custom_buff" then
+            local originalID = id
+            for cat = 0, 3 do
+                if id ~= originalID then break end  -- already resolved
+                local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+                if allIDs then
+                    for _, cdID in ipairs(allIDs) do
+                        local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                        if info and info.overrideSpellID == originalID
+                           and info.spellID and info.spellID > 0
+                           and info.spellID ~= originalID then
+                            id = info.spellID
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     for _, existing in ipairs(sd.assignedSpells) do
         if existing == id then return false end
     end

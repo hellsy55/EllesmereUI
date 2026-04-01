@@ -938,23 +938,24 @@ function ns.UpdateFriendlyNameplateSystem()
     local nameOnly     = IsNameOnlyMode()           -- name-only mode
 
     -- In follower dungeons, force-hide all friendly nameplates via CVars
-    if IsInFollowerDungeon() then
-        if SetCVar then
+    -- SetCVar for nameplate CVars is protected in combat; skip to avoid taint.
+    if not InCombatLockdown() and SetCVar then
+        if IsInFollowerDungeon() then
             pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
             pcall(SetCVar, "nameplateShowFriends", 0)
             pcall(SetCVar, "nameplateShowFriendlyNPCs", 0)
             pcall(SetCVar, "nameplateShowFriendlyNpcs", 0)
-        end
-    else
-        -- Restore user's preferred friendly CVar state
-        local fp = FP()
-        if fp and SetCVar then
-            local showPlayers = (fp.showFriendlyPlayers ~= false)
-            local showNPCs = (fp.showFriendlyNPCs == true)
-            pcall(SetCVar, "nameplateShowFriendlyPlayers", showPlayers and 1 or 0)
-            pcall(SetCVar, "nameplateShowFriends", showPlayers and 1 or 0)
-            pcall(SetCVar, "nameplateShowFriendlyNPCs", showNPCs and 1 or 0)
-            pcall(SetCVar, "nameplateShowFriendlyNpcs", showNPCs and 1 or 0)
+        else
+            -- Restore user's preferred friendly CVar state
+            local fp = FP()
+            if fp then
+                local showPlayers = (fp.showFriendlyPlayers ~= false)
+                local showNPCs = (fp.showFriendlyNPCs == true)
+                pcall(SetCVar, "nameplateShowFriendlyPlayers", showPlayers and 1 or 0)
+                pcall(SetCVar, "nameplateShowFriends", showPlayers and 1 or 0)
+                pcall(SetCVar, "nameplateShowFriendlyNPCs", showNPCs and 1 or 0)
+                pcall(SetCVar, "nameplateShowFriendlyNpcs", showNPCs and 1 or 0)
+            end
         end
     end
 
@@ -1014,7 +1015,7 @@ function ns.UpdateFriendlyNameplateSystem()
         ApplyFriendlyFontOverride()
         -- (nameplate sizing handled by Blizzard in name-only mode)
         -- Set class-color CVar for Blizzard's name-only rendering
-        if SetCVar then
+        if SetCVar and not InCombatLockdown() then
             local cc = (_fp and _fp.classColorFriendly ~= false) and 1 or 0
             pcall(SetCVar, "nameplateUseClassColorForFriendlyPlayerUnitNames", cc)
         end

@@ -4264,6 +4264,28 @@ local function TalentAwareReconcile()
 
     local knownSet = BuildAvailableSpellPool()
 
+    -- Build a reverse override map from CDM cooldownInfo:
+    -- overrideSpellID -> base spellID. Handles conditional overrides
+    -- (e.g. Glacial Spike -> Frostbolt) where C_Spell.GetBaseSpell
+    -- may not work because the relationship is state-dependent.
+    local overrideToBase = {}
+    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+       and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        for cat = 0, 3 do
+            local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+            if allIDs then
+                for _, cdID in ipairs(allIDs) do
+                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                    if info and info.overrideSpellID and info.overrideSpellID > 0
+                       and info.spellID and info.spellID > 0
+                       and info.overrideSpellID ~= info.spellID then
+                        overrideToBase[info.overrideSpellID] = info.spellID
+                    end
+                end
+            end
+        end
+    end
+
     -- Helper: reconcile a single spell list (assignedSpells)
     -- Returns the new active list with dormant spells removed and returning
     -- spells re-inserted at their saved positions.
@@ -4278,7 +4300,11 @@ local function TalentAwareReconcile()
         -- Phase 1: separate active list into still-known and newly-dormant
         -- Also check IsPlayerSpell as a fallback for spells the CDM viewer
         -- hasn't updated yet (e.g. choice-node talent swaps).
+        -- For conditional overrides (e.g. Glacial Spike from Frostbolt),
+        -- also check the base spell -- the override may not be "known" when
+        -- its condition isn't met (e.g. icicles = 0 on reload/zone change).
         local _IPS = IsPlayerSpell
+        local _GBS = C_Spell and C_Spell.GetBaseSpell
         local active = {}
         local seenInActive = {}
         for i, sid in ipairs(spellList) do
@@ -4294,8 +4320,22 @@ local function TalentAwareReconcile()
                     active[#active + 1] = sid
                     seenInActive[sid] = true
                 else
-                    -- Spell is no longer known -- save its slot index and move to dormant
-                    dormant[sid] = i
+                    -- Check if this is an override whose base spell is known
+                    -- (e.g. Glacial Spike stored while Frostbolt is the base).
+                    -- Try C_Spell.GetBaseSpell first, fall back to CDM
+                    -- cooldownInfo reverse map for conditional overrides.
+                    local base = _GBS and _GBS(sid)
+                    if base == sid then base = nil end
+                    if not base then base = overrideToBase[sid] end
+                    if base and base > 0 and base ~= sid
+                       and (knownSet[base] or (_IPS and _IPS(base))
+                            or (classSpellSet and classSpellSet[base])) then
+                        active[#active + 1] = sid
+                        seenInActive[sid] = true
+                    else
+                        -- Spell is no longer known -- save its slot index and move to dormant
+                        dormant[sid] = i
+                    end
                 end
             end
         end
@@ -4315,6 +4355,16 @@ local function TalentAwareReconcile()
             local isKnown = knownSet[sid]
                 or (_IPS and _IPS(sid))
                 or (classSpellSet and classSpellSet[sid])
+            -- Also check base spell for conditional overrides
+            if not isKnown then
+                local base = _GBS and _GBS(sid)
+                if base == sid then base = nil end
+                if not base then base = overrideToBase[sid] end
+                if base and base > 0 and base ~= sid then
+                    isKnown = knownSet[base] or (_IPS and _IPS(base))
+                        or (classSpellSet and classSpellSet[base])
+                end
+            end
             if isKnown and not (removed and removed[sid]) then
                 -- Only return spells that aren't already in the active list
                 if not activeSet[sid] then
@@ -5329,13 +5379,18 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
-        _CDMApplyVisibility()
         if event == "UPDATE_SHAPESHIFT_FORM" then
             -- Form swap changes spell overrides (e.g. druid forms).
             -- Rebuild route map so transformed spells route correctly.
+            -- Defer visibility until after reanchor to prevent 1-frame blink.
             if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
             if ns.QueueReanchor then ns.QueueReanchor() end
-            C_Timer.After(0.5, UpdateCDMKeybinds)
+            C_Timer.After(0.3, function()
+                _CDMApplyVisibility()
+                UpdateCDMKeybinds()
+            end)
+        else
+            _CDMApplyVisibility()
         end
         return
     end

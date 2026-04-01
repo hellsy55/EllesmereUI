@@ -4892,7 +4892,7 @@ end
 --------------------------------------------------------------------------------
 local LABEL_Y_NORMAL  =  0   -- label vertical offset when synced
 local LABEL_Y_SHIFTED =  8   -- label vertical offset when desynced (shifted up)
-local SUBTEXT_Y       = -8   -- "Apply to All" vertical offset below center
+local SUBTEXT_Y       = -10  -- "Apply to All" vertical offset below center
 local ANIM_DUR        = 0.20 -- seconds for slide/fade transition
 
 local function BuildSyncIcon(opts)
@@ -4909,7 +4909,7 @@ local function BuildSyncIcon(opts)
 
     local prefixText = applyBtn:CreateFontString(nil, "OVERLAY")
     prefixText:SetFont(EXPRESSWAY, 11, "")
-    prefixText:SetTextColor(ar, ag, ab, 1)
+    prefixText:SetTextColor(1, 1, 1, 0.65)
     prefixText:SetText("Apply to:")
     prefixText:SetPoint("LEFT", applyBtn, "LEFT", 0, 0)
 
@@ -4917,23 +4917,19 @@ local function BuildSyncIcon(opts)
     allBtn:SetFrameLevel(region:GetFrameLevel() + 4)
     local allText = allBtn:CreateFontString(nil, "OVERLAY")
     allText:SetFont(EXPRESSWAY, 11, "")
-    allText:SetTextColor(ar, ag, ab, 1)
+    allText:SetTextColor(ar, ag, ab, 0.65)
     allText:SetText("All")
     allText:SetPoint("CENTER", allBtn, "CENTER", 0, 0)
     allBtn:SetSize(20, 14)
     allBtn:SetPoint("LEFT", prefixText, "RIGHT", 4, 0)
 
-    -- Hover: lighten links 50% toward white
-    local function Lighten(r, g, b)
-        return r + (1 - r) * 0.75, g + (1 - g) * 0.75, b + (1 - b) * 0.75
-    end
     allBtn:SetScript("OnEnter", function()
         local r, g, b = EllesmereUI.GetAccentColor()
-        allText:SetTextColor(Lighten(r, g, b))
+        allText:SetTextColor(r, g, b, 1)
     end)
     allBtn:SetScript("OnLeave", function()
         local r, g, b = EllesmereUI.GetAccentColor()
-        allText:SetTextColor(r, g, b, 1)
+        allText:SetTextColor(r, g, b, 0.65)
     end)
 
     -- " | Multiple" link (only when multiApply opts are provided)
@@ -4949,7 +4945,7 @@ local function BuildSyncIcon(opts)
         multiBtn:SetFrameLevel(region:GetFrameLevel() + 4)
         multiText = multiBtn:CreateFontString(nil, "OVERLAY")
         multiText:SetFont(EXPRESSWAY, 11, "")
-        multiText:SetTextColor(ar, ag, ab, 1)
+        multiText:SetTextColor(ar, ag, ab, 0.65)
         multiText:SetText("Multiple")
         multiText:SetPoint("CENTER", multiBtn, "CENTER", 0, 0)
         multiBtn:SetSize(50, 14)
@@ -4957,11 +4953,11 @@ local function BuildSyncIcon(opts)
 
         multiBtn:SetScript("OnEnter", function()
             local r, g, b = EllesmereUI.GetAccentColor()
-            multiText:SetTextColor(Lighten(r, g, b))
+            multiText:SetTextColor(r, g, b, 1)
         end)
         multiBtn:SetScript("OnLeave", function()
             local r, g, b = EllesmereUI.GetAccentColor()
-            multiText:SetTextColor(r, g, b, 1)
+            multiText:SetTextColor(r, g, b, 0.65)
         end)
     end
 
@@ -5066,9 +5062,9 @@ local function BuildSyncIcon(opts)
     EllesmereUI.RegisterWidgetRefresh(function()
         -- Re-color accent in case it changed
         local r, g, b = EllesmereUI.GetAccentColor()
-        prefixText:SetTextColor(r, g, b, 1)
-        allText:SetTextColor(r, g, b, 1)
-        if multiText then multiText:SetTextColor(r, g, b, 1) end
+        prefixText:SetTextColor(1, 1, 1, 0.65)
+        allText:SetTextColor(r, g, b, 0.65)
+        if multiText then multiText:SetTextColor(r, g, b, 0.65) end
         ResizeBtn()
 
         local synced = opts.isSynced()
@@ -5087,9 +5083,9 @@ local function BuildSyncIcon(opts)
                 end
                 EllesmereUI._deferredDriftChecks[function()
                     local r2, g2, b2 = EllesmereUI.GetAccentColor()
-                    prefixText:SetTextColor(r2, g2, b2, 1)
-                    allText:SetTextColor(r2, g2, b2, 1)
-                    if multiText then multiText:SetTextColor(r2, g2, b2, 1) end
+                    prefixText:SetTextColor(1, 1, 1, 0.65)
+                    allText:SetTextColor(r2, g2, b2, 0.65)
+                    if multiText then multiText:SetTextColor(r2, g2, b2, 0.65) end
                     ResizeBtn()
                     AnimateTo(opts.isSynced() and 0 or 1)
                 end] = true
@@ -5104,9 +5100,9 @@ local function BuildSyncIcon(opts)
             end
             EllesmereUI._deferredDriftChecks[function()
                 local r2, g2, b2 = EllesmereUI.GetAccentColor()
-                prefixText:SetTextColor(r2, g2, b2, 1)
-                allText:SetTextColor(r2, g2, b2, 1)
-                if multiText then multiText:SetTextColor(r2, g2, b2, 1) end
+                prefixText:SetTextColor(1, 1, 1, 0.65)
+                allText:SetTextColor(r2, g2, b2, 0.65)
+                if multiText then multiText:SetTextColor(r2, g2, b2, 0.65) end
                 ResizeBtn()
                 AnimateTo(opts.isSynced() and 0 or 1)
             end] = true
