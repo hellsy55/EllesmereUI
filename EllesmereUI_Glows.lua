@@ -156,7 +156,7 @@ local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, 
             tex:SetColorTexture(1, 1, 1, 1)
             d.lines[i] = tex
         end
-        d.lines[i]:SetVertexColor(cr or 1, cg or 1, cb or 1, 1)
+        d.lines[i]:SetVertexColor(cr, cg, cb, 1)
         d.lines[i]:Show()
     end
     for i = totalTex + 1, #d.lines do d.lines[i]:Hide() end

@@ -174,6 +174,10 @@ local defaults = {
     pandemicGlowLines = 8,
     pandemicGlowThickness = 1,
     pandemicGlowSpeed = 4,
+    dispelGlow = false,
+    dispelGlowStyle = 2,
+    dispelGlowColor = { r = 1.0, g = 1.0, b = 1.0 },
+    dispelGlowUseTypeColor = false,
     castScale = 100,
     focusCastHeight = 100,
     questMobColorEnabled = false,
@@ -348,6 +352,119 @@ local function GetPandemicGlowSpeed()
     return (p and p.pandemicGlowSpeed) or defaults.pandemicGlowSpeed
 end
 ns.GetPandemicGlowSpeed = GetPandemicGlowSpeed
+
+-- Dispellable buff glow: taint-safe detection via GetAuraDispelTypeColor
+do
+    -- Dispel type IDs from SpellDispelType (DB2)
+    local DISPEL_NONE    = 0
+    local DISPEL_MAGIC   = 1
+    local DISPEL_CURSE   = 2
+    local DISPEL_DISEASE = 3
+    local DISPEL_POISON  = 4
+    local DISPEL_ENRAGE  = 9
+
+    -- Build a color curve for taint-safe dispel type detection.
+    -- Magic → blue, Enrage → red, all others → transparent.
+    -- Step curve: each point covers its exact ID; fill gaps with transparent.
+    local dispelDetectionCurve
+    if C_CurveUtil and C_CurveUtil.CreateColorCurve and Enum and Enum.LuaCurveType then
+        dispelDetectionCurve = C_CurveUtil.CreateColorCurve()
+        dispelDetectionCurve:SetType(Enum.LuaCurveType.Step)
+        local clear = CreateColor(0, 0, 0, 0)
+        local blue  = CreateColor(0.2, 0.6, 1.0, 1)
+        local red   = CreateColor(1.0, 0.2, 0.2, 1)
+        dispelDetectionCurve:AddPoint(DISPEL_NONE,    clear)
+        dispelDetectionCurve:AddPoint(DISPEL_MAGIC,   blue)
+        dispelDetectionCurve:AddPoint(DISPEL_CURSE,   clear)
+        dispelDetectionCurve:AddPoint(DISPEL_DISEASE, clear)
+        dispelDetectionCurve:AddPoint(DISPEL_POISON,  clear)
+        dispelDetectionCurve:AddPoint(DISPEL_ENRAGE,  red)
+    end
+
+    local _, playerClass = UnitClass("player")
+    -- { spellID, category ("Magic", "Enrage", or "Both"), requiredClass or nil }
+    local OFFENSIVE_DISPEL_SPELLS = {
+        { 370,    "Magic",  nil       },  -- Purge (Shaman)
+        { 378773, "Magic",  nil       },  -- Greater Purge (Shaman)
+        { 528,    "Magic",  nil       },  -- Dispel Magic (Priest)
+        { 278326, "Magic",  nil       },  -- Consume Magic (Demon Hunter)
+        { 19505,  "Magic",  "WARLOCK" },  -- Devour Magic (Felhunter)
+        { 19801,  "Both",   nil       },  -- Tranquilizing Shot (Hunter)
+        { 2908,   "Enrage", nil       },  -- Soothe (Druid)
+        { 30449,  "Magic",  nil       },  -- Spellsteal (Mage)
+    }
+    local canDispelMagic, canDispelEnrage = false, false
+    local function RebuildDispelTypes()
+        canDispelMagic, canDispelEnrage = false, false
+        for _, entry in ipairs(OFFENSIVE_DISPEL_SPELLS) do
+            local spellID, cat, reqClass = entry[1], entry[2], entry[3]
+            if reqClass and playerClass ~= reqClass then
+                -- skip: wrong class for this spell
+            else
+                local known = false
+                if reqClass then
+                    -- Class-gated pet spell: check via pet bank
+                    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+                        and Enum and Enum.SpellBookSpellBank then
+                        known = C_SpellBook.IsSpellKnownOrInSpellBook(spellID, Enum.SpellBookSpellBank.Pet)
+                    elseif IsSpellKnown then
+                        known = IsSpellKnown(spellID, true)
+                    end
+                elseif C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
+                    known = C_SpellBook.IsSpellKnownOrInSpellBook(spellID)
+                elseif IsSpellKnown then
+                    known = IsSpellKnown(spellID, false)
+                end
+                if known then
+                    if cat == "Magic" or cat == "Both" then canDispelMagic = true end
+                    if cat == "Enrage" or cat == "Both" then canDispelEnrage = true end
+                end
+            end
+        end
+    end
+    local dispelFrame = CreateFrame("Frame")
+    dispelFrame:RegisterEvent("SPELLS_CHANGED")
+    dispelFrame:RegisterEvent("UNIT_PET")
+    dispelFrame:SetScript("OnEvent", function(_, event, unit)
+        if event == "UNIT_PET" and unit ~= "player" then return end
+        RebuildDispelTypes()
+    end)
+    RebuildDispelTypes()
+
+    -- Returns: shouldGlow, typeColor (ColorMixin or nil)
+    -- All aura fields on enemy nameplates are secret in Midnight.
+    -- The typeColor's alpha (from the detection curve) drives visibility:
+    -- Magic/Enrage → alpha 1 (visible), everything else → alpha 0 (hidden).
+    -- Secret RGBA values pass safely through C visual functions (SetAlpha,
+    -- SetVertexColor) without Lua ever testing or comparing them.
+    ns.CanDispelAura = function(unit, aura)
+        if not (canDispelMagic or canDispelEnrage) then return false end
+        local typeColor
+        if dispelDetectionCurve and C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor then
+            local ok, c = pcall(C_UnitAuras.GetAuraDispelTypeColor, unit, aura.auraInstanceID, dispelDetectionCurve)
+            if ok and c then typeColor = c end
+        end
+        return true, typeColor
+    end
+    ns.GetDispelGlow = function()
+        return (p and p.dispelGlow) or defaults.dispelGlow
+    end
+    ns.GetDispelGlowStyle = function()
+        local raw = p and p.dispelGlowStyle
+        if raw == nil then return defaults.dispelGlowStyle end
+        if type(raw) == "number" then return raw end
+        return 2
+    end
+    ns.GetDispelGlowColor = function(typeColor)
+        local useType = (p and p.dispelGlowUseTypeColor)
+        if useType == nil then useType = defaults.dispelGlowUseTypeColor end
+        if useType and typeColor then
+            return typeColor:GetRGBA()  -- secret values pass through to visual ops
+        end
+        local c = (p and p.dispelGlowColor) or defaults.dispelGlowColor
+        return c.r, c.g, c.b
+    end
+end
 local function GetCastBarHeight()
     return (p and p.castBarHeight) or defaults.castBarHeight
 end
@@ -732,6 +849,126 @@ local function ApplyPandemicGlow(slot)
 end
 ns.StopPandemicGlow = StopPandemicGlow
 ns.ApplyPandemicGlow = ApplyPandemicGlow
+
+-------------------------------------------------------------------------------
+--  Dispellable buff glow — highlights enemy buffs the player can purge/soothe
+-------------------------------------------------------------------------------
+local function StopDispelGlow(slot)
+    local dg = slot.dispelGlow
+    if not dg or not dg.active then return end
+    if dg.animGroup then dg.animGroup:Stop() end
+    if dg.flipTex then dg.flipTex:Hide() end
+    StopProceduralAnts(dg.wrapper)
+    StopButtonGlow(dg.wrapper)
+    StopAutoCastShine(dg.wrapper)
+    dg.wrapper:Hide()
+    dg.active = false
+end
+
+local function StartDispelGlow(slot, slotSize, typeColor)
+    local dg = slot.dispelGlow
+    local styleIdx = ns.GetDispelGlowStyle()
+    local styles = PANDEMIC_GLOW_STYLES
+    if styleIdx < 1 or styleIdx > #styles then styleIdx = 2 end
+    local entry = styles[styleIdx]
+    local sz = slotSize or 26
+
+    if not dg then
+        local wrapper = CreateFrame("Frame", nil, slot)
+        wrapper:SetAllPoints()
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
+        flipTex:SetPoint("CENTER")
+        local animGroup = flipTex:CreateAnimationGroup()
+        animGroup:SetLooping("REPEAT")
+        local flipAnim = animGroup:CreateAnimation("FlipBook")
+        wrapper:Show()
+        dg = { wrapper = wrapper, flipTex = flipTex, animGroup = animGroup, flipAnim = flipAnim, active = false }
+        slot.dispelGlow = dg
+    end
+
+    -- Only restart glow if style changed or not active
+    if dg.active and dg.styleIdx == styleIdx then
+        dg.wrapper:Show()
+        return
+    end
+    -- Stop previous style if switching
+    if dg.active then
+        StopDispelGlow(slot)
+    end
+
+    local cr, cg, cb = ns.GetDispelGlowColor(typeColor)
+
+    if entry.procedural then
+        dg.flipTex:Hide()
+        dg.animGroup:Stop()
+        StopButtonGlow(dg.wrapper)
+        StopAutoCastShine(dg.wrapper)
+        -- Fixed values (no user sub-options for dispel glow pixel style)
+        local N = 8; local th = 1; local speed = 4
+        local period = speed
+        local lineLen = math.floor((sz + sz) * (2 / N - 0.1))
+        lineLen = min(lineLen, sz)
+        if lineLen < 1 then lineLen = 1 end
+        StartProceduralAnts(dg.wrapper, N, th, period, lineLen, cr, cg, cb, sz)
+    elseif entry.buttonGlow then
+        dg.flipTex:Hide()
+        dg.animGroup:Stop()
+        StopProceduralAnts(dg.wrapper)
+        StopAutoCastShine(dg.wrapper)
+        StartButtonGlow(dg.wrapper, sz, cr, cg, cb, entry.scale or 1.36)
+    elseif entry.autocast then
+        dg.flipTex:Hide()
+        dg.animGroup:Stop()
+        StopProceduralAnts(dg.wrapper)
+        StopButtonGlow(dg.wrapper)
+        StartAutoCastShine(dg.wrapper, sz, cr, cg, cb)
+    else
+        -- FlipBook-based glow (GCD, Modern, Classic) — matches pandemic glow pattern
+        StopProceduralAnts(dg.wrapper)
+        StopButtonGlow(dg.wrapper)
+        StopAutoCastShine(dg.wrapper)
+        local flipTex = dg.flipTex
+        local animGroup = dg.animGroup
+        local flipAnim = dg.flipAnim
+
+        local texSz = sz * (entry.scale or 1)
+        flipTex:SetSize(texSz, texSz)
+        if entry.atlas then
+            flipTex:SetAtlas(entry.atlas)
+        elseif entry.texture then
+            flipTex:SetTexture(entry.texture)
+        end
+        flipAnim:SetFlipBookRows(entry.rows or 6)
+        flipAnim:SetFlipBookColumns(entry.columns or 5)
+        flipAnim:SetFlipBookFrames(entry.frames or 30)
+        flipAnim:SetDuration(entry.duration or 1.0)
+        flipAnim:SetFlipBookFrameWidth(entry.frameW or 0)
+        flipAnim:SetFlipBookFrameHeight(entry.frameH or 0)
+
+        flipTex:SetDesaturated(true)
+        flipTex:SetVertexColor(cr, cg, cb)
+        flipTex:Show()
+        animGroup:Play()
+    end
+
+    dg.wrapper:Show()
+    dg.active = true
+    dg.styleIdx = styleIdx
+    -- Use the curve color's alpha to control visibility.
+    -- Magic/Enrage → alpha 1 (visible), everything else → alpha 0 (hidden).
+    -- The alpha is a secret number but SetAlpha (C function) accepts secrets.
+    -- typeColor is nil in preview mode → fall back to alpha 1.
+    if typeColor then
+        local _, _, _, a = typeColor:GetRGBA()
+        dg.wrapper:SetAlpha(a)
+    else
+        dg.wrapper:SetAlpha(1)
+    end
+end
+
+ns.StopDispelGlow = StopDispelGlow
+ns.StartDispelGlow = StartDispelGlow
 end -- do (glow engine)
 
 -- Forward declaration (defined later in the class power section)
@@ -3035,6 +3272,9 @@ function NameplateFrame:ClearUnit()
         end
         bSlot.icon:SetTexture(nil)
         bSlot:Hide()
+        if bSlot.dispelGlow and bSlot.dispelGlow.active then
+            ns.StopDispelGlow(bSlot)
+        end
     end
     self.unit = nil
     self.nameplate = nil
@@ -3541,6 +3781,9 @@ function NameplateFrame:UpdateAuras(updateInfo)
         dSlot._durationObj = nil
         bSlot:Hide()
         bSlot.icon:SetTexture(nil)
+        if bSlot.dispelGlow and bSlot.dispelGlow.active then
+            ns.StopDispelGlow(bSlot)
+        end
         local dCd = dSlot.cd
         if dCd then
             if dCd.SetDrawSwipe then dCd:SetDrawSwipe(false) end
@@ -3653,7 +3896,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             for _, aura in ipairs(allBuffs) do
                 if bIdx > 4 then break end
                 local id = aura and aura.auraInstanceID
-                if id and type(aura.dispelName) ~= "nil" and aura.icon then
+                if id and aura.icon then
                     local slot = self.buffs[bIdx]
                     slot.icon:SetTexture(aura.icon)
                     slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -3671,6 +3914,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
                     end
                     slot:Show()
                     self._shownAuras[id] = true
+                    -- Dispellable buff glow
+                    local canDispel, typeColor = ns.CanDispelAura(unit, aura)
+                    if ns.GetDispelGlow() and canDispel then
+                        ns.StartDispelGlow(slot, GetBuffIconSize(), typeColor)
+                    elseif slot.dispelGlow and slot.dispelGlow.active then
+                        ns.StopDispelGlow(slot)
+                    end
                     bIdx = bIdx + 1
                 end
             end
