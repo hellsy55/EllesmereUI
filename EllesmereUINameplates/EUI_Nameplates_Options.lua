@@ -184,6 +184,7 @@ initFrame:SetScript("OnEvent", function(self)
     local showRaidMarkerPreview = false
     local showClassificationPreview = false
     local showTargetGlowPreview = false
+    local showDispelGlowPreview = false
 
     -- Transient flags: force-show indicators during slider drag
     local _sliderDragShowRaidMarker = false
@@ -302,6 +303,8 @@ initFrame:SetScript("OnEvent", function(self)
             BUFF_COUNT = 1,
             CC_COUNT = 1,
         }
+        -- Type colors for preview dispel glow: Magic (blue), Enrage (red)
+        local previewDispelColors = { CreateColor(0.2, 0.6, 1.0, 1), CreateColor(1.0, 0.2, 0.2, 1) }
         if not _previewHpPct then RandomizePreviewValues() end
         local previewHpPct = _previewHpPct
         local previewHpVal = math.floor(PV_CONST.FAKE_MAX_HP * previewHpPct / 100)
@@ -1259,6 +1262,9 @@ initFrame:SetScript("OnEvent", function(self)
             for i = 1, PV_CONST.BUFF_COUNT do
                 if buffSlotVal == "none" then
                     buffs[i]:Hide()
+                    if buffs[i].dispelGlow and buffs[i].dispelGlow.active then
+                        ns.StopDispelGlow(buffs[i])
+                    end
                 else
                     buffs[i]:Show()
                     buffs[i]:SetSize(Snap(buffSz), Snap(buffSz))
@@ -1266,6 +1272,15 @@ initFrame:SetScript("OnEvent", function(self)
                     buffs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
                     ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos)
                     PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffSz, buffSpacing, buffXOff, buffYOff)
+                    -- Dispel glow preview (always stop first to pick up color/style changes)
+                    if showDispelGlowPreview and DBVal("dispelGlow") == true then
+                        if buffs[i].dispelGlow and buffs[i].dispelGlow.active then
+                            ns.StopDispelGlow(buffs[i])
+                        end
+                        ns.StartDispelGlow(buffs[i], buffSz, previewDispelColors[i])
+                    elseif buffs[i].dispelGlow and buffs[i].dispelGlow.active then
+                        ns.StopDispelGlow(buffs[i])
+                    end
                 end
             end
 
@@ -2670,6 +2685,115 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             EllesmereUI.RegisterWidgetRefresh(function()
                 if pgPopupOwner ~= btn then btn:SetAlpha(antsOff() and 0.15 or 0.4) end
+            end)
+        end
+
+        -- ─── Dispellable Buff Glow ────────────────────────────────────────
+        local function dispelGlowOff()
+            return DBVal("dispelGlow") ~= true
+        end
+
+        local dispelGlowStyleValues = { [0] = "None" }
+        local dispelGlowStyleOrder = { 0 }
+        for i, entry in ipairs(ns.PANDEMIC_GLOW_STYLES) do
+            dispelGlowStyleValues[i] = entry.name
+            dispelGlowStyleOrder[#dispelGlowStyleOrder + 1] = i
+        end
+
+        local dispelGlowRow
+        dispelGlowRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Dispel Glow Style",
+              values=dispelGlowStyleValues,
+              getValue=function()
+                if dispelGlowOff() then return 0 end
+                local raw = ns.GetDispelGlowStyle and ns.GetDispelGlowStyle() or (DBVal("dispelGlowStyle") or 2)
+                if type(raw) ~= "number" then return 2 end
+                if raw < 1 or raw > #ns.PANDEMIC_GLOW_STYLES then return 2 end
+                return raw
+              end,
+              setValue=function(v)
+                if v == 0 then
+                    DB().dispelGlow = false
+                else
+                    DB().dispelGlow = true
+                    DB().dispelGlowStyle = v
+                end
+                RefreshAllAuras()
+                UpdatePreview()
+                C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+              end,
+              order=dispelGlowStyleOrder },
+            { type="toggle", text="Use Dispel Type Color",
+              getValue=function() return DBVal("dispelGlowUseTypeColor") or false end,
+              setValue=function(v)
+                DB().dispelGlowUseTypeColor = v
+                RefreshAllAuras()
+                UpdatePreview()
+                C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+              end });  y = y - h
+
+        -- Inline color swatch for dispel glow
+        do
+            local glowColorGet = function()
+                local c = DB().dispelGlowColor or defaults.dispelGlowColor
+                return c.r, c.g, c.b
+            end
+            local glowColorSet = function(r, g, b)
+                DB().dispelGlowColor = { r = r, g = g, b = b }
+                RefreshAllAuras()
+                UpdatePreview()
+            end
+            local leftRgn = dispelGlowRow._leftRegion
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, glowColorGet, glowColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            leftRgn._lastInline = swatch
+            -- Gray out swatch when dispel glow is off or using type color
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = dispelGlowOff() or (DBVal("dispelGlowUseTypeColor") == true)
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local initialOff = dispelGlowOff() or (DBVal("dispelGlowUseTypeColor") == true)
+            swatch:SetAlpha(initialOff and 0.15 or 1)
+            swatch:EnableMouse(not initialOff)
+        end
+
+        -- Eye icon: show/hide dispel glow on preview buff icons
+        do
+            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
+            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
+            local leftRgn = dispelGlowRow._leftRegion
+            local eyeBtn = CreateFrame("Button", nil, leftRgn)
+            eyeBtn:SetSize(26, 26)
+            eyeBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            eyeBtn:SetAlpha(0.4)
+            leftRgn._lastInline = eyeBtn
+            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+            eyeTex:SetAllPoints()
+            local function RefreshEyeIcon()
+                eyeTex:SetTexture(showDispelGlowPreview and EYE_INVISIBLE or EYE_VISIBLE)
+            end
+            RefreshEyeIcon()
+            eyeBtn:SetScript("OnClick", function()
+                showDispelGlowPreview = not showDispelGlowPreview
+                RefreshEyeIcon()
+                UpdatePreview()
+            end)
+            eyeBtn:SetScript("OnEnter", function(self)
+                self:SetAlpha(0.7)
+                EllesmereUI.ShowWidgetTooltip(self, "Show/Hide on Preview", { width = 155 })
+            end)
+            eyeBtn:SetScript("OnLeave", function(self)
+                self:SetAlpha(0.4)
+                EllesmereUI.HideWidgetTooltip()
+            end)
+            -- Gray out when dispel glow is off
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = dispelGlowOff()
+                eyeBtn:SetAlpha(off and 0.15 or 0.4)
+                eyeBtn:EnableMouse(not off)
             end)
         end
 
