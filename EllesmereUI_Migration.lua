@@ -34,4 +34,7 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
     -- Perform the full wipe for users updating from beta builds.
     -- This runs before child addons init so they see a clean DB.
     EllesmereUI.PerformResetWipe()
+    -- Stamp fresh installs early (before child addons can create DBs
+    -- that would make StampResetVersion think it's an old install).
+    EllesmereUI.StampResetVersion()
 end)

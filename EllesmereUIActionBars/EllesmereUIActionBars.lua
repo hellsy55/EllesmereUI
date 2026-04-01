@@ -1989,10 +1989,6 @@ local function SetupBar(info, skipProtected)
                 -- RegisterForClicks and EnableMouseWheel are not protected
                 if btn.RegisterForClicks then
                     if info.nativeActionPage or info.nativeMainBar then
-                        -- Native-dispatch bars: use Blizzard's default registration.
-                        -- ActionBarActionButtonMixin:OnLoad sets AnyUp + LeftButtonDown
-                        -- + RightButtonDown. Action fires on mouse-up; press-and-hold
-                        -- repeat is keyboard-only per Blizzard's design.
                         btn:RegisterForClicks("AnyUp", "LeftButtonDown", "RightButtonDown")
                     else
                         btn:RegisterForClicks("AnyDown", "AnyUp")

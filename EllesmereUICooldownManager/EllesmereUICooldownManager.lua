@@ -551,6 +551,11 @@ ns.EnsureMappings = EnsureMappings
 -------------------------------------------------------------------------------
 local MAIN_BAR_KEYS = { cooldowns = true, utility = true, buffs = true }
 
+-- Ghost buff bar: a hidden routing sink for buff spells the user removes.
+-- Icons routed here get alpha 0 via the _visHidden mechanism.
+local GHOST_BUFF_BAR_KEY = "__ghost_buffs"
+MAIN_BAR_KEYS[GHOST_BUFF_BAR_KEY] = true
+
 -- Bar types that support talent-aware dormant slot persistence.
 -- Trinket/racial/potion and buff bars are excluded.
 local TALENT_AWARE_BAR_TYPES = { cooldowns = true, utility = true }
@@ -2961,6 +2966,30 @@ local function RefreshCDMIconAppearance(barKey)
 end
 ns.RefreshCDMIconAppearance = RefreshCDMIconAppearance
 
+-- Ghost buff bar: ensure it exists in the bars array at runtime.
+-- Called from BuildAllCDMBars before iterating bars.
+ns.GHOST_BUFF_BAR_KEY = GHOST_BUFF_BAR_KEY
+local function EnsureGhostBar()
+    local p = ECME.db and ECME.db.profile
+    if not p or not p.cdmBars or not p.cdmBars.bars then return end
+    for _, b in ipairs(p.cdmBars.bars) do
+        if b.key == GHOST_BUFF_BAR_KEY then return end
+    end
+    p.cdmBars.bars[#p.cdmBars.bars + 1] = {
+        key = GHOST_BUFF_BAR_KEY,
+        name = "Hidden Buffs",
+        barType = "buffs",
+        isGhostBar = true,
+        enabled = true,
+        barVisibility = "never",
+        iconSize = 1,
+        spacing = 0,
+        numRows = 1,
+        growDirection = "RIGHT",
+    }
+end
+ns.EnsureGhostBar = EnsureGhostBar
+
 -- Exports for extracted files (EllesmereUICdmHooks.lua, EllesmereUICdmSpellPicker.lua)
 ns.MAIN_BAR_KEYS = MAIN_BAR_KEYS
 ns.GetCDMFont = GetCDMFont
@@ -3144,10 +3173,11 @@ _CDMApplyVisibility = function()
         local frame = cdmBarFrames[barData.key]
         if frame then
             -- Unlock mode: bars must stay visible for dragging
-            if unlockActive then
+            -- Ghost bar stays hidden even in unlock mode
+            if unlockActive and not barData.isGhostBar then
                 _CDMStopFade(frame)
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
                 frame._visHidden = false
             else
 
@@ -3182,7 +3212,7 @@ _CDMApplyVisibility = function()
             if shouldHide then
                 if vis ~= "mouseover" then _CDMStopFade(frame) end
                 frame:SetAlpha(0)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(vis == "mouseover") end
+                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, vis == "mouseover") end
                 frame._visHidden = true
                 -- Hide this bar's icons individually. The viewer may stay
                 -- at alpha 1 (other bars need it), so icon alpha must be
@@ -3197,7 +3227,7 @@ _CDMApplyVisibility = function()
                 local wasHidden = frame._visHidden
                 _CDMStopFade(frame)
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
                 frame._visHidden = false
                 -- Restore icon alpha and reposition
                 if wasHidden then
@@ -3421,6 +3451,9 @@ BuildAllCDMBars = function()
     if not _specValidated then
         ValidateSpec()
     end
+
+    -- Ensure the ghost buff bar exists before iterating bars
+    EnsureGhostBar()
 
     local p = ECME.db.profile
 
@@ -3798,8 +3831,8 @@ function ns.RepopulateFromBlizzard()
     if not specKey or specKey == "0" then return end
 
     for _, barData in ipairs(p.cdmBars.bars) do
-        -- Skip the main buffs bar -- it auto-shows all CDM buffs, no assignments.
-        if MAIN_BAR_KEYS[barData.key] and barData.key ~= "buffs" then
+        -- Skip the main buffs bar and ghost bar -- they manage their own assignments.
+        if MAIN_BAR_KEYS[barData.key] and barData.key ~= "buffs" and not barData.isGhostBar then
             local sd = ns.GetBarSpellData(barData.key)
             if sd then
                 sd.assignedSpells = nil
@@ -3843,7 +3876,7 @@ RegisterCDMUnlockElements = function()
     for _, barData in ipairs(ECME.db.profile.cdmBars.bars) do
         local key = barData.key
         local frame = cdmBarFrames[key]
-        if frame and barData.enabled then
+        if frame and barData.enabled and not barData.isGhostBar then
             -- Skip bars anchored to party frame, player frame, or mouse cursor
             local isPartyAnchored = barData.anchorTo == "partyframe"
             local isPlayerFrameAnchored = barData.anchorTo == "playerframe"
@@ -4637,6 +4670,22 @@ function ECME:CDMFinishSetup()
         end
     end
 
+    -- Migrate: clear stale assignedSpells on the main buffs bar.
+    -- The main bar is Blizzard-owned and should never have assignedSpells.
+    do
+        if not EllesmereUIDB._buffsBarCleanupV2 then
+            EllesmereUIDB._buffsBarCleanupV2 = true
+            local store = EllesmereUIDB.spellAssignments
+            if store and store.specProfiles then
+                for _, specProf in pairs(store.specProfiles) do
+                    if specProf.barSpells and specProf.barSpells.buffs then
+                        specProf.barSpells.buffs.assignedSpells = nil
+                    end
+                end
+            end
+        end
+    end
+
     -- Migrate: mouseover visibility is no longer supported on CDM bars.
     -- Move any bars using it to "always".
     do
@@ -5304,7 +5353,14 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                 end
             end)
         else
+            -- Zone transition (e.g. BG exit): Blizzard viewer frames may have
+            -- been recycled. Re-collect and re-apply visibility after a brief
+            -- delay to let the viewer state settle.
             _CDMApplyVisibility()
+            C_Timer.After(0.5, function()
+                if ns.QueueReanchor then ns.QueueReanchor() end
+                _CDMApplyVisibility()
+            end)
         end
         -- Flush deferred TBB rebuild that was queued during combat
         if event == "PLAYER_REGEN_ENABLED" and ns.IsTBBRebuildPending and ns.IsTBBRebuildPending() then

@@ -2417,6 +2417,18 @@ end
 -- Called from EllesmereUI_Migration.lua (which fires on parent ADDON_LOADED).
 function EllesmereUI.PerformResetWipe()
     if not EllesmereUI.NeedsBetaReset() then return false end
+    -- Safety: log the wipe to help diagnose unexpected triggers
+    local ver = EllesmereUIDB and EllesmereUIDB._resetVersion
+    print("|cffff0000[EllesmereUI]|r Reset wipe triggered. _resetVersion=" .. tostring(ver))
+    -- Extra guard: if the DB has real user data (profiles, positions, etc.)
+    -- but _resetVersion is somehow missing, do NOT wipe. Only wipe if
+    -- _resetVersion is genuinely below threshold (old beta data).
+    if EllesmereUIDB and EllesmereUIDB.profiles and not EllesmereUIDB._resetVersion then
+        -- User has profiles but no reset stamp -- could be a load race.
+        -- Stamp and skip rather than wipe their data.
+        EllesmereUIDB._resetVersion = 9
+        return false
+    end
     -- Wipe all child addon SVs
     local svNames = {
         "EllesmereUIActionBarsDB",
@@ -3184,7 +3196,23 @@ local function CreateMainFrame()
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()
-        for _, fn in ipairs(_onHideCallbacks) do fn() end
+        if _onHideCallbacks then
+            for _, fn in ipairs(_onHideCallbacks) do fn() end
+        end
+        -- Release cached pages for non-active tabs to free memory.
+        -- Keep the active page so reopening shows the same content.
+        if _pageCache then
+            local activeKey = activeModule and activePage and (activeModule .. "::" .. activePage)
+            for key, entry in pairs(_pageCache) do
+                if key ~= activeKey then
+                    if entry.wrapper then
+                        entry.wrapper:Hide()
+                        entry.wrapper:SetParent(nil)
+                    end
+                    _pageCache[key] = nil
+                end
+            end
+        end
     end)
 
     -- Pixel-perfect scale: make 1 WoW unit = 1 screen pixel
@@ -6046,7 +6074,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.0.2"
+EllesmereUI.VERSION = "6.0.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6783,6 +6811,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- PLAYER_LOGIN: register demo modules (UI is built lazily on first open)
     self:UnregisterEvent("PLAYER_LOGIN")
+
 
     -- Stamp fresh installs so they never see the reset popup
     EllesmereUI.StampResetVersion()

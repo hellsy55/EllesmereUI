@@ -1289,20 +1289,6 @@ end
 -------------------------------------------------------------------------------
 --  Build / Rebuild All Tracking Bars
 -------------------------------------------------------------------------------
-SLASH_TBBDEBUG1 = "/tbbdebug"
-SlashCmdList.TBBDEBUG = function()
-    local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
-    if not anchors then print("|cffff0000[TBB]|r no unlockAnchors"); return end
-    local found = false
-    for k, v in pairs(anchors) do
-        if k:sub(1, 4) == "TBB_" then
-            print("|cff00ff00[TBB]|r " .. k .. " -> target=" .. tostring(v.target) .. " side=" .. tostring(v.side))
-            found = true
-        end
-    end
-    if not found then print("|cffff0000[TBB]|r no TBB anchors found in unlockAnchors") end
-end
-
 function ns.HideAllTBB()
     for i = 1, #tbbFrames do
         if tbbFrames[i] then tbbFrames[i]:Hide() end

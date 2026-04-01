@@ -573,7 +573,7 @@ end
 local function ReleaseItemBtn(b)
     b:Hide(); b:ClearAllPoints()
     b._icon:SetTexture(nil)
-    b:SetAttribute("item", nil)
+    if not InCombatLockdown() then b:SetAttribute("item", nil) end
 end
 local function ReleaseAllItems()
     for i = #EQT.itemBtns, 1, -1 do ReleaseItemBtn(EQT.itemBtns[i]); EQT.itemBtns[i] = nil end

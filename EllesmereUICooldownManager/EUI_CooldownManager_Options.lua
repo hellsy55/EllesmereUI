@@ -3,6 +3,7 @@
 --  Registers CDM Effects module with EllesmereUI
 --  Tab 1: CDM Bars  (Bar Glows + Tracking Bars disabled pending rewrite)
 -------------------------------------------------------------------------------
+-- TEMP DEBUG: /euicdmdump - prints all spell assignments
 local ADDON_NAME, ns = ...
 
 local PAGE_BAR_GLOWS    = "Bar Glows"
@@ -267,7 +268,9 @@ initFrame:SetScript("OnEvent", function(self)
         local pdb = DB()
         if pdb and pdb.cdmBars and pdb.cdmBars.bars then
             for _, b in ipairs(pdb.cdmBars.bars) do
-                if b.key ~= skipCdmKey then CopyPandemicFields(src, b) end
+                if b.key ~= skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff" then
+                    CopyPandemicFields(src, b)
+                end
             end
         end
         ns.BuildAllCDMBars()
@@ -282,7 +285,8 @@ initFrame:SetScript("OnEvent", function(self)
         local pdb = DB()
         if pdb and pdb.cdmBars and pdb.cdmBars.bars then
             for _, b in ipairs(pdb.cdmBars.bars) do
-                if b.key ~= skipCdmKey and not PandemicFieldsMatch(src, b) then return false end
+                if b.key ~= skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff"
+                   and not PandemicFieldsMatch(src, b) then return false end
             end
         end
         return true
@@ -3635,42 +3639,58 @@ initFrame:SetScript("OnEvent", function(self)
         local mBgA  = EllesmereUI.DD_BG_HA or 0.98
         local mBrdA = EllesmereUI.DD_BRD_A or 0.20
         local hlA   = EllesmereUI.DD_ITEM_HL_A or 0.08
-        local menuW = 210
+        local tDimR = EllesmereUI.DD_ITEM_R or 0.75
+        local tDimG = EllesmereUI.DD_ITEM_G or 0.75
+        local tDimB = EllesmereUI.DD_ITEM_B or 0.75
+        local tDimA = EllesmereUI.DD_ITEM_A or 0.9
+        local menuW = 240
         local ITEM_H = 26
-        local MAX_H = 300
+        local MAX_H = 350
 
-        -- Collect spells from category API (all tracked buff spells).
-        local buffSpells = {}
-        local seenSID = {}
-        local allBuffSpells = GetTrackedBuffSpellList()
-        for _, sid in ipairs(allBuffSpells) do
-            if not seenSID[sid] then
-                seenSID[sid] = true
-                local name = C_Spell.GetSpellName(sid)
-                local icon = C_Spell.GetSpellTexture(sid)
-                if name and icon then
-                    -- Only consider routed to BUFF bars (ignore CD/utility routes)
-                    local currentBar = nil
-                    if ns._spellRouteMap then
-                        local rb = ns._spellRouteMap[sid]
-                        if rb then
-                            local rbd = ns.barDataByKey and ns.barDataByKey[rb]
-                            local rType = rbd and rbd.barType or rb
-                            if rType == "buffs" then currentBar = rb end
-                        end
+        -- Use the same data source as CD/utility: GetCDMSpellsForBar
+        local allSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(targetBarKey) or {}
+        local ghostKey = ns.GHOST_BUFF_BAR_KEY
+
+        -- Categorize spells: every buff spell is shown. Spells assigned to
+        -- any buff bar are grayed out with a tooltip. Ghost bar spells are
+        -- clickable (can be restored to the current bar).
+        local ghostKey = ns.GHOST_BUFF_BAR_KEY
+        local knownSpells = {}       -- known buff spells (main list)
+        local unlearnedSpells = {}   -- not yet talented (grayed out)
+
+        for _, sp in ipairs(allSpells) do
+            if sp.cdmCatGroup ~= "buff" then
+                -- skip non-buff category spells
+            elseif not sp.isKnown then
+                unlearnedSpells[#unlearnedSpells + 1] = sp
+            else
+                local sid = sp.spellID
+                local routedBar = ns._spellRouteMap and ns._spellRouteMap[sid]
+                local isHidden = ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(sid)
+
+                -- Determine which buff bar this spell is assigned to
+                local assignedBarKey = nil
+                if isHidden then
+                    -- On ghost bar = not assigned, available to add
+                elseif routedBar and routedBar ~= ghostKey then
+                    local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
+                    if rbd and (rbd.barType == "buffs" or rbd.key == "buffs") then
+                        assignedBarKey = routedBar
                     end
-                    buffSpells[#buffSpells + 1] = {
-                        spellID = sid,
-                        name = name,
-                        icon = icon,
-                        currentBar = currentBar,
-                    }
+                elseif ns._tickBuffIconTrackedSet and ns._tickBuffIconTrackedSet[sid] then
+                    -- On main buff bar icon viewer
+                    assignedBarKey = "buffs"
+                elseif ns.IsSpellInBuffBarViewer and ns.IsSpellInBuffBarViewer(sid) then
+                    -- On Tracked Buff Bars (TBB)
+                    assignedBarKey = "_tbb"
                 end
+
+                sp._assignedBarKey = assignedBarKey
+                knownSpells[#knownSpells + 1] = sp
             end
         end
-        table.sort(buffSpells, function(a, b) return a.name < b.name end)
 
-        if #buffSpells == 0 then return end
+        if #knownSpells == 0 and #unlearnedSpells == 0 then return end
 
         -- Build menu
         local menu = CreateFrame("Frame", nil, UIParent)
@@ -3679,8 +3699,8 @@ initFrame:SetScript("OnEvent", function(self)
         menu:SetClampedToScreen(true)
         menu:SetSize(menuW, 10)
 
-        local bg = menu:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(); bg:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
+        local bgTex = menu:CreateTexture(nil, "BACKGROUND")
+        bgTex:SetAllPoints(); bgTex:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
         EllesmereUI.MakeBorder(menu, 1, 1, 1, mBrdA, EllesmereUI.PP)
 
         local inner = CreateFrame("Frame", nil, menu)
@@ -3689,70 +3709,149 @@ initFrame:SetScript("OnEvent", function(self)
 
         local mH = 4
 
-        for _, sp in ipairs(buffSpells) do
-            -- Skip spells already on this bar
-            local alreadyOnTarget = (sp.currentBar == targetBarKey)
-            -- For main buffs bar (key="buffs"), spells with no route are already on it
-            if targetBarKey == "buffs" and not sp.currentBar then
-                alreadyOnTarget = true
+        -- Helper: create a spell row
+        local function MakeSpellRow(sp, disabled, disabledMsg)
+            local item = CreateFrame("Button", nil, inner)
+            item:SetHeight(ITEM_H)
+            item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            item:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            item:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+            local iconTex = item:CreateTexture(nil, "ARTWORK")
+            iconTex:SetSize(ITEM_H - 4, ITEM_H - 4)
+            iconTex:SetPoint("LEFT", 4, 0)
+            iconTex:SetTexture(sp.icon)
+            iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            if disabled then iconTex:SetDesaturated(true) end
+
+            local lbl = item:CreateFontString(nil, "OVERLAY")
+            lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            lbl:SetPoint("LEFT", iconTex, "RIGHT", 6, 0)
+            lbl:SetPoint("RIGHT", -4, 0)
+            lbl:SetJustifyH("LEFT")
+            lbl:SetText(sp.name or "")
+            if disabled then
+                lbl:SetTextColor(tDimR * 0.5, tDimG * 0.5, tDimB * 0.5, tDimA * 0.5)
+            else
+                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
             end
-            if not alreadyOnTarget then
-                local item = CreateFrame("Button", nil, inner)
-                item:SetHeight(ITEM_H)
-                item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
-                item:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
-                item:SetFrameLevel(menu:GetFrameLevel() + 2)
 
-                local iconTex = item:CreateTexture(nil, "ARTWORK")
-                iconTex:SetSize(ITEM_H - 4, ITEM_H - 4)
-                iconTex:SetPoint("LEFT", 4, 0)
-                iconTex:SetTexture(sp.icon)
-                iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local hl = item:CreateTexture(nil, "ARTWORK")
+            hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
 
-                local lbl = item:CreateFontString(nil, "OVERLAY")
-                lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                lbl:SetPoint("LEFT", iconTex, "RIGHT", 6, 0)
-                lbl:SetPoint("RIGHT", -4, 0)
-                lbl:SetJustifyH("LEFT")
-                lbl:SetText(sp.name)
-                lbl:SetTextColor(1, 1, 1, 1)
-
-                local hl = item:CreateTexture(nil, "ARTWORK")
-                hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
-
+            if disabled then
+                item:SetScript("OnEnter", function()
+                    hl:SetColorTexture(1, 1, 1, hlA * 0.3)
+                    if disabledMsg then
+                        EllesmereUI.ShowWidgetTooltip(item, disabledMsg)
+                    end
+                end)
+                item:SetScript("OnLeave", function()
+                    hl:SetColorTexture(1, 1, 1, 0)
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+            else
                 item:SetScript("OnEnter", function()
                     lbl:SetTextColor(1, 1, 1, 1)
                     hl:SetColorTexture(1, 1, 1, hlA)
                 end)
                 item:SetScript("OnLeave", function()
-                    lbl:SetTextColor(1, 1, 1, 1)
+                    lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                     hl:SetColorTexture(1, 1, 1, 0)
                 end)
+            end
+
+            mH = mH + ITEM_H
+            return item
+        end
+
+        -- Helper: add a divider
+        local function AddDivider()
+            local div = inner:CreateTexture(nil, "ARTWORK")
+            div:SetHeight(1)
+            div:SetColorTexture(1, 1, 1, 0.10)
+            div:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
+            div:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
+            mH = mH + 9
+        end
+
+        -- Helper: untracked popup (same as CD/utility)
+        local function ShowUntrackedPopup()
+            menu:Hide()
+            if EllesmereUI and EllesmereUI.ShowConfirmPopup then
+                EllesmereUI:ShowConfirmPopup({
+                    title = "Spell Not Tracked",
+                    message = "This spell is not currently tracked in any of your CDM bars. Add it to a CDM bar first, or enable it in Blizzard's Cooldown Manager.",
+                    confirmText = "Open Blizzard CDM",
+                    cancelText = "Close",
+                    onConfirm = function()
+                        if CooldownViewerSettings and CooldownViewerSettings.Show then
+                            CooldownViewerSettings:Show()
+                        end
+                        if EllesmereUI._mainFrame then EllesmereUI._mainFrame:Hide() end
+                    end,
+                })
+            end
+        end
+
+        -- Split known spells into buff icon bar spells (top) and rest
+        local displayedSpells = {}
+        local otherSpells = {}
+        for _, sp in ipairs(knownSpells) do
+            if sp.isDisplayed and sp._assignedBarKey ~= "_tbb" then
+                displayedSpells[#displayedSpells + 1] = sp
+            else
+                otherSpells[#otherSpells + 1] = sp
+            end
+        end
+
+        local function RenderSpell(sp)
+            local assigned = sp._assignedBarKey
+            if assigned then
+                local barName
+                if assigned == "_tbb" then
+                    barName = "Tracking Bars"
+                else
+                    local rbd = ns.barDataByKey and ns.barDataByKey[assigned]
+                    barName = rbd and (rbd.name or assigned) or assigned
+                end
+                MakeSpellRow(sp, true, "Already assigned to " .. barName)
+            elseif not sp.isDisplayed then
+                -- Not tracked in Blizzard CDM: open Blizzard CDM to enable it
+                local item = MakeSpellRow(sp, false)
                 item:SetScript("OnClick", function()
                     menu:Hide()
-                    local sid = sp.spellID
-                    -- Remove from current bar (if assigned to one)
-                    if sp.currentBar then
-                        local otherSD = ns.GetBarSpellData(sp.currentBar)
-                        if otherSD and otherSD.assignedSpells then
-                            for i = #otherSD.assignedSpells, 1, -1 do
-                                if otherSD.assignedSpells[i] == sid then
-                                    table.remove(otherSD.assignedSpells, i)
-                                    break
-                                end
-                            end
-                        end
-                    end
-                    -- Add to target bar (unless it's the main "buffs" bar --
-                    -- removing from the other bar is enough, it auto-shows)
-                    if targetBarKey ~= "buffs" then
-                        ns.AddTrackedSpell(targetBarKey, sid)
-                    end
-                    if onChanged then onChanged() end
+                    ShowUntrackedPopup()
                 end)
-
-                mH = mH + ITEM_H
+            else
+                -- Available: add to this bar
+                local item = MakeSpellRow(sp, false)
+                item:SetScript("OnClick", function()
+                    menu:Hide()
+                    if onChanged then onChanged(sp.spellID) end
+                end)
             end
+        end
+
+        -- Tracked spells first
+        for _, sp in ipairs(displayedSpells) do RenderSpell(sp) end
+
+        -- Divider
+        if #displayedSpells > 0 and (#otherSpells > 0 or #unlearnedSpells > 0) then
+            AddDivider()
+        end
+
+        -- Rest of known spells
+        for _, sp in ipairs(otherSpells) do RenderSpell(sp) end
+
+        -- Divider before unlearned
+        if (#displayedSpells > 0 or #otherSpells > 0) and #unlearnedSpells > 0 then
+            AddDivider()
+        end
+
+        -- Unlearned spells (grayed out, no click)
+        for _, sp in ipairs(unlearnedSpells) do
+            MakeSpellRow(sp, true)
         end
 
         inner:SetHeight(mH + 4)
@@ -3761,11 +3860,35 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Scroll if needed
         if mH + 4 > MAX_H then
-            local scroll = CreateFrame("ScrollFrame", nil, menu, "UIPanelScrollFrameTemplate")
-            scroll:SetPoint("TOPLEFT", 0, 0)
-            scroll:SetPoint("BOTTOMRIGHT", -20, 0)
-            scroll:SetScrollChild(inner)
-            inner:SetWidth(menuW - 20)
+            local sf = CreateFrame("ScrollFrame", nil, menu)
+            sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+            sf:SetFrameLevel(menu:GetFrameLevel() + 1)
+            sf:EnableMouseWheel(true)
+            sf:SetScrollChild(inner)
+            inner:SetWidth(menuW)
+            local scrollTarget = 0
+            local maxScroll = (mH + 4) - MAX_H
+            local SCROLL_STEP = 40
+            local SMOOTH_SPEED = 12
+            local smoothFrame = CreateFrame("Frame")
+            smoothFrame:Hide()
+            smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = sf:GetVerticalScroll()
+                scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
+                local diff = scrollTarget - cur
+                if math.abs(diff) < 0.3 then
+                    sf:SetVerticalScroll(scrollTarget)
+                    smoothFrame:Hide()
+                    return
+                end
+                sf:SetVerticalScroll(cur + diff * math.min(1, SMOOTH_SPEED * elapsed))
+            end)
+            sf:SetScript("OnMouseWheel", function(_, delta)
+                if maxScroll <= 0 then return end
+                local base = smoothFrame:IsShown() and scrollTarget or sf:GetVerticalScroll()
+                scrollTarget = math.max(0, math.min(maxScroll, base - delta * SCROLL_STEP))
+                smoothFrame:Show()
+            end)
         end
 
         menu:ClearAllPoints()
@@ -3911,10 +4034,21 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             rmItem:SetScript("OnClick", function()
                 menu:Hide()
-                ns.RemoveTrackedSpell(barKey, slotIndex)
+                -- Buff bars: hide via ghost bar instead of removing from assignedSpells
+                local bd = ns.barDataByKey and ns.barDataByKey[barKey]
+                local isBuff = bd and (bd.barType == "buffs" or bd.key == "buffs")
+                if isBuff and anchorFrame and anchorFrame._previewSpellID then
+                    ns.HideBuffSpell(anchorFrame._previewSpellID)
+                else
+                    ns.RemoveTrackedSpell(barKey, slotIndex)
+                end
+                if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
                 Refresh()
-                if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                UpdateCDMPreviewAndResize()
+                C_Timer.After(0.05, function()
+                    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                    if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                    UpdateCDMPreviewAndResize()
+                end)
             end)
 
             allItems[#allItems + 1] = rmItem
@@ -4118,6 +4252,8 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
+                local isCustomBuffPopup = isCustomBuff
+
                 local function DoAdd()
                     local text = popup._editBox:GetText()
                     local sid = tonumber(text)
@@ -4131,6 +4267,17 @@ initFrame:SetScript("OnEvent", function(self)
                         SetStatus("Unknown spell ID")
                         return
                     end
+                    -- Custom aura bars require a duration
+                    local dur
+                    if isCustomBuffPopup then
+                        local durText = popup._durBox:GetText()
+                        dur = tonumber(durText)
+                        if not dur or dur <= 0 then
+                            SetStatus("Enter a duration in seconds")
+                            return
+                        end
+                        dur = math.floor(dur)
+                    end
                     -- Check if already tracked
                     local sdChk = bd and ns.GetBarSpellData(bd.key)
                     if sdChk and sdChk.assignedSpells then
@@ -4141,6 +4288,14 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end
                     end
+                    -- Store duration for custom aura bars
+                    if isCustomBuffPopup and dur then
+                        local sdStore = bd and ns.GetBarSpellData(bd.key)
+                        if sdStore then
+                            if not sdStore.spellDurations then sdStore.spellDurations = {} end
+                            sdStore.spellDurations[sid] = dur
+                        end
+                    end
                     popup._dimmer:Hide()
                     if onSelect then onSelect(sid, true) end
                 end
@@ -4149,9 +4304,16 @@ initFrame:SetScript("OnEvent", function(self)
                 popup._editBox:SetScript("OnEnterPressed", DoAdd)
                 popup._editBox:SetText("")
                 popup._status:SetText("")
-                popup:SetHeight(160)
-                popup._durLabel:Hide()
-                popup._durBox:Hide()
+                if isCustomBuffPopup then
+                    popup:SetHeight(220)
+                    popup._durLabel:Show()
+                    popup._durBox:Show()
+                    popup._durBox:SetText("")
+                else
+                    popup:SetHeight(160)
+                    popup._durLabel:Hide()
+                    popup._durBox:Hide()
+                end
                 popup._dimmer:Show()
                 popup._editBox:SetFocus()
             end)
@@ -4416,11 +4578,28 @@ initFrame:SetScript("OnEvent", function(self)
                     sf:SetFrameLevel(_customTrackingSub:GetFrameLevel() + 1)
                     sf:EnableMouseWheel(true); sf:SetScrollChild(subInner)
                     subInner:SetWidth(subW)
-                    local scrollPos = 0
+                    local scrollTarget = 0
                     local maxScroll = totalSubH - SUB_MAX_H
+                    local SCROLL_STEP = 40
+                    local SMOOTH_SPEED = 12
+                    local smoothFrame = CreateFrame("Frame")
+                    smoothFrame:Hide()
+                    smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                        local cur = sf:GetVerticalScroll()
+                        scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
+                        local diff = scrollTarget - cur
+                        if math.abs(diff) < 0.3 then
+                            sf:SetVerticalScroll(scrollTarget)
+                            smoothFrame:Hide()
+                            return
+                        end
+                        sf:SetVerticalScroll(cur + diff * math.min(1, SMOOTH_SPEED * elapsed))
+                    end)
                     sf:SetScript("OnMouseWheel", function(_, delta)
-                        scrollPos = math.max(0, math.min(maxScroll, scrollPos - delta * 30))
-                        sf:SetVerticalScroll(scrollPos)
+                        if maxScroll <= 0 then return end
+                        local base = smoothFrame:IsShown() and scrollTarget or sf:GetVerticalScroll()
+                        scrollTarget = math.max(0, math.min(maxScroll, base - delta * SCROLL_STEP))
+                        smoothFrame:Show()
                     end)
                 else
                     _customTrackingSub:SetHeight(totalSubH)
@@ -4556,10 +4735,13 @@ initFrame:SetScript("OnEvent", function(self)
                         menu:Hide()
                         EnsureAssignedSpells(barKey)
                         ns.AddTrackedSpell(barKey, negSlot)
-                        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                        if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                         Refresh()
-                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                        UpdateCDMPreviewAndResize()
+                        C_Timer.After(0.05, function()
+                            if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                            if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                            UpdateCDMPreviewAndResize()
+                        end)
                     end)
                 end
                 allItems[#allItems + 1] = ti
@@ -4626,10 +4808,13 @@ initFrame:SetScript("OnEvent", function(self)
                                     menu:Hide()
                                     EnsureAssignedSpells(barKey)
                                     ns.AddTrackedSpell(barKey, rSid)
-                                    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                                     Refresh()
-                                    if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                                    UpdateCDMPreviewAndResize()
+                                    C_Timer.After(0.05, function()
+                                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                                        UpdateCDMPreviewAndResize()
+                                    end)
                                 end)
                             end
                             allItems[#allItems + 1] = ri
@@ -4690,10 +4875,13 @@ initFrame:SetScript("OnEvent", function(self)
                         menu:Hide()
                         EnsureAssignedSpells(barKey)
                         ns.AddTrackedSpell(barKey, hsNegID)
-                        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                        if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                         Refresh()
-                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                        UpdateCDMPreviewAndResize()
+                        C_Timer.After(0.05, function()
+                            if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                            if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                            UpdateCDMPreviewAndResize()
+                        end)
                     end)
                 end
                 allItems[#allItems + 1] = hi
@@ -4820,10 +5008,13 @@ initFrame:SetScript("OnEvent", function(self)
                                 menu:Hide()
                                 EnsureAssignedSpells(barKey)
                                 ns.AddTrackedSpell(barKey, pID)
-                                if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                                if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                                 Refresh()
-                                if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                                UpdateCDMPreviewAndResize()
+                                C_Timer.After(0.05, function()
+                                    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                                    if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                                    UpdateCDMPreviewAndResize()
+                                end)
                             end)
                         end
                         subH = subH + SUB_ITEM_H
@@ -4929,10 +5120,13 @@ initFrame:SetScript("OnEvent", function(self)
                             menu:Hide()
                             EnsureAssignedSpells(barKey)
                             ns.AddPresetToBar(barKey, preset)
-                            if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
+                            if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                             Refresh()
-                            if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                            UpdateCDMPreviewAndResize()
+                            C_Timer.After(0.05, function()
+                                if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                                if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                                UpdateCDMPreviewAndResize()
+                            end)
                         end)
                     end
 
@@ -5126,11 +5320,28 @@ initFrame:SetScript("OnEvent", function(self)
             sf:EnableMouseWheel(true)
             sf:SetScrollChild(inner)
             inner:SetWidth(menuW)
-            local scrollPos = 0
+            local scrollTarget = 0
             local maxScroll = totalH - MAX_H
+            local SCROLL_STEP = 40
+            local SMOOTH_SPEED = 12
+            local smoothFrame = CreateFrame("Frame")
+            smoothFrame:Hide()
+            smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = sf:GetVerticalScroll()
+                scrollTarget = max(0, min(maxScroll, scrollTarget))
+                local diff = scrollTarget - cur
+                if abs(diff) < 0.3 then
+                    sf:SetVerticalScroll(scrollTarget)
+                    smoothFrame:Hide()
+                    return
+                end
+                sf:SetVerticalScroll(cur + diff * min(1, SMOOTH_SPEED * elapsed))
+            end)
             sf:SetScript("OnMouseWheel", function(_, delta)
-                scrollPos = max(0, min(maxScroll, scrollPos - delta * 30))
-                sf:SetVerticalScroll(scrollPos)
+                if maxScroll <= 0 then return end
+                local base = smoothFrame:IsShown() and scrollTarget or sf:GetVerticalScroll()
+                scrollTarget = max(0, min(maxScroll, base - delta * SCROLL_STEP))
+                smoothFrame:Show()
             end)
         else
             menu:SetHeight(totalH)
@@ -5763,9 +5974,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             slot:SetScript("OnEnter", function()
                 if dragSlot then return end
-                -- No hover highlights for buff bars
                 local bdHov = SelectedCDMBar()
-                if bdHov and (bdHov.barType == "buffs" or bdHov.key == "buffs") then return end
                 -- Custom shapes: tint the shape border instead of square edges
                 if slot._shapeBorder and slot._shapeBorder:IsShown() then
                     slot._shapeBorder:SetVertexColor(eg.r, eg.g, eg.b, 1)
@@ -5776,7 +5985,6 @@ initFrame:SetScript("OnEvent", function(self)
             slot:SetScript("OnLeave", function()
                 if dragSlot then return end
                 local bdHov = SelectedCDMBar()
-                if bdHov and (bdHov.barType == "buffs" or bdHov.key == "buffs") then return end
                 if slot._shapeBorder and slot._shapeBorder:IsShown() then
                     local bR, bG, bB = 0, 0, 0
                     if bdHov then
@@ -5805,8 +6013,24 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 local bd = SelectedCDMBar()
                 if not bd then return end
-                -- Buff bars: no click interaction on preview icons
-                if bd.barType == "buffs" or bd.key == "buffs" then return end
+                -- Buff bars: same remove flow as CD/utility via ghost bar
+                if bd.barType == "buffs" or bd.key == "buffs" then
+                    local sid = self._previewSpellID
+                    if not sid then return end
+                    if button == "MiddleButton" then
+                        ns.HideBuffSpell(sid)
+                        if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
+                        Refresh()
+                        C_Timer.After(0.05, function()
+                            if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                            if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                            UpdateCDMPreviewAndResize()
+                        end)
+                    elseif button == "RightButton" or button == "LeftButton" then
+                        ShowSpellPicker(self, bd.key, self._slotIdx, {}, function() end, true)
+                    end
+                    return
+                end
 
                 if button == "MiddleButton" then
                     local si = self._slotIdx
@@ -5815,10 +6039,13 @@ initFrame:SetScript("OnEvent", function(self)
                     local t = sdMid.assignedSpells
                     if not t[si] or t[si] == 0 then return end
                     ns.RemoveTrackedSpell(bd.key, si)
-                    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
                     Refresh()
-                    if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                    UpdateCDMPreviewAndResize()
+                    C_Timer.After(0.05, function()
+                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
+                        UpdateCDMPreviewAndResize()
+                    end)
                 elseif button == "RightButton" or button == "LeftButton" then
                     local si = self._slotIdx
                     local sdClick = EnsureAssignedSpells(bd.key)
@@ -6137,14 +6364,24 @@ initFrame:SetScript("OnEvent", function(self)
             local bdIsBuffBar = (bd.barType == "buffs" or bd.key == "buffs")
 
             if bdIsBuffBar then
-                -- Buff bars: show picker with ONLY CDM buff section spells.
-                -- Selecting moves the spell to this bar (removes from others).
-                ShowBuffBarPicker(self, bd.key, function()
-                    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-                    ns.BuildAllCDMBars()
-                    if ns.QueueReanchor then ns.QueueReanchor() end
+                -- Buff bars: show hidden spells (ghost bar) that can be restored.
+                -- Also show all tracked buff spells not currently on this bar.
+                local pickerBarKey = bd.key
+                ShowBuffBarPicker(self, pickerBarKey, function(restoredSID)
+                    if restoredSID then
+                        -- Unhide from ghost bar if hidden
+                        if ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(restoredSID) then
+                            ns.UnhideBuffSpell(restoredSID)
+                        end
+                        -- For extra buff bars, add the spell to this bar
+                        if pickerBarKey ~= "buffs" then
+                            ns.AddTrackedSpell(pickerBarKey, restoredSID)
+                        end
+                    end
+                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
                     Refresh()
                     C_Timer.After(0.05, function()
+                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
                         if pf.Update then pf:Update() end
                         UpdateCDMPreviewAndResize()
                     end)
@@ -6158,8 +6395,10 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 ShowSpellPicker(self, bd.key, nil, excl, function(newSpellID, isExtra)
                     ns.AddTrackedSpell(bd.key, newSpellID, isExtra)
-                    ns.BuildAllCDMBars(); Refresh()
+                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
+                    Refresh()
                     C_Timer.After(0.05, function()
+                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
                         if pf.Update then pf:Update() end
                         UpdateCDMPreviewAndResize()
                     end)
@@ -6515,34 +6754,7 @@ initFrame:SetScript("OnEvent", function(self)
             if addBtn._ppBorders then PP.SetBorderSize(addBtn, 1) end
             local ar, ag, ab = EllesmereUI.GetAccentColor()
 
-            -- For buff bars: gray out "+" if all tracked buffs are on this bar
-            if isBuffBar then
-                local allBuffSpells = GetTrackedBuffSpellList()
-                local totalBuffs = #allBuffSpells
-                local onThisBarCount = 0
-                for _, dsid in ipairs(allBuffSpells) do
-                    -- Only consider buff-type routes
-                    local routedBar = ns._spellRouteMap and ns._spellRouteMap[dsid]
-                    local effRoute = nil
-                    if routedBar then
-                        local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
-                        local rType = rbd and rbd.barType or routedBar
-                        if rType == "buffs" then effRoute = routedBar end
-                    end
-                    local onThisBar = (effRoute == bd.key)
-                    if bd.key == "buffs" and not effRoute then onThisBar = true end
-                    if onThisBar then onThisBarCount = onThisBarCount + 1 end
-                end
-                if totalBuffs > 0 and onThisBarCount >= totalBuffs then
-                    addLbl:SetTextColor(0.4, 0.4, 0.4, 0.4)
-                    addBtn:Disable()
-                else
-                    addLbl:SetTextColor(ar, ag, ab, 0.6)
-                    addBtn:Enable()
-                end
-            else
-                addLbl:SetTextColor(ar, ag, ab, 0.6)
-            end
+            addLbl:SetTextColor(ar, ag, ab, 0.6)
             addBtn:Show()
 
             -- Bar background covers spell grid only (not the + column)
@@ -6587,7 +6799,7 @@ initFrame:SetScript("OnEvent", function(self)
                 clickFS:SetJustifyH("CENTER")
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 clickFS:SetTextColor(ar, ag, ab, 1)
-                clickFS:SetText("Click Here to change which buffs are visible.")
+                clickFS:SetText("Reorder icons through Blizzard CDM Settings")
                 clickBtn:SetScript("OnEnter", function() clickFS:SetTextColor(1, 1, 1, 1) end)
                 clickBtn:SetScript("OnLeave", function()
                     local r, g, b = EllesmereUI.GetAccentColor()
@@ -6597,7 +6809,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if isBuffBar then
                 local infoFS = self._buffInfoText
-                infoFS:SetText("All buffs assigned to the Blizzard CDM Buff section are shown.\nCreate additional Buff Bars to move specific buffs to new bars.")
+                infoFS:SetText("")
                 infoFS:ClearAllPoints()
                 infoFS:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
                 infoFS:SetWidth(self:GetWidth() - 20)
@@ -6607,6 +6819,11 @@ initFrame:SetScript("OnEvent", function(self)
                 clickBtn:SetPoint("TOP", infoFS, "BOTTOM", 0, -2)
                 clickBtn:SetWidth(self:GetWidth() - 20)
                 clickBtn:Show()
+                -- Clean up hidden rows from previous implementation
+                if self._hiddenRows then
+                    for _, hr in ipairs(self._hiddenRows) do hr:Hide() end
+                end
+                if self._hiddenHeader then self._hiddenHeader:Hide() end
                 self:SetHeight(totalH + 10 + infoFS:GetStringHeight() + 20 + 14)
             else
                 if self._buffInfoText then self._buffInfoText:Hide() end
@@ -6788,12 +7005,15 @@ initFrame:SetScript("OnEvent", function(self)
                 local mH = 4
                 local customCount = 0
                 for _, b in ipairs(bars) do
-                    if b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs" then
+                    if b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs" and not b.isGhostBar then
                         customCount = customCount + 1
                     end
                 end
 
                 for idx, b in ipairs(bars) do
+                    if b.isGhostBar then
+                        -- skip ghost bar in dropdown
+                    else
                     local isCustom = (b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs")
                     local item = CreateFrame("Button", nil, menu)
                     item:SetHeight(ITEM_H)
@@ -6883,10 +7103,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 cancelText = "Cancel",
                                 onConfirm = function()
                                     ns.RemoveCDMBar(delKey)
-                                    if selectedCDMBarIndex > #bars then
-                                        selectedCDMBarIndex = #bars
+                                    -- Select the cooldowns bar after deletion
+                                    selectedCDMBarIndex = 1
+                                    for bi, bb in ipairs(bars) do
+                                        if bb.key == "cooldowns" then selectedCDMBarIndex = bi; break end
                                     end
-                                    if selectedCDMBarIndex < 1 then selectedCDMBarIndex = 1 end
                                     Refresh()
                                     EllesmereUI:InvalidateContentHeaderCache()
                                     EllesmereUI:SetContentHeader(_cdmHeaderBuilder)
@@ -6941,7 +7162,8 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
 
                     mH = mH + ITEM_H
-                end
+                end -- else (not ghost bar)
+                end -- for idx, b
 
                 -- Divider before add-bar options
                 local div = menu:CreateTexture(nil, "ARTWORK")
@@ -7101,6 +7323,29 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  BAR LAYOUT
         -------------------------------------------------------------------
+        -- Sync helpers: different exclusion levels
+        -- General: all bars except ghost
+        local function ForEachSyncBar(fn)
+            local pp = DB(); if not pp or not pp.cdmBars then return end
+            for _, b in ipairs(pp.cdmBars.bars) do
+                if not b.isGhostBar then fn(b) end
+            end
+        end
+        -- Pandemic: exclude ghost + custom_buff
+        local function ForEachPandemicSyncBar(fn)
+            local pp = DB(); if not pp or not pp.cdmBars then return end
+            for _, b in ipairs(pp.cdmBars.bars) do
+                if not b.isGhostBar and b.barType ~= "custom_buff" then fn(b) end
+            end
+        end
+        -- Extras: exclude ghost + buffs + custom_buff
+        local function ForEachExtrasSyncBar(fn)
+            local pp = DB(); if not pp or not pp.cdmBars then return end
+            for _, b in ipairs(pp.cdmBars.bars) do
+                if not b.isGhostBar and b.barType ~= "buffs" and b.key ~= "buffs" and b.barType ~= "custom_buff" then fn(b) end
+            end
+        end
+
         _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
 
         -- Row 1: (Sync) Visibility | Visibility Options (checkbox dropdown)
@@ -7147,16 +7392,13 @@ initFrame:SetScript("OnEvent", function(self)
                 tooltip = "Apply Visibility to all Bars",
                 isSynced = function()
                     local v = BD().barVisibility or "always"
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.barVisibility or "always") ~= v then return false end
-                    end
-                    return true
+                    local synced = true
+                    ForEachSyncBar(function(b) if (b.barVisibility or "always") ~= v then synced = false end end)
+                    return synced
                 end,
                 onClick = function()
                     local v = BD().barVisibility or "always"
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do b.barVisibility = v end
+                    ForEachSyncBar(function(b) b.barVisibility = v end)
                     ns.CDMApplyVisibility(); EllesmereUI:RefreshPage()
                 end,
             })
@@ -7170,23 +7412,20 @@ initFrame:SetScript("OnEvent", function(self)
                 tooltip = "Apply Visibility Options to all Bars",
                 isSynced = function()
                     local bd = BD()
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
+                    local synced = true
                     for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
                         local k = item.key
                         local cur = bd[k] or false
-                        for _, b in ipairs(pp.cdmBars.bars) do
-                            if (b[k] or false) ~= cur then return false end
-                        end
+                        ForEachSyncBar(function(b) if (b[k] or false) ~= cur then synced = false end end)
                     end
-                    return true
+                    return synced
                 end,
                 onClick = function()
                     local bd = BD()
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
                     for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
                         local k = item.key
                         local v = bd[k] or false
-                        for _, b in ipairs(pp.cdmBars.bars) do b[k] = v end
+                        ForEachSyncBar(function(b) b[k] = v end)
                     end
                     ns.CDMApplyVisibility(); EllesmereUI:RefreshPage()
                 end,
@@ -7387,9 +7626,10 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 1: Icon Scale | Active Animation (or Buff Glow for buff bars)
+        -- Row 1: Icon Scale | Buff Glow (buff/custom_buff) or Active Animation (others)
+        local isBuffGlowBar = isBuffBar or (barData.barType == "custom_buff")
         local scaleAnimRow
-        if isBuffBar then
+        if isBuffGlowBar then
             scaleAnimRow, h = W:DualRow(parent, y,
                 { type="slider", text="Icon Scale",
                   min=16, max=80, step=1,
@@ -7526,16 +7766,13 @@ initFrame:SetScript("OnEvent", function(self)
             tooltip = "Apply Icon Spacing to all Bars",
             isSynced = function()
                 local v = BD().spacing or 2
-                local pp = DB(); if not pp or not pp.cdmBars then return false end
-                for _, b in ipairs(pp.cdmBars.bars) do
-                    if (b.spacing or 2) ~= v then return false end
-                end
-                return true
+                local synced = true
+                ForEachSyncBar(function(b) if (b.spacing or 2) ~= v then synced = false end end)
+                return synced
             end,
             onClick = function()
                 local v = BD().spacing or 2
-                local pp = DB(); if not pp or not pp.cdmBars then return end
-                for _, b in ipairs(pp.cdmBars.bars) do b.spacing = v end
+                ForEachSyncBar(function(b) b.spacing = v end)
                 ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
             end,
         })
@@ -7576,22 +7813,19 @@ initFrame:SetScript("OnEvent", function(self)
                 local bd = BD()
                 local v = bd.borderThickness or "thin"
                 local cc = bd.borderClassColor
-                local pp = DB(); if not pp or not pp.cdmBars then return false end
-                for _, b in ipairs(pp.cdmBars.bars) do
-                    if (b.borderThickness or "thin") ~= v or b.borderClassColor ~= cc then return false end
-                end
-                return true
+                local synced = true
+                ForEachSyncBar(function(b) if (b.borderThickness or "thin") ~= v or b.borderClassColor ~= cc then synced = false end end)
+                return synced
             end,
             onClick = function()
                 local bd = BD()
                 local v = bd.borderThickness or "thin"
                 local sz = bd.borderSize or 1
                 local cc = bd.borderClassColor
-                local pp = DB(); if not pp or not pp.cdmBars then return end
-                for _, b in ipairs(pp.cdmBars.bars) do
+                ForEachSyncBar(function(b)
                     b.borderThickness = v; b.borderSize = sz
                     b.borderClassColor = cc
-                end
+                end)
                 ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
             end,
         })
@@ -7824,23 +8058,20 @@ initFrame:SetScript("OnEvent", function(self)
                     local bd = BD()
                     local v = bd.iconShape or "none"
                     local zoom = bd.iconZoom or 0.08
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.iconShape or "none") ~= v or (b.iconZoom or 0.08) ~= zoom then return false end
-                    end
-                    return true
+                    local synced = true
+                    ForEachSyncBar(function(b) if (b.iconShape or "none") ~= v or (b.iconZoom or 0.08) ~= zoom then synced = false end end)
+                    return synced
                 end,
                 onClick = function()
                     local bd = BD()
                     local v = bd.iconShape or "none"
                     local zoom = bd.iconZoom or 0.08
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do
+                    ForEachSyncBar(function(b)
                         b.iconShape = v; b.iconZoom = zoom
                         local isCS = (v ~= "none" and v ~= "cropped")
                         if isCS then b.borderThickness = "strong"; b.borderSize = BORDER_SIZES["strong"]
                         else b.borderThickness = "thin"; b.borderSize = BORDER_SIZES["thin"] end
-                    end
+                    end)
                     ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
                 end,
             })
@@ -7849,16 +8080,13 @@ initFrame:SetScript("OnEvent", function(self)
                 tooltip = "Apply Icon Zoom to all Bars",
                 isSynced = function()
                     local v = BD().iconZoom or 0.08
-                    local pp = DB(); if not pp or not pp.cdmBars then return false end
-                    for _, b in ipairs(pp.cdmBars.bars) do
-                        if (b.iconZoom or 0.08) ~= v then return false end
-                    end
-                    return true
+                    local synced = true
+                    ForEachSyncBar(function(b) if (b.iconZoom or 0.08) ~= v then synced = false end end)
+                    return synced
                 end,
                 onClick = function()
                     local v = BD().iconZoom or 0.08
-                    local pp = DB(); if not pp or not pp.cdmBars then return end
-                    for _, b in ipairs(pp.cdmBars.bars) do b.iconZoom = v end
+                    ForEachSyncBar(function(b) b.iconZoom = v end)
                     ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                 end,
             })
@@ -7981,11 +8209,15 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 8);  y = y - h
 
         -------------------------------------------------------------------
-        --  EXTRAS
+        --  EXTRAS (not shown for custom aura bars)
         -------------------------------------------------------------------
+        local isCustomBuffBar = (barData.barType == "custom_buff")
+        local isAnyBuffBar = isBuffGlowBar  -- buffs or custom_buff
+        if not isCustomBuffBar then
         _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
 
-        -- Show Tooltip | Show Keybind
+        -- Show Tooltip | Show Keybind (not for buff bars)
+        if not isAnyBuffBar then
         local kbRow
         kbRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Tooltip on Hover",
@@ -8054,6 +8286,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
             end
         end
+        end -- tooltip/keybind buff bar guard
 
         -- Pandemic Glow
         do
@@ -8130,7 +8363,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Rotation Helper
+        -- Rotation Helper (not for buff bars)
+        if not isAnyBuffBar then
         do
             local function CDM() local pp = DB(); return pp and pp.cdmBars end
 
@@ -8172,6 +8406,8 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Glow style used for the rotation helper highlight" }
             );  y = y - h
         end
+        end -- rotation helper buff bar guard
+        end -- custom_buff extras guard
 
         return math.abs(y)
     end

@@ -2255,10 +2255,18 @@ local function ApplyCastbarUnlockPos(castbarBg, unit)
     -- between ReloadFrames and the deferred ApplySavedPositions.
     local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
     if anchors and anchors[key] and anchors[key].target then
-        if EllesmereUI.ReapplyOwnAnchor then
-            EllesmereUI.ReapplyOwnAnchor(key)
+        -- Only use the anchor if the target element is actually available
+        local targetKey = anchors[key].target
+        local elems = EllesmereUI._unlockRegisteredElements
+        local targetElem = elems and elems[targetKey]
+        local targetFrame = targetElem and targetElem.getFrame and targetElem.getFrame(targetKey)
+        if targetFrame then
+            if EllesmereUI.ReapplyOwnAnchor then
+                EllesmereUI.ReapplyOwnAnchor(key)
+            end
+            return true
         end
-        return true
+        -- Target element missing (addon disabled) -- fall through to saved position
     end
     local pos = db and db.profile and db.profile.positions and db.profile.positions[key]
     if not pos then return false end
@@ -2291,7 +2299,8 @@ local function CreateCastBar(frame, unit, settings)
     PP.Size(castbarBg, cbWidth, cbHeight)
 
     -- Use saved unlock position if available, otherwise default below parent
-    if not ApplyCastbarUnlockPos(castbarBg, unit) then
+    if not ApplyCastbarUnlockPos(castbarBg, unit) or castbarBg:GetNumPoints() == 0 then
+        castbarBg:ClearAllPoints()
         castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, 0)
     end
 

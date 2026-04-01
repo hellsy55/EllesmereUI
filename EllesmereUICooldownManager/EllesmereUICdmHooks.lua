@@ -176,7 +176,7 @@ function ns.RebuildSpellRouteMap()
     local spellToBar = {}
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and bd.key ~= "buffs" and bd.barType ~= "custom_buff" then
+        if bd.enabled and (bd.isGhostBar or (bd.key ~= "buffs" and bd.barType ~= "custom_buff")) then
             local sd = ns.GetBarSpellData(bd.key)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
@@ -1539,6 +1539,7 @@ local function UpdateCustomBuffBars()
                                 if not f then
                                     f = CreateFrame("Frame", nil, UIParent)
                                     f:SetSize(36, 36); f:Hide()
+                                    f:EnableMouse(false)
                                     local tex = f:CreateTexture(nil, "ARTWORK")
                                     tex:SetAllPoints(); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                                     f.Icon = tex; f._tex = tex
@@ -1564,6 +1565,10 @@ local function UpdateCustomBuffBars()
                                     f._cooldown:Clear()
                                 end
                                 DecorateFrame(f, barData); f:Show()
+                                f:EnableMouse(false)
+                                if f.Cooldown and f.Cooldown.SetDrawSwipe then
+                                    f.Cooldown:SetDrawSwipe(true)
+                                end
                                 count = count + 1
                                 icons[count] = f
                             else
@@ -1582,6 +1587,11 @@ local function UpdateCustomBuffBars()
                     if icons[i] then icons[i]:Hide() end
                     icons[i] = nil
                 end
+
+                -- Custom aura bars are display-only, never clickable
+                container:EnableMouse(false)
+                if container.EnableMouseClicks then container:EnableMouseClicks(false) end
+                if container.EnableMouseMotion then pcall(container.EnableMouseMotion, container, false) end
 
                 local prevCount = container._prevVisibleCount or 0
                 if count ~= prevCount then
@@ -1959,7 +1969,7 @@ function ns.SetupViewerHooks()
             local needsReanchor = false
             for _, bd in ipairs(p.cdmBars.bars) do
                 if bd.enabled then
-                    local isBuff = (bd.barType == "buffs" or bd.key == "buffs")
+                    local isBuff = (bd.barType == "buffs" or bd.key == "buffs" or bd.barType == "custom_buff")
                     local icons = cdmBarIcons[bd.key]
                     if icons then
                         for fi = 1, #icons do

@@ -593,7 +593,7 @@ function ns.AddCDMBar(barType, name, numRows)
     -- Count existing custom bars (non-default)
     local customCount = 0
     for _, b in ipairs(bars) do
-        if b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs" then
+        if b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs" and not b.isGhostBar then
             customCount = customCount + 1
         end
     end
@@ -675,6 +675,51 @@ function ns.RemoveCDMBar(key)
             RegisterCDMUnlockElements()
             return true
         end
+    end
+    return false
+end
+
+-------------------------------------------------------------------------------
+--  Ghost Buff Bar helpers: route/unroute spells to hide them from buff bars
+-------------------------------------------------------------------------------
+function ns.HideBuffSpell(spellID)
+    if not spellID or spellID <= 0 then return end
+    local ghostKey = ns.GHOST_BUFF_BAR_KEY
+    if not ghostKey then return end
+    local sd = ns.GetBarSpellData(ghostKey)
+    if not sd then return end
+    if not sd.assignedSpells then sd.assignedSpells = {} end
+    for _, sid in ipairs(sd.assignedSpells) do
+        if sid == spellID then return end
+    end
+    sd.assignedSpells[#sd.assignedSpells + 1] = spellID
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    if ns.QueueReanchor then ns.QueueReanchor() end
+end
+
+function ns.UnhideBuffSpell(spellID)
+    if not spellID or spellID <= 0 then return end
+    local ghostKey = ns.GHOST_BUFF_BAR_KEY
+    if not ghostKey then return end
+    local sd = ns.GetBarSpellData(ghostKey)
+    if not sd or not sd.assignedSpells then return end
+    for i = #sd.assignedSpells, 1, -1 do
+        if sd.assignedSpells[i] == spellID then
+            table.remove(sd.assignedSpells, i)
+        end
+    end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    if ns.QueueReanchor then ns.QueueReanchor() end
+end
+
+function ns.IsBuffSpellHidden(spellID)
+    if not spellID or spellID <= 0 then return false end
+    local ghostKey = ns.GHOST_BUFF_BAR_KEY
+    if not ghostKey then return false end
+    local sd = ns.GetBarSpellData(ghostKey)
+    if not sd or not sd.assignedSpells then return false end
+    for _, sid in ipairs(sd.assignedSpells) do
+        if sid == spellID then return true end
     end
     return false
 end

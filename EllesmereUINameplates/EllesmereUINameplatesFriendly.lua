@@ -107,12 +107,12 @@ local function ApplyFriendlyFontOverride()
     end
     local font = GetFont()
     if SystemFont_NamePlate and SystemFont_NamePlate.SetFont then
-        local _, h, flags = SystemFont_NamePlate:GetFont()
-        SystemFont_NamePlate:SetFont(font, h or 9, flags or GetNPOutline())
+        local _, _, flags = SystemFont_NamePlate:GetFont()
+        SystemFont_NamePlate:SetFont(font, 15, flags or GetNPOutline())
     end
     if SystemFont_NamePlate_Outlined and SystemFont_NamePlate_Outlined.SetFont then
-        local _, h, flags = SystemFont_NamePlate_Outlined:GetFont()
-        SystemFont_NamePlate_Outlined:SetFont(font, h or 9, flags or GetNPOutline())
+        local _, _, flags = SystemFont_NamePlate_Outlined:GetFont()
+        SystemFont_NamePlate_Outlined:SetFont(font, 15, flags or GetNPOutline())
     end
     fontOverrideApplied = true
 end

@@ -3324,6 +3324,12 @@ UpdateCastBar = function(dt)
     local showTimer = ERB.db.profile.castBar.showTimer
 
     if castBarFrame._casting or castBarFrame._empowering then
+        -- Safety: if cast/empower ran 1s past expected end, force stop.
+        -- Catches missed EMPOWER_STOP events under network desync.
+        if castBarFrame._endTime and now > castBarFrame._endTime + 1 then
+            OnCastStop()
+            return
+        end
         local progress = (now - castBarFrame._startTime) / (castBarFrame._endTime - castBarFrame._startTime)
         progress = min(max(progress, 0), 1)
         bar:SetValue(progress)
@@ -3507,7 +3513,8 @@ end
 local function OnEmpowerStop(eventCastID)
     if not castBarFrame then return end
     if not castBarFrame._empowering then return end
-    if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
+    -- Accept any empower stop while we're empowering. Strict castID
+    -- matching can reject valid stops due to event desync under load.
     castBarFrame._empowering = false
     castBarFrame._castID = nil
     if castBarFrame._pips then
