@@ -691,6 +691,10 @@ local AURAS = {
     { key="blistering_scales", class="EVOKER", name="Blistering Scales", castSpell=360827,
       buffIDs={360827}, check="ownOnRaid", combatOk=true,
       requireInstanceGroup=true },
+      -- Bestow Weyrnstone: OOC only. Tracks target aura, not the one on self.
+    { key="bestow_weyrnstone", class="EVOKER", name="Bestow Weyrnstone", castSpell=408233,
+      buffIDs={410318}, check="ownOnRaid", combatOk=false,
+      requireInstanceGroup=true },
 }
 
 -------------------------------------------------------------------------------
@@ -1144,7 +1148,8 @@ local defaults = {
             scale = 1.0,
             enabled = {
                 symbiotic=true, def_stance=true, berserk_stance=true, shadowform=true,
-                devo_aura=true, bol=true, bof=true, som=true, blistering_scales=true,
+                devo_aura=true, bol=true, bof=true, som=true, blistering_scales=true, 
+                bestow_weyrnstone=true,
             },
         },
         consumables = {
