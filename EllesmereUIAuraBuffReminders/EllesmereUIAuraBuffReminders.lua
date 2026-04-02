@@ -691,11 +691,11 @@ local AURAS = {
     { key="blistering_scales", class="EVOKER", name="Blistering Scales", castSpell=360827,
       buffIDs={360827}, check="ownOnRaid", combatOk=true,
       requireInstanceGroup=true },
-      -- Bestow Weyrnstone: OOC only. Tracks target aura, not the one on self.
+    -- Bestow Weyrnstone: OOC only. Tracks target aura, not the one on self.
     { key="bestow_weyrnstone", class="EVOKER", name="Bestow Weyrnstone", castSpell=408233,
       buffIDs={410318}, check="ownOnRaid", combatOk=false,
       requireInstanceGroup=true },
-      -- Timelessness: OOC only. 
+    -- Timelessness: OOC only. 
     { key="timelessness", class="EVOKER", name="Timelessness", castSpell=412710,
       buffIDs={412710}, check="ownOnRaid", combatOk=false,
       requireInstanceGroup=true },
