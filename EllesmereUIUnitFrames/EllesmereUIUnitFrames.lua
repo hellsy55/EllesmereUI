@@ -1683,9 +1683,12 @@ local function UpdateBordersForScale(frame, unit)
     if frame.Castbar then
         local castbarBg = frame.Castbar:GetParent()
         if castbarBg then
-            -- Trim castbar bg width to match frame width
+            -- Trim castbar bg width to match frame width, but only if the
+            -- user hasn't set a custom width (castbarWidth > 0 means custom).
             local cbW = castbarBg:GetWidth()
-            if cbW > snappedFrameW + 0.01 then
+            local cbSettings = GetSettingsForUnit(frame._unit or frame.unit)
+            local hasCustomW = cbSettings and (cbSettings.castbarWidth or 0) > 0
+            if not hasCustomW and cbW > snappedFrameW + 0.01 then
                 PP.Width(castbarBg, snappedFrameW)
             end
             -- Re-snap border textures
@@ -7036,20 +7039,28 @@ function SetupOptionsPanel()
 
         -- Seed default anchor + width-match for castbars so they start
         -- anchored to their parent frame with matched width out of the box.
+        -- Only seed if the user has NEVER configured this castbar in unlock
+        -- mode. Once they have (tracked by _castbarUnlockSeeded), stop
+        -- overwriting their choices.
         if EllesmereUIDB then
             if not EllesmereUIDB.unlockAnchors then EllesmereUIDB.unlockAnchors = {} end
             if not EllesmereUIDB.unlockWidthMatch then EllesmereUIDB.unlockWidthMatch = {} end
+            if not EllesmereUIDB._castbarUnlockSeeded then EllesmereUIDB._castbarUnlockSeeded = {} end
             local CB_DEFAULTS = {
                 { cb = "playerCastbar", parent = "player" },
                 { cb = "targetCastbar", parent = "target" },
                 { cb = "focusCastbar",  parent = "focus" },
             }
             for _, def in ipairs(CB_DEFAULTS) do
-                if not EllesmereUIDB.unlockAnchors[def.cb] then
-                    EllesmereUIDB.unlockAnchors[def.cb] = { target = def.parent, side = "BOTTOM" }
-                end
-                if not EllesmereUIDB.unlockWidthMatch[def.cb] then
-                    EllesmereUIDB.unlockWidthMatch[def.cb] = def.parent
+                if not EllesmereUIDB._castbarUnlockSeeded[def.cb] then
+                    if not EllesmereUIDB.unlockAnchors[def.cb] then
+                        EllesmereUIDB.unlockAnchors[def.cb] = { target = def.parent, side = "BOTTOM" }
+                    end
+                    if not EllesmereUIDB.unlockWidthMatch[def.cb] then
+                        EllesmereUIDB.unlockWidthMatch[def.cb] = def.parent
+                    end
+                    -- Mark as seeded so we never overwrite user changes
+                    EllesmereUIDB._castbarUnlockSeeded[def.cb] = true
                 end
             end
         end

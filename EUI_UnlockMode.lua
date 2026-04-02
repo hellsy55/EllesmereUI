@@ -679,6 +679,7 @@ function MatchH.GetWidthMatchDB()
     return EllesmereUIDB.unlockWidthMatch
 end
 
+
 function MatchH.GetHeightMatchDB()
     if not EllesmereUIDB then return nil end
     if not EllesmereUIDB.unlockHeightMatch then
@@ -697,27 +698,70 @@ function MatchH.GetHeightMatchInfo(barKey)
     return db and db[barKey] or nil
 end
 
+-- Detect cycles: walk the chain from targetKey and check if we'd
+-- reach childKey, which would create an infinite loop.
+function MatchH.WouldCreateCycle(db, childKey, targetKey)
+    local visited = {}
+    local current = targetKey
+    while current do
+        if current == childKey then return true end
+        if visited[current] then return false end
+        visited[current] = true
+        current = db[current]
+    end
+    return false
+end
+
 function MatchH.SetWidthMatch(childKey, targetKey)
     local db = MatchH.GetWidthMatchDB()
     if not db then return end
+    if MatchH.WouldCreateCycle(db, childKey, targetKey) then
+        -- Break the cycle: clear the link that targetKey has, then set ours
+        db[targetKey] = nil
+    end
     db[childKey] = targetKey
 end
 
 function MatchH.SetHeightMatch(childKey, targetKey)
     local db = MatchH.GetHeightMatchDB()
     if not db then return end
+    if MatchH.WouldCreateCycle(db, childKey, targetKey) then
+        db[targetKey] = nil
+    end
     db[childKey] = targetKey
 end
 
 function MatchH.ClearWidthMatch(childKey)
     local db = MatchH.GetWidthMatchDB()
     if not db then return end
+    -- Persist current width so elements with "0 = match parent" defaults
+    -- don't revert on reload. The element's setWidth saves to its own DB.
+    local elem = registeredElements[childKey]
+    if elem and elem.setWidth then
+        local frame = GetBarFrame(childKey)
+        if frame then
+            local curW = frame:GetWidth()
+            if curW and curW > 0 then
+                pcall(elem.setWidth, childKey, curW)
+            end
+        end
+    end
     db[childKey] = nil
 end
 
 function MatchH.ClearHeightMatch(childKey)
     local db = MatchH.GetHeightMatchDB()
     if not db then return end
+    local elem = registeredElements[childKey]
+    if elem and elem.setHeight then
+        local frame = GetBarFrame(childKey)
+        if frame then
+            local curH = frame:GetHeight()
+            if curH and curH > 0 then
+                pcall(elem.setHeight, childKey, curH)
+            end
+        end
+    end
     db[childKey] = nil
 end
 
@@ -1092,7 +1136,35 @@ end
 -------------------------------------------------------------------------------
 --  Apply ALL width/height matches globally (used on login/reload)
 -------------------------------------------------------------------------------
+-- Break any circular chains in a match DB before applying.
+-- Walks each chain; if a cycle is found, removes the last link
+-- that closes the loop.
+function MatchH.BreakMatchCycles(db)
+    if not db then return end
+    local safe = {}  -- keys confirmed cycle-free
+    for childKey in pairs(db) do
+        if not safe[childKey] then
+            local visited = {}
+            local current = childKey
+            while current and db[current] do
+                if visited[current] then
+                    -- current closes the cycle; break it
+                    db[current] = nil
+                    break
+                end
+                visited[current] = true
+                current = db[current]
+            end
+            -- Mark all visited keys as safe
+            for k in pairs(visited) do safe[k] = true end
+        end
+    end
+end
+
 local function ApplyAllWidthHeightMatches()
+    -- Break any circular chains from old data before applying
+    MatchH.BreakMatchCycles(MatchH.GetWidthMatchDB())
+    MatchH.BreakMatchCycles(MatchH.GetHeightMatchDB())
     -- Width matches
     local wdb = MatchH.GetWidthMatchDB()
     if wdb then
@@ -4852,6 +4924,13 @@ local function CreateMover(barKey)
                         RejectH.ShowTooltip("Action Bars can only width match\nto other Action Bars")
                         return
                     end
+                    local wdb = MatchH.GetWidthMatchDB()
+                    if wdb and MatchH.WouldCreateCycle(wdb, sourceKey, targetKey) then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        RejectH.ShowTooltip("This would create a circular width match")
+                        return
+                    end
                     MatchH.SetWidthMatch(sourceKey, targetKey)
                     MatchH.ApplyWidthMatch(sourceKey, targetKey)
                     hasChanges = true
@@ -4868,6 +4947,13 @@ local function CreateMover(barKey)
                     return
 
                 elseif pickMode == "heightMatch" then
+                    local hdb = MatchH.GetHeightMatchDB()
+                    if hdb and MatchH.WouldCreateCycle(hdb, sourceKey, targetKey) then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        RejectH.ShowTooltip("This would create a circular height match")
+                        return
+                    end
                     MatchH.SetHeightMatch(sourceKey, targetKey)
                     MatchH.ApplyHeightMatch(sourceKey, targetKey)
                     hasChanges = true
@@ -5855,22 +5941,35 @@ local function CreateMover(barKey)
                         -- Back to UIParent-TOPLEFT center
                         local newCX = newSX + screenW * 0.5
                         local newCY = newSY - screenH * 0.5
-                        -- Move bar
+                        -- Compute delta from current position
+                        local dx = newCX - moverCX
+                        local dy = newCY - moverCY
+                        -- Move bar (anchored vs unanchored)
                         local b = GetBarFrame(barKey)
                         if b and not InCombatLockdown() then
-                            local ratio = UIParent:GetEffectiveScale() / b:GetEffectiveScale()
-                            local barHW = (b:GetWidth() or 0) * 0.5
-                            local barHH = (b:GetHeight() or 0) * 0.5
-                            local barX = newCX * ratio - barHW
-                            local barY = newCY * ratio + barHH
-                            pcall(function()
-                                b:ClearAllPoints()
-                                b:SetPoint("TOPLEFT", UIParent, "TOPLEFT", barX, barY)
-                            end)
-                            pendingPositions[barKey] = {
-                                point = "TOPLEFT", relPoint = "TOPLEFT",
-                                x = barX, y = barY,
-                            }
+                            local ai = GetAnchorInfo(barKey)
+                            if ai and ai.target then
+                                -- Anchored: update anchor offsets (same as drag)
+                                ai.offsetX = (ai.offsetX or 0) + dx
+                                ai.offsetY = (ai.offsetY or 0) + dy
+                                ApplyAnchorPosition(barKey, ai.target, ai.side)
+                                pendingPositions[barKey] = { _anchored = true }
+                            else
+                                -- Unanchored: absolute position
+                                local ratio = UIParent:GetEffectiveScale() / b:GetEffectiveScale()
+                                local barHW = (b:GetWidth() or 0) * 0.5
+                                local barHH = (b:GetHeight() or 0) * 0.5
+                                local barX = newCX * ratio - barHW
+                                local barY = newCY * ratio + barHH
+                                pcall(function()
+                                    b:ClearAllPoints()
+                                    b:SetPoint("TOPLEFT", UIParent, "TOPLEFT", barX, barY)
+                                end)
+                                pendingPositions[barKey] = {
+                                    point = "TOPLEFT", relPoint = "TOPLEFT",
+                                    x = barX, y = barY,
+                                }
+                            end
                         end
                         -- Update mover
                         moverCX, moverCY = newCX, newCY

@@ -1404,12 +1404,13 @@ initFrame:SetScript("OnEvent", function(self)
         zoneDDLbl:SetPoint("RIGHT", zoneArrow, "LEFT", -5, 0)
 
         -- Multi-select checkbox popup
+        local SEARCH_H = 26
+        local ITEM_H = 28
         local zonePopup = CreateFrame("Frame", nil, UIParent)
         zonePopup:SetFrameStrata("FULLSCREEN_DIALOG")
         zonePopup:SetFrameLevel(200)
         zonePopup:SetClampedToScreen(true)
-        local ITEM_H = 28
-        local popupH = math.min(#zones * ITEM_H + 8, 300)
+        local popupH = math.min(#zones * ITEM_H + 8, 300) + SEARCH_H + 10
         zonePopup:SetSize(ZONE_DD_W, popupH)
         zonePopup:Hide()
 
@@ -1418,22 +1419,146 @@ initFrame:SetScript("OnEvent", function(self)
         popupBg:SetColorTexture(0.10, 0.10, 0.12, 0.97)
         EllesmereUI.MakeBorder(zonePopup, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
 
-        -- Scroll frame for items
+        -- Search box at top of zone popup
+        local zoneSearch = CreateFrame("EditBox", nil, zonePopup)
+        zoneSearch:SetSize(ZONE_DD_W - 16, SEARCH_H)
+        zoneSearch:SetPoint("TOP", zonePopup, "TOP", 0, -6)
+        zoneSearch:SetFrameLevel(zonePopup:GetFrameLevel() + 3)
+        zoneSearch:SetFont(fontPath, 11, "")
+        zoneSearch:SetTextColor(1, 1, 1, 0.9)
+        zoneSearch:SetJustifyH("LEFT")
+        zoneSearch:SetAutoFocus(false)
+        zoneSearch:SetMaxLetters(30)
+        zoneSearch:SetTextInsets(4, 4, 0, 0)
+        local zsBg = zoneSearch:CreateTexture(nil, "BACKGROUND")
+        zsBg:SetAllPoints()
+        zsBg:SetColorTexture(0, 0, 0, 0.4)
+        local zsPlaceholder = zoneSearch:CreateFontString(nil, "OVERLAY")
+        zsPlaceholder:SetFont(fontPath, 11, "")
+        zsPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.6)
+        zsPlaceholder:SetPoint("LEFT", zoneSearch, "LEFT", 4, 0)
+        zsPlaceholder:SetText("Search...")
+        zoneSearch:SetScript("OnTextChanged", function(self)
+            local t = self:GetText()
+            zsPlaceholder:SetShown(t == "")
+        end)
+        zoneSearch:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+        -- Scroll frame for items with smooth scroll + scrollbar
         local sf = CreateFrame("ScrollFrame", nil, zonePopup)
-        sf:SetPoint("TOPLEFT", zonePopup, "TOPLEFT", 0, -4)
+        sf:SetPoint("TOPLEFT", zonePopup, "TOPLEFT", 0, -(SEARCH_H + 10))
         sf:SetPoint("BOTTOMRIGHT", zonePopup, "BOTTOMRIGHT", 0, 4)
+        sf:SetFrameLevel(zonePopup:GetFrameLevel() + 1)
+        sf:EnableMouseWheel(true)
         local child = CreateFrame("Frame", nil, sf)
         child:SetWidth(ZONE_DD_W)
         sf:SetScrollChild(child)
 
-        local scrollOffset = 0
-        sf:SetScript("OnMouseWheel", function(_, delta)
+        -- Thin scrollbar track
+        local zTrack = CreateFrame("Frame", nil, sf)
+        zTrack:SetWidth(4)
+        zTrack:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -4, -4)
+        zTrack:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", -4, 4)
+        zTrack:SetFrameLevel(sf:GetFrameLevel() + 2)
+        do local t = zTrack:CreateTexture(nil, "BACKGROUND"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.02) end
+
+        local zThumb = CreateFrame("Button", nil, zTrack)
+        zThumb:SetWidth(4)
+        zThumb:SetFrameLevel(zTrack:GetFrameLevel() + 1)
+        zThumb:EnableMouse(true)
+        zThumb:RegisterForDrag("LeftButton")
+        zThumb:SetScript("OnDragStart", function() end)
+        zThumb:SetScript("OnDragStop", function() end)
+        do local t = zThumb:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.27) end
+
+        local zScrollTarget = 0
+        local zSmoothing = false
+        local Z_SCROLL_STEP = 40
+        local Z_SMOOTH_SPEED = 12
+        local zSmoothFrame = CreateFrame("Frame")
+        zSmoothFrame:Hide()
+
+        local function UpdateZThumb()
             local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
-            scrollOffset = math.max(0, math.min(maxScroll, scrollOffset - delta * ITEM_H * 2))
-            sf:SetVerticalScroll(scrollOffset)
+            if maxScroll <= 0 then zTrack:Hide(); return end
+            zTrack:Show()
+            local trackH = zTrack:GetHeight()
+            local visH = sf:GetHeight()
+            local ratio = visH / (visH + maxScroll)
+            local thumbH = math.max(20, trackH * ratio)
+            zThumb:SetHeight(thumbH)
+            local scrollRatio = (tonumber(sf:GetVerticalScroll()) or 0) / maxScroll
+            local maxTravel = trackH - thumbH
+            zThumb:ClearAllPoints()
+            zThumb:SetPoint("TOP", zTrack, "TOP", 0, -(scrollRatio * maxTravel))
+        end
+
+        zSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+            local cur = sf:GetVerticalScroll()
+            local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+            zScrollTarget = math.max(0, math.min(maxScroll, zScrollTarget))
+            local diff = zScrollTarget - cur
+            if math.abs(diff) < 0.3 then
+                sf:SetVerticalScroll(zScrollTarget)
+                UpdateZThumb()
+                zSmoothing = false
+                zSmoothFrame:Hide()
+                return
+            end
+            local newScroll = cur + diff * math.min(1, Z_SMOOTH_SPEED * elapsed)
+            newScroll = math.max(0, math.min(maxScroll, newScroll))
+            sf:SetVerticalScroll(newScroll)
+            UpdateZThumb()
+        end)
+
+        local function ZSmoothScrollTo(target)
+            local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+            zScrollTarget = math.max(0, math.min(maxScroll, target))
+            if not zSmoothing then
+                zSmoothing = true
+                zSmoothFrame:Show()
+            end
+        end
+
+        sf:SetScript("OnMouseWheel", function(self, delta)
+            local maxScroll = math.max(0, child:GetHeight() - self:GetHeight())
+            if maxScroll <= 0 then return end
+            local base = zSmoothing and zScrollTarget or self:GetVerticalScroll()
+            ZSmoothScrollTo(base - delta * Z_SCROLL_STEP)
         end)
         zonePopup:SetScript("OnMouseWheel", function(_, delta)
             sf:GetScript("OnMouseWheel")(sf, delta)
+        end)
+
+        -- Thumb drag
+        local zDragging = false
+        local zDragStartY, zDragStartScroll
+        zThumb:SetScript("OnMouseDown", function(self, button)
+            if button ~= "LeftButton" then return end
+            zDragging = true
+            zSmoothing = false
+            zSmoothFrame:Hide()
+            local _, cursorY = GetCursorPosition()
+            zDragStartY = cursorY / self:GetEffectiveScale()
+            zDragStartScroll = sf:GetVerticalScroll()
+        end)
+        zThumb:SetScript("OnMouseUp", function(_, button)
+            if button == "LeftButton" then zDragging = false end
+        end)
+        zThumb:SetScript("OnUpdate", function(self)
+            if not zDragging then return end
+            local _, cursorY = GetCursorPosition()
+            cursorY = cursorY / self:GetEffectiveScale()
+            local dy = zDragStartY - cursorY
+            local trackH = zTrack:GetHeight()
+            local thumbH = zThumb:GetHeight()
+            local maxTravel = trackH - thumbH
+            if maxTravel <= 0 then return end
+            local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+            local newScroll = zDragStartScroll + (dy / maxTravel) * maxScroll
+            newScroll = math.max(0, math.min(maxScroll, newScroll))
+            sf:SetVerticalScroll(newScroll)
+            UpdateZThumb()
         end)
 
         local eg = EllesmereUI.ELLESMERE_GREEN or {r=0.047, g=0.824, b=0.624}
@@ -1491,14 +1616,41 @@ initFrame:SetScript("OnEvent", function(self)
                 hl:SetColorTexture(1, 1, 1, 0)
             end)
             checkItems[i] = item
+            item._zoneName = z.name
         end
         child:SetHeight(math.max(1, #zones * ITEM_H))
+
+        -- Wire zone search filtering
+        zoneSearch:SetScript("OnTextChanged", function(self)
+            local t = strlower(strtrim(self:GetText()))
+            zsPlaceholder:SetShown(t == "")
+            local visIdx = 0
+            for idx, item in ipairs(checkItems) do
+                if t == "" or strfind(strlower(item._zoneName), t, 1, true) then
+                    item:Show()
+                    item:ClearAllPoints()
+                    item:SetPoint("TOPLEFT", child, "TOPLEFT", 1, -visIdx * ITEM_H)
+                    item:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, -visIdx * ITEM_H)
+                    visIdx = visIdx + 1
+                else
+                    item:Hide()
+                end
+            end
+            child:SetHeight(math.max(1, visIdx * ITEM_H))
+            scrollOffset = 0
+            sf:SetVerticalScroll(0)
+        end)
 
         zonePopup:SetScript("OnShow", function()
             zonePopup:ClearAllPoints()
             zonePopup:SetPoint("TOPLEFT", zoneDDBtn, "BOTTOMLEFT", 0, -2)
-            scrollOffset = 0
+            zoneSearch:SetText("")
+            zoneSearch:SetFocus()
+            zScrollTarget = 0
+            zSmoothing = false
+            zSmoothFrame:Hide()
             sf:SetVerticalScroll(0)
+            UpdateZThumb()
             -- Refresh checks
             for i, item in ipairs(checkItems) do
                 item._cbCheck:SetShown(selectedZoneMap[i] == true)
@@ -1575,62 +1727,297 @@ initFrame:SetScript("OnEvent", function(self)
         local totalTalentW = TALENT_DD_W * 2 + TALENT_GAP_X
         local talentStartX = (talentRowW - totalTalentW) / 2
 
-        -- Class Talent label + dropdown
-        local classLabel = talentRow:CreateFontString(nil, "OVERLAY")
-        classLabel:SetFont(fontPath, 11, GetABROptOutline())
-        classLabel:SetTextColor(EllesmereUI.TEXT_SECTION_R or 0.45, EllesmereUI.TEXT_SECTION_G or 0.50, EllesmereUI.TEXT_SECTION_B or 0.55, EllesmereUI.TEXT_SECTION_A or 1)
-        PP.Point(classLabel, "TOP", talentRow, "TOPLEFT", talentStartX + TALENT_DD_W / 2, 0)
-        classLabel:SetText("Class Talent")
+        -- Helper: build a talent dropdown with search inside the popup
+        local function MakeTalentDropdown(parentRow, xOff, labelText, allTalents, valuesTable, source, otherLblRef)
+            -- Label
+            local lbl = parentRow:CreateFontString(nil, "OVERLAY")
+            lbl:SetFont(fontPath, 11, GetABROptOutline())
+            lbl:SetTextColor(EllesmereUI.TEXT_SECTION_R or 0.45, EllesmereUI.TEXT_SECTION_G or 0.50, EllesmereUI.TEXT_SECTION_B or 0.55, EllesmereUI.TEXT_SECTION_A or 1)
+            PP.Point(lbl, "TOP", parentRow, "TOPLEFT", xOff + TALENT_DD_W / 2, 0)
+            lbl:SetText(labelText)
 
-        local classDDBtn, classDDLbl = EllesmereUI.BuildDropdownControl(
-            talentRow, TALENT_DD_W, talentRow:GetFrameLevel() + 1,
-            classTalentValues, classTalentOrder,
-            function() return selectedClassTalent end,
-            function(v)
-                selectedClassTalent = v
-                if v ~= 0 then
-                    selectedSpecTalent = 0
-                    selectedTalentSpellID = v
-                    selectedTalentName = classTalentValues[v]
-                    selectedTalentSource = "class"
-                    if _specDDLbl then _specDDLbl:SetText(specTalentValues[0] or "Select a talent...") end
-                else
-                    selectedTalentSpellID = nil
-                    selectedTalentName = nil
-                    selectedTalentSource = nil
+            -- Button (styled like zone dropdown)
+            local btn = CreateFrame("Button", nil, parentRow)
+            PP.Size(btn, TALENT_DD_W, TALENT_DD_H)
+            PP.Point(btn, "TOPLEFT", parentRow, "TOPLEFT", xOff, -(TALENT_LABEL_H + TALENT_GAP_Y))
+            btn:SetFrameLevel(parentRow:GetFrameLevel() + 1)
+            local btnBg = btn:CreateTexture(nil, "BACKGROUND")
+            btnBg:SetAllPoints()
+            btnBg:SetColorTexture(0.075, 0.113, 0.141, 0.9)
+            EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.20, EllesmereUI.PanelPP)
+            local btnLbl = btn:CreateFontString(nil, "OVERLAY")
+            btnLbl:SetFont(fontPath, 13, GetABROptOutline())
+            btnLbl:SetTextColor(1, 1, 1, 0.50)
+            btnLbl:SetMaxLines(1)
+            btnLbl:SetJustifyH("LEFT")
+            btnLbl:SetWordWrap(false)
+            btnLbl:SetText("Select a talent...")
+            local arrow = EllesmereUI.MakeDropdownArrow(btn, 12, EllesmereUI.PanelPP)
+            btnLbl:SetPoint("LEFT", btn, "LEFT", 12, 0)
+            btnLbl:SetPoint("RIGHT", arrow, "LEFT", -5, 0)
+            btn:SetScript("OnEnter", function() btnBg:SetColorTexture(0.095, 0.143, 0.181, 1) end)
+            btn:SetScript("OnLeave", function() btnBg:SetColorTexture(0.075, 0.113, 0.141, 0.9) end)
+
+            -- Popup with search
+            local T_ITEM_H = 26
+            local popupH = math.min(#allTalents * T_ITEM_H + 8, 250) + SEARCH_H + 10
+            local popup = CreateFrame("Frame", nil, UIParent)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(200)
+            popup:SetClampedToScreen(true)
+            popup:SetSize(TALENT_DD_W, popupH)
+            popup:Hide()
+            local popBg = popup:CreateTexture(nil, "BACKGROUND")
+            popBg:SetAllPoints()
+            popBg:SetColorTexture(0.10, 0.10, 0.12, 0.97)
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
+
+            -- Search
+            local search = CreateFrame("EditBox", nil, popup)
+            search:SetSize(TALENT_DD_W - 16, SEARCH_H)
+            search:SetPoint("TOP", popup, "TOP", 0, -6)
+            search:SetFrameLevel(popup:GetFrameLevel() + 3)
+            search:SetFont(fontPath, 11, "")
+            search:SetTextColor(1, 1, 1, 0.9)
+            search:SetJustifyH("LEFT")
+            search:SetAutoFocus(false)
+            search:SetMaxLetters(30)
+            search:SetTextInsets(4, 4, 0, 0)
+            local sBg = search:CreateTexture(nil, "BACKGROUND")
+            sBg:SetAllPoints()
+            sBg:SetColorTexture(0, 0, 0, 0.4)
+            local sPh = search:CreateFontString(nil, "OVERLAY")
+            sPh:SetFont(fontPath, 11, "")
+            sPh:SetTextColor(0.5, 0.5, 0.5, 0.6)
+            sPh:SetPoint("LEFT", search, "LEFT", 4, 0)
+            sPh:SetText("Search...")
+            search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+            -- Scroll frame
+            local sf = CreateFrame("ScrollFrame", nil, popup)
+            sf:SetPoint("TOPLEFT", popup, "TOPLEFT", 0, -(SEARCH_H + 10))
+            sf:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", 0, 4)
+            sf:SetFrameLevel(popup:GetFrameLevel() + 1)
+            sf:EnableMouseWheel(true)
+            local child = CreateFrame("Frame", nil, sf)
+            child:SetWidth(TALENT_DD_W)
+            sf:SetScrollChild(child)
+
+            -- Items
+            local items = {}
+            for i, t in ipairs(allTalents) do
+                local item = CreateFrame("Button", nil, child)
+                item:SetHeight(T_ITEM_H)
+                item:SetPoint("TOPLEFT", child, "TOPLEFT", 1, -(i - 1) * T_ITEM_H)
+                item:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, -(i - 1) * T_ITEM_H)
+                local hl = item:CreateTexture(nil, "ARTWORK")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0)
+                local iLbl = item:CreateFontString(nil, "OVERLAY")
+                iLbl:SetFont(fontPath, 11, GetABROptOutline())
+                iLbl:SetTextColor(0.75, 0.75, 0.78, 1)
+                iLbl:SetPoint("LEFT", item, "LEFT", 10, 0)
+                iLbl:SetPoint("RIGHT", item, "RIGHT", -8, 0)
+                iLbl:SetJustifyH("LEFT")
+                iLbl:SetWordWrap(false)
+                iLbl:SetText(t.name)
+                item._talentName = t.name
+                item._spellID = t.spellID
+                item:SetScript("OnClick", function()
+                    if source == "class" then
+                        selectedClassTalent = t.spellID
+                        selectedSpecTalent = 0
+                        selectedTalentSource = "class"
+                        if otherLblRef[1] then otherLblRef[1]:SetText("Select a talent...") end
+                    else
+                        selectedSpecTalent = t.spellID
+                        selectedClassTalent = 0
+                        selectedTalentSource = "spec"
+                        if otherLblRef[1] then otherLblRef[1]:SetText("Select a talent...") end
+                    end
+                    selectedTalentSpellID = t.spellID
+                    selectedTalentName = t.name
+                    btnLbl:SetText(t.name)
+                    btnLbl:SetTextColor(1, 1, 1, 0.9)
+                    popup:Hide()
+                end)
+                item:SetScript("OnEnter", function() iLbl:SetTextColor(1, 1, 1, 1); hl:SetColorTexture(1, 1, 1, 0.08) end)
+                item:SetScript("OnLeave", function() iLbl:SetTextColor(0.75, 0.75, 0.78, 1); hl:SetColorTexture(1, 1, 1, 0) end)
+                items[i] = item
+            end
+            child:SetHeight(math.max(1, #allTalents * T_ITEM_H))
+
+            -- Search filter
+            search:SetScript("OnTextChanged", function(self)
+                local t = strlower(strtrim(self:GetText()))
+                sPh:SetShown(t == "")
+                local visIdx = 0
+                for _, item in ipairs(items) do
+                    if t == "" or strfind(strlower(item._talentName), t, 1, true) then
+                        item:Show()
+                        item:ClearAllPoints()
+                        item:SetPoint("TOPLEFT", child, "TOPLEFT", 1, -visIdx * T_ITEM_H)
+                        item:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, -visIdx * T_ITEM_H)
+                        visIdx = visIdx + 1
+                    else
+                        item:Hide()
+                    end
+                end
+                child:SetHeight(math.max(1, visIdx * T_ITEM_H))
+                tScrollTarget = 0
+                tSmoothing = false
+                tSmoothFrame:Hide()
+                sf:SetVerticalScroll(0)
+                UpdateTThumb()
+            end)
+
+            -- Scrollbar + smooth scroll
+            local tTrack = CreateFrame("Frame", nil, sf)
+            tTrack:SetWidth(4)
+            tTrack:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -4, -4)
+            tTrack:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", -4, 4)
+            tTrack:SetFrameLevel(sf:GetFrameLevel() + 2)
+            do local t2 = tTrack:CreateTexture(nil, "BACKGROUND"); t2:SetAllPoints(); t2:SetColorTexture(1, 1, 1, 0.02) end
+
+            local tThumb = CreateFrame("Button", nil, tTrack)
+            tThumb:SetWidth(4)
+            tThumb:SetFrameLevel(tTrack:GetFrameLevel() + 1)
+            tThumb:EnableMouse(true)
+            tThumb:RegisterForDrag("LeftButton")
+            tThumb:SetScript("OnDragStart", function() end)
+            tThumb:SetScript("OnDragStop", function() end)
+            do local t2 = tThumb:CreateTexture(nil, "ARTWORK"); t2:SetAllPoints(); t2:SetColorTexture(1, 1, 1, 0.27) end
+
+            local tScrollTarget = 0
+            local tSmoothing = false
+            local T_SCROLL_STEP = 40
+            local T_SMOOTH_SPEED = 12
+            local tSmoothFrame = CreateFrame("Frame")
+            tSmoothFrame:Hide()
+
+            local function UpdateTThumb()
+                local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+                if maxScroll <= 0 then tTrack:Hide(); return end
+                tTrack:Show()
+                local trackH = tTrack:GetHeight()
+                local visH = sf:GetHeight()
+                local ratio = visH / (visH + maxScroll)
+                local thumbH = math.max(20, trackH * ratio)
+                tThumb:SetHeight(thumbH)
+                local scrollRatio = (tonumber(sf:GetVerticalScroll()) or 0) / maxScroll
+                local maxTravel = trackH - thumbH
+                tThumb:ClearAllPoints()
+                tThumb:SetPoint("TOP", tTrack, "TOP", 0, -(scrollRatio * maxTravel))
+            end
+
+            tSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = sf:GetVerticalScroll()
+                local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+                tScrollTarget = math.max(0, math.min(maxScroll, tScrollTarget))
+                local diff = tScrollTarget - cur
+                if math.abs(diff) < 0.3 then
+                    sf:SetVerticalScroll(tScrollTarget)
+                    UpdateTThumb()
+                    tSmoothing = false
+                    tSmoothFrame:Hide()
+                    return
+                end
+                local newScroll = cur + diff * math.min(1, T_SMOOTH_SPEED * elapsed)
+                newScroll = math.max(0, math.min(maxScroll, newScroll))
+                sf:SetVerticalScroll(newScroll)
+                UpdateTThumb()
+            end)
+
+            local function TSmoothScrollTo(target)
+                local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+                tScrollTarget = math.max(0, math.min(maxScroll, target))
+                if not tSmoothing then
+                    tSmoothing = true
+                    tSmoothFrame:Show()
                 end
             end
-        )
-        PP.Point(classDDBtn, "TOPLEFT", talentRow, "TOPLEFT", talentStartX, -(TALENT_LABEL_H + TALENT_GAP_Y))
+
+            sf:SetScript("OnMouseWheel", function(self, delta)
+                local maxScroll = math.max(0, child:GetHeight() - self:GetHeight())
+                if maxScroll <= 0 then return end
+                local base = tSmoothing and tScrollTarget or self:GetVerticalScroll()
+                TSmoothScrollTo(base - delta * T_SCROLL_STEP)
+            end)
+            popup:SetScript("OnMouseWheel", function(_, delta)
+                sf:GetScript("OnMouseWheel")(sf, delta)
+            end)
+
+            -- Thumb drag
+            local tDragging = false
+            local tDragStartY, tDragStartScroll
+            tThumb:SetScript("OnMouseDown", function(self2, button)
+                if button ~= "LeftButton" then return end
+                tDragging = true
+                tSmoothing = false
+                tSmoothFrame:Hide()
+                local _, cursorY = GetCursorPosition()
+                tDragStartY = cursorY / self2:GetEffectiveScale()
+                tDragStartScroll = sf:GetVerticalScroll()
+            end)
+            tThumb:SetScript("OnMouseUp", function(_, button)
+                if button == "LeftButton" then tDragging = false end
+            end)
+            tThumb:SetScript("OnUpdate", function(self2)
+                if not tDragging then return end
+                local _, cursorY = GetCursorPosition()
+                cursorY = cursorY / self2:GetEffectiveScale()
+                local dy = tDragStartY - cursorY
+                local trackH = tTrack:GetHeight()
+                local thumbH = tThumb:GetHeight()
+                local maxTravel = trackH - thumbH
+                if maxTravel <= 0 then return end
+                local maxScroll = math.max(0, child:GetHeight() - sf:GetHeight())
+                local newScroll = tDragStartScroll + (dy / maxTravel) * maxScroll
+                newScroll = math.max(0, math.min(maxScroll, newScroll))
+                sf:SetVerticalScroll(newScroll)
+                UpdateTThumb()
+            end)
+
+            -- Show/hide
+            popup:SetScript("OnShow", function()
+                popup:ClearAllPoints()
+                popup:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
+                search:SetText("")
+                search:SetFocus()
+                tScrollTarget = 0
+                tSmoothing = false
+                tSmoothFrame:Hide()
+                sf:SetVerticalScroll(0)
+                UpdateTThumb()
+            end)
+            popup:SetScript("OnUpdate", function()
+                if not popup:IsMouseOver() and not btn:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                    popup:Hide()
+                end
+            end)
+            btn:SetScript("OnClick", function()
+                if popup:IsShown() then popup:Hide() else popup:Show() end
+            end)
+            btn:HookScript("OnHide", function() popup:Hide() end)
+
+            return btn, btnLbl
+        end
+
+        local _specLblRef = {}
+        local _classLblRef = {}
+
+        -- Class Talent dropdown
+        local classDDBtn, classDDLbl = MakeTalentDropdown(
+            talentRow, talentStartX, "Class Talent",
+            classTalents, classTalentValues, "class", _specLblRef)
+        _classLblRef[1] = classDDLbl
         _classDDLbl = classDDLbl
 
-        -- Spec Talent label + dropdown
-        local specLabel = talentRow:CreateFontString(nil, "OVERLAY")
-        specLabel:SetFont(fontPath, 11, GetABROptOutline())
-        specLabel:SetTextColor(EllesmereUI.TEXT_SECTION_R or 0.45, EllesmereUI.TEXT_SECTION_G or 0.50, EllesmereUI.TEXT_SECTION_B or 0.55, EllesmereUI.TEXT_SECTION_A or 1)
-        PP.Point(specLabel, "TOP", talentRow, "TOPLEFT", talentStartX + TALENT_DD_W + TALENT_GAP_X + TALENT_DD_W / 2, 0)
-        specLabel:SetText("Spec Talent")
-
-        local specDDBtn, specDDLbl = EllesmereUI.BuildDropdownControl(
-            talentRow, TALENT_DD_W, talentRow:GetFrameLevel() + 1,
-            specTalentValues, specTalentOrder,
-            function() return selectedSpecTalent end,
-            function(v)
-                selectedSpecTalent = v
-                if v ~= 0 then
-                    selectedClassTalent = 0
-                    selectedTalentSpellID = v
-                    selectedTalentName = specTalentValues[v]
-                    selectedTalentSource = "spec"
-                    if _classDDLbl then _classDDLbl:SetText(classTalentValues[0] or "Select a talent...") end
-                else
-                    selectedTalentSpellID = nil
-                    selectedTalentName = nil
-                    selectedTalentSource = nil
-                end
-            end
-        )
-        PP.Point(specDDBtn, "TOPLEFT", talentRow, "TOPLEFT", talentStartX + TALENT_DD_W + TALENT_GAP_X, -(TALENT_LABEL_H + TALENT_GAP_Y))
+        -- Spec Talent dropdown
+        local specDDBtn, specDDLbl = MakeTalentDropdown(
+            talentRow, talentStartX + TALENT_DD_W + TALENT_GAP_X, "Spec Talent",
+            specTalents, specTalentValues, "spec", _classLblRef)
+        _specLblRef[1] = specDDLbl
         _specDDLbl = specDDLbl
 
         y = y - TALENT_ROW_H
@@ -1992,11 +2379,16 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
+            local _, playerClass = UnitClass("player")
+            local specID = GetSpecializationInfo(GetSpecialization() or 1)
             p.talentReminders[#p.talentReminders + 1] = {
                 zoneNames = selZoneNames,
                 spellID = selectedTalentSpellID,
                 spellName = selectedTalentName,
                 showNotNeeded = false,
+                class = playerClass,
+                talentSource = selectedTalentSource,  -- "class" or "spec"
+                specID = (selectedTalentSource == "spec") and specID or nil,
             }
 
             -- Reset selection

@@ -1670,15 +1670,16 @@ end
 local function LayoutTalentIcons()
     local count = #talentActiveIcons; if count == 0 then return end
     local p = db.profile.display
-    local spacing = p.iconSpacing or 8
+    local spacing = 40
     local baseScale = p.scale or 1.0
     local sz = floor(ICON_SIZE * baseScale + 0.5)
-    local totalW = (count * sz) + ((count-1) * spacing)
+    local totalW = (count * sz) + ((count - 1) * spacing)
+    local startX = -totalW / 2
     for i, btn in ipairs(talentActiveIcons) do
         btn:SetSize(sz, sz)
         btn:SetAlpha(p.opacity or 1.0)
         btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", talentIconAnchor, "TOPLEFT", (i-1)*(sz+spacing), 0)
+        btn:SetPoint("TOPLEFT", talentIconAnchor, "TOP", startX + (i - 1) * (sz + spacing), 0)
     end
 end
 
@@ -2255,8 +2256,55 @@ if not inKeystone and not inCombat and inInstance then
     if reminders and #reminders > 0 then
         local currentInstance = GetInstanceInfo()
         local currentMapID = C_Map.GetBestMapForUnit("player")
+        local _, playerClass = UnitClass("player")
+        local playerSpecID = GetSpecializationInfo(GetSpecialization() or 1)
         if currentInstance then
             for _, reminder in ipairs(reminders) do
+                -- One-time migration: stamp class/spec on old reminders
+                -- when the current character knows the talent.
+                -- Only runs on zone-in or talent change (guarded by caller).
+                if _B._talentMigPending and not reminder.class
+                    and (IsPlayerSpell(reminder.spellID) or IsSpellKnown(reminder.spellID)) then
+                    _B._talentMigStamped = true
+                    reminder.class = playerClass
+                    -- Determine class vs spec talent
+                    if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+                        local cfgID = C_ClassTalents.GetActiveConfigID()
+                        if cfgID and C_Traits and C_Traits.GetConfigInfo then
+                            local cfgInfo = C_Traits.GetConfigInfo(cfgID)
+                            if cfgInfo and cfgInfo.treeIDs then
+                                for _, treeID in ipairs(cfgInfo.treeIDs) do
+                                    local nodes = C_Traits.GetTreeNodes(treeID)
+                                    if nodes then for _, nodeID in ipairs(nodes) do
+                                        local ni = C_Traits.GetNodeInfo(cfgID, nodeID)
+                                        if ni and ni.entryIDs then for _, eID in ipairs(ni.entryIDs) do
+                                            local ei = C_Traits.GetEntryInfo(cfgID, eID)
+                                            if ei and ei.definitionID then
+                                                local di = C_Traits.GetDefinitionInfo(ei.definitionID)
+                                                if di and di.spellID == reminder.spellID then
+                                                    if ni.isClassNode then
+                                                        reminder.talentSource = "class"
+                                                    else
+                                                        reminder.talentSource = "spec"
+                                                        reminder.specID = playerSpecID
+                                                    end
+                                                end
+                                            end
+                                        end end
+                                    end end
+                                end
+                            end
+                        end
+                    end
+                end
+                -- Skip reminders for a different class
+                if reminder.class and reminder.class ~= playerClass then
+                    -- not this class, skip entirely
+                -- Skip spec-specific reminders for a different spec
+                elseif reminder.talentSource == "spec" and reminder.specID
+                    and reminder.specID ~= playerSpecID then
+                    -- not this spec, skip entirely
+                else
                 -- Build name set cache once per reminder
                 if not reminder._nameSet and reminder.zoneNames then
                     local s = {}
@@ -2294,6 +2342,18 @@ if not inKeystone and not inCombat and inInstance then
                     e.label = (reminder.spellName or "Unknown") .. " (N/N)"
                     e.cat = "talent"; e.scale = 1.0
                     talentMissing[#talentMissing+1] = e
+                end
+                end -- class check
+            end
+            _B._talentMigPending = false
+            if _B._talentMigStamped then
+                _B._talentMigStamped = false
+                local stillNeeded = false
+                for _, r in ipairs(reminders) do
+                    if not r.class then stillNeeded = true; break end
+                end
+                if not stillNeeded then
+                    _B._talentMigNeeded = false
                 end
             end
         end
@@ -2950,6 +3010,17 @@ function EABR:OnEnable()
     -- Expose globals for options
     _G._EABR_AceDB = db
 
+    -- Check if any talent reminders need class/spec migration
+    local reminders = db.profile and db.profile.talentReminders
+    if reminders then
+        for _, r in ipairs(reminders) do
+            if not r.class then
+                _B._talentMigNeeded = true
+                break
+            end
+        end
+    end
+
     -- Snapshot flask/food/rune before PvP and M+ restrictions activate.
     -- Uses zero-allocation GetPlayerAuraBySpellID lookups instead of iterating.
     local function _scanFlaskOOC()
@@ -3111,7 +3182,7 @@ function EABR:OnEnable()
     talentIconAnchor:SetSize(1, 1)
     talentIconAnchor:SetFrameStrata(GetStrata())
     talentIconAnchor:EnableMouse(false)
-    talentIconAnchor:SetPoint("TOP", iconAnchor, "BOTTOM", 0, db.profile.talentReminderYOffset or -50)
+    talentIconAnchor:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
     talentIconAnchor:Show()
     EllesmereUI.SetElementVisibility(talentIconAnchor, false)
 
@@ -3268,6 +3339,14 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
             RequestRefresh()
         end
         return
+    end
+
+    if _B._talentMigNeeded then
+        if e == "PLAYER_ENTERING_WORLD" or e == "ZONE_CHANGED_NEW_AREA"
+           or e == "TRAIT_CONFIG_UPDATED" or e == "PLAYER_TALENT_UPDATE"
+           or e == "PLAYER_SPECIALIZATION_CHANGED" or e == "SPELLS_CHANGED" then
+            _B._talentMigPending = true
+        end
     end
 
     if e == "PLAYER_ENTERING_WORLD" then

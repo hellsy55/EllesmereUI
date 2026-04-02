@@ -206,6 +206,7 @@ function ns.GetCDMSpellsForBar(barKey)
                             cdmCat = cat,
                             cdmCatGroup = (cat == 2 or cat == 3) and "buff" or "cooldown",
                             isDisplayed = ourPool[sid] or (name and ourPool[name]) or blizzTracked[sid] or false,
+                            onEUIBar = (ourPool[sid] or (name and ourPool[name]) or usedOnBar) and true or false,
                             isKnown = knownSet[cdID] or spellIDKnown[sid] or baseKnown or false,
                             usedOnBar = usedOnBar,
                             isTrackedForBar = trackedForBar,
@@ -315,9 +316,9 @@ SpellUsedOnAnyOtherBar = function(spellID, excludeBarKey)
     local excludeIsBuff = (excludeType == "buffs")
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
 
-    -- Check CDM bars (same family only)
+    -- Check CDM bars (same family only, skip ghost bars)
     for _, b in ipairs(p.cdmBars.bars) do
-        if b.key ~= excludeBarKey then
+        if b.key ~= excludeBarKey and not b.isGhostBar then
             local otherType = GetBarType(b.key)
             local otherIsBuff = (otherType == "buffs")
             if excludeIsBuff == otherIsBuff then
@@ -547,28 +548,54 @@ function ns.AddTrackedSpell(barKey, id)
         sd.assignedSpells[newCount] = id
     end
     if sd.removedSpells then sd.removedSpells[id] = nil end
+    -- Remove from ghost CD bar if it was previously "removed" (routed there)
+    local ghostKey = ns.GHOST_CD_BAR_KEY
+    if ghostKey then
+        local ghostSD = ns.GetBarSpellData(ghostKey)
+        if ghostSD and ghostSD.assignedSpells then
+            for gi = #ghostSD.assignedSpells, 1, -1 do
+                if ghostSD.assignedSpells[gi] == id then
+                    table.remove(ghostSD.assignedSpells, gi)
+                end
+            end
+        end
+    end
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     if ns.QueueReanchor then ns.QueueReanchor() end
     return true
 end
 
---- Remove a tracked spell by index
+--- Remove a tracked spell by index. Routes the spell to the ghost CD
+--- bar so it stays in the routing system (cdidRouteMap) but is hidden.
 function ns.RemoveTrackedSpell(barKey, idx)
     local sd = ns.GetBarSpellData(barKey)
     if not sd then return false end
     local list = sd.assignedSpells
     if not list or idx < 1 or idx > #list then return false end
-    -- Prevent emptying default bars (cooldowns/utility) — causes corruption
+    -- Prevent emptying default bars (cooldowns/utility)
     if (barKey == "cooldowns" or barKey == "utility") and #list <= 1 then
         print("|cffff6060[EllesmereUI CDM]|r Cannot remove the last spell from a default bar.")
         return false
     end
     local removedID = list[idx]
     table.remove(list, idx)
-    if removedID and removedID ~= 0 then
-        if not sd.removedSpells then sd.removedSpells = {} end
-        sd.removedSpells[removedID] = true
+    -- Route to ghost CD bar (replaces the old removedSpells mechanism).
+    -- The spell stays routed via cdidRouteMap but the ghost bar is hidden.
+    local ghostKey = ns.GHOST_CD_BAR_KEY
+    if removedID and removedID ~= 0 and ghostKey then
+        local ghostSD = ns.GetBarSpellData(ghostKey)
+        if ghostSD then
+            if not ghostSD.assignedSpells then ghostSD.assignedSpells = {} end
+            local found = false
+            for _, existing in ipairs(ghostSD.assignedSpells) do
+                if existing == removedID then found = true; break end
+            end
+            if not found then
+                ghostSD.assignedSpells[#ghostSD.assignedSpells + 1] = removedID
+            end
+        end
     end
     if removedID and sd.customSpellDurations then
         sd.customSpellDurations[removedID] = nil
@@ -582,6 +609,7 @@ function ns.RemoveTrackedSpell(barKey, idx)
     end
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     if ns.QueueReanchor then ns.QueueReanchor() end
     return true
 end
@@ -697,12 +725,26 @@ function ns.RemoveCDMBar(key)
             cdmBarIcons[key] = nil
             p.cdmBarPositions[key] = nil
             table.remove(p.cdmBars.bars, i)
+            -- Clean up orphaned spell data for the deleted bar (all specs)
+            local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+            local sp = sa and sa.specProfiles
+            if sp then
+                for _, specData in pairs(sp) do
+                    if specData.barSpells and specData.barSpells[key] then
+                        specData.barSpells[key] = nil
+                    end
+                end
+            end
             -- Unregister from unlock mode
             if EllesmereUI and EllesmereUI.UnregisterUnlockElement then
                 EllesmereUI:UnregisterUnlockElement("CDM_" .. key)
             end
             -- Re-register remaining bars to update linkedKeys
             RegisterCDMUnlockElements()
+            -- Rebuild route maps and reanchor so frames stop routing
+            -- to the deleted bar key
+            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
             return true
         end
     end

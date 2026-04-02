@@ -3898,13 +3898,31 @@ function NameplateFrame:UpdateAuras(updateInfo)
     end -- debuffSlotVal ~= "none"
     if buffSlotVal ~= "none" then
     if UnitCanAttack("player", unit) and C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local allBuffs = C_UnitAuras.GetUnitAuras(unit, "HELPFUL|INCLUDE_NAME_PLATE_ONLY")
+        -- Build important buff set from Blizzard's buffList (same approach
+        -- as debuffs above). Only show buffs Blizzard considers important.
+        local importantBuffSet
+        if self.nameplate then
+            local uf = self.nameplate.UnitFrame
+            if uf and uf.AurasFrame and uf.AurasFrame.buffList and uf.AurasFrame.buffList.Iterate then
+                if not self._importantBuffSet then self._importantBuffSet = {} end
+                importantBuffSet = self._importantBuffSet
+                wipe(importantBuffSet)
+                if not self._buffIterateCB then
+                    self._buffIterateCB = function(auraInstanceID)
+                        self._importantBuffSet[auraInstanceID] = true
+                    end
+                end
+                uf.AurasFrame.buffList:Iterate(self._buffIterateCB)
+            end
+        end
+        local allBuffs = C_UnitAuras.GetUnitAuras(unit, "HELPFUL")
         local bIdx = 1
         if allBuffs then
             for _, aura in ipairs(allBuffs) do
                 if bIdx > 4 then break end
                 local id = aura and aura.auraInstanceID
-                if id and aura.icon then
+                if id and aura.icon
+                    and (importantBuffSet and importantBuffSet[id]) then
                     local slot = self.buffs[bIdx]
                     slot.icon:SetTexture(aura.icon)
                     slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4106,14 +4124,21 @@ function NameplateFrame:UpdateCast()
     end
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
-    -- Use UnitName for cast target to get a clean name without realm.
-    -- UnitSpellTargetName returns secret/tainted strings that can't be
-    -- manipulated, so we read the target's name via UnitName instead
-    -- (first return is name-only, realm is the second return).
-    local targetUnit = self.unit .. "target"
-    local spellTarget = UnitName(targetUnit)
-    local spellTargetClass = UnitClassBase(targetUnit)
-    self.castTarget:SetText(type(spellTarget) ~= "nil" and spellTarget or "")
+    -- Use the dedicated spell target APIs when available. These return
+    -- who the SPELL is aimed at (locked at cast start), not the mob's
+    -- current aggro target which can change mid-cast.
+    -- UnitSpellTargetName returns a secret string but SetText accepts it.
+    local spellTarget, spellTargetClass
+    if UnitSpellTargetName and UnitShouldDisplaySpellTargetName
+        and UnitShouldDisplaySpellTargetName(self.unit) then
+        spellTarget = UnitSpellTargetName(self.unit)
+        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+    else
+        local targetUnit = self.unit .. "target"
+        spellTarget = UnitName(targetUnit)
+        spellTargetClass = UnitClassBase(targetUnit)
+    end
+    self.castTarget:SetText(spellTarget or "")
 
     -- Apply class color to cast target text if enabled and target is a player
     local db = p or defaults

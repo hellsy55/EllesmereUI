@@ -196,45 +196,61 @@ function ns.RebuildSpellRouteMap()
     end
 
     -- Step 1: build spellID -> barKey from assignedSpells (for options/preview)
+    -- Two-pass approach: buffs bars first, then CD/utility bars. This ensures
+    -- CD/utility bars always win when a spell is assigned to both a buffs bar
+    -- and a CD/utility bar, so the CooldownViewer frame (which carries
+    -- ChargeCount) routes to the CD bar instead of being rejected by the
+    -- buffs bar's viewer type mismatch.
     local spellToBar = {}
     local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
-    for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and (bd.isGhostBar or (bd.key ~= "buffs" and bd.barType ~= "custom_buff")) then
-            local sd = ns.GetBarSpellData(bd.key)
-            if sd and sd.assignedSpells then
-                for _, sid in ipairs(sd.assignedSpells) do
-                    if type(sid) == "number" and sid > 0 then
-                        _spellRouteMap[sid] = bd.key
-                        spellToBar[sid] = bd.key
-                        -- Forward: stored spell -> current override
-                        if _FindOverride then
-                            local ovr = _FindOverride(sid)
-                            if ovr and ovr > 0 and ovr ~= sid then
-                                _spellRouteMap[ovr] = bd.key
-                                spellToBar[ovr] = bd.key
-                            end
-                        end
-                        -- Reverse: stored spell may be the override form
-                        -- (added while transformed). Resolve the base spell
-                        -- so the cooldownID lookup can match via info.spellID.
-                        -- Try C_Spell.GetBaseSpell first, fall back to the
-                        -- CDM cooldownInfo reverse map for conditional overrides
-                        -- (e.g. Glacial Spike, Frostfire Bolt).
-                        local base
-                        if C_Spell and C_Spell.GetBaseSpell then
-                            base = C_Spell.GetBaseSpell(sid)
-                            if base == sid then base = nil end
-                        end
-                        if not base then
-                            base = overrideToBase[sid]
-                        end
-                        if base and base > 0 and base ~= sid then
-                            _spellRouteMap[base] = bd.key
-                            spellToBar[base] = bd.key
-                        end
+
+    local function MapBarSpells(bd)
+        local sd = ns.GetBarSpellData(bd.key)
+        if not (sd and sd.assignedSpells) then return end
+        for _, sid in ipairs(sd.assignedSpells) do
+            if type(sid) == "number" and sid > 0 then
+                _spellRouteMap[sid] = bd.key
+                spellToBar[sid] = bd.key
+                -- Forward: stored spell -> current override
+                if _FindOverride then
+                    local ovr = _FindOverride(sid)
+                    if ovr and ovr > 0 and ovr ~= sid then
+                        _spellRouteMap[ovr] = bd.key
+                        spellToBar[ovr] = bd.key
                     end
                 end
+                -- Reverse: stored spell may be the override form
+                -- (added while transformed). Resolve the base spell
+                -- so the cooldownID lookup can match via info.spellID.
+                -- Try C_Spell.GetBaseSpell first, fall back to the
+                -- CDM cooldownInfo reverse map for conditional overrides
+                -- (e.g. Glacial Spike, Frostfire Bolt).
+                local base
+                if C_Spell and C_Spell.GetBaseSpell then
+                    base = C_Spell.GetBaseSpell(sid)
+                    if base == sid then base = nil end
+                end
+                if not base then
+                    base = overrideToBase[sid]
+                end
+                if base and base > 0 and base ~= sid then
+                    _spellRouteMap[base] = bd.key
+                    spellToBar[base] = bd.key
+                end
             end
+        end
+    end
+
+    -- Pass 1: buffs-type bars (lowest priority)
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
+            MapBarSpells(bd)
+        end
+    end
+    -- Pass 2: CD/utility bars and ghost bar (overwrite buffs entries)
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and (bd.isGhostBar or (bd.key ~= "buffs" and bd.barType ~= "custom_buff" and bd.barType ~= "buffs")) then
+            MapBarSpells(bd)
         end
     end
 
@@ -499,37 +515,9 @@ local function DecorateFrame(frame, barData)
         end)
     end
 
-    -- Hook SetDesaturated on the icon texture: when hideActive is enabled,
-    -- force desaturation back immediately if Blizzard tries to un-desaturate.
-    -- Same pattern as the SetSwipeColor hook -- prevents 1-frame flash.
-    if iconWidget and iconWidget.SetDesaturated and not fd._desatHooked then
-        fd._desatHooked = true
-        hooksecurefunc(iconWidget, "SetDesaturated", function()
-            if fd._inDesatHook then return end
-            local fc2 = _ecmeFC[frame]
-            local bk = fc2 and fc2.barKey
-            local bd2 = bk and barDataByKey[bk]
-            if not bd2 then return end
-            local anim = bd2.activeStateAnim or "blizzard"
-            if anim ~= "hideActive" then return end
-            -- Only override when the spell is actually active (swipe color
-            -- red channel != 0). Normal cooldown desat is left alone.
-            local swipeColor = frame.cooldownSwipeColor
-            if not swipeColor or type(swipeColor) == "number" then return end
-            if not swipeColor.GetRGBA then return end
-            local r = swipeColor:GetRGBA()
-            if not r or type(r) ~= "number" or issecretvalue(r) then return end
-            if r == 0 then return end
-            -- Spell is active: force desat + suppress alert
-            fd._inDesatHook = true
-            iconWidget:SetDesaturated(true)
-            if frame.SpellActivationAlert then
-                frame.SpellActivationAlert:SetAlpha(0)
-                frame.SpellActivationAlert:Hide()
-            end
-            fd._inDesatHook = false
-        end)
-    end
+
+    -- Per-icon active state hooks installed lazily during CollectAndReanchor,
+    -- ONLY for spells with custom active state settings.
 
     if not fd.bg then
         local bg = frame:CreateTexture(nil, "BACKGROUND")
@@ -542,7 +530,7 @@ local function DecorateFrame(frame, barData)
     if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
-        go:SetFrameLevel(frame:GetFrameLevel() + 2)
+        go:SetFrameLevel(frame:GetFrameLevel() + 6)
         go:SetAlpha(0)
         go:EnableMouse(false)
         fd.glowOverlay = go
@@ -588,7 +576,7 @@ local function DecorateFrame(frame, barData)
     if not fd.borderFrame then
         local bf = CreateFrame("Frame", nil, frame)
         bf:SetAllPoints(frame)
-        bf:SetFrameLevel(frame:GetFrameLevel())
+        bf:SetFrameLevel(frame:GetFrameLevel() + 5)
         fd.borderFrame = bf
         EllesmereUI.PP.CreateBorder(bf,
             barData.borderR or 0, barData.borderG or 0,
@@ -596,7 +584,6 @@ local function DecorateFrame(frame, barData)
             barData.borderSize or 1, "OVERLAY", 7)
     end
 
-    fd.isActive = false
     fd.procGlowActive = false
 
     if fd.cooldown then
@@ -607,36 +594,95 @@ local function DecorateFrame(frame, barData)
         -- our reanchor runs.
         fd.cooldown:SetDrawSwipe(false)
         fd.cooldown:SetDrawBling(false)
+        fd._isProcessingOverride = true
         fd.cooldown:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+        fd._isProcessingOverride = false
         fd.cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
-        -- Hook SetSwipeColor: when Blizzard changes the swipe color (e.g.
-        -- red for active state), force it back to our color immediately.
-        -- Without this, Blizzard's colored swipe renders for 1 frame before
-        -- the ticker catches it.
+        -- Hook SetSwipeColor on EVERY CD/utility frame.
+        -- Forces our swipe color (default black, or per-spell custom)
+        -- so Blizzard's active state color flash never shows.
+        -- Also hook SetDrawSwipe to keep swipe visible on charge spells.
         if not fd._swipeColorHooked then
             fd._swipeColorHooked = true
             local cd = fd.cooldown
-            hooksecurefunc(cd, "SetSwipeColor", function(_, r, g, b, a)
-                if fd._inSwipeHook then return end
+            hooksecurefunc(cd, "SetSwipeColor", function()
+                if fd._isProcessingOverride then return end
+                fd._isProcessingOverride = true
                 local fc2 = _ecmeFC[frame]
-                local bk = fc2 and fc2.barKey
-                local bd2 = bk and barDataByKey[bk]
-                local anim = bd2 and bd2.activeStateAnim or "blizzard"
-                if anim ~= "hideActive" then return end
-                local sa = bd2 and bd2.swipeAlpha or 0.7
-                if r == 0 and g == 0 and b == 0 and a == sa then return end
-                fd._inSwipeHook = true
-                cd:SetSwipeColor(0, 0, 0, sa)
-                fd._inSwipeHook = false
+                local sid2 = fc2 and fc2.spellID
+                local bk2 = fc2 and fc2.barKey
+                -- Check per-spell settings
+                local ss2
+                if sid2 and bk2 then
+                    local sd2 = ns.GetBarSpellData(bk2)
+                    ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
+                end
+                -- Detect active state from swipe color
+                local swipeColor = frame.cooldownSwipeColor
+                local isActive = false
+                if swipeColor and type(swipeColor) ~= "number" and swipeColor.GetRGBA then
+                    local r = swipeColor:GetRGBA()
+                    if r and type(r) == "number" and not issecretvalue(r) then
+                        isActive = (r ~= 0)
+                    end
+                end
+
+                if ss2 and ss2.activeSwipeMode == "none" then
+                    -- Hide Active State: black swipe + desat when active
+                    cd:SetSwipeColor(0, 0, 0, 0.7)
+                    if isActive and fd.tex then fd.tex:SetDesaturated(true) end
+                elseif isActive then
+                    -- Active: apply swipe color (custom, class, or default #FFC660)
+                    local cr, cg, cb, ca
+                    if ss2 and ss2.activeSwipeClassColor then
+                        local _, ct = UnitClass("player")
+                        if ct then
+                            local cc = RAID_CLASS_COLORS[ct]
+                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                        end
+                    end
+                    cr = cr or (ss2 and ss2.activeSwipeR) or 1
+                    cg = cg or (ss2 and ss2.activeSwipeG) or 0.776
+                    cb = cb or (ss2 and ss2.activeSwipeB) or 0.376
+                    ca = (ss2 and ss2.activeSwipeA) or 0.7
+                    cd:SetSwipeColor(cr, cg, cb, ca)
+                    if fd.tex then fd.tex:SetDesaturated(false) end
+                else
+                    -- Not active: black swipe
+                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                end
+
+                -- Active glow (per-spell)
+                local hasGlow2 = ss2 and ss2.activeGlow and ss2.activeGlow > 0
+                if isActive and hasGlow2 then
+                    if fd.glowOverlay and not fd._activeGlowOn then
+                        local gr, gg, gb
+                        if ss2.activeGlowClassColor then
+                            local _, ct = UnitClass("player")
+                            if ct then
+                                local cc = RAID_CLASS_COLORS[ct]
+                                if cc then gr, gg, gb = cc.r, cc.g, cc.b end
+                            end
+                        end
+                        gr = gr or (ss2.activeGlowR or 1)
+                        gg = gg or (ss2.activeGlowG or 0.85)
+                        gb = gb or (ss2.activeGlowB or 0)
+                        ns.StartNativeGlow(fd.glowOverlay, ss2.activeGlow, gr, gg, gb)
+                        fd._activeGlowOn = true
+                    end
+                elseif fd._activeGlowOn then
+                    if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                    fd._activeGlowOn = false
+                end
+
+                fd._isProcessingOverride = false
             end)
-            -- Force swipe always visible. Blizzard disables swipe on charge
-            -- spells while recharging. We always want it shown.
             hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
-                if fd._inSwipeHook then return end
+                if fd._isProcessingOverride then return end
                 if show then return end
-                fd._inSwipeHook = true
+                fd._isProcessingOverride = true
                 cd:SetDrawSwipe(true)
-                fd._inSwipeHook = false
+                fd._isProcessingOverride = false
             end)
         end
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
@@ -717,7 +763,6 @@ local function GetOrCreateTrinketFrame(slotID)
     f.cooldownID = nil
     f.cooldownInfo = nil
     f.layoutIndex = slotID == 13 and 99990 or 99991
-    f.isActive = false
     f.auraInstanceID = nil
     f.cooldownDuration = 0
 
@@ -981,23 +1026,21 @@ local function ReleaseEntries(list)
     end
 end
 
-local _scratch_barLists  = {}
-local _scratch_seenSpell = {}
-local _scratch_spellOrder = {}
-local _scratch_allowSet  = {}
+local _scratch_barLists  = {}   -- buff bars: barKey -> {entry, ...}
+local _scratch_seenSpell = {}   -- buff bars: barKey -> {dedupKey -> true}
+local _scratch_spellOrder = {}  -- CD/utility: spellID -> sort index
 local _scratch_activeFrames = {}
-local _scratch_entryBySpell = {}
-local _scratch_filtered  = {}
 local _scratch_usedFrames = {}
+local _scratch_cdFrames = {}    -- CD/utility: barKey -> {frame, frame, ...}
 
-local function _sortBySpellOrder(a, b)
-    local ai = _scratch_spellOrder[a.baseSpellID] or _scratch_spellOrder[a.spellID] or 10000
-    local bi = _scratch_spellOrder[b.baseSpellID] or _scratch_spellOrder[b.spellID] or 10000
-    if ai ~= bi then return ai < bi end
-    return (a.layoutIndex or 0) < (b.layoutIndex or 0)
-end
 local function _sortByLayoutIndex(a, b)
     return (a.layoutIndex or 0) < (b.layoutIndex or 0)
+end
+-- CD/utility sort: by sort order stored on the FC cache during collection.
+local function _sortByCDOrder(a, b)
+    local fcA = _ecmeFC[a]
+    local fcB = _ecmeFC[b]
+    return (fcA and fcA.sortOrder or 99999) < (fcB and fcB.sortOrder or 99999)
 end
 
 -------------------------------------------------------------------------------
@@ -1013,99 +1056,228 @@ local reanchorDirty = false
 local reanchorFrame = nil
 local viewerHooksInstalled = false
 
-local function CollectAndReanchor()
-    -- Block reanchors during spec transitions
-    if ns._specChangePending then return end
+local function CollectAndReanchor(bypassSpecGuard)
+    -- Block reanchors during spec transitions. FullCDMRebuild's direct
+    -- call passes bypassSpecGuard=true so it runs while the flag is up.
+    if not bypassSpecGuard and ns._specChangePending then return end
 
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.enabled then return end
 
-    MemSnap("RebuildSideEffectCaches")
     RebuildSideEffectCaches()
     if ns.RebuildCDMSpellCaches then ns.RebuildCDMSpellCaches() end
-    MemDelta("RebuildSideEffectCaches")
 
-    -- 1. Collect frames from all viewers via EnumerateActive
+    wipe(_scratch_usedFrames)
+    wipe(_scratch_activeFrames)
+    local allActiveFrames = _scratch_activeFrames
+    local usedFrames = _scratch_usedFrames
+
+    -- Buff bars: existing entry-based collection (unchanged)
     local barLists = _scratch_barLists
     local seenSpell = _scratch_seenSpell
     for k, list in pairs(barLists) do ReleaseEntries(list) end
     for k, sub in pairs(seenSpell) do wipe(sub) end
-    wipe(_scratch_usedFrames)
-    wipe(_scratch_activeFrames)
-    local allActiveFrames = _scratch_activeFrames
 
-    MemSnap("Enumerate+Categorize")
+    -- CD/utility bars: simple frame lists keyed by barKey
+    local cdFrames = _scratch_cdFrames
+    for k, list in pairs(cdFrames) do wipe(list) end
+
+    local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+
+    ---------------------------------------------------------------------------
+    --  PHASE 1: Enumerate all viewers, split into buff vs CD/utility paths
+    ---------------------------------------------------------------------------
     for viewerName, defaultBarKey in pairs(VIEWER_TO_BAR) do
         local viewer = _G[viewerName]
         if viewer and viewer.itemFramePool and viewer.itemFramePool.EnumerateActive then
+            local isBuff = (defaultBarKey == "buffs")
             for frame in viewer.itemFramePool:EnumerateActive() do
                 if IsFrameIncluded(frame) then
                     allActiveFrames[frame] = true
-                    local isBuff = (defaultBarKey == "buffs")
-                    if isBuff and not frame:IsShown() then
-                        -- Blizzard hid this buff. Skip it.
-                    else
-                    local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
-                    if targetBar and displaySID and displaySID > 0 then
-                        local skip = false
-                        if not isBuff and ns.IsSpellKnownInCDM then
-                            skip = not ns.IsSpellKnownInCDM(displaySID)
-                            -- Don't skip frames whose cooldownID is routed to a bar
-                            -- (spell transforms change the displaySID but the base is known)
-                            if skip and frame.cooldownID and _cdidRouteMap[frame.cooldownID] then
-                                skip = false
+
+                    if isBuff then
+                        -------------------------------------------------------
+                        --  BUFF PATH (unchanged): CategorizeFrame + dedup
+                        -------------------------------------------------------
+                        if frame:IsShown() then
+                            local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
+                            if targetBar and displaySID and displaySID > 0 then
+                                local barSeen = seenSpell[targetBar]
+                                if not barSeen then barSeen = {}; seenSpell[targetBar] = barSeen end
+                                local dedupKey = frame.cooldownID
+                                if dedupKey and not barSeen[dedupKey] then
+                                    if not barLists[targetBar] then barLists[targetBar] = {} end
+                                    barLists[targetBar][#barLists[targetBar] + 1] =
+                                        AcquireEntry(frame, displaySID, baseSID or displaySID, frame.layoutIndex or 0)
+                                    barSeen[dedupKey] = true
+                                end
                             end
                         end
-                        if not skip then
-                            local barSeen = seenSpell[targetBar]
-                            if not barSeen then barSeen = {}; seenSpell[targetBar] = barSeen end
-                            local dedupKey = isBuff and frame.cooldownID or displaySID
-                            if dedupKey and not barSeen[dedupKey] then
-                                if not barLists[targetBar] then barLists[targetBar] = {} end
-                                barLists[targetBar][#barLists[targetBar] + 1] =
-                                    AcquireEntry(frame, displaySID, baseSID or displaySID, frame.layoutIndex or 0)
-                                barSeen[dedupKey] = true
+                    else
+                        -------------------------------------------------------
+                        --  CD/UTILITY PATH: cdidRouteMap only
+                        -------------------------------------------------------
+                        local cdID = frame.cooldownID
+                        local barKey = cdID and _cdidRouteMap[cdID]
+                        if barKey then
+                            local bd = barDataByKey[barKey]
+                            if bd and bd.barType ~= "buffs" and not bd.isGhostBar then
+                                local displaySID, baseSID = ResolveFrameSpellID(frame)
+                                if displaySID and displaySID > 0 then
+                                    if not cdFrames[barKey] then cdFrames[barKey] = {} end
+                                    local frames = cdFrames[barKey]
+                                    frames[#frames + 1] = frame
+                                    local fc = FC(frame)
+                                    fc.barKey = barKey
+                                    fc.spellID = baseSID or displaySID
+                                end
                             end
                         end
                     end
-                    end -- buff inclusion check
                 end
             end
         end
     end
-    MemDelta("Enumerate+Categorize")
 
-    MemSnap("ProcessBars")
     local LayoutCDMBar = ns.LayoutCDMBar
     local RefreshCDMIconAppearance = ns.RefreshCDMIconAppearance
     local ApplyCDMTooltipState = ns.ApplyCDMTooltipState
-    local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
 
-    -- Ensure custom-frame-only bars get processed
-    for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and not barLists[bd.key] then
-            local sd = ns.GetBarSpellData(bd.key)
-            if sd and sd.assignedSpells and #sd.assignedSpells > 0 then
-                barLists[bd.key] = {}
-            end
-        end
-    end
-
-    -- 2-4. Process each bar (skip custom_buff)
+    ---------------------------------------------------------------------------
+    --  PHASE 2: Process BUFF bars (existing flow, completely unchanged)
+    ---------------------------------------------------------------------------
     for barKey, list in pairs(barLists) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
             local container = cdmBarFrames[barKey]
             if container then
+                table.sort(list, _sortByLayoutIndex)
+
+                local icons = cdmBarIcons[barKey]
+                if not icons then icons = {}; cdmBarIcons[barKey] = icons end
+                local count = 0
+
+                for _, entry in ipairs(list) do
+                    count = count + 1
+                    local frame = entry.frame
+                    usedFrames[frame] = true
+                    DecorateFrame(frame, barData)
+                    FC(frame).barKey = barKey
+                    FC(frame).spellID = entry.baseSpellID or entry.spellID
+                    icons[count] = frame
+                    local barHidden = container and container._visHidden
+                    frame:SetAlpha(barHidden and 0 or 1)
+                    frame:Show()
+                    if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                        frame.Cooldown:SetDrawSwipe(true)
+                    end
+                    local ov = frame._untrackedOverlay
+                    if not ov then
+                        local fd = hookFrameData[frame]
+                        ov = fd and fd.untrackedOverlay
+                    end
+                    if ov then ov:Hide() end
+                end
+
+                -- Clear excess buff icons (Blizzard owns lifecycle, only disable swipe)
+                for i = count + 1, #icons do
+                    local icon = icons[i]
+                    if icon then
+                        local efd = hookFrameData[icon]
+                        if efd then efd._cdmAnchor = nil end
+                        if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
+                            icon.Cooldown:SetDrawSwipe(false)
+                        end
+                    end
+                    icons[i] = nil
+                end
+
+                -- Mark unclaimed buff frames as used
+                for _, entry in ipairs(list) do
+                    if entry.frame and not usedFrames[entry.frame] then
+                        usedFrames[entry.frame] = true
+                    end
+                end
+
+                -- Conditional layout for buffs (existing iconsChanged detection)
+                local prevCount = container._prevVisibleCount or 0
+                local iconsChanged = count ~= prevCount
+                if not iconsChanged and container._prevIconRefs then
+                    for idx = 1, count do
+                        if container._prevIconRefs[idx] ~= icons[idx] then
+                            iconsChanged = true; break
+                        end
+                    end
+                else
+                    iconsChanged = true
+                end
+                if iconsChanged then
+                    if RefreshCDMIconAppearance then RefreshCDMIconAppearance(barKey) end
+                    if LayoutCDMBar then LayoutCDMBar(barKey) end
+                    if ApplyCDMTooltipState then ApplyCDMTooltipState(barKey) end
+                    if not container._prevIconRefs then container._prevIconRefs = {} end
+                    for idx = 1, count do container._prevIconRefs[idx] = icons[idx] end
+                    for idx = count + 1, #container._prevIconRefs do container._prevIconRefs[idx] = nil end
+                end
+                container._prevVisibleCount = count
+            end
+        end
+    end
+
+    -- Clean up empty buff bars
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and (bd.barType == "buffs" or bd.key == "buffs")
+           and not bd.isGhostBar and not barLists[bd.key] then
+            local icons = cdmBarIcons[bd.key]
+            if icons then
+                for i = 1, #icons do
+                    if icons[i] then
+                        local efd = hookFrameData[icons[i]]
+                        if efd then efd._cdmAnchor = nil end
+                        if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
+                            icons[i].Cooldown:SetDrawSwipe(false)
+                        end
+                    end
+                    icons[i] = nil
+                end
+            end
+            local container = cdmBarFrames[bd.key]
+            if container and (container._prevVisibleCount or 0) > 0 then
+                container._prevVisibleCount = 0
+                if LayoutCDMBar then LayoutCDMBar(bd.key) end
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  PHASE 3: Process CD/UTILITY bars (simplified flow)
+    --  For each bar: inject custom frames, assign sort keys, sort, position.
+    --  No allowSet, no entryBySpell, no dedup, no change detection.
+    ---------------------------------------------------------------------------
+
+    -- Ensure custom-frame-only CD/utility bars get processed
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and not bd.isGhostBar
+           and bd.barType ~= "buffs" and bd.barType ~= "custom_buff"
+           and bd.key ~= "buffs" and not cdFrames[bd.key] then
+            local sd = ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells and #sd.assignedSpells > 0 then
+                cdFrames[bd.key] = {}
+            end
+        end
+    end
+
+    for barKey, frames in pairs(cdFrames) do
+        local barData = barDataByKey[barKey]
+        if barData and barData.enabled then
+            local container = cdmBarFrames[barKey]
+            if container then
                 local sd = ns.GetBarSpellData(barKey)
                 local spellList = sd and sd.assignedSpells
-                local barType = barData.barType or barKey
-                local isBuff = (barType == "buffs")
 
-                -- Spell order for sorting (CD/utility only).
-                -- Buff bars use Blizzard's layoutIndex -- no custom ordering.
+                -- Build spell order map for sorting
                 local spellOrder = _scratch_spellOrder; wipe(spellOrder)
-                if not isBuff and spellList then
+                if spellList then
                     local idx = 0
                     for _, sid in ipairs(spellList) do
                         if sid and sid ~= 0 then
@@ -1115,52 +1287,25 @@ local function CollectAndReanchor()
                     end
                 end
 
-                -- Filter by assignedSpells (CD/utility only).
-                -- Buff bars show everything Blizzard provides -- no filtering.
-                if not isBuff and spellList and #spellList > 0 then
-                    local allowSet = _scratch_allowSet; wipe(allowSet)
-                    for _, sid in ipairs(spellList) do
-                        if sid and sid > 0 then
-                            allowSet[sid] = true
-                            if _FindOverride then
-                                local ovr = _FindOverride(sid)
-                                if ovr and ovr > 0 then allowSet[ovr] = true end
-                            end
-                            local nm = C_Spell.GetSpellName(sid)
-                            if nm then allowSet[nm] = true end
-                        end
-                    end
-                    local filtered = _scratch_filtered; wipe(filtered)
-                    for _, entry in ipairs(list) do
-                        local pass = allowSet[entry.spellID] or allowSet[entry.baseSpellID]
-                        if not pass then
-                            local nm = C_Spell.GetSpellName(entry.spellID)
-                            if nm and allowSet[nm] then pass = true end
-                        end
-                        if pass then filtered[#filtered + 1] = entry end
-                    end
-                    list = filtered
-                end
-
-                -- Inject custom frames (trinkets, racials, items, custom buffs)
-                -- Buff bars never inject -- they only show Blizzard-provided frames.
-                local isCustomBuff = (barType == "custom_buff")
-                if spellList and not isBuff then
+                -- Inject custom frames (trinkets, items, racials)
+                if spellList then
                     for _, sid in ipairs(spellList) do
                         if sid and (sid == -13 or sid == -14) then
+                            -- Trinket
                             local slot = -sid
                             local tf = _trinketFrames[slot]
                             if not tf then tf = GetOrCreateTrinketFrame(slot) end
                             UpdateTrinketFrame(slot)
                             if _trinketItemCache[slot] and tf._trinketIsOnUse then
                                 UpdateTrinketCooldown(slot)
-                                DecorateFrame(tf, barData)
-                                tf:Show()
-                                list[#list + 1] = AcquireEntry(tf, sid, sid, spellOrder[sid] or 99999)
+                                frames[#frames + 1] = tf
+                                local fc = FC(tf)
+                                fc.barKey = barKey; fc.spellID = sid
                             else
                                 tf:Hide()
                             end
                         elseif sid and sid <= -100 then
+                            -- Item preset (potions, healthstone, etc.)
                             local itemID = -sid
                             local fkey = barKey .. ":item:" .. itemID
                             local f = _presetFrames[fkey]
@@ -1230,7 +1375,6 @@ local function CollectAndReanchor()
                                     f._cooldown:Clear()
                                     f._cdStart = nil; f._cdDur = nil
                                 end
-                                -- Desaturate icon when on cooldown (matches Blizzard CDM behavior)
                                 local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
                                 if f._presetData and (f._presetData.key == "healthstone" or f._presetData.key == "demonic_healthstone") then
                                     local inBags = C_Item.GetItemCount(itemID) > 0
@@ -1257,65 +1401,36 @@ local function CollectAndReanchor()
                                     end
                                     if f._tex then f._tex:SetDesaturated(total == 0 or itemOnCD) end
                                 end
-                                DecorateFrame(f, barData); f:Show()
-                                list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
+                                frames[#frames + 1] = f
+                                local fc = FC(f)
+                                fc.barKey = barKey; fc.spellID = sid
                             end
                         elseif sid and sid > 0 then
+                            -- Racial / custom spell (only if no Blizzard frame claimed it)
+                            -- Transform-aware: check base, override, and exact match
                             local hasClaim = false
-                            if not isCustomBuff then
-                                for _, e in ipairs(list) do
-                                    if e.spellID == sid or e.baseSpellID == sid then hasClaim = true; break end
+                            for _, f in ipairs(frames) do
+                                local fc = _ecmeFC[f]
+                                if fc then
+                                    local fSid = fc.spellID
+                                    if fSid == sid then
+                                        hasClaim = true; break
+                                    end
+                                    if _FindOverride and sid > 0 then
+                                        local ovr = _FindOverride(sid)
+                                        if ovr and ovr > 0 and fSid == ovr then hasClaim = true; break end
+                                    end
+                                    if C_Spell and C_Spell.GetBaseSpell then
+                                        local base = C_Spell.GetBaseSpell(sid)
+                                        if base and base > 0 and fSid == base then hasClaim = true; break end
+                                    end
                                 end
                             end
                             if not hasClaim then
-                                if isCustomBuff then
-                                    local euiOpen = EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown()
-                                    local aura = C_UnitAuras.GetPlayerAuraBySpellID(sid)
-                                    if not aura and sd and sd.presetVariants and sd.presetVariants[sid] then
-                                        for _, varSid in ipairs(sd.presetVariants[sid]) do
-                                            aura = C_UnitAuras.GetPlayerAuraBySpellID(varSid)
-                                            if aura then break end
-                                        end
-                                    end
-                                    if not aura and not euiOpen then
-                                        local fkey = barKey .. ":custombuff:" .. sid
-                                        local f = _presetFrames[fkey]
-                                        if f then f:Hide() end
-                                    else
-                                        local fkey = barKey .. ":custombuff:" .. sid
-                                        local f = _presetFrames[fkey]
-                                        if not f then
-                                            f = CreateFrame("Frame", nil, UIParent)
-                                            f:SetSize(36, 36); f:Hide()
-                                            local tex = f:CreateTexture(nil, "ARTWORK")
-                                            tex:SetAllPoints(); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                                            f.Icon = tex; f._tex = tex
-                                            local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
-                                            cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
-                                            cd:SetHideCountdownNumbers(true); cd:SetReverse(true)
-                                            f.Cooldown = cd; f._cooldown = cd
-                                            f._isCustomSpellFrame = true
-                                            f.cooldownID = nil; f.cooldownInfo = nil
-                                            f.layoutIndex = 99999
-                                            _presetFrames[fkey] = f
-                                            local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
-                                            if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
-                                        end
-                                        if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
-                                            local aStart = aura.expirationTime - aura.duration
-                                            f._cooldown:SetCooldown(aStart, aura.duration)
-                                        else
-                                            f._cooldown:Clear()
-                                        end
-                                        DecorateFrame(f, barData); f:Show()
-                                        list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
-                                    end
+                                local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
+                                if not isRacial and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
+                                    -- Unknown spell, skip
                                 else
-                                    -- Skip spells the player doesn't currently know (e.g. talented out)
-                                    local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
-                                    if not isRacial and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
-                                        -- pass: don't inject frame for unknown spell
-                                    else
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
                                     local f = _presetFrames[fkey]
                                     if not f then
@@ -1347,213 +1462,132 @@ local function CollectAndReanchor()
                                         ApplySpellDesaturation(f, durObj)
                                         f._cdSet = true; f._racialCdDirty = false
                                     end
-                                    DecorateFrame(f, barData); f:Show()
-                                    list[#list + 1] = AcquireEntry(f, sid, sid, spellOrder[sid] or 99999)
+                                    frames[#frames + 1] = f
+                                    local fc = FC(f)
+                                    fc.barKey = barKey; fc.spellID = sid
                                 end
                             end
-                                    end -- IsSpellKnownInCDM check
                         end
                     end
                 end
 
-                -- Sort: buff bars use Blizzard's layoutIndex, CD/utility use spellOrder
-                if isBuff then
-                    table.sort(list, _sortByLayoutIndex)
-                else
-                    table.sort(list, _sortBySpellOrder)
+                -- Assign sort keys from spellOrder (transform-aware)
+                for _, frame in ipairs(frames) do
+                    local fc = _ecmeFC[frame]
+                    local sid = fc and fc.spellID
+                    local key = sid and spellOrder[sid]
+                    if not key and sid and sid > 0 and _FindOverride then
+                        local ovr = _FindOverride(sid)
+                        if ovr and ovr > 0 then key = spellOrder[ovr] end
+                    end
+                    if not key and sid and sid > 0 and C_Spell and C_Spell.GetBaseSpell then
+                        local base = C_Spell.GetBaseSpell(sid)
+                        if base and base > 0 and base ~= sid then key = spellOrder[base] end
+                    end
+                    if fc then fc.sortOrder = key or 99999 end
                 end
 
-                -- Assign to icon slots
+                -- Sort by user-defined order
+                table.sort(frames, _sortByCDOrder)
+
+                -- Assign to icon slots, decorate, show
                 local icons = cdmBarIcons[barKey]
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
-                local count = 0
-                local usedFrames = _scratch_usedFrames
+                local barHidden = container._visHidden
 
-                if not isBuff and spellList and #spellList > 0 then
-                    -- CD/utility: assign in spellList order (matching by ID/name)
-                    local entryBySpell = _scratch_entryBySpell; wipe(entryBySpell)
-                    for _, entry in ipairs(list) do
-                        if entry.spellID and not entryBySpell[entry.spellID] then entryBySpell[entry.spellID] = entry end
-                        if entry.baseSpellID and not entryBySpell[entry.baseSpellID] then entryBySpell[entry.baseSpellID] = entry end
-                        local nm = C_Spell.GetSpellName(entry.spellID)
-                        if nm and not entryBySpell[nm] then entryBySpell[nm] = entry end
+                for i, frame in ipairs(frames) do
+                    usedFrames[frame] = true
+                    DecorateFrame(frame, barData)
+                    icons[i] = frame
+                    frame:SetAlpha(barHidden and 0 or 1)
+                    frame:Show()
+                    if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                        frame.Cooldown:SetDrawSwipe(true)
                     end
-                    for _, sid in ipairs(spellList) do
-                        if sid and sid ~= 0 then
-                            local entry = entryBySpell[sid]
-                            if not entry and sid > 0 and _FindOverride then
-                                local ovr = _FindOverride(sid)
-                                if ovr and ovr > 0 then entry = entryBySpell[ovr] end
-                            end
-                            if not entry and sid > 0 and C_Spell.GetBaseSpell then
-                                local base = C_Spell.GetBaseSpell(sid)
-                                if base and base > 0 and base ~= sid then entry = entryBySpell[base] end
-                            end
-                            if not entry and sid > 0 then
-                                local nm = C_Spell.GetSpellName(sid)
-                                if nm then entry = entryBySpell[nm] end
-                            end
-                            if entry and not usedFrames[entry.frame] then
-                                count = count + 1
-                                local frame = entry.frame
-                                usedFrames[frame] = true
-                                DecorateFrame(frame, barData)
-                                FC(frame).barKey = barKey
-                                FC(frame).spellID = entry.baseSpellID or entry.spellID
-                                icons[count] = frame
-                                local barHidden = container and container._visHidden
-                                frame:SetAlpha(barHidden and 0 or 1)
-                                frame:Show()
-                                if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
-                                    frame.Cooldown:SetDrawSwipe(true)
-                                end
-                                -- Reparent custom frames (trinkets, racials, etc.)
-                                -- to our container. Never parent to Blizzard viewers
-                                -- as that taints the secure frame tree.
-                                if frame._isRacialFrame or frame._isTrinketFrame
-                                    or frame._isPresetFrame or frame._isItemPresetFrame
-                                    or frame._isCustomSpellFrame then
-                                    if frame:GetParent() ~= container then
-                                        frame:SetParent(container)
-                                    end
-                                end
-                            end
+                    -- Reparent custom frames to our container (never to Blizzard viewers)
+                    if frame._isRacialFrame or frame._isTrinketFrame
+                       or frame._isPresetFrame or frame._isItemPresetFrame
+                       or frame._isCustomSpellFrame then
+                        if frame:GetParent() ~= container then
+                            frame:SetParent(container)
                         end
                     end
-                else
-                    -- Buff bars: assign in list order (Blizzard's layoutIndex).
-                    -- No spellList matching, no filtering. Just take everything.
-                    for _, entry in ipairs(list) do
-                        count = count + 1
-                        local frame = entry.frame
-                        usedFrames[frame] = true
-                        DecorateFrame(frame, barData)
-                        FC(frame).barKey = barKey
-                        FC(frame).spellID = entry.baseSpellID or entry.spellID
-                        icons[count] = frame
-                        local barHidden = container and container._visHidden
-                        frame:SetAlpha(barHidden and 0 or 1)
-                        frame:Show()
-                        if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
-                            frame.Cooldown:SetDrawSwipe(true)
-                        end
-                        -- Kill any stale untracked overlay on buff bar frames
-                        local ov = frame._untrackedOverlay
-                        if not ov then
-                            local fd = hookFrameData[frame]
-                            ov = fd and fd.untrackedOverlay
-                        end
-                        if ov then ov:Hide() end
-                    end
+                    -- Active state hooks handled in DecorateFrame (SetSwipeColor
+                    -- hook on every frame, forces our color always).
                 end
 
-                -- Clear excess icons. Buff frames: Blizzard owns their
-                -- lifecycle, only disable swipe. CD/utility: hide.
-                for i = count + 1, #icons do
-                    local icon = icons[i]
-                    if icon then
-                        -- Clear stored anchor so SetPoint hook stops intercepting
-                        local efd = hookFrameData[icon]
+                -- Clear excess icons
+                for i = #frames + 1, #icons do
+                    if icons[i] then
+                        local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
-                        if isBuff then
-                            if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
-                                icon.Cooldown:SetDrawSwipe(false)
-                            end
-                        else
-                            icon:ClearAllPoints()
-                            icon:Hide()
-                            if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
-                                icon.Cooldown:SetDrawSwipe(false)
-                            end
+                        icons[i]:ClearAllPoints()
+                        icons[i]:Hide()
+                        if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
+                            icons[i].Cooldown:SetDrawSwipe(false)
                         end
                     end
                     icons[i] = nil
                 end
 
-                -- Mark unclaimed frames as used so the alpha-0 cleanup
-                -- doesn't hide them. Blizzard controls twin-frame visibility
-                -- during spell transforms (e.g. Wings → Sentinel).
-                for _, entry in ipairs(list) do
-                    if entry.frame and not usedFrames[entry.frame] then
-                        usedFrames[entry.frame] = true
-                    end
-                end
-
-                -- Only refresh/layout if icon set changed
-                local prevCount = container._prevVisibleCount or 0
-                local iconsChanged = count ~= prevCount
-                if not iconsChanged and container._prevIconRefs then
-                    for idx = 1, count do
-                        if container._prevIconRefs[idx] ~= icons[idx] then
-                            iconsChanged = true; break
-                        end
-                    end
-                else
-                    iconsChanged = true
-                end
-                if iconsChanged then
-                    if RefreshCDMIconAppearance then RefreshCDMIconAppearance(barKey) end
-                    if LayoutCDMBar then LayoutCDMBar(barKey) end
-                    if ApplyCDMTooltipState then ApplyCDMTooltipState(barKey) end
-                    if not container._prevIconRefs then container._prevIconRefs = {} end
-                    for idx = 1, count do container._prevIconRefs[idx] = icons[idx] end
-                    for idx = count + 1, #container._prevIconRefs do container._prevIconRefs[idx] = nil end
-                end
-                container._prevVisibleCount = count
+                -- Always layout (no change detection -- simpler, more robust)
+                RefreshCDMIconAppearance(barKey)
+                LayoutCDMBar(barKey)
+                ApplyCDMTooltipState(barKey)
             end
         end
     end
 
-    -- Clean up empty bars
+    -- Clean up empty CD/utility bars
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and not barLists[bd.key] then
-            local isBuff_cleanup = (bd.barType == "buffs" or bd.key == "buffs")
+        if bd.enabled and not bd.isGhostBar
+           and bd.barType ~= "buffs" and bd.barType ~= "custom_buff"
+           and bd.key ~= "buffs" and not cdFrames[bd.key] then
             local icons = cdmBarIcons[bd.key]
             if icons then
                 for i = 1, #icons do
                     if icons[i] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
-                        if isBuff_cleanup then
-                            -- Buff: only disable swipe, Blizzard owns the rest
-                            if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
-                                icons[i].Cooldown:SetDrawSwipe(false)
-                            end
-                        else
-                            icons[i]:ClearAllPoints()
-                            icons[i]:Hide()
-                            if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
-                                icons[i].Cooldown:SetDrawSwipe(false)
-                            end
+                        icons[i]:ClearAllPoints()
+                        icons[i]:Hide()
+                        if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
+                            icons[i].Cooldown:SetDrawSwipe(false)
                         end
                     end
                     icons[i] = nil
                 end
             end
             local container = cdmBarFrames[bd.key]
-            if container and (container._prevVisibleCount or 0) > 0 then
-                container._prevVisibleCount = 0
-                if LayoutCDMBar then LayoutCDMBar(bd.key) end
+            if container then
+                LayoutCDMBar(bd.key)
             end
         end
     end
 
-    -- 5. Cleanup unclaimed frames.
-    -- Buff frames: Blizzard fully owns their lifecycle. Only disable the
-    -- swipe to prevent ghost swipe artifacts. Never ClearAllPoints, SetAlpha,
-    -- or Hide -- Blizzard needs the frame intact to re-show on aura updates.
-    -- CD/utility frames: we own these, hide immediately.
+    -- Re-apply proc glows for any active procs (picks up per-spell settings)
+    if ns.ScanExistingProcGlows then ns.ScanExistingProcGlows() end
+
+    ---------------------------------------------------------------------------
+    --  PHASE 4: Global cleanup for unclaimed frames
+    --  Also protect any frame currently in cdmBarIcons (may be from a
+    --  previous reanchor cycle but still visually active on a bar).
+    ---------------------------------------------------------------------------
+    for bk, icons in pairs(cdmBarIcons) do
+        for ii = 1, #icons do
+            if icons[ii] then usedFrames[icons[ii]] = true end
+        end
+    end
     local buffViewer = _G["BuffIconCooldownViewer"]
     local barViewer  = _G["BuffBarCooldownViewer"]
     for frame in pairs(allActiveFrames) do
-        if _scratch_usedFrames[frame] then
+        if usedFrames[frame] then
             -- Claimed: leave alone
         elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
             -- Custom frames: managed by their own systems
         else
-            -- Clear stored anchor so SetPoint hook stops intercepting
             local efd = hookFrameData[frame]
             if efd then efd._cdmAnchor = nil end
             local vf = frame.viewerFrame
@@ -1563,6 +1597,7 @@ local function CollectAndReanchor()
                     frame.Cooldown:SetDrawSwipe(false)
                 end
             else
+                -- CD/utility frame: hide (unrouted or ghost-bar routed)
                 frame:ClearAllPoints()
                 frame:Hide()
                 if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
@@ -1824,7 +1859,9 @@ local REANCHOR_THROTTLE = 0.2
 local _lastReanchorTime = 0
 
 local function QueueReanchor()
-    if ns._specChangePending then return end
+    -- Always queue, never drop. If a spec swap is in progress the
+    -- ProcessReanchorQueue gate will hold the request until the flag
+    -- clears, then the queued reanchor fires naturally.
     reanchorDirty = true
     if reanchorFrame then reanchorFrame:Show() end
 end
@@ -1832,6 +1869,9 @@ ns.QueueReanchor = QueueReanchor
 
 local function ProcessReanchorQueue(self)
     if not reanchorDirty then self:Hide(); return end
+    -- Gate: hold queued reanchors while a spec swap is in progress.
+    -- The queue stays dirty so it fires as soon as the flag clears.
+    if ns._specChangePending then return end
     local now = GetTime()
     if now - _lastReanchorTime < REANCHOR_THROTTLE then return end
     reanchorDirty = false
@@ -1861,7 +1901,14 @@ function ns.SetupViewerHooks()
     --    Reset frame spell cache so the next reanchor re-resolves the spellID
     --    (handles spell transforms like Avenging Crusader -> Crusader Strike).
     local function ResetFrameAndReanchor(frame)
-        if ns._specChangePending then return end
+        if ns._specChangePending then
+            -- Queue instead of drop: ProcessReanchorQueue will hold
+            -- until the flag clears, then fire the queued reanchor.
+            -- Skip per-frame cache clear -- FullCDMRebuild handles that
+            -- wholesale during spec swap.
+            QueueReanchor()
+            return
+        end
         if frame then
             local fc = _ecmeFC[frame]
             if fc then
@@ -1876,6 +1923,9 @@ function ns.SetupViewerHooks()
             -- change on transforms, only the spell behind it changes).
             -- CategorizeFrame will re-resolve the spell via baseSID.
         end
+        -- Invalidate spell caches so IsSpellKnownInCDM re-reads from API
+        -- on the next reanchor (transform may have changed which IDs exist).
+        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
         QueueReanchor()
     end
     if CooldownViewerBuffIconItemMixin and CooldownViewerBuffIconItemMixin.OnCooldownIDSet then
@@ -1915,6 +1965,12 @@ function ns.SetupViewerHooks()
                         _activeStateReanchorPending = true
                         C_Timer.After(0, function()
                             _activeStateReanchorPending = false
+                            -- During spec swap, queue instead of direct reanchor.
+                            -- ProcessReanchorQueue will hold until flag clears.
+                            if ns._specChangePending then
+                                QueueReanchor()
+                                return
+                            end
                             CollectAndReanchor()
                         end)
                     end)
@@ -1941,6 +1997,7 @@ function ns.SetupViewerHooks()
             -- Intercept newly acquired frames the instant Blizzard creates
             -- them, before they render at the viewer's default position.
             -- Alpha 0 until our reanchor claims and positions them.
+            -- The pool Acquire hook above already queues a reanchor.
             -- Skip during init: on /reload ALL frames are acquired at once
             -- and our reanchor hasn't run yet, so blanking them would hide
             -- all buffs until the first buff change.
@@ -2012,14 +2069,20 @@ function ns.SetupViewerHooks()
     local buffViewer = _G["BuffIconCooldownViewer"]
     if buffViewer and buffViewer.RefreshLayout then
         hooksecurefunc(buffViewer, "RefreshLayout", function()
-            if ns._specChangePending then return end
+            if ns._specChangePending then
+                QueueReanchor()
+                return
+            end
             CollectAndReanchor()
         end)
     end
     local buffBarViewer = _G["BuffBarCooldownViewer"]
     if buffBarViewer and buffBarViewer.RefreshLayout then
         hooksecurefunc(buffBarViewer, "RefreshLayout", function()
-            if ns._specChangePending then return end
+            if ns._specChangePending then
+                QueueReanchor()
+                return
+            end
             CollectAndReanchor()
         end)
     end
@@ -2132,65 +2195,37 @@ function ns.SetupViewerHooks()
                                     end
                                 end
 
-                                -- Active state animation (CD/utility only, polled).
-                                -- Detection uses cooldownSwipeColor:
-                                -- Blizzard sets a non-zero red channel when a spell
-                                -- is active (proc, buff). No wasSetFromAura/auraInstanceID
-                                -- reads -- those are secret values that cause taint.
-                                if not isBuff and fd then
-                                    local anim = bd.activeStateAnim or "blizzard"
-                                    if anim ~= "blizzard" then
-                                        local swipeColor = frame.cooldownSwipeColor
-                                        local isActive = false
-                                        if swipeColor and type(swipeColor) ~= "number"
-                                            and swipeColor.GetRGBA then
-                                            local r = swipeColor:GetRGBA()
-                                            if r and type(r) == "number"
-                                                and not issecretvalue(r) then
-                                                isActive = (r ~= 0)
-                                            end
-                                        end
-
-                                        if anim == "hideActive" then
-                                            -- Suppress active visuals: desat + black swipe
-                                            if isActive then
-                                                if fd.cooldown then
-                                                    fd.cooldown:SetReverse(false)
-                                                    fd.cooldown:SetSwipeColor(0, 0, 0, bd.swipeAlpha or 0.7)
-                                                end
-                                                if fd.tex then fd.tex:SetDesaturated(true) end
-                                            elseif fd.isActive then
-                                                -- Transition to inactive: restore
-                                                if fd.tex then fd.tex:SetDesaturated(bd.desaturateOnCD or false) end
-                                            end
-                                        else
-                                            -- Custom glow modes (1, 3, 4, 5, 7)
-                                            local glowIdx = tonumber(anim)
-                                            if glowIdx and fd.glowOverlay then
-                                                if isActive and not fd.isActive then
-                                                    local cr, cg, cb = 1.0, 0.85, 0.0
-                                                    if bd.activeAnimClassColor then
-                                                        local _, ct = UnitClass("player")
-                                                        if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
-                                                    elseif bd.activeAnimR then
-                                                        cr, cg, cb = bd.activeAnimR, bd.activeAnimG or 0.85, bd.activeAnimB or 0.0
-                                                    end
-                                                    fd.glowOverlay:SetAlpha(1)
-                                                    ns.StartNativeGlow(fd.glowOverlay, glowIdx, cr, cg, cb)
-                                                elseif not isActive and fd.isActive then
-                                                    ns.StopNativeGlow(fd.glowOverlay)
-                                                end
-                                            end
-                                        end
-                                        fd.isActive = isActive
-                                    end
-                                end
+                                -- (Per-icon active state handled by hooks in DecorateFrame, not ticker)
                             end
                         end
                     end
                 end
             end
             if needsReanchor then QueueReanchor() end
+            -- Refresh aura active cache + bar glow overlays. The full
+            -- RebuildSideEffectCaches is too heavy for 0.1s polling, so
+            -- just re-check aura state on already-known frames.
+            do
+                local ac = _activeCache
+                wipe(ac)
+                for vi = 1, 4 do
+                    local vf = _G[VIEWER_NAMES[vi]]
+                    if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                        for frame in vf.itemFramePool:EnumerateActive() do
+                            if frame.wasSetFromAura == true or frame.auraInstanceID ~= nil then
+                                local fc = _ecmeFC[frame]
+                                local sid = fc and fc.resolvedSid
+                                if sid and sid > 0 then
+                                    ac[sid] = true
+                                    local baseSID = fc.baseSpellID
+                                    if baseSID and baseSID > 0 then ac[baseSID] = true end
+                                end
+                            end
+                        end
+                    end
+                end
+                if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
+            end
             MemDelta("BuffTicker")
         end)
     end
@@ -2229,6 +2264,17 @@ function ns.SetupViewerHooks()
                 end)
             end)
         end
+    end
+
+    -- Listen for EditMode layout updates: Blizzard resets viewer frame
+    -- pools when applying a layout (happens on spec swap). Reanchor to
+    -- recollect the new frames. No flag manipulation -- just reanchor.
+    do
+        local emEventFrame = CreateFrame("Frame")
+        emEventFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+        emEventFrame:SetScript("OnEvent", function()
+            QueueReanchor()
+        end)
     end
 
     -- Lock EditMode for CDM frames (prevent user changes, avoid taint)

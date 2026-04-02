@@ -5223,6 +5223,13 @@ function EAB:HookProcGlow()
                         local id = GetButtonSpellID(btn)
                         if id and id == arg1 then
                             if isShow then ShowGlow(btn) else HideGlow(btn) end
+                        elseif not isShow and _procState.active[btn] then
+                            -- Spell on this button changed (transform/override)
+                            -- since the glow was shown. The HIDE event carries
+                            -- the old spellID which no longer matches. Clear it.
+                            if not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
+                                HideGlow(btn)
+                            end
                         end
                     end
                 end

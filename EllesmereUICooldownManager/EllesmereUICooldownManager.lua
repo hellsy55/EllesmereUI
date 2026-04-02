@@ -556,6 +556,13 @@ local MAIN_BAR_KEYS = { cooldowns = true, utility = true, buffs = true }
 local GHOST_BUFF_BAR_KEY = "__ghost_buffs"
 MAIN_BAR_KEYS[GHOST_BUFF_BAR_KEY] = true
 
+-- Ghost CD bar: same concept for CD/utility spells. When the user "removes"
+-- a spell from a CD or utility bar, it routes here instead of being deleted.
+-- This means every spell in Blizzard's viewer pool always has a route,
+-- eliminating the need for allowSet filtering during collection.
+local GHOST_CD_BAR_KEY = "__ghost_cd"
+MAIN_BAR_KEYS[GHOST_CD_BAR_KEY] = true
+
 -- Bar types that support talent-aware dormant slot persistence.
 -- Trinket/racial/potion and buff bars are excluded.
 local TALENT_AWARE_BAR_TYPES = { cooldowns = true, utility = true }
@@ -761,13 +768,21 @@ end
 -- during the transition window where spell data may be stale.
 local _lastSpecSwitchTime = 0
 
+-- Version token: incremented on each spec swap. All deferred timers check
+-- this so a newer spec swap cancels stale callbacks from an older one.
+local _specSwapVersion = 0
+
 --- Full spec switch: save non-spell data, update active spec, rebuild everything.
 --- Spell data is already in the global store keyed by spec -- switching the
 --- active spec key is all that's needed for spells to "switch".
 local function SwitchSpecProfile(newSpecKey)
     _lastSpecSwitchTime = GetTime()
+    _specSwapVersion = _specSwapVersion + 1
+    local myVersion = _specSwapVersion
 
-    -- Block reanchors so stale data doesn't cause flicker
+    -- Block reanchors so stale data doesn't cause flicker.
+    -- QueueReanchor still queues (never drops), but
+    -- ProcessReanchorQueue holds until this flag clears.
     ns._specChangePending = true
 
     -- Hide TBB bars immediately so stale spell data doesn't flash
@@ -785,45 +800,128 @@ local function SwitchSpecProfile(newSpecKey)
     EnsureSpec(p, newSpecKey)
     LoadSpecProfile(newSpecKey)
 
-    -- Deferred rebuild (Blizzard CDM needs time to update its frames)
+    -- Deferred spec swap: rebuild data, unblock, queue.
+    -- The normal reanchor handles everything else -- no special clearing.
     C_Timer.After(0.5, function()
-        -- Clear the flag that told RefreshAllAddons to skip CDM. The profile
-        -- system may have switched db.profile before CDM's handler ran; now
-        -- that the active spec key is correct, we can rebuild safely.
-        ns._specChangePending = false
+        if _specSwapVersion ~= myVersion then return end  -- superseded
         if EllesmereUI then EllesmereUI._specProfileSwitching = false end
-        ns.FullCDMRebuild("spec_switch")
-        -- Show TBB bars one frame after rebuild so the tick populates data first
-        C_Timer.After(0, function()
-            ns._tbbSpecSwapPending = false
-            if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
-        end)
-        RegisterCDMUnlockElements()
-        if ns.RegisterTBBUnlockElements then ns.RegisterTBBUnlockElements() end
 
-        -- CDM frames just moved to their new-profile positions. Re-sync
-        -- any external bars (resource bars, cast bar) that anchor to CDM
-        -- bars via the unlock system -- they rebuilt earlier (in
-        -- RefreshAllAddons) against stale CDM positions.
-        if EllesmereUI.ResyncAnchorOffsets then
-            EllesmereUI.ResyncAnchorOffsets()
+        -- 1. Rebuild data for the new spec
+        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+        if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
+
+        -- If the new spec has no assignedSpells (first time on this spec),
+        -- snapshot from Blizzard's active viewer frames to populate bars.
+        local needsSnapshot = false
+        for _, bk in ipairs({"cooldowns", "utility"}) do
+            local sd = ns.GetBarSpellData(bk)
+            if not sd or not sd.assignedSpells or #sd.assignedSpells == 0 then
+                needsSnapshot = true; break
+            end
+        end
+        if needsSnapshot then
+            local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+            local viewerToBar = {
+                EssentialCooldownViewer = "cooldowns",
+                UtilityCooldownViewer   = "utility",
+            }
+            for vName, bk in pairs(viewerToBar) do
+                local vf = _G[vName]
+                local sd = ns.GetBarSpellData(bk)
+                if vf and sd then
+                    if not sd.assignedSpells then sd.assignedSpells = {} end
+                    if #sd.assignedSpells == 0 then
+                        local seen = {}
+                        if vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                            for frame in vf.itemFramePool:EnumerateActive() do
+                                local cdID = frame.cooldownID
+                                if cdID and gci then
+                                    local info = gci(cdID)
+                                    if info then
+                                        local sid = ResolveInfoSpellID(info)
+                                        if sid and sid > 0 and not seen[sid] then
+                                            seen[sid] = true
+                                            sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
 
-        -- Catch frames Blizzard populates after our initial rebuild.
-        -- Rebuild route map again since spell overrides may have changed.
-        C_Timer.After(1, function()
-            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+
+        -- 2. Clear FC caches so ResolveFrameSpellID re-reads from API
+        for _, vname in ipairs(_cdmViewerNames) do
+            local vf = _G[vname]
+            if vf and vf.GetNumChildren and vf:GetNumChildren() > 0 then
+                local children = { vf:GetChildren() }
+                for ci = 1, #children do
+                    local ch = children[ci]
+                    if ch then
+                        local chfc = _ecmeFC[ch]
+                        if chfc then
+                            chfc.resolvedSid = nil
+                            chfc.baseSpellID = nil
+                            chfc.overrideSid = nil
+                            chfc.cachedCdID = nil
+                            chfc.isChargeSpell = nil
+                            chfc.maxCharges = nil
+                            chfc.sortOrder = nil
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 3. Clear preset frames so injection recreates fresh
+        if ns._presetFrames then
+            for _, f in pairs(ns._presetFrames) do
+                f:Hide(); f:ClearAllPoints()
+            end
+            wipe(ns._presetFrames)
+        end
+
+        -- 4. Unblock reanchors, then queue
+        ns._specChangePending = false
+        if ns.QueueReanchor then ns.QueueReanchor() end
+
+        -- Stage 2: catch late-populating frames
+        C_Timer.After(0.3, function()
+            if _specSwapVersion ~= myVersion then return end
+            if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
             if ns.QueueReanchor then ns.QueueReanchor() end
         end)
 
-        -- Refresh options panel if open
+        -- Stage 3: population failsafe
+        C_Timer.After(1.0, function()
+            if _specSwapVersion ~= myVersion then return end
+            if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
+        end)
+
+        -- TBB
+        C_Timer.After(0, function()
+            if _specSwapVersion ~= myVersion then return end
+            ns._tbbSpecSwapPending = false
+            if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
+        end)
+
+        -- Post-swap work (lightweight, no frame creation)
+        if _CDMApplyVisibility then _CDMApplyVisibility()
+        elseif ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+        RegisterCDMUnlockElements()
+        if ns.RegisterTBBUnlockElements then ns.RegisterTBBUnlockElements() end
+        if ns.UpdateCDMKeybinds then ns.UpdateCDMKeybinds() end
+        if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+        if EllesmereUI.ResyncAnchorOffsets then EllesmereUI.ResyncAnchorOffsets() end
+        if EllesmereUI.ApplyAllWidthHeightMatches then EllesmereUI.ApplyAllWidthHeightMatches() end
         if EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
-            if EllesmereUI.InvalidateContentHeaderCache then
-                EllesmereUI:InvalidateContentHeaderCache()
-            end
-            if EllesmereUI.RefreshPage then
-                EllesmereUI:RefreshPage(true)
-            end
+            if EllesmereUI.InvalidateContentHeaderCache then EllesmereUI:InvalidateContentHeaderCache() end
+            if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
         end
     end)
 end
@@ -1271,19 +1369,40 @@ ResolveBlizzChildSpellID = function(blizzChild)
     return nil
 end
 
--- Show proc glow on one of our icons (separate from active state glow)
+-- Show proc glow on one of our icons. Uses per-spell settings if available.
 local function ShowProcGlow(icon, cr, cg, cb)
     if not icon then return end
     local fd = _getFD(icon)
     local glow = fd and fd.glowOverlay or icon._glowOverlay
     if not glow then return end
-    -- Don't double-start if already showing proc glow
     if fd and fd.procGlowActive then return end
-    -- If active state glow is running, stop it first (proc glow takes priority)
-    if (fd and fd.isActive) and glow._glowActive then
-        StopNativeGlow(glow)
+
+    -- Per-spell proc glow settings
+    local style = PROC_GLOW_STYLE
+    local fc = _ecmeFC[icon]
+    local sid = fc and fc.spellID
+    if sid then
+        local bk = fc and fc.barKey
+        local sd = bk and ns.GetBarSpellData(bk)
+        local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+        if ss then
+            if ss.procGlow == 0 then return end -- proc glow disabled
+            if ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            if ss.procGlowClassColor then
+                local _, ct = UnitClass("player")
+                if ct then
+                    local cc = RAID_CLASS_COLORS[ct]
+                    if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                end
+            elseif ss.procGlowR then
+                cr, cg, cb = ss.procGlowR, ss.procGlowG or 0.788, ss.procGlowB or 0.137
+            end
+        end
     end
-    StartNativeGlow(glow, PROC_GLOW_STYLE, cr, cg, cb)
+
+    -- Stop active glow if running (proc takes priority)
+    if glow._glowActive then StopNativeGlow(glow) end
+    StartNativeGlow(glow, style, cr, cg, cb)
     if fd then fd.procGlowActive = true end
 end
 
@@ -1346,10 +1465,25 @@ local function InstallProcGlowHooks()
     _procGlowHooksInstalled = true
 end
 
+-- Scan all Blizzard CDM children for already-active proc alerts and apply
+-- our proc glow. Called after hooks install and after the 2s reset so we
+-- pick up procs that were active before our hooks were in place.
+local function ScanExistingProcGlows()
+    -- No-op: proc glows are now fully hook-driven. ShowAlert hooks installed
+    -- at file load time catch Blizzard's login re-fire. This function kept
+    -- as a callable no-op so existing call sites don't error.
+end
+ns.ScanExistingProcGlows = ScanExistingProcGlows
+
 -- (OnProcGlowEvent removed -- all bars use hook-based proc glows via
 -- InstallProcGlowHooks / ActionButtonSpellAlertManager now)
 local function OnProcGlowEvent() end
 ns.OnProcGlowEvent = OnProcGlowEvent
+
+-- Install proc glow hooks at file-load time (earliest possible).
+-- Blizzard re-fires ShowAlert during PLAYER_LOGIN for active procs.
+-- Hooks must be in place before that to catch them.
+InstallProcGlowHooks()
 
 
 -------------------------------------------------------------------------------
@@ -2289,14 +2423,10 @@ LayoutCDMBar = function(barKey)
             frame._prevLayoutW = fallbackW
             frame._prevLayoutH = fallbackH
         end
-        -- Dynamic bars (buffs): never hide the container. Blizzard's viewer
-        -- can return a partial set mid-update, causing a transient count of 0.
-        -- Hiding the container would kill all icons (they're anchored to it)
-        -- and nothing restores it until the next FullCDMRebuild.
-        -- Static bars (cd/utility): safe to hide, count 0 is stable.
-        if not isDynamic then
-            EllesmereUI.SetElementVisibility(frame, false)
-        end
+        -- Never permanently hide containers on transient count=0. Spec
+        -- swaps and viewer pool churn can produce brief 0-count states.
+        -- The next reanchor refills the bar. Hiding the container would
+        -- require an explicit re-show that nothing guarantees.
         if frame._barBg then frame._barBg:Hide() end
         return
     end
@@ -2950,45 +3080,103 @@ local function RefreshCDMIconAppearance(barKey)
         -- Do NOT reset isActive -- that causes a 1-frame flash where the
         -- ticker sees the transition as "inactive" and un-desaturates the
         -- icon before re-detecting active on the next frame.
-        -- Preserve proc glow across rebuilds to avoid visible blink at load-in.
+        -- Preserve proc glow and active state glow across rebuilds.
         local ifd = _getFD(icon)
         local hadProcGlow = ifd and ifd.procGlowActive
-        if glowOv then
-            StopNativeGlow(glowOv)
-        end
+        local hadActiveGlow = ifd and ifd._activeGlowOn
         if hadProcGlow and glowOv then
-            StartNativeGlow(glowOv, PROC_GLOW_STYLE, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
-            if ifd then ifd.procGlowActive = true end
-        else
+            -- Stop then restart with per-spell settings
+            StopNativeGlow(glowOv)
+            if ifd then ifd.procGlowActive = false end
+            ShowProcGlow(icon, PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3])
+        elseif hadActiveGlow then
+            -- Don't touch: active glow is managed by the SetSwipeColor hook.
+            -- Stopping it here causes a visible blink.
+        elseif glowOv then
+            StopNativeGlow(glowOv)
             if ifd then ifd.procGlowActive = false end
         end
     end
 end
 ns.RefreshCDMIconAppearance = RefreshCDMIconAppearance
 
--- Ghost buff bar: ensure it exists in the bars array at runtime.
+-- Ghost bars: ensure both buff and CD ghost bars exist in the bars array.
 -- Called from BuildAllCDMBars before iterating bars.
 ns.GHOST_BUFF_BAR_KEY = GHOST_BUFF_BAR_KEY
-local function EnsureGhostBar()
+ns.GHOST_CD_BAR_KEY = GHOST_CD_BAR_KEY
+local function EnsureGhostBars()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return end
+    local hasBuff, hasCD = false, false
     for _, b in ipairs(p.cdmBars.bars) do
-        if b.key == GHOST_BUFF_BAR_KEY then return end
+        if b.key == GHOST_BUFF_BAR_KEY then hasBuff = true end
+        if b.key == GHOST_CD_BAR_KEY then hasCD = true end
     end
-    p.cdmBars.bars[#p.cdmBars.bars + 1] = {
-        key = GHOST_BUFF_BAR_KEY,
-        name = "Hidden Buffs",
-        barType = "buffs",
-        isGhostBar = true,
-        enabled = true,
-        barVisibility = "never",
-        iconSize = 1,
-        spacing = 0,
-        numRows = 1,
-        growDirection = "RIGHT",
-    }
+    if not hasBuff then
+        p.cdmBars.bars[#p.cdmBars.bars + 1] = {
+            key = GHOST_BUFF_BAR_KEY,
+            name = "Hidden Buffs",
+            barType = "buffs",
+            isGhostBar = true,
+            enabled = true,
+            barVisibility = "never",
+            iconSize = 1,
+            spacing = 0,
+            numRows = 1,
+            growDirection = "RIGHT",
+        }
+    end
+    if not hasCD then
+        p.cdmBars.bars[#p.cdmBars.bars + 1] = {
+            key = GHOST_CD_BAR_KEY,
+            name = "Hidden CDs",
+            barType = "cooldowns",
+            isGhostBar = true,
+            enabled = true,
+            barVisibility = "never",
+            iconSize = 1,
+            spacing = 0,
+            numRows = 1,
+            growDirection = "RIGHT",
+        }
+    end
+    -- Migration: move existing removedSpells to the ghost CD bar.
+    -- Before the ghost bar existed, removed spells were tracked via a
+    -- per-bar removedSpells set and filtered by allowSet. Now they route
+    -- to the ghost bar instead.
+    -- Iterate ALL spec profiles (not just active spec) so every spec's
+    -- removedSpells are migrated on first load after this update.
+    local specProfiles = SpellStore.GetSpecProfiles()
+    if specProfiles then
+        for specKey, prof in pairs(specProfiles) do
+            local barSpells = prof and prof.barSpells
+            if barSpells then
+                local ghostBS = barSpells[GHOST_CD_BAR_KEY]
+                if not ghostBS then
+                    ghostBS = {}
+                    barSpells[GHOST_CD_BAR_KEY] = ghostBS
+                end
+                if not ghostBS.assignedSpells then ghostBS.assignedSpells = {} end
+                for barKey, bs in pairs(barSpells) do
+                    if barKey ~= GHOST_CD_BAR_KEY and barKey ~= GHOST_BUFF_BAR_KEY
+                       and bs.removedSpells and next(bs.removedSpells) then
+                        for sid in pairs(bs.removedSpells) do
+                            local found = false
+                            for _, existing in ipairs(ghostBS.assignedSpells) do
+                                if existing == sid then found = true; break end
+                            end
+                            if not found then
+                                ghostBS.assignedSpells[#ghostBS.assignedSpells + 1] = sid
+                            end
+                        end
+                        wipe(bs.removedSpells)
+                    end
+                end
+            end
+        end
+    end
 end
-ns.EnsureGhostBar = EnsureGhostBar
+ns.EnsureGhostBars = EnsureGhostBars
 
 -- Exports for extracted files (EllesmereUICdmHooks.lua, EllesmereUICdmSpellPicker.lua)
 ns.MAIN_BAR_KEYS = MAIN_BAR_KEYS
@@ -3452,8 +3640,8 @@ BuildAllCDMBars = function()
         ValidateSpec()
     end
 
-    -- Ensure the ghost buff bar exists before iterating bars
-    EnsureGhostBar()
+    -- Ensure ghost bars exist before iterating bars
+    EnsureGhostBars()
 
     local p = ECME.db.profile
 
@@ -3482,6 +3670,37 @@ BuildAllCDMBars = function()
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.activeStateAnim == "none" then
             bd.activeStateAnim = "hideActive"
+        end
+    end
+
+    -- Migration: per-bar activeStateAnim="hideActive" -> per-icon activeSwipeMode="none"
+    -- Old system had a per-bar "Hide Active State" setting. New system is per-icon.
+    -- For bars with hideActive, set all their spells to "Hide Active State" mode
+    -- across ALL spec profiles, then clear the bar-level setting.
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.activeStateAnim == "hideActive" and not bd.isGhostBar then
+            local specProfiles = SpellStore.GetSpecProfiles()
+            if specProfiles then
+                for specKey, prof in pairs(specProfiles) do
+                    local barSpells = prof and prof.barSpells
+                    local bs = barSpells and barSpells[bd.key]
+                    if bs and bs.assignedSpells then
+                        if not bs.spellSettings then bs.spellSettings = {} end
+                        for _, sid in ipairs(bs.assignedSpells) do
+                            if sid and sid > 0 then
+                                if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
+                                local ss = bs.spellSettings[sid]
+                                -- Only migrate if user hasn't already set per-icon active state
+                                if not ss.activeSwipeMode and not ss.activeSwipeR then
+                                    ss.activeSwipeMode = "none"
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- Clear old per-bar setting so migration doesn't run again
+            bd.activeStateAnim = "blizzard"
         end
     end
 
@@ -3525,9 +3744,10 @@ BuildAllCDMBars = function()
         return
     end
 
-    -- Detach icons from bars before rebuilding. BuildCDMBar handles
-    -- per-bar enable/disable visibility. No blanket alpha wipe needed --
-    -- that causes a 1-frame blink on every FullCDMRebuild.
+    -- Detach BUFF icons only before rebuilding. CD/utility icons are
+    -- managed entirely by CollectAndReanchor's simplified flow which
+    -- handles cleanup via excess icon clearing. Detaching CD/utility
+    -- icons here causes a 1-frame blink because the reanchor is deferred.
     local buffViewer = _G["BuffIconCooldownViewer"]
     local barViewer  = _G["BuffBarCooldownViewer"]
     for key, icons in pairs(cdmBarIcons) do
@@ -3536,9 +3756,6 @@ BuildAllCDMBars = function()
             if icon then
                 local vf = icon.viewerFrame
                 if vf == buffViewer or vf == barViewer then
-                    icon:ClearAllPoints()
-                else
-                    icon:Hide()
                     icon:ClearAllPoints()
                 end
             end
@@ -3571,7 +3788,9 @@ BuildAllCDMBars = function()
                 -- Hooked default bar: skip icon state reset and layout.
                 -- CollectAndReanchor will repopulate from viewer pools.
                 local frame = cdmBarFrames[barData.key]
-                if frame then frame._prevVisibleCount = nil end
+                if frame then
+                    frame._prevVisibleCount = nil
+                end
             else
                 RefreshCDMIconAppearance(barData.key)
                 -- Reset cached icon state so textures re-evaluate after a character switch
@@ -3588,7 +3807,9 @@ BuildAllCDMBars = function()
                     end
                 end
                 local frame = cdmBarFrames[barData.key]
-                if frame then frame._prevVisibleCount = nil end
+                if frame then
+                    frame._prevVisibleCount = nil
+                end
                 LayoutCDMBar(barData.key)
                 ApplyCDMTooltipState(barData.key)
             end
@@ -3662,6 +3883,15 @@ BuildAllCDMBars = function()
                 if icons then
                     for ii = 1, #icons do
                         if icons[ii] then icons[ii]:SetAlpha(0) end
+                    end
+                end
+            else
+                frame._visHidden = false
+                frame:SetAlpha(1)
+                local icons = cdmBarIcons[barData.key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] then icons[ii]:SetAlpha(1) end
                     end
                 end
             end
@@ -3744,6 +3974,7 @@ local _rebuildGen = 0
 
 function ns.FullCDMRebuild(reason)
     _rebuildGen = _rebuildGen + 1
+    local isSpecSwap = (reason == "spec_switch" or reason == "talent_reconcile" or reason == "spec_same_key")
 
     -- 1. Wipe all caches
     if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
@@ -3767,10 +3998,60 @@ function ns.FullCDMRebuild(reason)
     -- 5. Rebuild tracked buff bars
     if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
 
-    -- 6. Reanchor
-    if ns.QueueReanchor then ns.QueueReanchor() end
+    -- 6. On spec swap: wipe everything and reanchor directly.
+    -- _specChangePending is still true at this point (cleared by the
+    -- caller AFTER we return), so no queued reanchors can interfere.
+    -- The direct CollectAndReanchor call uses bypassSpecGuard=true.
+    if isSpecSwap then
+        -- Wipe all icon arrays
+        for bk, icons in pairs(cdmBarIcons) do
+            for i = 1, #icons do icons[i] = nil end
+        end
+        -- Clear change detection so layout runs fresh
+        for bk, frame in pairs(cdmBarFrames) do
+            if frame then
+                frame._prevIconRefs = nil
+                frame._prevVisibleCount = nil
+            end
+        end
+        -- Clear all stale anchors so SetPoint hook doesn't fight
+        if ns._hookFrameData then
+            for _, efd in pairs(ns._hookFrameData) do
+                efd._cdmAnchor = nil
+            end
+        end
+        -- Clear all FC caches so ResolveFrameSpellID re-reads from API.
+        -- Spells behind cooldownIDs change on spec swap; stale caches
+        -- would return the old spec's spell IDs.
+        for _, vname in ipairs(_cdmViewerNames) do
+            local vf = _G[vname]
+            if vf and vf.GetNumChildren and vf:GetNumChildren() > 0 then
+                local children = { vf:GetChildren() }
+                for ci = 1, #children do
+                    local ch = children[ci]
+                    if ch then
+                        local chfc = _ecmeFC[ch]
+                        if chfc then
+                            chfc.resolvedSid = nil
+                            chfc.baseSpellID = nil
+                            chfc.overrideSid = nil
+                            chfc.cachedCdID = nil
+                            chfc.isChargeSpell = nil
+                            chfc.maxCharges = nil
+                            chfc.sortOrder = nil
+                        end
+                    end
+                end
+            end
+        end
+        -- Direct reanchor, bypassing the _specChangePending guard
+        if ns.CollectAndReanchor then ns.CollectAndReanchor(true) end
 
-    -- 7. Glows (visibility already applied by BuildAllCDMBars)
+    else
+        if ns.QueueReanchor then ns.QueueReanchor() end
+    end
+
+    -- 7. Glows
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
 end
 
@@ -3822,16 +4103,16 @@ local function CDMFirstLoginCapture()
 end
 
 --- Repopulate all main bars from Blizzard CDM for the current spec.
---- Wipes assignedSpells/removedSpells/dormantSpells so CollectAndReanchor
---- shows whatever Blizzard currently has, then saves the spec profile.
+--- Wipes assignedSpells/removedSpells/dormantSpells, re-snapshots from
+--- Blizzard's CDM categories, then rebuilds route maps and reanchors.
 function ns.RepopulateFromBlizzard()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
     local specKey = ns.GetActiveSpecKey()
     if not specKey or specKey == "0" then return end
 
+    -- Wipe spell data on main CD/utility bars
     for _, barData in ipairs(p.cdmBars.bars) do
-        -- Skip the main buffs bar and ghost bar -- they manage their own assignments.
         if MAIN_BAR_KEYS[barData.key] and barData.key ~= "buffs" and not barData.isGhostBar then
             local sd = ns.GetBarSpellData(barData.key)
             if sd then
@@ -3842,9 +4123,47 @@ function ns.RepopulateFromBlizzard()
         end
     end
 
+    -- Also wipe the ghost CD bar so removed spells come back
+    local ghostSD = ns.GetBarSpellData(GHOST_CD_BAR_KEY)
+    if ghostSD then
+        ghostSD.assignedSpells = nil
+        ghostSD.removedSpells = nil
+        ghostSD.dormantSpells = nil
+    end
+
+    -- Re-snapshot: populate assignedSpells from Blizzard's active viewer
+    -- frames. Only spells that Blizzard currently displays are included
+    -- (excludes "Not Displayed" spells the user hid in Blizzard's CDM).
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    local viewerToBar = {
+        EssentialCooldownViewer = "cooldowns",
+        UtilityCooldownViewer   = "utility",
+    }
+    for vName, barKey in pairs(viewerToBar) do
+        local vf = _G[vName]
+        local sd = ns.GetBarSpellData(barKey)
+        if vf and sd then
+            if not sd.assignedSpells then sd.assignedSpells = {} end
+            local seen = {}
+            if vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                for frame in vf.itemFramePool:EnumerateActive() do
+                    local cdID = frame.cooldownID
+                    if cdID and gci then
+                        local info = gci(cdID)
+                        if info then
+                            local sid = ResolveInfoSpellID(info)
+                            if sid and sid > 0 and not seen[sid] then
+                                seen[sid] = true
+                                sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     ns.FullCDMRebuild("repopulate")
-    -- Run CollectAndReanchor immediately so live icons are populated
-    -- before the options page refreshes the preview.
     if ns.CollectAndReanchor then ns.CollectAndReanchor() end
 
     C_Timer.After(1, function()
@@ -4121,7 +4440,15 @@ function ECME:OnInitialize()
     -- Expose for options
     _G._ECME_AceDB = self.db
     _G._ECME_Apply = function()
-        ns.FullCDMRebuild("apply")
+        -- Skip FullCDMRebuild if a CD/utility spell change just happened
+        -- (AddTrackedSpell/RemoveTrackedSpell already handled routes + reanchor).
+        -- The _skipNextApplyRebuild flag prevents the double-reanchor that
+        -- causes icon 1 to disappear.
+        if ns._skipNextApplyRebuild then
+            ns._skipNextApplyRebuild = false
+        else
+            ns.FullCDMRebuild("apply")
+        end
         if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
         if ns.UpdateCustomBuffBars then ns.UpdateCustomBuffBars() end
     end
@@ -4213,25 +4540,10 @@ function ECME:OnEnable()
         C_Timer.After(3, function() if ns.HookAllCDMChildren then ns.HookAllCDMChildren(_G.BuffIconCooldownViewer) end end)
     end
 
-    -- Proc glow hooks (ShowAlert/HideAlert on Blizzard CDM children)
+    -- Proc glow hooks: install immediately + retry. Hooks must be in place
+    -- before Blizzard re-fires ShowAlert at PLAYER_LOGIN for active procs.
     InstallProcGlowHooks()
-    C_Timer.After(1, InstallProcGlowHooks)
-
-    -- Clear all proc glows after layout settles, then let Blizzard re-fire
-    -- them on the correct frames. Fixes stale glows from login when frames
-    -- shift positions (e.g. trinket filtering removes a slot).
-    C_Timer.After(2, function()
-        for _, icons in pairs(cdmBarIcons) do
-            for _, icon in ipairs(icons) do
-                local ifd = _getFD(icon)
-                local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
-                if glowOv and glowOv._glowActive then
-                    StopNativeGlow(glowOv)
-                    if ifd then ifd.procGlowActive = false end
-                end
-            end
-        end
-    end)
+    C_Timer.After(0.5, InstallProcGlowHooks)
 
     -- Initialize Bar Glows overlay system
     if ns.InitBarGlows then ns.InitBarGlows() end
@@ -4471,7 +4783,7 @@ local function TalentAwareReconcile()
         elseif TALENT_AWARE_BAR_TYPES[barData.barType] then
             if sd.assignedSpells and #sd.assignedSpells > 0 then
                 sd.assignedSpells, sd.dormantSpells =
-                    ReconcileSpellList(sd.assignedSpells, sd.dormantSpells, nil, classSpellSet)
+                    ReconcileSpellList(sd.assignedSpells, sd.dormantSpells, sd.removedSpells, nil)
             end
         end
     end
@@ -5254,7 +5566,7 @@ eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+-- UPDATE_SHAPESHIFT_FORM not needed: OnCooldownIDSet hooks handle form shifts
 
 -- Debounce token for talent-change rebuilds: rapid talent clicks collapse
 -- into a single deferred rebuild rather than firing once per click.
@@ -5378,20 +5690,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns.QueueReanchor then ns.QueueReanchor() end
         return
     end
-    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
-        if event == "UPDATE_SHAPESHIFT_FORM" then
-            -- Form swap changes spell overrides (e.g. druid forms).
-            -- Rebuild route map so transformed spells route correctly.
-            -- Defer visibility until after reanchor to prevent 1-frame blink.
-            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-            if ns.QueueReanchor then ns.QueueReanchor() end
-            C_Timer.After(0.3, function()
-                _CDMApplyVisibility()
-                UpdateCDMKeybinds()
-            end)
-        else
-            _CDMApplyVisibility()
-        end
+    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_TARGET_CHANGED" then
+        _CDMApplyVisibility()
         return
     end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then
