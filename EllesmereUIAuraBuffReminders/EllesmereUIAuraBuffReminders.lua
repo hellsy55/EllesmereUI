@@ -695,6 +695,10 @@ local AURAS = {
     { key="bestow_weyrnstone", class="EVOKER", name="Bestow Weyrnstone", castSpell=408233,
       buffIDs={410318}, check="ownOnRaid", combatOk=false,
       requireInstanceGroup=true },
+      -- Timelessness: OOC only. 
+    { key="timelessness", class="EVOKER", name="Timelessness", castSpell=412710,
+      buffIDs={412710}, check="ownOnRaid", combatOk=false,
+      requireInstanceGroup=true },
 }
 
 -------------------------------------------------------------------------------
@@ -1149,7 +1153,7 @@ local defaults = {
             enabled = {
                 symbiotic=true, def_stance=true, berserk_stance=true, shadowform=true,
                 devo_aura=true, bol=true, bof=true, som=true, blistering_scales=true, 
-                bestow_weyrnstone=true,
+                bestow_weyrnstone=true, timelessness=true,
             },
         },
         consumables = {
