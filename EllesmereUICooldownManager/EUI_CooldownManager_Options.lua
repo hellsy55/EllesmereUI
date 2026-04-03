@@ -558,11 +558,11 @@ initFrame:SetScript("OnEvent", function(self)
         if _bgSpellPickerMenu then _bgSpellPickerMenu:Hide() end
     end)
 
-    local function ShowBarGlowSpellPicker(anchorFrame, barIdx, btnIdx, onChanged)
+    local function ShowBarGlowSpellPicker(anchorFrame, barIdx, btnIdx, onChanged, overrideAssignKey)
         if _bgSpellPickerMenu then _bgSpellPickerMenu:Hide() end
 
         local bg = ns.GetBarGlows()
-        local assignKey = barIdx .. "_" .. btnIdx
+        local assignKey = overrideAssignKey or (barIdx .. "_" .. btnIdx)
         local buffList = bg.assignments[assignKey] or {}
 
         -- Build set of currently assigned spellIDs
@@ -1106,7 +1106,13 @@ initFrame:SetScript("OnEvent", function(self)
                 end
 
                 -- Accent border for buttons that have assignments
-                local assignKey = barIdx .. "_" .. i
+                local assignKey
+                if isCDMBar and realBtn and realBtn.cooldownID then
+                    assignKey = "cdm_" .. realBtn.cooldownID
+                else
+                    assignKey = barIdx .. "_" .. i
+                end
+                bf._assignKey = assignKey
                 local assigns = bgData.assignments[assignKey]
                 local hasAssign = assigns and #assigns > 0
 
@@ -1178,7 +1184,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if headerFrame._activeBtnRef and headerFrame._activeBtnRef ~= bf then
                         local prev = headerFrame._activeBtnRef
                         -- Revert border: if prev has assignments, switch to white; otherwise hide
-                        local prevKey = barIdx .. "_" .. (prev._btnIdx or 0)
+                        local prevKey = prev._assignKey or (barIdx .. "_" .. (prev._btnIdx or 0))
                         local prevAssigns = bgData.assignments[prevKey]
                         local prevHasAssign = prevAssigns and #prevAssigns > 0
                         if prevHasAssign then
@@ -1241,7 +1247,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 ShowBarGlowSpellPicker(newBf, barIdx, i, function()
                                     _glowSelectedButton = i
                                     EllesmereUI:RefreshPage(true)
-                                end)
+                                end, newBf._assignKey)
                             end
                         end)
                     end
@@ -1300,7 +1306,17 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - 40
         else
             -- Button selected: show per-buff sections
-            local assignKey = curBar .. "_" .. curBtn
+            local assignKey
+            local isCurCDM = (curBar >= 100)
+            if isCurCDM then
+                local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[curBar]
+                local cdmIcons = cdmKey and ns.cdmBarIcons and ns.cdmBarIcons[cdmKey]
+                local icon = cdmIcons and cdmIcons[curBtn]
+                if icon and icon.cooldownID then
+                    assignKey = "cdm_" .. icon.cooldownID
+                end
+            end
+            if not assignKey then assignKey = curBar .. "_" .. curBtn end
             local buffList = bg.assignments[assignKey] or {}
             parent._showRowDivider = true
 
@@ -2619,9 +2635,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
 
         -- Height | Width
+        local tbbKey = "TBB_" .. _tbbSelectedBar
+        local thDis, thTip, thRaw = EllesmereUI.MatchGuard(tbbKey, "Height")
+        local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 60, step = 1,
+              disabled = thDis, disabledTooltip = thTip, rawTooltip = thRaw,
               getValue = function() local bd = SelectedTBB(); return bd and bd.height or 24 end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
@@ -2640,6 +2660,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Width",
               min = 50, max = 500, step = 1,
+              disabled = twDis, disabledTooltip = twTip, rawTooltip = twRaw,
               getValue = function() local bd = SelectedTBB(); return bd and bd.width or 270 end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
@@ -4752,6 +4773,12 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                     popup._dimmer:Hide()
+                    -- Tag as custom spell so ghost bar routing can skip it
+                    local sdTag = bd and ns.GetBarSpellData(bd.key)
+                    if sdTag then
+                        if not sdTag.customSpellIDs then sdTag.customSpellIDs = {} end
+                        sdTag.customSpellIDs[sid] = true
+                    end
                     if onSelect then onSelect(sid, true) end
                 end
 

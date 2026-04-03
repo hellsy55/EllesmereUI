@@ -1367,11 +1367,6 @@ local _refreshPendingAfterCombat = false
 local _refreshSkipAlphaFlash = false
 
 function EQT:Refresh(skipAlphaFlash)
-    if InCombatLockdown() then
-        _refreshPendingAfterCombat = true
-        _refreshSkipAlphaFlash = skipAlphaFlash
-        return
-    end
     local f = self.frame
     if not f then return end
     -- Full rebuild: invalidate caches so data is fresh

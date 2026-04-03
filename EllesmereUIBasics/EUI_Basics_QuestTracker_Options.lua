@@ -128,18 +128,20 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - visH
 
+        local eqtWDis, eqtWTip, eqtWRaw = EllesmereUI.MatchGuard("EQT_Tracker", "Width",
+            function() return Cfg("enabled") == false end, "Module is disabled")
+        local eqtHDis, eqtHTip, eqtHRaw = EllesmereUI.MatchGuard("EQT_Tracker", "Height",
+            function() return Cfg("enabled") == false end, "Module is disabled")
         _, h = W:DualRow(parent, y,
             { type="slider", text="Width", min=160, max=400, step=5,
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
+              disabled=eqtWDis, disabledTooltip=eqtWTip, rawTooltip=eqtWRaw,
               getValue=function() return Cfg("width") or 325 end,
               setValue=function(v)
                   Set("width", v)
                   EQT:Refresh(true)
               end },
             { type="slider", text="Height",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
+              disabled=eqtHDis, disabledTooltip=eqtHTip, rawTooltip=eqtHRaw,
               min=100, max=800, step=10,
               getValue=function() return Cfg("height") or 500 end,
               setValue=function(v)

@@ -2382,10 +2382,30 @@ LayoutCDMBar = function(barKey)
     if shape == "cropped" then
         iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
     end
-    local spacing = SnapForScale(barData.spacing or 2, 1)
     local grow = frame._mouseGrow or barData.growDirection or "CENTER"
     local numRows = barData.numRows or 1
     if numRows < 1 then numRows = 1 end
+    -- Use match-adjusted fractional spacing if stride still matches
+    -- and the bar still has an active width match. Otherwise revert
+    -- to the user's configured integer spacing.
+    local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
+    local spacing
+    local hasWidthMatch = EllesmereUI.GetWidthMatchTarget
+        and EllesmereUI.GetWidthMatchTarget("CDM_" .. barKey) ~= nil
+    if hasWidthMatch and barData._matchSpacing and barData._matchStride then
+        local curDim = isHoriz and ComputeTopRowStride(barData, #icons) or numRows
+        if curDim == barData._matchStride then
+            spacing = barData._matchSpacing
+        else
+            barData._matchSpacing = nil
+            barData._matchStride = nil
+            spacing = SnapForScale(barData.spacing or 2, 1)
+        end
+    else
+        barData._matchSpacing = nil
+        barData._matchStride = nil
+        spacing = SnapForScale(barData.spacing or 2, 1)
+    end
 
     -- Use ALL icons in the array (not just IsShown). CollectAndReanchor
     -- already filtered to only include frames we claimed. Blizzard may
@@ -2432,7 +2452,6 @@ LayoutCDMBar = function(barKey)
     end
 
     -- Bar has visible icons -- ensure it is visible (unless visibility is "never")
-    local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     local stride, _, customTopCount = ComputeTopRowStride(barData, sizeCount)
 
     -- Container size (already snapped values)
@@ -2521,46 +2540,47 @@ LayoutCDMBar = function(barKey)
         local rowCount = RowIconCount(row)
         local rowHasLess = (rowCount > 0 and rowCount < stride)
 
+        local snap = SnapForScale
         if grow == "RIGHT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                col * scaledStepW + rowOffset,
-                -(row * scaledStepH))
+                snap(col * scaledStepW + rowOffset, 1),
+                snap(-(row * scaledStepH), 1))
         elseif grow == "LEFT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT",
-                -(col * scaledStepW + rowOffset),
-                -(row * scaledStepH))
+                snap(-(col * scaledStepW + rowOffset), 1),
+                snap(-(row * scaledStepH), 1))
         elseif grow == "DOWN" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * scaledStepH / 2, 1)
+                rowOffset = snap((stride - rowCount) * scaledStepH / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                row * scaledStepW,
-                -(col * scaledStepH + rowOffset))
+                snap(row * scaledStepW, 1),
+                snap(-(col * scaledStepH + rowOffset), 1))
         elseif grow == "UP" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * scaledStepH / 2, 1)
+                rowOffset = snap((stride - rowCount) * scaledStepH / 2, 1)
             end
             icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT",
-                row * scaledStepW,
-                col * scaledStepH + rowOffset)
+                snap(row * scaledStepW, 1),
+                snap(col * scaledStepH + rowOffset, 1))
         elseif grow == "CENTER" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = SnapForScale((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
             end
             icon:SetPoint("TOPLEFT", frame, "CENTER",
-                col * scaledStepW + rowOffset - (totalW / 2) * iS,
-                -(row * scaledStepH) + (totalH / 2) * iS)
+                snap(col * scaledStepW + rowOffset - (totalW / 2) * iS, 1),
+                snap(-(row * scaledStepH) + (totalH / 2) * iS, 1))
         end
 
         -- Store the anchor we just set so the SetPoint hook can force
@@ -3172,6 +3192,45 @@ local function EnsureGhostBars()
                         wipe(bs.removedSpells)
                     end
                 end
+            end
+        end
+    end
+    -- One-time cleanup: remove preset/trinket IDs (negative) and custom
+    -- spell IDs from ghost CD bar. Only Blizzard viewer spells belong there.
+    if specProfiles then
+        for specKey, prof in pairs(specProfiles) do
+            if not prof._ghostBarCleaned3 then
+                local barSpells = prof and prof.barSpells
+                local ghostBS = barSpells and barSpells[GHOST_CD_BAR_KEY]
+                if ghostBS and ghostBS.assignedSpells then
+                    -- Build set of all spells on real (non-ghost) bars
+                    local realBarSpells = {}
+                    local customSet = {}
+                    for bk, bs in pairs(barSpells) do
+                        if bk ~= GHOST_CD_BAR_KEY and bk ~= GHOST_BUFF_BAR_KEY then
+                            if bs.assignedSpells then
+                                for _, sid in ipairs(bs.assignedSpells) do
+                                    if sid and sid > 0 then realBarSpells[sid] = true end
+                                end
+                            end
+                            if bs.customSpellIDs then
+                                for sid in pairs(bs.customSpellIDs) do
+                                    customSet[sid] = true
+                                end
+                            end
+                        end
+                    end
+                    local racialsSet = ns._myRacialsSet
+                    for i = #ghostBS.assignedSpells, 1, -1 do
+                        local sid = ghostBS.assignedSpells[i]
+                        if sid <= 0 or customSet[sid]
+                           or (racialsSet and racialsSet[sid])
+                           or realBarSpells[sid] then
+                            table.remove(ghostBS.assignedSpells, i)
+                        end
+                    end
+                end
+                prof._ghostBarCleaned3 = true
             end
         end
     end
@@ -4111,14 +4170,17 @@ function ns.RepopulateFromBlizzard()
     local specKey = ns.GetActiveSpecKey()
     if not specKey or specKey == "0" then return end
 
-    -- Wipe spell data on main CD/utility bars
+    -- Wipe spell data on all CD/utility bars (main + custom)
     for _, barData in ipairs(p.cdmBars.bars) do
-        if MAIN_BAR_KEYS[barData.key] and barData.key ~= "buffs" and not barData.isGhostBar then
+        if not barData.isGhostBar and barData.key ~= "buffs"
+           and (barData.barType == "cooldowns" or barData.barType == "utility"
+                or MAIN_BAR_KEYS[barData.key]) then
             local sd = ns.GetBarSpellData(barData.key)
             if sd then
                 sd.assignedSpells = nil
                 sd.removedSpells = nil
                 sd.dormantSpells = nil
+                sd.spellSettings = nil
             end
         end
     end
@@ -4222,6 +4284,7 @@ RegisterCDMUnlockElements = function()
                 order = 600,
                 linkedKeys = linked,
                 noAnchorTarget = isDynamic,
+                noResize = isDynamic,
                 isHidden = function()
                     -- If this bar key is no longer in the current profile's
                     -- barDataByKey, it is a stale registration from a previous
@@ -4247,14 +4310,24 @@ RegisterCDMUnlockElements = function()
                     local grow = bd2.growDirection or "CENTER"
                     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
-                    local rawIcon
-                    if isH then
-                        rawIcon = (newW - (stride - 1) * sp) / stride
-                    else
-                        rawIcon = (newW - (rows - 1) * sp) / rows
-                    end
+                    local dim = isH and stride or rows
+                    local rawIcon = (newW - (dim - 1) * sp) / dim
                     if rawIcon < 8 then rawIcon = 8 end
                     bd2.iconSize = math.floor(rawIcon + 0.5)
+                    -- Back-solve exact fractional spacing to hit target width.
+                    -- Per-offset snapping in LayoutCDMBar distributes the
+                    -- sub-pixel difference as +/-1px across individual gaps.
+                    local iconW = SnapForScale(bd2.iconSize, 1)
+                    local gaps = dim - 1
+                    bd2._matchSpacing = nil
+                    bd2._matchStride = nil
+                    if gaps > 0 then
+                        local exactSp = (newW - dim * iconW) / gaps
+                        if exactSp >= 0 and math.abs(exactSp - sp) <= 1 then
+                            bd2._matchSpacing = exactSp
+                            bd2._matchStride = dim
+                        end
+                    end
                     LayoutCDMBar(key)
                 end,
                 setHeight = function(_, newH)

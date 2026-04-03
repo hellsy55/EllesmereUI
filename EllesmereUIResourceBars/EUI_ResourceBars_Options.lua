@@ -1160,11 +1160,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: (Sync) Height | (Sync) Width
         local classSizeRow
+        local chDis, chTip, chRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Height", classOff, "Enable Class Resource")
+        local cwDis, cwTip, cwRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Width", classOff, "Enable Class Resource")
         classSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 60, step = 1,
-              disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabled = chDis, disabledTooltip = chTip, rawTooltip = chRaw,
               getValue = function() local p = DB(); return p and p.secondary.pipHeight or 20 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -1173,8 +1174,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Width",
               min = 10, max = 500, step = 1,
-              disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabled = cwDis, disabledTooltip = cwTip, rawTooltip = cwRaw,
               getValue = function() local p = DB(); return p and p.secondary.pipWidth or 214 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -1697,11 +1697,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: (Sync) Height | (Sync) Width
         local powerSizeRow
+        local phDis, phTip, phRaw = EllesmereUI.MatchGuard("ERB_Power", "Height", powerOff, powerDisTip)
+        local pwDis, pwTip, pwRaw = EllesmereUI.MatchGuard("ERB_Power", "Width", powerOff, powerDisTip)
         powerSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 30, step = 1,
-              disabled = powerOff,
-              disabledTooltip = powerDisTip,
+              disabled = phDis, disabledTooltip = phTip, rawTooltip = phRaw,
               getValue = function() local p = DB(); return p and p.primary.height or 16 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -1710,8 +1711,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Width",
               min = 50, max = 350, step = 1,
-              disabled = powerOff,
-              disabledTooltip = powerDisTip,
+              disabled = pwDis, disabledTooltip = pwTip, rawTooltip = pwRaw,
               getValue = function() local p = DB(); return p and p.primary.width or 220 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -2154,11 +2154,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: (Sync) Height | (Sync) Width
         local healthSizeRow
+        local hhDis, hhTip, hhRaw = EllesmereUI.MatchGuard("ERB_Health", "Height", healthOff, "Enable Health Bar")
+        local hwDis, hwTip, hwRaw = EllesmereUI.MatchGuard("ERB_Health", "Width", healthOff, "Enable Health Bar")
         healthSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 40, step = 1,
-              disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabled = hhDis, disabledTooltip = hhTip, rawTooltip = hhRaw,
               getValue = function() local p = DB(); return p and p.health.height or 20 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -2167,8 +2168,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Width",
               min = 50, max = 350, step = 1,
-              disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabled = hwDis, disabledTooltip = hwTip, rawTooltip = hwRaw,
               getValue = function() local p = DB(); return p and p.health.width or 220 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -3033,11 +3033,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: Height | Width (sync icons push to power + health bars)
         local classSizeRow
+        local cbhDis, cbhTip, cbhRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Height", castOff, "Enable Player Cast Bar")
+        local cbwDis, cbwTip, cbwRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Width", castOff, "Enable Player Cast Bar")
         classSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 60, step = 1,
-              disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabled = cbhDis, disabledTooltip = cbhTip, rawTooltip = cbhRaw,
               getValue = function() local p = DB(); return p and p.castBar.height or 20 end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -3045,8 +3046,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Width",
               min = 50, max = 500, step = 1,
-              disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabled = cbwDis, disabledTooltip = cbwTip, rawTooltip = cbwRaw,
               getValue = function() local p = DB(); return p and p.castBar.width or 220 end,
               setValue = function(v)
                   local p = DB(); if not p then return end

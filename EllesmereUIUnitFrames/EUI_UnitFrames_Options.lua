@@ -3658,11 +3658,15 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 1: Bar Height + Bar Width (was Frame Width)
         local sharedSizeRow
+        local ufhDis, ufhTip, ufhRaw = EllesmereUI.MatchGuard(selectedUnit, "Height")
+        local ufwDis, ufwTip, ufwRaw = EllesmereUI.MatchGuard(selectedUnit, "Width")
         sharedSizeRow, h = W:DualRow(parent, y,
             { type="slider", text="Bar Height", min=15, max=100, step=1,
+              disabled=ufhDis, disabledTooltip=ufhTip, rawTooltip=ufhRaw,
               getValue=function() return SVal("healthHeight", 46) end,
               setValue=function(v) SSet("healthHeight", v) end },
             { type="slider", text="Bar Width", min=80, max=400, step=1,
+              disabled=ufwDis, disabledTooltip=ufwTip, rawTooltip=ufwRaw,
               getValue=function() return SVal("frameWidth", 181) end,
               setValue=function(v) SSet("frameWidth", v) end });  y = y - h
         -- Sync icons: Bar Height (left) and Bar Width (right)
@@ -4696,11 +4700,14 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 1: Show Cast Bar (toggle + fill swatch) | Height (slider)
         local sharedCastRow1
+        local cbKey = selectedUnit .. "Castbar"
+        local cbhDis, cbhTip, cbhRaw = EllesmereUI.MatchGuard(cbKey, "Height")
         sharedCastRow1, h = W:DualRow(parent, y,
             { type="toggle", text="Show Cast Bar",
               getValue=function() return GetCastbarEnabled(selectedUnit) end,
               setValue=function(v) SetCastbarEnabled(selectedUnit, v); ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage() end },
             { type="slider", text="Height", min=1, max=40, step=1,
+              disabled=cbhDis, disabledTooltip=cbhTip, rawTooltip=cbhRaw,
               getValue=GetCastbarHeight,
               setValue=function(v) SetCastbarHeight(v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
         -- Inline fill color swatch on Show Cast Bar
@@ -6818,14 +6825,18 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row: Bar Height + Bar Width
         local sizeRow
+        local mhDis, mhTip, mhRaw = EllesmereUI.MatchGuard(unitKey, "Height")
+        local mwDis, mwTip, mwRaw = EllesmereUI.MatchGuard(unitKey, "Width")
         sizeRow, h = W:DualRow(parent, y,
             { type="slider", text="Bar Height", min=10, max=80, step=1,
+              disabled=mhDis, disabledTooltip=mhTip, rawTooltip=mhRaw,
               getValue=function() return settingsTable.healthHeight end,
               setValue=function(v)
                 settingsTable.healthHeight = v
                 ReloadAndUpdate()
               end },
             { type="slider", text="Bar Width", min=60, max=300, step=1,
+              disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
               getValue=function() return settingsTable.frameWidth end,
               setValue=function(v)
                 settingsTable.frameWidth = v

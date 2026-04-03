@@ -1259,16 +1259,18 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
             end
 
+            local wDis, wTip, wRaw = EllesmereUI.MatchGuard(barKey, "Width", _blizzDis, BLIZZ_DIS_TIP)
+            local hDis, hTip, hRaw = EllesmereUI.MatchGuard(barKey, "Height", _blizzDis, BLIZZ_DIS_TIP)
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Width", min=50, max=600, step=1,
-                  disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP,
+                  disabled=wDis, disabledTooltip=wTip, rawTooltip=wRaw,
                   getValue=function() return EAB.db.profile.bars[barKey].width or 400 end,
                   setValue=function(v)
                       EAB.db.profile.bars[barKey].width = v
                       if ns.ApplyDataBarLayout then ns.ApplyDataBarLayout(barKey) end
                   end },
                 { type="slider", text="Height", min=4, max=40, step=1,
-                  disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP,
+                  disabled=hDis, disabledTooltip=hTip, rawTooltip=hRaw,
                   getValue=function() return EAB.db.profile.bars[barKey].height or 18 end,
                   setValue=function(v)
                       EAB.db.profile.bars[barKey].height = v

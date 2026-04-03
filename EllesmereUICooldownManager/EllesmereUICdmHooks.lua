@@ -241,15 +241,21 @@ function ns.RebuildSpellRouteMap()
         end
     end
 
-    -- Pass 1: buffs-type bars (lowest priority)
+    -- Pass 1: ghost bars (lowest priority -- real bars always override)
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and bd.isGhostBar then
+            MapBarSpells(bd)
+        end
+    end
+    -- Pass 2: buffs-type bars
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
             MapBarSpells(bd)
         end
     end
-    -- Pass 2: CD/utility bars and ghost bar (overwrite buffs entries)
+    -- Pass 3: CD/utility bars (highest priority -- overwrite all)
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and (bd.isGhostBar or (bd.key ~= "buffs" and bd.barType ~= "custom_buff" and bd.barType ~= "buffs")) then
+        if bd.enabled and not bd.isGhostBar and bd.key ~= "buffs" and bd.barType ~= "custom_buff" and bd.barType ~= "buffs" then
             MapBarSpells(bd)
         end
     end
@@ -953,9 +959,19 @@ _racialCdListener:SetScript("OnEvent", function()
                     f._cooldown:Clear()
                     f._cdStart = nil; f._cdDur = nil
                 end
-                -- Desaturate when on cooldown (matches Blizzard CDM behavior)
+                -- Desaturate when on cooldown or zero count
                 local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
-                if f._tex then f._tex:SetDesaturated(itemOnCD and true or false) end
+                local total = C_Item.GetItemCount(f._presetItemID) or 0
+                if total == 0 and f._presetData and f._presetData.altItemIDs then
+                    for _, altID in ipairs(f._presetData.altItemIDs) do
+                        total = total + (C_Item.GetItemCount(altID) or 0)
+                    end
+                end
+                local shouldDesat = (total == 0 or itemOnCD) and true or false
+                if shouldDesat ~= f._lastDesat then
+                    f._lastDesat = shouldDesat
+                    if f._tex then f._tex:SetDesaturated(shouldDesat) end
+                end
             end
         end
     end
@@ -1376,22 +1392,13 @@ local function CollectAndReanchor(bypassSpecGuard)
                                     f._cdStart = nil; f._cdDur = nil
                                 end
                                 local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
-                                if f._presetData and (f._presetData.key == "healthstone" or f._presetData.key == "demonic_healthstone") then
-                                    local inBags = C_Item.GetItemCount(itemID) > 0
-                                    if not inBags and f._presetData.altItemIDs then
-                                        for _, altID in ipairs(f._presetData.altItemIDs) do
-                                            if C_Item.GetItemCount(altID) > 0 then inBags = true; break end
-                                        end
+                                local total = C_Item.GetItemCount(itemID) or 0
+                                if f._presetData and f._presetData.altItemIDs then
+                                    for _, altID in ipairs(f._presetData.altItemIDs) do
+                                        total = total + (C_Item.GetItemCount(altID) or 0)
                                     end
-                                    if f._tex then f._tex:SetDesaturated(not inBags or itemOnCD) end
                                 end
                                 if f._itemCountText then
-                                    local total = C_Item.GetItemCount(itemID) or 0
-                                    if f._presetData and f._presetData.altItemIDs then
-                                        for _, altID in ipairs(f._presetData.altItemIDs) do
-                                            total = total + (C_Item.GetItemCount(altID) or 0)
-                                        end
-                                    end
                                     if total > 1 then
                                         f._itemCountText:SetText(total)
                                         f._itemCountText:Show()
@@ -1399,8 +1406,10 @@ local function CollectAndReanchor(bypassSpecGuard)
                                         f._itemCountText:SetText("")
                                         f._itemCountText:Hide()
                                     end
-                                    if f._tex then f._tex:SetDesaturated(total == 0 or itemOnCD) end
                                 end
+                                local shouldDesat = (total == 0 or itemOnCD) and true or false
+                                if f._tex then f._tex:SetDesaturated(shouldDesat) end
+                                f._lastDesat = shouldDesat
                                 frames[#frames + 1] = f
                                 local fc = FC(f)
                                 fc.barKey = barKey; fc.spellID = sid
@@ -1609,7 +1618,7 @@ local function CollectAndReanchor(bypassSpecGuard)
 
     if not ns._initialReanchorDone then ns._initialReanchorDone = true end
 
-    if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
+    if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
     ns.RefreshAllOverlays()
     MemDelta("ProcessBars")
     MemReport()
@@ -2219,6 +2228,13 @@ function ns.SetupViewerHooks()
                                     ac[sid] = true
                                     local baseSID = fc.baseSpellID
                                     if baseSID and baseSID > 0 then ac[baseSID] = true end
+                                    local linked = fc and fc.linkedSpellIDs
+                                    if linked then
+                                        for li = 1, #linked do
+                                            local lsid = linked[li]
+                                            if lsid and lsid > 0 then ac[lsid] = true end
+                                        end
+                                    end
                                 end
                             end
                         end

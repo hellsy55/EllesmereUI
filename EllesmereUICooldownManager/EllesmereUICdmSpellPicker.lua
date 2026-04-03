@@ -583,8 +583,13 @@ function ns.RemoveTrackedSpell(barKey, idx)
     table.remove(list, idx)
     -- Route to ghost CD bar (replaces the old removedSpells mechanism).
     -- The spell stays routed via cdidRouteMap but the ghost bar is hidden.
+    -- Only Blizzard viewer spells (positive IDs) go to ghost bar.
+    -- Presets (trinkets <= -13, items <= -100) are not viewer spells.
     local ghostKey = ns.GHOST_CD_BAR_KEY
-    if removedID and removedID ~= 0 and ghostKey then
+    local isNonViewer = removedID and removedID > 0
+        and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
+          or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
+    if removedID and removedID > 0 and not isNonViewer and ghostKey then
         local ghostSD = ns.GetBarSpellData(ghostKey)
         if ghostSD then
             if not ghostSD.assignedSpells then ghostSD.assignedSpells = {} end
@@ -599,6 +604,9 @@ function ns.RemoveTrackedSpell(barKey, idx)
     end
     if removedID and sd.customSpellDurations then
         sd.customSpellDurations[removedID] = nil
+    end
+    if removedID and sd.customSpellIDs then
+        sd.customSpellIDs[removedID] = nil
     end
     if removedID and sd.customSpellGroups then
         for variantID, primaryID in pairs(sd.customSpellGroups) do

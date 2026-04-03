@@ -434,7 +434,9 @@ local function AddControlDisabledTooltip(controlAnchor, cfg)
         if cfg.disabled() then
             local tt = cfg.disabledTooltip
             if type(tt) == "function" then tt = tt() end
-            ShowWidgetTooltip(controlAnchor, DisabledTooltip(tt))
+            local raw = cfg.rawTooltip
+            if type(raw) == "function" then raw = raw() end
+            ShowWidgetTooltip(controlAnchor, raw and tt or DisabledTooltip(tt))
         end
     end)
     hit:SetScript("OnLeave", function() HideWidgetTooltip() end)
@@ -2637,7 +2639,9 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                 if cfg.disabled and cfg.disabled() and cfg.disabledTooltip then
                     local tt = cfg.disabledTooltip
                     if type(tt) == "function" then tt = tt() end
-                    ShowWidgetTooltip(label, DisabledTooltip(tt))
+                    local raw = cfg.rawTooltip
+                    if type(raw) == "function" then raw = raw() end
+                    ShowWidgetTooltip(label, raw and tt or DisabledTooltip(tt))
                 elseif cfg.tooltip then
                     ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
                 end
@@ -2984,7 +2988,9 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
                 if cfg.disabled and cfg.disabled() and cfg.disabledTooltip then
                     local tt = cfg.disabledTooltip
                     if type(tt) == "function" then tt = tt() end
-                    ShowWidgetTooltip(label, DisabledTooltip(tt))
+                    local raw = cfg.rawTooltip
+                    if type(raw) == "function" then raw = raw() end
+                    ShowWidgetTooltip(label, raw and tt or DisabledTooltip(tt))
                 elseif cfg.tooltip then
                     ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
                 end
