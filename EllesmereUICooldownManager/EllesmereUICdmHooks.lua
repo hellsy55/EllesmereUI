@@ -165,10 +165,12 @@ ns.ResolveFrameSpellID = ResolveFrameSpellID
 -------------------------------------------------------------------------------
 local _spellRouteMap = {}
 local _cdidRouteMap = {}
+local _buffSpellRouteMap = {}  -- spellID -> barKey for buff-type bars only
 
 function ns.RebuildSpellRouteMap()
     wipe(_spellRouteMap)
     wipe(_cdidRouteMap)
+    wipe(_buffSpellRouteMap)
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
@@ -251,6 +253,29 @@ function ns.RebuildSpellRouteMap()
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
             MapBarSpells(bd)
+            -- Also populate buff-only route map (not overwritten by CD pass)
+            local sd = ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells then
+                for _, sid in ipairs(sd.assignedSpells) do
+                    if type(sid) == "number" and sid > 0 then
+                        _buffSpellRouteMap[sid] = bd.key
+                        if _FindOverride then
+                            local ovr = _FindOverride(sid)
+                            if ovr and ovr > 0 and ovr ~= sid then
+                                _buffSpellRouteMap[ovr] = bd.key
+                            end
+                        end
+                        local base
+                        if C_Spell and C_Spell.GetBaseSpell then
+                            base = C_Spell.GetBaseSpell(sid)
+                            if base == sid then base = nil end
+                        end
+                        if base and base > 0 and base ~= sid then
+                            _buffSpellRouteMap[base] = bd.key
+                        end
+                    end
+                end
+            end
         end
     end
     -- Pass 3: CD/utility bars (highest priority -- overwrite all)
@@ -730,6 +755,14 @@ local function CategorizeFrame(frame, viewerBarKey)
         local claimIsBuff  = (claimType == "buffs")
         if viewerIsBuff == claimIsBuff then
             return claimBarKey, displaySID, baseSID
+        end
+        -- Type mismatch: buff viewer frame routed to CD bar (or vice versa).
+        -- Check the buff-specific route map for a matching buff bar.
+        if viewerIsBuff then
+            local buffBar = _buffSpellRouteMap[baseSID] or _buffSpellRouteMap[displaySID]
+            if buffBar then
+                return buffBar, displaySID, baseSID
+            end
         end
     end
     return viewerBarKey, displaySID, baseSID
