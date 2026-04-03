@@ -2933,15 +2933,21 @@ BuildCastBar = function()
         castBarFrame._iconFrame = iconFrame
         castBarFrame._icon = icon
 
+        -- Text overlay frame (above border)
+        local textFrame = CreateFrame("Frame", nil, castBarFrame)
+        textFrame:SetAllPoints(bar)
+        textFrame:SetFrameLevel(bdrFrame:GetFrameLevel() + 1)
+        castBarFrame._textFrame = textFrame
+
         -- Spell name text
-        local nameText = bar:CreateFontString(nil, "OVERLAY")
+        local nameText = textFrame:CreateFontString(nil, "OVERLAY")
         SetRBFont(nameText, GetRBFont(), 11)
         nameText:SetPoint("LEFT", bar, "LEFT", 4, 0)
         nameText:SetJustifyH("LEFT")
         castBarFrame._nameText = nameText
 
         -- Timer text
-        local timerText = bar:CreateFontString(nil, "OVERLAY")
+        local timerText = textFrame:CreateFontString(nil, "OVERLAY")
         SetRBFont(timerText, GetRBFont(), 11)
         timerText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
         timerText:SetJustifyH("RIGHT")
@@ -3101,8 +3107,8 @@ else
     end
     castBarFrame._gradientFullBar = nil
 
-    castBarFrame._nameText:SetParent(bar)
-    castBarFrame._timerText:SetParent(bar)
+    castBarFrame._nameText:SetParent(castBarFrame._textFrame)
+    castBarFrame._timerText:SetParent(castBarFrame._textFrame)
 
     do
         local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
