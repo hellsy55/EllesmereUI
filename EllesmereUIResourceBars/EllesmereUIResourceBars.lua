@@ -2607,7 +2607,9 @@ local function UpdateVisibility()
     -- Power bar visibility
     if primaryBar then
         local pp = ERB.db.profile.primary
-        if pp and pp.enabled ~= false and ShouldShowBar(pp) and not inVehicle then
+        -- Also check cachedPrimary: specs without a primary power (e.g. BM/MM Hunter)
+        -- should hide the power bar even if enabled in settings
+        if pp and pp.enabled ~= false and cachedPrimary and ShouldShowBar(pp) and not inVehicle then
             primaryBar:Show()
             EllesmereUI.SetElementVisibility(primaryBar, true)
             primaryBar:SetAlpha(pp.barAlpha or 1)
