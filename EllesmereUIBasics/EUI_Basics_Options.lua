@@ -371,12 +371,42 @@ initFrame:SetScript("OnEvent", function(self)
                 local m = MinimapDB(); if not m then return end
                 m.hideZoneText = not v
                 RefreshMinimap()
+                EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Show Clock",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.showClock end,
-              setValue=function(v) local m = MinimapDB(); if not m then return end; m.showClock = v; RefreshMinimap() end }
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.showClock = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Zone Inside | Clock Inside
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Zone Inside",
+              tooltip="Display the zone text inside the minimap instead of below it",
+              disabled=function() local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText) end,
+              disabledTooltip="Enable Show Zone first",
+              getValue=function() local m = MinimapDB(); return m and m.zoneInside end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.zoneInside = v
+                RefreshMinimap()
+              end },
+            { type="toggle", text="Clock Inside",
+              tooltip="Display the clock inside the minimap instead of above it",
+              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showClock) end,
+              disabledTooltip="Enable Show Clock first",
+              getValue=function() local m = MinimapDB(); return m and m.clockInside end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.clockInside = v
+                RefreshMinimap()
+              end }
         );  y = y - h
 
         -- Scroll to Zoom | Auto Zoom Out

@@ -60,6 +60,7 @@ local defaults = {
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             useClassColor = false,
             hideZoneText  = false,
+            zoneInside    = false,
             scrollZoom    = true,
             autoZoomOut   = true,
             hideZoomButtons      = true,
@@ -71,6 +72,7 @@ local defaults = {
             hideAddonCompartment = false,
             hideAddonButtons     = false,
             showClock     = true,
+            clockInside   = false,
             clockFormat   = "12h",
             lock          = false,
             position      = nil,
@@ -1535,7 +1537,7 @@ local function ApplyMinimap()
     -- Refresh cached clock CVars when settings are applied
     RefreshClockCVars()
 
-    -- Clock -- top center, text vertically centered on the top edge
+    -- Clock -- top center (outside) or top inside the minimap
     if p.showClock then
         if not clockBg then
             clockBg = CreateFrame("Button", nil, minimap, "BackdropTemplate")
@@ -1554,13 +1556,21 @@ local function ApplyMinimap()
             clockFrame:SetPoint("CENTER", clockBg, "CENTER", 0, 0)
             clockFrame:SetTextColor(1, 1, 1, 0.9)
         end
-        do
+        -- Position and background based on inside/outside setting
+        local clockInside = p.clockInside
+        if clockInside then
+            -- Inside: no background, positioned inside the minimap
+            clockBg:SetBackdropColor(0, 0, 0, 0)
+            clockBg:ClearAllPoints()
+            clockBg:SetPoint("TOP", minimap, "TOP", 0, -4)
+        else
+            -- Outside: background with border color, positioned outside
             local ar, ag, ab = GetBorderColor(p)
             clockBg:SetBackdropColor(ar, ag, ab, 1)
+            local clockYOff = isCircle and -3 or 7
+            clockBg:ClearAllPoints()
+            clockBg:SetPoint("TOP", minimap, "TOP", 0, clockYOff)
         end
-        local clockYOff = isCircle and -3 or 7
-        clockBg:ClearAllPoints()
-        clockBg:SetPoint("TOP", minimap, "TOP", 0, clockYOff)
         clockBg:Show()
         clockFrame:Show()
         if not clockTicker then
@@ -1591,7 +1601,7 @@ local function ApplyMinimap()
     -- Indicator frames (tracking, calendar, mail, crafting)
     LayoutIndicatorFrames(minimap, p, isCircle)
 
-    -- Location bar -- bottom center, shows subzone/zone name
+    -- Location bar -- bottom center (outside) or bottom inside the minimap
     if not p.hideZoneText then
         if not locationBg then
             locationBg = CreateFrame("Frame", nil, minimap, "BackdropTemplate")
@@ -1611,13 +1621,21 @@ local function ApplyMinimap()
             locationFrame:SetPoint("CENTER", locationBg, "CENTER", 0, 0)
             locationFrame:SetTextColor(1, 1, 1, 0.9)
         end
-        do
+        -- Position and background based on inside/outside setting
+        local zoneInside = p.zoneInside
+        if zoneInside then
+            -- Inside: no background, positioned inside the minimap
+            locationBg:SetBackdropColor(0, 0, 0, 0)
+            locationBg:ClearAllPoints()
+            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, 4)
+        else
+            -- Outside: background with border color, positioned outside
             local ar, ag, ab = GetBorderColor(p)
             locationBg:SetBackdropColor(ar, ag, ab, 1)
+            local locYOff = isCircle and 3 or -7
+            locationBg:ClearAllPoints()
+            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, locYOff)
         end
-        local locYOff = isCircle and 3 or -7
-        locationBg:ClearAllPoints()
-        locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, locYOff)
         locationBg:Show()
         locationFrame:Show()
         UpdateLocation()
