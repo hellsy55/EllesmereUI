@@ -1625,14 +1625,15 @@ initFrame:SetScript("OnEvent", function(self)
         local powerSection
         powerSection, h = W:SectionHeader(parent, "POWER BAR", y);  y = y - h
 
-        local noPrimaryPower = not HasPrimaryPower()
+        -- Use a function instead of a cached value so it updates on spec change
+        local function noPrimaryPower() return not HasPrimaryPower() end
         local SPEC_DIS = "This option is not available for your spec"
         local powerOff = function()
-            if noPrimaryPower then return true end
+            if noPrimaryPower() then return true end
             local p = DB(); return p and not p.primary.enabled
         end
         local powerDisTip = function()
-            if noPrimaryPower then return SPEC_DIS end
+            if noPrimaryPower() then return SPEC_DIS end
             return "Enable Power Bar"
         end
 
@@ -1640,8 +1641,8 @@ initFrame:SetScript("OnEvent", function(self)
         local powerEnableRow
         powerEnableRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Power Bar",
-              disabled = noPrimaryPower and function() return true end or nil,
-              disabledTooltip = noPrimaryPower and SPEC_DIS or nil,
+              disabled = function() return noPrimaryPower() end,
+              disabledTooltip = function() return noPrimaryPower() and SPEC_DIS or nil end,
               getValue = function() local p = DB(); return p and p.primary.enabled end,
               setValue = function(v)
                   local p = DB(); if not p then return end
