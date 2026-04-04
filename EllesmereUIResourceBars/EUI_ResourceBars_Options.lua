@@ -3498,6 +3498,23 @@ initFrame:SetScript("OnEvent", function(self)
             "Enable Last Tick"
         )
 
+        -- ── EMPOWERED section ───────────────────────────────────────────
+        _, h = W:SectionHeader(parent, "EMPOWERED", y);  y = y - h
+
+        -- Colored Empowered Spells toggle
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Colored Empowered Stages",
+              tooltip = "Changes the cast bar color based on the current empower stage. Colors transition from red (stage 1) through yellow to green (max stage).",
+              disabled = castOff,
+              disabledTooltip = "Enable Player Cast Bar",
+              getValue = function() local p = DB(); return p and p.castBar.coloredEmpowerStages end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.coloredEmpowerStages = v; RefreshCast()
+              end },
+            { type = "spacer" }
+        );  y = y - h
+
         -- Wire up click mappings for cast bar preview hit overlays
         _clickMappings.castBar       = { section = castSection, target = classSizeRow }
         _clickMappings.castIcon      = { section = castSection, target = castEnableRow, slotSide = "right" }
