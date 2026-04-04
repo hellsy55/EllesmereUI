@@ -37,4 +37,25 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
     -- Stamp fresh installs early (before child addons can create DBs
     -- that would make StampResetVersion think it's an old install).
     EllesmereUI.StampResetVersion()
+
+    ---------------------------------------------------------------------------
+    --  Migration: wipe legacy friends list data across all profiles.
+    --  The friends module was fully rebuilt (session 15-17). Old profile data
+    --  contains stale keys (bgAlpha without bgR/G/B, no tile/icon/group
+    --  settings) that conflict with the new defaults. One-time wipe replaces
+    --  the friends subtable with { enabled = <previous> } so the module stays
+    --  on/off as the user had it, and fresh defaults fill the rest.
+    ---------------------------------------------------------------------------
+    if EllesmereUIDB and EllesmereUIDB.profiles and not EllesmereUIDB._friendsWipeDone then
+        for profName, profData in pairs(EllesmereUIDB.profiles) do
+            if type(profData) == "table" and profData.addons then
+                local basics = profData.addons.EllesmereUIBasics
+                if basics and basics.friends then
+                    local wasEnabled = basics.friends.enabled
+                    basics.friends = { enabled = wasEnabled }
+                end
+            end
+        end
+        EllesmereUIDB._friendsWipeDone = true
+    end
 end)

@@ -552,46 +552,39 @@ local function IsVerticalOrientation(ori)
     return ori == "VERTICAL_UP" or ori == "VERTICAL_DOWN"
 end
 
--- Returns the current empowered stage (0-based) based on progress and stage thresholds
+-- Cached empower stage thresholds (set once at empower start, avoids per-frame API call)
+local cachedStageThresholds
+-- Reusable CreateColor objects for gradient (avoids per-frame allocation)
+local empowerColorA = CreateColor(1, 0, 0, 1)
+local empowerColorB = CreateColor(1, 0, 0, 1)
+
+-- Returns the current empowered stage (0-based) based on progress and cached thresholds
 local function GetCurrentEmpowerStage(progress, numStages)
     if not numStages or numStages <= 0 then return 0 end
-    local stages = UnitEmpoweredStagePercentages("player")
-    if not stages then return 0 end
+    local thresholds = cachedStageThresholds
+    if not thresholds then return 0 end
 
-    local cumulative = 0
-    for i = 1, #stages do
-        cumulative = cumulative + stages[i]
-        if progress < cumulative then
-            return i - 1  -- 0-based stage
+    for i = 1, #thresholds do
+        if progress < thresholds[i] then
+            return i - 1
         end
     end
-    return #stages  -- At max stage
+    return #thresholds
 end
 
 -- Returns RGB color for the current empower stage (red -> yellow -> green gradient)
 local function GetEmpowerStageColor(stage, maxStages)
     if maxStages <= 1 then
-        return 0, 1, 0  -- Just green for single stage
+        return 0, 1, 0
     end
 
-    -- Normalize stage to 0..1 range
     local t = stage / maxStages
 
-    -- Red (1,0,0) -> Yellow (1,1,0) -> Green (0,1,0)
-    local r, g, b
     if t < 0.5 then
-        -- Red to Yellow
-        r = 1
-        g = t * 2
-        b = 0
+        return 1, t * 2, 0
     else
-        -- Yellow to Green
-        r = 1 - (t - 0.5) * 2
-        g = 1
-        b = 0
+        return 1 - (t - 0.5) * 2, 1, 0
     end
-
-    return r, g, b
 end
 
 local function OrientedSize(w, h, orientation)
@@ -3115,11 +3108,6 @@ if cb.gradientEnabled then
 
         castBarFrame._gradClip = clip
         castBarFrame._gradTex = tex
-
-        local textOverlay = CreateFrame("Frame", nil, bar)
-        textOverlay:SetAllPoints(bar)
-        textOverlay:SetFrameLevel(clip:GetFrameLevel() + 1)
-        castBarFrame._textOverlay = textOverlay
     end
 
     local clip = castBarFrame._gradClip
@@ -3141,8 +3129,8 @@ if cb.gradientEnabled then
         CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA)
     )
 
-    castBarFrame._nameText:SetParent(castBarFrame._textOverlay)
-    castBarFrame._timerText:SetParent(castBarFrame._textOverlay)
+    castBarFrame._nameText:SetParent(castBarFrame._textFrame)
+    castBarFrame._timerText:SetParent(castBarFrame._textFrame)
 
     clip:Show()
     castBarFrame._gradientFullBar = true
@@ -3402,13 +3390,11 @@ UpdateCastBar = function(dt)
 
             -- Apply color to bar or gradient
             if castBarFrame._gradientFullBar and castBarFrame._gradTex then
-                -- For gradient bars, override the gradient with solid color
-                castBarFrame._gradTex:SetGradient("HORIZONTAL",
-                    CreateColor(r, g, b, 1),
-                    CreateColor(r, g, b, 1))
+                empowerColorA:SetRGBA(r, g, b, 1)
+                empowerColorB:SetRGBA(r, g, b, 1)
+                castBarFrame._gradTex:SetGradient("HORIZONTAL", empowerColorA, empowerColorB)
             else
-                local fillTex = bar:GetStatusBarTexture()
-                fillTex:SetVertexColor(r, g, b, 1)
+                bar:GetStatusBarTexture():SetVertexColor(r, g, b, 1)
             end
             castBarFrame._empowerColorApplied = true
         end
@@ -3603,9 +3589,22 @@ local function OnEmpowerStop(eventCastID)
     -- Reset empower stage coloring if it was applied
     if castBarFrame._empowerColorApplied then
         castBarFrame._empowerColorApplied = false
-        -- Rebuild cast bar to restore normal colors
-        BuildCastBar()
+        local cb = ERB.db.profile.castBar
+        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
+        if cb.classColored then
+            local cc = CLASS_COLORS[cachedClass]
+            if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
+        end
+        if castBarFrame._gradientFullBar and castBarFrame._gradTex then
+            empowerColorA:SetRGBA(fR, fG, fB, fA)
+            empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG, cb.gradientB or fB, cb.gradientA or fA)
+            castBarFrame._gradTex:SetGradient(cb.gradientDir or "HORIZONTAL", empowerColorA, empowerColorB)
+        else
+            local fillTex = castBarFrame._bar:GetStatusBarTexture()
+            fillTex:SetVertexColor(fR, fG, fB, fA)
+        end
     end
+    cachedStageThresholds = nil
 
     EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
@@ -3665,6 +3664,17 @@ OnEmpowerStart = function()
 
     -- Stage pips (hash marks) -- pixel-perfect positioning
     local stages = UnitEmpoweredStagePercentages("player")
+    -- Cache cumulative thresholds for per-frame stage color lookup
+    if stages then
+        cachedStageThresholds = {}
+        local cum = 0
+        for i = 1, #stages do
+            cum = cum + stages[i]
+            cachedStageThresholds[i] = cum
+        end
+    else
+        cachedStageThresholds = nil
+    end
     if stages then
         local bar = castBarFrame._bar
         local barWidth = bar:GetWidth()

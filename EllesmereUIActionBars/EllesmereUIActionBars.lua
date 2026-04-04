@@ -2218,6 +2218,8 @@ end
 -- physical pixels, eliminating sub-pixel drift between siblings.
 local function SnapForScale(x, barScale)
     if x == 0 then return 0 end
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP then return PP.Scale(x) end
     return math.floor(x + 0.5)
 end
 

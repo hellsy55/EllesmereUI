@@ -1206,6 +1206,7 @@ local function CollectAndReanchor(bypassSpecGuard)
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local count = 0
 
+                local hideCD = not barData.showCooldownText
                 for _, entry in ipairs(list) do
                     count = count + 1
                     local frame = entry.frame
@@ -1217,8 +1218,11 @@ local function CollectAndReanchor(bypassSpecGuard)
                     local barHidden = container and container._visHidden
                     frame:SetAlpha(barHidden and 0 or 1)
                     frame:Show()
-                    if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
-                        frame.Cooldown:SetDrawSwipe(true)
+                    if frame.Cooldown then
+                        if frame.Cooldown.SetDrawSwipe then
+                            frame.Cooldown:SetDrawSwipe(true)
+                        end
+                        frame.Cooldown:SetHideCountdownNumbers(hideCD)
                     end
                     local ov = frame._untrackedOverlay
                     if not ov then
@@ -1537,14 +1541,18 @@ local function CollectAndReanchor(bypassSpecGuard)
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local barHidden = container._visHidden
 
+                local hideCDText = not barData.showCooldownText
                 for i, frame in ipairs(frames) do
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
                     icons[i] = frame
                     frame:SetAlpha(barHidden and 0 or 1)
                     frame:Show()
-                    if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
-                        frame.Cooldown:SetDrawSwipe(true)
+                    if frame.Cooldown then
+                        if frame.Cooldown.SetDrawSwipe then
+                            frame.Cooldown:SetDrawSwipe(true)
+                        end
+                        frame.Cooldown:SetHideCountdownNumbers(hideCDText)
                     end
                     -- Reparent custom frames to our container (never to Blizzard viewers)
                     if frame._isRacialFrame or frame._isTrinketFrame

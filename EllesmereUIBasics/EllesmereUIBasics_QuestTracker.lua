@@ -35,13 +35,18 @@ function EQT:SetDirty(structural)
     if _dirtyTimer then _dirtyTimer:Cancel() end
     _dirtyTimer = C_Timer.NewTimer(0.5, function()
         _dirtyTimer = nil
-        local wasStructural = _structuralDirty
-        _structuralDirty = false
-        if wasStructural then
-            EQT:Refresh()
-        else
-            EQT:RefreshProgress()
-        end
+        -- Break the taint chain: C_Timer callbacks can inherit taint from
+        -- the event that triggered SetDirty. securecallfunction runs in a
+        -- clean execution context so frame operations don't propagate taint.
+        securecallfunction(function()
+            local wasStructural = _structuralDirty
+            _structuralDirty = false
+            if wasStructural then
+                EQT:Refresh()
+            else
+                EQT:RefreshProgress()
+            end
+        end)
     end)
 end
 
@@ -431,7 +436,7 @@ local function AcquireRow(parent)
     local r = table.remove(rowPool)
     if not r then
         r = {}
-        r.frame = CreateFrame("Button", nil, parent)
+        r.frame = CreateFrame("Frame", nil, parent)
         r.text  = r.frame:CreateFontString(nil, "OVERLAY")
         r.text:SetJustifyH("LEFT")
         r.text:SetWordWrap(true)
@@ -454,7 +459,7 @@ local function AcquireRow(parent)
 end
 local function ReleaseRow(r)
     r.frame:Hide(); r.frame:ClearAllPoints()
-    r.frame:SetScript("OnClick", nil)
+    r.frame:SetScript("OnMouseUp", nil)
     r.frame:SetScript("OnEnter", nil)
     r.frame:SetScript("OnLeave", nil)
     r.frame:EnableMouse(false)
@@ -493,7 +498,7 @@ local function AcquireSection(parent)
     local s = table.remove(secPool)
     if not s then
         s = {}
-        s.frame = CreateFrame("Button", nil, parent)
+        s.frame = CreateFrame("Frame", nil, parent)
         s.label = s.frame:CreateFontString(nil, "OVERLAY")
         s.label:SetJustifyH("LEFT")
         s.arrow = s.frame:CreateFontString(nil, "OVERLAY")
@@ -519,7 +524,7 @@ local function AcquireSection(parent)
     return s
 end
 local function ReleaseSection(s)
-    s.frame:Hide(); s.frame:ClearAllPoints(); s.frame:SetScript("OnClick", nil)
+    s.frame:Hide(); s.frame:ClearAllPoints(); s.frame:SetScript("OnMouseUp", nil)
     s._scR, s._scG, s._scB = nil, nil, nil
     if s.line then s.line:Hide() end
     secPool[#secPool + 1] = s
@@ -1433,7 +1438,7 @@ function EQT:Refresh(skipAlphaFlash)
         s.frame:SetHeight(h)
         s.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
         s.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -yOff)
-        s.frame:SetScript("OnClick", onToggle)
+        s.frame:SetScript("OnMouseUp", onToggle)
         yOff = yOff + h + SEC_GAP
         self.sections[#self.sections + 1] = s
     end
@@ -1698,9 +1703,10 @@ function EQT:Refresh(skipAlphaFlash)
             local activityID = showGroupFinder
             if activityID then
                 if not r._lfgBtn then
-                    local btn = CreateFrame("Button", nil, r.frame)
+                    local btn = CreateFrame("Frame", nil, r.frame)
                     btn:SetSize(20, 20)
                     btn:SetFrameLevel(r.frame:GetFrameLevel() + 3)
+                    btn:EnableMouse(true)
                     local ico = btn:CreateTexture(nil, "ARTWORK")
                     ico:SetAllPoints()
                     ico:SetAtlas("socialqueuing-icon-eye")
@@ -1720,7 +1726,7 @@ function EQT:Refresh(skipAlphaFlash)
                 local oX = item and -4 or -2
                 r._lfgBtn:SetPoint("RIGHT", anchor, anchorPt, oX, 0)
                 local capturedQID = qID
-                r._lfgBtn:SetScript("OnClick", function()
+                r._lfgBtn:SetScript("OnMouseUp", function()
                     if LFGListUtil_FindQuestGroup then
                         LFGListUtil_FindQuestGroup(capturedQID)
                     elseif C_LFGList and C_LFGList.Search then
@@ -1746,13 +1752,11 @@ function EQT:Refresh(skipAlphaFlash)
             r.frame._questID = qID; r.frame:EnableMouse(true)
             r.frame._isAutoComplete = isAutoComplete
             r.frame._isComplete = isComplete
-            r.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            r.frame:SetScript("OnClick", TitleRowOnClick)
+            r.frame:SetScript("OnMouseUp", TitleRowOnClick)
         elseif recipeID then
             r.frame._recipeID = recipeID; r.frame:EnableMouse(true)
             r.frame._isRecraft = isRecraft or false
-            r.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            r.frame:SetScript("OnClick", TitleRowOnClick)
+            r.frame:SetScript("OnMouseUp", TitleRowOnClick)
         end
         r._rowType = "title"
         yOff = yOff + rh + ROW_GAP
@@ -2314,11 +2318,8 @@ local function BuildFrame()
     thumbTex:SetColorTexture(1, 1, 1, 0.27)
 
     local SCROLL_STEP = 60
-    local SMOOTH_SPEED = 12
     local isDragging = false
     local dragStartY, dragStartScroll
-    local scrollTarget = 0
-    local isSmoothing = false
 
     local function StopScrollDrag()
         if not isDragging then return end
@@ -2344,59 +2345,21 @@ local function BuildFrame()
     end
     f._updateScrollThumb = UpdateScrollThumb
 
-    -- Smooth scroll OnUpdate
-    local smoothFrame = CreateFrame("Frame")
-    smoothFrame:Hide()
-    smoothFrame:SetScript("OnUpdate", function(_, elapsed)
-        local cur = sf:GetVerticalScroll()
-        local maxScroll = EllesmereUI.SafeScrollRange(sf)
-        local scale = sf:GetEffectiveScale()
-        maxScroll = math.floor(maxScroll * scale) / scale
-        scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
-        local diff = scrollTarget - cur
-        if math.abs(diff) < 0.3 then
-            sf:SetVerticalScroll(scrollTarget)
-            UpdateScrollThumb()
-            isSmoothing = false
-            smoothFrame:Hide()
-            return
-        end
-        local newScroll = cur + diff * math.min(1, SMOOTH_SPEED * elapsed)
-        newScroll = math.max(0, math.min(maxScroll, newScroll))
-        if diff > 0 then
-            newScroll = math.ceil(newScroll * scale) / scale
-        else
-            newScroll = math.floor(newScroll * scale) / scale
-        end
-        newScroll = math.max(0, math.min(maxScroll, newScroll))
-        sf:SetVerticalScroll(newScroll)
-        UpdateScrollThumb()
-    end)
-
-    local function SmoothScrollTo(target)
-        local maxScroll = EllesmereUI.SafeScrollRange(sf)
-        local scale = sf:GetEffectiveScale()
-        maxScroll = math.floor(maxScroll * scale) / scale
-        scrollTarget = math.max(0, math.min(maxScroll, target))
-        scrollTarget = math.floor(scrollTarget * scale + 0.5) / scale
-        scrollTarget = math.min(scrollTarget, maxScroll)
-        if not isSmoothing then
-            isSmoothing = true
-            smoothFrame:Show()
-        end
-    end
-
+    -- Direct scroll (no smoothing, no per-frame allocations)
     sf:SetScript("OnMouseWheel", function(self, delta)
         local maxScroll = EllesmereUI.SafeScrollRange(self)
         if maxScroll <= 0 then return end
-        local base = isSmoothing and scrollTarget or self:GetVerticalScroll()
-        SmoothScrollTo(base - delta * SCROLL_STEP)
+        local cur = self:GetVerticalScroll()
+        local newScroll = math.max(0, math.min(maxScroll, cur - delta * SCROLL_STEP))
+        local scale = self:GetEffectiveScale()
+        newScroll = math.floor(newScroll * scale + 0.5) / scale
+        self:SetVerticalScroll(newScroll)
+        UpdateScrollThumb()
     end)
     sf:SetScript("OnScrollRangeChanged", function() UpdateScrollThumb() end)
 
     local function ScrollThumbOnUpdate(self)
         if not IsMouseButtonDown("LeftButton") then StopScrollDrag(); return end
-        isSmoothing = false; smoothFrame:Hide()
         local _, cursorY = GetCursorPosition()
         cursorY = cursorY / self:GetEffectiveScale()
         local deltaY = dragStartY - cursorY
@@ -2407,14 +2370,12 @@ local function BuildFrame()
         local newScroll = math.max(0, math.min(maxScroll, dragStartScroll + (deltaY / maxThumbTravel) * maxScroll))
         local scale = sf:GetEffectiveScale()
         newScroll = math.floor(newScroll * scale + 0.5) / scale
-        scrollTarget = newScroll
         sf:SetVerticalScroll(newScroll)
         UpdateScrollThumb()
     end
 
     scrollThumb:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
-        isSmoothing = false; smoothFrame:Hide()
         isDragging = true
         local _, cursorY = GetCursorPosition()
         dragStartY = cursorY / self:GetEffectiveScale()
@@ -2428,7 +2389,6 @@ local function BuildFrame()
 
     scrollHitArea:SetScript("OnMouseDown", function(_, button)
         if button ~= "LeftButton" then return end
-        isSmoothing = false; smoothFrame:Hide()
         local maxScroll = EllesmereUI.SafeScrollRange(sf)
         if maxScroll <= 0 then return end
         local _, cy = GetCursorPosition()
@@ -2442,7 +2402,6 @@ local function BuildFrame()
         local newScroll = frac * maxScroll
         local scale = sf:GetEffectiveScale()
         newScroll = math.floor(newScroll * scale + 0.5) / scale
-        scrollTarget = newScroll
         sf:SetVerticalScroll(newScroll)
         UpdateScrollThumb()
         isDragging = true
@@ -2465,12 +2424,6 @@ local function BuildFrame()
     -- f is the full-height wrapper used by unlock mode and must NOT
     -- intercept mouse events in the empty space below content.
     f:EnableMouse(false)
-
-    -- Stop all standalone frames when hidden (M+, raids, disabled, etc.)
-    f:HookScript("OnHide", function()
-        smoothFrame:Hide()
-        isSmoothing = false
-    end)
 
     UpdateInnerAlignment(f)
 
@@ -2611,7 +2564,11 @@ function EQT:Init()
             if not ot._eqtEnforcer then
                 ot._eqtEnforcer = CreateFrame("Frame")
             end
-            ot._eqtEnforcer:SetScript("OnUpdate", function()
+            local _enfElapsed = 0
+            ot._eqtEnforcer:SetScript("OnUpdate", function(_, dt)
+                _enfElapsed = _enfElapsed + dt
+                if _enfElapsed < 0.5 then return end
+                _enfElapsed = 0
                 if ot:GetAlpha() > 0 then
                     ot:SetAlpha(0)
                     ot:EnableMouse(false)
@@ -2678,11 +2635,15 @@ function EQT:Init()
     local qtMouseoverShown = false
     local qtMouseoverPoller = CreateFrame("Frame")
     qtMouseoverPoller:Hide()
+    local _moElapsed = 0
     qtMouseoverPoller:SetScript("OnUpdate", function(_, dt)
         if not qtMouseoverActive then
             qtMouseoverPoller:Hide()
             return
         end
+        _moElapsed = _moElapsed + dt
+        if _moElapsed < 0.15 then return end
+        _moElapsed = 0
         if EQT.frame:IsMouseOver() then
             if not qtMouseoverShown then
                 qtMouseoverShown = true
@@ -2812,7 +2773,15 @@ function EQT:Init()
         ZONE_CHANGED_NEW_AREA = true,
         UPDATE_UI_WIDGET = true,
     }
+    local _widgetThrottleTime = 0
     w:SetScript("OnEvent", function(_, event)
+        if not Cfg("enabled") and event ~= "PLAYER_ENTERING_WORLD" then return end
+        -- Throttle high-frequency widget events to avoid churn
+        if event == "UPDATE_UI_WIDGET" or event == "UI_WIDGET_UNIT_CHANGED" then
+            local now = GetTime()
+            if now - _widgetThrottleTime < 0.5 then return end
+            _widgetThrottleTime = now
+        end
         -- M+ start/end: re-evaluate both Blizzard tracker visibility (so
         -- the M+ timer shows) and EQT visibility (so our tracker hides).
         -- Delayed re-check because GetInstanceInfo may not return diffID 8
@@ -2856,7 +2825,16 @@ function EQT:Init()
         -- Invalidate scenario cache on scenario-related events.
         -- Force structural so the full Refresh() re-reads the scenario cache
         -- (RefreshProgress only handles quest objectives, not scenarios).
+        -- Guard UPDATE_UI_WIDGET: only process if actually in a scenario/M+ (fires constantly otherwise)
         if SCENARIO_EVENTS[event] then
+            if event == "UPDATE_UI_WIDGET" or event == "UI_WIDGET_UNIT_CHANGED" then
+                local inScenario = C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario()
+                if not inScenario then
+                    -- Not in scenario: skip the expensive invalidation, just do a light progress refresh
+                    EQT:SetDirty(false)
+                    return
+                end
+            end
             InvalidateScenarioCache()
             isStructural = true
         end
@@ -2903,6 +2881,7 @@ function EQT:Init()
     autoFrame:RegisterEvent("QUEST_AUTOCOMPLETE")
     autoFrame:RegisterEvent("GOSSIP_SHOW")
     autoFrame:SetScript("OnEvent", function(self, event, ...)
+        if not Cfg("enabled") then return end
         if event == "GOSSIP_SHOW" then
             if C_GossipInfo then
                 -- Auto turn-in: select the first completed active quest
@@ -2967,23 +2946,31 @@ function EQT:Init()
         end
     end)
 
-    -- Dedicated timer update frame: only runs when timer rows exist
-    _timerUpdateFrame = CreateFrame("Frame")
-    _timerUpdateFrame:Hide()
-    local timerElapsed = 0
-    _timerUpdateFrame:SetScript("OnUpdate", function(_, dt)
-        timerElapsed = timerElapsed + dt
-        if timerElapsed >= 1.0 then
-            timerElapsed = 0
-            if #EQT.timerRows == 0 then
-                _timerUpdateFrame:Hide()
-                return
-            end
-            for _, r in ipairs(EQT.timerRows) do
-                if r._updateTimer then r._updateTimer() end
-            end
+    -- Dedicated timer ticker: fires once per second only when timer rows exist.
+    -- Uses C_Timer.NewTicker instead of OnUpdate to avoid per-frame overhead.
+    _timerUpdateFrame = CreateFrame("Frame")  -- kept as a state object for Show/Hide API
+    local _timerTicker = nil
+    local function _timerTickFn()
+        if #EQT.timerRows == 0 then
+            if _timerTicker then _timerTicker:Cancel(); _timerTicker = nil end
+            _timerUpdateFrame._running = false
+            return
         end
-    end)
+        for _, r in ipairs(EQT.timerRows) do
+            if r._updateTimer then r._updateTimer() end
+        end
+    end
+    _timerUpdateFrame.Show = function(self)
+        if self._running then return end
+        self._running = true
+        if _timerTicker then _timerTicker:Cancel() end
+        _timerTicker = C_Timer.NewTicker(1.0, _timerTickFn)
+    end
+    _timerUpdateFrame.Hide = function(self)
+        if not self._running then return end
+        self._running = false
+        if _timerTicker then _timerTicker:Cancel(); _timerTicker = nil end
+    end
 
     RegisterSlash()
     C_Timer.After(1.5, function() EQT:SetDirty(true) end)
@@ -3161,6 +3148,7 @@ function EQT:Init()
             return
         end
 
+        if not Cfg("questItemHotkey") then return end
         questItemDirty = true
         UpdateQuestItemAttribute()
     end)

@@ -1480,12 +1480,40 @@ function ns.RegisterTBBUnlockElements()
                 setWidth = function(_, w)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if c then c.width = w; ns.BuildTrackedBuffBars() end
+                    if not c then return end
+                    -- Subtract icon size so c.width stores bar-only width
+                    local iconMode = c.iconDisplay or "none"
+                    local hasIcon = iconMode ~= "none"
+                    local isVert = c.verticalOrientation
+                    if hasIcon and not isVert then
+                        w = w - (c.height or 24)
+                    end
+                    c.width = w
+                    -- Resize frame directly without full rebuild to avoid
+                    -- position resets from BuildTrackedBuffBars
+                    local f = tbbFrames[idx]
+                    if f then
+                        local totalW = hasIcon and not isVert and (w + (c.height or 24)) or w
+                        f:SetWidth(totalW)
+                    end
                 end,
                 setHeight = function(_, h)
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
-                    if c then c.height = h; ns.BuildTrackedBuffBars() end
+                    if not c then return end
+                    -- Subtract icon size so c.height stores bar-only height
+                    local iconMode = c.iconDisplay or "none"
+                    local hasIcon = iconMode ~= "none"
+                    local isVert = c.verticalOrientation
+                    if hasIcon and isVert then
+                        h = h - (c.width or 200)
+                    end
+                    c.height = h
+                    local f = tbbFrames[idx]
+                    if f then
+                        local totalH = hasIcon and isVert and (h + (c.width or 200)) or h
+                        f:SetHeight(totalH)
+                    end
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     local pos = ns.GetTBBPositions()

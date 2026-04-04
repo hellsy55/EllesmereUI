@@ -3512,7 +3512,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB(); if not p then return end
                   p.castBar.coloredEmpowerStages = v; RefreshCast()
               end },
-            { type = "spacer" }
+            { type = "label", text = "" }
         );  y = y - h
 
         -- Wire up click mappings for cast bar preview hit overlays

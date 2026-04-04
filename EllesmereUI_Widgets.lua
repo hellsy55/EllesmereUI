@@ -1425,15 +1425,19 @@ end
 EllesmereUI.ResolveThemeColor = ResolveThemeColor
 
 --- Internal: snap accent color to all registered one-time elements (no transition)
+-- Reusable color objects for gradient updates (avoids allocations per tick)
+local _gradStart = CreateColor(0, 0, 0, 0)
+local _gradEnd   = CreateColor(0, 0, 0, 0)
+
 local function UpdateAccentElements(r, g, b)
     for _, entry in ipairs(EllesmereUI._accentElements) do
         if entry.type == "solid" and entry.obj then
             entry.obj:SetColorTexture(r, g, b, entry.a or 1)
         elseif entry.type == "gradient" and entry.obj then
             entry.obj:SetColorTexture(r, g, b, 1)
-            entry.obj:SetGradient("HORIZONTAL",
-                CreateColor(r, g, b, entry.startA or 0.15),
-                CreateColor(r, g, b, 0))
+            _gradStart.r, _gradStart.g, _gradStart.b, _gradStart.a = r, g, b, entry.startA or 0.15
+            _gradEnd.r, _gradEnd.g, _gradEnd.b, _gradEnd.a = r, g, b, 0
+            entry.obj:SetGradient("HORIZONTAL", _gradStart, _gradEnd)
         elseif entry.type == "vertex" and entry.obj then
             entry.obj:SetVertexColor(r, g, b, 1)
         elseif entry.type == "callback" and entry.fn then
@@ -1535,8 +1539,8 @@ local function ApplyAccentLive(r, g, b)
         EllesmereUI._applyBgTint(r, g, b)
     end
 
-    -- 5. Rebuild current page -- widget factories read from ELLESMERE_GREEN
-    EllesmereUI:RefreshPage(true)
+    -- 5. Fast-path refresh only (no full rebuild to avoid memory churn)
+    EllesmereUI:RefreshPage()
 end
 
 --- SetActiveTheme: main theme setter. Persists and applies with animated transition.

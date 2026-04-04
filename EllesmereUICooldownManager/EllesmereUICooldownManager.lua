@@ -14,6 +14,8 @@ ns.ECME = ECME
 -- round to nearest integer, convert back.
 local function SnapForScale(x, barScale)
     if x == 0 then return 0 end
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP then return PP.Scale(x) end
     return math.floor(x + 0.5)
 end
 
@@ -2376,35 +2378,42 @@ LayoutCDMBar = function(barKey)
     local barData = barDataByKey[barKey]
     if not barData or not barData.enabled then return end
 
-    local iconW = SnapForScale(barData.iconSize or 36, 1)
+    local grow = frame._mouseGrow or barData.growDirection or "CENTER"
+    local numRows = barData.numRows or 1
+    if numRows < 1 then numRows = 1 end
+    local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
+    local spacing = SnapForScale(barData.spacing or 2, 1)
+
+    -- Width match: use stored physical pixel count to avoid floating point
+    -- precision loss in the iconSize → PP.Scale roundtrip.
+    local extraPixels = 0
+    local hasWidthMatch = EllesmereUI.GetWidthMatchTarget
+        and EllesmereUI.GetWidthMatchTarget("CDM_" .. barKey) ~= nil
+    local PP = EllesmereUI.PP
+    local onePx = PP.mult
+    local iconW
+    if hasWidthMatch and barData._matchIconPhys and barData._matchStride then
+        local curDim = isHoriz and ComputeTopRowStride(barData, #icons) or numRows
+        if curDim == barData._matchStride then
+            iconW = barData._matchIconPhys * onePx
+            extraPixels = barData._matchExtraPixels or 0
+        else
+            barData._matchExtraPixels = nil
+            barData._matchStride = nil
+            barData._matchIconPhys = nil
+            iconW = SnapForScale(barData.iconSize or 36, 1)
+        end
+    else
+        barData._matchExtraPixels = nil
+        barData._matchStride = nil
+        barData._matchIconPhys = nil
+        iconW = SnapForScale(barData.iconSize or 36, 1)
+    end
+
     local iconH = iconW
     local shape = barData.iconShape or "none"
     if shape == "cropped" then
         iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
-    end
-    local grow = frame._mouseGrow or barData.growDirection or "CENTER"
-    local numRows = barData.numRows or 1
-    if numRows < 1 then numRows = 1 end
-    -- Use match-adjusted fractional spacing if stride still matches
-    -- and the bar still has an active width match. Otherwise revert
-    -- to the user's configured integer spacing.
-    local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
-    local spacing
-    local hasWidthMatch = EllesmereUI.GetWidthMatchTarget
-        and EllesmereUI.GetWidthMatchTarget("CDM_" .. barKey) ~= nil
-    if hasWidthMatch and barData._matchSpacing and barData._matchStride then
-        local curDim = isHoriz and ComputeTopRowStride(barData, #icons) or numRows
-        if curDim == barData._matchStride then
-            spacing = barData._matchSpacing
-        else
-            barData._matchSpacing = nil
-            barData._matchStride = nil
-            spacing = SnapForScale(barData.spacing or 2, 1)
-        end
-    else
-        barData._matchSpacing = nil
-        barData._matchStride = nil
-        spacing = SnapForScale(barData.spacing or 2, 1)
     end
 
     -- Use ALL icons in the array (not just IsShown). CollectAndReanchor
@@ -2454,20 +2463,33 @@ LayoutCDMBar = function(barKey)
     -- Bar has visible icons -- ensure it is visible (unless visibility is "never")
     local stride, _, customTopCount = ComputeTopRowStride(barData, sizeCount)
 
-    -- Container size (already snapped values)
+    -- Container size -- all values in physical pixel units (multiples of PP.mult)
+    local PP = EllesmereUI.PP
+    local onePx = PP.mult
     local totalW, totalH
+    local extraPxSize = extraPixels * onePx
     if isHoriz then
-        totalW = stride * iconW + (stride - 1) * spacing
+        totalW = stride * iconW + (stride - 1) * spacing + extraPxSize
         totalH = numRows * iconH + (numRows - 1) * spacing
     else
         totalW = numRows * iconW + (numRows - 1) * spacing
-        totalH = stride * iconH + (stride - 1) * spacing
+        totalH = stride * iconH + (stride - 1) * spacing + extraPxSize
+    end
+
+    -- CENTER grow anchors icons to the container's center point. If the
+    -- total isn't evenly divisible by 2*onePx, center falls between physical
+    -- pixels. Pad by one physical pixel so center lands on a boundary.
+    if grow == "CENTER" then
+        local twoPx = 2 * onePx
+        if math.abs(totalW % twoPx) > 0.001 then totalW = totalW + onePx end
+        if math.abs(totalH % twoPx) > 0.001 then totalH = totalH + onePx end
     end
 
     -- Just resize the container. Never re-anchor, save position, or
     -- propagate here. Bar position is set by BuildCDMBar / unlock mode.
     -- LayoutCDMBar's job is ONLY: resize container + position icons inside.
     frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
+
 
     -- Bar background
     if barData.barBgEnabled then
@@ -2506,22 +2528,9 @@ LayoutCDMBar = function(barKey)
     -- top row gets the remainder. Center any row with fewer icons than stride.
     for i, icon in ipairs(visibleIcons) do
         -- Compensate for Blizzard's per-icon scale so visual size matches.
-        -- Both SetSize and SetPoint offsets are in the frame's scaled space,
-        -- so divide everything by the scale factor.
         local iconScale = icon:GetScale() or 1
         if iconScale < 0.01 then iconScale = 1 end
         local iS = 1 / iconScale
-        icon:SetSize(iconW * iS, iconH * iS)
-        local scaledStepW = stepW * iS
-        local scaledStepH = stepH * iS
-        if isMouseBar then
-            icon:SetFrameStrata("TOOLTIP")
-            icon:SetFrameLevel(9980 + i)
-        elseif icon:GetFrameStrata() == "TOOLTIP" then
-            icon:SetFrameStrata("LOW")
-            icon:SetFrameLevel(5 + i)
-        end
-        icon:ClearAllPoints()
 
         -- Map sequential index to bottom-up grid position.
         -- Icon 1..topRowCount fill the top row (visual row 0).
@@ -2536,51 +2545,74 @@ LayoutCDMBar = function(barKey)
             row = 1 + math.floor(bottomIdx / stride)
         end
 
+        -- Width-match: first N columns get +1 physical pixel width (cropped
+        -- to maintain aspect ratio). Offset accumulates the extra from prior cols.
+        local onePx = PP.mult
+        local expanded = (extraPixels > 0 and col < extraPixels)
+        local thisIconW = expanded and (iconW + onePx) or iconW
+        icon._matchExpanded = expanded or nil
+        icon:SetSize(thisIconW * iS, iconH * iS)
+
+        -- Cumulative offset: each column before this one that was expanded
+        -- shifts our position by 1 physical pixel.
+        local extraBefore = math.min(col, extraPixels) * onePx
+
+        if isMouseBar then
+            icon:SetFrameStrata("TOOLTIP")
+            icon:SetFrameLevel(9980 + i)
+        elseif icon:GetFrameStrata() == "TOOLTIP" then
+            icon:SetFrameStrata("LOW")
+            icon:SetFrameLevel(5 + i)
+        end
+        icon:ClearAllPoints()
+
         -- Center any row that has fewer icons than stride
         local rowCount = RowIconCount(row)
         local rowHasLess = (rowCount > 0 and rowCount < stride)
 
-        local snap = SnapForScale
+        -- Compute offsets as absolute parent-space integers, then divide
+        -- by iconScale for SetPoint. No per-position snapping -- dividing
+        -- integers by the same constant produces mathematically uniform gaps.
+        local posX = col * stepW + extraBefore
+        local posY = row * stepH
         if grow == "RIGHT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = math.floor((stride - rowCount) * stepW / 2 + 0.5)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                snap(col * scaledStepW + rowOffset, 1),
-                snap(-(row * scaledStepH), 1))
+                (posX + rowOffset) * iS, -posY * iS)
         elseif grow == "LEFT" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = math.floor((stride - rowCount) * stepW / 2 + 0.5)
             end
             icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT",
-                snap(-(col * scaledStepW + rowOffset), 1),
-                snap(-(row * scaledStepH), 1))
+                -(posX + rowOffset) * iS, -posY * iS)
         elseif grow == "DOWN" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = snap((stride - rowCount) * scaledStepH / 2, 1)
+                rowOffset = math.floor((stride - rowCount) * stepH / 2 + 0.5)
             end
             icon:SetPoint("TOPLEFT", frame, "TOPLEFT",
-                snap(row * scaledStepW, 1),
-                snap(-(col * scaledStepH + rowOffset), 1))
+                row * stepW * iS,
+                -(col * stepH + extraBefore + rowOffset) * iS)
         elseif grow == "UP" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = snap((stride - rowCount) * scaledStepH / 2, 1)
+                rowOffset = math.floor((stride - rowCount) * stepH / 2 + 0.5)
             end
             icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT",
-                snap(row * scaledStepW, 1),
-                snap(col * scaledStepH + rowOffset, 1))
+                row * stepW * iS,
+                (col * stepH + extraBefore + rowOffset) * iS)
         elseif grow == "CENTER" then
             local rowOffset = 0
             if rowHasLess then
-                rowOffset = snap((stride - rowCount) * scaledStepW / 2, 1)
+                rowOffset = math.floor((stride - rowCount) * stepW / 2 + 0.5)
             end
             icon:SetPoint("TOPLEFT", frame, "CENTER",
-                snap(col * scaledStepW + rowOffset - (totalW / 2) * iS, 1),
-                snap(-(row * scaledStepH) + (totalH / 2) * iS, 1))
+                (posX + rowOffset - totalW / 2) * iS,
+                (-posY + totalH / 2) * iS)
         end
 
         -- Store the anchor we just set so the SetPoint hook can force
@@ -2593,6 +2625,7 @@ LayoutCDMBar = function(barKey)
             end
         end
     end
+
 end
 
 -- (CreateCDMIcon removed -- all bars now use hook-based reparenting of Blizzard CDM frames)
@@ -2866,10 +2899,17 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
             tex:ClearAllPoints()
             EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
             EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
+            -- Extra vertical crop for width-match expanded icons (+1px wider).
+            -- Crop proportionally so content stays visually square.
+            local extraCrop = 0
+            if icon._matchExpanded then
+                local baseW = barData.iconSize or 36
+                extraCrop = (1 - 2 * zoom) / (2 * (baseW + 1))
+            end
             if shape == "cropped" then
-                tex:SetTexCoord(zoom, 1 - zoom, zoom + 0.10, 1 - zoom - 0.10)
+                tex:SetTexCoord(zoom, 1 - zoom, zoom + 0.10 + extraCrop, 1 - zoom - 0.10 - extraCrop)
             else
-                tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+                tex:SetTexCoord(zoom, 1 - zoom, zoom + extraCrop, 1 - zoom - extraCrop)
             end
         end
 
@@ -4299,9 +4339,10 @@ RegisterCDMUnlockElements = function()
                 end,
                 linkedDimensions = true,
                 setWidth = function(_, newW)
-                    -- Reverse-engineer iconSize from target width
+                    -- Reverse-engineer iconSize from target width (physical pixels)
                     local bd2 = barDataByKey[key]
                     if not bd2 then return end
+                    local onePx = EllesmereUI.PP.mult
                     local count = CountCDMBarSpells(key)
                     if count == 0 then return end
                     local rows = bd2.numRows or 1
@@ -4311,22 +4352,27 @@ RegisterCDMUnlockElements = function()
                     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
                     local sp = SnapForScale(bd2.spacing or 2, 1)
                     local dim = isH and stride or rows
-                    local rawIcon = (newW - (dim - 1) * sp) / dim
-                    if rawIcon < 8 then rawIcon = 8 end
-                    bd2.iconSize = math.floor(rawIcon + 0.5)
-                    -- Back-solve exact fractional spacing to hit target width.
-                    -- Per-offset snapping in LayoutCDMBar distributes the
-                    -- sub-pixel difference as +/-1px across individual gaps.
-                    local iconW = SnapForScale(bd2.iconSize, 1)
-                    local gaps = dim - 1
-                    bd2._matchSpacing = nil
+                    -- Convert to physical pixels, solve for icon size
+                    local physTarget = math.floor(newW / onePx + 0.5)
+                    local physSp = math.floor(sp / onePx + 0.5)
+                    local rawPhysIcon = (physTarget - (dim - 1) * physSp) / dim
+                    if rawPhysIcon < 8 then rawPhysIcon = 8 end
+                    -- Floor so base icons fit within target; remainder becomes
+                    -- extra physical pixels distributed as +1px expanded icons.
+                    local basePhysIcon = math.floor(rawPhysIcon)
+                    -- Store physical pixel count directly to avoid floating point
+                    -- precision loss in the iconSize → PP.Scale roundtrip.
+                    bd2._matchIconPhys = basePhysIcon
+                    bd2.iconSize = basePhysIcon * onePx
                     bd2._matchStride = nil
-                    if gaps > 0 then
-                        local exactSp = (newW - dim * iconW) / gaps
-                        if exactSp >= 0 and math.abs(exactSp - sp) <= 1 then
-                            bd2._matchSpacing = exactSp
-                            bd2._matchStride = dim
-                        end
+                    local idealPhys = dim * basePhysIcon + (dim - 1) * physSp
+                    local extra = physTarget - idealPhys
+                    if extra > 0 and extra <= dim then
+                        bd2._matchExtraPixels = extra
+                        bd2._matchStride = dim
+                    else
+                        bd2._matchExtraPixels = nil
+                        bd2._matchStride = nil
                     end
                     LayoutCDMBar(key)
                 end,
@@ -4352,7 +4398,7 @@ RegisterCDMUnlockElements = function()
                         if shape == "cropped" then rawIcon = rawIcon / 0.80 end
                     end
                     if rawIcon < 8 then rawIcon = 8 end
-                    bd2.iconSize = math.floor(rawIcon + 0.5)
+                    bd2.iconSize = SnapForScale(rawIcon, 1)
                     LayoutCDMBar(key)
                 end,
                 savePos = function(_, point, relPoint, x, y)

@@ -156,9 +156,15 @@ end
 -- Registry for one-time accent-colored elements (sidebar indicators, glows,
 -- tab underlines, footer buttons, popup confirm button, etc.)
 -- Each entry is { type="solid"|"gradient"|"font"|"callback", obj=..., ... }
-local _accentElements = {}
+local _accentElements = { _idx = {} }  -- _idx: obj -> index, prevents duplicates
 local function RegAccent(entry)
-    _accentElements[#_accentElements + 1] = entry
+    local key = entry.obj or entry.fn
+    if key and _accentElements._idx[key] then
+        _accentElements[_accentElements._idx[key]] = entry
+    else
+        _accentElements[#_accentElements + 1] = entry
+        if key then _accentElements._idx[key] = #_accentElements end
+    end
 end
 local DARK_BG         = { r = PANEL_BG_R, g = PANEL_BG_G, b = PANEL_BG_B }
 local BORDER_COLOR    = { r = BORDER_R, g = BORDER_G, b = BORDER_B, a = BORDER_A }
@@ -681,17 +687,15 @@ do
     --  Convenience wrappers — pixel-snapped frame geometry
     ---------------------------------------------------------------------------
     function PP.Size(frame, w, h)
-        local sw = math.floor(w + 0.5)
-        local sh = h and math.floor(h + 0.5) or sw
-        frame:SetSize(sw, sh)
+        frame:SetSize(PP.Scale(w), h and PP.Scale(h) or PP.Scale(w))
     end
 
     function PP.Width(frame, w)
-        frame:SetWidth(math.floor(w + 0.5))
+        frame:SetWidth(PP.Scale(w))
     end
 
     function PP.Height(frame, h)
-        frame:SetHeight(math.floor(h + 0.5))
+        frame:SetHeight(PP.Scale(h))
     end
 
     function PP.Point(obj, anchor, p1, p2, p3, p4)
@@ -6074,7 +6078,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.1.1"
+EllesmereUI.VERSION = "6.1.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
