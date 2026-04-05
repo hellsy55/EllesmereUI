@@ -1522,7 +1522,6 @@ local function BuildBars()
         primaryBar:SetFrameStrata("MEDIUM")
         primaryBar:SetFrameLevel(10)
     end
-    -- DEBUG: track who moves power bar during combat (outside creation guard)
     if pp.enabled ~= false and cachedPrimary then
         local ppOri = pp.orientation or g.orientation or "HORIZONTAL"
         local primaryAnchorKey = NormalizeAnchorKey(pp.anchorTo)
