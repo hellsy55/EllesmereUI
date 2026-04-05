@@ -3709,8 +3709,16 @@ function EAB:ApplyAlwaysShowButtons(barKey)
                 -- Always restore button alpha to 1. The bar frame's own
                 -- alpha (via mouseover fade) handles overall visibility.
                 btn:SetAlpha(1)
-                -- Restore mouse state based on bar's click-through setting
-                SafeEnableMouse(btn, clickable)
+                -- Restore mouse state based on bar's click-through setting.
+                -- When click-through is on but mouseover is enabled, keep
+                -- mouse motion so OnEnter/OnLeave still fire for hover fade.
+                if clickable then
+                    SafeEnableMouse(btn, true)
+                elseif s.mouseoverEnabled then
+                    SafeEnableMouseMotionOnly(btn, true)
+                else
+                    SafeEnableMouse(btn, false)
+                end
                 lastVisible = i
             end
         end
@@ -4640,7 +4648,7 @@ function EAB:RefreshRuntimeVisibility()
                         end
                     end
                     if barFrames[key] and frame == barFrames[key] then
-                        SafeEnableMouseMotionOnly(frame, not s.clickThrough)
+                        SafeEnableMouseMotionOnly(frame, not s.clickThrough or s.mouseoverEnabled)
                     elseif info.isBlizzardMovable or info.blizzOwnedVisibility then
                         SafeEnableMouse(frame, false)
                     else
@@ -4696,9 +4704,12 @@ function EAB:ApplyClickThroughForBar(barKey)
     if not buttons then return end
 
     local enable = ShouldQuickKeybindSurfaceBar(s) or not s.clickThrough
+    -- When click-through is on but mouseover is enabled, keep mouse motion
+    -- so OnEnter/OnLeave still fire for hover fade.
+    local motionOnly = not enable and s.mouseoverEnabled
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
-    SafeEnableMouseMotionOnly(frame, enable)
+    SafeEnableMouseMotionOnly(frame, enable or motionOnly)
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
     local info = BAR_LOOKUP[barKey]
@@ -4709,7 +4720,13 @@ function EAB:ApplyClickThroughForBar(barKey)
             -- Don't re-enable mouse on invisible empty slots
             local isInvisible = (btn:GetAlpha() == 0) and not showEmpty
             if not isInvisible then
-                SafeEnableMouse(btn, enable)
+                if enable then
+                    SafeEnableMouse(btn, true)
+                elseif motionOnly then
+                    SafeEnableMouseMotionOnly(btn, true)
+                else
+                    SafeEnableMouse(btn, false)
+                end
             end
         end
     end
