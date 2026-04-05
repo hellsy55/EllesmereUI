@@ -1082,6 +1082,7 @@ initFrame:SetScript("OnEvent", function(self)
                     mask:SetAllPoints(bf)
                     mask:SetTexture(SHAPE_MASKS[btnShape], "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
                     iconTex:AddMaskTexture(mask)
+                    bgTex:AddMaskTexture(mask)
                     -- Shape border
                     if SHAPE_BORDERS and SHAPE_BORDERS[btnShape] and brdSize > 0 then
                         local sbt = bf:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -1123,22 +1124,46 @@ initFrame:SetScript("OnEvent", function(self)
                 local PP2 = EllesmereUI and EllesmereUI.PP
 
                 -- Active button gets accent border; assigned (non-active) buttons get white border
+                -- For custom shapes, tint the shape border instead of showing square PP borders
+                local isCustomShape = btnShape ~= "none" and btnShape ~= "cropped" and btnShape ~= "square" and btnShape ~= "csquare"
+                    and SHAPE_MASKS and SHAPE_MASKS[btnShape]
                 local accentBrd
-                if isSelected then
-                    accentBrd = PP2 and PP2.CreateBorder(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1, 2, "OVERLAY", 7)
-                else
-                    accentBrd = PP2 and PP2.CreateBorder(accentCont, 1, 1, 1, 0.6, 2, "OVERLAY", 7)
+                if not isCustomShape then
+                    if isSelected then
+                        accentBrd = PP2 and PP2.CreateBorder(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1, 2, "OVERLAY", 7)
+                    else
+                        accentBrd = PP2 and PP2.CreateBorder(accentCont, 1, 1, 1, 0.6, 2, "OVERLAY", 7)
+                    end
+                    if accentBrd then accentBrd:Hide() end
                 end
-                if accentBrd then accentBrd:Hide() end
 
                 -- Show active state
                 if isSelected then
-                    if accentBrd then accentBrd:Show() end
+                    if isCustomShape then
+                        -- Tint shape border to accent color
+                        for _, region in ipairs({bf:GetRegions()}) do
+                            if region:IsObjectType("Texture") and region:GetTexture() and SHAPE_BORDERS and SHAPE_BORDERS[btnShape]
+                               and region:GetDrawLayer() == "OVERLAY" then
+                                region:SetVertexColor(ACCENT.r, ACCENT.g, ACCENT.b, 1)
+                            end
+                        end
+                    elseif accentBrd then
+                        accentBrd:Show()
+                    end
                 end
 
                 -- Show white border for assigned buttons (even if not active)
                 if hasAssign and not isSelected then
-                    if accentBrd then accentBrd:Show() end
+                    if isCustomShape then
+                        for _, region in ipairs({bf:GetRegions()}) do
+                            if region:IsObjectType("Texture") and region:GetTexture() and SHAPE_BORDERS and SHAPE_BORDERS[btnShape]
+                               and region:GetDrawLayer() == "OVERLAY" then
+                                region:SetVertexColor(1, 1, 1, 0.6)
+                            end
+                        end
+                    elseif accentBrd then
+                        accentBrd:Show()
+                    end
                 end
 
                 -- Store refs so click handler can activate inline
@@ -1154,25 +1179,56 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Hover highlight: switch border to accent on hover
                 -- Active button doesn't need hover (already accent)
+                -- Store shape border ref for hover tinting
+                bf._shapeBorderTex = nil
+                if isCustomShape and SHAPE_BORDERS and SHAPE_BORDERS[btnShape] then
+                    for _, region in ipairs({bf:GetRegions()}) do
+                        if region:IsObjectType("Texture") and region:GetDrawLayer() == "OVERLAY" then
+                            bf._shapeBorderTex = region
+                            break
+                        end
+                    end
+                end
+                local origBrdR, origBrdG, origBrdB = 0, 0, 0
+                if isCDMBar then
+                    local bd2 = SelectedCDMBar()
+                    if bd2 then origBrdR, origBrdG, origBrdB = bd2.borderR or 0, bd2.borderG or 0, bd2.borderB or 0 end
+                else
+                    origBrdR, origBrdG, origBrdB = brdColor.r, brdColor.g, brdColor.b
+                end
                 if not isSelected then
                     if hasAssign then
-                        -- Has assignments: swap white border to accent on hover
                         bf:SetScript("OnEnter", function()
-                            if PP2 and accentCont then PP2.SetBorderColor(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1) end
+                            if isCustomShape and bf._shapeBorderTex then
+                                bf._shapeBorderTex:SetVertexColor(ACCENT.r, ACCENT.g, ACCENT.b, 1)
+                            elseif PP2 and accentCont then
+                                PP2.SetBorderColor(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1)
+                            end
                         end)
                         bf:SetScript("OnLeave", function()
-                            if PP2 and accentCont then PP2.SetBorderColor(accentCont, 1, 1, 1, 0.6) end
+                            if isCustomShape and bf._shapeBorderTex then
+                                bf._shapeBorderTex:SetVertexColor(1, 1, 1, 0.6)
+                            elseif PP2 and accentCont then
+                                PP2.SetBorderColor(accentCont, 1, 1, 1, 0.6)
+                            end
                         end)
                     else
-                        -- No assignments: show accent border + bump alpha on hover, revert on leave
                         bf:SetScript("OnEnter", function()
                             bf:SetAlpha(0.55)
-                            if PP2 and accentCont then PP2.SetBorderColor(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1) end
-                            if accentBrd then accentBrd:Show() end
+                            if isCustomShape and bf._shapeBorderTex then
+                                bf._shapeBorderTex:SetVertexColor(ACCENT.r, ACCENT.g, ACCENT.b, 1)
+                            else
+                                if PP2 and accentCont then PP2.SetBorderColor(accentCont, ACCENT.r, ACCENT.g, ACCENT.b, 1) end
+                                if accentBrd then accentBrd:Show() end
+                            end
                         end)
                         bf:SetScript("OnLeave", function()
                             bf:SetAlpha(0.50)
-                            if accentBrd then accentBrd:Hide() end
+                            if isCustomShape and bf._shapeBorderTex then
+                                bf._shapeBorderTex:SetVertexColor(origBrdR, origBrdG, origBrdB, 1)
+                            else
+                                if accentBrd then accentBrd:Hide() end
+                            end
                         end)
                     end
                 end
@@ -6349,17 +6405,24 @@ initFrame:SetScript("OnEvent", function(self)
             local slotBrd = slotPP and slotPP.CreateBorder(slotHlCont, eg.r, eg.g, eg.b, 1, 2, "OVERLAY", 7)
             if slotBrd then slotBrd:Hide() end
             slot._hlBrd = slotBrd
-            slot._stackText = slot:CreateFontString(nil, "OVERLAY")
+            -- Text overlay (renders above border)
+            local pvTextOvr = CreateFrame("Frame", nil, slot)
+            pvTextOvr:SetAllPoints(slot)
+            pvTextOvr:SetFrameLevel(slot:GetFrameLevel() + 3)
+            pvTextOvr:EnableMouse(false)
+            slot._pvTextOverlay = pvTextOvr
+
+            slot._stackText = pvTextOvr:CreateFontString(nil, "OVERLAY")
             SetPVFont(slot._stackText, FONT_PATH, 11)
-            slot._stackText:SetPoint("BOTTOMRIGHT", 0, 2)
+            slot._stackText:SetPoint("BOTTOMRIGHT", pvTextOvr, "BOTTOMRIGHT", 0, 2)
             slot._stackText:SetJustifyH("RIGHT")
             slot._stackText:Hide()
             local stackTxt = slot._stackText
 
             -- Keybind text (mirrors _keybindText on real CDM icons)
-            local kbTxt = slot:CreateFontString(nil, "OVERLAY")
+            local kbTxt = pvTextOvr:CreateFontString(nil, "OVERLAY")
             SetPVFont(kbTxt, FONT_PATH, 9)
-            kbTxt:SetPoint("TOPLEFT", 2, -2)
+            kbTxt:SetPoint("TOPLEFT", pvTextOvr, "TOPLEFT", 2, -2)
             kbTxt:SetJustifyH("LEFT")
             kbTxt:Hide()
             slot._keybindText = kbTxt
@@ -7037,6 +7100,11 @@ initFrame:SetScript("OnEvent", function(self)
                 if slot._bg.SetSnapToPixelGrid then slot._bg:SetSnapToPixelGrid(false); slot._bg:SetTexelSnappingBias(0) end
 
                 ns.ApplyShapeToCDMIcon(slot, shape, bd)
+                -- For custom shapes, ensure the square highlight border stays hidden
+                -- (ApplyShapeToCDMIcon hides the slot's own PP border but not _hlBrd)
+                if slot._hlBrd and shape ~= "square" and shape ~= "csquare" and shape ~= "none" then
+                    slot._hlBrd:Hide()
+                end
 
                 -- Stack count preview text
                 if slot._stackText then

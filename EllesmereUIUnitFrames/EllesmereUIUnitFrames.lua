@@ -1505,8 +1505,16 @@ end
 local function ApplyFramePosition(frame, unit)
     if not frame or not db.profile.positions[unit] then return end
     local pos = db.profile.positions[unit]
+    local x, y = pos.x, pos.y
+    -- Snap to physical pixel grid so positions are deterministic across reloads
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES and x and y then
+        local es = frame:GetEffectiveScale()
+        x = PPa.SnapForES(x, es)
+        y = PPa.SnapForES(y, es)
+    end
     frame:ClearAllPoints()
-    frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+    frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, x, y)
 end
 
 -- Clip container for health + power bars -- prevents sub-pixel overflow at
@@ -6976,34 +6984,61 @@ function SetupOptionsPanel()
                 applyPos = function(k)
                     local pos = db.profile.positions[k]
                     if not pos then return end
+                    local pt = pos.point
+                    local rpt = pos.relPoint or pt
+                    local px, py = pos.x, pos.y
+                    -- Snap to physical pixel grid
+                    local PPa = EllesmereUI and EllesmereUI.PP
                     -- Castbar elements: reposition the castbarBg
                     if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
                         local cbUnit = k:gsub("Castbar", "")
                         if frames[cbUnit] and frames[cbUnit].Castbar then
                             local cbBg = frames[cbUnit].Castbar:GetParent()
                             if cbBg then
+                                if PPa and PPa.SnapForES and px and py then
+                                    local es = cbBg:GetEffectiveScale()
+                                    px = PPa.SnapForES(px, es)
+                                    py = PPa.SnapForES(py, es)
+                                end
                                 cbBg:ClearAllPoints()
-                                cbBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                                cbBg:SetPoint(pt, UIParent, rpt, px, py)
                             end
                         end
                     elseif k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
                         for i = 1, 5 do
-                            if frames["boss" .. i] then
-                                frames["boss" .. i]:ClearAllPoints()
-                                frames["boss" .. i]:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y - ((i - 1) * spacing))
+                            local bf = frames["boss" .. i]
+                            if bf then
+                                local bx, by = pos.x, pos.y - ((i - 1) * spacing)
+                                if PPa and PPa.SnapForES and bx and by then
+                                    local es = bf:GetEffectiveScale()
+                                    bx = PPa.SnapForES(bx, es)
+                                    by = PPa.SnapForES(by, es)
+                                end
+                                bf:ClearAllPoints()
+                                bf:SetPoint(pt, UIParent, rpt, bx, by)
                             end
                         end
                     elseif k == "classPower" then
                         if frames._classPowerBar then
+                            if PPa and PPa.SnapForES and px and py then
+                                local es = frames._classPowerBar:GetEffectiveScale()
+                                px = PPa.SnapForES(px, es)
+                                py = PPa.SnapForES(py, es)
+                            end
                             frames._classPowerBar:ClearAllPoints()
-                            frames._classPowerBar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            frames._classPowerBar:SetPoint(pt, UIParent, rpt, px, py)
                         end
                     else
                         local fr = frames[k]
                         if fr then
+                            if PPa and PPa.SnapForES and px and py then
+                                local es = fr:GetEffectiveScale()
+                                px = PPa.SnapForES(px, es)
+                                py = PPa.SnapForES(py, es)
+                            end
                             fr:ClearAllPoints()
-                            fr:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                            fr:SetPoint(pt, UIParent, rpt, px, py)
                         end
                     end
                 end,

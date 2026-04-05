@@ -6078,7 +6078,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.1.5"
+EllesmereUI.VERSION = "6.1.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6135,6 +6135,83 @@ do
             end)
         end
 
+    end)
+end
+
+-- Combat reload warning: if the UI was reloaded while in combat, show a
+-- red warning in the center of the screen. Fades after 5s or on combat drop.
+do
+    local cf = CreateFrame("Frame")
+    cf:RegisterEvent("PLAYER_ENTERING_WORLD")
+    cf:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_ENTERING_WORLD" then
+            self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            local function HasAnchoredActionBars()
+                local adb = EllesmereUIDB and EllesmereUIDB.unlockAnchors
+                if not adb then return false end
+                for key, info in pairs(adb) do
+                    if info.target then
+                        -- Check if this element or its target is an action bar
+                        local isBar = (key == "MainBar" or key == "StanceBar" or key == "PetBar"
+                            or key == "MicroBar" or key == "BagBar" or key == "XPBar" or key == "RepBar"
+                            or (key:sub(1, 3) == "Bar" and tonumber(key:sub(4))))
+                        local targetIsBar = (info.target == "MainBar" or info.target == "StanceBar"
+                            or info.target == "PetBar" or info.target == "MicroBar"
+                            or info.target == "BagBar" or info.target == "XPBar" or info.target == "RepBar"
+                            or (info.target:sub(1, 3) == "Bar" and tonumber(info.target:sub(4))))
+                        if isBar or targetIsBar then return true end
+                    end
+                end
+                return false
+            end
+            local function ShowWarning()
+                if self._warn then return end
+                if not HasAnchoredActionBars() then return end
+                local warn = UIParent:CreateFontString(nil, "OVERLAY")
+                warn:SetFont("Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF", 24, "")
+                warn:SetShadowOffset(1, -1)
+                warn:SetShadowColor(0, 0, 0, 0.8)
+                warn:SetTextColor(0.878, 0.247, 0.247, 1)
+                warn:SetPoint("CENTER", UIParent, "CENTER", 0, 50)
+                warn:SetJustifyH("CENTER")
+                warn:SetText("EUI: Combat Reload UI Warning:\nDrop combat to fix any layout issues")
+                warn:Show()
+                self:RegisterEvent("PLAYER_REGEN_ENABLED")
+                self._warn = warn
+                local elapsed = 0
+                local fadeFrame = CreateFrame("Frame")
+                fadeFrame:SetScript("OnUpdate", function(ff, dt)
+                    elapsed = elapsed + dt
+                    if elapsed >= 10 then
+                        warn:Hide()
+                        ff:SetScript("OnUpdate", nil)
+                    elseif elapsed >= 9 then
+                        warn:SetAlpha(1 - (elapsed - 9))
+                    end
+                end)
+                self._fadeFrame = fadeFrame
+            end
+            if InCombatLockdown() then
+                ShowWarning()
+            else
+                -- Brief delay: combat state may not be set yet at PEW
+                C_Timer.After(0.5, function()
+                    if InCombatLockdown() and not self._warn then
+                        ShowWarning()
+                    end
+                end)
+            end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            if self._warn then
+                self._warn:Hide()
+                self._warn = nil
+            end
+            if self._fadeFrame then
+                self._fadeFrame:SetScript("OnUpdate", nil)
+                self._fadeFrame = nil
+            end
+        end
     end)
 end
 
@@ -6845,6 +6922,12 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         local _gameMenuBaseHeight = nil
         hooksecurefunc(GameMenuFrame, "Layout", function()
+            -- Respect the hide setting
+            if EllesmereUIDB and EllesmereUIDB.hideGameMenuButton then
+                btn:Hide()
+                return
+            end
+            btn:Show()
             local eg = ELLESMERE_GREEN
             local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
             btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")

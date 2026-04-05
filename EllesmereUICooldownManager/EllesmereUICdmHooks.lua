@@ -570,7 +570,7 @@ local function DecorateFrame(frame, barData)
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
-        txo:SetFrameLevel(frame:GetFrameLevel() + 3)
+        txo:SetFrameLevel(frame:GetFrameLevel() + 7)
         txo:EnableMouse(false)
         fd.textOverlay = txo
     end

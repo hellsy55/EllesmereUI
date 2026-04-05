@@ -63,8 +63,9 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Helpers
     ---------------------------------------------------------------------------
+    local _selectedBarKey = "MainBar"
     local function SelectedKey()
-        return EAB.db.profile.selectedBar or "MainBar"
+        return _selectedBarKey
     end
 
     local function SB()
@@ -1549,6 +1550,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       SB().buttonWidth  = v
                       SB().buttonHeight = v
+                      SB()._matchExtraPixels = nil
+                      SB()._matchExtraPixelsH = nil
                       EAB:ApplyButtonSizeForBar(SelectedKey())
                       SUpdatePreviewAndResize()
                       EllesmereUI:RefreshPage()
@@ -3404,7 +3407,7 @@ initFrame:SetScript("OnEvent", function(self)
                 barLabels, barOrder,
                 function() return SelectedKey() end,
                 function(v)
-                    EAB.db.profile.selectedBar = v
+                    _selectedBarKey = v
                     EllesmereUI:InvalidateContentHeaderCache()
                     EllesmereUI:SetContentHeader(_barsHeaderBuilder)
                     -- Always force full rebuild — combined keys (MicroBagBars,

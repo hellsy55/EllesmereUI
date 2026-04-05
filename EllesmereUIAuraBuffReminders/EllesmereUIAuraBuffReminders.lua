@@ -1972,12 +1972,17 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             end
         end
 
+        -- Consumables (weapon enchants, flask, food) only in Mythic dungeons
+        -- (M0/M+) and Normal/Heroic/Mythic raids.
+        if inInstance and (InMythicPlusKey()
+            or (_cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8))
+            or (_cachedIType == "raid" and (_cachedDiffID == 14 or _cachedDiffID == 15 or _cachedDiffID == 16))) then
+
         -- Weapon Enchants (temp weapon enchant items)
         -- Skip for classes with their own imbue system (poisons, imbues, runeforging).
         -- Paladin: only skip if player knows a rite spell (Lightsmith only).
-        local hasClassImbue = _IMBUE_CLASSES[playerClass]
-            or (playerClass == "PALADIN" and HasImbueSpells())
-        if co.enabled.weapon_enchant and not hasClassImbue then
+        if co.enabled.weapon_enchant and not (_IMBUE_CLASSES[playerClass]
+            or (playerClass == "PALADIN" and HasImbueSpells())) then
             local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
             local mhCat = GetWeaponCategory(16)
             local ohCat = GetWeaponCategory(17)
@@ -2077,6 +2082,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 end
             end
         end
+        end -- InConsumableContent
 
         -- Inky Black Potion (zone-specific)
         if co.enabled.inky_black then
@@ -2608,8 +2614,15 @@ local function ApplyUnlockPos()
     if anchored and iconAnchor:GetLeft() then return end
     local pos = db.profile.unlockPos
     if pos and pos.point then
+        local px, py = pos.x or 0, pos.y or 0
+        local PPa = EllesmereUI and EllesmereUI.PP
+        if PPa and PPa.SnapForES then
+            local es = iconAnchor:GetEffectiveScale()
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
         iconAnchor:ClearAllPoints()
-        iconAnchor:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        iconAnchor:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
     else
         -- Convert legacy CENTER offset to TOPLEFT
         local d = db.profile.display

@@ -58,4 +58,131 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
         end
         EllesmereUIDB._friendsWipeDone = true
     end
+
+    ---------------------------------------------------------------------------
+    --  Position snap helpers (reusable for migration + profile import)
+    ---------------------------------------------------------------------------
+    local function MakeSnappers()
+        local physH = select(2, GetPhysicalScreenSize())
+        local perfect = physH and physH > 0 and (768 / physH) or 1
+        local uiScale = EllesmereUIDB.ppUIScale or perfect
+        if uiScale <= 0 then uiScale = perfect end
+        local onePixel = perfect / uiScale
+
+        local function snap(v)
+            if type(v) ~= "number" or v == 0 then return v end
+            return floor(v / onePixel + 0.5) * onePixel
+        end
+        local function snapPos(tbl)
+            if type(tbl) ~= "table" then return end
+            if tbl.x then tbl.x = snap(tbl.x) end
+            if tbl.y then tbl.y = snap(tbl.y) end
+        end
+        local function snapPosMap(map)
+            if type(map) ~= "table" then return end
+            for _, pos in pairs(map) do snapPos(pos) end
+        end
+        local function snapAnchors(anchors)
+            if type(anchors) ~= "table" then return end
+            for _, info in pairs(anchors) do
+                if type(info) == "table" then
+                    if info.offsetX then info.offsetX = snap(info.offsetX) end
+                    if info.offsetY then info.offsetY = snap(info.offsetY) end
+                end
+            end
+        end
+        return snapPos, snapPosMap, snapAnchors
+    end
+
+    -- Snap all positions in a single profile data table.
+    -- Called by migration (all profiles) and by profile import (one profile).
+    local function SnapProfilePositions(profData)
+        if type(profData) ~= "table" then return end
+        local snapPos, snapPosMap, snapAnchors = MakeSnappers()
+
+        local ul = profData.unlockLayout
+        if ul then snapAnchors(ul.anchors) end
+
+        local addons = profData.addons
+        if type(addons) ~= "table" then return end
+
+        local uf = addons.EllesmereUIUnitFrames
+        if uf then snapPosMap(uf.positions) end
+
+        local eab = addons.EllesmereUIActionBars
+        if eab then snapPosMap(eab.barPositions) end
+
+        local cdm = addons.EllesmereUICooldownManager
+        if cdm then snapPosMap(cdm.cdmBarPositions) end
+
+        local erb = addons.EllesmereUIResourceBars
+        if type(erb) == "table" then
+            for _, section in pairs(erb) do
+                if type(section) == "table" and section.unlockPos then
+                    snapPos(section.unlockPos)
+                end
+            end
+        end
+
+        local abr = addons.EllesmereUIAuraBuffReminders
+        if type(abr) == "table" and abr.unlockPos then
+            snapPos(abr.unlockPos)
+        end
+
+        local basics = addons.EllesmereUIBasics
+        if type(basics) == "table" then
+            if basics.questTracker then snapPos(basics.questTracker.pos) end
+            if basics.minimap then snapPos(basics.minimap.position) end
+            if basics.friends then snapPos(basics.friends.position) end
+        end
+
+        local cursor = addons.EllesmereUICursor
+        if type(cursor) == "table" then
+            if cursor.gcd then snapPos(cursor.gcd.pos) end
+            if cursor.cast then snapPos(cursor.cast.pos) end
+        end
+    end
+
+    -- Expose for profile import
+    EllesmereUI.SnapProfilePositions = SnapProfilePositions
+
+    ---------------------------------------------------------------------------
+    --  One-time migration: re-snap all stored positions
+    ---------------------------------------------------------------------------
+    if not EllesmereUIDB._positionSnapV3Done then
+        local _, _, snapAnchors = MakeSnappers()
+        snapAnchors(EllesmereUIDB.unlockAnchors)
+
+        if EllesmereUIDB.profiles then
+            for _, profData in pairs(EllesmereUIDB.profiles) do
+                SnapProfilePositions(profData)
+            end
+        end
+
+        EllesmereUIDB._positionSnapV3Done = true
+    end
+
+    ---------------------------------------------------------------------------
+    --  Migration: wipe friendAssignments and friendNotes.
+    --  Friend group assignments are now stored in Blizzard's friend note
+    --  field (server-side) instead of local DB keyed by bnetAccountID
+    --  (which is not stable across sessions). Group definitions, colors,
+    --  order, and collapsed states are preserved.
+    ---------------------------------------------------------------------------
+    if EllesmereUIDB.global and not EllesmereUIDB.global._friendNotesMigrated then
+        -- Check if user had any group assignments before wiping
+        local hadAssignments = false
+        if EllesmereUIDB.global.friendAssignments then
+            for _ in pairs(EllesmereUIDB.global.friendAssignments) do
+                hadAssignments = true
+                break
+            end
+        end
+        if hadAssignments then
+            EllesmereUIDB.global._friendGroupReassignPopup = true
+        end
+        EllesmereUIDB.global.friendAssignments = {}
+        EllesmereUIDB.global.friendNotes = {}
+        EllesmereUIDB.global._friendNotesMigrated = true
+    end
 end)

@@ -770,6 +770,21 @@ initFrame:SetScript("OnEvent", function(self)
                 end
               end });  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Pause Menu Button",
+              tooltip="Shows the EllesmereUI button in the game menu (Escape key).",
+              getValue=function()
+                return not EllesmereUIDB or EllesmereUIDB.hideGameMenuButton ~= true
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.hideGameMenuButton = not v
+                local btn = _G.EllesmereUI_GameMenuButton
+                if btn then btn:SetShown(v) end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         _, h = W:SectionHeader(parent, "COMBAT", y);  y = y - h

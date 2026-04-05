@@ -2262,6 +2262,10 @@ local function ComputeBarLayout(key)
     btnH = SnapForScale(btnH, 1)
     local stepW = btnW + padding
     local stepH = btnH + padding
+    local PPc = EllesmereUI and EllesmereUI.PP
+    local onePxC = PPc and PPc.mult or 1
+    local extraWC = s._matchExtraPixels or 0
+    local extraHC = s._matchExtraPixelsH or 0
 
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
@@ -2283,42 +2287,46 @@ local function ComputeBarLayout(key)
                 col = (i - 1) % stride
                 row = floor((i - 1) / stride)
             end
+            local thisBtnW = (extraWC > 0 and col < extraWC) and (btnW + onePxC) or btnW
+            local thisBtnH = (extraHC > 0 and row < extraHC) and (btnH + onePxC) or btnH
+            local extraBeforeW = math.min(col, extraWC) * onePxC
+            local extraBeforeH = math.min(row, extraHC) * onePxC
             local xOff, yOff
             if growDir == "LEFT" then
-                xOff = -(col * stepW)
-                yOff = -(row * stepH)
+                xOff = -(col * stepW + extraBeforeW)
+                yOff = -(row * stepH + extraBeforeH)
             elseif growDir == "RIGHT" then
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
             elseif growDir == "DOWN" then
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
             elseif growDir == "UP" then
-                xOff = col * stepW
-                yOff = row * stepH
+                xOff = col * stepW + extraBeforeW
+                yOff = row * stepH + extraBeforeH
             elseif growDir == "CENTER" then
                 local totalCols = isVertical and numRows or stride
-                local totalW = totalCols * stepW - padding
+                local totalW = totalCols * stepW - padding + extraWC * onePxC
                 local totalRowsN = isVertical and stride or numRows
-                local totalH = totalRowsN * stepH - padding
-                xOff = col * stepW - totalW / 2
-                yOff = -(row * stepH) + totalH / 2
+                local totalH = totalRowsN * stepH - padding + extraHC * onePxC
+                xOff = col * stepW + extraBeforeW - totalW / 2
+                yOff = -(row * stepH + extraBeforeH) + totalH / 2
             else
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
             end
             local show = true
             if not showEmpty and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s)) and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 show = false
             end
-            result[i] = { x = xOff, y = yOff, w = btnW, h = btnH, show = show }
+            result[i] = { x = xOff, y = yOff, w = thisBtnW, h = thisBtnH, show = show }
         end
     end
 
     local totalCols = isVertical and numRows or stride
     local totalRows = isVertical and stride or numRows
-    local frameW = SnapForScale(totalCols * btnW + (totalCols - 1) * padding, 1)
-    local frameH = SnapForScale(totalRows * btnH + (totalRows - 1) * padding, 1)
+    local frameW = SnapForScale(totalCols * btnW + (totalCols - 1) * padding + extraWC * onePxC, 1)
+    local frameH = SnapForScale(totalRows * btnH + (totalRows - 1) * padding + extraHC * onePxC, 1)
     return result, max(frameW, 1), max(frameH, 1)
 end
 
@@ -2371,6 +2379,12 @@ local function LayoutBar(key)
     local stepW = btnW + padding
     local stepH = btnH + padding
 
+    -- Width/height match: distribute extra physical pixels across buttons
+    local PP = EllesmereUI and EllesmereUI.PP
+    local onePx = PP and PP.mult or 1
+    local extraW = s._matchExtraPixels or 0
+    local extraH = s._matchExtraPixelsH or 0
+
     -- Show empty slots (stance bar always forces this off)
     local showEmpty = s.alwaysShowButtons
     if showEmpty == nil then showEmpty = true end
@@ -2399,44 +2413,48 @@ local function LayoutBar(key)
                 row = floor((i - 1) / stride)
             end
 
+            -- Width/height match: first N columns/rows get +1 physical pixel.
+            -- Only the matched axis expands -- height stays constant so all
+            -- buttons in a row are the same height (no 1px jagged edge).
+            local thisBtnW = (extraW > 0 and col < extraW) and (btnW + onePx) or btnW
+            local thisBtnH = (extraH > 0 and row < extraH) and (btnH + onePx) or btnH
+            -- Cumulative offset from expanded buttons before this one
+            local extraBeforeW = math.min(col, extraW) * onePx
+            local extraBeforeH = math.min(row, extraH) * onePx
+
             btn:ClearAllPoints()
             local xOff, yOff, anchor
             if growDir == "LEFT" then
-                -- Icon 1 at right edge, grows leftward
-                xOff = -(col * stepW)
-                yOff = -(row * stepH)
+                xOff = -(col * stepW + extraBeforeW)
+                yOff = -(row * stepH + extraBeforeH)
                 anchor = "TOPRIGHT"
             elseif growDir == "RIGHT" then
-                -- Icon 1 at left edge, grows rightward
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
                 anchor = "TOPLEFT"
             elseif growDir == "DOWN" then
-                -- Icon 1 at top, grows downward
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
                 anchor = "TOPLEFT"
             elseif growDir == "UP" then
-                -- Icon 1 at top, grows upward (row flipped so highest row index = bottom)
-                xOff = col * stepW
-                yOff = row * stepH
+                xOff = col * stepW + extraBeforeW
+                yOff = row * stepH + extraBeforeH
                 anchor = "BOTTOMLEFT"
             elseif growDir == "CENTER" then
                 local totalCols = isVertical and numRows or stride
-                local totalW = totalCols * stepW - padding
+                local totalW = totalCols * stepW - padding + extraW * onePx
                 local totalRowsN = isVertical and stride or numRows
-                local totalH = totalRowsN * stepH - padding
-                xOff = col * stepW - totalW / 2
-                yOff = -(row * stepH) + totalH / 2
+                local totalH = totalRowsN * stepH - padding + extraH * onePx
+                xOff = col * stepW + extraBeforeW - totalW / 2
+                yOff = -(row * stepH + extraBeforeH) + totalH / 2
                 anchor = "CENTER"
             else
-                -- Fallback (treat as RIGHT)
-                xOff = col * stepW
-                yOff = -(row * stepH)
+                xOff = col * stepW + extraBeforeW
+                yOff = -(row * stepH + extraBeforeH)
                 anchor = "TOPLEFT"
             end
             btn:SetPoint(anchor, frame, anchor, xOff, yOff)
-            btn:SetSize(btnW, btnH)
+            btn:SetSize(thisBtnW, thisBtnH)
 
             -- Resize the autocast overlay to match the button size
             if btn.AutoCastOverlay then
@@ -2486,11 +2504,11 @@ local function LayoutBar(key)
         end
     end
 
-    -- Size the bar frame to encompass all visible buttons
+    -- Size the bar frame to encompass all visible buttons (including extra px)
     local totalCols = isVertical and numRows or stride
     local totalRows = isVertical and stride or numRows
-    local frameW = totalCols * btnW + (totalCols - 1) * padding
-    local frameH = totalRows * btnH + (totalRows - 1) * padding
+    local frameW = totalCols * btnW + (totalCols - 1) * padding + extraW * onePx
+    local frameH = totalRows * btnH + (totalRows - 1) * padding + extraH * onePx
 
     -- Capture the fixed edge position BEFORE SetSize changes the frame bounds.
     -- When the frame is anchored at CENTER, SetSize expands both sides equally.
@@ -5755,8 +5773,14 @@ function EAB.AnchorVehicleButton()
     btn:ClearAllPoints()
     if pos then
         local pt = pos.point
-        btn:SetPoint(pt, UIParent, pos.relPoint or pt,
-                     pos.x, pos.y)
+        local px, py = pos.x, pos.y
+        local PPa = EllesmereUI and EllesmereUI.PP
+        if PPa and PPa.SnapForES and px and py then
+            local es = btn:GetEffectiveScale()
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
+        btn:SetPoint(pt, UIParent, pos.relPoint or pt, px, py)
     else
         local bar1 = barFrames["MainBar"]
         if bar1 then
@@ -5990,11 +6014,19 @@ end
 local function RestoreBarPositions()
     local positions = EAB.db.profile.barPositions
     if not positions then return end
+    local PPa = EllesmereUI and EllesmereUI.PP
     for _, info in ipairs(BAR_CONFIG) do
         local key = info.key
         local pos = positions[key]
         local frame = barFrames[key]
         if pos and frame then
+            -- Skip bars owned by the unlock anchor system -- their position
+            -- is computed from the anchor chain, not from saved barPositions.
+            local anchored = EllesmereUI and EllesmereUI.IsUnlockAnchored
+                             and EllesmereUI.IsUnlockAnchored(key)
+            if anchored then
+                -- skip: anchor system owns this bar's position
+            else
             local pt = pos.point or "CENTER"
             local rpt = pos.relPoint or pt
             local px = pos.x or 0
@@ -6005,9 +6037,16 @@ local function RestoreBarPositions()
             if pt == "CENTER" and rpt == "CENTER" and px == 0 and py == 0 then
                 -- skip
             else
+                -- Snap to physical pixel grid
+                if PPa and PPa.SnapForES then
+                    local es = frame:GetEffectiveScale()
+                    px = PPa.SnapForES(px, es)
+                    py = PPa.SnapForES(py, es)
+                end
                 frame:ClearAllPoints()
                 frame:SetPoint(pt, UIParent, rpt, px, py)
             end
+            end -- anchored else
         end
     end
 end
@@ -6046,6 +6085,7 @@ local function RegisterWithUnlockMode()
                 local s = EAB.db.profile.bars[info.key]
                 if not s then return end
                 -- Reverse-engineer square button size from total bar width
+                -- using physical pixel math to distribute remainder pixels.
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count
                 local numRows  = s.overrideNumRows  or s.numRows  or 1
                 if numRows < 1 then numRows = 1 end
@@ -6055,21 +6095,37 @@ local function RegisterWithUnlockMode()
                 local pad      = s.buttonPadding or 2
                 local shape    = s.buttonShape or "none"
                 local cols     = isVert and numRows or stride
-                local rawBtn   = (w - (cols - 1) * pad) / cols
-                -- Remove shape expansion to get the stored button size
+                local PP = EllesmereUI and EllesmereUI.PP
+                local onePx = PP and PP.mult or 1
+                local physTarget = math.floor(w / onePx + 0.5)
+                local physPad = math.floor(SnapForScale(pad, 1) / onePx + 0.5)
+                local rawPhysBtn = (physTarget - (cols - 1) * physPad) / cols
                 if shape ~= "none" and shape ~= "cropped" then
-                    rawBtn = rawBtn - (SHAPE_BTN_EXPAND or 10)
+                    rawPhysBtn = rawPhysBtn - math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)
                 end
-                if rawBtn < 8 then rawBtn = 8 end
-                local btnSize = math.floor(rawBtn + 0.5)
-                s.buttonWidth  = btnSize
-                s.buttonHeight = btnSize
+                if rawPhysBtn < 8 then rawPhysBtn = 8 end
+                local basePhysBtn = math.floor(rawPhysBtn)
+                s.buttonWidth  = math.floor(basePhysBtn * onePx + 0.5)
+                s.buttonHeight = s.buttonWidth
+                -- Compute remainder pixels to distribute across columns
+                local shapePhys = 0
+                if shape ~= "none" and shape ~= "cropped" then
+                    shapePhys = math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)
+                end
+                local idealPhys = cols * (basePhysBtn + shapePhys) + (cols - 1) * physPad
+                local extra = physTarget - idealPhys
+                if extra > 0 and extra <= cols then
+                    s._matchExtraPixels = extra
+                else
+                    s._matchExtraPixels = nil
+                end
                 LayoutBar(info.key)
             end,
             setHeight = function(_, h)
                 local s = EAB.db.profile.bars[info.key]
                 if not s then return end
                 -- Reverse-engineer square button size from total bar height
+                -- using physical pixel math to distribute remainder pixels.
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count
                 local numRows  = s.overrideNumRows  or s.numRows  or 1
                 if numRows < 1 then numRows = 1 end
@@ -6079,17 +6135,36 @@ local function RegisterWithUnlockMode()
                 local pad      = s.buttonPadding or 2
                 local shape    = s.buttonShape or "none"
                 local rows     = isVert and stride or numRows
-                local rawBtn   = (h - (rows - 1) * pad) / rows
-                -- Remove shape expansion to get the stored button size
+                local PP = EllesmereUI and EllesmereUI.PP
+                local onePx = PP and PP.mult or 1
+                local physTarget = math.floor(h / onePx + 0.5)
+                local physPad = math.floor(SnapForScale(pad, 1) / onePx + 0.5)
+                local rawPhysBtn = (physTarget - (rows - 1) * physPad) / rows
                 if shape ~= "none" and shape ~= "cropped" then
-                    rawBtn = rawBtn - (SHAPE_BTN_EXPAND or 10)
+                    rawPhysBtn = rawPhysBtn - math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)
                 elseif shape == "cropped" then
-                    rawBtn = rawBtn / 0.80
+                    rawPhysBtn = rawPhysBtn / 0.80
                 end
-                if rawBtn < 8 then rawBtn = 8 end
-                local btnSize = math.floor(rawBtn + 0.5)
-                s.buttonWidth  = btnSize
-                s.buttonHeight = btnSize
+                if rawPhysBtn < 8 then rawPhysBtn = 8 end
+                local basePhysBtn = math.floor(rawPhysBtn)
+                s.buttonWidth  = math.floor(basePhysBtn * onePx + 0.5)
+                s.buttonHeight = s.buttonWidth
+                -- Compute remainder pixels to distribute across rows
+                local shapePhys = 0
+                if shape ~= "none" and shape ~= "cropped" then
+                    shapePhys = math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)
+                end
+                local croppedH = basePhysBtn + shapePhys
+                if shape == "cropped" then
+                    croppedH = math.floor(basePhysBtn * 0.80)
+                end
+                local idealPhys = rows * croppedH + (rows - 1) * physPad
+                local extra = physTarget - idealPhys
+                if extra > 0 and extra <= rows then
+                    s._matchExtraPixelsH = extra
+                else
+                    s._matchExtraPixelsH = nil
+                end
                 LayoutBar(info.key)
             end,
             savePos = function(_, point, relPoint, x, y)
@@ -6111,12 +6186,22 @@ local function RegisterWithUnlockMode()
                 EAB.db.profile.barPositions[info.key] = nil
             end,
             applyPos = function()
+                -- Skip bars owned by the unlock anchor system
+                if EllesmereUI and EllesmereUI.IsUnlockAnchored
+                   and EllesmereUI.IsUnlockAnchored(info.key) then return end
                 local pos = EAB.db.profile.barPositions[info.key]
                 local frame = barFrames[info.key]
                 if pos and frame then
                     local pt = pos.point
+                    local px, py = pos.x, pos.y
+                    local PPa = EllesmereUI and EllesmereUI.PP
+                    if PPa and PPa.SnapForES and px and py then
+                        local es = frame:GetEffectiveScale()
+                        px = PPa.SnapForES(px, es)
+                        py = PPa.SnapForES(py, es)
+                    end
                     frame:ClearAllPoints()
-                    frame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
+                    frame:SetPoint(pt, UIParent, pos.relPoint or pt, px, py)
                 end
             end,
         })
@@ -6170,7 +6255,14 @@ local function RegisterWithUnlockMode()
                     holder:ClearAllPoints()
                     if pos then
                         local pt = pos.point
-                        holder:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
+                        local px, py = pos.x, pos.y
+                        local PPa = EllesmereUI and EllesmereUI.PP
+                        if PPa and PPa.SnapForES and px and py then
+                            local es = holder:GetEffectiveScale()
+                            px = PPa.SnapForES(px, es)
+                            py = PPa.SnapForES(py, es)
+                        end
+                        holder:SetPoint(pt, UIParent, pos.relPoint or pt, px, py)
                     else
                         holder:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
                     end

@@ -1686,7 +1686,14 @@ local function ApplyMinimap()
     if not minimap._ebsActive then
         minimap:ClearAllPoints()
         if p.position then
-            minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, p.position.x, p.position.y)
+            local px, py = p.position.x, p.position.y
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapForES and px and py then
+                local es = minimap:GetEffectiveScale()
+                px = PPa.SnapForES(px, es)
+                py = PPa.SnapForES(py, es)
+            end
+            minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, px, py)
         else
             minimap:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -10)
         end
@@ -1808,6 +1815,37 @@ local function GetFriendKey(button, bnetInfo, wowInfo)
         return "wow-" .. wowInfo.name
     end
     return nil
+end
+
+-- EUI group tag in Blizzard friend notes: stored as ||EUI:GroupName|| at end
+local EUI_NOTE_TAG = "||EUI:"
+local EUI_NOTE_END = "||"
+
+local function ParseGroupFromNote(note)
+    if not note or note == "" then return nil, note end
+    local tagStart = note:find(EUI_NOTE_TAG, 1, true)
+    if not tagStart then return nil, note end
+    local groupStart = tagStart + #EUI_NOTE_TAG
+    local tagEnd = note:find(EUI_NOTE_END, groupStart, true)
+    if not tagEnd then return nil, note end
+    local group = note:sub(groupStart, tagEnd - 1)
+    -- Strip the tag to get the clean user note
+    local clean = note:sub(1, tagStart - 1)
+    -- Trim trailing whitespace from user note
+    clean = clean:match("^(.-)%s*$") or clean
+    if group == "" then return nil, clean end
+    return group, clean
+end
+
+local function WriteGroupToNote(note, group)
+    -- Strip any existing EUI tag first
+    local _, clean = ParseGroupFromNote(note)
+    if not clean then clean = "" end
+    if not group or group == "" then return clean end
+    if clean ~= "" then
+        return clean .. " " .. EUI_NOTE_TAG .. group .. EUI_NOTE_END
+    end
+    return EUI_NOTE_TAG .. group .. EUI_NOTE_END
 end
 
 
@@ -2605,7 +2643,10 @@ local function SkinRaidGroupButton(btn)
         btn._ebsBg:SetAllPoints()
         btn._ebsBg:SetColorTexture(0.06, 0.06, 0.07, 0.95)
     end
-    PP.CreateBorder(btn, 0.3, 0.3, 0.3, 0.9, 1, "BORDER", 1)
+    local bdrFrame = CreateFrame("Frame", nil, btn)
+    bdrFrame:SetAllPoints(btn)
+    bdrFrame:SetFrameLevel(btn:GetFrameLevel() + 1)
+    PP.CreateBorder(bdrFrame, 0.3, 0.3, 0.3, 0.9, 1, "BORDER", 1)
     for i = 1, select("#", btn:GetRegions()) do
         local region = select(i, btn:GetRegions())
         if region and region:IsObjectType("FontString") then
@@ -2803,8 +2844,17 @@ StaticPopupDialogs["EBS_DELETE_FRIEND_GROUP"] = {
         local fg = GetFriendGroupsGlobal()
         for i = #fg.friendGroups, 1, -1 do
             if fg.friendGroups[i].name == gName then
-                for k, v in pairs(fg.friendAssignments) do
-                    if v == gName then fg.friendAssignments[k] = nil end
+                -- Remove group tag from all Blizzard friend notes
+                local numBN = BNGetNumFriends and BNGetNumFriends() or 0
+                for bi = 1, numBN do
+                    local bInfo = C_BattleNet and C_BattleNet.GetFriendAccountInfo(bi)
+                    if bInfo and bInfo.note then
+                        local g = ParseGroupFromNote(bInfo.note)
+                        if g == gName then
+                            local _, cleanNote = ParseGroupFromNote(bInfo.note)
+                            BNSetFriendNote(bInfo.bnetAccountID, cleanNote or "")
+                        end
+                    end
                 end
                 table.remove(fg.friendGroups, i)
                 break
@@ -2839,8 +2889,19 @@ StaticPopupDialogs["EBS_NEW_FRIEND_GROUP"] = {
                         break
                     end
                 end
-                for k, v in pairs(fg.friendAssignments) do
-                    if v == oldName then fg.friendAssignments[k] = name end
+                -- Rename group tag in all Blizzard friend notes
+                local numBN = BNGetNumFriends and BNGetNumFriends() or 0
+                for bi = 1, numBN do
+                    local bInfo = C_BattleNet and C_BattleNet.GetFriendAccountInfo(bi)
+                    if bInfo and bInfo.note then
+                        local g = ParseGroupFromNote(bInfo.note)
+                        if g == oldName then
+                            local newNote = WriteGroupToNote(bInfo.note, name)
+                            -- Re-parse to get clean user note, then rebuild with new group
+                            local _, cleanNote = ParseGroupFromNote(bInfo.note)
+                            BNSetFriendNote(bInfo.bnetAccountID, WriteGroupToNote(cleanNote, name))
+                        end
+                    end
                 end
             end
         else
@@ -2849,9 +2910,21 @@ StaticPopupDialogs["EBS_NEW_FRIEND_GROUP"] = {
                 if g.name == name then return end
             end
             fg.friendGroups[#fg.friendGroups + 1] = { name = name, collapsed = false }
-            if self.data and self.data.friendKey then
-                fg.friendAssignments[self.data.friendKey] = name
-                _G._EBS_ScrollToFriend = self.data.friendKey
+            -- Assign the friend who triggered the dialog
+            if self.data and self.data.bnetID then
+                local bInfo = C_BattleNet.GetAccountInfoByID(self.data.bnetID)
+                local rawNote = bInfo and bInfo.note or ""
+                BNSetFriendNote(self.data.bnetID, WriteGroupToNote(rawNote, name))
+            elseif self.data and self.data.wowName then
+                local numWoW = C_FriendList.GetNumFriends()
+                for fi = 1, numWoW do
+                    local wInfo = C_FriendList.GetFriendInfoByIndex(fi)
+                    if wInfo and wInfo.name == self.data.wowName then
+                        local rawNote = wInfo.notes or ""
+                        C_FriendList.SetFriendNotes(self.data.wowName, WriteGroupToNote(rawNote, name))
+                        break
+                    end
+                end
             end
         end
         if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
@@ -2868,33 +2941,7 @@ StaticPopupDialogs["EBS_NEW_FRIEND_GROUP"] = {
     preferredIndex = 3,
 }
 
-StaticPopupDialogs["EBS_SET_FRIEND_NOTE"] = {
-    text = "Set a note for this friend:",
-    button1 = ACCEPT,
-    button2 = CANCEL,
-    hasEditBox = true,
-    editBoxWidth = 200,
-    OnAccept = function(self)
-        local note = strtrim((self.EditBox or self.editBox):GetText())
-        local friendKey = self.data
-        if not friendKey then return end
-        local fg = GetFriendGroupsGlobal()
-        if note == "" then
-            fg.friendNotes[friendKey] = nil
-        else
-            fg.friendNotes[friendKey] = note
-        end
-        if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
-    end,
-    OnShow = function(self)
-        local eb = self.EditBox or self.editBox
-        eb:SetFocus()
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-}
+
 
 -- Inject group assignment into Blizzard's friend right-click menu
 local function EBS_ModifyFriendMenu(ownerRegion, rootDescription, contextData)
@@ -2905,23 +2952,33 @@ local function EBS_ModifyFriendMenu(ownerRegion, rootDescription, contextData)
     local raf = _G.RecentAlliesFrame
     if raf and raf:IsShown() then return end
 
-    -- Identify the friend and check if favorite
-    local friendKey
+    -- Identify the friend and read current group from Blizzard note
     local isFavorite = false
+    local currentGroup, currentNote, bnetID, wowName
     if contextData.bnetIDAccount then
-        friendKey = "bnet-" .. contextData.bnetIDAccount
-        local info = C_BattleNet and C_BattleNet.GetAccountInfoByID(contextData.bnetIDAccount)
-        if info then isFavorite = info.isFavorite end
+        bnetID = contextData.bnetIDAccount
+        local info = C_BattleNet and C_BattleNet.GetAccountInfoByID(bnetID)
+        if info then
+            isFavorite = info.isFavorite
+            currentGroup, currentNote = ParseGroupFromNote(info.note)
+        end
     elseif contextData.name then
-        friendKey = "wow-" .. contextData.name
+        wowName = contextData.name
+        local numWoW = C_FriendList and C_FriendList.GetNumFriends and C_FriendList.GetNumFriends() or 0
+        for fi = 1, numWoW do
+            local wInfo = C_FriendList.GetFriendInfoByIndex(fi)
+            if wInfo and wInfo.name == wowName then
+                currentGroup, currentNote = ParseGroupFromNote(wInfo.notes)
+                break
+            end
+        end
     end
-    if not friendKey then return end
+    if not bnetID and not wowName then return end
 
     -- Favorites are managed by Blizzard, don't show our group options
     if isFavorite then return end
 
     local fg = GetFriendGroupsGlobal()
-    local currentGroup = fg.friendAssignments[friendKey]
     local hasGroups = #fg.friendGroups > 0
 
     local ar, ag, ab = EG.r, EG.g, EG.b
@@ -2930,22 +2987,41 @@ local function EBS_ModifyFriendMenu(ownerRegion, rootDescription, contextData)
     rootDescription:CreateDivider()
     rootDescription:CreateTitle(accentHex .. "EUI Friend Groups|r")
 
-    -- "Add to Group" submenu (disabled if already in a group)
-    local addToGroup = rootDescription:CreateButton("Add to Group")
-    if currentGroup then
-        addToGroup:SetEnabled(false)
-    else
-        addToGroup:CreateButton("|cff00ff00+|r Add New Group", function()
-            local dialog = StaticPopup_Show("EBS_NEW_FRIEND_GROUP")
-            if dialog then dialog.data = { friendKey = friendKey } end
-        end)
-        if hasGroups then
-            addToGroup:CreateDivider()
-            for _, group in ipairs(fg.friendGroups) do
-                local gName = group.name
+    -- Helper: write group tag into Blizzard friend note
+    local function SetFriendGroup(groupName)
+        if bnetID then
+            local info = C_BattleNet.GetAccountInfoByID(bnetID)
+            local rawNote = info and info.note or ""
+            local newNote = WriteGroupToNote(rawNote, groupName)
+            BNSetFriendNote(bnetID, newNote)
+        elseif wowName then
+            local numWoW = C_FriendList.GetNumFriends()
+            for fi = 1, numWoW do
+                local wInfo = C_FriendList.GetFriendInfoByIndex(fi)
+                if wInfo and wInfo.name == wowName then
+                    local rawNote = wInfo.notes or ""
+                    local newNote = WriteGroupToNote(rawNote, groupName)
+                    C_FriendList.SetFriendNotes(wowName, newNote)
+                    break
+                end
+            end
+        end
+    end
+
+    -- "Add to Group" / "Move to Group" submenu
+    local addLabel = currentGroup and "Move to Group" or "Add to Group"
+    local addToGroup = rootDescription:CreateButton(addLabel)
+    addToGroup:CreateButton("|cff00ff00+|r Add New Group", function()
+        local dialog = StaticPopup_Show("EBS_NEW_FRIEND_GROUP")
+        if dialog then dialog.data = { bnetID = bnetID, wowName = wowName } end
+    end)
+    if hasGroups then
+        addToGroup:CreateDivider()
+        local groupOrder = GetValidGroupOrder()
+        for _, gName in ipairs(groupOrder) do
+            if gName ~= ORDER_FAVORITES and gName ~= ORDER_UNGROUPED and gName ~= currentGroup then
                 addToGroup:CreateButton(gName, function()
-                    fg.friendAssignments[friendKey] = gName
-                    _G._EBS_ScrollToFriend = friendKey
+                    SetFriendGroup(gName)
                     if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
                 end)
             end
@@ -2954,22 +3030,11 @@ local function EBS_ModifyFriendMenu(ownerRegion, rootDescription, contextData)
 
     -- "Remove from Group" (disabled if not in a group)
     local removeBtn = rootDescription:CreateButton("Remove from Group", function()
-        fg.friendAssignments[friendKey] = nil
+        SetFriendGroup(nil)
         if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
     end)
     if not currentGroup then removeBtn:SetEnabled(false) end
 
-    -- "Set Note"
-    local currentNote = fg.friendNotes[friendKey] or ""
-    local noteLabel = currentNote ~= "" and ("Set Note  |cff888888(" .. currentNote .. ")|r") or "Set Note"
-    rootDescription:CreateButton(noteLabel, function()
-        local dialog = StaticPopup_Show("EBS_SET_FRIEND_NOTE")
-        if dialog then
-            dialog.data = friendKey
-            local eb = dialog.EditBox or dialog.editBox
-            if eb then eb:SetText(currentNote) end
-        end
-    end)
 end
 
 -- Register with all friend menu types
@@ -2978,6 +3043,46 @@ if Menu and Menu.ModifyMenu then
     Menu.ModifyMenu("MENU_UNIT_FRIEND_OFFLINE", EBS_ModifyFriendMenu)
     Menu.ModifyMenu("MENU_UNIT_BN_FRIEND", EBS_ModifyFriendMenu)
     Menu.ModifyMenu("MENU_UNIT_BN_FRIEND_OFFLINE", EBS_ModifyFriendMenu)
+end
+
+-- Hook Blizzard's BNet note edit popup to strip/restore EUI group tag.
+-- When the user opens "Set Note", they see only their personal note.
+-- When they save, the EUI group tag is re-appended automatically.
+do
+    local _euiNoteGroup = nil  -- stashed group during note edit
+    local origBNSet = BNSetFriendNote
+    hooksecurefunc("BNSetFriendNote", function(id, note)
+        -- After Blizzard's note edit saves, re-append the stashed group
+        if _euiNoteGroup then
+            local group = _euiNoteGroup
+            _euiNoteGroup = nil
+            -- Only re-append if the saved note doesn't already have our tag
+            -- (our own SetFriendGroup calls already include it)
+            if not note:find(EUI_NOTE_TAG, 1, true) then
+                origBNSet(id, WriteGroupToNote(note, group))
+            end
+        end
+    end)
+    local notePopup = StaticPopupDialogs["SET_BNFRIENDNOTE"]
+    if notePopup then
+        local origOnShow = notePopup.OnShow
+        notePopup.OnShow = function(self, ...)
+            if origOnShow then origOnShow(self, ...) end
+            -- Blizzard sets the note text after OnShow; defer our strip
+            local popup = self
+            C_Timer.After(0, function()
+                local eb = popup.EditBox or popup.editBox
+                if eb then
+                    local raw = eb:GetText() or ""
+                    local group, clean = ParseGroupFromNote(raw)
+                    _euiNoteGroup = group
+                    if clean ~= raw then
+                        eb:SetText(clean or "")
+                    end
+                end
+            end)
+        end
+    end
 end
 
 -- Frame background color (used everywhere)
@@ -3081,8 +3186,15 @@ local function SkinFriendsFrame()
             -- Position: saved > default Blizzard
             local pos = _ebsTempPos or fp.position
             if pos then
+                local px, py = pos.x, pos.y
+                local PPa = EllesmereUI and EllesmereUI.PP
+                if PPa and PPa.SnapForES and px and py then
+                    local es = frame:GetEffectiveScale()
+                    px = PPa.SnapForES(px, es)
+                    py = PPa.SnapForES(py, es)
+                end
                 frame:ClearAllPoints()
-                frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+                frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
             end
         end
         frame._ebsApplyScaleAndPosition = ApplyScaleAndPosition
@@ -3536,10 +3648,14 @@ local function SkinFriendsFrame()
     -- Store references for SkinSubTabs to use
     local function GetPlayerStatusName()
         -- Use pcall to avoid taint from secret boolean return values
-        local okDND, isDND = pcall(UnitIsDND, "player")
-        if okDND and isDND then return BUSY or "Busy" end
-        local okAFK, isAFK = pcall(UnitIsAFK, "player")
-        if okAFK and isAFK then return AWAY or "Away" end
+        local dnd = UnitIsDND("player")
+        if not issecretvalue or not issecretvalue(dnd) then
+            if dnd then return BUSY or "Busy" end
+        end
+        local afk = UnitIsAFK("player")
+        if not issecretvalue or not issecretvalue(afk) then
+            if afk then return AWAY or "Away" end
+        end
         return FRIENDS_LIST_ONLINE or "Online"
     end
     frame._ebsGetPlayerStatus = GetPlayerStatusName
@@ -3975,7 +4091,10 @@ local function SkinFriendsFrame()
                         if s then
                             if s.isOnline then
                                 local status = FRIENDS_LIST_ONLINE or "Online"
-                                if s.isDND then status = BUSY or "Busy" elseif s.isAFK then status = AWAY or "Away" end
+                                local _isv2 = issecretvalue
+                                local sDND = s.isDND; local sAFK = s.isAFK
+                                if (not _isv2 or not _isv2(sDND)) and sDND then status = BUSY or "Busy"
+                                elseif (not _isv2 or not _isv2(sAFK)) and sAFK then status = AWAY or "Away" end
                                 if s.currentLocation and s.currentLocation ~= "" then
                                     status = status .. " - " .. s.currentLocation
                                 end
@@ -4073,8 +4192,10 @@ local function SkinFriendsFrame()
                 -- Status orb
                 local orb = btn._ebsStatusOrb
                 if isOnline then
-                    if sd.isDND then orb:SetVertexColor(1, 0.2, 0.2, 1)
-                    elseif sd.isAFK then orb:SetVertexColor(1, 0.8, 0, 1)
+                    local _isv3 = issecretvalue
+                    local sdDND = sd.isDND; local sdAFK = sd.isAFK
+                    if (not _isv3 or not _isv3(sdDND)) and sdDND then orb:SetVertexColor(1, 0.2, 0.2, 1)
+                    elseif (not _isv3 or not _isv3(sdAFK)) and sdAFK then orb:SetVertexColor(1, 0.8, 0, 1)
                     else orb:SetVertexColor(0.2, 1, 0.2, 1) end
                 else
                     orb:SetVertexColor(0.4, 0.4, 0.4, 0.6)
@@ -4478,39 +4599,46 @@ local function SkinFriendsFrame()
                 infoText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -3)
             end
 
-            -- Append friend note to info line
+            -- Append friend note (from Blizzard note, stripped of EUI group tag)
             if infoText and button.buttonType and button.id then
-                local noteKey
+                local userNote
                 if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
                     local cached = _friendCache[button.id]
-                    if cached then noteKey = "bnet-" .. (cached.bnetAccountID or button.id) end
+                    if cached and cached.note then
+                        local _, clean = ParseGroupFromNote(cached.note)
+                        if clean and clean ~= "" then userNote = clean end
+                    end
                 elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
                     local cached = _friendCache[button.id + _FC_WOW_OFFSET]
-                    if cached then noteKey = "wow-" .. (cached.name or "") end
+                    if cached and cached.notes then
+                        local _, clean = ParseGroupFromNote(cached.notes)
+                        if clean and clean ~= "" then userNote = clean end
+                    end
                 end
-                if noteKey then
-                    local fg = GetFriendGroupsGlobal()
-                    local note = fg.friendNotes[noteKey]
-                    if note and note ~= "" then
-                        local curText = infoText:GetText() or ""
-                        if curText ~= "" then
-                            infoText:SetText(curText .. "  |cff888888|  " .. note .. "|r")
-                        else
-                            infoText:SetText("|cff888888" .. note .. "|r")
-                        end
+                if userNote then
+                    local curText = infoText:GetText() or ""
+                    if curText ~= "" then
+                        infoText:SetText(curText .. "  |cff888888|  " .. userNote .. "|r")
+                    else
+                        infoText:SetText("|cff888888" .. userNote .. "|r")
                     end
                 end
             end
             -- Determine online/away/busy state
             local isOnline, isAFK, isDND = false, false, false
+            local _isv = issecretvalue
             if bnetInfo then
                 isOnline = bnetInfo.gameAccountInfo and bnetInfo.gameAccountInfo.isOnline
-                isAFK = bnetInfo.isAFK
-                isDND = bnetInfo.isDND
+                local rawAFK = bnetInfo.isAFK
+                local rawDND = bnetInfo.isDND
+                isAFK = (not _isv or not _isv(rawAFK)) and rawAFK or false
+                isDND = (not _isv or not _isv(rawDND)) and rawDND or false
             elseif wowInfo then
                 isOnline = wowInfo.connected
-                isAFK = wowInfo.afk
-                isDND = wowInfo.dnd
+                local rawAFK = wowInfo.afk
+                local rawDND = wowInfo.dnd
+                isAFK = (not _isv or not _isv(rawAFK)) and rawAFK or false
+                isDND = (not _isv or not _isv(rawDND)) and rawDND or false
             end
 
             if not button._ebsStatusOrb then
@@ -5167,13 +5295,13 @@ local function SkinFriendsFrame()
             local info = C_BattleNet and C_BattleNet.GetFriendAccountInfo(i)
             if info then
                 _friendCache[i] = info
-                local friendKey = "bnet-" .. (info.bnetAccountID or i)
                 local isFavorite = info.isFavorite
+                local noteGroup = ParseGroupFromNote(info.note)
                 local group
                 if isFavorite then
                     group = EBS_FAVORITES
                 else
-                    group = fg.friendAssignments[friendKey]
+                    group = noteGroup
                 end
                 local btag = (info.battleTag or ""):lower()
                 local sortName = btag:match("^(.-)#") or btag
@@ -5193,13 +5321,13 @@ local function SkinFriendsFrame()
             local info = C_FriendList.GetFriendInfoByIndex(i)
             if info and info.name then
                 _friendCache[i + _FC_WOW_OFFSET] = info
-                local friendKey = "wow-" .. info.name
+                local wowGroup = ParseGroupFromNote(info.notes)
                 friends[#friends + 1] = {
                     buttonType = FRIENDS_BUTTON_TYPE_WOW,
                     id = i,
                     priority = info.connected and 1 or 5,
                     name = info.name:lower(),
-                    group = fg.friendAssignments[friendKey],
+                    group = wowGroup,
                 }
             end
         end
@@ -6296,6 +6424,19 @@ function EBS:OnEnable()
     loginRefresh:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
         C_Timer.After(0, ApplyAll)
+        -- One-time popup for users whose friend group assignments were wiped
+        if EllesmereUIDB and EllesmereUIDB.global and EllesmereUIDB.global._friendGroupReassignPopup then
+            EllesmereUIDB.global._friendGroupReassignPopup = nil
+            C_Timer.After(2, function()
+                if EllesmereUI and EllesmereUI.ShowConfirmPopup then
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Friend Groups Updated",
+                        message = "EllesmereUI Update for \"Friend Group\" assignments: Friends must be re-assigned to your groups. Blizzard changes internal bnet ids which made tracking friends this way unstable, a new tracking system is now in place so this won't happen again!",
+                        confirmText = "OK",
+                    })
+                end
+            end)
+        end
     end)
 
     -- Hook FriendsFrame for load-on-demand (only if friends module is enabled)

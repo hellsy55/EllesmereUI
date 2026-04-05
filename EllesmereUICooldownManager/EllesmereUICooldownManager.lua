@@ -794,6 +794,20 @@ local function SwitchSpecProfile(newSpecKey)
     local p = ECME.db.profile
     local oldSpecKey = ns.GetActiveSpecKey()
 
+    -- Check if the new spec is truly new (no spell data yet) BEFORE
+    -- EnsureSpec/GetBarSpellData create empty tables.
+    -- assignedSpells == nil means never seen. assignedSpells == {} means
+    -- the user intentionally cleared the bar (we must not overwrite).
+    local isNewSpec = false
+    do
+        local sp = SpellStore.GetSpecProfiles()
+        local prof = sp[newSpecKey]
+        local bs = prof and prof.barSpells
+        local cdNil = not bs or not bs.cooldowns or bs.cooldowns.assignedSpells == nil
+        local utNil = not bs or not bs.utility or bs.utility.assignedSpells == nil
+        isNewSpec = cdNil and utNil
+    end
+
     -- Save old spec, switch to new spec, load new spec
     if oldSpecKey and oldSpecKey ~= "0" then
         SaveCurrentSpecProfile()
@@ -812,38 +826,55 @@ local function SwitchSpecProfile(newSpecKey)
         if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
         if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
 
-        -- If the new spec has no assignedSpells (first time on this spec),
-        -- snapshot from Blizzard's active viewer frames to populate bars.
-        local needsSnapshot = false
-        for _, bk in ipairs({"cooldowns", "utility"}) do
-            local sd = ns.GetBarSpellData(bk)
-            if not sd or not sd.assignedSpells or #sd.assignedSpells == 0 then
-                needsSnapshot = true; break
-            end
-        end
-        if needsSnapshot then
+        -- Snapshot from Blizzard's viewer frames when needed.
+        -- isNewSpec was captured before EnsureSpec created empty tables.
+        -- Also handle emptied bars (assignedSpells == {}) by routing to ghost bar.
+        do
             local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-            local viewerToBar = {
-                EssentialCooldownViewer = "cooldowns",
-                UtilityCooldownViewer   = "utility",
-            }
-            for vName, bk in pairs(viewerToBar) do
-                local vf = _G[vName]
-                local sd = ns.GetBarSpellData(bk)
-                if vf and sd then
-                    if not sd.assignedSpells then sd.assignedSpells = {} end
-                    if #sd.assignedSpells == 0 then
-                        local seen = {}
-                        if vf.itemFramePool and vf.itemFramePool.EnumerateActive then
-                            for frame in vf.itemFramePool:EnumerateActive() do
-                                local cdID = frame.cooldownID
-                                if cdID and gci then
-                                    local info = gci(cdID)
-                                    if info then
-                                        local sid = ResolveInfoSpellID(info)
-                                        if sid and sid > 0 and not seen[sid] then
-                                            seen[sid] = true
-                                            sd.assignedSpells[#sd.assignedSpells + 1] = sid
+            if gci then
+                local ghostKey = GHOST_CD_BAR_KEY
+                local viewerToBar = {
+                    EssentialCooldownViewer = "cooldowns",
+                    UtilityCooldownViewer   = "utility",
+                }
+                local ghostSD = ghostKey and ns.GetBarSpellData(ghostKey)
+                local ghostEmpty = not ghostSD or not ghostSD.assignedSpells
+                                   or #ghostSD.assignedSpells == 0
+
+                for vName, bk in pairs(viewerToBar) do
+                    local sd = ns.GetBarSpellData(bk)
+                    if sd then
+                        local isNil = isNewSpec and (sd.assignedSpells == nil)
+                        local isEmpty = (sd.assignedSpells and #sd.assignedSpells == 0)
+                        if isNil or (isEmpty and ghostEmpty) then
+                            local targetSD
+                            if isNil then
+                                sd.assignedSpells = {}
+                                targetSD = sd
+                            else
+                                targetSD = ghostSD
+                            end
+                            if targetSD then
+                                if not targetSD.assignedSpells then targetSD.assignedSpells = {} end
+                                local vf = _G[vName]
+                                local seen = {}
+                                for _, existing in ipairs(targetSD.assignedSpells) do
+                                    seen[existing] = true
+                                end
+                                if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                                    for frame in vf.itemFramePool:EnumerateActive() do
+                                        if frame:IsShown() then
+                                            local cdID = frame.cooldownID
+                                            if cdID then
+                                                local info = gci(cdID)
+                                                if info then
+                                                    local sid = ResolveInfoSpellID(info)
+                                                    if sid and sid > 0 and not seen[sid] then
+                                                        seen[sid] = true
+                                                        targetSD.assignedSpells[#targetSD.assignedSpells + 1] = sid
+                                                    end
+                                                end
+                                            end
                                         end
                                     end
                                 end
@@ -1380,7 +1411,10 @@ local function ShowProcGlow(icon, cr, cg, cb)
     if fd and fd.procGlowActive then return end
 
     -- Per-spell proc glow settings
-    local style = PROC_GLOW_STYLE
+    -- Force Custom Shape Glow (style 2) for custom-shaped icons
+    local shapeName = icon._shapeName
+    local isCustomShape = shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none"
+    local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local fc = _ecmeFC[icon]
     local sid = fc and fc.spellID
     if sid then
@@ -1389,7 +1423,7 @@ local function ShowProcGlow(icon, cr, cg, cb)
         local ss = sd and sd.spellSettings and sd.spellSettings[sid]
         if ss then
             if ss.procGlow == 0 then return end -- proc glow disabled
-            if ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
             if ss.procGlowClassColor then
                 local _, ct = UnitClass("player")
                 if ct then
@@ -1889,21 +1923,31 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
             local grow = bd and bd.growDirection or "CENTER"
             local fw = frame:GetWidth() or 0
             local fh = frame:GetHeight() or 0
+            local halfW = math.floor(fw / 2)
+            local halfH = math.floor(fh / 2)
 
             if grow == "RIGHT" then
                 anchor = "LEFT"
-                px = px - fw / 2
+                px = px - halfW
             elseif grow == "LEFT" then
                 anchor = "RIGHT"
-                px = px + fw / 2
+                px = px + (fw - halfW)
             elseif grow == "DOWN" then
                 anchor = "TOP"
-                py = py + fh / 2
+                py = py + (fh - halfH)
             elseif grow == "UP" then
                 anchor = "BOTTOM"
-                py = py - fh / 2
+                py = py - halfH
             end
         end
+    end
+
+    -- Snap to physical pixel grid
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES then
+        local es = frame:GetEffectiveScale()
+        px = PPa.SnapForES(px, es)
+        py = PPa.SnapForES(py, es)
     end
 
     frame:ClearAllPoints()
@@ -2169,6 +2213,13 @@ BuildCDMBar = function(barIndex)
             local side = barData.partyFrameSide or "LEFT"
             local oX = barData.partyFrameOffsetX or 0
             local oY = barData.partyFrameOffsetY or 0
+            -- Snap offsets to physical pixel grid
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapForES then
+                local es = frame:GetEffectiveScale()
+                oX = PPa.SnapForES(oX, es)
+                oY = PPa.SnapForES(oY, es)
+            end
             local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(side, grow, centered)
@@ -2200,6 +2251,13 @@ BuildCDMBar = function(barIndex)
             local side = barData.playerFrameSide or "LEFT"
             local oX = barData.playerFrameOffsetX or 0
             local oY = barData.playerFrameOffsetY or 0
+            -- Snap offsets to physical pixel grid
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapForES then
+                local es = frame:GetEffectiveScale()
+                oX = PPa.SnapForES(oX, es)
+                oY = PPa.SnapForES(oY, es)
+            end
             local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(side, grow, centered)
@@ -2237,6 +2295,14 @@ BuildCDMBar = function(barIndex)
             local gap = barData.spacing or 2
             local oX = barData.anchorOffsetX or 0
             local oY = barData.anchorOffsetY or 0
+            -- Snap offsets to physical pixel grid
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapForES then
+                local es = frame:GetEffectiveScale()
+                gap = PPa.SnapForES(gap, es)
+                oX = PPa.SnapForES(oX, es)
+                oY = PPa.SnapForES(oY, es)
+            end
             local grow = barData.growDirection or "CENTER"
             local centered = barData.growCentered ~= false
             local fp = CDMFrameAnchorPoint(anchorPos:upper(), grow, centered)
@@ -2488,7 +2554,8 @@ LayoutCDMBar = function(barKey)
     -- Just resize the container. Never re-anchor, save position, or
     -- propagate here. Bar position is set by BuildCDMBar / unlock mode.
     -- LayoutCDMBar's job is ONLY: resize container + position icons inside.
-    frame:SetSize(SnapForScale(totalW, 1), SnapForScale(totalH, 1))
+    -- pcall: suppresses rare taint noise from hook execution context.
+    pcall(frame.SetSize, frame, SnapForScale(totalW, 1), SnapForScale(totalH, 1))
 
 
     -- Bar background
@@ -2908,13 +2975,11 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
             EllesmereUI.PP.UpdateBorder(bdrTarget, borderSz, brdR, brdG, brdB, brdA)
         end
 
-        -- Restore icon texture coords
+        -- Restore icon texture -- fill the entire frame. The border renders
+        -- on top via PP.CreateBorder so no inset is needed.
         if tex then
             tex:ClearAllPoints()
-            EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", borderSz, -borderSz)
-            EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSz, borderSz)
-            -- Extra vertical crop for width-match expanded icons (+1px wider).
-            -- Crop proportionally so content stays visually square.
+            tex:SetAllPoints(icon)
             local extraCrop = 0
             if icon._matchExpanded then
                 local baseW = barData.iconSize or 36
@@ -2957,10 +3022,16 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     if tex then pcall(tex.RemoveMaskTexture, tex, mask) end
     if bg then pcall(bg.RemoveMaskTexture, bg, mask) end
     if cd then pcall(cd.RemoveMaskTexture, cd, mask) end
+    if icon.OutOfRange then pcall(icon.OutOfRange.RemoveMaskTexture, icon.OutOfRange, mask) end
 
-    -- Apply mask to icon texture and background
+    -- Apply mask to icon texture, background, and OutOfRange overlay
     if tex then tex:AddMaskTexture(mask) end
     if bg then bg:AddMaskTexture(mask) end
+    if icon.OutOfRange then
+        local oor = icon.OutOfRange
+        pcall(oor.RemoveMaskTexture, oor, mask)
+        pcall(oor.AddMaskTexture, oor, mask)
+    end
 
     -- Expand icon beyond frame for shape
     local shapeOffset = CDM_SHAPES.iconExpandOffsets[shape] or 0
@@ -3072,11 +3143,11 @@ local function RefreshCDMIconAppearance(barKey)
         local iconScale = icon:GetScale() or 1
         if iconScale < 0.01 then iconScale = 1 end
         local fontScale = 1 / iconScale
-        -- Update texture zoom
+        -- Update texture -- fill the entire frame. The border renders on
+        -- top via PP.CreateBorder so no inset is needed.
         if tex then
             tex:ClearAllPoints()
-            EllesmereUI.PP.Point(tex, "TOPLEFT", icon, "TOPLEFT", borderSize, -borderSize)
-            EllesmereUI.PP.Point(tex, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", -borderSize, borderSize)
+            tex:SetAllPoints(icon)
             tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
         -- Update cooldown (full frame so swipe covers the entire icon)
@@ -3111,30 +3182,41 @@ local function RefreshCDMIconAppearance(barKey)
         if bg then
             bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08, barData.bgB or 0.08, barData.bgA or 0.6)
         end
-        -- Style Blizzard's native stack/charge text elements
+        -- Style Blizzard's native stack/charge text elements.
+        -- Raise Blizzard's text sub-frames above our border frame (+5)
+        -- by bumping their frame level. Safe because these are Blizzard's
+        -- own children of the icon, and they follow frame reuse naturally.
         local scFont = GetCDMFont()
         local scSize = (barData.stackCountSize or 11) * fontScale
         local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
         local scX, scY = barData.stackCountX or 0, (barData.stackCountY or 0) + 2
+        local borderLvl = icon:GetFrameLevel() + 5
         -- Applications (buff stacks / aura applications)
-        if icon.Applications and icon.Applications.Applications then
-            local appsFS = icon.Applications.Applications
-            SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
-            appsFS:ClearAllPoints()
-            appsFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+        if icon.Applications then
+            pcall(icon.Applications.SetFrameLevel, icon.Applications, borderLvl + 1)
+            if icon.Applications.Applications then
+                local appsFS = icon.Applications.Applications
+                SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
+                appsFS:ClearAllPoints()
+                appsFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+            end
         end
         -- ChargeCount (spell charges like Holy Power spenders)
-        if icon.ChargeCount and icon.ChargeCount.Current then
-            local chargeFS = icon.ChargeCount.Current
-            SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
-            chargeFS:ClearAllPoints()
-            chargeFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+        if icon.ChargeCount then
+            pcall(icon.ChargeCount.SetFrameLevel, icon.ChargeCount, borderLvl + 1)
+            if icon.ChargeCount.Current then
+                local chargeFS = icon.ChargeCount.Current
+                SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
+                chargeFS:ClearAllPoints()
+                chargeFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+            end
         end
-        -- Item count text (potions/healthstones)
+        -- Item count text (potions/healthstones) -- our own frame, safe to reparent
         if icon._itemCountText then
+            if txOverlay then icon._itemCountText:SetParent(txOverlay) end
             SetBlizzCDMFont(icon._itemCountText, scFont, scSize, scR, scG, scB)
             icon._itemCountText:ClearAllPoints()
-            icon._itemCountText:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+            icon._itemCountText:SetPoint("BOTTOMRIGHT", txOverlay or icon, "BOTTOMRIGHT", scX, scY)
         end
 
         -- Update keybind text style
@@ -4101,6 +4183,84 @@ function ns.FullCDMRebuild(reason)
         end
         wipe(ns._presetFrames)
     end
+
+    -- 2b. Snapshot from Blizzard's viewer frames when needed.
+    --     Only runs on "init" (first login) before CDM's CollectAndReanchor
+    --     hooks have fired. After that, IsShown() on viewer frames is unreliable
+    --     because CDM hides unclaimed frames.
+    --     Two cases:
+    --     (A) New spec (assignedSpells == nil): populate the real bar.
+    --     (B) Emptied bar (assignedSpells == {}): populate the ghost bar
+    --         so spells stay routed but hidden (respects user's removal).
+    if reason == "init" then
+    do
+        local specKey = ns.GetActiveSpecKey()
+        if specKey and specKey ~= "0" then
+            local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+            if gci then
+                local ghostKey = GHOST_CD_BAR_KEY
+                local viewerToBar = {
+                    EssentialCooldownViewer = "cooldowns",
+                    UtilityCooldownViewer   = "utility",
+                }
+                -- Check if ghost bar is also empty (bugged state where spells
+                -- vanished without being routed to ghost)
+                local ghostSD = ghostKey and ns.GetBarSpellData(ghostKey)
+                local ghostEmpty = not ghostSD or not ghostSD.assignedSpells
+                                   or #ghostSD.assignedSpells == 0
+
+                for vName, bk in pairs(viewerToBar) do
+                    local sd = ns.GetBarSpellData(bk)
+                    if sd then
+                        local isNil = (sd.assignedSpells == nil)
+                        local isEmpty = (sd.assignedSpells and #sd.assignedSpells == 0)
+                        if isNil or (isEmpty and ghostEmpty) then
+                            -- (A) New spec (nil): populate real bar
+                            -- (B) Bugged state (empty bar + empty ghost): populate ghost bar
+                            --     so spells get routed. Skip if ghost has spells (user
+                            --     intentionally cleared the bar -- ghost already has routing).
+                            local targetSD
+                            if isNil then
+                                sd.assignedSpells = {}
+                                targetSD = sd
+                            else
+                                targetSD = ghostSD
+                            end
+                            if targetSD then
+                                if not targetSD.assignedSpells then targetSD.assignedSpells = {} end
+                                local vf = _G[vName]
+                                local seen = {}
+                                -- Don't duplicate spells already on the target
+                                for _, existing in ipairs(targetSD.assignedSpells) do
+                                    seen[existing] = true
+                                end
+                                if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                                    for frame in vf.itemFramePool:EnumerateActive() do
+                                        -- Only snapshot spells Blizzard is actually
+                                        -- displaying (not "Not Displayed" ones)
+                                        if frame:IsShown() then
+                                            local cdID = frame.cooldownID
+                                            if cdID then
+                                                local info = gci(cdID)
+                                                if info then
+                                                    local sid = ResolveInfoSpellID(info)
+                                                    if sid and sid > 0 and not seen[sid] then
+                                                        seen[sid] = true
+                                                        targetSD.assignedSpells[#targetSD.assignedSpells + 1] = sid
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    end -- reason guard
 
     -- 3. Rebuild route maps (must happen before BuildAllCDMBars)
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end

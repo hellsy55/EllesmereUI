@@ -288,6 +288,12 @@ local function UpdateOverlayVisuals()
                 if shouldGlow then
                     StopNativeGlow(overlay)
                     local style = entry.glowStyle or 1
+                    -- Force Custom Shape Glow for custom-shaped icons
+                    local glowParent = overlay:GetParent()
+                    local shapeName = glowParent and glowParent._shapeName
+                    if shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none" then
+                        style = 2
+                    end
                     local cr, cg, cb = 1, 0.82, 0.1
                     if entry.classColor then
                         local _, ct = UnitClass("player")

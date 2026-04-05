@@ -1126,7 +1126,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end }
         );  y = y - h
-        -- Inline cog on Show Class Resource: Spacing
+        -- Inline cog on Show Class Resource: Spacing + Hide Power Bar
         do
             local rgn = classEnableRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
@@ -1137,6 +1137,12 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local p = DB(); if not p then return end
                           p.secondary.pipSpacing = v; SmoothRefresh()
+                      end },
+                    { type = "toggle", label = "Hide Power Bar if Resource",
+                      get = function() local p = DB(); return p and p.secondary.hidePowerIfResource end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.hidePowerIfResource = v; RebuildClass()
                       end },
                 },
             })
@@ -1625,24 +1631,15 @@ initFrame:SetScript("OnEvent", function(self)
         local powerSection
         powerSection, h = W:SectionHeader(parent, "POWER BAR", y);  y = y - h
 
-        -- Use a function instead of a cached value so it updates on spec change
-        local function noPrimaryPower() return not HasPrimaryPower() end
-        local SPEC_DIS = "This option is not available for your spec"
         local powerOff = function()
-            if noPrimaryPower() then return true end
             local p = DB(); return p and not p.primary.enabled
         end
-        local powerDisTip = function()
-            if noPrimaryPower() then return SPEC_DIS end
-            return "Enable Power Bar"
-        end
+        local powerDisTip = "Enable Power Bar"
 
         -- Row 1: Show Power Bar | Orientation
         local powerEnableRow
         powerEnableRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Power Bar",
-              disabled = function() return noPrimaryPower() end,
-              disabledTooltip = function() return noPrimaryPower() and SPEC_DIS or nil end,
               getValue = function() local p = DB(); return p and p.primary.enabled end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -1812,11 +1809,10 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(noPrimaryPower and SPEC_DIS or "Enable Power Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Power Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBorderCogDisP()
-                if noPrimaryPower then cogDis:Show(); return end
                 local p = DB()
                 if p and not p.primary.enabled then cogDis:Show() else cogDis:Hide() end
             end
@@ -1974,11 +1970,10 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(noPrimaryPower and SPEC_DIS or "Enable Power Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Power Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisP2()
-                if noPrimaryPower then cogDis:Show(); return end
                 local p = DB()
                 if p and not p.primary.enabled then cogDis:Show() else cogDis:Hide() end
             end
@@ -2002,11 +1997,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Threshold %",
               min = 1, max = 99, step = 1,
               disabled = function()
-                  if noPrimaryPower then return true end
                   local p = DB(); return p and (not p.primary.enabled or not p.primary.thresholdEnabled)
               end,
               disabledTooltip = function()
-                  if noPrimaryPower then return SPEC_DIS end
                   local p = DB(); if p and not p.primary.enabled then return "Enable Power Bar" end
                   return "Enable Threshold Color first"
               end,
@@ -2040,10 +2033,6 @@ initFrame:SetScript("OnEvent", function(self)
             swDisTex:SetColorTexture(0.12, 0.12, 0.12, 0.75)
             swDis:EnableMouse(true)
             swDis:SetScript("OnEnter", function()
-                if noPrimaryPower then
-                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip(SPEC_DIS))
-                    return
-                end
                 local p = DB()
                 if p and not p.primary.enabled then
                     EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Enable Power Bar"))
@@ -2053,7 +2042,6 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             swDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdatePowerThreshSwDis()
-                if noPrimaryPower then swDis:Show(); return end
                 local p = DB()
                 if p and (not p.primary.enabled or not p.primary.thresholdEnabled) then swDis:Show() else swDis:Hide() end
             end
@@ -2081,15 +2069,10 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                if noPrimaryPower then
-                    EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(SPEC_DIS))
-                else
-                    EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Threshold Color first"))
-                end
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Threshold Color first"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdatePowerThreshCogDis()
-                if noPrimaryPower then cogDis:Show(); cogBtn:SetAlpha(0.15); return end
                 local p = DB()
                 if p and (not p.primary.enabled or not p.primary.thresholdEnabled) then
                     cogDis:Show(); cogBtn:SetAlpha(0.15)
@@ -2110,8 +2093,7 @@ initFrame:SetScript("OnEvent", function(self)
                 onApply = function() RebuildPower(); SmoothRefresh() end,
                 makeCogBtn = MakeCogBtn,
                 disabledFn = function()
-                    if noPrimaryPower then return true end
-                    local p = DB(); return p and not p.primary.enabled
+                      local p = DB(); return p and not p.primary.enabled
                 end,
                 disabledTip = "Enable Power Bar",
             })

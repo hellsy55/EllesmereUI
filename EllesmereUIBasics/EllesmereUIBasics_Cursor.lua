@@ -999,8 +999,15 @@ _G._ECL_ApplyGCDPosition = function()
     local g = GCD_DB()
     local pos = g.pos
     if pos and pos.point then
+        local px, py = pos.x or 0, pos.y or 0
+        local PPa = EllesmereUI and EllesmereUI.PP
+        if PPa and PPa.SnapForES then
+            local es = gcdRoot:GetEffectiveScale()
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
         gcdRoot:ClearAllPoints()
-        gcdRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        gcdRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
     else
         -- Default: screen center
         gcdRoot:ClearAllPoints()
@@ -1016,8 +1023,15 @@ _G._ECL_ApplyCastPosition = function()
     local c = Cast_DB()
     local pos = c.pos
     if pos and pos.point then
+        local px, py = pos.x or 0, pos.y or 0
+        local PPa = EllesmereUI and EllesmereUI.PP
+        if PPa and PPa.SnapForES then
+            local es = castRoot:GetEffectiveScale()
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
         castRoot:ClearAllPoints()
-        castRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        castRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
     else
         -- Default: screen center
         castRoot:ClearAllPoints()

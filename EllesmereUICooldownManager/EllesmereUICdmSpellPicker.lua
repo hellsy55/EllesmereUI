@@ -574,11 +574,6 @@ function ns.RemoveTrackedSpell(barKey, idx)
     if not sd then return false end
     local list = sd.assignedSpells
     if not list or idx < 1 or idx > #list then return false end
-    -- Prevent emptying default bars (cooldowns/utility)
-    if (barKey == "cooldowns" or barKey == "utility") and #list <= 1 then
-        print("|cffff6060[EllesmereUI CDM]|r Cannot remove the last spell from a default bar.")
-        return false
-    end
     local removedID = list[idx]
     table.remove(list, idx)
     -- Route to ghost CD bar (replaces the old removedSpells mechanism).

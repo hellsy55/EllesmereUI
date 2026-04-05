@@ -1135,7 +1135,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Augment Rune",
               getValue=function() local c = CDB(); return c and c.enabled and c.enabled.augment_rune end,
               setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.augment_rune = v; RefreshAll(); RebuildPreviewHeader() end end },
-            { type="dropdown", text="Display In:",
+            { type="dropdown", text="Augment Reminder Only In:",
               values={ mythic="Mythic Only", heroic_mythic="Heroic and Mythic", all="All Instanced Content" },
               order={ "mythic", "heroic_mythic", "all" },
               getValue=function() local c = CDB(); return c and c.runeDisplayMode or "mythic" end,

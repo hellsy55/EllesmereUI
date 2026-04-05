@@ -458,7 +458,9 @@ local function AcquireRow(parent)
     return r
 end
 local function ReleaseRow(r)
-    r.frame:Hide(); r.frame:ClearAllPoints()
+    if not InCombatLockdown() then
+        r.frame:Hide(); r.frame:ClearAllPoints()
+    end
     r.frame:SetScript("OnMouseUp", nil)
     r.frame:SetScript("OnEnter", nil)
     r.frame:SetScript("OnLeave", nil)
@@ -2456,7 +2458,14 @@ function EQT:ApplyPosition()
     end
     local pos = db.pos
     if pos and pos.point then
-        f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        local px, py = pos.x or 0, pos.y or 0
+        local PPa = EllesmereUI and EllesmereUI.PP
+        if PPa and PPa.SnapForES then
+            local es = f:GetEffectiveScale()
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
+        f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
     else
         f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -30, -200)
     end

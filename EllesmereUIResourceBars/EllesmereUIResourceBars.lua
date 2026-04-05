@@ -11,6 +11,16 @@ ns.ERB = ERB
 
 local PP = EllesmereUI.PP
 
+-- Snap x/y to the physical pixel grid for a given frame's effective scale.
+local function SnapXY(x, y, frame)
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES and x and y and frame then
+        local es = frame:GetEffectiveScale()
+        return PPa.SnapForES(x, es), PPa.SnapForES(y, es)
+    end
+    return x or 0, y or 0
+end
+
 local floor, ceil, abs, min, max = math.floor, math.ceil, math.abs, math.min, math.max
 local format = string.format
 local UnitHealth, UnitHealthMax = UnitHealth, UnitHealthMax
@@ -658,7 +668,7 @@ local function CalcPipGeometry(totalW, numPips, pipSp, frame)
         cursor = cursor + w + spPx
     end
 
-    return slots, spPx * onePixel, onePixel
+    return slots, spPx * onePixel, onePixel, totalPx * onePixel
 end
 
 local function MakePixelBorder(parent, r, g, b, a, size)
@@ -695,9 +705,12 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
     bar:SetSize(w, h)
     bar:EnableMouse(false)
 
-    -- Inner StatusBar: clips its fill to prevent bleed past the border.
+    -- Inner StatusBar: clips its fill. Inset by half a physical pixel so
+    -- the fill can never bleed past the border at any resolution.
     local sb = CreateFrame("StatusBar", nil, bar)
-    sb:SetAllPoints()
+    local halfPx = PP.mult * 0.5
+    sb:SetPoint("TOPLEFT", bar, "TOPLEFT", halfPx, -halfPx)
+    sb:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -halfPx, halfPx)
     sb:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(0)
@@ -730,11 +743,7 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
     function bar:ApplyBorder(sz, r, g, b, a)
         self._border:SetSize(sz)
         self._border:SetColor(r, g, b, a)
-        if sz == 0 then
-            self._border:SetShown(false)
-        else
-            self._border:SetShown(true)
-        end
+        self._border:SetShown(sz > 0)
     end
 
     -- Text overlay (on outer container, not clipped)
@@ -920,8 +929,15 @@ local function RegisterUnlockElements()
             local f = frame_fn()
             if f then
                 local pt = pos.point
+                local px, py = pos.x, pos.y
+                local PPa = EllesmereUI and EllesmereUI.PP
+                if PPa and PPa.SnapForES and px and py then
+                    local es = f:GetEffectiveScale()
+                    px = PPa.SnapForES(px, es)
+                    py = PPa.SnapForES(py, es)
+                end
                 f:ClearAllPoints()
-                f:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
+                f:SetPoint(pt, UIParent, pos.relPoint or pt, px, py)
             end
         end
         return savePos, loadPos, clearPos, applyPos
@@ -942,8 +958,8 @@ local function RegisterUnlockElements()
             key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
             getFrame = function() return healthBar end,
             getSize  = function() local s = S(); return s.width, s.height end,
-            setWidth = function(_, w) S().width = floor(w + 0.5); Rebuild() end,
-            setHeight = function(_, h) S().height = floor(h + 0.5); Rebuild() end,
+            setWidth = function(_, w) S().width = w; Rebuild() end,
+            setHeight = function(_, h) S().height = h; Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -958,8 +974,8 @@ local function RegisterUnlockElements()
             key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
             getFrame = function() return primaryBar end,
             getSize  = function() local s = S(); return s.width, s.height end,
-            setWidth = function(_, w) S().width = floor(w + 0.5); Rebuild() end,
-            setHeight = function(_, h) S().height = floor(h + 0.5); Rebuild() end,
+            setWidth = function(_, w) S().width = w; Rebuild() end,
+            setHeight = function(_, h) S().height = h; Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -974,6 +990,14 @@ local function RegisterUnlockElements()
             key = "ERB_ClassResource", label = "Class Resource", group = "Resource Bars", order = 502,
             getFrame = function() return secondaryFrame end,
             getSize  = function()
+                -- Return actual frame dimensions (post-CalcPipGeometry snap)
+                -- so width-matching reads the real rendered size, not the
+                -- raw setting which may differ after physical pixel snapping.
+                if secondaryFrame then
+                    local w = secondaryFrame:GetWidth()
+                    local h = secondaryFrame:GetHeight()
+                    if w and w > 1 and h and h > 1 then return w, h end
+                end
                 local s = S()
                 if cachedSecondary and cachedSecondary.type == "bar" then
                     return (ERB.db.profile.primary.width or 214), s.pipHeight
@@ -981,11 +1005,13 @@ local function RegisterUnlockElements()
                 return s.pipWidth, s.pipHeight
             end,
             setWidth = function(_, w)
-                w = floor(w + 0.5)
                 local s = S()
                 if cachedSecondary and cachedSecondary.type == "bar" then
-                    ERB.db.profile.primary.width = w
+                    -- Bar types use primary width (integer is fine)
+                    ERB.db.profile.primary.width = floor(w + 0.5)
                 else
+                    -- Pip types: store raw value so CalcPipGeometry can do
+                    -- accurate physical pixel conversion without double rounding
                     s.pipWidth = w
                 end
                 Rebuild()
@@ -1025,8 +1051,9 @@ local function RegisterUnlockElements()
             if not pos then return end
             if castBarFrame then
                 local pt = pos.point
+                local sx, sy = SnapXY(pos.x, pos.y, castBarFrame)
                 castBarFrame:ClearAllPoints()
-                castBarFrame:SetPoint(pt, UIParent, pos.relPoint or pt, pos.x, pos.y)
+                castBarFrame:SetPoint(pt, UIParent, pos.relPoint or pt, sx, sy)
             end
         end
         elements[#elements + 1] = MK({
@@ -1133,6 +1160,13 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
     if not anchorKey or anchorKey == "none" then return false end
     offsetX = offsetX or 0
     offsetY = offsetY or 0
+    -- Snap offsets to physical pixel grid
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and PPa.SnapForES then
+        local es = frame:GetEffectiveScale()
+        offsetX = PPa.SnapForES(offsetX, es)
+        offsetY = PPa.SnapForES(offsetY, es)
+    end
     anchorPos = anchorPos or "left"
     growthDir = growthDir or "UP"
     local centered = (growCentered ~= false)
@@ -1234,7 +1268,8 @@ local function ApplyFreeBarPosition(frame, settings, defaultX, defaultY, width, 
     frame:ClearAllPoints()
 
     if pos and pos.point then
-        frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        local sx, sy = SnapXY(pos.x, pos.y, frame)
+        frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, sx, sy)
         return
     end
 
@@ -1401,8 +1436,9 @@ local function BuildBars()
             healthBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
                 if not EllesmereUI.IsUnlockAnchored("ERB_Health") or not healthBar:GetLeft() then
+                    local sx, sy = SnapXY(hp.unlockPos.x, hp.unlockPos.y, healthBar)
                     healthBar:ClearAllPoints()
-                    healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, hp.unlockPos.x or 0, hp.unlockPos.y or 0)
+                    healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, sx, sy)
                 end
             end
         else
@@ -1503,8 +1539,9 @@ local function BuildBars()
             primaryBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
                 if not EllesmereUI.IsUnlockAnchored("ERB_Power") or not primaryBar:GetLeft() then
+                    local sx, sy = SnapXY(pp.unlockPos.x, pp.unlockPos.y, primaryBar)
                     primaryBar:ClearAllPoints()
-                    primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
+                    primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, sx, sy)
                 end
             end
         else
@@ -1559,7 +1596,12 @@ local function BuildBars()
         primaryBar._text:SetPoint("CENTER", primaryBar, "CENTER", pp.textXOffset, pp.textYOffset)
         SetRBFont(primaryBar._text, GetRBFont(), pp.textSize)
         primaryBar:Show()
-        primaryBar:SetAlpha(pp.barAlpha or 1)
+        local hidePower = p.secondary and p.secondary.hidePowerIfResource and cachedSecondary
+        if hidePower then
+            EllesmereUI.SetElementVisibility(primaryBar, false)
+        else
+            primaryBar:SetAlpha(pp.barAlpha or 1)
+        end
         ApplyBarOrientation(primaryBar, ppOri)
     elseif primaryBar then
         -- Enabled but no resource for this spec: keep the frame positioned
@@ -1571,8 +1613,9 @@ local function BuildBars()
         if pp.unlockPos and pp.unlockPos.point then
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
             if not EllesmereUI.IsUnlockAnchored("ERB_Power") or not primaryBar:GetLeft() then
+                local sx, sy = SnapXY(pp.unlockPos.x, pp.unlockPos.y, primaryBar)
                 primaryBar:ClearAllPoints()
-                primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, pp.unlockPos.x or 0, pp.unlockPos.y or 0)
+                primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, sx, sy)
             end
         elseif not primaryBar:GetLeft() then
             primaryBar:ClearAllPoints()
@@ -1612,7 +1655,7 @@ local function BuildBars()
                 maxPts = 5
             end
         end
-        local pipH = sp.pipHeight or 20
+        local pipH = PP.Scale(sp.pipHeight or 20)
         local pipSp = sp.pipSpacing or 1
         local pipOri = sp.pipOrientation or "HORIZONTAL"
         local isVertical = (pipOri ~= "HORIZONTAL")
@@ -1626,12 +1669,11 @@ local function BuildBars()
             totalW = sp.pipWidth or 214
         end
 
-        -- Frame dimensions: vertical flips width/height axes
-        -- Round to whole logical pixels so all elements size consistently.
-        local frameW = isVertical and pipH or totalW
-        local frameH = isVertical and totalW or pipH
-        frameW = floor(frameW + 0.5)
-        frameH = floor(frameH + 0.5)
+        -- Frame dimensions: vertical flips width/height axes.
+        -- Initial size set here; pip layout may refine width to match
+        -- the exact physical pixel span from CalcPipGeometry.
+        local frameW = isVertical and PP.Scale(pipH) or PP.Scale(totalW)
+        local frameH = isVertical and PP.Scale(totalW) or PP.Scale(pipH)
 
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
         if secondaryAnchorKey ~= "none" then
@@ -1645,8 +1687,9 @@ local function BuildBars()
             secondaryFrame:SetSize(frameW, frameH)
             if not EllesmereUI._unlockActive then
                 if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") or not secondaryFrame:GetLeft() then
+                    local sx, sy = SnapXY(sp.unlockPos.x, sp.unlockPos.y, secondaryFrame)
                     secondaryFrame:ClearAllPoints()
-                    secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+                    secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sx, sy)
                 end
             end
         else
@@ -1735,7 +1778,11 @@ local function BuildBars()
             secondaryBar:Show()
         elseif cachedSecondary.type == "runes" then
             local numPips = 6
-            local slots = CalcPipGeometry(totalW, numPips, pipSp, secondaryFrame)
+            local slots, _, _, actualW = CalcPipGeometry(totalW, numPips, pipSp, secondaryFrame)
+            if actualW then
+                if isVertical then secondaryFrame:SetHeight(actualW)
+                else secondaryFrame:SetWidth(actualW) end
+            end
             for i = 1, 6 do
                 if not runeFrames[i] then
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
@@ -1768,9 +1815,10 @@ local function BuildBars()
                         rf:SetHeight(ah)
                     end
                 end
-                SmoothBarAnimate(rf, "x0", x0, function() ApplyRunePos() end)
-                SmoothBarAnimate(rf, "x1", x1 - x0, function() ApplyRunePos() end)
-                SmoothBarAnimate(rf, "ph", pipH, function() ApplyRunePos() end)
+                rf["_barAnim_x0"] = x0
+                rf["_barAnim_x1"] = x1 - x0
+                rf["_barAnim_ph"] = pipH
+                ApplyRunePos()
                 runeFrames[i]:ApplyBorder(0, 0, 0, 0, 0)
                 runeFrames[i]:ApplyTexture(g.barTexture or "none")
                 if sp.darkTheme then
@@ -1786,7 +1834,11 @@ local function BuildBars()
             if secondaryBar then secondaryBar:Hide() end
             for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
         else
-            local slots = CalcPipGeometry(totalW, maxPts, pipSp, secondaryFrame)
+            local slots, _, _, actualW = CalcPipGeometry(totalW, maxPts, pipSp, secondaryFrame)
+            if actualW then
+                if isVertical then secondaryFrame:SetHeight(actualW)
+                else secondaryFrame:SetWidth(actualW) end
+            end
             for i = 1, maxPts do
                 if not pips[i] then
                     pips[i] = CreatePip(secondaryFrame, 20, pipH, i,
@@ -1814,9 +1866,10 @@ local function BuildBars()
                         pip:SetHeight(ah)
                     end
                 end
-                SmoothBarAnimate(pip, "x0", x0, function() ApplyPipPos() end)
-                SmoothBarAnimate(pip, "x1", x1 - x0, function() ApplyPipPos() end)
-                SmoothBarAnimate(pip, "ph", pipH, function() ApplyPipPos() end)
+                pip["_barAnim_x0"] = x0
+                pip["_barAnim_x1"] = x1 - x0
+                pip["_barAnim_ph"] = pipH
+                ApplyPipPos()
                 pips[i]:ApplyBorder(0, 0, 0, 0, 0)
                 pips[i]:ApplyTexture(g.barTexture or "none")
                 if sp.darkTheme then
@@ -1896,8 +1949,9 @@ local function BuildBars()
         if sp.unlockPos and sp.unlockPos.point then
             local rp = sp.unlockPos.relPoint or sp.unlockPos.point
             if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") or not secondaryFrame:GetLeft() then
+                local sx, sy = SnapXY(sp.unlockPos.x, sp.unlockPos.y, secondaryFrame)
                 secondaryFrame:ClearAllPoints()
-                secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, rp, sp.unlockPos.x or 0, sp.unlockPos.y or 0)
+                secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, rp, sx, sy)
             end
         elseif not secondaryFrame:GetLeft() then
             secondaryFrame:ClearAllPoints()
@@ -2643,9 +2697,11 @@ local function UpdateVisibility()
     -- Power bar visibility
     if primaryBar then
         local pp = ERB.db.profile.primary
+        local sp = ERB.db.profile.secondary
         -- Also check cachedPrimary: specs without a primary power (e.g. BM/MM Hunter)
         -- should hide the power bar even if enabled in settings
-        if pp and pp.enabled ~= false and cachedPrimary and ShouldShowBar(pp) and not inVehicle then
+        local hidePower = sp and sp.hidePowerIfResource and cachedSecondary
+        if not hidePower and pp and pp.enabled ~= false and cachedPrimary and ShouldShowBar(pp) and not inVehicle then
             primaryBar:Show()
             EllesmereUI.SetElementVisibility(primaryBar, true)
             primaryBar:SetAlpha(pp.barAlpha or 1)
@@ -3996,6 +4052,12 @@ function ERB:OnEnable()
     eventFrame:RegisterUnitEvent("UNIT_POWER_POINT_CHARGE", "player")
     eventFrame:SetScript("OnEvent", OnEvent)
     eventFrame:SetScript("OnUpdate", OnUpdate)
+
+    -- Apply immediately at PLAYER_LOGIN so positions are set before combat
+    -- lockdown blocks ApplySavedPositions. The PLAYER_ENTERING_WORLD handler
+    -- will re-apply after the full game state is available.
+    ERB:ApplyAll()
+    RegisterUnlockElements()
 end
 
 -------------------------------------------------------------------------------
