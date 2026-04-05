@@ -6078,7 +6078,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.1.7"
+EllesmereUI.VERSION = "6.1.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6246,6 +6246,7 @@ if not _G._EUI_ConflictChecked then
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
             { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" } },
             { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" } },
+            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIBasics" } },
             -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIBasics" } },
             -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIBasics" } },
             -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIBasics" } },
@@ -6772,7 +6773,7 @@ do
     function EllesmereUI.CreateMinimapButton()
         if btn then return btn end
 
-        btn = CreateFrame("Button", "EllesmereUIMinimapButton", Minimap)
+        btn = CreateFrame("Button", "EllesmereUI", Minimap)
         btn:SetSize(BUTTON_SIZE, BUTTON_SIZE)
         btn:SetFrameStrata("MEDIUM")
         btn:SetFrameLevel(8)

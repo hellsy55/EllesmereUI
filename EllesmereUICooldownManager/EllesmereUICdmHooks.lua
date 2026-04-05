@@ -659,9 +659,18 @@ local function DecorateFrame(frame, barData)
                 end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
-                    -- Hide Active State: black swipe + desat when active
-                    cd:SetSwipeColor(0, 0, 0, 0.7)
-                    if isActive and fd.tex then fd.tex:SetDesaturated(true) end
+                    -- Hide Active State: force black swipe, track active flag.
+                    -- CD model override is handled by the SetDesaturation hook
+                    -- which fires on every Blizzard cooldown tick.
+                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    if isActive then
+                        fd._hideActiveOverriding = true
+                    elseif fd._hideActiveOverriding then
+                        fd._hideActiveOverriding = false
+                        if cd.SetUseAuraDisplayTime then
+                            cd:SetUseAuraDisplayTime(true)
+                        end
+                    end
                 elseif isActive then
                     -- Active: apply swipe color (custom, class, or default #FFC660)
                     local cr, cg, cb, ca
@@ -715,6 +724,46 @@ local function DecorateFrame(frame, barData)
                 cd:SetDrawSwipe(true)
                 fd._isProcessingOverride = false
             end)
+        end
+        -- Hook SetDesaturated AND SetDesaturation on icon texture: Blizzard
+        -- calls these on every cooldown tick. When we're overriding the CD
+        -- model (hide active state), re-apply the actual CD duration here so
+        -- Blizzard can't revert it between ticks.
+        if fd.tex and not fd._desatOverrideHooked then
+            fd._desatOverrideHooked = true
+            local function onDesatChange()
+                if fd._isProcessingOverride then return end
+                if not fd._hideActiveOverriding then return end
+                fd._isProcessingOverride = true
+                local cdw = fd.cooldown
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                if sid2 and cdw then
+                    if cdw.SetUseAuraDisplayTime then
+                        cdw:SetUseAuraDisplayTime(false)
+                    end
+                    if cdw.SetCooldownFromDurationObject then
+                        local hasCharges = type(frame.HasVisualDataSource_Charges) == "function"
+                            and frame:HasVisualDataSource_Charges()
+                        local durObj
+                        if hasCharges and C_Spell.GetSpellChargeDuration then
+                            durObj = C_Spell.GetSpellChargeDuration(sid2)
+                        end
+                        if not durObj and C_Spell.GetSpellCooldownDuration then
+                            durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                        end
+                        if durObj then
+                            cdw:SetCooldownFromDurationObject(durObj)
+                        end
+                    end
+                end
+                fd.tex:SetDesaturated(true)
+                fd._isProcessingOverride = false
+            end
+            hooksecurefunc(fd.tex, "SetDesaturated", onDesatChange)
+            if fd.tex.SetDesaturation then
+                hooksecurefunc(fd.tex, "SetDesaturation", onDesatChange)
+            end
         end
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)

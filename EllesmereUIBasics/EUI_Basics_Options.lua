@@ -278,15 +278,95 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Accent Color | (spacer)
+        -- Accent Color | Interactable Button Size
         _, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Accent Color",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) },
-            { type="label", text="" }
+            { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
+              tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 22 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.interactableBtnSize = v
+                RefreshMinimap()
+              end }
         );  y = y - h
-            
+
+        -- Minimap Button Size | Ungroup Minimap Button
+        local ungroupRow
+        ungroupRow, h = W:DualRow(parent, y,
+            { type="slider", text="Minimap Button Size", min=14, max=40, step=1,
+              tooltip="Size of addon minimap buttons in the flyout grid",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 21 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.addonBtnSize = v
+                RefreshMinimap()
+              end },
+            { type="dropdown", text="Ungroup Minimap Button",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue = function() return "__placeholder" end,
+              setValue = function() end }
+        );  y = y - h
+
+        -- Replace placeholder dropdown with checkbox dropdown
+        do
+            local rightRgn = ungroupRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+
+            -- Build items from currently collected minimap buttons
+            local function GetUngroupItems()
+                local items = {}
+                local btns = _G._EBS_CachedAddonButtons or {}
+                local vis = _G._EBS_AddonVisible or {}
+                for _, btn in ipairs(btns) do
+                    local name = btn:GetName()
+                    if name and vis[btn] ~= false then
+                        local label = name:gsub("^LibDBIcon10_", ""):gsub("^Lib_GPI_Minimap_", "")
+                        items[#items + 1] = { key = name, label = label }
+                    end
+                end
+                table.sort(items, function(a, b) return a.label < b.label end)
+                return items
+            end
+
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                GetUngroupItems(),
+                function(k)
+                    local m = MinimapDB(); if not m then return false end
+                    return m.ungroupedButtons and m.ungroupedButtons[k] and true or false
+                end,
+                function(k, v)
+                    local m = MinimapDB(); if not m then return end
+                    if not m.ungroupedButtons then m.ungroupedButtons = {} end
+                    if v then
+                        -- Assign next order index
+                        local maxOrder = 0
+                        for _, ord in pairs(m.ungroupedButtons) do
+                            if type(ord) == "number" and ord > maxOrder then maxOrder = ord end
+                        end
+                        m.ungroupedButtons[k] = maxOrder + 1
+                    else
+                        m.ungroupedButtons[k] = nil
+                    end
+                    RefreshMinimap()
+                end)
+            local PP = EllesmereUI.PP
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
+
         y = y - 10
 
         -- EXTRAS section header

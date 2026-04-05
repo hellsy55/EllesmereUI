@@ -270,6 +270,9 @@ local defaults = {
             hideCraftingOrder    = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
+            addonBtnSize         = 21,
+            interactableBtnSize  = 22,
+            ungroupedButtons     = {},
             showClock     = true,
             clockInside   = false,
             clockFormat   = "12h",
@@ -502,6 +505,8 @@ end
 -- Forward declarations for flyout system
 local addonButtonPoll = nil
 local cachedAddonButtons = {}
+local _addonVisible = {}       -- persistent: tracks whether each addon WANTS its button visible
+local _suppressVisTrack = false -- flag to suppress tracking during our own Show/Hide calls
 local flyoutOwnedFrames = {}
 
 -------------------------------------------------------------------------------
@@ -572,13 +577,27 @@ local function RestoreButtonDecorations(btn)
     flyoutSavedRegions[btn] = nil
 end
 
+local function IsUngrouped(btn)
+    local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    if not mp or not mp.ungroupedButtons then return false end
+    local name = btn:GetName()
+    return name and mp.ungroupedButtons[name]
+end
+
 local function CollectFlyoutButtons()
-    -- Return all collected minimap buttons (populated by GatherMinimapButtons)
+    -- Return only buttons the addon wants visible and not ungrouped
     local collected = {}
     for _, btn in ipairs(cachedAddonButtons) do
-        collected[#collected + 1] = btn
+        if _addonVisible[btn] ~= false and not IsUngrouped(btn) then
+            collected[#collected + 1] = btn
+        end
     end
     return collected
+end
+
+local function GetAddonBtnSize()
+    local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    return mp and mp.addonBtnSize or FLYOUT_BTN_SIZE
 end
 
 local function LayoutFlyoutButtons()
@@ -590,10 +609,11 @@ local function LayoutFlyoutButtons()
         return
     end
 
+    local btnSize = GetAddonBtnSize()
     local cols = math.min(count, FLYOUT_COLS)
     local rows = math.ceil(count / cols)
-    local pw = FLYOUT_PADDING + cols * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
-    local ph = FLYOUT_PADDING + rows * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
+    local pw = FLYOUT_PADDING + cols * (btnSize + FLYOUT_PADDING)
+    local ph = FLYOUT_PADDING + rows * (btnSize + FLYOUT_PADDING)
     flyoutPanel:SetSize(pw, ph)
 
     for i, btn in ipairs(buttons) do
@@ -609,8 +629,8 @@ local function LayoutFlyoutButtons()
 
         local col = (i - 1) % cols
         local row = math.floor((i - 1) / cols)
-        local xOff = FLYOUT_PADDING + col * (FLYOUT_BTN_SIZE + FLYOUT_PADDING)
-        local yOff = -(FLYOUT_PADDING + row * (FLYOUT_BTN_SIZE + FLYOUT_PADDING))
+        local xOff = FLYOUT_PADDING + col * (btnSize + FLYOUT_PADDING)
+        local yOff = -(FLYOUT_PADDING + row * (btnSize + FLYOUT_PADDING))
 
         btn:SetParent(flyoutPanel)
         -- Unlock fixed strata/level first (LibDBIcon locks these)
@@ -620,9 +640,11 @@ local function LayoutFlyoutButtons()
         if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(true) end
         btn:ClearAllPoints()
         btn:SetPoint("TOPLEFT", flyoutPanel, "TOPLEFT", xOff, yOff)
-        btn:SetSize(FLYOUT_BTN_SIZE, FLYOUT_BTN_SIZE)
+        btn:SetSize(btnSize, btnSize)
+        _suppressVisTrack = true
         btn:SetAlpha(1)
         btn:Show()
+        _suppressVisTrack = false
         btn:SetFrameLevel(flyoutPanel:GetFrameLevel() + 5)
         if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(true) end
         -- Strip decorative border/background textures
@@ -674,8 +696,10 @@ local function RestoreFlyoutButtons()
             btn:SetPoint(saved.point, saved.relTo, saved.relPoint, saved.x, saved.y)
         end
         -- Re-hide on the minimap surface
+        _suppressVisTrack = true
         btn:Hide()
         btn:SetAlpha(0)
+        _suppressVisTrack = false
     end
     wipe(flyoutSavedParents)
 end
@@ -714,12 +738,16 @@ local function ToggleFlyoutPanel()
     end
 end
 
+local function GetInteractableBtnSize()
+    local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    return mp and mp.interactableBtnSize or 22
+end
+
 local function CreateFlyoutToggle()
     if flyoutToggle then return flyoutToggle end
 
     local btn = CreateFrame("Button", nil, Minimap)
-    local iconSize = (MinimapCluster and MinimapCluster.Tracking)
-        and MinimapCluster.Tracking:GetHeight() or 22
+    local iconSize = GetInteractableBtnSize()
     btn:SetSize(iconSize, iconSize)
     btn:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMLEFT", 0, 0)
     btn:SetFrameLevel(Minimap:GetFrameLevel() + 10)
@@ -860,16 +888,29 @@ local flyoutBlacklist = {
 local addonButtonHooks = {}
 
 local function HideMinimapChild(btn)
+    _suppressVisTrack = true
     btn:Hide()
     btn:SetAlpha(0)
+    _suppressVisTrack = false
     if not addonButtonHooks[btn] then
+        -- Track addon-intended visibility via Show/Hide hooks
         hooksecurefunc(btn, "Show", function(self)
+            if not _suppressVisTrack then
+                _addonVisible[self] = true
+            end
             if InCombatLockdown() then return end
             -- Allow showing when parented to the flyout panel
             if self:GetParent() == flyoutPanel then return end
+            -- Allow ungrouped buttons to stay visible
+            if IsUngrouped(self) then return end
             local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
             if mp and mp.enabled and not flyoutOwnedFrames[self] then
                 self:SetAlpha(0)
+            end
+        end)
+        hooksecurefunc(btn, "Hide", function(self)
+            if not _suppressVisTrack then
+                _addonVisible[self] = false
             end
         end)
         addonButtonHooks[btn] = true
@@ -877,9 +918,11 @@ local function HideMinimapChild(btn)
 end
 
 local function ShowMinimapChild(btn)
+    _suppressVisTrack = true
     btn:SetAlpha(1)
     btn:EnableMouse(true)
     btn:Show()
+    _suppressVisTrack = false
 end
 
 -- Pin/POI frame patterns to exclude from the flyout (HandyNotes, TomTom, etc.)
@@ -905,33 +948,49 @@ end
 local function GatherMinimapButtons()
     wipe(cachedAddonButtons)
     if not Minimap then return end
-    for _, child in ipairs({ Minimap:GetChildren() }) do
-        if not flyoutOwnedFrames[child] then
-            local name = child:GetName()
-            -- Skip blacklisted structural frames and map pin frames
-            if flyoutBlacklist[name] then
-                -- skip
-            elseif IsPinFrame(name) then
-                -- skip pin/POI frames (HandyNotes, TomTom, etc.)
-            elseif child:IsObjectType("Button") and name then
-                -- Skip tiny frames (map pins are typically < 20px, real buttons are 25+)
-                local w = child:GetWidth() or 0
-                if w >= 20 then
+    -- Also scan flyout panel children (buttons we already reparented)
+    local sources = { Minimap }
+    if flyoutPanel then sources[2] = flyoutPanel end
+    for _, source in ipairs(sources) do
+        for _, child in ipairs({ source:GetChildren() }) do
+            if not flyoutOwnedFrames[child] then
+                local name = child:GetName()
+                if flyoutBlacklist[name] then
+                    -- skip
+                elseif IsPinFrame(name) then
+                    -- skip pin/POI frames
+                elseif child:IsObjectType("Button") and name then
+                    local w = child:GetWidth() or 0
+                    if w >= 20 then
+                        -- Record initial addon visibility (only first time)
+                        if _addonVisible[child] == nil then
+                            _addonVisible[child] = child:IsShown()
+                        end
+                        cachedAddonButtons[#cachedAddonButtons + 1] = child
+                    end
+                elseif not child:IsObjectType("Button") and name and name:match("^LibDBIcon10_") then
+                    if _addonVisible[child] == nil then
+                        _addonVisible[child] = child:IsShown()
+                    end
                     cachedAddonButtons[#cachedAddonButtons + 1] = child
                 end
-            elseif not child:IsObjectType("Button") and name and name:match("^LibDBIcon10_") then
-                -- LibDBIcon sometimes uses Frame instead of Button
-                cachedAddonButtons[#cachedAddonButtons + 1] = child
             end
         end
     end
 end
 
+-- Expose for options UI
+_G._EBS_CachedAddonButtons = cachedAddonButtons
+_G._EBS_AddonVisible = _addonVisible
+
 -- Hide all collected minimap buttons from the map surface
+-- Ungrouped buttons are left alone (positioned by LayoutIndicatorFrames)
 local function HideAllMinimapButtons()
     GatherMinimapButtons()
     for _, btn in ipairs(cachedAddonButtons) do
-        HideMinimapChild(btn)
+        if not IsUngrouped(btn) then
+            HideMinimapChild(btn)
+        end
     end
 end
 
@@ -970,6 +1029,12 @@ local function ShrinkTrackingIcon(tracking)
     end
 end
 
+local function ApplyInteractableSize(frame)
+    if not frame then return end
+    local sz = GetInteractableBtnSize()
+    frame:SetSize(sz, sz)
+end
+
 local function LayoutIndicatorFrames(minimap, p, circleMode)
     local flvl = minimap:GetFrameLevel() + 10
 
@@ -978,6 +1043,16 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
     local mailFrame = indicator and indicator.MailFrame
     local craftingFrame = indicator and indicator.CraftingOrderFrame
+
+    -- Apply interactable button size
+    ApplyInteractableSize(tracking)
+    ApplyInteractableSize(gameTime)
+    ApplyInteractableSize(mailFrame)
+    ApplyInteractableSize(craftingFrame)
+    if flyoutToggle then
+        local sz = GetInteractableBtnSize()
+        flyoutToggle:SetSize(sz, sz)
+    end
 
     -- Reparent indicator children onto minimap (cluster is hidden).
     -- Guard with InCombatLockdown to avoid tainting during protected operations.
@@ -1149,6 +1224,77 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             indicatorBg:Show()
         elseif indicatorBg then
             indicatorBg:Hide()
+        end
+    end
+
+    -- Position ungrouped buttons above the flyout toggle (in check order)
+    if flyoutToggle then
+        local btnSize = GetInteractableBtnSize()
+        local anchor = flyoutToggle
+        local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+        local ungrouped = {}
+        for _, btn in ipairs(cachedAddonButtons) do
+            if _addonVisible[btn] ~= false and IsUngrouped(btn) then
+                local name = btn:GetName()
+                local order = mp and mp.ungroupedButtons and mp.ungroupedButtons[name] or 999
+                if type(order) == "boolean" then order = 999 end
+                ungrouped[#ungrouped + 1] = { btn = btn, order = order }
+            end
+        end
+        table.sort(ungrouped, function(a, b) return a.order < b.order end)
+        for _, entry in ipairs(ungrouped) do
+            local btn = entry.btn
+            -- Restore from flyout if needed
+            if flyoutSavedParents[btn] then
+                if btn._flyoutRing then btn._flyoutRing:Hide() end
+                if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
+                if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
+                flyoutSavedParents[btn] = nil
+            end
+            btn:SetParent(minimap)
+            btn:SetFrameLevel(minimap:GetFrameLevel() + 11)
+            btn:ClearAllPoints()
+            btn:SetSize(btnSize, btnSize)
+            btn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+            -- Lock position: disable dragging
+            btn:SetMovable(false)
+            btn:RegisterForDrag()
+            btn:SetScript("OnDragStart", nil)
+            btn:SetScript("OnDragStop", nil)
+            -- Strip decorative textures and normalize icon
+            StripButtonDecorations(btn)
+            local icon = btn.icon or btn.Icon
+            if not icon then
+                for _, region in ipairs({ btn:GetRegions() }) do
+                    if region:IsObjectType("Texture") and region:IsShown()
+                       and region:GetAlpha() > 0 and not IsJunkTexture(region)
+                       and region ~= btn._ungroupBg then
+                        icon = region
+                        break
+                    end
+                end
+            end
+            if icon then
+                icon:ClearAllPoints()
+                icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
+                icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
+                icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+            end
+            -- Black square background
+            if not btn._ungroupBg then
+                local ubg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+                ubg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+                ubg:SetBackdropColor(0, 0, 0, 0.8)
+                ubg:SetAllPoints(btn)
+                ubg:SetFrameLevel(btn:GetFrameLevel() - 1)
+                btn._ungroupBg = ubg
+            end
+            btn._ungroupBg:Show()
+            _suppressVisTrack = true
+            btn:SetAlpha(1)
+            btn:Show()
+            _suppressVisTrack = false
+            anchor = btn
         end
     end
 end
@@ -1705,151 +1851,7 @@ end
 
 
 
--------------------------------------------------------------------------------
---  Friends List Skin
--------------------------------------------------------------------------------
-local friendsSkinned = false
-
-local CLASS_ICON_SPRITE_BASE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\class-full\\"
--- Pre-cached sprite texture paths per style (avoids string concat per button)
-local CLASS_ICON_SPRITE_TEX = {}
-for _, style in ipairs({"modern", "dark", "light", "clean"}) do
-    CLASS_ICON_SPRITE_TEX[style] = CLASS_ICON_SPRITE_BASE .. style .. ".tga"
-end
-local CLASS_SPRITE_COORDS = {
-    WARRIOR     = { 0,     0.125, 0,     0.125 },
-    MAGE        = { 0.125, 0.25,  0,     0.125 },
-    ROGUE       = { 0.25,  0.375, 0,     0.125 },
-    DRUID       = { 0.375, 0.5,   0,     0.125 },
-    EVOKER      = { 0.5,   0.625, 0,     0.125 },
-    HUNTER      = { 0,     0.125, 0.125, 0.25  },
-    SHAMAN      = { 0.125, 0.25,  0.125, 0.25  },
-    PRIEST      = { 0.25,  0.375, 0.125, 0.25  },
-    WARLOCK     = { 0.375, 0.5,   0.125, 0.25  },
-    PALADIN     = { 0,     0.125, 0.25,  0.375 },
-    DEATHKNIGHT = { 0.125, 0.25,  0.25,  0.375 },
-    MONK        = { 0.25,  0.375, 0.25,  0.375 },
-    DEMONHUNTER = { 0.375, 0.5,   0.25,  0.375 },
-}
-
--- Reverse lookup: localized class name -> class file token (built once)
-local classFileByLocalName = {}
-local function BuildClassNameLookup()
-    if next(classFileByLocalName) then return end
-    if LOCALIZED_CLASS_NAMES_MALE then
-        for token, name in pairs(LOCALIZED_CLASS_NAMES_MALE) do
-            classFileByLocalName[name] = token
-        end
-    end
-    if LOCALIZED_CLASS_NAMES_FEMALE then
-        for token, name in pairs(LOCALIZED_CLASS_NAMES_FEMALE) do
-            classFileByLocalName[name] = token
-        end
-    end
-end
-
--- Friend data cache: populated once during RebuildFriendsDataProvider,
--- read from during per-button hook. Avoids API calls (and table allocations)
--- during scrolling. Numeric keys: BNet friends at [id], WoW friends at [id + 10000].
-local _friendCache = {}
-local _FC_WOW_OFFSET = 10000
-
-local function GetCachedFriendInfo(button)
-    if not button or not button.buttonType or not button.id then return nil, nil end
-    local key
-    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
-        key = button.id
-    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
-        key = button.id + _FC_WOW_OFFSET
-    end
-    if not key then return nil, nil end
-    local cached = _friendCache[key]
-    if cached then
-        if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
-            return cached, nil
-        else
-            return nil, cached
-        end
-    end
-    -- Cache miss (shouldn't happen if rebuild ran, but safety fallback)
-    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
-        return C_BattleNet and C_BattleNet.GetFriendAccountInfo(button.id), nil
-    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
-        return nil, C_FriendList and C_FriendList.GetFriendInfoByIndex(button.id)
-    end
-    return nil, nil
-end
-
--- Legacy GetFriendInfo kept for non-scroll callers (menus, etc.)
-local function GetFriendInfo(button)
-    if not button or not button.buttonType or not button.id then return nil, nil end
-    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
-        return C_BattleNet and C_BattleNet.GetFriendAccountInfo(button.id), nil
-    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
-        return nil, C_FriendList and C_FriendList.GetFriendInfoByIndex(button.id)
-    end
-    return nil, nil
-end
-
-local function GetFriendClassFile(bnetInfo, wowInfo)
-    BuildClassNameLookup()
-    if bnetInfo and bnetInfo.gameAccountInfo then
-        local gi = bnetInfo.gameAccountInfo
-        if gi.classID and gi.classID > 0 then
-            local _, classFile = GetClassInfo(gi.classID)
-            return classFile
-        end
-        if gi.className then
-            return classFileByLocalName[gi.className]
-        end
-    elseif wowInfo and wowInfo.className then
-        return classFileByLocalName[wowInfo.className]
-    end
-    return nil
-end
-
-local function GetFriendKey(button, bnetInfo, wowInfo)
-    if bnetInfo then
-        return "bnet-" .. (bnetInfo.bnetAccountID or button.id)
-    elseif wowInfo and wowInfo.name then
-        return "wow-" .. wowInfo.name
-    end
-    return nil
-end
-
--- EUI group tag in Blizzard friend notes: stored as ||EUI:GroupName|| at end
-local EUI_NOTE_TAG = "||EUI:"
-local EUI_NOTE_END = "||"
-
-local function ParseGroupFromNote(note)
-    if not note or note == "" then return nil, note end
-    local tagStart = note:find(EUI_NOTE_TAG, 1, true)
-    if not tagStart then return nil, note end
-    local groupStart = tagStart + #EUI_NOTE_TAG
-    local tagEnd = note:find(EUI_NOTE_END, groupStart, true)
-    if not tagEnd then return nil, note end
-    local group = note:sub(groupStart, tagEnd - 1)
-    -- Strip the tag to get the clean user note
-    local clean = note:sub(1, tagStart - 1)
-    -- Trim trailing whitespace from user note
-    clean = clean:match("^(.-)%s*$") or clean
-    if group == "" then return nil, clean end
-    return group, clean
-end
-
-local function WriteGroupToNote(note, group)
-    -- Strip any existing EUI tag first
-    local _, clean = ParseGroupFromNote(note)
-    if not clean then clean = "" end
-    if not group or group == "" then return clean end
-    if clean ~= "" then
-        return clean .. " " .. EUI_NOTE_TAG .. group .. EUI_NOTE_END
-    end
-    return EUI_NOTE_TAG .. group .. EUI_NOTE_END
-end
-
-
--- Strip all textures from a frame (used in one-time skinning only)
+-- Hide all textures on a frame (used by one-time skinning passes)
 local function StripTextures(f)
     if not f then return end
     for i = 1, select("#", f:GetRegions()) do
@@ -1860,578 +1862,6 @@ local function StripTextures(f)
     end
 end
 
--- Simple 3-state icon: retail WoW class icon, Blizzard default icon, or offline icon.
--- No caching. Always sets texture fresh every call. ScrollBox recycles buttons freely.
-local OFFLINE_ICON = "Interface\\AddOns\\EllesmereUIBasics\\Media\\offline.png"
-
--- Mini region display names (constant, used for region icon tooltips)
-local MINI_DISPLAY = {
-    namerica = "North America", samerica = "South America",
-    australia = "Australia", europe = "Europe",
-    russia = "Russia", korea = "Korea",
-    taiwan = "Taiwan", china = "China",
-}
-
--- Cached orb atlas info (used for status orbs on friend buttons and RA entries)
-local _orbFile, _orbL, _orbR, _orbT, _orbB
-do
-    local orbInfo = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("lootroll-animreveal-a")
-    if orbInfo and orbInfo.file then
-        _orbFile = orbInfo.file
-        local aL = orbInfo.leftTexCoord or 0
-        local aR = orbInfo.rightTexCoord or 1
-        local aT = orbInfo.topTexCoord or 0
-        local aB = orbInfo.bottomTexCoord or 1
-        local aW, aH = aR - aL, aB - aT
-        _orbL, _orbR, _orbT, _orbB = aL, aL + aW/6, aT, aT + aH/2
-    end
-end
-
-local function UpdateClassIcon(button, bnetInfo, wowInfo)
-    -- Skip dividers and non-friend buttons
-    if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
-    if not button.buttonType then return end
-
-    local p = EBS.db.profile.friends
-
-    -- Hide Blizzard's game icon; we draw our own
-    local gameIcon = button.gameIcon
-    if gameIcon then gameIcon:SetAlpha(0) end
-
-    if not p.showClassIcons then
-        if button._ebsClassIcon then button._ebsClassIcon:Hide() end
-        return
-    end
-
-    -- Create icon texture once
-    if not button._ebsClassIcon then
-        button._ebsClassIcon = button:CreateTexture(nil, "ARTWORK", nil, 2)
-    end
-    local icon = button._ebsClassIcon
-    local h = button:GetHeight() - 4
-    if h <= 0 then icon:Hide(); return end
-
-    -- Determine state
-    local state = "offline"  -- default
-    if bnetInfo and bnetInfo.gameAccountInfo then
-        local gi = bnetInfo.gameAccountInfo
-        if gi.isOnline then
-            if gi.clientProgram == BNET_CLIENT_WOW and (gi.wowProjectID == 1 or gi.wowProjectID == nil) then
-                state = "retail"
-            else
-                state = "other_game"
-            end
-        end
-    elseif wowInfo then
-        state = wowInfo.connected and "retail" or "offline"
-    end
-
-    -- Apply based on state (always set texture, no caching)
-    icon:ClearAllPoints()
-
-    if state == "retail" then
-        -- Full-size class icon with small inset
-        local inset = math.floor(h * 0.025 + 0.5)
-        icon:SetPoint("LEFT", button, "LEFT", 4, 0)
-        icon:SetPoint("TOP", button, "TOP", 0, -(2 + inset))
-        icon:SetPoint("BOTTOM", button, "BOTTOM", 0, 2 + inset)
-        local iconH = h - inset * 2
-        if iconH > 0 then icon:SetWidth(iconH) end
-
-        local classFile = GetFriendClassFile(bnetInfo, wowInfo)
-        if not classFile then icon:Hide(); return end
-
-        local style = p.iconStyle or "modern"
-        if style == "blizzard" then
-            icon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
-            local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
-            if coords then icon:SetTexCoord(unpack(coords)) end
-        else
-            local coords = CLASS_SPRITE_COORDS[classFile]
-            if coords then
-                icon:SetTexture(CLASS_ICON_SPRITE_TEX[style] or (CLASS_ICON_SPRITE_BASE .. style .. ".tga"))
-                icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
-            end
-        end
-        icon:SetDesaturated(false)
-        icon:SetAlpha(1)
-
-    elseif state == "other_game" then
-        -- 75% size, use Blizzard's gameIcon texture
-        local smallH = math.floor(h * 0.75)
-        icon:SetSize(smallH, smallH)
-        icon:SetPoint("LEFT", button, "LEFT", 4 + math.floor((h - smallH) / 2), 0)
-        if gameIcon then
-            local tex = gameIcon:GetTexture()
-            if tex then
-                icon:SetTexture(tex)
-                icon:SetTexCoord(0, 1, 0, 1)
-            end
-        end
-        icon:SetDesaturated(false)
-        icon:SetAlpha(1)
-
-    else -- offline
-        -- 75% size, custom offline PNG
-        local smallH = math.floor(h * 0.75)
-        icon:SetSize(smallH, smallH)
-        icon:SetPoint("LEFT", button, "LEFT", 4 + math.floor((h - smallH) / 2), 0)
-        icon:SetTexture(OFFLINE_ICON)
-        icon:SetTexCoord(0, 1, 0, 1)
-        icon:SetDesaturated(false)
-        icon:SetAlpha(0.5)
-    end
-
-    icon:Show()
-end
-
--- Pre-cached class color codes (built once, 13 strings total)
-local _classColorCodes = {}
-local function _getClassColorCode(classFile)
-    local code = _classColorCodes[classFile]
-    if code then return code end
-    local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-    if not cc then return nil end
-    code = format("|cff%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
-    _classColorCodes[classFile] = code
-    return code
-end
-
--- Apply class color to the character name portion of a friend button.
--- Only runs on stamp mismatch (button assigned to new friend), not during scroll.
-local function UpdateNameColor(button, bnetInfo, wowInfo)
-    local p = EBS.db.profile.friends
-    local nameText = button.name or button.Name
-    if not nameText then return end
-
-    if not p.classColorNames then
-        -- Not class-colored: leave Blizzard's text alone, no custom override
-        return
-    end
-
-    local classFile = GetFriendClassFile(bnetInfo, wowInfo)
-    if not classFile then return end
-
-    if wowInfo then
-        -- WoW friend: entire name is the character, use SetTextColor (zero alloc)
-        local cc = RAID_CLASS_COLORS[classFile]
-        if cc then nameText:SetTextColor(cc.r, cc.g, cc.b) end
-    elseif bnetInfo then
-        -- BNet friend: color only the (CharName) portion via inline color codes
-        local text = nameText:GetText()
-        if not text then return end
-        local colorCode = _getClassColorCode(classFile)
-        if not colorCode then return end
-        local colored = text:gsub("%((.-)%)", "(" .. colorCode .. "%1|r)")
-        if colored ~= text then
-            nameText:SetText(colored)
-        end
-    end
-end
-
--- Pre-cached faction overlay paths (avoids string concat per button)
-local FACTION_TEX_ALLIANCE = "Interface\\AddOns\\EllesmereUIBasics\\Media\\alliance.png"
-local FACTION_TEX_HORDE    = "Interface\\AddOns\\EllesmereUIBasics\\Media\\horde.png"
-local FACTION_TEX_NEUTRAL  = "Interface\\AddOns\\EllesmereUIBasics\\Media\\neutral.png"
-
--- Apply faction background overlay to a friend button
--- Only retail WoW gets Alliance/Horde, everything else gets neutral
-local function UpdateFactionOverlay(button, bnetInfo, wowInfo)
-    local factionName
-    local isRetail = false
-    if bnetInfo and bnetInfo.gameAccountInfo then
-        local gi = bnetInfo.gameAccountInfo
-        factionName = gi.factionName
-        if gi.clientProgram == BNET_CLIENT_WOW and (gi.wowProjectID == 1 or gi.wowProjectID == nil) and gi.isOnline then
-            isRetail = true
-        end
-    elseif wowInfo then
-        factionName = UnitFactionGroup("player")
-        isRetail = true
-    end
-
-    if not button._ebsFactionBg then
-        button._ebsFactionBg = button:CreateTexture(nil, "BACKGROUND", nil, 3)
-    end
-
-    local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
-    local showFaction = fp and fp.factionBanners ~= false
-    local texPath
-    if showFaction and isRetail and factionName == "Alliance" then
-        texPath = FACTION_TEX_ALLIANCE
-    elseif showFaction and isRetail and factionName == "Horde" then
-        texPath = FACTION_TEX_HORDE
-    else
-        texPath = FACTION_TEX_NEUTRAL
-    end
-
-    local tex = button._ebsFactionBg
-    tex:SetTexture(texPath)
-    tex:SetTexCoord(0, 1, 0, 1)
-    tex:ClearAllPoints()
-    tex:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
-    tex:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
-    tex:SetAlpha(0.2)
-    tex:Show()
-end
-
-
-
--- Skin a single friend button (one-time setup per button)
-local function SkinFriendButton(button)
-    if button._ebsSkinned then return end
-    button._ebsSkinned = true
-
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-
-    local function ApplyFont(fs, size)
-        if not fs or not fs.SetFont then return end
-        fs:SetFont(fontPath, size, "")
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 0.8)
-    end
-
-    -- Strip Blizzard's highlight texture (it's inset and conflicts with ours)
-    local blizzHighlight = button:GetHighlightTexture()
-    if blizzHighlight then blizzHighlight:SetAlpha(0) end
-
-    -- Tile background (sublevel 2 to render above Blizzard's BACKGROUND textures)
-    local tileBg = button:CreateTexture(nil, "BACKGROUND", nil, 2)
-    tileBg:SetAllPoints()
-    tileBg:SetColorTexture(0, 0, 0, 0.10)
-    button._ebsTileBg = tileBg
-
-    -- Hover highlight (full size, 50% reduced)
-    local hover = button:CreateTexture(nil, "HIGHLIGHT")
-    hover:SetAllPoints()
-    hover:SetColorTexture(1, 1, 1, 0.05)
-    hover:SetBlendMode("ADD")
-
-    -- Apply EUI font to friend row text
-    local nameText = button.name or button.Name
-    ApplyFont(nameText, 12)
-    local infoText = button.info or button.Info
-    ApplyFont(infoText, 9)
-    local statusText = button.status or button.Status
-    ApplyFont(statusText, 9)
-    local gameText = button.gameText or button.GameText
-    ApplyFont(gameText, 9)
-
-    -- Offset name text right to make room for class icon (one-time, Blizzard doesn't re-anchor name)
-    if nameText then
-        local p1, rel, p2, x, y = nameText:GetPoint(1)
-        if p1 then
-            nameText:SetPoint(p1, rel, p2, (x or 0) + 20, y or 0)
-        end
-    end
-end
-
--- Process all visible friend buttons (used only on initial OnShow as safety net)
-local function ProcessFriendButtons()
-    local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
-    if not scrollBox then return end
-    for _, button in scrollBox:EnumerateFrames() do
-        if button._ebsPendingSkinned then
-            -- Re-apply pending button colors (survive settings changes)
-            if button._ebsName then button._ebsName:SetTextColor(0.51, 0.784, 1, 1) end
-            if button._ebsSubText then button._ebsSubText:SetTextColor(0.5, 0.5, 0.5, 0.8) end
-            if button._ebsTileBg then button._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30) end
-        elseif button.buttonType and button.buttonType ~= FRIENDS_BUTTON_TYPE_DIVIDER then
-            SkinFriendButton(button)
-            local bnetInfo, wowInfo = GetCachedFriendInfo(button)
-            UpdateClassIcon(button, bnetInfo, wowInfo)
-            UpdateNameColor(button, bnetInfo, wowInfo)
-            UpdateFactionOverlay(button, bnetInfo, wowInfo)
-        end
-    end
-end
-
--- Skin a single ScrollBox+ScrollBar pair with thin EUI track
-local function SkinOneScrollbar(scrollBox, scrollBar)
-    if not scrollBox or not scrollBar then return end
-    if scrollBox._ebsTrack then return end
-
-    scrollBar:SetAlpha(0)
-    scrollBox._ebsScrollBar = scrollBar
-
-    -- Track (parented to scrollBox's parent so it isn't clipped by ScrollBox)
-    local trackParent = scrollBox:GetParent() or scrollBox
-    local track = CreateFrame("Frame", nil, trackParent)
-    track:SetWidth(4)
-    track:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 2, 0)
-    track:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 2, 0)
-    track:SetFrameLevel(scrollBox:GetFrameLevel() + 10)
-    scrollBox._ebsTrack = track
-
-    local trackBg = track:CreateTexture(nil, "BACKGROUND")
-    trackBg:SetColorTexture(1, 1, 1, 0)
-    trackBg:SetAllPoints()
-
-    -- Thumb
-    local thumb = CreateFrame("Button", nil, track)
-    thumb:SetWidth(4)
-    thumb:SetHeight(60)
-    thumb:SetPoint("TOP", track, "TOP", 0, 0)
-    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
-    thumb:EnableMouse(true)
-    thumb:RegisterForDrag("LeftButton")
-
-    local thumbTex = thumb:CreateTexture(nil, "ARTWORK")
-    thumbTex:SetColorTexture(1, 1, 1, 0.4)
-    thumbTex:SetAllPoints()
-
-    -- Hit area (wider clickable region for the scrollbar)
-    local hitArea = CreateFrame("Button", nil, trackParent)
-    hitArea:SetWidth(16)
-    hitArea:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", -4, -2)
-    hitArea:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", -4, 2)
-    hitArea:SetFrameLevel(track:GetFrameLevel() + 2)
-    hitArea:EnableMouse(true)
-    hitArea:RegisterForDrag("LeftButton")
-
-    local SCROLL_STEP = 40
-    local SCROLLBAR_ALPHA = 0.35
-    local isDragging = false
-    local dragStartY, dragStartPct
-
-    local function GetPct()
-        return scrollBar.GetScrollPercentage and scrollBar:GetScrollPercentage() or 0
-    end
-
-    local function GetExtent()
-        return scrollBar.GetVisibleExtentPercentage and scrollBar:GetVisibleExtentPercentage() or 1
-    end
-
-    local function StepToPct()
-        local ext = GetExtent()
-        if ext >= 1 then return 0 end
-        local totalH = scrollBox:GetHeight() / ext
-        if totalH <= 0 then return 0 end
-        return SCROLL_STEP / totalH
-    end
-
-    local function StopScrollDrag()
-        if not isDragging then return end
-        isDragging = false
-        thumb:SetScript("OnUpdate", nil)
-    end
-
-    local function UpdateScrollThumb()
-        local ext = GetExtent()
-        if ext >= 1 then track:SetAlpha(0); return end
-        track:SetAlpha(SCROLLBAR_ALPHA)
-        local pct = GetPct()
-        local trackH = track:GetHeight()
-        local thumbH = math.max(20, trackH * ext)
-        thumb:SetHeight(thumbH)
-        local maxTravel = trackH - thumbH
-        thumb:ClearAllPoints()
-        thumb:SetPoint("TOP", track, "TOP", 0, -(pct * maxTravel))
-    end
-
-    -- Direct scroll (no smoothing, no C_Timer allocations)
-    scrollBox:SetScript("OnMouseWheel", function(_, delta)
-        if GetExtent() >= 1 then return end
-        local step = StepToPct()
-        local newPct = math.max(0, math.min(1, GetPct() - delta * step))
-        scrollBar:SetScrollPercentage(newPct)
-        UpdateScrollThumb()
-    end)
-
-    -- Thumb drag
-    local function ScrollThumbOnUpdate(self)
-        if not IsMouseButtonDown("LeftButton") then StopScrollDrag(); return end
-        local _, cursorY = GetCursorPosition()
-        cursorY = cursorY / self:GetEffectiveScale()
-        local deltaY = dragStartY - cursorY
-        local trackH = track:GetHeight()
-        local maxTravel = trackH - self:GetHeight()
-        if maxTravel <= 0 then return end
-        local newPct = math.max(0, math.min(1, dragStartPct + deltaY / maxTravel))
-        scrollBar:SetScrollPercentage(newPct)
-        UpdateScrollThumb()
-    end
-
-    thumb:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" then return end
-        isDragging = true
-        local _, cursorY = GetCursorPosition()
-        dragStartY = cursorY / self:GetEffectiveScale()
-        dragStartPct = GetPct()
-        self:SetScript("OnUpdate", ScrollThumbOnUpdate)
-    end)
-    thumb:SetScript("OnMouseUp", function(_, button)
-        if button ~= "LeftButton" then return end
-        StopScrollDrag()
-    end)
-
-    -- Hit area click-to-jump
-    hitArea:SetScript("OnMouseDown", function(_, button)
-        if button ~= "LeftButton" then return end
-        if GetExtent() >= 1 then return end
-        local _, cy = GetCursorPosition()
-        cy = cy / track:GetEffectiveScale()
-        local top = track:GetTop() or 0
-        local trackH = track:GetHeight()
-        local thumbH = thumb:GetHeight()
-        if trackH <= thumbH then return end
-        local frac = (top - cy - thumbH / 2) / (trackH - thumbH)
-        frac = math.max(0, math.min(1, frac))
-        scrollBar:SetScrollPercentage(frac)
-        UpdateScrollThumb()
-        isDragging = true
-        dragStartY = cy
-        dragStartPct = frac
-        thumb:SetScript("OnUpdate", ScrollThumbOnUpdate)
-    end)
-    hitArea:SetScript("OnMouseUp", function(_, button)
-        if button ~= "LeftButton" then return end
-        StopScrollDrag()
-    end)
-
-    -- Keep thumb in sync with Blizzard scroll changes (no C_Timer, direct call)
-    if scrollBar.RegisterCallback then
-        scrollBar:RegisterCallback("OnScroll", UpdateScrollThumb)
-    end
-    -- Update thumb when content size changes (collapse/expand, filter toggle)
-    if scrollBox.RegisterCallback then
-        scrollBox:RegisterCallback("OnDataRangeChanged", UpdateScrollThumb)
-    end
-    C_Timer.After(0.1, UpdateScrollThumb)
-end
-
--- Skin known scrollbars by direct reference
-local function SkinScrollbars()
-    local targets = {
-        FriendsListFrame,
-    }
-    for _, f in ipairs(targets) do
-        if f then
-            local sb = f.ScrollBox
-            local bar = sb and (sb.ScrollBar or f.ScrollBar) or f.ScrollBar
-            if sb and bar then
-                SkinOneScrollbar(sb, bar)
-            elseif f.ScrollBar then
-                for i = 1, select("#", f:GetChildren()) do
-                    local child = select(i, f:GetChildren())
-                    if child.EnumerateFrames then
-                        SkinOneScrollbar(child, f.ScrollBar)
-                        break
-                    end
-                end
-            end
-        end
-    end
-    -- RecentAlliesFrame has nested structure
-    if _G.RecentAlliesFrame and _G.RecentAlliesFrame.List then
-        local list = _G.RecentAlliesFrame.List
-        if list.ScrollBox then
-            local bar = list.ScrollBox.ScrollBar or list.ScrollBar
-            if bar then SkinOneScrollbar(list.ScrollBox, bar) end
-        end
-    end
-end
-
--- Skin a bottom-area button (Add Friend, Send Message, etc.)
-local function SkinBottomButton(btn)
-    if not btn or btn._ebsBtnSkinned then return end
-    btn._ebsBtnSkinned = true
-
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-
-    StripTextures(btn)
-
-    btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
-    btn._ebsBg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
-    btn._ebsBg:SetAllPoints()
-
-    PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
-
-    local text = btn:GetFontString()
-    if text then
-        text:SetFont(fontPath, 9, "")
-        text:SetTextColor(1, 1, 1, 0.5)
-        text:ClearAllPoints()
-        text:SetPoint("CENTER", btn, "CENTER", 0, 0)
-    end
-
-    btn:HookScript("OnEnter", function()
-        local r, g, b, a1, a2 = 1, 1, 1, 0.7, 0.6
-        if btn._ebsAccent then
-            r, g, b = EG.r, EG.g, EG.b
-            a1, a2 = 1, 0.8
-        end
-        if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
-    end)
-    btn:HookScript("OnLeave", function()
-        local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
-        if btn._ebsAccent then
-            r, g, b = EG.r, EG.g, EG.b
-            a1, a2 = 0.7, 0.5
-        end
-        if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
-    end)
-end
-
--- Skin known buttons by name (like ElvUI) instead of string-matching
-local KNOWN_BUTTONS = {
-    "FriendsFrameAddFriendButton",
-    "FriendsFrameSendMessageButton",
-    "WhoFrameWhoButton",
-    "WhoFrameAddFriendButton",
-    "WhoFrameGroupInviteButton",
-}
-
-local function SkinKnownButtons()
-    for _, name in ipairs(KNOWN_BUTTONS) do
-        local btn = _G[name]
-        if btn then SkinBottomButton(btn) end
-    end
-end
-
--- Apply accent coloring to bottom buttons + pending accept buttons (called from ApplyFriends)
-local function UpdateBottomButtonAccent()
-    local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
-    if not fp then return end
-    local useAccent = fp.accentColors ~= false
-
-    -- Helper: apply accent state to a single button (reads EG live, no caching)
-    local function ApplyAccentToBtn(btn, labelFS)
-        if not btn then return end
-        btn._ebsAccent = useAccent
-        if useAccent then
-            if labelFS then labelFS:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
-            if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
-        else
-            if labelFS then labelFS:SetTextColor(1, 1, 1, 0.5) end
-            if btn._ppBorders then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
-        end
-    end
-
-    -- Bottom buttons (Send Message, Who buttons — skip Add Friend)
-    for _, name in ipairs(KNOWN_BUTTONS) do
-        local btn = _G[name]
-        if btn and btn._ebsBtnSkinned and btn:IsEnabled()
-           and name ~= "FriendsFrameAddFriendButton" then
-            ApplyAccentToBtn(btn, btn:GetFontString())
-        end
-    end
-
-    -- Pending invite accept buttons
-    local sb = FriendsListFrame and FriendsListFrame.ScrollBox
-    if sb then
-        for _, btn in sb:EnumerateFrames() do
-            if btn._ebsAcceptBtn then
-                ApplyAccentToBtn(btn._ebsAcceptBtn, btn._ebsAcceptLabel)
-            end
-        end
-    end
-
-end
-
--- StaticPopup for creating a new friend group
 -------------------------------------------------------------------------------
 --  Raid Tab Skinning
 -------------------------------------------------------------------------------
@@ -2833,6 +2263,716 @@ local function UpdateRaidTabButtonAccent()
         end
     end
 end
+
+-------------------------------------------------------------------------------
+--  Friends List Skin
+-------------------------------------------------------------------------------
+local friendsSkinned = false
+
+local CLASS_ICON_SPRITE_BASE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\class-full\\"
+-- Sprite texture paths keyed by style name
+local CLASS_ICON_SPRITE_TEX = {}
+for _, style in ipairs({"modern", "dark", "light", "clean"}) do
+    CLASS_ICON_SPRITE_TEX[style] = CLASS_ICON_SPRITE_BASE .. style .. ".tga"
+end
+local CLASS_SPRITE_COORDS = {
+    WARRIOR     = { 0,     0.125, 0,     0.125 },
+    MAGE        = { 0.125, 0.25,  0,     0.125 },
+    ROGUE       = { 0.25,  0.375, 0,     0.125 },
+    DRUID       = { 0.375, 0.5,   0,     0.125 },
+    EVOKER      = { 0.5,   0.625, 0,     0.125 },
+    HUNTER      = { 0,     0.125, 0.125, 0.25  },
+    SHAMAN      = { 0.125, 0.25,  0.125, 0.25  },
+    PRIEST      = { 0.25,  0.375, 0.125, 0.25  },
+    WARLOCK     = { 0.375, 0.5,   0.125, 0.25  },
+    PALADIN     = { 0,     0.125, 0.25,  0.375 },
+    DEATHKNIGHT = { 0.125, 0.25,  0.25,  0.375 },
+    MONK        = { 0.25,  0.375, 0.25,  0.375 },
+    DEMONHUNTER = { 0.375, 0.5,   0.25,  0.375 },
+}
+
+-- Localized class name -> class file token (built once on first use)
+local classFileByLocalName = {}
+local function BuildClassNameLookup()
+    if next(classFileByLocalName) then return end
+    if LOCALIZED_CLASS_NAMES_MALE then
+        for token, name in pairs(LOCALIZED_CLASS_NAMES_MALE) do
+            classFileByLocalName[name] = token
+        end
+    end
+    if LOCALIZED_CLASS_NAMES_FEMALE then
+        for token, name in pairs(LOCALIZED_CLASS_NAMES_FEMALE) do
+            classFileByLocalName[name] = token
+        end
+    end
+end
+
+-- Friend data cache: populated during RebuildFriendsDataProvider, read per-button.
+-- BNet friends keyed by [id], WoW friends keyed by [id + 10000].
+local _friendCache = {}
+local _FC_WOW_OFFSET = 10000
+
+local function GetCachedFriendInfo(button)
+    if not button or not button.buttonType or not button.id then return nil, nil end
+    local key
+    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
+        key = button.id
+    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
+        key = button.id + _FC_WOW_OFFSET
+    end
+    if not key then return nil, nil end
+    local cached = _friendCache[key]
+    if cached then
+        if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
+            return cached, nil
+        else
+            return nil, cached
+        end
+    end
+    -- Cache miss fallback
+    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
+        return C_BattleNet and C_BattleNet.GetFriendAccountInfo(button.id), nil
+    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
+        return nil, C_FriendList and C_FriendList.GetFriendInfoByIndex(button.id)
+    end
+    return nil, nil
+end
+
+-- Direct API call version for non-scroll callers (menus, tooltips)
+local function GetFriendInfo(button)
+    if not button or not button.buttonType or not button.id then return nil, nil end
+    if button.buttonType == FRIENDS_BUTTON_TYPE_BNET then
+        return C_BattleNet and C_BattleNet.GetFriendAccountInfo(button.id), nil
+    elseif button.buttonType == FRIENDS_BUTTON_TYPE_WOW then
+        return nil, C_FriendList and C_FriendList.GetFriendInfoByIndex(button.id)
+    end
+    return nil, nil
+end
+
+local function GetFriendClassFile(bnetInfo, wowInfo)
+    BuildClassNameLookup()
+    if bnetInfo and bnetInfo.gameAccountInfo then
+        local gi = bnetInfo.gameAccountInfo
+        if gi.classID and gi.classID > 0 then
+            local _, classFile = GetClassInfo(gi.classID)
+            return classFile
+        end
+        if gi.className then
+            return classFileByLocalName[gi.className]
+        end
+    elseif wowInfo and wowInfo.className then
+        return classFileByLocalName[wowInfo.className]
+    end
+    return nil
+end
+
+local function GetFriendKey(button, bnetInfo, wowInfo)
+    if bnetInfo then
+        return "bnet-" .. (bnetInfo.bnetAccountID or button.id)
+    elseif wowInfo and wowInfo.name then
+        return "wow-" .. wowInfo.name
+    end
+    return nil
+end
+
+-- Group tag stored in Blizzard friend notes as ||EUI:GroupName||
+local EUI_NOTE_TAG = "||EUI:"
+local EUI_NOTE_END = "||"
+
+local function ParseGroupFromNote(note)
+    if not note or note == "" then return nil, note end
+    local tagStart = note:find(EUI_NOTE_TAG, 1, true)
+    if not tagStart then return nil, note end
+    local groupStart = tagStart + #EUI_NOTE_TAG
+    local tagEnd = note:find(EUI_NOTE_END, groupStart, true)
+    if not tagEnd then return nil, note end
+    local group = note:sub(groupStart, tagEnd - 1)
+    -- Strip the tag to get the clean user note
+    local clean = note:sub(1, tagStart - 1)
+    -- Trim trailing whitespace from user note
+    clean = clean:match("^(.-)%s*$") or clean
+    if group == "" then return nil, clean end
+    return group, clean
+end
+
+local function WriteGroupToNote(note, group)
+    -- Strip any existing EUI tag first
+    local _, clean = ParseGroupFromNote(note)
+    if not clean then clean = "" end
+    if not group or group == "" then return clean end
+    if clean ~= "" then
+        return clean .. " " .. EUI_NOTE_TAG .. group .. EUI_NOTE_END
+    end
+    return EUI_NOTE_TAG .. group .. EUI_NOTE_END
+end
+
+
+
+-- Offline icon path (displayed when friend is not online)
+local OFFLINE_ICON = "Interface\\AddOns\\EllesmereUIBasics\\Media\\offline.png"
+
+-- Region display names for friend region tooltips
+local MINI_DISPLAY = {
+    namerica = "North America", samerica = "South America",
+    australia = "Australia", europe = "Europe",
+    russia = "Russia", korea = "Korea",
+    taiwan = "Taiwan", china = "China",
+}
+
+-- Status orb atlas (online/away/dnd indicator on friend buttons)
+local _orbFile, _orbL, _orbR, _orbT, _orbB
+do
+    local orbInfo = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("lootroll-animreveal-a")
+    if orbInfo and orbInfo.file then
+        _orbFile = orbInfo.file
+        local aL = orbInfo.leftTexCoord or 0
+        local aR = orbInfo.rightTexCoord or 1
+        local aT = orbInfo.topTexCoord or 0
+        local aB = orbInfo.bottomTexCoord or 1
+        local aW, aH = aR - aL, aB - aT
+        _orbL, _orbR, _orbT, _orbB = aL, aL + aW/6, aT, aT + aH/2
+    end
+end
+
+local function UpdateClassIcon(button, bnetInfo, wowInfo)
+    -- Skip dividers
+    if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
+    if not button.buttonType then return end
+
+    local p = EBS.db.profile.friends
+
+    -- Hide Blizzard's game icon
+    local gameIcon = button.gameIcon
+    if gameIcon then gameIcon:SetAlpha(0) end
+
+    if not p.showClassIcons then
+        if button._ebsClassIcon then button._ebsClassIcon:Hide() end
+        return
+    end
+
+    -- Create icon texture
+    if not button._ebsClassIcon then
+        button._ebsClassIcon = button:CreateTexture(nil, "ARTWORK", nil, 2)
+    end
+    local icon = button._ebsClassIcon
+    local h = button:GetHeight() - 4
+    if h <= 0 then icon:Hide(); return end
+
+    -- Determine online state
+    local state = "offline"  -- default
+    if bnetInfo and bnetInfo.gameAccountInfo then
+        local gi = bnetInfo.gameAccountInfo
+        if gi.isOnline then
+            if gi.clientProgram == BNET_CLIENT_WOW and (gi.wowProjectID == 1 or gi.wowProjectID == nil) then
+                state = "retail"
+            else
+                state = "other_game"
+            end
+        end
+    elseif wowInfo then
+        state = wowInfo.connected and "retail" or "offline"
+    end
+
+    -- Apply icon based on state
+    icon:ClearAllPoints()
+
+    if state == "retail" then
+        -- Class icon with small inset
+        local inset = math.floor(h * 0.025 + 0.5)
+        icon:SetPoint("LEFT", button, "LEFT", 4, 0)
+        icon:SetPoint("TOP", button, "TOP", 0, -(2 + inset))
+        icon:SetPoint("BOTTOM", button, "BOTTOM", 0, 2 + inset)
+        local iconH = h - inset * 2
+        if iconH > 0 then icon:SetWidth(iconH) end
+
+        local classFile = GetFriendClassFile(bnetInfo, wowInfo)
+        if not classFile then icon:Hide(); return end
+
+        local style = p.iconStyle or "modern"
+        if style == "blizzard" then
+            icon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+            local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
+            if coords then icon:SetTexCoord(unpack(coords)) end
+        else
+            local coords = CLASS_SPRITE_COORDS[classFile]
+            if coords then
+                icon:SetTexture(CLASS_ICON_SPRITE_TEX[style] or (CLASS_ICON_SPRITE_BASE .. style .. ".tga"))
+                icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+            end
+        end
+        icon:SetDesaturated(false)
+        icon:SetAlpha(1)
+
+    elseif state == "other_game" then
+        -- Smaller icon using Blizzard's game icon texture
+        local smallH = math.floor(h * 0.75)
+        icon:SetSize(smallH, smallH)
+        icon:SetPoint("LEFT", button, "LEFT", 4 + math.floor((h - smallH) / 2), 0)
+        if gameIcon then
+            local tex = gameIcon:GetTexture()
+            if tex then
+                icon:SetTexture(tex)
+                icon:SetTexCoord(0, 1, 0, 1)
+            end
+        end
+        icon:SetDesaturated(false)
+        icon:SetAlpha(1)
+
+    else -- offline
+        local smallH = math.floor(h * 0.75)
+        icon:SetSize(smallH, smallH)
+        icon:SetPoint("LEFT", button, "LEFT", 4 + math.floor((h - smallH) / 2), 0)
+        icon:SetTexture(OFFLINE_ICON)
+        icon:SetTexCoord(0, 1, 0, 1)
+        icon:SetDesaturated(false)
+        icon:SetAlpha(0.5)
+    end
+
+    icon:Show()
+end
+
+-- Class color hex codes (built on first use per class)
+local _classColorCodes = {}
+local function _getClassColorCode(classFile)
+    local code = _classColorCodes[classFile]
+    if code then return code end
+    local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+    if not cc then return nil end
+    code = format("|cff%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
+    _classColorCodes[classFile] = code
+    return code
+end
+
+-- Apply class color to the character name portion of a friend button
+local function UpdateNameColor(button, bnetInfo, wowInfo)
+    local p = EBS.db.profile.friends
+    local nameText = button.name or button.Name
+    if not nameText then return end
+
+    if not p.classColorNames then return end
+
+    local classFile = GetFriendClassFile(bnetInfo, wowInfo)
+    if not classFile then return end
+
+    if wowInfo then
+        -- WoW friend: entire name is the character
+        local cc = RAID_CLASS_COLORS[classFile]
+        if cc then nameText:SetTextColor(cc.r, cc.g, cc.b) end
+    elseif bnetInfo then
+        -- BNet friend: color only the (CharName) portion
+        local text = nameText:GetText()
+        if not text then return end
+        local colorCode = _getClassColorCode(classFile)
+        if not colorCode then return end
+        local colored = text:gsub("%((.-)%)", "(" .. colorCode .. "%1|r)")
+        if colored ~= text then
+            nameText:SetText(colored)
+        end
+    end
+end
+
+-- Faction overlay texture paths
+local FACTION_TEX_ALLIANCE = "Interface\\AddOns\\EllesmereUIBasics\\Media\\alliance.png"
+local FACTION_TEX_HORDE    = "Interface\\AddOns\\EllesmereUIBasics\\Media\\horde.png"
+local FACTION_TEX_NEUTRAL  = "Interface\\AddOns\\EllesmereUIBasics\\Media\\neutral.png"
+
+-- Apply faction background overlay to a friend button
+local function UpdateFactionOverlay(button, bnetInfo, wowInfo)
+    local factionName
+    local isRetail = false
+    if bnetInfo and bnetInfo.gameAccountInfo then
+        local gi = bnetInfo.gameAccountInfo
+        factionName = gi.factionName
+        if gi.clientProgram == BNET_CLIENT_WOW and (gi.wowProjectID == 1 or gi.wowProjectID == nil) and gi.isOnline then
+            isRetail = true
+        end
+    elseif wowInfo then
+        factionName = UnitFactionGroup("player")
+        isRetail = true
+    end
+
+    if not button._ebsFactionBg then
+        button._ebsFactionBg = button:CreateTexture(nil, "BACKGROUND", nil, 3)
+    end
+
+    local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
+    local showFaction = fp and fp.factionBanners ~= false
+    local texPath
+    if showFaction and isRetail and factionName == "Alliance" then
+        texPath = FACTION_TEX_ALLIANCE
+    elseif showFaction and isRetail and factionName == "Horde" then
+        texPath = FACTION_TEX_HORDE
+    else
+        texPath = FACTION_TEX_NEUTRAL
+    end
+
+    local tex = button._ebsFactionBg
+    tex:SetTexture(texPath)
+    tex:SetTexCoord(0, 1, 0, 1)
+    tex:ClearAllPoints()
+    tex:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+    tex:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
+    tex:SetAlpha(0.2)
+    tex:Show()
+end
+
+
+
+-- Skin a single friend button
+local function SkinFriendButton(button)
+    if button._ebsSkinned then return end
+    button._ebsSkinned = true
+
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+
+    local function ApplyFont(fs, size)
+        if not fs or not fs.SetFont then return end
+        fs:SetFont(fontPath, size, "")
+        fs:SetShadowOffset(1, -1)
+        fs:SetShadowColor(0, 0, 0, 0.8)
+    end
+
+    -- Strip Blizzard's highlight texture
+    local blizzHighlight = button:GetHighlightTexture()
+    if blizzHighlight then blizzHighlight:SetAlpha(0) end
+
+    -- Tile background
+    local tileBg = button:CreateTexture(nil, "BACKGROUND", nil, 2)
+    tileBg:SetAllPoints()
+    tileBg:SetColorTexture(0, 0, 0, 0.10)
+    button._ebsTileBg = tileBg
+
+    -- Hover highlight
+    local hover = button:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, 0.05)
+    hover:SetBlendMode("ADD")
+
+    -- Apply font to friend row text
+    local nameText = button.name or button.Name
+    ApplyFont(nameText, 12)
+    local infoText = button.info or button.Info
+    ApplyFont(infoText, 9)
+    local statusText = button.status or button.Status
+    ApplyFont(statusText, 9)
+    local gameText = button.gameText or button.GameText
+    ApplyFont(gameText, 9)
+
+    -- Offset name text right for class icon
+    if nameText then
+        local p1, rel, p2, x, y = nameText:GetPoint(1)
+        if p1 then
+            nameText:SetPoint(p1, rel, p2, (x or 0) + 20, y or 0)
+        end
+    end
+end
+
+-- Process all visible friend buttons (used only on initial OnShow as safety net)
+local function ProcessFriendButtons()
+    local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
+    if not scrollBox then return end
+    for _, button in scrollBox:EnumerateFrames() do
+        if button._ebsPendingSkinned then
+            -- Re-apply pending button colors (survive settings changes)
+            if button._ebsName then button._ebsName:SetTextColor(0.51, 0.784, 1, 1) end
+            if button._ebsSubText then button._ebsSubText:SetTextColor(0.5, 0.5, 0.5, 0.8) end
+            if button._ebsTileBg then button._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30) end
+        elseif button.buttonType and button.buttonType ~= FRIENDS_BUTTON_TYPE_DIVIDER then
+            SkinFriendButton(button)
+            local bnetInfo, wowInfo = GetCachedFriendInfo(button)
+            UpdateClassIcon(button, bnetInfo, wowInfo)
+            UpdateNameColor(button, bnetInfo, wowInfo)
+            UpdateFactionOverlay(button, bnetInfo, wowInfo)
+        end
+    end
+end
+
+-- Skin a single ScrollBox+ScrollBar pair with thin EUI track
+local function SkinOneScrollbar(scrollBox, scrollBar)
+    if not scrollBox or not scrollBar then return end
+    if scrollBox._ebsTrack then return end
+
+    scrollBar:SetAlpha(0)
+    scrollBox._ebsScrollBar = scrollBar
+
+    -- Track (parented to scrollBox's parent so it isn't clipped by ScrollBox)
+    local trackParent = scrollBox:GetParent() or scrollBox
+    local track = CreateFrame("Frame", nil, trackParent)
+    track:SetWidth(4)
+    track:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 2, 0)
+    track:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 2, 0)
+    track:SetFrameLevel(scrollBox:GetFrameLevel() + 10)
+    scrollBox._ebsTrack = track
+
+    local trackBg = track:CreateTexture(nil, "BACKGROUND")
+    trackBg:SetColorTexture(1, 1, 1, 0)
+    trackBg:SetAllPoints()
+
+    -- Thumb
+    local thumb = CreateFrame("Button", nil, track)
+    thumb:SetWidth(4)
+    thumb:SetHeight(60)
+    thumb:SetPoint("TOP", track, "TOP", 0, 0)
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
+    thumb:EnableMouse(true)
+    thumb:RegisterForDrag("LeftButton")
+
+    local thumbTex = thumb:CreateTexture(nil, "ARTWORK")
+    thumbTex:SetColorTexture(1, 1, 1, 0.4)
+    thumbTex:SetAllPoints()
+
+    -- Hit area (wider clickable region for the scrollbar)
+    local hitArea = CreateFrame("Button", nil, trackParent)
+    hitArea:SetWidth(16)
+    hitArea:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", -4, -2)
+    hitArea:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", -4, 2)
+    hitArea:SetFrameLevel(track:GetFrameLevel() + 2)
+    hitArea:EnableMouse(true)
+    hitArea:RegisterForDrag("LeftButton")
+
+    local SCROLL_STEP = 40
+    local SCROLLBAR_ALPHA = 0.35
+    local isDragging = false
+    local dragStartY, dragStartPct
+
+    local function GetPct()
+        return scrollBar.GetScrollPercentage and scrollBar:GetScrollPercentage() or 0
+    end
+
+    local function GetExtent()
+        return scrollBar.GetVisibleExtentPercentage and scrollBar:GetVisibleExtentPercentage() or 1
+    end
+
+    local function StepToPct()
+        local ext = GetExtent()
+        if ext >= 1 then return 0 end
+        local totalH = scrollBox:GetHeight() / ext
+        if totalH <= 0 then return 0 end
+        return SCROLL_STEP / totalH
+    end
+
+    local function StopScrollDrag()
+        if not isDragging then return end
+        isDragging = false
+        thumb:SetScript("OnUpdate", nil)
+    end
+
+    local function UpdateScrollThumb()
+        local ext = GetExtent()
+        if ext >= 1 then track:SetAlpha(0); return end
+        track:SetAlpha(SCROLLBAR_ALPHA)
+        local pct = GetPct()
+        local trackH = track:GetHeight()
+        local thumbH = math.max(20, trackH * ext)
+        thumb:SetHeight(thumbH)
+        local maxTravel = trackH - thumbH
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOP", track, "TOP", 0, -(pct * maxTravel))
+    end
+
+    -- Direct scroll (no smoothing, no C_Timer allocations)
+    scrollBox:SetScript("OnMouseWheel", function(_, delta)
+        if GetExtent() >= 1 then return end
+        local step = StepToPct()
+        local newPct = math.max(0, math.min(1, GetPct() - delta * step))
+        scrollBar:SetScrollPercentage(newPct)
+        UpdateScrollThumb()
+    end)
+
+    -- Thumb drag
+    local function ScrollThumbOnUpdate(self)
+        if not IsMouseButtonDown("LeftButton") then StopScrollDrag(); return end
+        local _, cursorY = GetCursorPosition()
+        cursorY = cursorY / self:GetEffectiveScale()
+        local deltaY = dragStartY - cursorY
+        local trackH = track:GetHeight()
+        local maxTravel = trackH - self:GetHeight()
+        if maxTravel <= 0 then return end
+        local newPct = math.max(0, math.min(1, dragStartPct + deltaY / maxTravel))
+        scrollBar:SetScrollPercentage(newPct)
+        UpdateScrollThumb()
+    end
+
+    thumb:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        isDragging = true
+        local _, cursorY = GetCursorPosition()
+        dragStartY = cursorY / self:GetEffectiveScale()
+        dragStartPct = GetPct()
+        self:SetScript("OnUpdate", ScrollThumbOnUpdate)
+    end)
+    thumb:SetScript("OnMouseUp", function(_, button)
+        if button ~= "LeftButton" then return end
+        StopScrollDrag()
+    end)
+
+    -- Hit area click-to-jump
+    hitArea:SetScript("OnMouseDown", function(_, button)
+        if button ~= "LeftButton" then return end
+        if GetExtent() >= 1 then return end
+        local _, cy = GetCursorPosition()
+        cy = cy / track:GetEffectiveScale()
+        local top = track:GetTop() or 0
+        local trackH = track:GetHeight()
+        local thumbH = thumb:GetHeight()
+        if trackH <= thumbH then return end
+        local frac = (top - cy - thumbH / 2) / (trackH - thumbH)
+        frac = math.max(0, math.min(1, frac))
+        scrollBar:SetScrollPercentage(frac)
+        UpdateScrollThumb()
+        isDragging = true
+        dragStartY = cy
+        dragStartPct = frac
+        thumb:SetScript("OnUpdate", ScrollThumbOnUpdate)
+    end)
+    hitArea:SetScript("OnMouseUp", function(_, button)
+        if button ~= "LeftButton" then return end
+        StopScrollDrag()
+    end)
+
+    -- Keep thumb in sync with Blizzard scroll changes (no C_Timer, direct call)
+    if scrollBar.RegisterCallback then
+        scrollBar:RegisterCallback("OnScroll", UpdateScrollThumb)
+    end
+    -- Update thumb when content size changes (collapse/expand, filter toggle)
+    if scrollBox.RegisterCallback then
+        scrollBox:RegisterCallback("OnDataRangeChanged", UpdateScrollThumb)
+    end
+    C_Timer.After(0.1, UpdateScrollThumb)
+end
+
+-- Skin known scrollbars by direct reference
+local function SkinScrollbars()
+    local targets = {
+        FriendsListFrame,
+    }
+    for _, f in ipairs(targets) do
+        if f then
+            local sb = f.ScrollBox
+            local bar = sb and (sb.ScrollBar or f.ScrollBar) or f.ScrollBar
+            if sb and bar then
+                SkinOneScrollbar(sb, bar)
+            elseif f.ScrollBar then
+                for i = 1, select("#", f:GetChildren()) do
+                    local child = select(i, f:GetChildren())
+                    if child.EnumerateFrames then
+                        SkinOneScrollbar(child, f.ScrollBar)
+                        break
+                    end
+                end
+            end
+        end
+    end
+    -- RecentAlliesFrame has nested structure
+    if _G.RecentAlliesFrame and _G.RecentAlliesFrame.List then
+        local list = _G.RecentAlliesFrame.List
+        if list.ScrollBox then
+            local bar = list.ScrollBox.ScrollBar or list.ScrollBar
+            if bar then SkinOneScrollbar(list.ScrollBox, bar) end
+        end
+    end
+end
+
+-- Skin a bottom-area button (Add Friend, Send Message, etc.)
+local function SkinBottomButton(btn)
+    if not btn or btn._ebsBtnSkinned then return end
+    btn._ebsBtnSkinned = true
+
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+
+    StripTextures(btn)
+
+    btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+    btn._ebsBg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
+    btn._ebsBg:SetAllPoints()
+
+    PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
+
+    local text = btn:GetFontString()
+    if text then
+        text:SetFont(fontPath, 9, "")
+        text:SetTextColor(1, 1, 1, 0.5)
+        text:ClearAllPoints()
+        text:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    end
+
+    btn:HookScript("OnEnter", function()
+        local r, g, b, a1, a2 = 1, 1, 1, 0.7, 0.6
+        if btn._ebsAccent then
+            r, g, b = EG.r, EG.g, EG.b
+            a1, a2 = 1, 0.8
+        end
+        if text then text:SetTextColor(r, g, b, a1) end
+        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+    end)
+    btn:HookScript("OnLeave", function()
+        local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
+        if btn._ebsAccent then
+            r, g, b = EG.r, EG.g, EG.b
+            a1, a2 = 0.7, 0.5
+        end
+        if text then text:SetTextColor(r, g, b, a1) end
+        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+    end)
+end
+
+-- Skin known buttons by name instead of string-matching
+local KNOWN_BUTTONS = {
+    "FriendsFrameAddFriendButton",
+    "FriendsFrameSendMessageButton",
+    "WhoFrameWhoButton",
+    "WhoFrameAddFriendButton",
+    "WhoFrameGroupInviteButton",
+}
+
+local function SkinKnownButtons()
+    for _, name in ipairs(KNOWN_BUTTONS) do
+        local btn = _G[name]
+        if btn then SkinBottomButton(btn) end
+    end
+end
+
+-- Apply accent coloring to bottom buttons + pending accept buttons (called from ApplyFriends)
+local function UpdateBottomButtonAccent()
+    local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
+    if not fp then return end
+    local useAccent = fp.accentColors ~= false
+
+    -- Helper: apply accent state to a single button (reads EG live, no caching)
+    local function ApplyAccentToBtn(btn, labelFS)
+        if not btn then return end
+        btn._ebsAccent = useAccent
+        if useAccent then
+            if labelFS then labelFS:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
+            if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
+        else
+            if labelFS then labelFS:SetTextColor(1, 1, 1, 0.5) end
+            if btn._ppBorders then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
+        end
+    end
+
+    -- Bottom buttons (Send Message, Who buttons — skip Add Friend)
+    for _, name in ipairs(KNOWN_BUTTONS) do
+        local btn = _G[name]
+        if btn and btn._ebsBtnSkinned and btn:IsEnabled()
+           and name ~= "FriendsFrameAddFriendButton" then
+            ApplyAccentToBtn(btn, btn:GetFontString())
+        end
+    end
+
+    -- Pending invite accept buttons
+    local sb = FriendsListFrame and FriendsListFrame.ScrollBox
+    if sb then
+        for _, btn in sb:EnumerateFrames() do
+            if btn._ebsAcceptBtn then
+                ApplyAccentToBtn(btn._ebsAcceptBtn, btn._ebsAcceptLabel)
+            end
+        end
+    end
+
+end
+
+-- StaticPopup for creating a new friend group
 
 StaticPopupDialogs["EBS_DELETE_FRIEND_GROUP"] = {
     text = "Delete group \"%s\"?\nFriends in this group will be moved to the default list.",
