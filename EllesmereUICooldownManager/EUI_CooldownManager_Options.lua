@@ -7105,6 +7105,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local isNonCDM = (sid and sid < 0)
                         or (sid and ns._myRacialsSet and ns._myRacialsSet[sid])
                         or isCustomBuffBar
+                        or (sid and sid > 0 and ns.IsSpellInAnyCDMCategory and not ns.IsSpellInAnyCDMCategory(sid))
                     if sid and sid > 0 and not isNonCDM and ns.ApplyUntrackedOverlay then
                         local barType = (bd.barType or bd.key)
                         local isUntracked = not ns.IsSpellTrackedForBarType(sid, barType)

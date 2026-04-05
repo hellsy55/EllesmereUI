@@ -2764,6 +2764,20 @@ local function ApplyUntrackedOverlay(ourIcon, isUntracked)
                     spellName .. "not tracked in Blizzard CDM.\nClick to open the |cff0cd29d" .. tabName .. "|r tab.")
             end)
             ov:SetScript("OnLeave", function() HideUntrackedTooltip() end)
+            -- Forward mouse-down/up to parent so drag reordering works
+            -- through the overlay (preview slots use OnMouseDown for drag).
+            ov:SetScript("OnMouseDown", function(self, button)
+                local parent = self:GetParent()
+                if parent and parent.GetScript and parent:GetScript("OnMouseDown") then
+                    parent:GetScript("OnMouseDown")(parent, button)
+                end
+            end)
+            ov:SetScript("OnMouseUp", function(self, button)
+                local parent = self:GetParent()
+                if parent and parent.GetScript and parent:GetScript("OnMouseUp") then
+                    parent:GetScript("OnMouseUp")(parent, button)
+                end
+            end)
             if fd then fd.untrackedOverlay = ov else ourIcon._untrackedOverlay = ov end
             utOv = ov
         end

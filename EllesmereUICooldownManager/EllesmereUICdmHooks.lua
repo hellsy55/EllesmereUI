@@ -1474,7 +1474,8 @@ local function CollectAndReanchor(bypassSpecGuard)
                             end
                             if not hasClaim then
                                 local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
-                                if not isRacial and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
+                                local isCustomSpell = sd and sd.customSpellIDs and sd.customSpellIDs[sid]
+                                if not isRacial and not isCustomSpell and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
                                     -- Unknown spell, skip
                                 else
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
