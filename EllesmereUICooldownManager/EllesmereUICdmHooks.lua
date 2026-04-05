@@ -1377,14 +1377,28 @@ local function CollectAndReanchor(bypassSpecGuard)
                 local sd = ns.GetBarSpellData(barKey)
                 local spellList = sd and sd.assignedSpells
 
-                -- Build spell order map for sorting
+                -- Build spell order map for sorting (store all variants)
                 local spellOrder = _scratch_spellOrder; wipe(spellOrder)
                 if spellList then
                     local idx = 0
                     for _, sid in ipairs(spellList) do
                         if sid and sid ~= 0 then
                             idx = idx + 1
-                            spellOrder[sid] = idx
+                            if not spellOrder[sid] then spellOrder[sid] = idx end
+                            -- Forward: base -> current override
+                            if _FindOverride then
+                                local ovr = _FindOverride(sid)
+                                if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                    spellOrder[ovr] = idx
+                                end
+                            end
+                            -- Reverse: override -> base
+                            if C_Spell and C_Spell.GetBaseSpell then
+                                local base = C_Spell.GetBaseSpell(sid)
+                                if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                    spellOrder[base] = idx
+                                end
+                            end
                         end
                     end
                 end
@@ -1572,6 +1586,10 @@ local function CollectAndReanchor(bypassSpecGuard)
                     local fc = _ecmeFC[frame]
                     local sid = fc and fc.spellID
                     local key = sid and spellOrder[sid]
+                    -- Check cached baseSpellID (stable across transforms)
+                    if not key and fc and fc.baseSpellID then
+                        key = spellOrder[fc.baseSpellID]
+                    end
                     if not key and sid and sid > 0 and _FindOverride then
                         local ovr = _FindOverride(sid)
                         if ovr and ovr > 0 then key = spellOrder[ovr] end

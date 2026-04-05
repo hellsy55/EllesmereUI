@@ -1522,10 +1522,16 @@ local function BuildBars()
         primaryBar:SetFrameStrata("MEDIUM")
         primaryBar:SetFrameLevel(10)
     end
+    -- DEBUG: track who moves power bar during combat (outside creation guard)
     if pp.enabled ~= false and cachedPrimary then
         local ppOri = pp.orientation or g.orientation or "HORIZONTAL"
         local primaryAnchorKey = NormalizeAnchorKey(pp.anchorTo)
-        if primaryAnchorKey ~= "none" then
+        local primaryUnlockAnchored = EllesmereUI.IsUnlockAnchored("ERB_Power")
+        if primaryUnlockAnchored then
+            -- Unlock anchor system owns positioning; only update size
+            local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
+            primaryBar:SetSize(ow, oh)
+        elseif primaryAnchorKey ~= "none" then
             local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
             local offsetX, offsetY = GetAnchorOffsets(pp)
             primaryBar:SetSize(ow, oh)
@@ -1610,16 +1616,16 @@ local function BuildBars()
         local ow, oh = OrientedSize(pp.width or 214, ppHeight or 4, ppOri)
         primaryBar:SetSize(ow, oh)
         primaryBar:Show()
-        if pp.unlockPos and pp.unlockPos.point then
-            local rp = pp.unlockPos.relPoint or pp.unlockPos.point
-            if not EllesmereUI.IsUnlockAnchored("ERB_Power") or not primaryBar:GetLeft() then
+        if not EllesmereUI.IsUnlockAnchored("ERB_Power") then
+            if pp.unlockPos and pp.unlockPos.point then
+                local rp = pp.unlockPos.relPoint or pp.unlockPos.point
                 local sx, sy = SnapXY(pp.unlockPos.x, pp.unlockPos.y, primaryBar)
                 primaryBar:ClearAllPoints()
                 primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, sx, sy)
+            elseif not primaryBar:GetLeft() then
+                primaryBar:ClearAllPoints()
+                primaryBar:SetPoint("CENTER", mainFrame, "CENTER", pp.offsetX or 0, pp.offsetY or -54)
             end
-        elseif not primaryBar:GetLeft() then
-            primaryBar:ClearAllPoints()
-            primaryBar:SetPoint("CENTER", mainFrame, "CENTER", pp.offsetX or 0, pp.offsetY or -54)
         end
         EllesmereUI.SetElementVisibility(primaryBar, false)
     end
@@ -1676,7 +1682,11 @@ local function BuildBars()
         local frameH = isVertical and PP.Scale(totalW) or PP.Scale(pipH)
 
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
-        if secondaryAnchorKey ~= "none" then
+        local secondaryUnlockAnchored = EllesmereUI.IsUnlockAnchored("ERB_ClassResource")
+        if secondaryUnlockAnchored then
+            -- Unlock anchor system owns positioning; only update size
+            secondaryFrame:SetSize(frameW, frameH)
+        elseif secondaryAnchorKey ~= "none" then
             local offsetX, offsetY = GetAnchorOffsets(sp)
             secondaryFrame:SetSize(frameW, frameH)
             if not ApplyBarAnchor(secondaryFrame, secondaryAnchorKey, sp.anchorPosition, offsetX, offsetY, sp.growthDirection, sp.growCentered) then
@@ -1946,16 +1956,16 @@ local function BuildBars()
         local pipW = sp.pipWidth or ((pp.width or 214))
         secondaryFrame:SetSize(pipW, pipH)
         secondaryFrame:Show()
-        if sp.unlockPos and sp.unlockPos.point then
-            local rp = sp.unlockPos.relPoint or sp.unlockPos.point
-            if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") or not secondaryFrame:GetLeft() then
+        if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") then
+            if sp.unlockPos and sp.unlockPos.point then
+                local rp = sp.unlockPos.relPoint or sp.unlockPos.point
                 local sx, sy = SnapXY(sp.unlockPos.x, sp.unlockPos.y, secondaryFrame)
                 secondaryFrame:ClearAllPoints()
                 secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, rp, sx, sy)
+            elseif not secondaryFrame:GetLeft() then
+                secondaryFrame:ClearAllPoints()
+                secondaryFrame:SetPoint("CENTER", mainFrame, "CENTER", sp.offsetX or 0, sp.offsetY or -74)
             end
-        elseif not secondaryFrame:GetLeft() then
-            secondaryFrame:ClearAllPoints()
-            secondaryFrame:SetPoint("CENTER", mainFrame, "CENTER", sp.offsetX or 0, sp.offsetY or -74)
         end
         EllesmereUI.SetElementVisibility(secondaryFrame, false)
     end

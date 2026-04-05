@@ -6078,7 +6078,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.1.9"
+EllesmereUI.VERSION = "6.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6228,9 +6228,18 @@ if not _G._EUI_ConflictChecked then
         local IsLoaded = C_AddOns and C_AddOns.IsAddOnLoaded
         if not IsLoaded then return end
 
-        -- conflict list: { addon, label, targets, message }
+        -- conflict list: { addon, label, targets, message, moduleCheck }
         -- targets = "all" or a table of Ellesmere folder names
         -- message = optional custom popup message override
+        -- moduleCheck = optional function returning true if the specific sub-module is active
+        --              (used for Basics sub-modules: minimap, friends, chat, etc.)
+        local function BasicsModuleEnabled(key)
+            local db = _G._EBS_AceDB
+            if db and db.profile and db.profile[key] then
+                return db.profile[key].enabled ~= false
+            end
+            return true -- assume enabled if DB not yet available
+        end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
@@ -6244,9 +6253,9 @@ if not _G._EUI_ConflictChecked then
             { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
-            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" } },
-            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" } },
-            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIBasics" } },
+            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("friends") end },
+            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
+            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
             -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIBasics" } },
             -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIBasics" } },
             -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIBasics" } },
@@ -6260,7 +6269,7 @@ if not _G._EUI_ConflictChecked then
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
-            { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
+            { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager", } },
             { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "EllesmereBarGlows",        label = "Ellesmere's CDM Bar Glows",  targets = "all" },
             { addon = "EllesmereNameplates",        label = "Ellesmere's Nameplates",  targets = "all" },
@@ -6279,7 +6288,8 @@ if not _G._EUI_ConflictChecked then
         -- would be the only conflict showing (i.e. no other conflicts exist).
         local pending = {}
         for _, entry in ipairs(conflicts) do
-            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon) then
+            local moduleActive = not entry.moduleCheck or entry.moduleCheck()
+            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon) and moduleActive then
                 local affected = {}
                 if entry.targets == "all" then
                     local allTargets = {

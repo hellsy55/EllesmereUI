@@ -736,6 +736,8 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
+                -- Snap 0.53 to exact pixel-perfect 0.5333...
+                if math.abs(v - 0.53) < 0.005 then v = 0.5333333333 end
                 EllesmereUI._uiScaleDragVal = v
                 EllesmereUIDB.ppUIScaleAuto = false
                 -- Snapshot panel scale before changing UIParent

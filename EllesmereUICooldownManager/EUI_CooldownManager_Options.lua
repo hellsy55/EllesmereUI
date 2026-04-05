@@ -1190,9 +1190,17 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
                 local origBrdR, origBrdG, origBrdB = 0, 0, 0
-                if isCDMBar then
-                    local bd2 = SelectedCDMBar()
-                    if bd2 then origBrdR, origBrdG, origBrdB = bd2.borderR or 0, bd2.borderG or 0, bd2.borderB or 0 end
+                if isCDMBar and cdmBarKey then
+                    local p2 = DB()
+                    local bars2 = p2 and p2.cdmBars and p2.cdmBars.bars
+                    if bars2 then
+                        for _, bd2 in ipairs(bars2) do
+                            if bd2.key == cdmBarKey then
+                                origBrdR, origBrdG, origBrdB = bd2.borderR or 0, bd2.borderG or 0, bd2.borderB or 0
+                                break
+                            end
+                        end
+                    end
                 else
                     origBrdR, origBrdG, origBrdB = brdColor.r, brdColor.g, brdColor.b
                 end
