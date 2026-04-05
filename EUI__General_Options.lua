@@ -726,6 +726,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="UI Scale",
               min=0.40, max=1.00, step=0.01,
               tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
+              disabled=function() return EllesmereUIDB and EllesmereUIDB.ppFixedScale end,
+              disabledTooltip="Disable 'Set UI Scale to 0.5333' first",
               getValue=function()
                 if EllesmereUI._uiScaleDragVal then
                     return EllesmereUI._uiScaleDragVal
@@ -756,6 +758,30 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
               end },
+            { type="toggle", text="Set UI Scale to 0.5333",
+              tooltip="This option is for users who use exact pixel perfect scale setting for other addons (EUI does not require this setting to be pixel perfect).",
+              getValue=function()
+                return EllesmereUIDB and EllesmereUIDB.ppFixedScale or false
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.ppFixedScale = v
+                if v then
+                    EllesmereUIDB.ppUIScaleAuto = false
+                    EllesmereUIDB.ppUIScale = 0.5333333333
+                    local mf = EllesmereUI._mainFrame
+                    local panelScaleBefore
+                    if mf then panelScaleBefore = mf:GetEffectiveScale() end
+                    EllesmereUI.PP.SetUIScale(0.5333333333)
+                    if mf and panelScaleBefore then
+                        local newEff = UIParent:GetEffectiveScale()
+                        if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
+                    end
+                end
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Minimap Button",
               getValue=function()
                 return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
@@ -768,9 +794,7 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     EllesmereUI.HideMinimapButton()
                 end
-              end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              end },
             { type="toggle", text="Show Pause Menu Button",
               tooltip="Shows the EllesmereUI button in the game menu (Escape key).",
               getValue=function()
@@ -781,8 +805,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.hideGameMenuButton = not v
                 local btn = _G.EllesmereUI_GameMenuButton
                 if btn then btn:SetShown(v) end
-              end },
-            { type="label", text="" }
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -891,6 +914,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, fpsCogShow = EllesmereUI.BuildCogPopup({
                 title = "FPS Counter Settings",
                 rows = {
+                    { type="slider", label="Text Size",
+                      min=8, max=24, step=1,
+                      get=function()
+                        return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.fpsTextSize = v
+                        if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
+                      end },
                     { type="toggle", label="Show Local MS",
                       get=function()
                         if not EllesmereUIDB or EllesmereUIDB.fpsShowLocalMS == nil then return true end
@@ -1178,6 +1211,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, durCogShow = EllesmereUI.BuildCogPopup({
                 title = "Durability Settings",
                 rows = {
+                    { type="slider", label="Text Size",
+                      min=10, max=50, step=1,
+                      get=function()
+                        return (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.durWarnTextSize = v
+                        if EllesmereUI._durWarnApplySettings then EllesmereUI._durWarnApplySettings() end
+                      end },
                     { type="slider", label="Y-Offset",
                       min=-600, max=600, step=1,
                       get=function()
@@ -1186,7 +1229,7 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         if not EllesmereUIDB then EllesmereUIDB = {} end
                         EllesmereUIDB.durWarnYOffset = v
-                        EllesmereUIDB.durWarnPos = nil  -- clear custom pos so slider always takes effect
+                        EllesmereUIDB.durWarnPos = nil
                         if EllesmereUI._durWarnPreview then EllesmereUI._durWarnPreview() end
                       end },
                     { type="slider", label="Repair %",
@@ -2367,7 +2410,7 @@ initFrame:SetScript("OnEvent", function(self)
     local function CreateFPSCounter()
         if fpsFrame then return end
         local FONT = EllesmereUI.GetFontPath("extras")
-        local FONT_SIZE = 12
+        local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
         local LABEL_SIZE = FONT_SIZE - 2
         local SHADOW_X, SHADOW_Y = 1, -1
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
@@ -2411,6 +2454,8 @@ initFrame:SetScript("OnEvent", function(self)
         local fsLocalLbl = MakeFS(LABEL_SIZE)
         fpsFrame._divLocal = divLocal
         fpsFrame._textLocal = fsLocalVal
+        fpsFrame._labelWorld = fsWorldLbl
+        fpsFrame._labelLocal = fsLocalLbl
 
         local function UpdateFPS(self)
             local db = EllesmereUIDB or {}
@@ -2493,6 +2538,16 @@ initFrame:SetScript("OnEvent", function(self)
         local shouldShow = EllesmereUIDB and EllesmereUIDB.showFPS
         if shouldShow then
             CreateFPSCounter()
+            -- Apply text size to all FPS counter texts
+            local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+            local lblSz = sz - 2
+            local fp = EllesmereUI.GetFontPath("extras")
+            local outF = EllesmereUI.GetFontOutlineFlag()
+            if fpsFrame._text then fpsFrame._text:SetFont(fp, sz, outF) end
+            if fpsFrame._textWorld then fpsFrame._textWorld:SetFont(fp, sz, outF) end
+            if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
+            if fpsFrame._labelWorld then fpsFrame._labelWorld:SetFont(fp, lblSz, outF) end
+            if fpsFrame._labelLocal then fpsFrame._labelLocal:SetFont(fp, lblSz, outF) end
             -- Apply saved position and scale
             local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
             if pos and pos.point then
@@ -2702,7 +2757,7 @@ initFrame:SetScript("OnEvent", function(self)
         durWarnOverlay:EnableMouse(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag())
+        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 30, EllesmereUI.GetFontOutlineFlag())
         fs:SetPoint("CENTER")
         fs:SetText("Low Durability")
         durWarnOverlay._text = fs
@@ -2719,9 +2774,10 @@ initFrame:SetScript("OnEvent", function(self)
             end
             durWarnOverlay:SetScale(1)
 
-            -- Font — pull from the global "extras" font key
+            -- Font -- pull from the global "extras" font key
             local fontPath = EllesmereUI.GetFontPath("extras")
-            fs:SetFont(fontPath, 18, EllesmereUI.GetFontOutlineFlag())
+            local durSz = (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
+            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag())
 
             -- Color
             local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
@@ -2776,6 +2832,19 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI._durWarnHidePreview = function()
         if durWarnOverlay then durWarnOverlay:Hide() end
     end
+
+    EllesmereUI._durWarnApplySettings = function()
+        if durWarnOverlay and durWarnOverlay._applySettings then
+            durWarnOverlay._applySettings()
+        end
+    end
+
+    -- Auto-hide durability preview when EUI window closes
+    EllesmereUI:RegisterOnHide(function()
+        if EllesmereUI._durWarnHidePreview then
+            EllesmereUI._durWarnHidePreview()
+        end
+    end)
 
     -- Durability warning: show while out of combat and below threshold, hide on repair or combat
     local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)

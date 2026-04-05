@@ -288,7 +288,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 22 end,
+              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.interactableBtnSize = v
@@ -303,7 +303,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="Size of addon minimap buttons in the flyout grid",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 21 end,
+              getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 24 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.addonBtnSize = v
@@ -420,8 +420,9 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Scroll to Zoom | (spacer)
-        _, h = W:DualRow(parent, y,
+        -- Scroll to Zoom | Clock Scale (with cog: X/Y offset)
+        local clockScaleRow
+        clockScaleRow, h = W:DualRow(parent, y,
             { type="toggle", text="Scroll to Zoom",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
@@ -431,8 +432,153 @@ initFrame:SetScript("OnEvent", function(self)
                 m.scrollZoom = v
                 RefreshMinimap()
               end },
+            { type="slider", text="Clock Scale", min=0.5, max=2.0, step=0.01,
+              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showClock) end,
+              disabledTooltip="Enable Show Clock first",
+              getValue=function() local m = MinimapDB(); return m and m.clockScale or 1.15 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.clockScale = v
+                local bg = _G._EBS_ClockBg
+                if bg then bg:SetScale(v) end
+              end }
+        );  y = y - h
+
+        -- Inline cog on Clock Scale for X/Y offset
+        do
+            local rgn = clockScaleRow._rightRegion
+            local function clockOff()
+                local m = MinimapDB(); return m and (not m.enabled or not m.showClock)
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Clock Position",
+                rows = {
+                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.clockOffsetX or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.clockOffsetX = v
+                          local bg = _G._EBS_ClockBg
+                          if bg then
+                              bg:ClearAllPoints()
+                              local cy = m.clockOffsetY or 0
+                              local baseY = m.clockInside and -4 or (m.shape == "circle" or m.shape == "textured_circle") and -3 or 7
+                              bg:SetPoint("TOP", _G.Minimap, "TOP", v, baseY + cy)
+                          end
+                      end },
+                    { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.clockOffsetY or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.clockOffsetY = v
+                          local bg = _G._EBS_ClockBg
+                          if bg then
+                              bg:ClearAllPoints()
+                              local cx = m.clockOffsetX or 0
+                              local baseY = m.clockInside and -4 or (m.shape == "circle" or m.shape == "textured_circle") and -3 or 7
+                              bg:SetPoint("TOP", _G.Minimap, "TOP", cx, baseY + v)
+                          end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(clockOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(clockOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local cogBlock = CreateFrame("Frame", nil, cogBtn)
+            cogBlock:SetAllPoints(); cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10); cogBlock:EnableMouse(true)
+            cogBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Show Clock")) end)
+            cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = clockOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then cogBlock:Show() else cogBlock:Hide() end
+            end)
+            if clockOff() then cogBlock:Show() else cogBlock:Hide() end
+        end
+
+        -- Location Scale (with cog: X/Y offset) | (spacer)
+        local locScaleRow
+        locScaleRow, h = W:DualRow(parent, y,
+            { type="slider", text="Location Scale", min=0.5, max=2.0, step=0.01,
+              disabled=function() local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText) end,
+              disabledTooltip="Enable Show Zone first",
+              getValue=function() local m = MinimapDB(); return m and m.locationScale or 1.15 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.locationScale = v
+                local bg = _G._EBS_LocationBg
+                if bg then bg:SetScale(v) end
+              end },
             { type="label", text="" }
         );  y = y - h
+
+        -- Inline cog on Location Scale for X/Y offset
+        do
+            local rgn = locScaleRow._leftRegion
+            local function locOff()
+                local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText)
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Location Position",
+                rows = {
+                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.locationOffsetX or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.locationOffsetX = v
+                          local bg = _G._EBS_LocationBg
+                          if bg then
+                              bg:ClearAllPoints()
+                              local ly = m.locationOffsetY or 0
+                              local baseY = m.zoneInside and 4 or (m.shape == "circle" or m.shape == "textured_circle") and 3 or -7
+                              bg:SetPoint("BOTTOM", _G.Minimap, "BOTTOM", v, baseY + ly)
+                          end
+                      end },
+                    { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.locationOffsetY or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.locationOffsetY = v
+                          local bg = _G._EBS_LocationBg
+                          if bg then
+                              bg:ClearAllPoints()
+                              local lx = m.locationOffsetX or 0
+                              local baseY = m.zoneInside and 4 or (m.shape == "circle" or m.shape == "textured_circle") and 3 or -7
+                              bg:SetPoint("BOTTOM", _G.Minimap, "BOTTOM", lx, baseY + v)
+                          end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(locOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(locOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local cogBlock = CreateFrame("Frame", nil, cogBtn)
+            cogBlock:SetAllPoints(); cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10); cogBlock:EnableMouse(true)
+            cogBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Show Zone")) end)
+            cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = locOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then cogBlock:Show() else cogBlock:Hide() end
+            end)
+            if locOff() then cogBlock:Show() else cogBlock:Hide() end
+        end
 
 
         return math.abs(y)

@@ -270,12 +270,18 @@ local defaults = {
             hideCraftingOrder    = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
-            addonBtnSize         = 21,
-            interactableBtnSize  = 22,
+            addonBtnSize         = 24,
+            interactableBtnSize  = 21,
             ungroupedButtons     = {},
             showClock     = true,
-            clockInside   = false,
+            clockInside   = true,
             clockFormat   = "12h",
+            clockScale    = 1.15,
+            clockOffsetX  = 0,
+            clockOffsetY  = 0,
+            locationScale = 1.15,
+            locationOffsetX = 0,
+            locationOffsetY = 0,
             lock          = false,
             position      = nil,
             visibility    = "always",
@@ -517,7 +523,7 @@ local flyoutPanel  = nil   -- the popup grid container
 local flyoutSavedParents = {}  -- original parent/point data for restore
 local flyoutSavedRegions = {}  -- original region states for restore
 
-local FLYOUT_BTN_SIZE = 21
+local FLYOUT_BTN_SIZE = 24
 local FLYOUT_PADDING  = 4
 local FLYOUT_COLS     = 4
 
@@ -1023,8 +1029,8 @@ local function ShrinkTrackingIcon(tracking)
     if tBtn then
         tBtn:ClearAllPoints()
         tBtn:SetPoint("CENTER", tracking, "CENTER", 0, 0)
-        local tw2 = (tracking:GetWidth() or 22) - 3
-        local th2 = (tracking:GetHeight() or 22) - 3
+        local tw2 = (tracking:GetWidth() or 22) - 5
+        local th2 = (tracking:GetHeight() or 22) - 5
         tBtn:SetSize(tw2, th2)
     end
 end
@@ -1641,19 +1647,22 @@ local function ApplyMinimap()
         end
         -- Position and background based on inside/outside setting
         local clockInside = p.clockInside
+        local cxOff = p.clockOffsetX or 0
+        local cyOff = p.clockOffsetY or 0
         if clockInside then
-            -- Inside: no background, positioned inside the minimap
             clockBg:SetBackdropColor(0, 0, 0, 0)
             clockBg:ClearAllPoints()
-            clockBg:SetPoint("TOP", minimap, "TOP", 0, -4)
+            clockBg:SetPoint("TOP", minimap, "TOP", cxOff, -4 + cyOff)
         else
-            -- Outside: background with border color, positioned outside
             local ar, ag, ab = GetBorderColor(p)
             clockBg:SetBackdropColor(ar, ag, ab, 1)
             local clockYOff = isCircle and -3 or 7
             clockBg:ClearAllPoints()
-            clockBg:SetPoint("TOP", minimap, "TOP", 0, clockYOff)
+            clockBg:SetPoint("TOP", minimap, "TOP", cxOff, clockYOff + cyOff)
         end
+        local cs = p.clockScale or 1.15
+        clockBg:SetScale(cs)
+        _G._EBS_ClockBg = clockBg
         clockBg:Show()
         clockFrame:Show()
         if not clockTicker then
@@ -1740,19 +1749,22 @@ local function ApplyMinimap()
         end
         -- Position and background based on inside/outside setting
         local zoneInside = p.zoneInside
+        local lxOff = p.locationOffsetX or 0
+        local lyOff = p.locationOffsetY or 0
         if zoneInside then
-            -- Inside: no background, positioned inside the minimap
             locationBg:SetBackdropColor(0, 0, 0, 0)
             locationBg:ClearAllPoints()
-            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, 4)
+            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", lxOff, 4 + lyOff)
         else
-            -- Outside: background with border color, positioned outside
             local ar, ag, ab = GetBorderColor(p)
             locationBg:SetBackdropColor(ar, ag, ab, 1)
             local locYOff = isCircle and 3 or -7
             locationBg:ClearAllPoints()
-            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", 0, locYOff)
+            locationBg:SetPoint("BOTTOM", minimap, "BOTTOM", lxOff, locYOff + lyOff)
         end
+        local ls = p.locationScale or 1.15
+        locationBg:SetScale(ls)
+        _G._EBS_LocationBg = locationBg
         locationBg:Show()
         locationFrame:Show()
         UpdateLocation()
@@ -1765,7 +1777,7 @@ local function ApplyMinimap()
     if not coordFrame then
         coordFrame = minimap:CreateFontString(nil, "OVERLAY")
         ApplyMinimapFont(coordFrame, 11)
-        coordFrame:SetPoint("TOPRIGHT", minimap, "TOPRIGHT", -4, -4)
+        coordFrame:SetPoint("TOPLEFT", minimap, "TOPLEFT", 4, -4)
         coordFrame:SetTextColor(1, 1, 1, 0.9)
     end
     coordFrame:Hide()  -- hidden by default, shown on hover
