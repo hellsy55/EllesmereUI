@@ -6078,7 +6078,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.2.1"
+EllesmereUI.VERSION = "6.2.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6266,6 +6266,8 @@ if not _G._EUI_ConflictChecked then
             -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBasics" } },
             -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBasics" } },
             -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBasics" } },
+            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end,
+              message = "FarmHud controls the Minimap frame directly and is incompatible with the EllesmereUI Minimap module. Disable either FarmHud or the EUI Minimap module in Basics settings." },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
@@ -6783,7 +6785,7 @@ do
     function EllesmereUI.CreateMinimapButton()
         if btn then return btn end
 
-        btn = CreateFrame("Button", "EllesmereUI", Minimap)
+        btn = CreateFrame("Button", "EllesmereUIMinimapButton", Minimap)
         btn:SetSize(BUTTON_SIZE, BUTTON_SIZE)
         btn:SetFrameStrata("MEDIUM")
         btn:SetFrameLevel(8)

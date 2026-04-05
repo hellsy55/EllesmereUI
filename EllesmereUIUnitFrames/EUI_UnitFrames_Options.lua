@@ -1021,7 +1021,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Class color helper for preview
-        local function PreviewClassColor(fs, useCC)
+        local function PreviewClassColor(fs, useCC, customR, customG, customB)
             if not fs then return end
             if useCC then
                 if unitKey == "player" then
@@ -1034,7 +1034,7 @@ initFrame:SetScript("OnEvent", function(self)
                     fs:SetTextColor(0.9, 0.3, 0.3); return
                 end
             end
-            fs:SetTextColor(1, 1, 1)
+            fs:SetTextColor(customR or 1, customG or 1, customB or 1)
         end
 
 
@@ -1071,7 +1071,7 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(centerFS, "CENTER", textOverlay, "CENTER", cxo, cyo)
                 centerFS:SetText(PreviewTextForContent(cc, s))
                 centerFS:Show()
-                PreviewClassColor(centerFS, s.centerTextClassColor)
+                PreviewClassColor(centerFS, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             else
                 centerFS:Hide()
                 leftFS:SetFont(PREVIEW_FONT, lsz, GetUFOptOutline())
@@ -1091,7 +1091,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     leftFS:SetText(PreviewTextForContent(lc, s))
                     leftFS:Show()
-                    PreviewClassColor(leftFS, s.leftTextClassColor)
+                    PreviewClassColor(leftFS, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
                 else
                     leftFS:Hide()
                 end
@@ -1103,7 +1103,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(rightFS, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
                     rightFS:SetText(PreviewTextForContent(rc, s))
                     rightFS:Show()
-                    PreviewClassColor(rightFS, s.rightTextClassColor)
+                    PreviewClassColor(rightFS, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
                 else
                     rightFS:Hide()
                 end
@@ -1368,7 +1368,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(btbLeftFS, "LEFT", btbTextOvr, "LEFT", 5 + (s.btbLeftX or 0), s.btbLeftY or 0)
                     btbLeftFS:SetText(PreviewTextForContent(lc, s))
                     btbLeftFS:Show()
-                    PreviewClassColor(btbLeftFS, s.btbLeftClassColor)
+                    PreviewClassColor(btbLeftFS, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB)
                     PreviewPowerColor(btbLeftFS, lc, s.btbLeftPowerColor)
                 else btbLeftFS:Hide() end
 
@@ -1379,7 +1379,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(btbRightFS, "RIGHT", btbTextOvr, "RIGHT", -5 + (s.btbRightX or 0), s.btbRightY or 0)
                     btbRightFS:SetText(PreviewTextForContent(rc, s))
                     btbRightFS:Show()
-                    PreviewClassColor(btbRightFS, s.btbRightClassColor)
+                    PreviewClassColor(btbRightFS, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB)
                     PreviewPowerColor(btbRightFS, rc, s.btbRightPowerColor)
                 else btbRightFS:Hide() end
 
@@ -1390,7 +1390,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(btbCenterFS, "CENTER", btbTextOvr, "CENTER", s.btbCenterX or 0, s.btbCenterY or 0)
                     btbCenterFS:SetText(PreviewTextForContent(cc, s))
                     btbCenterFS:Show()
-                    PreviewClassColor(btbCenterFS, s.btbCenterClassColor)
+                    PreviewClassColor(btbCenterFS, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB)
                     PreviewPowerColor(btbCenterFS, cc, s.btbCenterPowerColor)
                 else btbCenterFS:Hide() end
 
@@ -3981,6 +3981,34 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+        -- Color swatch on Left Text
+        do
+            local leftRgn = sharedTextRow._leftRegion
+            local ltSwGet = function()
+                local r = SVal("leftTextColorR", 1); local g = SVal("leftTextColorG", 1); local b = SVal("leftTextColorB", 1)
+                return r, g, b
+            end
+            local ltSwSet = function(r, g, b)
+                SSet("leftTextColorR", r); SSet("leftTextColorG", g); SSet("leftTextColorB", b)
+                UpdatePreview()
+            end
+            local ltSwatch, ltUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ltSwGet, ltSwSet, nil, 20)
+            PP.Point(ltSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = ltSwatch
+            local ltSwBlock = CreateFrame("Frame", nil, ltSwatch)
+            ltSwBlock:SetAllPoints(); ltSwBlock:SetFrameLevel(ltSwatch:GetFrameLevel() + 10); ltSwBlock:EnableMouse(true)
+            ltSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ltSwatch, EllesmereUI.DisabledTooltip("Left Text")) end)
+            ltSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("leftTextContent", "name") == "none"
+                local isClass = SVal("leftTextClassColor", false)
+                if isNone or isClass then ltSwatch:SetAlpha(0.3); ltSwBlock:Show() else ltSwatch:SetAlpha(1); ltSwBlock:Hide() end
+                ltUpdateSwatch()
+            end)
+            local ltInitOff = SVal("leftTextContent", "name") == "none" or SVal("leftTextClassColor", false)
+            ltSwatch:SetAlpha(ltInitOff and 0.3 or 1)
+            if ltInitOff then ltSwBlock:Show() else ltSwBlock:Hide() end
+        end
         -- Cogwheel on Left Text
         do
             local leftRgn = sharedTextRow._leftRegion
@@ -3989,7 +4017,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("leftTextClassColor", false) end,
-                      set=function(v) SSet("leftTextClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("leftTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("leftTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("leftTextSize", v); UpdatePreview() end },
@@ -4018,6 +4046,34 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateLeftCogState()
             RegisterWidgetRefresh(UpdateLeftCogState)
         end
+        -- Color swatch on Right Text
+        do
+            local rightRgn = sharedTextRow._rightRegion
+            local rtSwGet = function()
+                local r = SVal("rightTextColorR", 1); local g = SVal("rightTextColorG", 1); local b = SVal("rightTextColorB", 1)
+                return r, g, b
+            end
+            local rtSwSet = function(r, g, b)
+                SSet("rightTextColorR", r); SSet("rightTextColorG", g); SSet("rightTextColorB", b)
+                UpdatePreview()
+            end
+            local rtSwatch, rtUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, rtSwGet, rtSwSet, nil, 20)
+            PP.Point(rtSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+            rightRgn._lastInline = rtSwatch
+            local rtSwBlock = CreateFrame("Frame", nil, rtSwatch)
+            rtSwBlock:SetAllPoints(); rtSwBlock:SetFrameLevel(rtSwatch:GetFrameLevel() + 10); rtSwBlock:EnableMouse(true)
+            rtSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(rtSwatch, EllesmereUI.DisabledTooltip("Right Text")) end)
+            rtSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("rightTextContent", "both") == "none"
+                local isClass = SVal("rightTextClassColor", false)
+                if isNone or isClass then rtSwatch:SetAlpha(0.3); rtSwBlock:Show() else rtSwatch:SetAlpha(1); rtSwBlock:Hide() end
+                rtUpdateSwatch()
+            end)
+            local rtInitOff = SVal("rightTextContent", "both") == "none" or SVal("rightTextClassColor", false)
+            rtSwatch:SetAlpha(rtInitOff and 0.3 or 1)
+            if rtInitOff then rtSwBlock:Show() else rtSwBlock:Hide() end
+        end
         -- Cogwheel on Right Text
         do
             local rightRgn = sharedTextRow._rightRegion
@@ -4026,7 +4082,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("rightTextClassColor", false) end,
-                      set=function(v) SSet("rightTextClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("rightTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("rightTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("rightTextSize", v); UpdatePreview() end },
@@ -4103,6 +4159,34 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+        -- Color swatch on Center Text
+        do
+            local ctrRgn = sharedCenterTextRow._leftRegion
+            local ctSwGet = function()
+                local r = SVal("centerTextColorR", 1); local g = SVal("centerTextColorG", 1); local b = SVal("centerTextColorB", 1)
+                return r, g, b
+            end
+            local ctSwSet = function(r, g, b)
+                SSet("centerTextColorR", r); SSet("centerTextColorG", g); SSet("centerTextColorB", b)
+                UpdatePreview()
+            end
+            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(ctrRgn, ctrRgn:GetFrameLevel() + 5, ctSwGet, ctSwSet, nil, 20)
+            PP.Point(ctSwatch, "RIGHT", ctrRgn._lastInline or ctrRgn._control, "LEFT", -8, 0)
+            ctrRgn._lastInline = ctSwatch
+            local ctSwBlock = CreateFrame("Frame", nil, ctSwatch)
+            ctSwBlock:SetAllPoints(); ctSwBlock:SetFrameLevel(ctSwatch:GetFrameLevel() + 10); ctSwBlock:EnableMouse(true)
+            ctSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ctSwatch, EllesmereUI.DisabledTooltip("Center Text")) end)
+            ctSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("centerTextContent", "none") == "none"
+                local isClass = SVal("centerTextClassColor", false)
+                if isNone or isClass then ctSwatch:SetAlpha(0.3); ctSwBlock:Show() else ctSwatch:SetAlpha(1); ctSwBlock:Hide() end
+                ctUpdateSwatch()
+            end)
+            local ctInitOff = SVal("centerTextContent", "none") == "none" or SVal("centerTextClassColor", false)
+            ctSwatch:SetAlpha(ctInitOff and 0.3 or 1)
+            if ctInitOff then ctSwBlock:Show() else ctSwBlock:Hide() end
+        end
         -- Cogwheel on Center Text
         do
             local ctrRgn = sharedCenterTextRow._leftRegion
@@ -4111,7 +4195,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("centerTextClassColor", false) end,
-                      set=function(v) SSet("centerTextClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("centerTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("centerTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("centerTextSize", v); UpdatePreview() end },
@@ -5353,6 +5437,35 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ReloadAndUpdate(); UpdatePreview()
               end });  y = y - h
+        -- Color swatch on BTB Left Text
+        do
+            local btbLRgn = sharedBtbTextRow._leftRegion
+            local blSwGet = function()
+                local r = SVal("btbLeftColorR", 1); local g = SVal("btbLeftColorG", 1); local b = SVal("btbLeftColorB", 1)
+                return r, g, b
+            end
+            local blSwSet = function(r, g, b)
+                SSet("btbLeftColorR", r); SSet("btbLeftColorG", g); SSet("btbLeftColorB", b)
+                UpdatePreview()
+            end
+            local blSwatch, blUpdateSwatch = EllesmereUI.BuildColorSwatch(btbLRgn, btbLRgn:GetFrameLevel() + 5, blSwGet, blSwSet, nil, 20)
+            PP.Point(blSwatch, "RIGHT", btbLRgn._lastInline or btbLRgn._control, "LEFT", -8, 0)
+            btbLRgn._lastInline = blSwatch
+            local blSwBlock = CreateFrame("Frame", nil, blSwatch)
+            blSwBlock:SetAllPoints(); blSwBlock:SetFrameLevel(blSwatch:GetFrameLevel() + 10); blSwBlock:EnableMouse(true)
+            blSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blSwatch, EllesmereUI.DisabledTooltip("BTB Left Text")) end)
+            blSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("btbLeftContent", "none") == "none" or not SVal("bottomTextBar", false)
+                local isClass = SVal("btbLeftClassColor", false)
+                local isPower = SVal("btbLeftPowerColor", false)
+                if isNone or isClass or isPower then blSwatch:SetAlpha(0.3); blSwBlock:Show() else blSwatch:SetAlpha(1); blSwBlock:Hide() end
+                blUpdateSwatch()
+            end)
+            local blInitOff = SVal("btbLeftContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbLeftClassColor", false) or SVal("btbLeftPowerColor", false)
+            blSwatch:SetAlpha(blInitOff and 0.3 or 1)
+            if blInitOff then blSwBlock:Show() else blSwBlock:Hide() end
+        end
         -- Cogwheel on BTB Left Text
         do
             local btbLRgn = sharedBtbTextRow._leftRegion
@@ -5361,7 +5474,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("btbLeftClassColor", false) end,
-                      set=function(v) SSet("btbLeftClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbLeftClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbLeftPowerColor", false) end,
                       set=function(v) SSet("btbLeftPowerColor", v); UpdatePreview() end },
@@ -5398,6 +5511,35 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateBtbLCogState()
             RegisterWidgetRefresh(UpdateBtbLCogState)
         end
+        -- Color swatch on BTB Right Text
+        do
+            local btbRRgn = sharedBtbTextRow._rightRegion
+            local brSwGet = function()
+                local r = SVal("btbRightColorR", 1); local g = SVal("btbRightColorG", 1); local b = SVal("btbRightColorB", 1)
+                return r, g, b
+            end
+            local brSwSet = function(r, g, b)
+                SSet("btbRightColorR", r); SSet("btbRightColorG", g); SSet("btbRightColorB", b)
+                UpdatePreview()
+            end
+            local brSwatch, brUpdateSwatch = EllesmereUI.BuildColorSwatch(btbRRgn, btbRRgn:GetFrameLevel() + 5, brSwGet, brSwSet, nil, 20)
+            PP.Point(brSwatch, "RIGHT", btbRRgn._lastInline or btbRRgn._control, "LEFT", -8, 0)
+            btbRRgn._lastInline = brSwatch
+            local brSwBlock = CreateFrame("Frame", nil, brSwatch)
+            brSwBlock:SetAllPoints(); brSwBlock:SetFrameLevel(brSwatch:GetFrameLevel() + 10); brSwBlock:EnableMouse(true)
+            brSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brSwatch, EllesmereUI.DisabledTooltip("BTB Right Text")) end)
+            brSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("btbRightContent", "none") == "none" or not SVal("bottomTextBar", false)
+                local isClass = SVal("btbRightClassColor", false)
+                local isPower = SVal("btbRightPowerColor", false)
+                if isNone or isClass or isPower then brSwatch:SetAlpha(0.3); brSwBlock:Show() else brSwatch:SetAlpha(1); brSwBlock:Hide() end
+                brUpdateSwatch()
+            end)
+            local brInitOff = SVal("btbRightContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbRightClassColor", false) or SVal("btbRightPowerColor", false)
+            brSwatch:SetAlpha(brInitOff and 0.3 or 1)
+            if brInitOff then brSwBlock:Show() else brSwBlock:Hide() end
+        end
         -- Cogwheel on BTB Right Text
         do
             local btbRRgn = sharedBtbTextRow._rightRegion
@@ -5406,7 +5548,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("btbRightClassColor", false) end,
-                      set=function(v) SSet("btbRightClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbRightClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbRightPowerColor", false) end,
                       set=function(v) SSet("btbRightPowerColor", v); UpdatePreview() end },
@@ -5525,6 +5667,35 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Enable Text Bar is off",
               getValue=function() return SVal("btbClassIcon", "none") end,
               setValue=function(v) SSet("btbClassIcon", v); UpdatePreview() end });  y = y - h
+        -- Color swatch on BTB Center Text
+        do
+            local btbCRgn = sharedBtbCenterRow._leftRegion
+            local bcSwGet = function()
+                local r = SVal("btbCenterColorR", 1); local g = SVal("btbCenterColorG", 1); local b = SVal("btbCenterColorB", 1)
+                return r, g, b
+            end
+            local bcSwSet = function(r, g, b)
+                SSet("btbCenterColorR", r); SSet("btbCenterColorG", g); SSet("btbCenterColorB", b)
+                UpdatePreview()
+            end
+            local bcSwatch, bcUpdateSwatch = EllesmereUI.BuildColorSwatch(btbCRgn, btbCRgn:GetFrameLevel() + 5, bcSwGet, bcSwSet, nil, 20)
+            PP.Point(bcSwatch, "RIGHT", btbCRgn._lastInline or btbCRgn._control, "LEFT", -8, 0)
+            btbCRgn._lastInline = bcSwatch
+            local bcSwBlock = CreateFrame("Frame", nil, bcSwatch)
+            bcSwBlock:SetAllPoints(); bcSwBlock:SetFrameLevel(bcSwatch:GetFrameLevel() + 10); bcSwBlock:EnableMouse(true)
+            bcSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcSwatch, EllesmereUI.DisabledTooltip("BTB Center Text")) end)
+            bcSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            RegisterWidgetRefresh(function()
+                local isNone = SVal("btbCenterContent", "none") == "none" or not SVal("bottomTextBar", false)
+                local isClass = SVal("btbCenterClassColor", false)
+                local isPower = SVal("btbCenterPowerColor", false)
+                if isNone or isClass or isPower then bcSwatch:SetAlpha(0.3); bcSwBlock:Show() else bcSwatch:SetAlpha(1); bcSwBlock:Hide() end
+                bcUpdateSwatch()
+            end)
+            local bcInitOff = SVal("btbCenterContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbCenterClassColor", false) or SVal("btbCenterPowerColor", false)
+            bcSwatch:SetAlpha(bcInitOff and 0.3 or 1)
+            if bcInitOff then bcSwBlock:Show() else bcSwBlock:Hide() end
+        end
         -- Cogwheel on BTB Center Text
         do
             local btbCRgn = sharedBtbCenterRow._leftRegion
@@ -5533,7 +5704,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type="toggle", label="Class Color",
                       get=function() return SVal("btbCenterClassColor", false) end,
-                      set=function(v) SSet("btbCenterClassColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbCenterClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbCenterPowerColor", false) end,
                       set=function(v) SSet("btbCenterPowerColor", v); UpdatePreview() end },

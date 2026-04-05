@@ -1085,7 +1085,7 @@ local function EstimateUFTextWidth(content)
 end
 
 -- Apply class color to a FontString based on the unit
-local function ApplyClassColor(fs, unit, useClassColor)
+local function ApplyClassColor(fs, unit, useClassColor, customR, customG, customB)
     if not fs then return end
     if useClassColor then
         local _, class = UnitClass(unit)
@@ -1094,7 +1094,7 @@ local function ApplyClassColor(fs, unit, useClassColor)
             if c then fs:SetTextColor(c.r, c.g, c.b); return end
         end
     end
-    fs:SetTextColor(1, 1, 1)
+    fs:SetTextColor(customR or 1, customG or 1, customB or 1)
 end
 
 local UF_ICONS_PATH = "Interface\\AddOns\\EllesmereUI\\media\\icons\\"
@@ -1434,9 +1434,9 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
             centerFS:Show()
         else centerFS:Hide() end
 
-        ApplyClassColor(leftFS, unit, s.btbLeftClassColor)
-        ApplyClassColor(rightFS, unit, s.btbRightClassColor)
-        ApplyClassColor(centerFS, unit, s.btbCenterClassColor)
+        ApplyClassColor(leftFS, unit, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB)
+        ApplyClassColor(rightFS, unit, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB)
+        ApplyClassColor(centerFS, unit, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB)
         -- Power color overrides (applied after class color, takes priority for power-related text)
         local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
             if not fs or not usePowerColor then return end
@@ -2886,7 +2886,7 @@ local function StyleFullFrame(frame, unit)
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             centerText:SetWidth(0)
             centerText:Show()
-            ApplyClassColor(centerText, unit, s.centerTextClassColor)
+            ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else
             centerText:Hide()
             SetFSFont(leftText, lsz)
@@ -2902,7 +2902,7 @@ local function StyleFullFrame(frame, unit)
                     leftText:SetWidth(0)
                 end
                 leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor)
+                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else leftText:Hide() end
 
             SetFSFont(rightText, rsz)
@@ -2918,7 +2918,7 @@ local function StyleFullFrame(frame, unit)
                     rightText:SetWidth(0)
                 end
                 rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor)
+                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else rightText:Hide() end
         end
     end
@@ -3131,7 +3131,7 @@ local function StyleFocusFrame(frame, unit)
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             centerText:SetWidth(0)
             centerText:Show()
-            ApplyClassColor(centerText, unit, s.centerTextClassColor)
+            ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else
             centerText:Hide()
             SetFSFont(leftText, lsz)
@@ -3146,7 +3146,7 @@ local function StyleFocusFrame(frame, unit)
                     leftText:SetWidth(0)
                 end
                 leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor)
+                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else leftText:Hide() end
 
             SetFSFont(rightText, rsz)
@@ -3161,7 +3161,7 @@ local function StyleFocusFrame(frame, unit)
                     rightText:SetWidth(0)
                 end
                 rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor)
+                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else rightText:Hide() end
         end
     end
@@ -6675,13 +6675,13 @@ function InitializeFrames()
         if frame and (unitKey == "target" or unitKey == "focus") then
             local s = db.profile[unitKey]
             if frame.LeftText and s and s.leftTextClassColor ~= nil then
-                ApplyClassColor(frame.LeftText, unitKey, s.leftTextClassColor)
+                ApplyClassColor(frame.LeftText, unitKey, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             end
             if frame.RightText and s and s.rightTextClassColor ~= nil then
-                ApplyClassColor(frame.RightText, unitKey, s.rightTextClassColor)
+                ApplyClassColor(frame.RightText, unitKey, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             end
             if frame.CenterText and s and s.centerTextClassColor ~= nil then
-                ApplyClassColor(frame.CenterText, unitKey, s.centerTextClassColor)
+                ApplyClassColor(frame.CenterText, unitKey, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             end
         end
         if not frame or not frame.Portrait then return end

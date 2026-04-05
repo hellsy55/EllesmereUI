@@ -1460,6 +1460,14 @@ local function ApplyMinimap()
 
     -- Border
     local r, g, b = GetBorderColor(p)
+    -- Hide the circular quest area ring on square minimaps
+    if minimap.SetArchBlobRingScalar then
+        minimap:SetArchBlobRingScalar(isCircle and 1 or 0)
+    end
+    if minimap.SetQuestBlobRingScalar then
+        minimap:SetQuestBlobRingScalar(isCircle and 1 or 0)
+    end
+
     if p.shape == "square" then
         -- Square: pixel-perfect border
         local bs = p.borderSize or 1

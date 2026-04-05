@@ -346,12 +346,48 @@ local function TitleRowOnClick(self, btn)
                 EQT:SetDirty(true)
             end
         end
+        local function AuctionatorSearch()
+            if not (Auctionator and Auctionator.API and Auctionator.API.v1 and Auctionator.API.v1.MultiSearchAdvanced) then return false end
+            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+            if not ok or not schematic or not schematic.reagentSlotSchematics then return false end
+            local searchTerms = {}
+            for _, slot in ipairs(schematic.reagentSlotSchematics) do
+                if slot.reagentType == 1 and slot.reagents and #slot.reagents > 0 then
+                    local needed = slot.quantityRequired or 1
+                    local owned = 0
+                    local itemID
+                    for _, reagent in ipairs(slot.reagents) do
+                        if reagent.itemID then
+                            itemID = itemID or reagent.itemID
+                            owned = owned + (C_Item.GetItemCount(reagent.itemID, true) or 0)
+                        end
+                    end
+                    if itemID and owned < needed then
+                        local name = C_Item.GetItemNameByID(itemID)
+                        if name then
+                            searchTerms[#searchTerms + 1] = { searchString = name, isExact = true }
+                        end
+                    end
+                end
+            end
+            if #searchTerms > 0 then
+                Auctionator.API.v1.MultiSearchAdvanced("EllesmereUI", searchTerms)
+                return true
+            end
+            return false
+        end
         if btn == "RightButton" then
-            ShowContextMenu(self, {
+            local menuItems = {
                 { text = "Untrack Recipe", onClick = UntrackRecipe },
-            })
+            }
+            if Auctionator and Auctionator.API and Auctionator.API.v1 and Auctionator.API.v1.MultiSearchAdvanced then
+                menuItems[#menuItems + 1] = { text = "Search AH (Auctionator)", onClick = AuctionatorSearch }
+            end
+            ShowContextMenu(self, menuItems)
         elseif IsShiftKeyDown() then
-            UntrackRecipe()
+            if not AuctionatorSearch() then
+                UntrackRecipe()
+            end
         end
         return
     end
