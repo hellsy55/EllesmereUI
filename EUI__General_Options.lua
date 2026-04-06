@@ -21,6 +21,7 @@ local PAGE_GENERAL      = "General"
 local PAGE_CORE        = "Quick Setup"
 local PAGE_COLORS      = "Fonts & Colors"
 local PAGE_PROFILES    = "Profiles"
+local PAGE_QOL         = "QoL Features"
 
 
 -------------------------------------------------------------------------------
@@ -726,8 +727,6 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="UI Scale",
               min=0.40, max=1.00, step=0.01,
               tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
-              disabled=function() return EllesmereUIDB and EllesmereUIDB.ppFixedScale end,
-              disabledTooltip="Disable 'Set UI Scale to 0.5333' first",
               getValue=function()
                 if EllesmereUI._uiScaleDragVal then
                     return EllesmereUI._uiScaleDragVal
@@ -736,8 +735,6 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
-                -- Snap 0.53 to exact pixel-perfect 0.5333...
-                if math.abs(v - 0.53) < 0.005 then v = 0.5333333333 end
                 EllesmereUI._uiScaleDragVal = v
                 EllesmereUIDB.ppUIScaleAuto = false
                 -- Snapshot panel scale before changing UIParent
@@ -760,30 +757,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
               end },
-            { type="toggle", text="Set UI Scale to 0.5333",
-              tooltip="This option is for users who use exact pixel perfect scale setting for other addons (EUI does not require this setting to be pixel perfect).",
-              getValue=function()
-                return EllesmereUIDB and EllesmereUIDB.ppFixedScale or false
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.ppFixedScale = v
-                if v then
-                    EllesmereUIDB.ppUIScaleAuto = false
-                    EllesmereUIDB.ppUIScale = 0.5333333333
-                    local mf = EllesmereUI._mainFrame
-                    local panelScaleBefore
-                    if mf then panelScaleBefore = mf:GetEffectiveScale() end
-                    EllesmereUI.PP.SetUIScale(0.5333333333)
-                    if mf and panelScaleBefore then
-                        local newEff = UIParent:GetEffectiveScale()
-                        if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
-                    end
-                end
-                EllesmereUI:RefreshPage()
-              end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Minimap Button",
               getValue=function()
                 return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
@@ -796,19 +769,7 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     EllesmereUI.HideMinimapButton()
                 end
-              end },
-            { type="toggle", text="Show Pause Menu Button",
-              tooltip="Shows the EllesmereUI button in the game menu (Escape key).",
-              getValue=function()
-                return not EllesmereUIDB or EllesmereUIDB.hideGameMenuButton ~= true
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.hideGameMenuButton = not v
-                local btn = _G.EllesmereUI_GameMenuButton
-                if btn then btn:SetShown(v) end
-              end }
-        );  y = y - h
+              end });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -916,16 +877,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _, fpsCogShow = EllesmereUI.BuildCogPopup({
                 title = "FPS Counter Settings",
                 rows = {
-                    { type="slider", label="Text Size",
-                      min=8, max=24, step=1,
-                      get=function()
-                        return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
-                      end,
-                      set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.fpsTextSize = v
-                        if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
-                      end },
                     { type="toggle", label="Show Local MS",
                       get=function()
                         if not EllesmereUIDB or EllesmereUIDB.fpsShowLocalMS == nil then return true end
@@ -1111,29 +1062,6 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Row 2: Auto Repair (left) | Auto Sell Junk (right)
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Auto Repair",
-              tooltip="Automatically repair all gear when visiting a repair vendor.",
-              getValue=function()
-                if not EllesmereUIDB then return true end
-                return EllesmereUIDB.autoRepair ~= false
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.autoRepair = v
-              end },
-            { type="toggle", text="Auto Sell Junk",
-              tooltip="Automatically sell all junk items when visiting a vendor.",
-              getValue=function()
-                return EllesmereUIDB.autoSellJunk ~= false
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.autoSellJunk = v
-              end }
-        );  y = y - h
-
         -- Row 3: Low Durability Warning (left, with cog+eye+swatch) | Disable Right Click Targeting (right)
         local durWarnRow
         durWarnRow, h = W:DualRow(parent, y,
@@ -1213,16 +1141,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _, durCogShow = EllesmereUI.BuildCogPopup({
                 title = "Durability Settings",
                 rows = {
-                    { type="slider", label="Text Size",
-                      min=10, max=50, step=1,
-                      get=function()
-                        return (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
-                      end,
-                      set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.durWarnTextSize = v
-                        if EllesmereUI._durWarnApplySettings then EllesmereUI._durWarnApplySettings() end
-                      end },
                     { type="slider", label="Y-Offset",
                       min=-600, max=600, step=1,
                       get=function()
@@ -1231,7 +1149,7 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         if not EllesmereUIDB then EllesmereUIDB = {} end
                         EllesmereUIDB.durWarnYOffset = v
-                        EllesmereUIDB.durWarnPos = nil
+                        EllesmereUIDB.durWarnPos = nil  -- clear custom pos so slider always takes effect
                         if EllesmereUI._durWarnPreview then EllesmereUI._durWarnPreview() end
                       end },
                     { type="slider", label="Repair %",
@@ -2412,7 +2330,7 @@ initFrame:SetScript("OnEvent", function(self)
     local function CreateFPSCounter()
         if fpsFrame then return end
         local FONT = EllesmereUI.GetFontPath("extras")
-        local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+        local FONT_SIZE = 12
         local LABEL_SIZE = FONT_SIZE - 2
         local SHADOW_X, SHADOW_Y = 1, -1
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
@@ -2456,8 +2374,6 @@ initFrame:SetScript("OnEvent", function(self)
         local fsLocalLbl = MakeFS(LABEL_SIZE)
         fpsFrame._divLocal = divLocal
         fpsFrame._textLocal = fsLocalVal
-        fpsFrame._labelWorld = fsWorldLbl
-        fpsFrame._labelLocal = fsLocalLbl
 
         local function UpdateFPS(self)
             local db = EllesmereUIDB or {}
@@ -2540,16 +2456,6 @@ initFrame:SetScript("OnEvent", function(self)
         local shouldShow = EllesmereUIDB and EllesmereUIDB.showFPS
         if shouldShow then
             CreateFPSCounter()
-            -- Apply text size to all FPS counter texts
-            local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
-            local lblSz = sz - 2
-            local fp = EllesmereUI.GetFontPath("extras")
-            local outF = EllesmereUI.GetFontOutlineFlag()
-            if fpsFrame._text then fpsFrame._text:SetFont(fp, sz, outF) end
-            if fpsFrame._textWorld then fpsFrame._textWorld:SetFont(fp, sz, outF) end
-            if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
-            if fpsFrame._labelWorld then fpsFrame._labelWorld:SetFont(fp, lblSz, outF) end
-            if fpsFrame._labelLocal then fpsFrame._labelLocal:SetFont(fp, lblSz, outF) end
             -- Apply saved position and scale
             local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
             if pos and pos.point then
@@ -2694,58 +2600,6 @@ initFrame:SetScript("OnEvent", function(self)
     end)
 
     ---------------------------------------------------------------------------
-    --  Runtime: Auto Sell Junk + Auto Repair + Repair Warning
-    ---------------------------------------------------------------------------
-    local merchantFrame = CreateFrame("Frame", "EUI_MerchantHandler", UIParent)
-    merchantFrame:RegisterEvent("MERCHANT_SHOW")
-    merchantFrame:SetScript("OnEvent", function()
-        if not EllesmereUIDB then return end
-
-        -- Auto sell junk
-        if EllesmereUIDB.autoSellJunk ~= false then
-            local soldCount = 0
-            for bag = 0, 4 do
-                for slot = 1, C_Container.GetContainerNumSlots(bag) do
-                    local info = C_Container.GetContainerItemInfo(bag, slot)
-                    if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
-                        C_Container.UseContainerItem(bag, slot)
-                        soldCount = soldCount + 1
-                    end
-                end
-            end
-            if soldCount > 0 then
-                print("|cff0CD29DEllesmereUI:|r Sold " .. soldCount .. " junk item" .. (soldCount > 1 and "s" or "") .. ".")
-            end
-        end
-
-        -- Auto repair
-        if EllesmereUIDB.autoRepair ~= false then
-            if CanMerchantRepair() then
-                local cost, canRepair = GetRepairAllCost()
-                if canRepair and cost > 0 then
-                    local useGuild = IsInGuild() and CanGuildBankRepair() and cost <= GetGuildBankWithdrawMoney()
-                    RepairAllItems(useGuild)
-
-                    -- If guild repair was used, follow up with personal gold for any remainder
-                    if useGuild then
-                        C_Timer.After(0.5, function()
-                            local remainCost, stillNeed = GetRepairAllCost()
-                            if stillNeed and remainCost > 0 then
-                                RepairAllItems(false)
-                            end
-                        end)
-                    end
-
-                    local gold = floor(cost / 10000)
-                    local silver = floor((cost % 10000) / 100)
-                    local src = useGuild and " (guild bank)" or ""
-                    print("|cff0CD29DEllesmereUI:|r Repaired all items for " .. gold .. "g " .. silver .. "s." .. src)
-                end
-            end
-        end
-    end)
-
-    ---------------------------------------------------------------------------
     --  Runtime: Durability Warning (flashing on-screen text)
     ---------------------------------------------------------------------------
     local durWarnOverlay
@@ -2759,7 +2613,7 @@ initFrame:SetScript("OnEvent", function(self)
         durWarnOverlay:EnableMouse(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 30, EllesmereUI.GetFontOutlineFlag())
+        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag())
         fs:SetPoint("CENTER")
         fs:SetText("Low Durability")
         durWarnOverlay._text = fs
@@ -2776,10 +2630,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
             durWarnOverlay:SetScale(1)
 
-            -- Font -- pull from the global "extras" font key
+            -- Font — pull from the global "extras" font key
             local fontPath = EllesmereUI.GetFontPath("extras")
-            local durSz = (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
-            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag())
+            fs:SetFont(fontPath, 18, EllesmereUI.GetFontOutlineFlag())
 
             -- Color
             local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
@@ -2834,19 +2687,6 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI._durWarnHidePreview = function()
         if durWarnOverlay then durWarnOverlay:Hide() end
     end
-
-    EllesmereUI._durWarnApplySettings = function()
-        if durWarnOverlay and durWarnOverlay._applySettings then
-            durWarnOverlay._applySettings()
-        end
-    end
-
-    -- Auto-hide durability preview when EUI window closes
-    EllesmereUI:RegisterOnHide(function()
-        if EllesmereUI._durWarnHidePreview then
-            EllesmereUI._durWarnHidePreview()
-        end
-    end)
 
     -- Durability warning: show while out of combat and below threshold, hide on repair or combat
     local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)
@@ -3052,6 +2892,571 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Profiles page
     ---------------------------------------------------------------------------
+
+    ---------------------------------------------------------------------------
+    --  QoL Features page
+    ---------------------------------------------------------------------------
+    local function BuildQoLPage(pageName, parent, yOffset)
+        local W = EllesmereUI.Widgets
+        local y = yOffset
+        local _, h
+
+        parent._showRowDivider = true
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  GENERAL
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "GENERAL", y);  y = y - h
+
+        local row1
+        row1, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Blizzard Party Frame",
+              tooltip="Hides the collapsed Blizzard default party/raid frame tab that stays visible on the right side of the screen even when minimised.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.hideBlizzardPartyFrame = v
+                  if EllesmereUI._applyHideBlizzardPartyFrame then
+                      EllesmereUI._applyHideBlizzardPartyFrame()
+                  end
+              end },
+            { type="toggle", text="Skip Cinematics",
+              tooltip="When a cinematic plays and you press Escape or Space, the confirmation prompt is automatically accepted — skipping the cinematic immediately without a second click.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.skipCinematics or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.skipCinematics = v
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Cog on Skip Cinematics (right region of row1)
+        do
+            local rightRgn = row1._rightRegion
+            local function cinematicsOff()
+                return not (EllesmereUIDB and EllesmereUIDB.skipCinematics)
+            end
+
+            local _, cinCogShow = EllesmereUI.BuildCogPopup({
+                title = "Cinematic Settings",
+                rows = {
+                    { type="toggle", label="Automatically Skip If Possible",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.skipCinematicsAuto or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.skipCinematicsAuto = v
+                      end },
+                },
+            })
+
+            local cinCogBtn = CreateFrame("Button", nil, rightRgn)
+            cinCogBtn:SetSize(26, 26)
+            cinCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = cinCogBtn
+            cinCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            cinCogBtn:SetAlpha(cinematicsOff() and 0.15 or 0.4)
+            local cinCogTex = cinCogBtn:CreateTexture(nil, "OVERLAY")
+            cinCogTex:SetAllPoints()
+            cinCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cinCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cinCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(cinematicsOff() and 0.15 or 0.4) end)
+            cinCogBtn:SetScript("OnClick", function(self) cinCogShow(self) end)
+
+            local cinCogBlock = CreateFrame("Frame", nil, cinCogBtn)
+            cinCogBlock:SetAllPoints()
+            cinCogBlock:SetFrameLevel(cinCogBtn:GetFrameLevel() + 10)
+            cinCogBlock:EnableMouse(true)
+            cinCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(cinCogBtn, EllesmereUI.DisabledTooltip("Skip Cinematics"))
+            end)
+            cinCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = cinematicsOff()
+                cinCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then cinCogBlock:Show() else cinCogBlock:Hide() end
+            end)
+            if cinematicsOff() then cinCogBlock:Show() else cinCogBlock:Hide() end
+        end
+
+        local row2
+        row2, h = W:DualRow(parent, y,
+            { type="toggle", text="Quick Loot",
+              tooltip="Automatically loots all items as soon as a loot window opens, without needing to click each item individually.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.quickLoot or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.quickLoot = v
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Auto-Fill Delete Confirmation",
+              tooltip="Automatically types the required confirmation word when throwing away a valuable item, so you only need to click OK.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoFillDelete or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoFillDelete = v
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Auto Repair | Auto Sell Junk
+        local repairRow
+        repairRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Auto Repair",
+              tooltip="Automatically repair all gear when visiting a repair vendor.",
+              getValue=function()
+                  if not EllesmereUIDB then return true end
+                  return EllesmereUIDB.autoRepair ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoRepair = v
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Auto Sell Junk",
+              tooltip="Automatically sell all junk items when visiting a vendor.",
+              getValue=function()
+                  if not EllesmereUIDB then return true end
+                  return EllesmereUIDB.autoSellJunk ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoSellJunk = v
+              end }
+        );  y = y - h
+
+        -- Cog on Auto Repair (left region)
+        do
+            local leftRgn = repairRow._leftRegion
+            local function repairOff()
+                return not (EllesmereUIDB and EllesmereUIDB.autoRepair ~= false)
+            end
+
+            local _, repCogShow = EllesmereUI.BuildCogPopup({
+                title = "Auto Repair Settings",
+                rows = {
+                    { type="toggle", label="Use Guild Bank Funds",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.autoRepairGuild or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.autoRepairGuild = v
+                      end },
+                },
+            })
+
+            local repCogBtn = CreateFrame("Button", nil, leftRgn)
+            repCogBtn:SetSize(26, 26)
+            repCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = repCogBtn
+            repCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            repCogBtn:SetAlpha(repairOff() and 0.15 or 0.4)
+            local repCogTex = repCogBtn:CreateTexture(nil, "OVERLAY")
+            repCogTex:SetAllPoints()
+            repCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            repCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            repCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(repairOff() and 0.15 or 0.4) end)
+            repCogBtn:SetScript("OnClick", function(self) repCogShow(self) end)
+
+            local repCogBlock = CreateFrame("Frame", nil, repCogBtn)
+            repCogBlock:SetAllPoints()
+            repCogBlock:SetFrameLevel(repCogBtn:GetFrameLevel() + 10)
+            repCogBlock:EnableMouse(true)
+            repCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(repCogBtn, EllesmereUI.DisabledTooltip("Auto Repair"))
+            end)
+            repCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = repairOff()
+                repCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then repCogBlock:Show() else repCogBlock:Hide() end
+            end)
+            if repairOff() then repCogBlock:Show() else repCogBlock:Hide() end
+        end
+
+        -- Cog on Quick Loot (left region of row2)
+        do
+            local leftRgn = row2._leftRegion
+            local function quickLootOff()
+                return not (EllesmereUIDB and EllesmereUIDB.quickLoot)
+            end
+
+            local _, qlCogShow = EllesmereUI.BuildCogPopup({
+                title = "Quick Loot Settings",
+                rows = {
+                    { type="toggle", label="Hold Shift to Loot Normally",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.quickLootShiftSkip or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.quickLootShiftSkip = v
+                      end },
+                },
+            })
+
+            local qlCogBtn = CreateFrame("Button", nil, leftRgn)
+            qlCogBtn:SetSize(26, 26)
+            qlCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = qlCogBtn
+            qlCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            qlCogBtn:SetAlpha(quickLootOff() and 0.15 or 0.4)
+            local qlCogTex = qlCogBtn:CreateTexture(nil, "OVERLAY")
+            qlCogTex:SetAllPoints()
+            qlCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            qlCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            qlCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(quickLootOff() and 0.15 or 0.4) end)
+            qlCogBtn:SetScript("OnClick", function(self) qlCogShow(self) end)
+
+            local qlCogBlock = CreateFrame("Frame", nil, qlCogBtn)
+            qlCogBlock:SetAllPoints()
+            qlCogBlock:SetFrameLevel(qlCogBtn:GetFrameLevel() + 10)
+            qlCogBlock:EnableMouse(true)
+            qlCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(qlCogBtn, EllesmereUI.DisabledTooltip("Quick Loot"))
+            end)
+            qlCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = quickLootOff()
+                qlCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then qlCogBlock:Show() else qlCogBlock:Hide() end
+            end)
+            if quickLootOff() then qlCogBlock:Show() else qlCogBlock:Hide() end
+        end
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  GROUP FINDER
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "GROUP FINDER", y);  y = y - h
+
+        local roleCheckRow
+        roleCheckRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Auto Accept Role Check",
+              tooltip="Automatically accepts the role check popup when queuing via Premade Groups, using your already selected roles.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoAcceptRoleCheck = v
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Sort by Mythic+ Rating",
+              tooltip="Sorts applicants in the Premade Groups viewer by their Mythic+ dungeon score, highest first.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.sortByMythicScore or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.sortByMythicScore = v
+              end }
+        );  y = y - h
+
+        -- Cog on Auto Accept Role Check (left region)
+        do
+            local leftRgn = roleCheckRow._leftRegion
+            local function roleCheckOff()
+                return not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck)
+            end
+
+            local _, rcCogShow = EllesmereUI.BuildCogPopup({
+                title = "Role Check Settings",
+                rows = {
+                    { type="toggle", label="Hold Shift to Skip Auto-Accept",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheckShift or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.autoAcceptRoleCheckShift = v
+                      end },
+                },
+            })
+
+            local rcCogBtn = CreateFrame("Button", nil, leftRgn)
+            rcCogBtn:SetSize(26, 26)
+            rcCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = rcCogBtn
+            rcCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            rcCogBtn:SetAlpha(roleCheckOff() and 0.15 or 0.4)
+            local rcCogTex = rcCogBtn:CreateTexture(nil, "OVERLAY")
+            rcCogTex:SetAllPoints()
+            rcCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            rcCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            rcCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(roleCheckOff() and 0.15 or 0.4) end)
+            rcCogBtn:SetScript("OnClick", function(self) rcCogShow(self) end)
+
+            local rcCogBlock = CreateFrame("Frame", nil, rcCogBtn)
+            rcCogBlock:SetAllPoints()
+            rcCogBlock:SetFrameLevel(rcCogBtn:GetFrameLevel() + 10)
+            rcCogBlock:EnableMouse(true)
+            rcCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(rcCogBtn, EllesmereUI.DisabledTooltip("Auto Accept Role Check"))
+            end)
+            rcCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = roleCheckOff()
+                rcCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then rcCogBlock:Show() else rcCogBlock:Hide() end
+            end)
+            if roleCheckOff() then rcCogBlock:Show() else rcCogBlock:Hide() end
+        end
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Auto Insert Keystone",
+              tooltip="Automatically inserts your Mythic+ keystone into the Font of Power when you open the challenge mode UI.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoInsertKeystone or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoInsertKeystone = v
+              end },
+            { type="toggle", text="Announce Instance Reset",
+              tooltip="After a successful instance reset, automatically announces it in party or raid chat so your group knows they can re-enter.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.instanceResetAnnounce or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.instanceResetAnnounce = v
+              end }
+        );  y = y - h
+
+        local quickSignupRow
+        quickSignupRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Quick Signup",
+              tooltip="Double-click a group listing to instantly sign up without pressing the Sign Up button.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.quickSignup or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.quickSignup = v
+              end },
+            { type="toggle", text="Persistent Signup Note",
+              tooltip="Keeps your note text in the Sign Up dialog instead of clearing it each time you open it.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.persistSignupNote or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.persistSignupNote = v
+                  if EllesmereUI._applyPersistSignupNote then
+                      EllesmereUI._applyPersistSignupNote()
+                  end
+              end }
+        );  y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  UI
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "UI", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Screenshot Status",
+              tooltip="Hides the 'Screenshot saved' notification that appears on screen after taking a screenshot.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.hideScreenshotStatus or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.hideScreenshotStatus = v
+                  if EllesmereUI._applyScreenshotStatus then
+                      EllesmereUI._applyScreenshotStatus()
+                  end
+              end },
+            { type="toggle", text="Train All Button",
+              tooltip="Adds a 'Train All' button next to the Train button at profession trainers, allowing you to learn all available skills with one click.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.trainAllButton or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.trainAllButton = v
+                  if EllesmereUI._applyTrainAllButton then
+                      EllesmereUI._applyTrainAllButton()
+                  end
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Auto Unwrap Collections",
+              tooltip="Automatically dismisses the 'new mount/pet/toy' fanfare notification when you receive one, so you don't have to click through the collections journal.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoUnwrapCollections or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoUnwrapCollections = v
+                  if EllesmereUI._applyAutoUnwrap then
+                      EllesmereUI._applyAutoUnwrap()
+                  end
+              end },
+            { type="toggle", text="Auto Open Containers",
+              tooltip="Automatically opens bags, boxes and parcels in your inventory when they are added to your bags.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoOpenContainers or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoOpenContainers = v
+              end }
+        );  y = y - h
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "AUCTION HOUSE", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Current Expansion Only",
+              tooltip="Automatically enables the 'Current Expansion Only' filter whenever you open the Auction House.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.ahCurrentExpansion or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.ahCurrentExpansion = v
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  HEALTH MACRO
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "HEALTH MACRO", y);  y = y - h
+
+        -- Toggle for enabling the macro feature
+        local healthMacroRow
+        healthMacroRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Health Potion Macro",
+              tooltip="Creates a macro named 'EUI_Health' that dynamically uses the highest-priority consumable you have in your bags.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.healthMacroEnabled or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.healthMacroEnabled = v
+                  EllesmereUI:RefreshPage()
+                  if EllesmereUI._applyHealthMacro then EllesmereUI._applyHealthMacro() end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        -- Cog on Health Potion Macro
+        do
+            local leftRgn = healthMacroRow._leftRegion
+            local function macroOff()
+                return not (EllesmereUIDB and EllesmereUIDB.healthMacroEnabled)
+            end
+
+            local PRIO_VALUES = { ["1"]="Healthstone", ["2"]="Health Potion", ["3"]="Combat Potion" }
+            local PRIO_ORDER  = { "1", "2", "3" }
+
+            local _, hmCogShow = EllesmereUI.BuildCogPopup({
+                title = "Health Macro Priority",
+                rows = {
+                    { type="dropdown", label="Priority 1",
+                      values=PRIO_VALUES, order=PRIO_ORDER,
+                      get=function() return tostring(EllesmereUIDB and EllesmereUIDB.healthMacroPrio1 or 1) end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.healthMacroPrio1 = tonumber(v)
+                          if EllesmereUI._applyHealthMacro then EllesmereUI._applyHealthMacro() end
+                      end },
+                    { type="dropdown", label="Priority 2",
+                      values=PRIO_VALUES, order=PRIO_ORDER,
+                      get=function() return tostring(EllesmereUIDB and EllesmereUIDB.healthMacroPrio2 or 2) end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.healthMacroPrio2 = tonumber(v)
+                          if EllesmereUI._applyHealthMacro then EllesmereUI._applyHealthMacro() end
+                      end },
+                    { type="dropdown", label="Priority 3",
+                      values=PRIO_VALUES, order=PRIO_ORDER,
+                      get=function() return tostring(EllesmereUIDB and EllesmereUIDB.healthMacroPrio3 or 3) end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.healthMacroPrio3 = tonumber(v)
+                          if EllesmereUI._applyHealthMacro then EllesmereUI._applyHealthMacro() end
+                      end },
+                },
+            })
+
+            local hmCogBtn = CreateFrame("Button", nil, leftRgn)
+            hmCogBtn:SetSize(26, 26)
+            hmCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = hmCogBtn
+            hmCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            hmCogBtn:SetAlpha(macroOff() and 0.15 or 0.4)
+            local hmCogTex = hmCogBtn:CreateTexture(nil, "OVERLAY")
+            hmCogTex:SetAllPoints()
+            hmCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            hmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            hmCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(macroOff() and 0.15 or 0.4) end)
+            hmCogBtn:SetScript("OnClick", function(self) hmCogShow(self) end)
+
+            local hmCogBlock = CreateFrame("Frame", nil, hmCogBtn)
+            hmCogBlock:SetAllPoints()
+            hmCogBlock:SetFrameLevel(hmCogBtn:GetFrameLevel() + 10)
+            hmCogBlock:EnableMouse(true)
+            hmCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(hmCogBtn, EllesmereUI.DisabledTooltip("Health Potion Macro"))
+            end)
+            hmCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = macroOff()
+                hmCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then hmCogBlock:Show() else hmCogBlock:Hide() end
+            end)
+            if macroOff() then hmCogBlock:Show() else hmCogBlock:Hide() end
+        end
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  FOOD & DRINK MACRO
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "FOOD & DRINK MACRO", y);  y = y - h
+
+        local foodMacroRow
+        foodMacroRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Food & Drink Macro",
+              tooltip="Creates a macro 'EUI_FoodDrink' — with Mage food it handles both in one click.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.foodMacroEnabled or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.foodMacroEnabled = v
+                  if EllesmereUI._applyFoodMacro then EllesmereUI._applyFoodMacro() end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        return math.abs(y)
+    end
 
     -- Builds a red warning string from a decoded payload's meta vs current client.
     -- Returns nil if no mismatch.
@@ -4469,7 +4874,7 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule(GLOBAL_KEY, {
         title       = "Global Settings",
         description = "General options for all EllesmereUI addons.",
-        pages       = { PAGE_GENERAL, PAGE_PROFILES, PAGE_CORE, PAGE_COLORS },
+        pages       = { PAGE_GENERAL, PAGE_PROFILES, PAGE_CORE, PAGE_COLORS, PAGE_QOL },
         disabledPages = disabledList,
         disabledPageTooltips = disabledTips,
         buildPage   = function(pageName, parent, yOffset)
@@ -4481,6 +4886,8 @@ initFrame:SetScript("OnEvent", function(self)
                 return BuildCoreOptionsPage(pageName, parent, yOffset)
             elseif pageName == PAGE_PROFILES then
                 return BuildProfilesPage(pageName, parent, yOffset)
+            elseif pageName == PAGE_QOL then
+                return BuildQoLPage(pageName, parent, yOffset)
             end
         end,
         onReset     = function()
@@ -4523,9 +4930,38 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.unlockAnchors = nil
                 EllesmereUIDB.unlockWidthMatch = nil
                 EllesmereUIDB.unlockHeightMatch = nil
+                -- QoL Features defaults
+                EllesmereUIDB.hideBlizzardPartyFrame = false
+                EllesmereUIDB.autoAcceptRoleCheck = false
+                EllesmereUIDB.autoAcceptRoleCheckShift = false
+                EllesmereUIDB.quickLoot = false
+                EllesmereUIDB.quickLootShiftSkip = false
+                EllesmereUIDB.skipCinematics = false
+                EllesmereUIDB.skipCinematicsAuto = false
+                EllesmereUIDB.autoFillDelete = false
+                EllesmereUIDB.sortByMythicScore = false
+                EllesmereUIDB.autoInsertKeystone = false
+                EllesmereUIDB.instanceResetAnnounce = false
+                EllesmereUIDB.instanceResetAnnounceMsg = ""
+                EllesmereUIDB.quickSignup = false
+                EllesmereUIDB.persistSignupNote = false
+                EllesmereUIDB.ahCurrentExpansion = false
+                EllesmereUIDB.healthMacroEnabled = false
+                EllesmereUIDB.healthMacroPrio1 = 1
+                EllesmereUIDB.healthMacroPrio2 = 2
+                EllesmereUIDB.healthMacroPrio3 = 3
+                EllesmereUIDB.foodMacroEnabled = false
+                EllesmereUIDB.hideScreenshotStatus = false
+                EllesmereUIDB.trainAllButton = false
+                EllesmereUIDB.autoUnwrapCollections = false
+                EllesmereUIDB.autoOpenContainers = false
+                EllesmereUIDB.autoRepairGuild = false
             end
             if EllesmereUI._applyRightClickTarget then
                 EllesmereUI._applyRightClickTarget()
+            end
+            if EllesmereUI._applyHideBlizzardPartyFrame then
+                EllesmereUI._applyHideBlizzardPartyFrame()
             end
             if EllesmereUI._applyFPSCounter then
                 EllesmereUI._applyFPSCounter()
