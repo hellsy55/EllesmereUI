@@ -1,0 +1,988 @@
+-------------------------------------------------------------------------------
+--  EUI_QoL.lua
+--  Runtime logic for all Quality-of-Life features toggled in the QoL Features
+--  tab of Global Settings. No UI code here — only gameplay behaviour.
+-------------------------------------------------------------------------------
+
+local qolFrame = CreateFrame("Frame")
+qolFrame:RegisterEvent("PLAYER_LOGIN")
+qolFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+
+    ---------------------------------------------------------------------------
+    --  Health Potion Macro
+    ---------------------------------------------------------------------------
+    do
+        -- Item IDs per category (newest expansion first so best items are picked)
+        local ITEM_LISTS = {
+            -- 1 = Healthstone
+            [1] = { 5512 },
+            -- 2 = Health Potions  (Midnight → War Within → older)
+            [2] = { 241305, 212943, 211880 },
+            -- 3 = Combat Potions  (Midnight → War Within)
+            [3] = { 241309, 212265, 212259, 212260 },
+        }
+
+        local MACRO_NAME = "EUI_Health"
+        local MACRO_ICON = "INV_MISC_QUESTIONMARK"
+
+        -- Find the first item from a list that is in the player's bags
+        local function FindItemInBags(itemIDs)
+            for _, itemID in ipairs(itemIDs) do
+                for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                    for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                        local info = C_Container.GetContainerItemInfo(bag, slot)
+                        if info and info.itemID == itemID then
+                            return itemID
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        -- Tracks the last written macro body so we skip EditMacro when nothing changed
+        local cachedMacroBody = nil
+
+        local function RefreshHealthMacro()
+            if not (EllesmereUIDB and EllesmereUIDB.healthMacroEnabled) then return end
+            if InCombatLockdown() then return end
+
+            -- Walk priorities in order and grab the first matching item from bags
+            local slots = {
+                EllesmereUIDB.healthMacroPrio1 or 1,
+                EllesmereUIDB.healthMacroPrio2 or 2,
+                EllesmereUIDB.healthMacroPrio3 or 3,
+            }
+
+            local tokens = {}
+            for i = 1, #slots do
+                local itemList = ITEM_LISTS[slots[i]]
+                if itemList then
+                    local found = FindItemInBags(itemList)
+                    if found then
+                        tokens[#tokens + 1] = "item:" .. found
+                    end
+                end
+            end
+
+            local newBody
+            if #tokens == 0 then
+                newBody = "#showtooltip\n/run print(\"EUI: No health consumable in bags.\")"
+            elseif #tokens == 1 then
+                newBody = "#showtooltip " .. tokens[1] .. "\n/use " .. tokens[1]
+            else
+                newBody = "#showtooltip " .. tokens[1] .. "\n/castsequence reset=combat " .. table.concat(tokens, ", ")
+            end
+
+            if newBody == cachedMacroBody then return end
+            cachedMacroBody = newBody
+
+            local idx = GetMacroIndexByName(MACRO_NAME)
+            if idx == 0 then
+                CreateMacro(MACRO_NAME, MACRO_ICON, newBody, nil)
+            else
+                EditMacro(idx, MACRO_NAME, MACRO_ICON, newBody)
+            end
+        end
+
+        EllesmereUI._applyHealthMacro = RefreshHealthMacro
+
+        -- Rebuild whenever bags change
+        local macroFrame = CreateFrame("Frame")
+        macroFrame:RegisterEvent("BAG_UPDATE")
+        macroFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        macroFrame:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_ENTERING_WORLD" then
+                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            end
+            if EllesmereUIDB and EllesmereUIDB.healthMacroEnabled then
+                C_Timer.After(0.5, RefreshHealthMacro)
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Food & Drink Macro
+    ---------------------------------------------------------------------------
+    do
+        -- Only Mage food and actual drinks — NO buff food (stat food stays for raid)
+        local CONSUMABLE_LIST = {
+            -- Mage food (restores both health and mana, no stat buff)
+            { id = 113509 }, -- Conjured Mana Bun
+            { id = 80618  }, -- Conjured Mana Fritter
+            { id = 80610  }, -- Conjured Mana Pudding
+            { id = 65499  }, -- Conjured Mana Cake
+            { id = 43523  }, -- Conjured Mana Strudel
+            -- Midnight drinks (no stat buff)
+            { id = 242298 }, -- Argentleaf Tea
+            { id = 242693 }, -- Kafaccino
+            -- TWW drinks
+            { id = 260260 }, -- Springrunner Sparkling
+            { id = 247695 }, -- Sparkling Mana Supplement
+            { id = 247694 }, -- Snifted Void Essence
+            { id = 227322 }, -- Sanctified Sasparilla
+            { id = 202315 }, -- Frozen Solid Tea
+            { id = 197771 }, -- Delicious Dragon Spittle
+            -- Generic vendor water (fallback)
+            { id = 8766   }, -- Refreshing Spring Water
+            { id = 159    }, -- Refreshing Spring Water (old)
+        }
+
+        local MACRO_NAME = "EUI_FoodDrink"
+        local MACRO_ICON = "INV_MISC_QUESTIONMARK"
+
+        local function FindBest()
+            for _, e in ipairs(CONSUMABLE_LIST) do
+                if (C_Item.GetItemCount(e.id, false, false) or 0) > 0 then
+                    return "item:" .. e.id
+                end
+            end
+            return nil
+        end
+
+        local function EnsureMacro()
+            if InCombatLockdown() then return false end
+            if GetMacroInfo(MACRO_NAME) ~= nil then return true end
+            return CreateMacro(MACRO_NAME, MACRO_ICON, "#showtooltip", nil) ~= nil
+        end
+
+        local lastItem = nil
+        local pendingUpdate = false
+
+        local function UpdateMacro(ignoreCombat)
+            if not (EllesmereUIDB and EllesmereUIDB.foodMacroEnabled) then return end
+            if not ignoreCombat and UnitAffectingCombat("player") then return end
+            if InCombatLockdown() then return end
+            if not EnsureMacro() then return end
+
+            local bestItem = FindBest()
+            if bestItem == lastItem then return end
+
+            local body = bestItem
+                and string.format("#showtooltip\n/castsequence reset=combat %s", bestItem)
+                or "#showtooltip"
+
+            EditMacro(GetMacroIndexByName(MACRO_NAME), MACRO_NAME, MACRO_ICON, body)
+            lastItem = bestItem
+        end
+
+        EllesmereUI._applyFoodMacro = function() UpdateMacro(true) end
+
+        local fdFrame = CreateFrame("Frame")
+        fdFrame:RegisterEvent("PLAYER_LOGIN")
+        fdFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        fdFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+        fdFrame:RegisterEvent("SPELLS_CHANGED")
+
+        fdFrame:SetScript("OnEvent", function(self, event)
+            if not (EllesmereUIDB and EllesmereUIDB.foodMacroEnabled) then
+                if event ~= "PLAYER_LOGIN" then return end
+            end
+            if event == "PLAYER_LOGIN" then
+                C_Timer.After(1, function() UpdateMacro(true) end)
+            elseif event == "PLAYER_REGEN_ENABLED" then
+                UpdateMacro(true)
+            elseif event == "BAG_UPDATE_DELAYED" then
+                if not pendingUpdate then
+                    pendingUpdate = true
+                    C_Timer.After(0.05, function()
+                        pendingUpdate = false
+                        UpdateMacro(false)
+                    end)
+                end
+            elseif event == "SPELLS_CHANGED" then
+                -- Mage food appears/disappears when conjured
+                UpdateMacro(false)
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Unwrap Collections (Mounts / Pets / Toys)
+    ---------------------------------------------------------------------------
+    do
+        local busy = false
+
+        -- Dismiss the pending "new item" glow on all mounts that need it,
+        -- temporarily narrowing the journal filter so we only iterate collected ones.
+        local function AckMountAlerts()
+            if not C_MountJournal then return false end
+            local pending = C_MountJournal.GetNumMountsNeedingFanfare
+                and C_MountJournal.GetNumMountsNeedingFanfare()
+            if not pending or pending <= 0 then return false end
+
+            -- Snapshot active filters, force "collected only", sweep, then restore
+            local snapshot = {}
+            for i = LE_MOUNT_JOURNAL_FILTER_COLLECTED, LE_MOUNT_JOURNAL_FILTER_UNUSABLE do
+                snapshot[i] = C_MountJournal.GetCollectedFilterSetting(i) and true or false
+                C_MountJournal.SetCollectedFilterSetting(i, i == LE_MOUNT_JOURNAL_FILTER_COLLECTED)
+            end
+            for i = 1, C_MountJournal.GetNumDisplayedMounts() do
+                local id = C_MountJournal.GetDisplayedMountID(i)
+                if id and C_MountJournal.NeedsFanfare(id) then
+                    C_MountJournal.ClearFanfare(id)
+                end
+            end
+            for i = LE_MOUNT_JOURNAL_FILTER_COLLECTED, LE_MOUNT_JOURNAL_FILTER_UNUSABLE do
+                C_MountJournal.SetCollectedFilterSetting(i, snapshot[i])
+            end
+            return true
+        end
+
+        local function AckPetAlerts()
+            if not C_PetJournal or not C_PetJournal.GetNumPetsNeedingFanfare then return false end
+            if (C_PetJournal.GetNumPetsNeedingFanfare() or 0) == 0 then return false end
+            local any = false
+            for _, id in ipairs(C_PetJournal.GetOwnedPetIDs and C_PetJournal.GetOwnedPetIDs() or {}) do
+                if id and C_PetJournal.PetNeedsFanfare and C_PetJournal.PetNeedsFanfare(id) then
+                    if C_PetJournal.ClearFanfare then C_PetJournal.ClearFanfare(id) end
+                    any = true
+                end
+            end
+            return any
+        end
+
+        local function AckToyAlerts()
+            if not C_ToyBoxInfo or not C_ToyBoxInfo.ClearFanfare then return false end
+            local any = false
+            -- Fast path via ToyBox.fanfareToys lookup table
+            if ToyBox and ToyBox.fanfareToys then
+                for id, needs in pairs(ToyBox.fanfareToys) do
+                    if needs and id and C_ToyBoxInfo.NeedsFanfare and C_ToyBoxInfo.NeedsFanfare(id) then
+                        C_ToyBoxInfo.ClearFanfare(id)
+                        any = true
+                    end
+                end
+                if any then return true end
+            end
+            -- Fallback: full scan
+            if C_ToyBox and C_ToyBox.GetNumToys and C_ToyBox.GetToyFromIndex then
+                for i = 1, C_ToyBox.GetNumToys() do
+                    local id = C_ToyBox.GetToyFromIndex(i)
+                    if id and C_ToyBoxInfo.NeedsFanfare and C_ToyBoxInfo.NeedsFanfare(id) then
+                        C_ToyBoxInfo.ClearFanfare(id)
+                        any = true
+                    end
+                end
+            end
+            return any
+        end
+
+        local function DismissCollectionAlerts()
+            if not (EllesmereUIDB and EllesmereUIDB.autoUnwrapCollections) then return end
+            if busy then return end
+            busy = true
+            C_Timer.After(0.2, function()
+                busy = false
+                if not (EllesmereUIDB and EllesmereUIDB.autoUnwrapCollections) then return end
+                local changed = AckMountAlerts() or AckPetAlerts() or AckToyAlerts()
+                if changed then
+                    if CollectionsMicroButton and MainMenuMicroButton_HideAlert then
+                        MainMenuMicroButton_HideAlert(CollectionsMicroButton)
+                    end
+                    if CollectionsMicroButton_SetAlertShown then
+                        CollectionsMicroButton_SetAlertShown(false)
+                    end
+                end
+            end)
+        end
+
+        EllesmereUI._applyAutoUnwrap = function() end
+
+        hooksecurefunc("MainMenuMicroButton_ShowAlert", function(_, text)
+            if not (EllesmereUIDB and EllesmereUIDB.autoUnwrapCollections) then return end
+            if text == COLLECTION_UNOPENED_PLURAL or text == COLLECTION_UNOPENED_SINGULAR then
+                DismissCollectionAlerts()
+            end
+        end)
+
+        local f = CreateFrame("Frame")
+        f:RegisterEvent("PLAYER_LOGIN")
+        f:RegisterEvent("NEW_MOUNT_ADDED")
+        f:RegisterEvent("NEW_PET_ADDED")
+        f:RegisterEvent("NEW_TOY_ADDED")
+        f:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_LOGIN" then self:UnregisterEvent("PLAYER_LOGIN") end
+            DismissCollectionAlerts()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Open Containers
+    ---------------------------------------------------------------------------
+    do
+        local openableCache = {}
+        local pendingOpen = false
+
+        local function IsOpenable(bag, slot)
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if not info or not info.itemID then return false end
+            local cached = openableCache[info.itemID]
+            if cached ~= nil then return cached end
+            -- Check tooltip for the "Right Click to Open" / ITEM_OPENABLE text
+            local tip = C_TooltipInfo and C_TooltipInfo.GetBagItem and C_TooltipInfo.GetBagItem(bag, slot)
+            if tip and tip.lines then
+                for _, line in ipairs(tip.lines) do
+                    if line and line.leftText and line.leftText == ITEM_OPENABLE then
+                        openableCache[info.itemID] = true
+                        return true
+                    end
+                end
+            end
+            openableCache[info.itemID] = false
+            return false
+        end
+
+        local function OpenAllContainers()
+            if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers) then return end
+            if InCombatLockdown() then return end
+            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                    if IsOpenable(bag, slot) then
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                end
+            end
+        end
+
+        local containerFrame = CreateFrame("Frame")
+        containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+        containerFrame:SetScript("OnEvent", function()
+            if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers) then return end
+            if not pendingOpen then
+                pendingOpen = true
+                C_Timer.After(0.3, function()
+                    pendingOpen = false
+                    OpenAllContainers()
+                end)
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Hide Screenshot Status
+    ---------------------------------------------------------------------------
+    do
+        local function ApplyScreenshotStatus()
+            local actionStatus = _G.ActionStatus
+            if not actionStatus then return end
+            if EllesmereUIDB and EllesmereUIDB.hideScreenshotStatus then
+                actionStatus:UnregisterEvent("SCREENSHOT_STARTED")
+                actionStatus:UnregisterEvent("SCREENSHOT_SUCCEEDED")
+                actionStatus:UnregisterEvent("SCREENSHOT_FAILED")
+                actionStatus:Hide()
+            else
+                actionStatus:RegisterEvent("SCREENSHOT_STARTED")
+                actionStatus:RegisterEvent("SCREENSHOT_SUCCEEDED")
+                actionStatus:RegisterEvent("SCREENSHOT_FAILED")
+            end
+        end
+
+        EllesmereUI._applyScreenshotStatus = ApplyScreenshotStatus
+
+        local ssFrame = CreateFrame("Frame")
+        ssFrame:RegisterEvent("PLAYER_LOGIN")
+        ssFrame:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_LOGIN")
+            ApplyScreenshotStatus()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Train All Button
+    ---------------------------------------------------------------------------
+    do
+        local trainBtn = nil
+        local hooked = false
+
+        -- How many primary profession slots are still free?
+        local function FreeProfessionSlots()
+            if not GetProfessions then return 2 end
+            local a, b = GetProfessions()
+            return 2 - (a and 1 or 0) - (b and 1 or 0)
+        end
+
+        -- Can skill at index i be purchased given current funds/slots?
+        local function SkillIsAffordable(i, wallet, freeSlots)
+            if not GetTrainerServiceInfo or not GetTrainerServiceCost then return false, 0, false end
+            local _, kind = GetTrainerServiceInfo(i)
+            if kind ~= "available" then return false, 0, false end
+            local cost, takesProfSlot = GetTrainerServiceCost(i)
+            cost = cost or 0
+            if cost > wallet then return false, 0, false end
+            if takesProfSlot and freeSlots <= 0 then return false, 0, false end
+            return true, cost, takesProfSlot
+        end
+
+        -- Return total count and total gold cost of everything trainable right now
+        local function TrainableSummary()
+            if not GetNumTrainerServices then return 0, 0 end
+            local n, gold = 0, 0
+            local wallet = GetMoney and GetMoney() or 0
+            local slots  = FreeProfessionSlots()
+            for i = 1, GetNumTrainerServices() do
+                local ok, cost = SkillIsAffordable(i, wallet, slots)
+                if ok then n = n + 1; gold = gold + cost end
+            end
+            return n, gold
+        end
+
+        local function RefreshButton()
+            if not trainBtn then return end
+            if not (EllesmereUIDB and EllesmereUIDB.trainAllButton) then
+                trainBtn:Hide(); return
+            end
+            local n = TrainableSummary()
+            trainBtn:SetEnabled(n > 0)
+            trainBtn:Show()
+        end
+
+        local function SpawnButton()
+            if not (EllesmereUIDB and EllesmereUIDB.trainAllButton) then return end
+            if not ClassTrainerFrame or not ClassTrainerTrainButton then return end
+            if trainBtn then trainBtn:Show(); RefreshButton(); return end
+
+            trainBtn = CreateFrame("Button", "EUI_TrainAllButton", ClassTrainerFrame, "MagicButtonTemplate")
+            trainBtn:SetText("Train All")
+            trainBtn:SetHeight(ClassTrainerTrainButton:GetHeight() or 22)
+            trainBtn:SetWidth(80)
+            trainBtn:SetPoint("RIGHT", ClassTrainerTrainButton, "LEFT", -2, 0)
+
+            trainBtn:SetScript("OnClick", function()
+                local wallet = GetMoney and GetMoney() or 0
+                local slots  = FreeProfessionSlots()
+                for i = 1, GetNumTrainerServices() do
+                    local ok, cost, takesProfSlot = SkillIsAffordable(i, wallet, slots)
+                    if ok then
+                        BuyTrainerService(i)
+                        wallet = wallet - cost
+                        if takesProfSlot then slots = slots - 1 end
+                    end
+                end
+            end)
+
+            trainBtn:SetScript("OnEnter", function(self)
+                local n, gold = TrainableSummary()
+                if n <= 0 then return end
+                GameTooltip:SetOwner(self, "ANCHOR_TOP", 0, 4)
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine(string.format("Learn %d skill%s for %s",
+                    n, n == 1 and "" or "s",
+                    C_CurrencyInfo.GetCoinTextureString(gold)))
+                GameTooltip:Show()
+            end)
+            trainBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+            if not hooked then
+                hooksecurefunc("ClassTrainerFrame_Update", RefreshButton)
+                hooked = true
+            end
+            RefreshButton()
+        end
+
+        local function ApplyTrainAllButton()
+            if EllesmereUIDB and EllesmereUIDB.trainAllButton then
+                EventUtil.ContinueOnAddOnLoaded("Blizzard_TrainerUI", SpawnButton)
+                if IsAddOnLoaded and IsAddOnLoaded("Blizzard_TrainerUI") then SpawnButton() end
+            elseif trainBtn then
+                trainBtn:Hide()
+            end
+        end
+
+        EllesmereUI._applyTrainAllButton = ApplyTrainAllButton
+
+        local f = CreateFrame("Frame")
+        f:RegisterEvent("PLAYER_LOGIN")
+        f:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_LOGIN")
+            ApplyTrainAllButton()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  AH Current Expansion Only
+    ---------------------------------------------------------------------------
+    do
+        local ahFrame = CreateFrame("Frame")
+        ahFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
+        ahFrame:SetScript("OnEvent", function()
+            if not (EllesmereUIDB and EllesmereUIDB.ahCurrentExpansion) then return end
+            if not AuctionHouseFrame or not AuctionHouseFrame.SearchBar then return end
+            C_Timer.After(0, function()
+                local fb = AuctionHouseFrame.SearchBar.FilterButton
+                if not fb or not fb.filters then return end
+                if not (Enum and Enum.AuctionHouseFilter and Enum.AuctionHouseFilter.CurrentExpansionOnly) then return end
+                fb.filters[Enum.AuctionHouseFilter.CurrentExpansionOnly] = true
+                AuctionHouseFrame.SearchBar:UpdateClearFiltersButton()
+            end)
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Sell Junk + Auto Repair
+    ---------------------------------------------------------------------------
+    local merchantFrame = CreateFrame("Frame", "EUI_MerchantHandler", UIParent)
+    merchantFrame:RegisterEvent("MERCHANT_SHOW")
+    merchantFrame:SetScript("OnEvent", function()
+        if not EllesmereUIDB then return end
+
+        -- Auto sell junk
+        if EllesmereUIDB.autoSellJunk ~= false then
+            local soldCount = 0
+            for bag = 0, 4 do
+                for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                    local info = C_Container.GetContainerItemInfo(bag, slot)
+                    if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
+                        C_Container.UseContainerItem(bag, slot)
+                        soldCount = soldCount + 1
+                    end
+                end
+            end
+            if soldCount > 0 then
+                print("|cff0CD29DEllesmereUI:|r Sold " .. soldCount .. " junk item" .. (soldCount > 1 and "s" or "") .. ".")
+            end
+        end
+
+        -- Auto repair
+        if EllesmereUIDB.autoRepair ~= false then
+            if CanMerchantRepair() then
+                local cost, canRepair = GetRepairAllCost()
+                if canRepair and cost > 0 then
+                    local useGuild = EllesmereUIDB.autoRepairGuild
+                        and IsInGuild()
+                        and CanGuildBankRepair()
+                        and cost <= GetGuildBankWithdrawMoney()
+                    RepairAllItems(useGuild)
+
+                    if useGuild then
+                        C_Timer.After(0.5, function()
+                            local remainCost, stillNeed = GetRepairAllCost()
+                            if stillNeed and remainCost > 0 then
+                                RepairAllItems(false)
+                            end
+                        end)
+                    end
+
+                    local gold = floor(cost / 10000)
+                    local silver = floor((cost % 10000) / 100)
+                    local src = useGuild and " (guild bank)" or ""
+                    print("|cff0CD29DEllesmereUI:|r Repaired all items for " .. gold .. "g " .. silver .. "s." .. src)
+                end
+            end
+        end
+    end)
+
+    ---------------------------------------------------------------------------
+    --  Quick Loot
+    ---------------------------------------------------------------------------
+    do
+        local lootFrame = CreateFrame("Frame")
+        lootFrame:RegisterEvent("LOOT_READY")
+        lootFrame:SetScript("OnEvent", function()
+            if not (EllesmereUIDB and EllesmereUIDB.quickLoot) then return end
+            if EllesmereUIDB.quickLootShiftSkip and IsShiftKeyDown() then return end
+            for i = 1, GetNumLootItems() do
+                local index = i
+                C_Timer.After(0.05 * index, function()
+                    LootSlot(index)
+                end)
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto-Fill Delete Confirmation
+    ---------------------------------------------------------------------------
+    do
+        for i = 1, 4 do
+            local popup = _G["StaticPopup" .. i]
+            if popup then
+                hooksecurefunc(popup, "Show", function(self)
+                    if not self then return end
+                    if self.which ~= "DELETE_GOOD_ITEM" and self.which ~= "DELETE_GOOD_QUEST_ITEM" then return end
+                    if not (EllesmereUIDB and EllesmereUIDB.autoFillDelete) then return end
+                    local editBox = self.editBox or (self.GetEditBox and self:GetEditBox())
+                    if not editBox then return end
+                    editBox:SetText(DELETE_ITEM_CONFIRM_STRING)
+                    editBox:ClearFocus()
+                    editBox:SetAutoFocus(false)
+                end)
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Skip Cinematics
+    ---------------------------------------------------------------------------
+    do
+        local cinHooked = false
+
+        local function SetupCinematicHooks()
+            if cinHooked then return end
+            if not CinematicFrame or not CinematicFrame.HookScript then return end
+            cinHooked = true
+
+            CinematicFrame:HookScript("OnKeyDown", function(_, key)
+                if not (EllesmereUIDB and EllesmereUIDB.skipCinematics) then return end
+                if key == "ESCAPE" then
+                    if CinematicFrame:IsShown() and CinematicFrame.closeDialog then
+                        CinematicFrame.closeDialog:Hide()
+                    end
+                end
+            end)
+
+            CinematicFrame:HookScript("OnKeyUp", function(_, key)
+                if not (EllesmereUIDB and EllesmereUIDB.skipCinematics) then return end
+                if key == "SPACE" or key == "ESCAPE" or key == "ENTER" then
+                    if CinematicFrame:IsShown() and CinematicFrame.closeDialog then
+                        local confirmBtn = _G["CinematicFrameCloseDialogConfirmButton"]
+                        if confirmBtn then confirmBtn:Click() end
+                    end
+                end
+            end)
+
+            if MovieFrame and MovieFrame.HookScript then
+                MovieFrame:HookScript("OnKeyUp", function(_, key)
+                    if not (EllesmereUIDB and EllesmereUIDB.skipCinematics) then return end
+                    if key == "SPACE" or key == "ESCAPE" or key == "ENTER" then
+                        if MovieFrame:IsShown() and MovieFrame.CloseDialog and MovieFrame.CloseDialog.ConfirmButton then
+                            MovieFrame.CloseDialog.ConfirmButton:Click()
+                        end
+                    end
+                end)
+            end
+        end
+
+        local cinEventFrame = CreateFrame("Frame")
+        cinEventFrame:RegisterEvent("CINEMATIC_START")
+        cinEventFrame:RegisterEvent("PLAY_MOVIE")
+        cinEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        cinEventFrame:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_ENTERING_WORLD" then
+                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+                SetupCinematicHooks()
+                return
+            end
+            if not (EllesmereUIDB and EllesmereUIDB.skipCinematicsAuto) then return end
+            if event == "CINEMATIC_START" then
+                if CinematicFrame and CinematicFrame.isRealCinematic then
+                    StopCinematic()
+                elseif CanCancelScene and CanCancelScene() then
+                    CancelScene()
+                end
+            elseif event == "PLAY_MOVIE" then
+                if MovieFrame then MovieFrame:Hide() end
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Accept Role Check
+    ---------------------------------------------------------------------------
+    do
+        -- Premade Groups: skip if Shift is held and shift-bypass is enabled
+        LFGListApplicationDialog:HookScript("OnShow", function(self)
+            if not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck) then return end
+            local shiftBypass = EllesmereUIDB.autoAcceptRoleCheckShift and IsShiftKeyDown()
+            if self.SignUpButton:IsEnabled() and not shiftBypass then
+                self.SignUpButton:Click()
+            end
+        end)
+
+        -- Classic Dungeon Finder role check
+        local roleFrame = CreateFrame("Frame")
+        roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
+        roleFrame:SetScript("OnEvent", function()
+            if not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck) then return end
+            if not UnitInParty("player") then return end
+            -- Skip if Shift is held and shift-bypass is enabled
+            if EllesmereUIDB.autoAcceptRoleCheckShift and IsShiftKeyDown() then return end
+            local leader, tank, healer, dps = GetLFGRoles()
+            if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+            end
+            if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
+            end
+            if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
+            end
+            LFDRoleCheckPopupAcceptButton:Enable()
+            LFDRoleCheckPopupAcceptButton:Click()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Sort by Mythic+ Rating
+    ---------------------------------------------------------------------------
+    do
+        local function GetApplicantScore(applicantID)
+            if not C_LFGList or not C_LFGList.GetApplicantMemberInfo then return nil end
+            local _, _, _, _, _, _, _, _, _, _, _, dungeonScore = C_LFGList.GetApplicantMemberInfo(applicantID, 1)
+            if type(dungeonScore) ~= "number" then return nil end
+            return dungeonScore
+        end
+
+        hooksecurefunc("LFGListUtil_SortApplicants", function(applicants)
+            if not (EllesmereUIDB and EllesmereUIDB.sortByMythicScore) then return end
+            if not applicants then return end
+
+            local scores = {}
+            local originalOrder = {}
+            local hasSortable = false
+
+            for i, appID in ipairs(applicants) do
+                originalOrder[appID] = i
+                local score = GetApplicantScore(appID)
+                if score ~= nil then
+                    scores[appID] = score
+                    hasSortable = true
+                end
+            end
+
+            if not hasSortable then return end
+
+            table.sort(applicants, function(a, b)
+                local sa = scores[a]
+                local sb = scores[b]
+                if sa ~= nil and sb ~= nil and sa ~= sb then return sa > sb end
+                if sa ~= nil and sb == nil then return true end
+                if sa == nil and sb ~= nil then return false end
+                return (originalOrder[a] or 0) < (originalOrder[b] or 0)
+            end)
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Insert Keystone
+    ---------------------------------------------------------------------------
+    do
+        local function InsertKeystone()
+            if not (EllesmereUIDB and EllesmereUIDB.autoInsertKeystone) then return end
+            if C_ChallengeMode.GetSlottedKeystoneInfo() then return end
+            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                local slots = C_Container.GetContainerNumSlots(bag)
+                for slot = 1, slots do
+                    local link = C_Container.GetContainerItemLink(bag, slot)
+                    if link and link:find("|Hkeystone:") then
+                        C_Container.PickupContainerItem(bag, slot)
+                        if CursorHasItem() then
+                            C_ChallengeMode.SlotKeystone()
+                        end
+                        return
+                    end
+                end
+            end
+        end
+
+        local ksFrame = CreateFrame("Frame")
+        ksFrame:RegisterEvent("CHALLENGE_MODE_KEYSTONE_RECEPTABLE_OPEN")
+        ksFrame:RegisterEvent("ADDON_LOADED")
+        ksFrame:SetScript("OnEvent", function(self, event, arg1)
+            if event == "CHALLENGE_MODE_KEYSTONE_RECEPTABLE_OPEN" then
+                InsertKeystone()
+            elseif event == "ADDON_LOADED" and arg1 == "Blizzard_ChallengesUI" then
+                self:UnregisterEvent("ADDON_LOADED")
+                if ChallengesKeystoneFrame then
+                    ChallengesKeystoneFrame:HookScript("OnShow", InsertKeystone)
+                end
+            end
+        end)
+
+        if IsAddOnLoaded and IsAddOnLoaded("Blizzard_ChallengesUI") then
+            if ChallengesKeystoneFrame then
+                ChallengesKeystoneFrame:HookScript("OnShow", InsertKeystone)
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Quick Signup (double-click to sign up)
+    ---------------------------------------------------------------------------
+    do
+        local lastClickTime  = 0
+        local lastClickEntry = nil
+        local DOUBLE_CLICK_THRESHOLD = 0.4
+
+        hooksecurefunc("LFGListSearchEntry_OnClick", function(entry, button)
+            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+            if button == "RightButton" then return end
+
+            local panel = LFGListFrame and LFGListFrame.SearchPanel
+            if not panel then return end
+            if not LFGListSearchPanelUtil_CanSelectResult(entry.resultID) then return end
+            if not panel.SignUpButton or not panel.SignUpButton:IsEnabled() then return end
+
+            local now = GetTime()
+            if lastClickEntry == entry.resultID and (now - lastClickTime) < DOUBLE_CLICK_THRESHOLD then
+                if panel.selectedResult ~= entry.resultID then
+                    LFGListSearchPanel_SelectResult(panel, entry.resultID)
+                end
+                LFGListSearchPanel_SignUp(panel)
+                lastClickEntry = nil
+                lastClickTime  = 0
+            else
+                lastClickEntry = entry.resultID
+                lastClickTime  = now
+            end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Persistent LFG Signup Note
+    ---------------------------------------------------------------------------
+    do
+        local vanilla = LFGListApplicationDialog_Show
+        local patched = false
+
+        local function PatchedShow(self, resultID)
+            if resultID then
+                local info = C_LFGList.GetSearchResultInfo(resultID)
+                if info then
+                    self.resultID   = resultID
+                    self.activityID = info.activityID or (info.activityIDs and info.activityIDs[1])
+                end
+            end
+            LFGListApplicationDialog_UpdateRoles(self)
+            StaticPopupSpecial_Show(self)
+        end
+
+        local function SyncPatch()
+            if EllesmereUIDB and EllesmereUIDB.persistSignupNote then
+                if not patched then
+                    LFGListApplicationDialog_Show = PatchedShow
+                    patched = true
+                end
+            else
+                if patched then
+                    LFGListApplicationDialog_Show = vanilla
+                    patched = false
+                end
+            end
+        end
+
+        EllesmereUI._applyPersistSignupNote = SyncPatch
+        SyncPatch()
+    end
+
+    ---------------------------------------------------------------------------
+    --  Hide Blizzard Party / Raid Manager frame
+    ---------------------------------------------------------------------------
+    do
+        local hookedMgr = false
+
+        local function ApplyHideBlizzardPartyFrame()
+            local shouldHide = EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
+            local mgr = CompactRaidFrameManager or _G["CompactRaidFrameManager"]
+            if not mgr then return end
+
+            if shouldHide then
+                mgr:Hide()
+                if not hookedMgr then
+                    hookedMgr = true
+                    mgr:HookScript("OnShow", function(self)
+                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
+                            self:Hide()
+                        end
+                    end)
+                end
+            else
+                mgr:Show()
+            end
+        end
+
+        EllesmereUI._applyHideBlizzardPartyFrame = ApplyHideBlizzardPartyFrame
+
+        local initFrame = CreateFrame("Frame")
+        initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        initFrame:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            ApplyHideBlizzardPartyFrame()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Instance Reset Announce
+    --  After a successful /reset, posts a message to instance chat so the
+    --  whole group knows the instance is ready to re-enter.
+    ---------------------------------------------------------------------------
+    do
+        -- Capture the player name once at login; used in the chat message.
+        local playerName = UnitName("player") or "Unknown"
+
+        -- We detect a successful reset by watching CHAT_MSG_SYSTEM for the
+        -- Blizzard confirmation string.  The exact string varies by locale so
+        -- we match the most common substrings used across all WoW clients.
+        local RESET_PATTERNS = {
+            "has been reset",           -- enUS / enGB
+            "wurde zur",                -- deDE (zurückgesetzt)
+            "a été réinitialisé",       -- frFR
+            "ha sido reiniciada",       -- esES / esMX
+            "è stato resettato",        -- itIT
+            "foi reiniciada",           -- ptBR / ptPT
+            "сброшен",                  -- ruRU
+            "已重置",                    -- zhCN / zhTW
+            "초기화되었습니다",           -- koKR
+        }
+
+        -- Patterns that indicate a reset FAILED because players are still inside.
+        local FAIL_PATTERNS = {
+            "players still",            -- enUS / enGB: "There are players still inside..."
+            "noch spieler",             -- deDE
+            "joueurs sont encore",      -- frFR
+            "jugadores todavía",        -- esES / esMX
+            "giocatori sono ancora",    -- itIT
+            "jogadores ainda",          -- ptBR / ptPT
+            "игроки ещё",               -- ruRU
+            "还有玩家",                  -- zhCN
+            "아직 플레이어",             -- koKR
+        }
+
+        local function MatchesAny(msg, patterns)
+            if not msg then return false end
+            local ok, lower = pcall(string.lower, msg)
+            if not ok then return false end
+            for _, pat in ipairs(patterns) do
+                local ok2, result = pcall(string.find, lower, string.lower(pat), 1, true)
+                if ok2 and result then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local resetAnnounceFrame = CreateFrame("Frame")
+        resetAnnounceFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+        resetAnnounceFrame:SetScript("OnEvent", function(self, event, msg)
+            if not (EllesmereUIDB and EllesmereUIDB.instanceResetAnnounce) then return end
+
+            -- Only announce if we are inside an instance group.
+            -- IsInGroup(LE_PARTY_CATEGORY_INSTANCE) covers both party and raid
+            -- inside an instance; fall back to IsInGroup() for older API.
+            local inInstanceGroup = (IsInGroup and LE_PARTY_CATEGORY_INSTANCE and
+                                     IsInGroup(LE_PARTY_CATEGORY_INSTANCE))
+                                 or (IsInGroup and IsInGroup())
+
+            if not inInstanceGroup then return end
+
+            -- Small delay so Blizzard's own system message renders first.
+            if MatchesAny(msg, RESET_PATTERNS) then
+                C_Timer.After(0.3, function()
+                    local channel = IsInRaid() and "RAID" or "PARTY"
+                    local customMsg = (EllesmereUIDB.instanceResetAnnounceMsg and
+                                       EllesmereUIDB.instanceResetAnnounceMsg ~= "")
+                                      and EllesmereUIDB.instanceResetAnnounceMsg
+                                      or "Instance has been reset - you can re-enter now!"
+                    SendChatMessage("[EUI] " .. customMsg, channel)
+                end)
+            elseif MatchesAny(msg, FAIL_PATTERNS) then
+                C_Timer.After(0.3, function()
+                    local channel = IsInRaid() and "RAID" or "PARTY"
+                    SendChatMessage("[EUI] Reset failed - there are still players inside the instance.", channel)
+                end)
+            end
+        end)
+    end
+
+end)
