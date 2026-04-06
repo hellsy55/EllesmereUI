@@ -647,13 +647,23 @@ local function BuildAvailableSpellPool()
                     -- Store ALL related spell IDs so reconcile can match
                     -- regardless of whether the bar stores the base ID,
                     -- override ID, or a linked ID.
+                    -- Guard override-sourced IDs with IsPlayerSpell: CDM
+                    -- info can report a stale overrideSpellID after the
+                    -- talent providing it is removed (e.g. Cleave/Whirlwind).
+                    local staleOverride = info.overrideSpellID
+                        and info.overrideSpellID > 0
+                        and IsPlayerSpell
+                        and not IsPlayerSpell(info.overrideSpellID)
                     if primarySid and primarySid > 0 then
-                        known[primarySid] = true
+                        if not (staleOverride and primarySid == info.overrideSpellID) then
+                            known[primarySid] = true
+                        end
                     end
                     if info.spellID and info.spellID > 0 then
                         known[info.spellID] = true
                     end
-                    if info.overrideSpellID and info.overrideSpellID > 0 then
+                    if info.overrideSpellID and info.overrideSpellID > 0
+                       and not staleOverride then
                         known[info.overrideSpellID] = true
                     end
                     if info.linkedSpellIDs then
@@ -4235,19 +4245,32 @@ function ns.FullCDMRebuild(reason)
                                     seen[existing] = true
                                 end
                                 if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                                    -- Collect frames and sort by layoutIndex so
+                                    -- assignedSpells matches Blizzard's CDM order.
+                                    local sorted = {}
                                     for frame in vf.itemFramePool:EnumerateActive() do
-                                        -- Only snapshot spells Blizzard is actually
-                                        -- displaying (not "Not Displayed" ones)
                                         if frame:IsShown() then
-                                            local cdID = frame.cooldownID
-                                            if cdID then
-                                                local info = gci(cdID)
-                                                if info then
-                                                    local sid = ResolveInfoSpellID(info)
-                                                    if sid and sid > 0 and not seen[sid] then
-                                                        seen[sid] = true
-                                                        targetSD.assignedSpells[#targetSD.assignedSpells + 1] = sid
-                                                    end
+                                            sorted[#sorted + 1] = frame
+                                        end
+                                    end
+                                    table.sort(sorted, function(a, b)
+                                        return (a.layoutIndex or 0) < (b.layoutIndex or 0)
+                                    end)
+                                    local _GBS = C_Spell and C_Spell.GetBaseSpell
+                                    for _, frame in ipairs(sorted) do
+                                        local cdID = frame.cooldownID
+                                        if cdID then
+                                            local info = gci(cdID)
+                                            if info then
+                                                local sid = ResolveInfoSpellID(info)
+                                                local baseSid = _GBS and _GBS(sid)
+                                                if sid and sid > 0 and not seen[sid]
+                                                   and not (baseSid and baseSid ~= sid and seen[baseSid]) then
+                                                    seen[sid] = true
+                                                    if baseSid and baseSid > 0 then seen[baseSid] = true end
+                                                    if info.spellID and info.spellID > 0 then seen[info.spellID] = true end
+                                                    if info.overrideSpellID and info.overrideSpellID > 0 then seen[info.overrideSpellID] = true end
+                                                    targetSD.assignedSpells[#targetSD.assignedSpells + 1] = sid
                                                 end
                                             end
                                         end
@@ -4422,14 +4445,31 @@ function ns.RepopulateFromBlizzard()
             if not sd.assignedSpells then sd.assignedSpells = {} end
             local seen = {}
             if vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                -- Collect frames and sort by layoutIndex so
+                -- assignedSpells matches Blizzard's CDM order.
+                local sorted = {}
                 for frame in vf.itemFramePool:EnumerateActive() do
+                    sorted[#sorted + 1] = frame
+                end
+                table.sort(sorted, function(a, b)
+                    return (a.layoutIndex or 0) < (b.layoutIndex or 0)
+                end)
+                local _GBS = C_Spell and C_Spell.GetBaseSpell
+                for _, frame in ipairs(sorted) do
                     local cdID = frame.cooldownID
                     if cdID and gci then
                         local info = gci(cdID)
                         if info then
                             local sid = ResolveInfoSpellID(info)
-                            if sid and sid > 0 and not seen[sid] then
+                            -- Dedup by resolved ID and base spell to prevent
+                            -- duplicate CDM entries for the same ability
+                            -- (e.g. Warrior Execute has two cooldownIDs).
+                            if sid and sid > 0 and not seen[sid]
+                               and not (baseSid and baseSid ~= sid and seen[baseSid]) then
                                 seen[sid] = true
+                                if baseSid and baseSid > 0 then seen[baseSid] = true end
+                                if info.spellID and info.spellID > 0 then seen[info.spellID] = true end
+                                if info.overrideSpellID and info.overrideSpellID > 0 then seen[info.overrideSpellID] = true end
                                 sd.assignedSpells[#sd.assignedSpells + 1] = sid
                             end
                         end
@@ -4933,6 +4973,7 @@ local function TalentAwareReconcile()
                     if base == sid then base = nil end
                     if not base then base = overrideToBase[sid] end
                     if base and base > 0 and base ~= sid
+                       and (_IPS and _IPS(sid))
                        and (knownSet[base] or (_IPS and _IPS(base))
                             or (classSpellSet and classSpellSet[base])) then
                         active[#active + 1] = sid
@@ -4965,7 +5006,8 @@ local function TalentAwareReconcile()
                 local base = _GBS and _GBS(sid)
                 if base == sid then base = nil end
                 if not base then base = overrideToBase[sid] end
-                if base and base > 0 and base ~= sid then
+                if base and base > 0 and base ~= sid
+                   and (_IPS and _IPS(sid)) then
                     isKnown = knownSet[base] or (_IPS and _IPS(base))
                         or (classSpellSet and classSpellSet[base])
                 end

@@ -576,11 +576,14 @@ function ns.RemoveTrackedSpell(barKey, idx)
     if not list or idx < 1 or idx > #list then return false end
     local removedID = list[idx]
     table.remove(list, idx)
-    -- Route to ghost CD bar (replaces the old removedSpells mechanism).
-    -- The spell stays routed via cdidRouteMap but the ghost bar is hidden.
-    -- Only Blizzard viewer spells (positive IDs) go to ghost bar.
+    -- Route removed spell to ghost bar so it stays hidden.
+    -- Buff-type bars skip ghost routing: the spell returns to the main
+    -- buff bar (catchall) naturally once removed from assignedSpells.
+    -- Only CD/utility viewer spells (positive IDs) go to ghost CD bar.
     -- Presets (trinkets <= -13, items <= -100) are not viewer spells.
-    local ghostKey = ns.GHOST_CD_BAR_KEY
+    local bd = barDataByKey[barKey]
+    local isBuff = bd and (bd.barType == "buffs")
+    local ghostKey = not isBuff and ns.GHOST_CD_BAR_KEY or nil
     local isNonViewer = removedID and removedID > 0
         and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
           or (ns._myRacialsSet and ns._myRacialsSet[removedID]))

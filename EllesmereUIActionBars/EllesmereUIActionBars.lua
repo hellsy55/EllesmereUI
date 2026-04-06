@@ -2604,14 +2604,18 @@ local function LayoutBar(key)
         end
     end
 
-    -- Clear the resize guard so NotifyElementResized works normally again
-    if EllesmereUI then
-        EllesmereUI._layoutBarResizing = nil
-    end
-
-    -- Notify the position system for width/height match propagation and anchor chains
+    -- Notify the position system for width/height match propagation and anchor chains.
+    -- Keep _layoutBarResizing set so NotifyElementResized skips position
+    -- re-application (LayoutBar already positioned the bar from the captured
+    -- edge). Clearing after prevents CENTER->edge->CENTER round-trip drift
+    -- caused by double PP-snapping on each combat exit.
     if EllesmereUI and EllesmereUI.NotifyElementResized then
         EllesmereUI.NotifyElementResized(key)
+    end
+
+    -- Clear the resize guard after NotifyElementResized is done
+    if EllesmereUI then
+        EllesmereUI._layoutBarResizing = nil
     end
 
     -- Propagate anchor chain so anything anchored to this bar follows the resize

@@ -1934,10 +1934,31 @@ initFrame:SetScript("OnEvent", function(self)
                         local oldScale = EllesmereUIDB and EllesmereUIDB.ppUIScale
                         local oldScaleAuto = EllesmereUIDB and EllesmereUIDB.ppUIScaleAuto
                         local resetVer = EllesmereUIDB and EllesmereUIDB._resetVersion
+                        -- Preserve friend group data across reset
+                        local oldGlobal = EllesmereUIDB and EllesmereUIDB.global
+                        local savedFriends
+                        if oldGlobal then
+                            savedFriends = {
+                                friendGroups = oldGlobal.friendGroups,
+                                friendAssignments = oldGlobal.friendAssignments,
+                                friendGroupOrder = oldGlobal.friendGroupOrder,
+                                friendGroupColors = oldGlobal.friendGroupColors,
+                                friendNotes = oldGlobal.friendNotes,
+                                friendFavCollapsed = oldGlobal.friendFavCollapsed,
+                                friendPendingCollapsed = oldGlobal.friendPendingCollapsed,
+                                friendUngroupedCollapsed = oldGlobal.friendUngroupedCollapsed,
+                            }
+                        end
                         _G["EllesmereUIDB"] = { _resetVersion = resetVer }
                         EllesmereUIDB = _G["EllesmereUIDB"]
                         if oldScale then EllesmereUIDB.ppUIScale = oldScale end
                         if oldScaleAuto ~= nil then EllesmereUIDB.ppUIScaleAuto = oldScaleAuto end
+                        if savedFriends then
+                            if not EllesmereUIDB.global then EllesmereUIDB.global = {} end
+                            for k, v in pairs(savedFriends) do
+                                EllesmereUIDB.global[k] = v
+                            end
+                        end
                         ReloadUI()
                     end,
                 })

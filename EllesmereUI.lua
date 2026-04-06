@@ -5457,6 +5457,26 @@ end
 --  Module Registration
 -------------------------------------------------------------------------------
 function EllesmereUI:RegisterModule(folderName, config)
+    -- Only allow registration from EllesmereUI addon files.
+    -- Extract the addon folder name from the caller's file path.
+    local caller = debugstack(2, 1, 0) or ""
+    local callerFolder = caller:match("AddOns/([^/]+)/")
+    if callerFolder then
+        local ALLOWED = {
+            EllesmereUI = true,
+            EllesmereUIActionBars = true,
+            EllesmereUIAuraBuffReminders = true,
+            EllesmereUIBasics = true,
+            EllesmereUICooldownManager = true,
+            EllesmereUICursor = true,
+            EllesmereUINameplates = true,
+            EllesmereUIPartyMode = true,
+            EllesmereUIRaidFrames = true,
+            EllesmereUIResourceBars = true,
+            EllesmereUIUnitFrames = true,
+        }
+        if not ALLOWED[callerFolder] then return end
+    end
     modules[folderName] = config
     -- If UI is already built, update sidebar button immediately
     -- Otherwise, RefreshSidebarStates will handle it when the panel first opens
@@ -6078,7 +6098,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.2.2"
+EllesmereUI.VERSION = "6.2.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

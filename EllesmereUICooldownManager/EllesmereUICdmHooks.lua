@@ -278,6 +278,63 @@ function ns.RebuildSpellRouteMap()
             end
         end
     end
+    -- Bridge cooldownID -> barKey for extra buff bars.
+    -- Spell IDs stored by the picker (e.g. aura IDs like 48517 Eclipse Solar)
+    -- may differ from the CDM viewer's resolved ID (e.g. 1239669 Eclipse).
+    -- Iterate CDM cooldownIDs and check if any info field (spellID,
+    -- overrideSpellID, linkedSpellIDs) matches an extra buff bar's assigned
+    -- spell. If so, map that cooldownID directly so CategorizeFrame can
+    -- route the viewer frame by cooldownID without needing spell ID matches.
+    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+       and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        -- Collect all assigned spells from extra buff bars into a lookup
+        local buffBarSpells = {}
+        for _, bd in ipairs(p.cdmBars.bars) do
+            if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
+                local sd = ns.GetBarSpellData(bd.key)
+                if sd and sd.assignedSpells then
+                    for _, sid in ipairs(sd.assignedSpells) do
+                        if type(sid) == "number" and sid > 0 then
+                            buffBarSpells[sid] = bd.key
+                        end
+                    end
+                end
+            end
+        end
+        if next(buffBarSpells) then
+            for cat = 0, 3 do
+                local cdIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
+                if cdIDs then
+                    for _, cdID in ipairs(cdIDs) do
+                        if not _cdidRouteMap[cdID] then
+                            local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                            if info then
+                                local barKey
+                                if info.overrideSpellID and info.overrideSpellID > 0 then
+                                    barKey = buffBarSpells[info.overrideSpellID]
+                                end
+                                if not barKey and info.spellID and info.spellID > 0 then
+                                    barKey = buffBarSpells[info.spellID]
+                                end
+                                if not barKey and info.linkedSpellIDs then
+                                    for _, lid in ipairs(info.linkedSpellIDs) do
+                                        if lid and lid > 0 then
+                                            barKey = buffBarSpells[lid]
+                                            if barKey then break end
+                                        end
+                                    end
+                                end
+                                if barKey then
+                                    _cdidRouteMap[cdID] = barKey
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Pass 3: CD/utility bars (highest priority -- overwrite all)
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and not bd.isGhostBar and bd.key ~= "buffs" and bd.barType ~= "custom_buff" and bd.barType ~= "buffs" then

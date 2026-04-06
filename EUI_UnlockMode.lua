@@ -1121,8 +1121,10 @@ function EllesmereUI.NotifyElementResized(key)
     -- Skip if we're inside a width/height match propagation to avoid loops:
     -- setWidth/setHeight -> rebuild -> OnSizeChanged -> NotifyElementResized
     if _propagatingMatch then return end
-    -- Skip position re-application if LayoutBar is handling it
-    if EllesmereUI._layoutBarResizing == key then return end
+    -- When LayoutBar is handling positioning (custom grow directions), skip
+    -- only the position re-application below but still run width/height match
+    -- propagation and anchor chains.
+    local layoutBarHandled = (EllesmereUI._layoutBarResizing == key)
     -- Suppress during spec swap / zone transitions. CDM bar icon counts
     -- fluctuate as Blizzard recycles viewer frames, causing transient size
     -- changes that propagate wrong widths to matched elements.
@@ -1149,24 +1151,28 @@ function EllesmereUI.NotifyElementResized(key)
     -- its position may need adjusting after its own size changed).
     -- For unanchored elements, re-apply the stored CENTER position so the
     -- WoW anchor stays CENTER after addon rebuilds that may use TOPLEFT.
-    local anchorDB = GetAnchorDB()
-    local ownAnchor = anchorDB and anchorDB[key]
-    if ownAnchor and ownAnchor.target then
-        if EllesmereUI.ReapplyOwnAnchor then
-            EllesmereUI.ReapplyOwnAnchor(key)
-        end
-    else
-        -- Unanchored: re-apply stored CENTER position
-        local elem = registeredElements[key]
-        local pos
-        if elem and elem.loadPosition then
-            pos = elem.loadPosition(key)
+    -- Skip when LayoutBar already positioned the bar from its captured edge
+    -- to avoid CENTER->edge->CENTER round-trip drift.
+    if not layoutBarHandled then
+        local anchorDB = GetAnchorDB()
+        local ownAnchor = anchorDB and anchorDB[key]
+        if ownAnchor and ownAnchor.target then
+            if EllesmereUI.ReapplyOwnAnchor then
+                EllesmereUI.ReapplyOwnAnchor(key)
+            end
         else
-            local db = GetPositionDB()
-            pos = db and db[key]
-        end
-        if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
-            ApplyCenterPosition(key, pos)
+            -- Unanchored: re-apply stored CENTER position
+            local elem = registeredElements[key]
+            local pos
+            if elem and elem.loadPosition then
+                pos = elem.loadPosition(key)
+            else
+                local db = GetPositionDB()
+                pos = db and db[key]
+            end
+            if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
+                ApplyCenterPosition(key, pos)
+            end
         end
     end
 

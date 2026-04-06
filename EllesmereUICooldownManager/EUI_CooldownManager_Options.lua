@@ -3,7 +3,6 @@
 --  Registers CDM Effects module with EllesmereUI
 --  Tab 1: CDM Bars  (Bar Glows + Tracking Bars disabled pending rewrite)
 -------------------------------------------------------------------------------
--- TEMP DEBUG: /euicdmdump - prints all spell assignments
 local ADDON_NAME, ns = ...
 
 local PAGE_BAR_GLOWS    = "Bar Glows"
@@ -4146,10 +4145,11 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             rmItem:SetScript("OnClick", function()
                 menu:Hide()
-                -- Buff bars: hide via ghost bar instead of removing from assignedSpells
+                -- Main buff bar: hide via ghost bar (no assignedSpells to remove from)
+                -- Extra buff bars: use RemoveTrackedSpell like CD/utility bars
                 local bd = ns.barDataByKey and ns.barDataByKey[barKey]
-                local isBuff = bd and (bd.barType == "buffs" or bd.key == "buffs")
-                if isBuff and anchorFrame and anchorFrame._previewSpellID then
+                local isMainBuff = bd and bd.key == "buffs"
+                if isMainBuff and anchorFrame and anchorFrame._previewSpellID then
                     ns.HideBuffSpell(anchorFrame._previewSpellID)
                     if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
                     Refresh()
@@ -6476,8 +6476,9 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 local bd = SelectedCDMBar()
                 if not bd then return end
-                -- Buff bars: same remove flow as CD/utility via ghost bar
-                if bd.barType == "buffs" or bd.key == "buffs" then
+                -- Main buff bar: hide via ghost bar (no assignedSpells)
+                -- Extra buff bars fall through to RemoveTrackedSpell below
+                if bd.key == "buffs" then
                     local sid = self._previewSpellID
                     if not sid then return end
                     if button == "MiddleButton" then
@@ -8914,6 +8915,18 @@ initFrame:SetScript("OnEvent", function(self)
                     _G._ECME_AceDB.sv._capturedOnce_CDM = nil
                 end
             end
+            -- Wipe spell assignments for the current spec so the init
+            -- snapshot re-populates from Blizzard's CDM. Spell data lives
+            -- in EllesmereUIDB, not the AceDB profile, so ResetProfile
+            -- doesn't touch it. Only clear current spec to preserve other
+            -- specs' customizations.
+            if EllesmereUIDB and EllesmereUIDB.spellAssignments
+               and EllesmereUIDB.spellAssignments.specProfiles then
+                local specKey = ns and ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+                if specKey and specKey ~= "0" then
+                    EllesmereUIDB.spellAssignments.specProfiles[specKey] = nil
+                end
+            end
             ReloadUI()
         end,
     })
@@ -8923,6 +8936,8 @@ initFrame:SetScript("OnEvent", function(self)
         if InCombatLockdown and InCombatLockdown() then return end
         EllesmereUI:ShowModule("EllesmereUICooldownManager")
     end
+
+
 
     -- Debug: /cdmpassive <spellID> -- checks why a spell is or isn't in the picker
     SLASH_CDMPASSIVE1 = "/cdmpassive"

@@ -348,22 +348,17 @@ local function TitleRowOnClick(self, btn)
         end
         local function AuctionatorSearch()
             if not (Auctionator and Auctionator.API and Auctionator.API.v1 and Auctionator.API.v1.MultiSearchAdvanced) then return false end
-            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+            local PU = ProfessionsUtil
+            local ok, schematic = pcall(PU.GetRecipeSchematic, recipeID, self._isRecraft or false)
             if not ok or not schematic or not schematic.reagentSlotSchematics then return false end
             local searchTerms = {}
             for _, slot in ipairs(schematic.reagentSlotSchematics) do
-                if slot.reagentType == 1 and slot.reagents and #slot.reagents > 0 then
-                    local needed = slot.quantityRequired or 1
-                    local owned = 0
-                    local itemID
-                    for _, reagent in ipairs(slot.reagents) do
-                        if reagent.itemID then
-                            itemID = itemID or reagent.itemID
-                            owned = owned + (C_Item.GetItemCount(reagent.itemID, true) or 0)
-                        end
-                    end
-                    if itemID and owned < needed then
-                        local name = C_Item.GetItemNameByID(itemID)
+                if PU.IsReagentSlotBasicRequired(slot) and slot.reagents and #slot.reagents > 0 then
+                    local reagent = slot.reagents[1]
+                    local needed = slot:GetQuantityRequired(reagent)
+                    local owned = PU.AccumulateReagentsInPossession(slot.reagents)
+                    if reagent.itemID and owned < needed then
+                        local name = C_Item.GetItemNameByID(reagent.itemID)
                         if name then
                             searchTerms[#searchTerms + 1] = { searchString = name, isExact = true }
                         end
@@ -1322,69 +1317,84 @@ local function GetTrackedRecipes()
 
     if not C_TradeSkillUI or not C_TradeSkillUI.GetRecipesTracked then return _recipes end
 
-    local tracked = C_TradeSkillUI.GetRecipesTracked(false)
-    local recraft = C_TradeSkillUI.GetRecipesTracked(true)
-
-    if recraft then
-        for _, v in ipairs(recraft) do
-            if type(v) == "table" then v._isRecraft = true end
-            tracked[#tracked + 1] = v
-        end
-    end
-    if not tracked or #tracked == 0 then return _recipes end
-
+    local PU = ProfessionsUtil
     local listN = 0
-    for _, tracked_entry in ipairs(tracked) do
-        local recipeID = type(tracked_entry) == "table" and (tracked_entry.recipeID or tracked_entry.recipeSchematicID) or tracked_entry
-        if recipeID then
-            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
-            if ok and schematic then
-                listN = listN + 1
-                local entry = _recipe_entries[listN]
-                if not entry then
-                    entry = { reagents = {} }
-                    _recipe_entries[listN] = entry
-                end
-                entry.recipeID = recipeID
-                entry.isRecraft = (type(tracked_entry) == "table" and tracked_entry._isRecraft) or false
-                entry.name = schematic.name or ("Recipe #"..recipeID)
-                local reagentN = 0
-                if schematic.reagentSlotSchematics then
-                    for _, slot in ipairs(schematic.reagentSlotSchematics) do
-                        if slot.reagentType == 1 and slot.reagents and #slot.reagents > 0 then
-                            -- One row per slot; sum owned across all quality tiers
-                            local firstName, totalOwned = nil, 0
-                            for _, reagent in ipairs(slot.reagents) do
-                                local itemID = reagent.itemID
-                                if itemID then
-                                    if not firstName then
-                                        firstName = C_Item.GetItemNameByID(itemID) or ("Item "..itemID)
+    local anyNeedsLoad = false
+
+    -- Process normal recipes first, then recrafts
+    for _, isRecraft in ipairs({false, true}) do
+        local tracked = C_TradeSkillUI.GetRecipesTracked(isRecraft)
+        if tracked then
+            for _, recipeID in ipairs(tracked) do
+                local ok, schematic = pcall(PU.GetRecipeSchematic, recipeID, isRecraft)
+                if ok and schematic then
+                    listN = listN + 1
+                    local entry = _recipe_entries[listN]
+                    if not entry then
+                        entry = { reagents = {} }
+                        _recipe_entries[listN] = entry
+                    end
+                    entry.recipeID = recipeID
+                    entry.isRecraft = isRecraft
+                    if isRecraft and PROFESSIONS_CRAFTING_FORM_RECRAFTING_HEADER then
+                        entry.name = PROFESSIONS_CRAFTING_FORM_RECRAFTING_HEADER:format(schematic.name or "")
+                    else
+                        entry.name = schematic.name or ("Recipe #"..recipeID)
+                    end
+                    local reagentN = 0
+                    if schematic.reagentSlotSchematics then
+                        for _, slot in ipairs(schematic.reagentSlotSchematics) do
+                            if PU.IsReagentSlotRequired(slot) and slot.reagents and #slot.reagents > 0 then
+                                local firstName = nil
+                                local needsLoad = false
+                                if PU.IsReagentSlotBasicRequired(slot) then
+                                    local reagent = slot.reagents[1]
+                                    if reagent.itemID then
+                                        firstName = C_Item.GetItemNameByID(reagent.itemID)
+                                        if not firstName then
+                                            firstName = "Item "..reagent.itemID
+                                            needsLoad = true
+                                            C_Item.RequestLoadItemDataByID(reagent.itemID)
+                                        end
+                                    elseif reagent.currencyID then
+                                        local ci = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
+                                        if ci then firstName = ci.name end
                                     end
-                                    totalOwned = totalOwned + (C_Item.GetItemCount(itemID, true) or 0)
+                                elseif PU.IsReagentSlotModifyingRequired(slot) then
+                                    if slot.slotInfo then
+                                        firstName = slot.slotInfo.slotText
+                                    end
                                 end
-                            end
-                            if firstName then
-                                local r
-                                if _reagent_pool_n > 0 then
-                                    r = _reagent_pool[_reagent_pool_n]
-                                    _reagent_pool[_reagent_pool_n] = nil
-                                    _reagent_pool_n = _reagent_pool_n - 1
-                                else
-                                    r = {}
+                                if firstName then
+                                    local quantityRequired = slot:GetQuantityRequired(slot.reagents[1])
+                                    local totalOwned = PU.AccumulateReagentsInPossession(slot.reagents)
+                                    local r
+                                    if _reagent_pool_n > 0 then
+                                        r = _reagent_pool[_reagent_pool_n]
+                                        _reagent_pool[_reagent_pool_n] = nil
+                                        _reagent_pool_n = _reagent_pool_n - 1
+                                    else
+                                        r = {}
+                                    end
+                                    r.name = firstName
+                                    r.owned = totalOwned
+                                    r.needed = quantityRequired
+                                    r.finished = totalOwned >= quantityRequired
+                                    if needsLoad then anyNeedsLoad = true end
+                                    reagentN = reagentN + 1
+                                    entry.reagents[reagentN] = r
                                 end
-                                r.name = firstName
-                                r.owned = totalOwned
-                                r.needed = slot.quantityRequired or 1
-                                r.finished = totalOwned >= r.needed
-                                reagentN = reagentN + 1
-                                entry.reagents[reagentN] = r
                             end
                         end
                     end
+                    _recipes[listN] = entry
                 end
-                _recipes[listN] = entry
             end
         end
+    end
+    -- Item data wasn't cached yet; schedule a refresh so names resolve.
+    if anyNeedsLoad and EQT then
+        C_Timer.After(0.5, function() if EQT.SetDirty then EQT:SetDirty(true) end end)
     end
     return _recipes
 end
