@@ -1,7 +1,7 @@
 -------------------------------------------------------------------------------
 --  EUI_QoL.lua
 --  Runtime logic for all Quality-of-Life features toggled in the QoL Features
---  tab of Global Settings. No UI code here — only gameplay behaviour.
+--  tab of Global Settings. No UI code here -- only gameplay behaviour.
 -------------------------------------------------------------------------------
 
 local qolFrame = CreateFrame("Frame")
@@ -106,7 +106,7 @@ qolFrame:SetScript("OnEvent", function(self)
     --  Food & Drink Macro
     ---------------------------------------------------------------------------
     do
-        -- Only Mage food and actual drinks — NO buff food (stat food stays for raid)
+        -- Only Mage food and actual drinks -- NO buff food (stat food stays for raid)
         local CONSUMABLE_LIST = {
             -- Mage food (restores both health and mana, no stat buff)
             { id = 113509 }, -- Conjured Mana Bun
@@ -335,7 +335,7 @@ qolFrame:SetScript("OnEvent", function(self)
         end
 
         local function OpenAllContainers()
-            if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers) then return end
+            if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false then return end
             if InCombatLockdown() then return end
             for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                 for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -349,7 +349,7 @@ qolFrame:SetScript("OnEvent", function(self)
         local containerFrame = CreateFrame("Frame")
         containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         containerFrame:SetScript("OnEvent", function()
-            if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers) then return end
+            if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false then return end
             if not pendingOpen then
                 pendingOpen = true
                 C_Timer.After(0.3, function()
@@ -367,7 +367,7 @@ qolFrame:SetScript("OnEvent", function(self)
         local function ApplyScreenshotStatus()
             local actionStatus = _G.ActionStatus
             if not actionStatus then return end
-            if EllesmereUIDB and EllesmereUIDB.hideScreenshotStatus then
+            if not EllesmereUIDB or EllesmereUIDB.hideScreenshotStatus ~= false then
                 actionStatus:UnregisterEvent("SCREENSHOT_STARTED")
                 actionStatus:UnregisterEvent("SCREENSHOT_SUCCEEDED")
                 actionStatus:UnregisterEvent("SCREENSHOT_FAILED")
@@ -465,14 +465,12 @@ qolFrame:SetScript("OnEvent", function(self)
             trainBtn:SetScript("OnEnter", function(self)
                 local n, gold = TrainableSummary()
                 if n <= 0 then return end
-                GameTooltip:SetOwner(self, "ANCHOR_TOP", 0, 4)
-                GameTooltip:ClearLines()
-                GameTooltip:AddLine(string.format("Learn %d skill%s for %s",
+                local msg = string.format("Learn %d skill%s for %s",
                     n, n == 1 and "" or "s",
-                    C_CurrencyInfo.GetCoinTextureString(gold)))
-                GameTooltip:Show()
+                    C_CurrencyInfo.GetCoinTextureString(gold))
+                EllesmereUI.ShowWidgetTooltip(self, msg)
             end)
-            trainBtn:SetScript("OnLeave", GameTooltip_Hide)
+            trainBtn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
             if not hooked then
                 hooksecurefunc("ClassTrainerFrame_Update", RefreshButton)
@@ -549,7 +547,7 @@ qolFrame:SetScript("OnEvent", function(self)
             if CanMerchantRepair() then
                 local cost, canRepair = GetRepairAllCost()
                 if canRepair and cost > 0 then
-                    local useGuild = EllesmereUIDB.autoRepairGuild
+                    local useGuild = (EllesmereUIDB.autoRepairGuild ~= false)
                         and IsInGuild()
                         and CanGuildBankRepair()
                         and cost <= GetGuildBankWithdrawMoney()
@@ -581,7 +579,7 @@ qolFrame:SetScript("OnEvent", function(self)
         lootFrame:RegisterEvent("LOOT_READY")
         lootFrame:SetScript("OnEvent", function()
             if not (EllesmereUIDB and EllesmereUIDB.quickLoot) then return end
-            if EllesmereUIDB.quickLootShiftSkip and IsShiftKeyDown() then return end
+            if IsShiftKeyDown() then return end
             for i = 1, GetNumLootItems() do
                 local index = i
                 C_Timer.After(0.05 * index, function()
@@ -605,8 +603,7 @@ qolFrame:SetScript("OnEvent", function(self)
                     local editBox = self.editBox or (self.GetEditBox and self:GetEditBox())
                     if not editBox then return end
                     editBox:SetText(DELETE_ITEM_CONFIRM_STRING)
-                    editBox:ClearFocus()
-                    editBox:SetAutoFocus(false)
+                    editBox:SetFocus()
                 end)
             end
         end
@@ -759,7 +756,7 @@ qolFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     do
         local function InsertKeystone()
-            if not (EllesmereUIDB and EllesmereUIDB.autoInsertKeystone) then return end
+            if EllesmereUIDB and EllesmereUIDB.autoInsertKeystone == false then return end
             if C_ChallengeMode.GetSlottedKeystoneInfo() then return end
             for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                 local slots = C_Container.GetContainerNumSlots(bag)

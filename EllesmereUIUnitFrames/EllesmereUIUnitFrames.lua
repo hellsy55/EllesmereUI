@@ -1532,13 +1532,22 @@ local function EnsureBarClip(frame)
     return clip
 end
 
-local function ReparentBarsToClip(frame)
+local function ReparentBarsToClip(frame, powerPosition)
     local clip = EnsureBarClip(frame)
     if frame.Health and frame.Health:GetParent() ~= clip then
         frame.Health:SetParent(clip)
     end
-    if frame.Power and frame.Power:GetParent() ~= clip then
-        frame.Power:SetParent(clip)
+    if frame.Power then
+        local detached = (powerPosition == "detached_top" or powerPosition == "detached_bottom")
+        if detached then
+            if frame.Power:GetParent() == clip then
+                frame.Power:SetParent(frame)
+            end
+        else
+            if frame.Power:GetParent() ~= clip then
+                frame.Power:SetParent(clip)
+            end
+        end
     end
 end
 
@@ -2780,7 +2789,7 @@ local function StyleFullFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
-    ReparentBarsToClip(frame)
+    ReparentBarsToClip(frame, settings.powerPosition)
 
     -- Raid target marker icon -- oUF's RaidTargetIndicator element manages
     -- visibility via RAID_TARGET_UPDATE. We only assign the element when
@@ -3028,7 +3037,7 @@ local function StyleFocusFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
-    ReparentBarsToClip(frame)
+    ReparentBarsToClip(frame, settings.powerPosition)
 
     -- Raid target marker icon
     do
@@ -3230,7 +3239,7 @@ local function StyleSimpleFrame(frame, unit)
     frame.Health = health
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
-    ReparentBarsToClip(frame)
+    ReparentBarsToClip(frame, settings.powerPosition)
 
     -- Text overlay frame
     local textOverlay = CreateFrame("Frame", nil, health)
@@ -3388,7 +3397,7 @@ local function StylePetFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
-    ReparentBarsToClip(frame)
+    ReparentBarsToClip(frame, settings.powerPosition)
 
     -- Text overlay frame
     local textOverlay = CreateFrame("Frame", nil, health)
@@ -3528,7 +3537,7 @@ local function StyleBossFrame(frame, unit)
 
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
-    ReparentBarsToClip(frame)
+    ReparentBarsToClip(frame, settings.powerPosition)
 
     -- Raid target marker icon (boss frames) -- anchored outside the LEFT edge
     do
@@ -4708,7 +4717,7 @@ local function ReloadFrames()
                     end
 
                     UpdateBordersForScale(frame, unit)
-                    ReparentBarsToClip(frame)
+                    ReparentBarsToClip(frame, settings.powerPosition)
 
                 elseif unit == "target" then
                     local pSide = settings.portraitSide or "right"
@@ -5044,7 +5053,7 @@ local function ReloadFrames()
                     end
 
                     UpdateBordersForScale(frame, unit)
-                    ReparentBarsToClip(frame)
+                    ReparentBarsToClip(frame, settings.powerPosition)
                 end
 
                 -- (health tag re-tagging now handled by _applyTextTags above)
@@ -5378,7 +5387,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
-                ReparentBarsToClip(frame)
+                ReparentBarsToClip(frame, settings.powerPosition)
 
             elseif unit == "pet" or unit == "targettarget" or unit == "focustarget" then
                 if unit == "pet" then
@@ -5416,7 +5425,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
-                ReparentBarsToClip(frame)
+                ReparentBarsToClip(frame, settings.powerPosition)
 
             elseif unit:match("^boss%d$") then
                 local bPpPos = settings.powerPosition or "below"
@@ -5653,7 +5662,7 @@ local function ReloadFrames()
                 end
 
                 UpdateBordersForScale(frame, unit)
-                ReparentBarsToClip(frame)
+                ReparentBarsToClip(frame, settings.powerPosition)
             end
 
             -- Determine if this is a mini frame that inherits border/texture/font
