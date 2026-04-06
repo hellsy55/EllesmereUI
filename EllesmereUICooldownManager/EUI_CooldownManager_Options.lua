@@ -535,6 +535,16 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Check if a specific action bar uses a custom shape (not "none"/"cropped")
     local function BarHasCustomShape(barIdx)
+        if barIdx >= 100 then
+            local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[barIdx]
+            if cdmKey then
+                local cdmBd = ns.barDataByKey and ns.barDataByKey[cdmKey]
+                if cdmBd and cdmBd.iconShape and cdmBd.iconShape ~= "none" and cdmBd.iconShape ~= "cropped" then
+                    return true
+                end
+            end
+            return false
+        end
         local barKeys = { "MainBar", "Bar2", "Bar3", "Bar4", "Bar5", "Bar6", "Bar7", "Bar8" }
         local barKey = barKeys[barIdx]
         if not barKey then return false end
@@ -976,8 +986,16 @@ initFrame:SetScript("OnEvent", function(self)
             local scaledBtnW = math.floor(realBtnW + 0.5)
             local scaledBtnH = math.floor(realBtnH + 0.5)
 
+            -- CDM bar data reference (reused for shape, spacing, zoom, border)
+            local cdmBd = isCDMBar and ns.barDataByKey and ns.barDataByKey[cdmBarKey] or nil
+
             -- Custom shape expansion
-            local btnShape = isCDMBar and "none" or ((barSettings and barSettings.buttonShape) or "none")
+            local btnShape
+            if isCDMBar then
+                btnShape = (cdmBd and cdmBd.iconShape) or "none"
+            else
+                btnShape = (barSettings and barSettings.buttonShape) or "none"
+            end
             if btnShape ~= "none" and btnShape ~= "cropped" then
                 local shapeExp = 10
                 scaledBtnW = scaledBtnW + shapeExp
@@ -987,7 +1005,7 @@ initFrame:SetScript("OnEvent", function(self)
                 scaledBtnH = math.floor(scaledBtnH * 0.80 + 0.5)
             end
 
-            local spacing = isCDMBar and 2 or ((barSettings and barSettings.buttonPadding) or 2)
+            local spacing = isCDMBar and ((cdmBd and cdmBd.spacing) or 2) or ((barSettings and barSettings.buttonPadding) or 2)
             local scaledPad = spacing
 
             -- How many buttons visible
@@ -998,12 +1016,17 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             -- Read zoom
-            local zoom = isCDMBar and 0.08 or (((barSettings and barSettings.iconZoom) or 5.5) / 100)
+            local zoom = isCDMBar and ((cdmBd and cdmBd.iconZoom) or 0.08) or (((barSettings and barSettings.iconZoom) or 5.5) / 100)
             local square = (not isCDMBar) and EAB_ADDON and EAB_ADDON.db and EAB_ADDON.db.profile.squareIcons
 
             -- Read border settings
             local brdSize = 0
-            if not isCDMBar and barSettings then
+            local brdColor, brdClassColor
+            if isCDMBar and cdmBd then
+                brdSize = cdmBd.borderSize or 1
+                brdColor = { r = cdmBd.borderR or 0, g = cdmBd.borderG or 0, b = cdmBd.borderB or 0, a = cdmBd.borderA or 1 }
+                brdClassColor = cdmBd.borderClassColor
+            elseif not isCDMBar and barSettings then
                 -- Read raw borderThickness setting
                 local thickness = barSettings.borderThickness or "thin"
                 if thickness == "none" then brdSize = 0
@@ -1011,9 +1034,10 @@ initFrame:SetScript("OnEvent", function(self)
                 elseif thickness == "medium" then brdSize = 2
                 elseif thickness == "thick" then brdSize = 3
                 else brdSize = 1 end
+                brdColor = barSettings.borderColor
+                brdClassColor = barSettings.borderClassColor
             end
-            local brdColor = (barSettings and barSettings.borderColor) or { r = 0, g = 0, b = 0, a = 1 }
-            local brdClassColor = barSettings and barSettings.borderClassColor
+            if not brdColor then brdColor = { r = 0, g = 0, b = 0, a = 1 } end
 
             -- Layout
             local gridW = numVisible * scaledBtnW + (numVisible - 1) * scaledPad
@@ -1074,25 +1098,33 @@ initFrame:SetScript("OnEvent", function(self)
                 end
 
                 -- Shape mask
-                local SHAPE_MASKS = AB_SHAPE_MASKS
-                local SHAPE_BORDERS = AB_SHAPE_BORDERS
+                local SHAPE_MASKS = isCDMBar and ns.CDM_SHAPE_MASKS or AB_SHAPE_MASKS
+                local SHAPE_BORDERS = isCDMBar and ns.CDM_SHAPE_BORDERS or AB_SHAPE_BORDERS
                 if btnShape ~= "none" and btnShape ~= "cropped" and SHAPE_MASKS and SHAPE_MASKS[btnShape] then
                     local mask = bf:CreateMaskTexture()
                     mask:SetAllPoints(bf)
                     mask:SetTexture(SHAPE_MASKS[btnShape], "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
                     iconTex:AddMaskTexture(mask)
                     bgTex:AddMaskTexture(mask)
-                    -- Shape border
-                    if SHAPE_BORDERS and SHAPE_BORDERS[btnShape] and brdSize > 0 then
+                    -- Store shape metadata for glow preview (StartNativeGlow reads these)
+                    bf._shapeApplied = true
+                    bf._shapeName = btnShape
+                    bf._shapeMask = mask
+                    -- Shape border (always created for hover/accent tinting; invisible when brdSize == 0)
+                    if SHAPE_BORDERS and SHAPE_BORDERS[btnShape] then
                         local sbt = bf:CreateTexture(nil, "OVERLAY", nil, 6)
                         sbt:SetAllPoints(bf)
                         sbt:SetTexture(SHAPE_BORDERS[btnShape])
-                        local cr, cg, cb = brdColor.r, brdColor.g, brdColor.b
-                        if brdClassColor then
-                            local _, ct = UnitClass("player")
-                            if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
+                        if brdSize > 0 then
+                            local cr, cg, cb = brdColor.r, brdColor.g, brdColor.b
+                            if brdClassColor then
+                                local _, ct = UnitClass("player")
+                                if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
+                            end
+                            sbt:SetVertexColor(cr, cg, cb, brdColor.a or 1)
+                        else
+                            sbt:SetVertexColor(0, 0, 0, 0)
                         end
-                        sbt:SetVertexColor(cr, cg, cb, brdColor.a or 1)
                     end
                 elseif brdSize > 0 then
                     -- Square borders via unified PP system
@@ -1188,20 +1220,14 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
-                local origBrdR, origBrdG, origBrdB = 0, 0, 0
-                if isCDMBar and cdmBarKey then
-                    local p2 = DB()
-                    local bars2 = p2 and p2.cdmBars and p2.cdmBars.bars
-                    if bars2 then
-                        for _, bd2 in ipairs(bars2) do
-                            if bd2.key == cdmBarKey then
-                                origBrdR, origBrdG, origBrdB = bd2.borderR or 0, bd2.borderG or 0, bd2.borderB or 0
-                                break
-                            end
-                        end
-                    end
-                else
-                    origBrdR, origBrdG, origBrdB = brdColor.r, brdColor.g, brdColor.b
+                local origBrdR, origBrdG, origBrdB, origBrdA = brdColor.r, brdColor.g, brdColor.b, brdColor.a or 1
+                if isCDMBar and cdmBd then
+                    origBrdR = cdmBd.borderR or 0
+                    origBrdG = cdmBd.borderG or 0
+                    origBrdB = cdmBd.borderB or 0
+                    origBrdA = (cdmBd.borderSize or 1) > 0 and (cdmBd.borderA or 1) or 0
+                elseif brdSize == 0 then
+                    origBrdA = 0
                 end
                 if not isSelected then
                     if hasAssign then
@@ -1232,7 +1258,7 @@ initFrame:SetScript("OnEvent", function(self)
                         bf:SetScript("OnLeave", function()
                             bf:SetAlpha(0.50)
                             if isCustomShape and bf._shapeBorderTex then
-                                bf._shapeBorderTex:SetVertexColor(origBrdR, origBrdG, origBrdB, 1)
+                                bf._shapeBorderTex:SetVertexColor(origBrdR, origBrdG, origBrdB, origBrdA)
                             else
                                 if accentBrd then accentBrd:Hide() end
                             end
@@ -1405,7 +1431,14 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Get the button's spell name for the header
                     local btnSpellName = "Button " .. curBtn
-                    do
+                    if isCurCDM then
+                        local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[curBar]
+                        local cdmIcons = cdmKey and ns.cdmBarIcons and ns.cdmBarIcons[cdmKey]
+                        local icon = cdmIcons and cdmIcons[curBtn]
+                        if icon and icon.cooldownID then
+                            btnSpellName = C_Spell.GetSpellName(icon.cooldownID) or btnSpellName
+                        end
+                    else
                         local prefix = BAR_BUTTON_PREFIXES[curBar]
                         local realBtn = prefix and _G[prefix .. curBtn]
                         if realBtn and realBtn.action then

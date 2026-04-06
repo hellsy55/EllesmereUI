@@ -3605,16 +3605,17 @@ local function SkinFriendsFrame()
         if frame._ebsOurScrollBox then
             frame._ebsOurScrollBox:SetShown(frame:IsShown() and isContacts and _activeSubTab == 1)
         end
+        local shown = frame:IsShown()
         local friendsSB = FriendsListFrame and FriendsListFrame.ScrollBox
-        SetTrackVis(friendsSB, isContacts and _activeSubTab == 1)
+        SetTrackVis(friendsSB, shown and isContacts and _activeSubTab == 1)
         -- Also sync our ScrollBox's scrollbar track
         if frame._ebsOurScrollBox then
-            SetTrackVis(frame._ebsOurScrollBox, isContacts and _activeSubTab == 1)
+            SetTrackVis(frame._ebsOurScrollBox, shown and isContacts and _activeSubTab == 1)
         end
         local raf = _G.RecentAlliesFrame
-        if raf and raf.List then SetTrackVis(raf.List.ScrollBox, isContacts and _activeSubTab == 2) end
+        if raf and raf.List then SetTrackVis(raf.List.ScrollBox, shown and isContacts and _activeSubTab == 2) end
         local who = _G.WhoFrame
-        if who then SetTrackVis(who.ScrollBox or (who.List and who.List.ScrollBox), selected == 2) end
+        if who then SetTrackVis(who.ScrollBox or (who.List and who.List.ScrollBox), shown and selected == 2) end
     end
 
     frame._ebsUpdateCustomTabs = UpdateCustomTabs

@@ -5992,6 +5992,7 @@ local function ApplyAll()
 
     EAB:ApplyPushedTextures()
     EAB:ApplyHighlightTextures()
+    EAB:ApplyCooldownFonts()
     EAB:ApplyCooldownEdge()
     EAB:ApplyMiscTextures()
     if not inCombat then EAB:ApplyCombatVisibility() end

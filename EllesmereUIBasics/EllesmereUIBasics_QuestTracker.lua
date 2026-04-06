@@ -485,17 +485,18 @@ local function AcquireRow(parent)
         end)
     end
     r.frame:SetParent(parent); r.frame._questID = nil
-    r.frame:EnableMouse(false); r.frame:Show(); r.text:Show()
+    if not InCombatLockdown() then r.frame:EnableMouse(false) end
+    r.frame:Show(); r.text:Show()
     return r
 end
 local function ReleaseRow(r)
     if not InCombatLockdown() then
         r.frame:Hide(); r.frame:ClearAllPoints()
+        r.frame:EnableMouse(false)
     end
     r.frame:SetScript("OnMouseUp", nil)
     r.frame:SetScript("OnEnter", nil)
     r.frame:SetScript("OnLeave", nil)
-    r.frame:EnableMouse(false)
     r.frame._questID = nil
     r.frame._isAutoComplete = nil; r.frame._isComplete = nil
     r.frame._recipeID = nil; r.frame._isRecraft = nil
