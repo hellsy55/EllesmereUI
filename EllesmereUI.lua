@@ -6098,7 +6098,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.2.6"
+EllesmereUI.VERSION = "6.2.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6955,6 +6955,11 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         local _gameMenuBaseHeight = nil
         hooksecurefunc(GameMenuFrame, "Layout", function()
+            -- Skip entirely during combat to avoid protected frame taint
+            if InCombatLockdown() then
+                btn:Hide()
+                return
+            end
             -- Respect the hide setting
             if EllesmereUIDB and EllesmereUIDB.hideGameMenuButton then
                 btn:Hide()

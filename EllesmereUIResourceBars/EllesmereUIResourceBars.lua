@@ -746,10 +746,10 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
         self._border:SetShown(sz > 0)
     end
 
-    -- Text overlay (on outer container, not clipped)
+    -- Text overlay (above all bar borders)
     local textFrame = CreateFrame("Frame", nil, bar)
     textFrame:SetAllPoints(bar)
-    textFrame:SetFrameLevel(bar:GetFrameLevel() + 2)
+    textFrame:SetFrameLevel(25)
     textFrame:EnableMouse(false)
     local text = textFrame:CreateFontString(nil, "OVERLAY")
     SetRBFont(text, GetRBFont(), 11)
@@ -1929,13 +1929,13 @@ local function BuildBars()
                     secondaryFrame._countTextOverlay = CreateFrame("Frame", nil, secondaryFrame)
                     secondaryFrame._countTextOverlay:SetAllPoints(secondaryFrame)
                 end
-                secondaryFrame._countTextOverlay:SetFrameLevel(secondaryFrame:GetFrameLevel() + 10)
+                secondaryFrame._countTextOverlay:SetFrameLevel(25)
                 secondaryFrame._countText = secondaryFrame._countTextOverlay:CreateFontString(nil, "OVERLAY")
                 secondaryFrame._countText:SetTextColor(1, 1, 1, 0.9)
             end
             -- Keep overlay level current in case frame levels shifted
             if secondaryFrame._countTextOverlay then
-                secondaryFrame._countTextOverlay:SetFrameLevel(secondaryFrame:GetFrameLevel() + 10)
+                secondaryFrame._countTextOverlay:SetFrameLevel(25)
             end
             secondaryFrame._countText:ClearAllPoints()
             secondaryFrame._countText:SetParent(secondaryFrame._countTextOverlay)
@@ -3036,10 +3036,10 @@ BuildCastBar = function()
         castBarFrame._iconFrame = iconFrame
         castBarFrame._icon = icon
 
-        -- Text overlay frame (above border)
+        -- Text overlay frame (above all bar borders)
         local textFrame = CreateFrame("Frame", nil, castBarFrame)
         textFrame:SetAllPoints(bar)
-        textFrame:SetFrameLevel(bdrFrame:GetFrameLevel() + 1)
+        textFrame:SetFrameLevel(25)
         castBarFrame._textFrame = textFrame
 
         -- Spell name text

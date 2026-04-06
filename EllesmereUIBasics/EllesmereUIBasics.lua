@@ -3208,18 +3208,18 @@ end
 do
     local _euiNoteGroup = nil  -- stashed group during note edit
     local origBNSet = BNSetFriendNote
-    hooksecurefunc("BNSetFriendNote", function(id, note)
-        -- After Blizzard's note edit saves, re-append the stashed group
+    -- Pre-intercept: inject group tag BEFORE the note reaches Blizzard,
+    -- so the saved note always contains the tag and no rebuild sees it missing.
+    BNSetFriendNote = function(id, note)
         if _euiNoteGroup then
             local group = _euiNoteGroup
             _euiNoteGroup = nil
-            -- Only re-append if the saved note doesn't already have our tag
-            -- (our own SetFriendGroup calls already include it)
-            if not note:find(EUI_NOTE_TAG, 1, true) then
-                origBNSet(id, WriteGroupToNote(note, group))
+            if not note or not note:find(EUI_NOTE_TAG, 1, true) then
+                note = WriteGroupToNote(note or "", group)
             end
         end
-    end)
+        return origBNSet(id, note)
+    end
     local notePopup = StaticPopupDialogs["SET_BNFRIENDNOTE"]
     if notePopup then
         local origOnShow = notePopup.OnShow
@@ -3339,6 +3339,16 @@ local function SkinFriendsFrame()
             local fp = EBS.db.profile.friends
             local scale = fp.scale or 1
             frame:SetScale(scale)
+            -- Match scale on our UIParent-parented ScrollBox + ScrollBar
+            if frame._ebsOurScrollBox then frame._ebsOurScrollBox:SetScale(scale) end
+            if frame._ebsOurScrollBar then frame._ebsOurScrollBar:SetScale(scale) end
+            -- Also scale scrollbar track + hit area (parented to UIParent)
+            if frame._ebsOurScrollBox and frame._ebsOurScrollBox._ebsTrack then
+                frame._ebsOurScrollBox._ebsTrack:SetScale(scale)
+                if frame._ebsOurScrollBox._ebsTrack._hitArea then
+                    frame._ebsOurScrollBox._ebsTrack._hitArea:SetScale(scale)
+                end
+            end
             -- Position: saved > default Blizzard
             local pos = _ebsTempPos or fp.position
             if pos then
@@ -4176,12 +4186,10 @@ local function SkinFriendsFrame()
                     invBtn:SetPushedAtlas("friendslist-invitebutton-default-pressed")
                     invBtn:SetHighlightAtlas("friendslist-invitebutton-highlight")
                     invBtn:SetScript("OnEnter", function(self)
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:SetText(PARTY_INVITE)
-                        GameTooltip:Show()
+                        EllesmereUI.ShowWidgetTooltip(self, PARTY_INVITE)
                     end)
                     invBtn:SetScript("OnLeave", function()
-                        GameTooltip:Hide()
+                        EllesmereUI.HideWidgetTooltip()
                     end)
                     invBtn:SetScript("OnClick", function()
                         local ed = btn._ebsElementData
@@ -4227,16 +4235,10 @@ local function SkinFriendsFrame()
                         if not ed or not ed.characterData then return end
                         local c = ed.characterData
                         local s = ed.stateData
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        local _, classFile = GetClassInfo(c.classID or 0)
-                        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-                        if cc then
-                            GameTooltip:AddLine(c.name or "", cc.r, cc.g, cc.b)
-                        else
-                            GameTooltip:AddLine(c.name or "", 1, 1, 1)
-                        end
+                        local lines = {}
+                        lines[#lines + 1] = c.name or ""
                         if c.realmName and c.realmName ~= "" then
-                            GameTooltip:AddLine(c.realmName, 0.5, 0.5, 0.5)
+                            lines[#lines + 1] = c.realmName
                         end
                         if s then
                             if s.isOnline then
@@ -4248,21 +4250,21 @@ local function SkinFriendsFrame()
                                 if s.currentLocation and s.currentLocation ~= "" then
                                     status = status .. " - " .. s.currentLocation
                                 end
-                                GameTooltip:AddLine(status, 0.2, 1, 0.2)
+                                lines[#lines + 1] = status
                             else
-                                GameTooltip:AddLine(FRIENDS_LIST_OFFLINE or "Offline", 0.5, 0.5, 0.5)
+                                lines[#lines + 1] = FRIENDS_LIST_OFFLINE or "Offline"
                             end
                         end
                         if ed.interactionData and ed.interactionData.interactions then
                             local inter = ed.interactionData.interactions
                             if #inter > 0 and inter[1].description then
-                                GameTooltip:AddLine(inter[1].description, 0.7, 0.7, 0.7)
+                                lines[#lines + 1] = inter[1].description
                             end
                         end
-                        GameTooltip:Show()
+                        EllesmereUI.ShowWidgetTooltip(self, table.concat(lines, "\n"))
                     end)
                     btn:SetScript("OnLeave", function()
-                        GameTooltip:Hide()
+                        EllesmereUI.HideWidgetTooltip()
                     end)
                 end
 
@@ -5479,6 +5481,7 @@ local function SkinFriendsFrame()
         _ebsOurScrollBox = ourSB
         _ebsOurScrollBar = ourBar
         frame._ebsOurScrollBox = ourSB
+        frame._ebsOurScrollBar = ourBar
     end
 
     -- Rebuild state

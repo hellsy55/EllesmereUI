@@ -1324,10 +1324,10 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- BTB borders removed: main frame border now encompasses BTB
 
-            -- Text overlay
+            -- Text overlay (above border at barArea+5)
             local btbTextOvr = CreateFrame("Frame", nil, btbFrame)
             btbTextOvr:SetAllPoints()
-            btbTextOvr:SetFrameLevel(btbFrame:GetFrameLevel() + 2)
+            btbTextOvr:SetFrameLevel(barArea:GetFrameLevel() + 10)
 
             btbLeftFS = btbTextOvr:CreateFontString(nil, "OVERLAY")
             SetPVFont(btbLeftFS, PREVIEW_FONT, settings.btbLeftSize or 11)

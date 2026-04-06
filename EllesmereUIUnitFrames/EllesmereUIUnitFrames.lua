@@ -1363,10 +1363,10 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
     bg:SetColorTexture(bgc.r, bgc.g, bgc.b, bga)
     btb.bg = bg
 
-    -- Text overlay
+    -- Text overlay (above unified border at frame+10)
     local textOvr = CreateFrame("Frame", nil, btb)
     textOvr:SetAllPoints()
-    textOvr:SetFrameLevel(btb:GetFrameLevel() + 2)
+    textOvr:SetFrameLevel(frame:GetFrameLevel() + 15)
 
     local leftFS = textOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftFS, settings.btbLeftSize or 11)
@@ -6682,6 +6682,13 @@ function InitializeFrames()
             end
             if frame.CenterText and s and s.centerTextClassColor ~= nil then
                 ApplyClassColor(frame.CenterText, unitKey, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
+            end
+            -- Text bar class colors
+            local btb = frame._btb
+            if btb and s then
+                if btb.LeftText then ApplyClassColor(btb.LeftText, unitKey, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB) end
+                if btb.RightText then ApplyClassColor(btb.RightText, unitKey, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB) end
+                if btb.CenterText then ApplyClassColor(btb.CenterText, unitKey, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB) end
             end
         end
         if not frame or not frame.Portrait then return end
