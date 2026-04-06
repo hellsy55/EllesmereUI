@@ -49,6 +49,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 { key = "opt3", label = "Silvermoon Soiree Spread",   items = {260263} },
                 { key = "opt4", label = "Quel'Danas Rations",         items = {260264} },
                 { key = "opt5", label = "Mana Lily Tea",              items = {242297} },
+                { key = "opt6", label = "Springrunner Sparkling",     items = {260260} },
             },
         },
         {
@@ -74,8 +75,39 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     }
 
     ---------------------------------------------------------------------------
+    --  DB helper (global scope for polling)
+    ---------------------------------------------------------------------------
+    local function GetMacroDBByName(macroName)
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
+        if not EllesmereUIDB.macroFactory[macroName] then EllesmereUIDB.macroFactory[macroName] = {} end
+        return EllesmereUIDB.macroFactory[macroName]
+    end
+
+    ---------------------------------------------------------------------------
     --  Macro body generation
     ---------------------------------------------------------------------------
+    local function GetFirstAvailableItemID(def, db)
+        if not def.checkboxes then return nil end
+        local cbs = def.checkboxes
+        local order = db.order
+        if not order or #order < #cbs then
+            order = {}
+            for i = 1, #cbs do order[i] = i end
+        end
+        for _, idx in ipairs(order) do
+            local cb = cbs[idx]
+            if cb and db[cb.key] ~= false then
+                for _, itemID in ipairs(cb.items) do
+                    if C_Item.GetItemCount(itemID) > 0 then
+                        return itemID
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
     local function BuildMacroBody(def, db)
         if def.checkboxes then
             local cbs = def.checkboxes
@@ -97,8 +129,13 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             end
             if #lines == 0 then return "" end
             local body = ""
-            if db.showTooltip ~= false and firstItemID then
-                body = "#showtooltip item:" .. firstItemID .. "\n"
+            if db.showTooltip ~= false then
+                local availableItemID = GetFirstAvailableItemID(def, db)
+                if availableItemID then
+                    body = "#showtooltip item:" .. availableItemID .. "\n"
+                elseif firstItemID then
+                    body = "#showtooltip item:" .. firstItemID .. "\n"
+                end
             end
             return body .. table.concat(lines, "\n")
         elseif def.fixedBody then
@@ -113,10 +150,35 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         return ""
     end
 
+    local pendingMacroUpdates = {}
+
     local function UpdateMacro(def, db)
         local idx = GetMacroIndexByName(def.name)
         if idx and idx ~= 0 then
-            EditMacro(idx, nil, nil, BuildMacroBody(def, db))
+            if InCombatLockdown() then
+                pendingMacroUpdates[def.name] = db
+            else
+                EditMacro(idx, nil, nil, BuildMacroBody(def, db))
+            end
+        end
+    end
+
+    local function ProcessPendingMacroUpdates()
+        for macroName, db in pairs(pendingMacroUpdates) do
+            local mdef = nil
+            for _, def in ipairs(GENERAL_DEFS) do
+                if def.name == macroName then
+                    mdef = def
+                    break
+                end
+            end
+            if mdef then
+                local idx = GetMacroIndexByName(mdef.name)
+                if idx and idx ~= 0 then
+                    EditMacro(idx, nil, nil, BuildMacroBody(mdef, db))
+                end
+            end
+            pendingMacroUpdates[macroName] = nil
         end
     end
 
@@ -133,6 +195,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local halfW = parent:GetWidth() / 2
     local allMacroButtons = {}
     local allCogPopups = {}
+    local lastAvailableItems = {}
 
     -- Center divider (1px absolute pixel)
     local divider = container:CreateTexture(nil, "ARTWORK")
@@ -311,6 +374,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     else
                         local db = GetDB()
                         CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
+                        lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
                         PlayFlash()
                     end
                     C_Timer.After(0.1, function() RefreshState(); RefAct() end)
@@ -532,6 +596,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 if InCombatLockdown() then return end
                 local db = GetDB()
                 CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
+                lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
                 self._playFlash()
                 C_Timer.After(0.1, RefreshState)
             end)
@@ -552,6 +617,28 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     comingSoonFS:SetText("EllesmereUI Spec Macros are coming soon!")
     comingSoonFS:SetJustifyH("CENTER")
 
+    -- Update macros when inventory changes
+    local function UpdateInventoryDependentMacros()
+        for mi, btn in pairs(allMacroButtons) do
+            if btn and btn._tex then
+                local mdef = GENERAL_DEFS[mi]
+                if mdef and mdef.checkboxes then
+                    local ex = GetMacroIndexByName(mdef.name) ~= 0
+                    if ex then
+                        local db = GetMacroDBByName(mdef.name)
+                        local newAvailableItemID = GetFirstAvailableItemID(mdef, db)
+                        local oldAvailableItemID = lastAvailableItems[mdef.name]
+                        if newAvailableItemID ~= oldAvailableItemID then
+                            lastAvailableItems[mdef.name] = newAvailableItemID
+                            -- Defer macro update to avoid protected function error
+                            C_Timer.After(0, function() UpdateMacro(mdef, db) end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Poll for macro state changes (2s interval)
     local pollFrame = CreateFrame("Frame", nil, container)
     local elapsed = 0
@@ -571,6 +658,18 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     if pf and pf:IsShown() and pf._refreshAction then pf._refreshAction() end
                 end
             end
+        end
+    end)
+
+    -- Update macros immediately when bag changes
+    local bagUpdateFrame = CreateFrame("Frame", nil, container)
+    bagUpdateFrame:RegisterEvent("BAG_UPDATE")
+    bagUpdateFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    bagUpdateFrame:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            ProcessPendingMacroUpdates()
+        else
+            UpdateInventoryDependentMacros()
         end
     end)
 
