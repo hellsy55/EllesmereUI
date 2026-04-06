@@ -2165,13 +2165,12 @@ local function SkinRaidTab()
     end
     SkinRaidInfoFrame()
 
-    -- Reposition RaidFrame content to match friends/who/qj (every call, Blizzard re-anchors)
+    -- Reposition RaidFrame content
     if raidFrame then
         raidFrame:ClearAllPoints()
         raidFrame:SetPoint("TOPLEFT", FriendsFrame, "TOPLEFT", 15, -76)
         raidFrame:SetPoint("BOTTOMRIGHT", FriendsFrame, "BOTTOMRIGHT", -15, 35)
 
-        -- 1px inset border (one-time)
         if not raidFrame._ebsBorderAdded then
             raidFrame._ebsBorderAdded = true
             local bdr = CreateFrame("Frame", nil, raidFrame)
@@ -2182,20 +2181,17 @@ local function SkinRaidTab()
         end
     end
 
-    -- Reposition buttons to match other tabs' layout
+    -- Reposition buttons
     local convertBtn = _G.RaidFrameConvertToRaidButton
     local raidInfoBtn = _G.RaidFrameRaidInfoButton
     local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
     if scrollBox and (convertBtn or raidInfoBtn) then
-        local totalW = scrollBox:GetWidth()
-        local btnW = math.floor(totalW / 3)
-        -- Convert to Raid: bottom-right (same position as Quick Join's "Request to Join")
+        local btnW = math.floor(raidFrame:GetWidth() / 3)
         if convertBtn then
             convertBtn:ClearAllPoints()
             convertBtn:SetSize(btnW, 22)
             convertBtn:SetPoint("BOTTOMRIGHT", scrollBox, "BOTTOMRIGHT", 0, -22)
         end
-        -- Raid Info: top-right of scrollable area, up 12px
         if raidInfoBtn then
             raidInfoBtn:ClearAllPoints()
             raidInfoBtn:SetSize(btnW, 20)
@@ -2203,7 +2199,7 @@ local function SkinRaidTab()
         end
     end
 
-    -- Move top bar icons (AllAssistCheckButton, RoleCount) up 40px and left 50px
+    -- Move top bar icons
     local checkBtn = _G.RaidFrameAllAssistCheckButton
     if checkBtn and not checkBtn._ebsShifted then
         checkBtn._ebsShifted = true
@@ -2219,15 +2215,14 @@ local function SkinRaidTab()
         end
     end
 
-    -- Reposition raid groups: 2 columns anchored to raidFrame
+    -- Reposition raid groups: 2 columns
     if raidFrame then
-        local groupW = math.floor((raidFrame:GetWidth() - 10) / 2)  -- 10px gap between columns
+        local groupW = math.floor((raidFrame:GetWidth() - 10) / 2)
         for i = 1, 8 do
             local gf = _G["RaidGroup" .. i]
             if gf then
                 gf:ClearAllPoints()
                 gf:SetWidth(groupW)
-                -- Set slots to fit inside group
                 for j = 1, 5 do
                     local slot = _G["RaidGroup" .. i .. "Slot" .. j]
                     if slot then slot:SetWidth(groupW - 6) end
@@ -2245,7 +2240,6 @@ local function SkinRaidTab()
                 end
             end
         end
-        -- Set raid group player buttons to fit inside slots
         for i = 1, 40 do
             local btn = _G["RaidGroupButton" .. i]
             if btn then btn:SetWidth(groupW - 6) end
@@ -2652,21 +2646,33 @@ local function SkinFriendButton(button)
         fs:SetShadowColor(0, 0, 0, 0.8)
     end
 
-    -- Strip Blizzard's highlight texture
-    local blizzHighlight = button:GetHighlightTexture()
-    if blizzHighlight then blizzHighlight:SetAlpha(0) end
-
     -- Tile background
     local tileBg = button:CreateTexture(nil, "BACKGROUND", nil, 2)
     tileBg:SetAllPoints()
     tileBg:SetColorTexture(0, 0, 0, 0.10)
     button._ebsTileBg = tileBg
 
-    -- Hover highlight
-    local hover = button:CreateTexture(nil, "HIGHLIGHT")
+    -- Strip Blizzard's highlight texture (SetVertexColor to avoid taint risk)
+    local blizzHighlight = button:GetHighlightTexture()
+    if blizzHighlight then blizzHighlight:SetVertexColor(0, 0, 0, 0) end
+    button.LockHighlight = function() end
+    button.UnlockHighlight = function() end
+
+    -- Hover highlight (OnEnter/OnLeave)
+    local hover = button:CreateTexture(nil, "ARTWORK", nil, -7)
     hover:SetAllPoints()
-    hover:SetColorTexture(1, 1, 1, 0.05)
-    hover:SetBlendMode("ADD")
+    hover:SetAtlas("groupfinder-highlightbar-green")
+    hover:SetDesaturated(true)
+    hover:SetVertexColor(0.4, 0.7, 1.0)
+    hover:SetAlpha(1)
+    hover:Hide()
+    local hoverFill = button:CreateTexture(nil, "ARTWORK", nil, -8)
+    hoverFill:SetAllPoints()
+    hoverFill:SetColorTexture(1, 1, 1, 0.02)
+    hoverFill:SetBlendMode("ADD")
+    hoverFill:Hide()
+    button:HookScript("OnEnter", function() hover:Show(); hoverFill:Show() end)
+    button:HookScript("OnLeave", function() hover:Hide(); hoverFill:Hide() end)
 
     -- Apply font to friend row text
     local nameText = button.name or button.Name
@@ -2715,9 +2721,9 @@ local function SkinOneScrollbar(scrollBox, scrollBar)
     scrollBar:SetAlpha(0)
     scrollBox._ebsScrollBar = scrollBar
 
-    -- Track (parented to scrollBox's parent so it isn't clipped by ScrollBox)
-    local trackParent = scrollBox:GetParent() or scrollBox
-    local track = CreateFrame("Frame", nil, trackParent)
+    -- Parent to UIParent (parenting to FriendsListFrame taints)
+    local track = CreateFrame("Frame", nil, UIParent)
+    track:SetFrameStrata("HIGH")
     track:SetWidth(4)
     track:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 2, 0)
     track:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 2, 0)
@@ -2742,7 +2748,9 @@ local function SkinOneScrollbar(scrollBox, scrollBar)
     thumbTex:SetAllPoints()
 
     -- Hit area (wider clickable region for the scrollbar)
-    local hitArea = CreateFrame("Button", nil, trackParent)
+    local hitArea = CreateFrame("Button", nil, UIParent)
+    hitArea:SetFrameStrata("HIGH")
+    track._hitArea = hitArea
     hitArea:SetWidth(16)
     hitArea:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", -4, -2)
     hitArea:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", -4, 2)
@@ -3418,7 +3426,7 @@ local function SkinFriendsFrame()
         PP.CreateBorder(frame, r, g, b, borderAlpha, p.borderSize or 1, "OVERLAY", 7)
     end
 
-    frame:SetClipsChildren(true)
+    -- frame:SetClipsChildren(true)  -- removed: clips Blizzard tabs (now restyled in-place) and blocks VisitHouse()
 
     -- Reparent IgnoreListWindow so SetClipsChildren doesn't hide it
     if frame.IgnoreListWindow then
@@ -3457,27 +3465,80 @@ local function SkinFriendsFrame()
         frame._ebsTabBarBg:SetPoint("BOTTOM", firstTab, "BOTTOM", 0, 0)
     end
 
-    -- Hide Blizzard's tabs completely
-    for i = 1, 4 do
+    -- Restyle Blizzard's tabs in-place (like ElvUI). No custom tab frames,
+    -- no OnClick, no PanelTemplates_SetTab from addon code. Blizzard handles
+    -- all tab switching securely. We just change the visuals.
+    local customTabs = {}
+    for i = 1, frame.numTabs or 4 do
         local tab = _G["FriendsFrameTab" .. i]
         if tab then
-            tab:SetAlpha(0)
-            tab:SetHeight(1)
-            tab:EnableMouse(false)
+            -- Strip Blizzard's tab textures
+            for j = 1, select("#", tab:GetRegions()) do
+                local region = select(j, tab:GetRegions())
+                if region and region:IsObjectType("Texture") then
+                    region:SetTexture("")
+                    if region.SetAtlas then region:SetAtlas("") end
+                end
+            end
+            if tab.Left then tab.Left:SetTexture("") end
+            if tab.Middle then tab.Middle:SetTexture("") end
+            if tab.Right then tab.Right:SetTexture("") end
+            if tab.LeftDisabled then tab.LeftDisabled:SetTexture("") end
+            if tab.MiddleDisabled then tab.MiddleDisabled:SetTexture("") end
+            if tab.RightDisabled then tab.RightDisabled:SetTexture("") end
+            local hl = tab:GetHighlightTexture()
+            if hl then hl:SetTexture("") end
+
+            -- Dark background
+            if not tab._ebsBg then
+                tab._ebsBg = tab:CreateTexture(nil, "BACKGROUND")
+                tab._ebsBg:SetAllPoints()
+                tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+            end
+
+            -- Active highlight
+            if not tab._activeHL then
+                local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
+                activeHL:SetAllPoints()
+                activeHL:SetColorTexture(1, 1, 1, 0.05)
+                activeHL:SetBlendMode("ADD")
+                activeHL:Hide()
+                tab._activeHL = activeHL
+            end
+
+            -- Hide Blizzard's label (shifts on select) and use our own
+            local blizLabel = tab:GetFontString()
+            local labelText = blizLabel and blizLabel:GetText() or ("Tab " .. i)
+            if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
+            tab:SetPushedTextOffset(0, 0)
+            local label = tab:CreateFontString(nil, "OVERLAY")
+            label:SetFont(fontPath, 9, "")
+            label:SetPoint("CENTER", tab, "CENTER", 0, 0)
+            label:SetJustifyH("CENTER")
+            label:SetText(labelText)
+            tab._label = label
+
+            -- Accent underline (1px pixel-perfect)
+            if not tab._underline then
+                local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
+                PP.DisablePixelSnap(underline)
+                underline:SetHeight(PP.mult or 1)
+                underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
+                underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
+                local ar, ag, ab = EG.r, EG.g, EG.b
+                underline:SetColorTexture(ar, ag, ab, 1)
+                EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
+                underline:Hide()
+                tab._underline = underline
+            end
+
+            customTabs[i] = tab
         end
     end
+    -- Track active sub-tab index (1=Friends, 2=Recent Allies) to avoid
+    -- reading bliz:IsEnabled() during OnShow which taints.
+    local _activeSubTab = 1
 
-    -- Build our own custom tabs
-    local TAB_NAMES = {}
-    for i = 1, 4 do
-        local blizTab = _G["FriendsFrameTab" .. i]
-        if blizTab then
-            local text = blizTab:GetFontString() or blizTab.Text
-            TAB_NAMES[i] = text and text:GetText() or ("Tab " .. i)
-        end
-    end
-
-    local customTabs = {}
     local function UpdateCustomTabs()
         local selected = PanelTemplates_GetSelectedTab(FriendsFrame) or 1
         local isContacts = (selected == 1)
@@ -3485,18 +3546,19 @@ local function SkinFriendsFrame()
         local useAccent = fp and fp.accentColors ~= false
         for i, ct in ipairs(customTabs) do
             local isActive = (i == selected)
-            ct._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
-            ct._underline:SetShown(isActive)
-            if isActive then
-                if useAccent then
-                    local ar, ag, ab = EG.r, EG.g, EG.b
-                    ct._underline:SetColorTexture(ar, ag, ab, 1)
-                else
-                    ct._underline:SetColorTexture(1, 1, 1, 0.6)
+            if ct._label then ct._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5) end
+            if ct._underline then
+                ct._underline:SetShown(isActive)
+                if isActive then
+                    if useAccent then
+                        local ar, ag, ab = EG.r, EG.g, EG.b
+                        ct._underline:SetColorTexture(ar, ag, ab, 1)
+                    else
+                        ct._underline:SetColorTexture(1, 1, 1, 0.6)
+                    end
                 end
             end
-            ct._activeHL:SetShown(isActive)
-            ct._hoverHL:SetShown(not isActive)
+            if ct._activeHL then ct._activeHL:SetShown(isActive) end
         end
         -- Show/hide bottom buttons based on whether Contacts tab is active
         local addBtn = _G.FriendsFrameAddFriendButton
@@ -3536,122 +3598,66 @@ local function SkinFriendsFrame()
                 searchBox:EnableMouse(true)
             end
         end
-    end
-
-    for i = 1, frame.numTabs or 4 do
-        if TAB_NAMES[i] then
-            local ct = CreateFrame("Button", nil, UIParent)
-            ct:SetFrameStrata("HIGH")
-            ct:SetFrameLevel(frame:GetFrameLevel() + 10)
-            ct:Hide()  -- hidden until FriendsFrame OnShow
-
-            -- Background
-            local bg = ct:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-
-            -- Active highlight (same as hover, persistent when selected)
-            local activeHL = ct:CreateTexture(nil, "ARTWORK", nil, -6)
-            activeHL:SetAllPoints()
-            activeHL:SetColorTexture(1, 1, 1, 0.05)
-            activeHL:SetBlendMode("ADD")
-            activeHL:Hide()
-            ct._activeHL = activeHL
-
-            -- Hover highlight (hidden on active tab)
-            local hl = ct:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.05)
-            hl:SetBlendMode("ADD")
-            ct._hoverHL = hl
-
-            -- Label
-            local label = ct:CreateFontString(nil, "OVERLAY")
-            label:SetFont(fontPath, 9, "")
-            label:SetPoint("CENTER", ct, "CENTER", 0, 0)
-            label:SetJustifyH("CENTER")
-            label:SetJustifyV("MIDDLE")
-            label:SetText(TAB_NAMES[i])
-            ct._label = label
-
-            -- Accent underline (1px pixel-perfect)
-            local underline = ct:CreateTexture(nil, "OVERLAY", nil, 6)
-            PP.DisablePixelSnap(underline)
-            underline:SetHeight(PP.mult or 1)
-            underline:SetPoint("BOTTOMLEFT", ct, "BOTTOMLEFT", 0, 0)
-            underline:SetPoint("BOTTOMRIGHT", ct, "BOTTOMRIGHT", 0, 0)
-            local ar, ag, ab = EG.r, EG.g, EG.b
-            underline:SetColorTexture(ar, ag, ab, 1)
-            EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
-            underline:Hide()
-            ct._underline = underline
-
-            -- Click handler: switch Blizzard's tab
-            local tabIndex = i
-            ct:SetScript("OnClick", function()
-                if (PanelTemplates_GetSelectedTab(FriendsFrame) or 1) == tabIndex then return end
-                PanelTemplates_SetTab(FriendsFrame, tabIndex)
-                FriendsFrame_Update()
-                UpdateCustomTabs()
-            end)
-
-            customTabs[i] = ct
+        -- Sync scrollbar visibility based on selected tab (don't read IsVisible
+        -- from Blizzard ScrollBoxes -- that taints during OnShow in combat)
+        local function SetTrackVis(sb, vis)
+            if sb and sb._ebsTrack then
+                sb._ebsTrack:SetShown(vis)
+                if sb._ebsTrack._hitArea then sb._ebsTrack._hitArea:SetShown(vis) end
+            end
         end
+        -- Show/hide our custom ScrollBox (only when FriendsFrame is open)
+        if frame._ebsOurScrollBox then
+            frame._ebsOurScrollBox:SetShown(frame:IsShown() and isContacts and _activeSubTab == 1)
+        end
+        local friendsSB = FriendsListFrame and FriendsListFrame.ScrollBox
+        SetTrackVis(friendsSB, isContacts and _activeSubTab == 1)
+        -- Also sync our ScrollBox's scrollbar track
+        if frame._ebsOurScrollBox then
+            SetTrackVis(frame._ebsOurScrollBox, isContacts and _activeSubTab == 1)
+        end
+        local raf = _G.RecentAlliesFrame
+        if raf and raf.List then SetTrackVis(raf.List.ScrollBox, isContacts and _activeSubTab == 2) end
+        local who = _G.WhoFrame
+        if who then SetTrackVis(who.ScrollBox or (who.List and who.List.ScrollBox), selected == 2) end
     end
 
     frame._ebsUpdateCustomTabs = UpdateCustomTabs
 
-    -- Also update our tabs when Blizzard switches tabs
+    -- Update our tab visuals when Blizzard switches tabs (secure hook,
+    -- only updates visuals, never calls PanelTemplates_SetTab).
     hooksecurefunc("PanelTemplates_SetTab", function(f)
         if f ~= FriendsFrame then return end
         UpdateCustomTabs()
         local selected = PanelTemplates_GetSelectedTab(FriendsFrame) or 1
         if selected == 3 then
-            -- Show loading cover to prevent layout blink
-            if not frame._ebsRaidCover then
-                local cover = CreateFrame("Frame", nil, frame)
-                cover:SetAllPoints()
-                cover:SetFrameLevel(frame:GetFrameLevel() + 50)
-                local coverTex = cover:CreateTexture(nil, "BACKGROUND")
-                coverTex:SetAllPoints()
-                coverTex:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-
-                -- Fade-out animation
-                local fadeAG = cover:CreateAnimationGroup()
-                fadeAG:SetToFinalAlpha(true)
-                local fadeAnim = fadeAG:CreateAnimation("Alpha")
-                fadeAnim:SetFromAlpha(1)
-                fadeAnim:SetToAlpha(0)
-                fadeAnim:SetDuration(0.3)
-                fadeAnim:SetSmoothing("OUT")
-                fadeAG:SetScript("OnFinished", function() cover:Hide(); cover:SetAlpha(1) end)
-                cover._fadeOut = fadeAG
-
-                frame._ebsRaidCover = cover
-            end
-            frame._ebsRaidCover:SetAlpha(1)
-            frame._ebsRaidCover:Show()
-            local showTime = GetTime()
-            C_Timer.After(0.05, function()
-                SkinRaidTab()
-                local elapsed = GetTime() - showTime
-                local remaining = math.max(0, 0.2 - elapsed)
-                C_Timer.After(remaining, function()
-                    if frame._ebsRaidCover then frame._ebsRaidCover._fadeOut:Play() end
-                end)
-            end)
-        else
-            if frame._ebsRaidCover then frame._ebsRaidCover:Hide() end
+            C_Timer.After(0, function() SkinRaidTab() end)
         end
     end)
 
-    -- Show/hide custom tabs with the frame
-    frame:HookScript("OnHide", function()
-        for _, ct in ipairs(customTabs) do ct:Hide() end
-    end)
+    -- Update tab visuals on frame show
     frame:HookScript("OnShow", function()
-        for _, ct in ipairs(customTabs) do ct:Show() end
         UpdateCustomTabs()
+    end)
+
+    -- Hide all scrollbar tracks when FriendsFrame closes
+    frame:HookScript("OnHide", function()
+        local function HideTrack(sb)
+            if sb and sb._ebsTrack then
+                sb._ebsTrack:Hide()
+                if sb._ebsTrack._hitArea then sb._ebsTrack._hitArea:Hide() end
+            end
+        end
+        HideTrack(FriendsListFrame and FriendsListFrame.ScrollBox)
+        if frame._ebsOurScrollBox then
+            frame._ebsOurScrollBox:Hide()
+            HideTrack(frame._ebsOurScrollBox)
+        end
+        _activeSubTab = 1  -- reset to match Blizzard's default on reopen
+        local raf = _G.RecentAlliesFrame
+        if raf and raf.List then HideTrack(raf.List.ScrollBox) end
+        local who = _G.WhoFrame
+        if who then HideTrack(who.ScrollBox or (who.List and who.List.ScrollBox)) end
     end)
 
     -- Title text -- show BNet tag, accent colored
@@ -3929,18 +3935,15 @@ local function SkinFriendsFrame()
                 local tabName = info.name or ""
                 -- Recruit A Friend opens a popup, don't switch tabs
                 if strfind(tabName, "Recruit") then
-                    -- Open RAF recruitment popup directly instead of switching tabs
+                    -- Open RAF popup, then restore our tab state so nothing visually changes
+                    local savedSubTab = _activeSubTab
                     if RecruitAFriendFrame and RecruitAFriendFrame.RecruitmentButton then
                         RecruitAFriendFrame.RecruitmentButton:Click()
-                    elseif C_RecruitAFriend and C_RecruitAFriend.GenerateLink then
-                        -- Fallback: show the RAF frame which has the popup
-                        if bliz then bliz:Click() end
-                        C_Timer.After(0.1, function()
-                            if RecruitAFriendFrame and RecruitAFriendFrame.RecruitmentButton then
-                                RecruitAFriendFrame.RecruitmentButton:Click()
-                            end
-                        end)
                     end
+                    _activeSubTab = savedSubTab
+                    UpdateSubTabs()
+                    UpdateCustomTabs()
+                    return
                 else
                     -- Switch to Contacts bottom tab if needed
                     local bottomTab = PanelTemplates_GetSelectedTab(FriendsFrame) or 1
@@ -3955,7 +3958,9 @@ local function SkinFriendsFrame()
                         bliz:EnableMouse(false)
                     end
                 end
+                _activeSubTab = i
                 UpdateSubTabs()
+                UpdateCustomTabs()
             end)
 
             -- Width set in UpdateSubTabWidths on each OnShow
@@ -4712,6 +4717,44 @@ local function SkinFriendsFrame()
             -- Structural skinning always runs (guarded by _ebsSkinned, only fires once per button)
             SkinFriendButton(button)
 
+            -- On click, refresh all visible buttons in our ScrollBox so selection updates
+            -- Selection highlight (update on every refresh for recycled buttons)
+            if not button._ebsSelBar then
+                local sel = button:CreateTexture(nil, "ARTWORK", nil, -7)
+                sel:SetAllPoints()
+                sel:SetAtlas("groupfinder-highlightbar-green")
+                sel:SetDesaturated(true)
+                sel:SetVertexColor(0.4, 0.7, 1.0)
+                sel:SetAlpha(1)
+                sel:Hide()
+                local selFill = button:CreateTexture(nil, "ARTWORK", nil, -8)
+                selFill:SetAllPoints()
+                selFill:SetColorTexture(1, 1, 1, 0.02)
+                selFill:SetBlendMode("ADD")
+                selFill:Hide()
+                button._ebsSelBar = sel
+                button._ebsSelFill = selFill
+            end
+            local isSel = (FriendsFrame.selectedFriend == button.id)
+            button._ebsSelBar:SetShown(isSel)
+            if button._ebsSelFill then button._ebsSelFill:SetShown(isSel) end
+
+            if not button._ebsClickHooked then
+                button._ebsClickHooked = true
+                button:HookScript("OnClick", function()
+                    local sb = FriendsFrame._ebsOurScrollBox
+                    if sb then
+                        for _, btn in sb:EnumerateFrames() do
+                            if btn._ebsSelBar then
+                                local sel = (FriendsFrame.selectedFriend == btn.id)
+                                btn._ebsSelBar:SetShown(sel)
+                                if btn._ebsSelFill then btn._ebsSelFill:SetShown(sel) end
+                            end
+                        end
+                    end
+                end)
+            end
+
             -- Hide Blizzard elements immediately so they don't flash during scroll
             local fav = button.Favorite
             if fav then fav:SetAlpha(0) end
@@ -5393,8 +5436,28 @@ local function SkinFriendsFrame()
         btn._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30)
     end
 
-    -- Register a custom ScrollBox view with separate template pools for dividers vs friends
+    -- Our own ScrollBox + ScrollBar (parented to UIParent) to avoid tainting
+    -- Blizzard's FriendsListFrame.ScrollBox. ScrollUtil.Init + SetDataProvider
+    -- on our frames don't propagate taint to RaidFrame:Show().
+    local _ebsOurScrollBox, _ebsOurScrollBar
     do
+        local ourSB = CreateFrame("Frame", nil, UIParent, "WowScrollBoxList")
+        local ourBar = CreateFrame("EventFrame", nil, UIParent, "MinimalScrollBar")
+        ourSB:SetFrameStrata("HIGH")
+        ourSB:SetFrameLevel(20)
+        ourSB:Hide()
+        ourBar:SetFrameStrata("HIGH")
+        ourBar:Hide()
+
+        local ourBg = ourSB:CreateTexture(nil, "BACKGROUND")
+        ourBg:SetAllPoints()
+        ourBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+
+        ourSB:SetPoint("TOPLEFT", frame, "TOPLEFT", 15, -92)
+        ourSB:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -15, 35)
+        ourBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -92)
+        ourBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 35)
+
         local view = CreateScrollBoxListLinearView()
         view:SetElementExtentCalculator(function(dataIndex, elementData)
             if elementData.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then
@@ -5425,7 +5488,12 @@ local function SkinFriendsFrame()
                 factory("FriendsListButtonTemplate", FriendsFrame_UpdateFriendButton)
             end
         end)
-        ScrollUtil.InitScrollBoxListWithScrollBar(FriendsListFrame.ScrollBox, FriendsListFrame.ScrollBar, view)
+        ScrollUtil.InitScrollBoxListWithScrollBar(ourSB, ourBar, view)
+        SkinOneScrollbar(ourSB, ourBar)
+
+        _ebsOurScrollBox = ourSB
+        _ebsOurScrollBar = ourBar
+        frame._ebsOurScrollBox = ourSB
     end
 
     -- Rebuild state
@@ -5440,7 +5508,7 @@ local function SkinFriendsFrame()
         if not FriendsFrame:IsShown() then return end
         if not EBS.db or not EBS.db.profile.friends.enabled then return end
         local fp = EBS.db.profile.friends
-        local sb = FriendsListFrame and FriendsListFrame.ScrollBox
+        local sb = _ebsOurScrollBox
         if not sb then return end
 
         local EBS_FAVORITES = "Favorites"
@@ -5634,7 +5702,7 @@ local function SkinFriendsFrame()
             btn._ebsStampType = nil
         end
         _ebsRebuilding = true
-        sb:SetDataProvider(newDP, true)
+        sb:SetDataProvider(newDP, true)  -- safe: sb is our own ScrollBox, not Blizzard's
         _ebsRebuilding = false
 
         -- Scroll to a specific friend after rebuild (e.g. after adding to group)
@@ -6098,7 +6166,7 @@ local function SkinFriendsFrame()
         local btnY = -BTN_H - BTN_GAP + 10
 
         local function LayoutFriendBtns()
-            local totalW = scrollBox and scrollBox:GetWidth() or 300
+            local totalW = frame:GetWidth() - 30
             local btnW = math.floor(totalW / 3)
 
             addBtn:SetParent(frame)
@@ -6108,7 +6176,7 @@ local function SkinFriendsFrame()
 
             if frame._ebsOfflineBtn then
                 frame._ebsOfflineBtn:ClearAllPoints()
-                frame._ebsOfflineBtn:SetSize(btnW, BTN_H)
+                frame._ebsOfflineBtn:SetSize(totalW - btnW * 2, BTN_H)
                 frame._ebsOfflineBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", btnW, btnY)
             end
 
