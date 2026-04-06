@@ -2723,6 +2723,7 @@ local function SkinOneScrollbar(scrollBox, scrollBar)
 
     -- Parent to UIParent (parenting to FriendsListFrame taints)
     local track = CreateFrame("Frame", nil, UIParent)
+    track:Hide()
     track:SetFrameStrata("HIGH")
     track:SetWidth(4)
     track:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 2, 0)
@@ -2750,6 +2751,7 @@ local function SkinOneScrollbar(scrollBox, scrollBar)
     -- Hit area (wider clickable region for the scrollbar)
     local hitArea = CreateFrame("Button", nil, UIParent)
     hitArea:SetFrameStrata("HIGH")
+    hitArea:Hide()
     track._hitArea = hitArea
     hitArea:SetWidth(16)
     hitArea:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", -4, -2)
@@ -2871,25 +2873,12 @@ end
 
 -- Skin known scrollbars by direct reference
 local function SkinScrollbars()
-    local targets = {
-        FriendsListFrame,
-    }
-    for _, f in ipairs(targets) do
-        if f then
-            local sb = f.ScrollBox
-            local bar = sb and (sb.ScrollBar or f.ScrollBar) or f.ScrollBar
-            if sb and bar then
-                SkinOneScrollbar(sb, bar)
-            elseif f.ScrollBar then
-                for i = 1, select("#", f:GetChildren()) do
-                    local child = select(i, f:GetChildren())
-                    if child.EnumerateFrames then
-                        SkinOneScrollbar(child, f.ScrollBar)
-                        break
-                    end
-                end
-            end
-        end
+    -- FriendsListFrame uses our own custom ScrollBox (created later),
+    -- so we only hide Blizzard's native scrollbar here without creating a track.
+    if FriendsListFrame then
+        local bar = FriendsListFrame.ScrollBar
+            or (FriendsListFrame.ScrollBox and FriendsListFrame.ScrollBox.ScrollBar)
+        if bar then bar:SetAlpha(0) end
     end
     -- RecentAlliesFrame has nested structure
     if _G.RecentAlliesFrame and _G.RecentAlliesFrame.List then
@@ -2979,7 +2968,7 @@ local function UpdateBottomButtonAccent()
         end
     end
 
-    -- Bottom buttons (Send Message, Who buttons — skip Add Friend)
+    -- Bottom buttons (Send Message, Who buttons -- skip Add Friend)
     for _, name in ipairs(KNOWN_BUTTONS) do
         local btn = _G[name]
         if btn and btn._ebsBtnSkinned and btn:IsEnabled()
@@ -3306,12 +3295,11 @@ local function SkinFriendsFrame()
             frame:SetWidth(origW - 40)
             frame:SetHeight(origH + EXTRA_H)
             FriendsListFrame:SetHeight(origListH + EXTRA_H)
-            -- Re-anchor ScrollBox to fill the new space
+            -- Re-anchor Blizzard's ScrollBox to fill the resized frame
             FriendsListFrame.ScrollBox:ClearAllPoints()
             FriendsListFrame.ScrollBox:SetPoint("TOPLEFT", FriendsListFrame, "TOPLEFT", LIST_LEFT, LIST_TOP)
             FriendsListFrame.ScrollBox:SetPoint("BOTTOMRIGHT", FriendsListFrame, "BOTTOMRIGHT", LIST_RIGHT, LIST_BOTTOM)
             -- Match other sub-tab content frames to the same list pane bounds
-            -- Match other sub-tab content to the same list pane bounds
             local function FitToListPane(f)
                 if not f then return end
                 f:ClearAllPoints()
@@ -3336,7 +3324,7 @@ local function SkinFriendsFrame()
             FitToListPane(_G.RecruitAFriendFrame)
         end
 
-        -- Solid backdrop behind the ScrollBox so tile content doesn't fade with frame opacity
+        -- Solid backdrop behind the ScrollBox for consistent dark background
         if not FriendsListFrame.ScrollBox._ebsBackdrop then
             local bd = FriendsListFrame.ScrollBox:CreateTexture(nil, "BACKGROUND", nil, -7)
             bd:SetAllPoints()
@@ -3418,29 +3406,26 @@ local function SkinFriendsFrame()
     frame._ebsBg:SetAllPoints()
     frame._ebsBg:SetAlpha(1)
 
-    -- Pixel border (created before SetClipsChildren so the border container
-    -- is a direct child and its inset textures render within frame bounds)
+    -- Pixel border
     do
         local r, g, b, a = GetBorderColor(p)
         local borderAlpha = (p.showBorder ~= false) and a or 0
         PP.CreateBorder(frame, r, g, b, borderAlpha, p.borderSize or 1, "OVERLAY", 7)
     end
 
-    -- frame:SetClipsChildren(true)  -- removed: clips Blizzard tabs (now restyled in-place) and blocks VisitHouse()
-
-    -- Reparent IgnoreListWindow so SetClipsChildren doesn't hide it
+    -- Reparent IgnoreListWindow to UIParent so it renders above the main frame
     if frame.IgnoreListWindow then
         frame.IgnoreListWindow:SetParent(UIParent)
         frame.IgnoreListWindow:SetFrameStrata("DIALOG")
     end
 
-    -- Reparent RaidInfoFrame so SetClipsChildren doesn't hide it
+    -- Reparent RaidInfoFrame to UIParent so it renders above the main frame
     if _G.RaidInfoFrame then
         _G.RaidInfoFrame:SetParent(UIParent)
         _G.RaidInfoFrame:SetFrameStrata("DIALOG")
     end
 
-    -- Reparent FriendsTooltip to UIParent so SetClipsChildren doesn't hide it
+    -- Reparent FriendsTooltip to UIParent so it renders independently of the main frame
     if FriendsTooltip then
         FriendsTooltip:SetParent(UIParent)
         FriendsTooltip:SetFrameStrata("TOOLTIP")
@@ -3465,7 +3450,7 @@ local function SkinFriendsFrame()
         frame._ebsTabBarBg:SetPoint("BOTTOM", firstTab, "BOTTOM", 0, 0)
     end
 
-    -- Restyle Blizzard's tabs in-place (like ElvUI). No custom tab frames,
+    -- Restyle Blizzard's tabs in-place. No custom tab frames,
     -- no OnClick, no PanelTemplates_SetTab from addon code. Blizzard handles
     -- all tab switching securely. We just change the visuals.
     local customTabs = {}
@@ -3698,7 +3683,7 @@ local function SkinFriendsFrame()
         titleLabel:SetTextColor(1, 1, 1, 0.75)
     end)
 
-    -- Copy popup (replicates EUI main window ShowLinkPopup 1:1)
+    -- Copy popup for BattleTag
     local copyBackdrop, copyPopup
     local function HideCopyPopup()
         if copyPopup then copyPopup:Hide() end
@@ -3813,7 +3798,7 @@ local function SkinFriendsFrame()
     -- Status orb + arrow will be placed on the sub-tabs row (created later in SkinSubTabs)
     -- Store references for SkinSubTabs to use
     local function GetPlayerStatusName()
-        -- Use pcall to avoid taint from secret boolean return values
+        -- Guard against secret boolean return values to avoid taint
         local dnd = UnitIsDND("player")
         if not issecretvalue or not issecretvalue(dnd) then
             if dnd then return BUSY or "Busy" end
@@ -4095,7 +4080,7 @@ local function SkinFriendsFrame()
     end
     SkinSubTabs()
 
-    -- Recent Allies: fully custom DataProvider (no Blizzard recycling issues)
+    -- Recent Allies: custom element factory and DataProvider for styled buttons
     do
         local raf = _G.RecentAlliesFrame
         if raf and raf.List and raf.List.ScrollBox then
@@ -4785,7 +4770,7 @@ local function SkinFriendsFrame()
 
             -- Stamp: run data work once per button per friend assignment, skip repeats.
             -- Blizzard calls this hook many times for the same button+friend combo.
-            -- We only need to style once — subsequent calls for the same combo are no-ops.
+            -- We only need to style once -- subsequent calls for the same combo are no-ops.
             local curType = button.buttonType
             local curId = button.id or 0
             if button._ebsStampType == curType and button._ebsStampId == curId then return end
@@ -5172,7 +5157,7 @@ local function SkinFriendsFrame()
                 btn._ebsDivLine:SetPoint("RIGHT", btn._ebsDivDown, "LEFT", -6, 0)
             end
         else
-            -- Custom group: ↑ ✎ —— Label —— ✕ ↓ (symmetric)
+            -- Custom group: up edit -- Label -- close down (symmetric)
             btn._ebsDivX:Show()
             btn._ebsDivEdit:Show()
             btn._ebsDivUp:Show()
@@ -5231,7 +5216,7 @@ local function SkinFriendsFrame()
             end)
         end
 
-        -- Arrow reordering for all groups (Favorites, custom, Friends — not pending)
+        -- Arrow reordering for all groups (Favorites, custom, Friends -- not pending)
         if not isPending then
             local orderKey = groupName
             if isFavorites then orderKey = ORDER_FAVORITES
@@ -6293,7 +6278,7 @@ local function SkinFriendsFrame()
             lastCT = ct
         end
 
-        -- Tab bar bg (parent to first custom tab so it's not clipped)
+        -- Tab bar bg (parent to first custom tab so it extends below frame)
         if frame._ebsTabBarBg and lastCT then
             frame._ebsTabBarBg:SetParent(customTabs[1])
             frame._ebsTabBarBg:ClearAllPoints()

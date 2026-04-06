@@ -2087,7 +2087,7 @@ BuildCDMBar = function(barIndex)
 
     if not frame then
         frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
-        frame:SetFrameStrata("LOW")
+        frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
         if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
         if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
@@ -2125,7 +2125,7 @@ BuildCDMBar = function(barIndex)
         end
         frame._preMousePos = nil
         -- Restore default strata when leaving cursor anchor
-        frame:SetFrameStrata("LOW")
+        frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
         SetFrameClickThrough(frame, false)
@@ -2185,7 +2185,7 @@ BuildCDMBar = function(barIndex)
                 if icons then
                     for ii = 1, #icons do
                         if icons[ii] and icons[ii]:GetFrameStrata() == "TOOLTIP" then
-                            icons[ii]:SetFrameStrata("LOW")
+                            icons[ii]:SetFrameStrata("MEDIUM")
                             icons[ii]:SetFrameLevel(5 + ii)
                         end
                     end
@@ -2638,7 +2638,7 @@ LayoutCDMBar = function(barKey)
             icon:SetFrameStrata("TOOLTIP")
             icon:SetFrameLevel(9980 + i)
         elseif icon:GetFrameStrata() == "TOOLTIP" then
-            icon:SetFrameStrata("LOW")
+            icon:SetFrameStrata("MEDIUM")
             icon:SetFrameLevel(5 + i)
         end
         icon:ClearAllPoints()
@@ -3201,9 +3201,10 @@ local function RefreshCDMIconAppearance(barKey)
         local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
         local scX, scY = barData.stackCountX or 0, (barData.stackCountY or 0) + 2
         local borderLvl = icon:GetFrameLevel() + 5
+        local textLvl = 25
         -- Applications (buff stacks / aura applications)
         if icon.Applications then
-            pcall(icon.Applications.SetFrameLevel, icon.Applications, borderLvl + 1)
+            pcall(icon.Applications.SetFrameLevel, icon.Applications, textLvl)
             if icon.Applications.Applications then
                 local appsFS = icon.Applications.Applications
                 SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
@@ -3213,7 +3214,7 @@ local function RefreshCDMIconAppearance(barKey)
         end
         -- ChargeCount (spell charges like Holy Power spenders)
         if icon.ChargeCount then
-            pcall(icon.ChargeCount.SetFrameLevel, icon.ChargeCount, borderLvl + 1)
+            pcall(icon.ChargeCount.SetFrameLevel, icon.ChargeCount, textLvl)
             if icon.ChargeCount.Current then
                 local chargeFS = icon.ChargeCount.Current
                 SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
@@ -5540,7 +5541,7 @@ function ECME:CDMFinishSetup()
                             local frame = cdmBarFrames[key]
                             if not frame then
                                 frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
-                                frame:SetFrameStrata("LOW")
+                                frame:SetFrameStrata("MEDIUM")
                                 frame:SetFrameLevel(5)
                                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
                                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end

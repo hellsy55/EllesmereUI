@@ -627,7 +627,7 @@ local function DecorateFrame(frame, barData)
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
-        txo:SetFrameLevel(frame:GetFrameLevel() + 7)
+        txo:SetFrameLevel(25)
         txo:EnableMouse(false)
         fd.textOverlay = txo
     end
@@ -1221,6 +1221,12 @@ local function CollectAndReanchor(bypassSpecGuard)
 
     RebuildSideEffectCaches()
     if ns.RebuildCDMSpellCaches then ns.RebuildCDMSpellCaches() end
+
+    -- Safety: if route map is empty (API was unavailable during zone-in
+    -- rebuild, e.g. fast arena transitions), attempt a fresh rebuild now.
+    if not next(_cdidRouteMap) and ns.RebuildSpellRouteMap then
+        ns.RebuildSpellRouteMap()
+    end
 
     wipe(_scratch_usedFrames)
     wipe(_scratch_activeFrames)
