@@ -1288,6 +1288,17 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.absorb:SetWidth(GetHealthBarWidth())
     plate.absorb:SetHeight(GetHealthBarHeight())
     plate.absorb:SetFrameLevel(plate.health:GetFrameLevel())
+    plate.absorbForward = CreateFrame("StatusBar", nil, plate.absorbClip)
+    plate.absorbForward:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
+    plate.absorbForward:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
+    plate.absorbForward:SetStatusBarColor(1, 1, 1, 0.8)
+    plate.absorbForward:SetReverseFill(false)
+    plate.absorbForward:SetPoint("TOPLEFT", plate.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    plate.absorbForward:SetPoint("BOTTOMLEFT", plate.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    plate.absorbForward:SetWidth(GetHealthBarWidth())
+    plate.absorbForward:SetHeight(GetHealthBarHeight())
+    plate.absorbForward:SetFrameLevel(plate.health:GetFrameLevel())
+    plate.absorbForward:Hide()
     plate.absorbOverflow = CreateFrame("StatusBar", nil, plate.health)
     plate.absorbOverflow:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
     plate.absorbOverflow:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
@@ -3207,6 +3218,9 @@ function NameplateFrame:SetUnit(unit, nameplate)
         end
     end
     PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, gap, GetAuraSlotOffsets("ccSlot"))
+if self.absorbForward then
+    self.absorbForward:SetHeight(GetHealthBarHeight())
+end
 if self.absorbOverflow then
     self.absorbOverflow:SetHeight(GetHealthBarHeight())
 end
@@ -3229,6 +3243,7 @@ end
     self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", unit)
+    ApplyHealthBarTexture(self)
     self:UpdateHealth()
     self:UpdateName()
     self:UpdateClassification()
@@ -3237,7 +3252,6 @@ end
     self:ApplyMouseover()
     self:UpdateAuras()
     self:UpdateCast()
-    ApplyHealthBarTexture(self)
 end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
@@ -3309,13 +3323,16 @@ function NameplateFrame:ClearUnit()
     if self.rightArrow then self.rightArrow:Hide() end
     HideClassPowerOnPlate(self)
     self.absorb:Hide()
+    if self.absorbForward then
+        self.absorbForward:Hide()
+    end
     if self.absorbOverflow then
-    self.absorbOverflow:Hide()
-    self.absorbOverflow:SetWidth(0)
-end
-if self.absorbOverflowDivider then
-    self.absorbOverflowDivider:Hide()
-end
+        self.absorbOverflow:Hide()
+        self.absorbOverflow:SetWidth(0)
+    end
+    if self.absorbOverflowDivider then
+        self.absorbOverflowDivider:Hide()
+    end
     self:Hide()
     self:SetScale(1)
     self:SetParent(UIParent)
@@ -3339,25 +3356,139 @@ function NameplateFrame:UpdateHealthValues()
             self:UpdateName()
         end
     end
-    if false and self.hpCalculator and self.hpCalculator.GetMaximumHealth then
-        -- NOTE: Disabled because hpCalculator methods now return secret/protected values
-        -- on the beta, which cannot be passed to StatusBar:SetValue().
+
+    local curHealth, maxHealth, absorbAmt, maxWithAbsorbs
+
+    if self.hpCalculator and self.hpCalculator.GetMaximumHealth and UnitGetDetailedHealPrediction then
         UnitGetDetailedHealPrediction(unit, nil, self.hpCalculator)
-        self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
-        local maxWithAbsorbs = self.hpCalculator:GetMaximumHealth()
-        self.health:SetMinMaxValues(0, maxWithAbsorbs)
-        self.absorb:SetMinMaxValues(0, maxWithAbsorbs)
-        self.absorb:SetValue(self.hpCalculator:GetDamageAbsorbs())
-        self.absorb:Show()
+
         self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
-        self.health:SetValue(self.hpCalculator:GetCurrentHealth())
+        curHealth = self.hpCalculator:GetCurrentHealth()
+        maxHealth = self.hpCalculator:GetMaximumHealth()
+        absorbAmt = self.hpCalculator:GetDamageAbsorbs()
+
+        self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
+        maxWithAbsorbs = self.hpCalculator:GetMaximumHealth()
+        self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
     else
-        local maxHealth = UnitHealthMax(unit)
-        self.health:SetMinMaxValues(0, maxHealth)
-        self.health:SetValue(UnitHealth(unit))
-        self.absorb:SetMinMaxValues(0, maxHealth)
-        self.absorb:SetValue(UnitGetTotalAbsorbs(unit))
+        curHealth = UnitHealth(unit)
+        maxHealth = UnitHealthMax(unit)
+        absorbAmt = UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(unit) or 0
+        maxWithAbsorbs = maxHealth
+    end
+
+    local absorbIsSecret = issecretvalue and issecretvalue(absorbAmt)
+
+    self.absorb:ClearAllPoints()
+    self.absorb:SetWidth(self.health:GetWidth())
+    self.absorb:SetHeight(self.health:GetHeight())
+
+    if self.absorbForward then
+        self.absorbForward:ClearAllPoints()
+        self.absorbForward:SetWidth(self.health:GetWidth())
+        self.absorbForward:SetHeight(self.health:GetHeight())
+    end
+
+    if absorbIsSecret then
+        -- Secret-value absorbs (enemy players / Midnight units) cannot be split
+        -- safely in Lua. Instead, keep the health bar scaled to include absorbs,
+        -- then render a single forward absorb segment in the newly-created gap.
+        self.health:SetMinMaxValues(0, maxWithAbsorbs or maxHealth)
+        self.health:SetValue(curHealth)
+
+        self.absorb:SetMinMaxValues(0, maxWithAbsorbs or maxHealth)
+        self.absorb:SetReverseFill(false)
+        self.absorb:SetPoint("TOPLEFT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        self.absorb:SetPoint("BOTTOMLEFT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+        self.absorb:SetValue(absorbAmt)
         self.absorb:Show()
+
+        if self.absorbForward then
+            self.absorbForward:Hide()
+        end
+        if self.absorbOverflow then
+            self.absorbOverflow:Hide()
+            self.absorbOverflow:SetWidth(0)
+        end
+        if self.absorbOverflowDivider then
+            self.absorbOverflowDivider:Hide()
+        end
+    else
+        self.health:SetMinMaxValues(0, maxHealth)
+        self.health:SetValue(curHealth)
+
+        self.absorb:SetMinMaxValues(0, maxHealth)
+        if self.absorbForward then
+            self.absorbForward:SetMinMaxValues(0, maxHealth)
+        end
+
+        local absorbValue = absorbAmt or 0
+        if absorbValue <= 0 then
+            self.absorb:Hide()
+            if self.absorbForward then
+                self.absorbForward:Hide()
+            end
+            if self.absorbOverflow then
+                self.absorbOverflow:Hide()
+                self.absorbOverflow:SetWidth(0)
+            end
+            if self.absorbOverflowDivider then
+                self.absorbOverflowDivider:Hide()
+            end
+        else
+            local missing = maxHealth - curHealth
+            if missing < 0 then missing = 0 end
+
+            local forwardAbsorb = math.min(absorbValue, missing)
+            local remainingAbsorb = absorbValue - forwardAbsorb
+            if remainingAbsorb < 0 then remainingAbsorb = 0 end
+
+            local backfillAbsorb = math.min(remainingAbsorb, curHealth or 0)
+            local overflowAbsorb = remainingAbsorb - backfillAbsorb
+            if overflowAbsorb < 0 then overflowAbsorb = 0 end
+
+            if self.absorbForward then
+                self.absorbForward:SetReverseFill(false)
+                self.absorbForward:SetPoint("TOPLEFT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+                self.absorbForward:SetPoint("BOTTOMLEFT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+                self.absorbForward:SetValue(forwardAbsorb)
+                if forwardAbsorb > 0 then
+                    self.absorbForward:Show()
+                else
+                    self.absorbForward:Hide()
+                end
+            end
+
+            self.absorb:SetReverseFill(true)
+            self.absorb:SetPoint("TOPRIGHT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+            self.absorb:SetPoint("BOTTOMRIGHT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+            self.absorb:SetValue(backfillAbsorb)
+            if backfillAbsorb > 0 then
+                self.absorb:Show()
+            else
+                self.absorb:Hide()
+            end
+
+            if self.absorbOverflow then
+                self.absorbOverflow:SetMinMaxValues(0, maxHealth)
+                self.absorbOverflow:SetValue(overflowAbsorb)
+                if overflowAbsorb > 0 then
+                    self.absorbOverflow:Show()
+                    self.absorbOverflow:SetWidth(self.health:GetWidth())
+                    if self.absorbOverflowDivider then
+                        self.absorbOverflowDivider:Show()
+                    end
+                else
+                    self.absorbOverflow:Hide()
+                    self.absorbOverflow:SetWidth(0)
+                    if self.absorbOverflowDivider then
+                        self.absorbOverflowDivider:Hide()
+                    end
+                end
+            elseif self.absorbOverflowDivider then
+                self.absorbOverflowDivider:Hide()
+            end
+        end
     end
 
     -- Hash line positioning (target only)
