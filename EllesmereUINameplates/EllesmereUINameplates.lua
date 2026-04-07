@@ -16,6 +16,7 @@ local C_UnitAuras_GetAuraDuration = C_UnitAuras and C_UnitAuras.GetAuraDuration
 local UnitName, UnitGUID = UnitName, UnitGUID
 local UnitIsUnit, UnitCanAttack = UnitIsUnit, UnitCanAttack
 local UnitIsEnemy, UnitIsTapDenied = UnitIsEnemy, UnitIsTapDenied
+
 local UnitAffectingCombat, UnitClassification = UnitAffectingCombat, UnitClassification
 local UnitIsDeadOrGhost, UnitReaction = UnitIsDeadOrGhost, UnitReaction
 local UnitIsPlayer, UnitClass = UnitIsPlayer, UnitClass
@@ -1507,6 +1508,8 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.kickTick:SetPoint("TOP", plate.kickMarker, "TOP", 0, 0)
     plate.kickTick:SetPoint("BOTTOM", plate.kickMarker, "BOTTOM", 0, 0)
     plate.kickTick:SetPoint("LEFT", plate.kickMarker:GetStatusBarTexture(), "RIGHT")
+    -- Cast bar text: three independent fixed zones (Plater pattern).
+    -- [castName LEFT 50%] [castTarget CENTER-RIGHT 25%] [castTimer RIGHT 15%]
     plate.castName = plate.cast:CreateFontString(nil, "OVERLAY")
     SetFSFont(plate.castName, 10, GetNPOutline())
     plate.castName:SetPoint("LEFT", plate.cast, "LEFT", 5, 0)
@@ -1517,9 +1520,8 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     SetFSFont(plate.castTarget, 10, GetNPOutline())
     plate.castTarget:SetJustifyH("RIGHT")
     plate.castTarget:SetWordWrap(false)
+    plate.castTarget:SetNonSpaceWrap(false)
     plate.castTarget:SetMaxLines(1)
-    -- Cast timer text: remaining/elapsed seconds, anchored to the far right.
-    -- castTarget is repositioned to sit immediately left of it.
     plate.castTimer = plate.cast:CreateFontString(nil, "OVERLAY")
     SetFSFont(plate.castTimer, 10, GetNPOutline())
     plate.castTimer:SetPoint("RIGHT", plate.cast, "RIGHT", -3, 0)
@@ -1527,8 +1529,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castTimer:SetWordWrap(false)
     plate.castTimer:SetMaxLines(1)
     plate.castTimer:SetTextColor(1, 1, 1, 1)
-    -- castTarget sits left of castTimer with a small gap
-    plate.castTarget:SetPoint("RIGHT", plate.castTimer, "LEFT", -4, 0)
     -- OnUpdate: tick the cast timer every frame while a cast is active.
     -- Uses UnitCastingDuration/UnitChannelDuration duration objects and their
     -- :GetRemainingDuration() method to avoid taint from UnitCastingInfo's
@@ -3087,18 +3087,23 @@ function NameplateFrame:SetUnit(unit, nameplate)
     SetFSFont(self.castName, cns, GetNPOutline())
     SetFSFont(self.castTarget, cts, GetNPOutline())
     SetFSFont(self.castTimer, ctmSz, GetNPOutline())
+    -- Reapply justify after SetFont (SetFont can reset it)
+    self.castName:SetJustifyH("LEFT")
+    self.castTarget:SetJustifyH("RIGHT")
+    self.castTimer:SetJustifyH("RIGHT")
     self.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
     local showTimer = defaults.showCastTimer
     if p and p.showCastTimer ~= nil then showTimer = p.showCastTimer end
     self._showCastTimer = showTimer
-    if showTimer then
-        self.castTimer:Show()
+    -- Fixed widths for three independent zones
+    local castW = self.cast:GetWidth()
+    local timerW = ctmSz * 2.2
+    if castW and castW > 0 then
+        self.castName:SetWidth(castW * 0.42)
+        self.castTimer:SetWidth(timerW)
+        self.castTarget:SetWidth(castW * 0.42)
         self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.castTimer, "LEFT", -4, 0)
-    else
-        self.castTimer:Hide()
-        self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3, 0)
+        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW, 0)
     end
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     -- Cast target color: class-colored if enabled and target is a player, otherwise use castTargetColor
@@ -3518,7 +3523,7 @@ function NameplateFrame:UpdateHealthValues()
         local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
         pctText = string.format("%d%%", pctVal)
         pctNoSignText = string.format("%d", pctVal)
-        numText = AbbreviateLargeNumbers(UnitHealth(unit))
+        numText = AbbreviateNumbers(UnitHealth(unit))
     else
         pctText = ""
         pctNoSignText = ""
@@ -4256,13 +4261,10 @@ function NameplateFrame:UpdateCast()
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
     -- Get the cast target name and class for display.
-    -- Prefer UnitNameFromGUID for a clean name (no realm), but fall back
-    -- to UnitSpellTargetName (secret string, may include realm) when the
-    -- GUID isn't available (NPCs, non-party players, out-of-range targets).
+    -- Always try UnitSpellTargetName (Plater pattern) -- don't gate on
+    -- UnitShouldDisplaySpellTargetName which returns false for some casts
+    -- that do have targets. Prefer UnitNameFromGUID for a clean name (no realm).
     local spellTarget, spellTargetClass
-    if UnitSpellTargetClass then
-        spellTargetClass = UnitSpellTargetClass(self.unit)
-    end
     local targetUnit = self.unit .. "target"
     local targetGUID = UnitGUID(targetUnit)
     if targetGUID and UnitNameFromGUID then
@@ -4271,15 +4273,14 @@ function NameplateFrame:UpdateCast()
     if not spellTarget and UnitSpellTargetName then
         spellTarget = UnitSpellTargetName(self.unit)
     end
+    if UnitSpellTargetClass then
+        spellTargetClass = UnitSpellTargetClass(self.unit)
+    end
     if not spellTargetClass then
         spellTargetClass = UnitClassBase(targetUnit)
     end
+    local hasTarget = spellTarget and true or false
     self.castTarget:SetText(spellTarget or "")
-    -- Cap target name to 50% of cast bar so it never pushes the spell name out
-    local castW = self.cast:GetWidth()
-    if castW and castW > 0 then
-        self.castTarget:SetWidth(castW * 0.5)
-    end
 
     -- Apply class color to cast target text if enabled and target is a player
     local db = p or defaults
@@ -4302,12 +4303,9 @@ function NameplateFrame:UpdateCast()
         self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
     end
 
-    -- Two-point anchor: castName stretches from LEFT+5 to 5px before castTarget's left edge
-    -- This avoids GetStringWidth() which returns tainted secret values on nameplates
-    self.castName:SetWidth(0)  -- clear any fixed width
-    self.castName:ClearAllPoints()
-    self.castName:SetPoint("LEFT", self.cast, "LEFT", 5, 0)
-    self.castName:SetPoint("RIGHT", self.castTarget, "LEFT", -5, 0)
+    -- All three zones are independent: show/hide based on their own conditions
+    self.castTarget:SetShown(hasTarget)
+    self.castTimer:SetShown(self._showCastTimer)
 
     if type(kickProtected) == "nil" then
         kickProtected = false
@@ -4552,10 +4550,13 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
         self.castTarget:SetText("")
     end
 
-    self.castName:SetWidth(0)
-    self.castName:ClearAllPoints()
-    self.castName:SetPoint("LEFT", self.cast, "LEFT", 5, 0)
-    self.castName:SetPoint("RIGHT", self.castTarget, "LEFT", -5, 0)
+    -- Show interrupter name in target slot, hide timer
+    self.castTimer:Hide()
+    if interrupterName then
+        self.castTarget:Show()
+    else
+        self.castTarget:Hide()
+    end
     self.castShieldFrame:Hide()
     self.castShieldFrame:SetAlpha(1)
     self.castBarOverlay:SetAlpha(0)

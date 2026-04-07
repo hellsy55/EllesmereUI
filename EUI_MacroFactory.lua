@@ -312,6 +312,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                         local db = GetDB()
                         CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
                         PlayFlash()
+                        C_Timer.After(0.15, function()
+                            if not InCombatLockdown() then ShowMacroFrame() end
+                        end)
                     end
                     C_Timer.After(0.1, function() RefreshState(); RefAct() end)
                 end)
@@ -534,6 +537,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
                 self._playFlash()
                 C_Timer.After(0.1, RefreshState)
+                C_Timer.After(0.15, function()
+                    if not InCombatLockdown() then ShowMacroFrame() end
+                end)
             end)
 
             RefreshState()

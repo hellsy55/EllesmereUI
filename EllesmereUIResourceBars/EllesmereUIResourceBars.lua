@@ -2038,7 +2038,7 @@ local function UpdateHealthBar()
     if hp.textFormat ~= "none" then
         local fmt = hp.textFormat
         local pctStr = format("%d", pctRaw)
-        local curStr = AbbreviateLargeNumbers(cur)
+        local curStr = AbbreviateNumbers(cur)
         local txt
         if fmt == "both" then
             txt = curStr .. " | " .. pctStr .. "%"
@@ -2131,15 +2131,15 @@ local function UpdatePrimaryBar()
         local txt
         if fmt == "smart" then
             local isPercent = EllesmereUI.IsSmartPowerPercent and EllesmereUI.IsSmartPowerPercent()
-            txt = isPercent and percentText or AbbreviateLargeNumbers(cur)
+            txt = isPercent and percentText or AbbreviateNumbers(cur)
         elseif fmt == "both" then
-            txt = AbbreviateLargeNumbers(cur) .. " | " .. percentText
+            txt = AbbreviateNumbers(cur) .. " | " .. percentText
         elseif fmt == "curpp" then
-            txt = AbbreviateLargeNumbers(cur)
+            txt = AbbreviateNumbers(cur)
         elseif fmt == "perpp" then
             txt = percentText
         else
-            txt = AbbreviateLargeNumbers(cur)
+            txt = AbbreviateNumbers(cur)
         end
         primaryBar._text:SetText(txt)
         primaryBar._text:Show()

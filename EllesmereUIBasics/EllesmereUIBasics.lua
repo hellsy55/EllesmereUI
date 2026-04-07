@@ -1120,13 +1120,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             end
         end
 
-        -- Mail -- left of tracking, building left
+        -- Mail -- left of tracking, building left (nudged 1px right, 2px down)
         if mailFrame then
             mailFrame:ClearAllPoints()
             if tracking then
-                mailFrame:SetPoint("RIGHT", tracking, "LEFT", 0, 0)
+                mailFrame:SetPoint("RIGHT", tracking, "LEFT", 1, -2)
             elseif clockBg and p.showClock then
-                mailFrame:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
+                mailFrame:SetPoint("RIGHT", clockBg, "LEFT", 1, -2)
             end
         end
 
@@ -1191,7 +1191,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
 
         if mailFrame then
             mailFrame:ClearAllPoints()
-            mailFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            mailFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 1, y - 2)
             if mailFrame:IsShown() then
                 local mw = mailFrame:GetWidth() or 22
                 y = y - (mailFrame:GetHeight() or 22)
@@ -1434,6 +1434,21 @@ local function ApplyMinimap()
             end
         end)
     end
+    -- Guard reparent: Blizzard reparents the minimap during housing transitions
+    -- and other events. Hook SetParent to force it back to UIParent.
+    if not minimap._ebsParentGuard then
+        minimap._ebsParentGuard = true
+        hooksecurefunc(minimap, "SetParent", function()
+            if minimap:GetParent() ~= UIParent then
+                if not InCombatLockdown() then
+                    minimap:SetParent(UIParent)
+                end
+            end
+        end)
+        -- Lock strata/level so Blizzard can't change them during transitions
+        if minimap.SetFixedFrameStrata then minimap:SetFixedFrameStrata(true) end
+        if minimap.SetFixedFrameLevel then minimap:SetFixedFrameLevel(true) end
+    end
     minimap:Show()
 
     -- Hide default decorations
@@ -1441,7 +1456,6 @@ local function ApplyMinimap()
         local frame = _G[name]
         if frame then frame:Hide() end
     end
-
     -- Hide AddonCompartmentFrame by reparenting to a hidden frame
     local compartment = _G.AddonCompartmentFrame
     if compartment then
@@ -1520,7 +1534,85 @@ local function ApplyMinimap()
     local mapSize = p.mapSize or 140
     minimap:SetSize(mapSize, mapSize)
     -- Shape mask
-    minimap:SetMaskTexture(isCircle and 186178 or 130937)
+    local maskID = isCircle and 186178 or 130937
+    minimap:SetMaskTexture(maskID)
+    -- Custom housing overlay: our own texture behind the minimap that shows
+    -- the housing indoor map when Blizzard hides the real minimap content.
+    -- Fully owned by us, no Blizzard frame manipulation.
+    if not minimap._ebsHousingTex then
+        local frame = CreateFrame("Frame", nil, minimap)
+        frame:SetAllPoints(minimap)
+        frame:SetFrameLevel(minimap:GetFrameLevel() + 1)
+        local tex = frame:CreateTexture(nil, "ARTWORK")
+        if isCircle then
+            local inset = -mapSize * 0.10
+            tex:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
+            tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
+        else
+            tex:SetAllPoints(frame)
+        end
+        if isCircle then
+            local mask = frame:CreateMaskTexture()
+            mask:SetAllPoints(frame)
+            mask:SetTexture(maskID)
+            tex:AddMaskTexture(mask)
+            frame._mask = mask
+        end
+        frame._isCircle = isCircle
+        frame._tex = tex
+        frame:Hide()
+        minimap._ebsHousingFrame = frame
+        minimap._ebsHousingTex = tex
+        -- Watch for MinimapBackdrop atlas changes to detect housing
+        local backdrop = _G.MinimapBackdrop
+        if backdrop then
+            local function CheckHousing()
+                local housingAtlas
+                for ri = 1, backdrop:GetNumRegions() do
+                    local rgn = select(ri, backdrop:GetRegions())
+                    if rgn and rgn.GetAtlas then
+                        local atlas = rgn:GetAtlas()
+                        if atlas and atlas:find("housing") then
+                            housingAtlas = atlas
+                            break
+                        end
+                    end
+                end
+                if housingAtlas then
+                    if frame._isCircle then
+                        tex:SetAtlas(housingAtlas)
+                    else
+                        tex:SetTexture("Interface\\AddOns\\EllesmereUIBasics\\Media\\housing-minimap.png")
+                    end
+                    frame:Show()
+                else
+                    frame:Hide()
+                end
+            end
+            -- Check on zone transitions
+            if not minimap._ebsHousingZoneHook then
+                minimap._ebsHousingZoneHook = true
+                local zf = CreateFrame("Frame")
+                zf:RegisterEvent("PLAYER_ENTERING_WORLD")
+                zf:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+                zf:RegisterEvent("ZONE_CHANGED_INDOORS")
+                zf:SetScript("OnEvent", function()
+                    C_Timer.After(0.5, CheckHousing)
+                end)
+            end
+        end
+    else
+        -- Update existing housing frame on reapply
+        local frame = minimap._ebsHousingFrame
+        if frame then
+            frame:SetFrameLevel(minimap:GetFrameLevel() + 1)
+            if frame._mask then
+                frame._mask:SetTexture(maskID)
+            elseif not isCircle and frame._mask then
+                -- Switched to square, remove mask
+            end
+        end
+    end
     -- Clamp to screen so the border never extends off-screen
     minimap:SetClampedToScreen(true)
     local bInset = isCircle and (p.borderSize or 1) or 0

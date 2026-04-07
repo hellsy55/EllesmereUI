@@ -1110,6 +1110,25 @@ initFrame:SetScript("OnEvent", function(self)
                                 friendUngroupedCollapsed = oldGlobal.friendUngroupedCollapsed,
                             }
                         end
+                        -- Preserve QoL settings (stored on EllesmereUIDB root)
+                        local qolKeys = {
+                            "autoOpenContainers", "autoSellJunk", "autoRepair",
+                            "autoRepairGuild", "hideScreenshotStatus", "autoUnwrapCollections",
+                            "trainAllButton", "ahCurrentExpansion", "quickLoot",
+                            "autoFillDelete", "skipCinematics", "skipCinematicsAuto",
+                            "autoAcceptRoleCheck", "autoAcceptRoleCheckShift",
+                            "sortByMythicScore", "autoInsertKeystone", "quickSignup",
+                            "persistSignupNote", "hideBlizzardPartyFrame",
+                            "instanceResetAnnounce", "instanceResetAnnounceMsg",
+                            "healthMacroEnabled", "healthMacroPrio1", "healthMacroPrio2",
+                            "healthMacroPrio3", "foodMacroEnabled", "macroFactory",
+                        }
+                        local savedQoL = {}
+                        for _, k in ipairs(qolKeys) do
+                            if EllesmereUIDB[k] ~= nil then
+                                savedQoL[k] = EllesmereUIDB[k]
+                            end
+                        end
                         _G["EllesmereUIDB"] = { _resetVersion = resetVer }
                         EllesmereUIDB = _G["EllesmereUIDB"]
                         if oldScale then EllesmereUIDB.ppUIScale = oldScale end
@@ -1119,6 +1138,9 @@ initFrame:SetScript("OnEvent", function(self)
                             for k, v in pairs(savedFriends) do
                                 EllesmereUIDB.global[k] = v
                             end
+                        end
+                        for k, v in pairs(savedQoL) do
+                            EllesmereUIDB[k] = v
                         end
                         ReloadUI()
                     end,

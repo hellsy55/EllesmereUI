@@ -893,7 +893,7 @@ do
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
     local hp = UnitHealth(unit) or 0
-    return AbbreviateLargeNumbers(hp)
+    return AbbreviateNumbers(hp)
   end
 
   oUF.Tags.Methods[tagName] = AbbrevHP
@@ -922,7 +922,7 @@ oUF.Tags.Events["eui-perpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWE
 -- eui-curpp: current power as abbreviated number
 oUF.Tags.Methods["eui-curpp"] = [[function(u)
     local pType = UnitPowerType(u)
-    return AbbreviateLargeNumbers(UnitPower(u, pType))
+    return AbbreviateNumbers(UnitPower(u, pType))
 end]]
 oUF.Tags.Events["eui-curpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
 

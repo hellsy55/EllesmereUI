@@ -992,25 +992,25 @@ initFrame:SetScript("OnEvent", function(self)
                 local pct = _previewHealthPct or 0.70
                 local curHP = math.floor(maxHP * pct)
                 local pctInt = math.floor(pct * 100)
-                if content == "curhpshort" then return AbbreviateLargeNumbers(curHP)
+                if content == "curhpshort" then return AbbreviateNumbers(curHP)
                 elseif content == "perhp" then return pctInt .. "%"
                 elseif content == "perhpnosign" then return tostring(pctInt)
-                elseif content == "perhpnum" then return pctInt .. "% | " .. AbbreviateLargeNumbers(curHP)
-                else return AbbreviateLargeNumbers(curHP) .. " | " .. pctInt .. "%" end
+                elseif content == "perhpnum" then return pctInt .. "% | " .. AbbreviateNumbers(curHP)
+                else return AbbreviateNumbers(curHP) .. " | " .. pctInt .. "%" end
             elseif content == "perpp" then
                 local ppPct = _previewPowerPct or 0.85
                 return math.floor(ppPct * 100) .. "%"
             elseif content == "curpp" then
                 local maxPP = UnitPowerMax("player") or 100
                 local ppPct = _previewPowerPct or 0.85
-                return AbbreviateLargeNumbers(math.floor(maxPP * ppPct))
+                return AbbreviateNumbers(math.floor(maxPP * ppPct))
             elseif content == "curhp_curpp" then
                 local maxHP = UnitHealthMax("player") or 1
                 local pct = _previewHealthPct or 0.70
                 local curHP = math.floor(maxHP * pct)
                 local maxPP = UnitPowerMax("player") or 100
                 local ppPct2 = _previewPowerPct or 0.85
-                return AbbreviateLargeNumbers(curHP) .. " | " .. AbbreviateLargeNumbers(math.floor(maxPP * ppPct2))
+                return AbbreviateNumbers(curHP) .. " | " .. AbbreviateNumbers(math.floor(maxPP * ppPct2))
             elseif content == "perhp_perpp" then
                 local pct = _previewHealthPct or 0.70
                 local ppPct3 = _previewPowerPct or 0.85
