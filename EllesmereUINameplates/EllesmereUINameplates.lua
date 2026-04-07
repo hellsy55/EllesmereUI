@@ -4255,21 +4255,31 @@ function NameplateFrame:UpdateCast()
     end
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
-    -- Use the dedicated spell target APIs when available. These return
-    -- who the SPELL is aimed at (locked at cast start), not the mob's
-    -- current aggro target which can change mid-cast.
-    -- UnitSpellTargetName returns a secret string but SetText accepts it.
+    -- Get the cast target name and class for display.
+    -- Prefer UnitNameFromGUID for a clean name (no realm), but fall back
+    -- to UnitSpellTargetName (secret string, may include realm) when the
+    -- GUID isn't available (NPCs, non-party players, out-of-range targets).
     local spellTarget, spellTargetClass
-    if UnitSpellTargetName and UnitShouldDisplaySpellTargetName
-        and UnitShouldDisplaySpellTargetName(self.unit) then
+    if UnitSpellTargetClass then
+        spellTargetClass = UnitSpellTargetClass(self.unit)
+    end
+    local targetUnit = self.unit .. "target"
+    local targetGUID = UnitGUID(targetUnit)
+    if targetGUID and UnitNameFromGUID then
+        spellTarget = UnitNameFromGUID(targetGUID)
+    end
+    if not spellTarget and UnitSpellTargetName then
         spellTarget = UnitSpellTargetName(self.unit)
-        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
-    else
-        local targetUnit = self.unit .. "target"
-        spellTarget = UnitName(targetUnit)
+    end
+    if not spellTargetClass then
         spellTargetClass = UnitClassBase(targetUnit)
     end
     self.castTarget:SetText(spellTarget or "")
+    -- Cap target name to 50% of cast bar so it never pushes the spell name out
+    local castW = self.cast:GetWidth()
+    if castW and castW > 0 then
+        self.castTarget:SetWidth(castW * 0.5)
+    end
 
     -- Apply class color to cast target text if enabled and target is a player
     local db = p or defaults

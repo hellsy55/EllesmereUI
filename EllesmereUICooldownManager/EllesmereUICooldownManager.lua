@@ -2637,7 +2637,7 @@ LayoutCDMBar = function(barKey)
         if isMouseBar then
             icon:SetFrameStrata("TOOLTIP")
             icon:SetFrameLevel(9980 + i)
-        elseif icon:GetFrameStrata() == "TOOLTIP" then
+        else
             icon:SetFrameStrata("MEDIUM")
             icon:SetFrameLevel(5 + i)
         end
