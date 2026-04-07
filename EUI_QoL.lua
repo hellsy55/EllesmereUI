@@ -350,11 +350,32 @@ qolFrame:SetScript("OnEvent", function(self)
         containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         containerFrame:SetScript("OnEvent", function()
             if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false then return end
+            if InCombatLockdown() then return end
             if not pendingOpen then
                 pendingOpen = true
                 C_Timer.After(0.3, function()
-                    pendingOpen = false
-                    OpenAllContainers()
+                    -- Collect all openable items first
+                    local itemsToOpen = {}
+                    for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                            if IsOpenable(bag, slot) then
+                                table.insert(itemsToOpen, { bag = bag, slot = slot })
+                            end
+                        end
+                    end
+
+                    -- Open them one by one with delay between each
+                    local function OpenNext(index)
+                        if index > #itemsToOpen then
+                            pendingOpen = false
+                            return
+                        end
+                        local item = itemsToOpen[index]
+                        C_Container.UseContainerItem(item.bag, item.slot)
+                        C_Timer.After(0.15, function() OpenNext(index + 1) end)
+                    end
+
+                    OpenNext(1)
                 end)
             end
         end)
