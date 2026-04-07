@@ -54,8 +54,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 { key = "opt8", label = "Sanguithorn Tea",            items = {242299} },
                 { key = "opt9", label = "Azeroot Tea",                items = {242301} },
                 { key = "opt10", label = "Argentleaf Tea",            items = {242298} },
-                { key = "opt11", label = "Mana Lily Tea",             items = {242297} },
-                { key = "opt11", label = "Everspring Water",             items = {260259} },
+                { key = "opt11", label = "Everspring Water",          items = {260259} },
             },
         },
         {
@@ -84,7 +83,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     --  DB helper (global scope for polling)
     ---------------------------------------------------------------------------
     local function GetMacroDBByName(macroName)
-        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if not EllesmereUIDB then return {} end
         if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
         if not EllesmereUIDB.macroFactory[macroName] then EllesmereUIDB.macroFactory[macroName] = {} end
         return EllesmereUIDB.macroFactory[macroName]
@@ -162,7 +161,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         local idx = GetMacroIndexByName(def.name)
         if idx and idx ~= 0 then
             if InCombatLockdown() then
-                pendingMacroUpdates[def.name] = db
+                pendingMacroUpdates[def.name] = true
             else
                 EditMacro(idx, nil, nil, BuildMacroBody(def, db))
             end
@@ -170,7 +169,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     end
 
     local function ProcessPendingMacroUpdates()
-        for macroName, db in pairs(pendingMacroUpdates) do
+        for macroName in pairs(pendingMacroUpdates) do
             local mdef = nil
             for _, def in ipairs(GENERAL_DEFS) do
                 if def.name == macroName then
@@ -181,6 +180,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             if mdef then
                 local idx = GetMacroIndexByName(mdef.name)
                 if idx and idx ~= 0 then
+                    local db = GetMacroDBByName(mdef.name)
                     EditMacro(idx, nil, nil, BuildMacroBody(mdef, db))
                 end
             end
@@ -289,7 +289,10 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             btn._playFlash = PlayFlash
 
             -- State
-            local function MacroExists() return GetMacroIndexByName(def.name) ~= 0 end
+            local function MacroExists()
+                local idx = GetMacroIndexByName(def.name)
+                return idx and idx ~= 0
+            end
             local function RefreshState()
                 local exists = MacroExists()
                 tex:SetDesaturated(exists)
@@ -298,7 +301,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
             -- DB helper
             local function GetDB()
-                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB then return {} end
                 if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
                 if not EllesmereUIDB.macroFactory[def.name] then EllesmereUIDB.macroFactory[def.name] = {} end
                 return EllesmereUIDB.macroFactory[def.name]
@@ -629,8 +632,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             if btn and btn._tex then
                 local mdef = GENERAL_DEFS[mi]
                 if mdef and mdef.checkboxes then
-                    local ex = GetMacroIndexByName(mdef.name) ~= 0
-                    if ex then
+                    local idx = GetMacroIndexByName(mdef.name)
+                    if idx and idx ~= 0 then
                         local db = GetMacroDBByName(mdef.name)
                         local newAvailableItemID = GetFirstAvailableItemID(mdef, db)
                         local oldAvailableItemID = lastAvailableItems[mdef.name]
@@ -656,7 +659,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             if btn and btn._tex then
                 local mdef = GENERAL_DEFS[mi]
                 if mdef then
-                    local ex = GetMacroIndexByName(mdef.name) ~= 0
+                    local idx = GetMacroIndexByName(mdef.name)
+                    local ex = idx and idx ~= 0
                     if btn._isGray and not ex then btn._tex:SetDesaturated(false); btn._isGray = false
                     elseif not btn._isGray and ex then btn._tex:SetDesaturated(true); btn._isGray = true end
                     if btn._refreshIcon then btn._refreshIcon() end
