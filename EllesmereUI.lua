@@ -6098,7 +6098,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.3"
+EllesmereUI.VERSION = "6.3.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6171,15 +6171,11 @@ do
                 if not adb then return false end
                 for key, info in pairs(adb) do
                     if info.target then
-                        -- Check if this element or its target is an action bar
+                        -- Check if an action bar itself is anchored to something
                         local isBar = (key == "MainBar" or key == "StanceBar" or key == "PetBar"
                             or key == "MicroBar" or key == "BagBar" or key == "XPBar" or key == "RepBar"
                             or (key:sub(1, 3) == "Bar" and tonumber(key:sub(4))))
-                        local targetIsBar = (info.target == "MainBar" or info.target == "StanceBar"
-                            or info.target == "PetBar" or info.target == "MicroBar"
-                            or info.target == "BagBar" or info.target == "XPBar" or info.target == "RepBar"
-                            or (info.target:sub(1, 3) == "Bar" and tonumber(info.target:sub(4))))
-                        if isBar or targetIsBar then return true end
+                        if isBar then return true end
                     end
                 end
                 return false

@@ -6676,6 +6676,12 @@ function EAB:FinishSetup()
         -- Visual styling: defer visuals to out-of-combat if needed.
         local function DoVisuals()
             ApplyAll()
+            -- Reapply unlock-mode positions + anchor chains now that bars exist.
+            -- (The EUI_UnlockMode hook on EAB.ApplyAll doesn't fire because
+            -- ApplyAll is a local function, not on the addon table.)
+            if EllesmereUI._applySavedPositions then
+                C_Timer_After(1.5, EllesmereUI._applySavedPositions)
+            end
             ApplyKeyDownCVar()
             self:SyncEditModeIcons()
             self:HookProcGlow()

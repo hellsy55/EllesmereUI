@@ -1940,7 +1940,8 @@ local function CreatePowerBar(frame, unit, settings)
     end
 
     -- Power percent text overlay
-    local ppTextOvr = CreateFrame("Frame", nil, power)
+    -- Parent to frame (not power) so text isn't clipped by the bar clip container
+    local ppTextOvr = CreateFrame("Frame", nil, frame)
     ppTextOvr:SetAllPoints(power)
     ppTextOvr:SetFrameLevel(frame:GetFrameLevel() + 11)
     local ppFS = ppTextOvr:CreateFontString(nil, "OVERLAY")

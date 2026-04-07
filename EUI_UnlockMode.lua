@@ -238,7 +238,29 @@ if not EllesmereUI.IsUnlockAnchored then
     end
 end
 
-
+-- Early anchor reapply on login: the full ApplySavedPositions lives in the
+-- deferred block and only runs when EnsureLoaded() fires (options open, CDM
+-- init, etc.). Without this, anchored action bars never resolve their chain
+-- if the user doesn't open options and CDM is disabled.
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        C_Timer.After(1.5, function()
+            -- If the deferred block already ran, it handles everything
+            if EllesmereUI._applySavedPositions then return end
+            -- Otherwise, use the lightweight stub to reapply all anchors
+            local adb = EllesmereUIDB and EllesmereUIDB.unlockAnchors
+            if not adb then return end
+            for childKey, info in pairs(adb) do
+                if info.target and EllesmereUI.ReapplyOwnAnchor then
+                    EllesmereUI.ReapplyOwnAnchor(childKey)
+                end
+            end
+        end)
+    end)
+end
 
 -- DEFERRED: heavy body (4900+ lines) runs on first EnsureLoaded() call.
 EllesmereUI._deferredInits[#EllesmereUI._deferredInits + 1] = function()

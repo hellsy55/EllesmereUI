@@ -201,8 +201,13 @@ function EUILite.NewDB(svName, defaults, defaultToCharKey)
     local profile = profileData.addons[folder]
 
     -- Child SV globals are vestigial (all data lives in EllesmereUIDB).
-    -- Always blank them so WoW saves a clean file at logout.
-    _G[svName] = {}
+    -- Wipe in-place (not replace) so WoW's SV serializer, which holds
+    -- the original table reference from load time, saves the empty table.
+    if _G[svName] and type(_G[svName]) == "table" then
+        wipe(_G[svName])
+    else
+        _G[svName] = {}
+    end
 
     -- Merge defaults into profile (fills missing keys only)
     local profileDefaults = defaults and defaults.profile
