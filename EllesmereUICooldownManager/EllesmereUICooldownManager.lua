@@ -1858,8 +1858,10 @@ HideBlizzardCDM = function()
                 frame:ClearAllPoints()
                 frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
             end
-            pcall(frame.EnableMouse, frame, false)
-            if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+            if not InCombatLockdown() then
+                frame:EnableMouse(false)
+                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+            end
         end
     end
 end
@@ -3571,7 +3573,7 @@ _CDMApplyVisibility = function()
             if unlockActive and not barData.isGhostBar then
                 _CDMStopFade(frame)
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
+                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
             else
 
@@ -3606,7 +3608,7 @@ _CDMApplyVisibility = function()
             if shouldHide then
                 if vis ~= "mouseover" then _CDMStopFade(frame) end
                 frame:SetAlpha(0)
-                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, vis == "mouseover") end
+                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(vis == "mouseover") end
                 frame._visHidden = true
                 -- Hide this bar's icons individually. The viewer may stay
                 -- at alpha 1 (other bars need it), so icon alpha must be
@@ -3621,7 +3623,7 @@ _CDMApplyVisibility = function()
                 local wasHidden = frame._visHidden
                 _CDMStopFade(frame)
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
+                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
                 -- Restore icon alpha and reposition
                 if wasHidden then

@@ -4260,24 +4260,15 @@ function NameplateFrame:UpdateCast()
     end
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
-    -- Get the cast target name and class for display.
-    -- Always try UnitSpellTargetName (Plater pattern) -- don't gate on
-    -- UnitShouldDisplaySpellTargetName which returns false for some casts
-    -- that do have targets. Prefer UnitNameFromGUID for a clean name (no realm).
+    -- Get the cast target name and class for display (Midnight APIs).
+    -- UnitSpellTargetName returns a unit token or full name-realm;
+    -- pass through UnitName() to get a clean short name (no realm).
     local spellTarget, spellTargetClass
-    local targetUnit = self.unit .. "target"
-    local targetGUID = UnitGUID(targetUnit)
-    if targetGUID and UnitNameFromGUID then
-        spellTarget = UnitNameFromGUID(targetGUID)
-    end
-    if not spellTarget and UnitSpellTargetName then
-        spellTarget = UnitSpellTargetName(self.unit)
-    end
-    if UnitSpellTargetClass then
-        spellTargetClass = UnitSpellTargetClass(self.unit)
-    end
-    if not spellTargetClass then
-        spellTargetClass = UnitClassBase(targetUnit)
+    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
+    if rawTarget then
+        local shortName = UnitName(rawTarget)
+        spellTarget = shortName or rawTarget
+        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
     end
     local hasTarget = spellTarget and true or false
     self.castTarget:SetText(spellTarget or "")

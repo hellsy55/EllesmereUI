@@ -8,7 +8,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local ICON_SIZE = 40
     local ICON_GAP = 40
     local ICONS_PER_ROW = 4
-    local FIRST_ICON_Y = -24
+    local SPEC_ICONS_PER_ROW = 3
+    local SPEC_ICON_GAP = 70
+    local FIRST_ICON_Y = -34
     local ROW_STRIDE = 66
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN
@@ -74,16 +76,52 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         {
             name = "EUI_Focus",
             icon = "Interface\\Icons\\ability_hunter_focusedaim",
-            label = "Focus Mouseover",
-            fixedBody = "/focus [@mouseover]",
+            macroIcon = 236203,
+            label = "Set Focus",
+            fixedBody = "/focus [@mouseover,exists,nodead] []",
         },
     }
 
     ---------------------------------------------------------------------------
-    --  DB helper (global scope for polling)
+    --  Spec macro definitions (keyed by specID)
+    --  Format: same as GENERAL_DEFS but fixedBody only (no checkboxes).
+    --  Each entry: { name, icon, label, fixedBody, fixedTooltip (optional) }
     ---------------------------------------------------------------------------
-    local function GetMacroDBByName(macroName)
-        if not EllesmereUIDB then return {} end
+    local SPEC_DEFS = {
+        [65] = { -- Holy Paladin
+            {
+                name = "EUI_DevoJudge",
+                icon = "Interface\\Icons\\spell_holy_devotionaura",
+                label = "Devo Aura\nJudgment",
+                tooltip = "Casts Devotion Aura if it's not active\nwhen pressing Judgment",
+                fixedBody = "/startattack\n/cast [nostance:2] Devotion Aura; Judgment",
+                fixedTooltip = "Judgment",
+            },
+            {
+                name = "EUI_AutoRites",
+                icon = "Interface\\Icons\\inv_mace_2h_oribosquestholy_d_01",
+                macroIcon = 237172,
+                label = "Auto Apply\nRites",
+                tooltip = "Automatically applies Rite of Sanctification\nor Adjuration depending on talents",
+                fixedBody = "/cast [known:433568] Rite of Sanctification\n/cast [known:433583] Rite of Adjuration\n/use 16",
+            },
+        },
+    }
+
+    -- Detect current spec and class
+    local specIndex = GetSpecialization()
+    local activeSpecID, activeSpecName
+    if specIndex then
+        activeSpecID, activeSpecName = GetSpecializationInfo(specIndex)
+    end
+    local activeClassName = UnitClass("player") or "Unknown"
+    local activeSpecDefs = activeSpecID and SPEC_DEFS[activeSpecID] or {}
+
+    ---------------------------------------------------------------------------
+    --  DB helper (shared across all buttons and event handlers)
+    ---------------------------------------------------------------------------
+    local function GetMacroDB(macroName)
+        if not EllesmereUIDB then EllesmereUIDB = {} end
         if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
         if not EllesmereUIDB.macroFactory[macroName] then EllesmereUIDB.macroFactory[macroName] = {} end
         return EllesmereUIDB.macroFactory[macroName]
@@ -104,7 +142,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             local cb = cbs[idx]
             if cb and db[cb.key] ~= false then
                 for _, itemID in ipairs(cb.items) do
-                    if C_Item.GetItemCount(itemID) > 0 then
+                    if (GetItemCount(itemID, false) or 0) > 0 then
                         return itemID
                     end
                 end
@@ -159,7 +197,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
     local function UpdateMacro(def, db)
         local idx = GetMacroIndexByName(def.name)
-        if idx and idx ~= 0 then
+        if idx ~= 0 then
             if InCombatLockdown() then
                 pendingMacroUpdates[def.name] = true
             else
@@ -179,8 +217,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             end
             if mdef then
                 local idx = GetMacroIndexByName(mdef.name)
-                if idx and idx ~= 0 then
-                    local db = GetMacroDBByName(mdef.name)
+                if idx ~= 0 then
+                    local db = GetMacroDB(mdef.name)
                     EditMacro(idx, nil, nil, BuildMacroBody(mdef, db))
                 end
             end
@@ -192,7 +230,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     --  Layout
     ---------------------------------------------------------------------------
     local generalRows = math.ceil(#GENERAL_DEFS / ICONS_PER_ROW)
-    local SECTION_H = 92 + ROW_STRIDE * (generalRows - 1)
+    local specRows = #activeSpecDefs > 0 and math.ceil(#activeSpecDefs / SPEC_ICONS_PER_ROW) or 0
+    local maxRows = math.max(generalRows, specRows)
+    local SECTION_H = 102 + ROW_STRIDE * (maxRows - 1)
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(parent:GetWidth(), SECTION_H)
@@ -200,7 +240,6 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
     local halfW = parent:GetWidth() / 2
     local allMacroButtons = {}
-    local allCogPopups = {}
     local lastAvailableItems = {}
 
     -- Center divider (1px absolute pixel)
@@ -217,7 +256,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     ---------------------------------------------------------------------------
     --  BuildMacroGroup: creates a titled grid of macro icons
     ---------------------------------------------------------------------------
-    local function BuildMacroGroup(defs, anchorSide, titleText)
+    local function BuildMacroGroup(defs, anchorSide, titleText, perRow, gap)
+        perRow = perRow or ICONS_PER_ROW
+        gap = gap or ICON_GAP
         local isLeft = (anchorSide == "LEFT")
         local centerX = isLeft and (halfW / 2) or (halfW + halfW / 2)
 
@@ -230,11 +271,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         local numIcons = #defs
 
         for gi, def in ipairs(defs) do
-            local rowIdx = math.floor((gi - 1) / ICONS_PER_ROW)
-            local colIdx = (gi - 1) % ICONS_PER_ROW
-            local iconsInRow = math.min(ICONS_PER_ROW, numIcons - rowIdx * ICONS_PER_ROW)
-            local rowW = iconsInRow * ICON_SIZE + (iconsInRow - 1) * ICON_GAP
-            local iconX = centerX - rowW / 2 + ICON_SIZE / 2 + colIdx * (ICON_SIZE + ICON_GAP)
+            local rowIdx = math.floor((gi - 1) / perRow)
+            local colIdx = (gi - 1) % perRow
+            local iconsInRow = math.min(perRow, numIcons - rowIdx * perRow)
+            local rowW = iconsInRow * ICON_SIZE + (iconsInRow - 1) * gap
+            local iconX = centerX - rowW / 2 + ICON_SIZE / 2 + colIdx * (ICON_SIZE + gap)
             local iconY = FIRST_ICON_Y - rowIdx * ROW_STRIDE
 
             local btn = CreateFrame("Button", nil, container)
@@ -243,7 +284,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             btn:SetFrameLevel(container:GetFrameLevel() + 5)
 
             local tex = btn:CreateTexture(nil, "ARTWORK")
-            tex:SetAllPoints(); tex:SetTexture(def.icon); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            tex:SetAllPoints(); tex:SetTexture(def.macroIcon or def.icon); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
             btn._tex = tex
 
             local bdr = CreateFrame("Frame", nil, btn)
@@ -260,7 +301,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             btn._hoverBdr = hoverBdr
 
             local labelFS = container:CreateFontString(nil, "OVERLAY")
-            labelFS:SetFont(fontPath, 11, ""); labelFS:SetTextColor(1, 1, 1, 0.9)
+            labelFS:SetFont(fontPath, 13, ""); labelFS:SetTextColor(1, 1, 1, 0.9)
             labelFS:SetPoint("TOP", btn, "BOTTOM", 0, -4); labelFS:SetText(def.label)
             btn._label = labelFS
 
@@ -289,23 +330,14 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             btn._playFlash = PlayFlash
 
             -- State
-            local function MacroExists()
-                local idx = GetMacroIndexByName(def.name)
-                return idx and idx ~= 0
-            end
+            local function MacroExists() return GetMacroIndexByName(def.name) ~= 0 end
             local function RefreshState()
                 local exists = MacroExists()
                 tex:SetDesaturated(exists)
                 btn._isGray = exists
             end
 
-            -- DB helper
-            local function GetDB()
-                if not EllesmereUIDB then return {} end
-                if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
-                if not EllesmereUIDB.macroFactory[def.name] then EllesmereUIDB.macroFactory[def.name] = {} end
-                return EllesmereUIDB.macroFactory[def.name]
-            end
+            local function GetDB() return GetMacroDB(def.name) end
 
             -- Dynamic icon: show the first selected item or equipped trinket
             local function RefreshIcon()
@@ -331,7 +363,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                         icon = GetInventoryItemTexture("player", slot)
                     end
                 end
-                tex:SetTexture(icon or def.icon)
+                tex:SetTexture(icon or def.macroIcon or def.icon)
             end
             btn._refreshIcon = RefreshIcon
             RefreshIcon()
@@ -382,7 +414,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                         DeleteMacro(def.name)
                     else
                         local db = GetDB()
-                        CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
+                        CreateMacro(def.name, def.macroIcon or "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
                         lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
                         PlayFlash()
                         C_Timer.After(0.15, function()
@@ -583,19 +615,24 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
             btn._showMenu = function()
                 BuildMenu()
-                for _, pf in pairs(allCogPopups) do if pf and pf:IsShown() then pf:Hide() end end
+                for _, mb in ipairs(allMacroButtons) do
+                    if mb._cogPopup and mb._cogPopup:IsShown() then mb._cogPopup:Hide() end
+                end
                 if menuFrame:IsShown() then menuFrame:Hide(); return end
                 local bs = btn:GetEffectiveScale(); local us = UIParent:GetEffectiveScale()
                 menuFrame:SetScale(bs / us); menuFrame:ClearAllPoints()
                 menuFrame:SetPoint("TOP", btn, "BOTTOM", 0, -18)
                 if menuFrame._refreshAction then menuFrame._refreshAction() end
-                menuFrame:Show(); allCogPopups[gi] = menuFrame
+                menuFrame:Show(); btn._cogPopup = menuFrame
             end
 
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn:SetScript("OnEnter", function(self)
                 self._hoverBdr:Show()
-                if self._isGray then
+                if def.tooltip then
+                    local status = self._isGray and "|cff888888Created|r" or "|cff888888Click to create|r"
+                    EllesmereUI.ShowWidgetTooltip(self, def.tooltip .. "\n" .. status)
+                elseif self._isGray then
                     EllesmereUI.ShowWidgetTooltip(self, def.label .. " macro created. Right-click to configure.")
                 else
                     EllesmereUI.ShowWidgetTooltip(self, "Click to create " .. def.label .. " macro\nRight-click to configure")
@@ -607,7 +644,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 if self._isGray then return end
                 if InCombatLockdown() then return end
                 local db = GetDB()
-                CreateMacro(def.name, "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
+                CreateMacro(def.name, def.macroIcon or "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
                 lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
                 self._playFlash()
                 C_Timer.After(0.1, RefreshState)
@@ -617,37 +654,39 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             end)
 
             RefreshState()
-            allMacroButtons[gi] = btn
+            btn._def = def
+            allMacroButtons[#allMacroButtons + 1] = btn
         end -- for gi
     end -- BuildMacroGroup
 
     -- Build general macros on left side
-    BuildMacroGroup(GENERAL_DEFS, "LEFT", "General Macros")
+    BuildMacroGroup(GENERAL_DEFS, "LEFT", "General Macro Factory")
 
-    -- "Coming Soon" text on right side
-    local comingSoonFS = container:CreateFontString(nil, "OVERLAY")
-    comingSoonFS:SetFont(fontPath, 14, "")
-    comingSoonFS:SetTextColor(1, 1, 1, 0.3)
-    comingSoonFS:SetPoint("CENTER", container, "TOPLEFT", halfW + halfW / 2, -SECTION_H / 2)
-    comingSoonFS:SetText("EllesmereUI Spec Macros are coming soon!")
-    comingSoonFS:SetJustifyH("CENTER")
+    -- Build spec macros on right side
+    if #activeSpecDefs > 0 then
+        BuildMacroGroup(activeSpecDefs, "RIGHT", (activeSpecName or "Spec") .. " " .. activeClassName .. " Macro Factory", SPEC_ICONS_PER_ROW, SPEC_ICON_GAP)
+    else
+        local emptyFS = container:CreateFontString(nil, "OVERLAY")
+        emptyFS:SetFont(fontPath, 12, "")
+        emptyFS:SetTextColor(1, 1, 1, 0.25)
+        emptyFS:SetPoint("CENTER", container, "TOPLEFT", halfW + halfW / 2, -SECTION_H / 2)
+        emptyFS:SetText("No spec macros for " .. (activeSpecName or "this spec"))
+        emptyFS:SetJustifyH("CENTER")
+    end
 
     -- Update macros when inventory changes
     local function UpdateInventoryDependentMacros()
-        for mi, btn in pairs(allMacroButtons) do
-            if btn and btn._tex then
-                local mdef = GENERAL_DEFS[mi]
-                if mdef and mdef.checkboxes then
-                    local idx = GetMacroIndexByName(mdef.name)
-                    if idx and idx ~= 0 then
-                        local db = GetMacroDBByName(mdef.name)
-                        local newAvailableItemID = GetFirstAvailableItemID(mdef, db)
-                        local oldAvailableItemID = lastAvailableItems[mdef.name]
-                        if newAvailableItemID ~= oldAvailableItemID then
-                            lastAvailableItems[mdef.name] = newAvailableItemID
-                            -- Defer macro update to avoid protected function error
-                            C_Timer.After(0, function() UpdateMacro(mdef, db) end)
-                        end
+        for _, btn in ipairs(allMacroButtons) do
+            local mdef = btn._def
+            if mdef and mdef.checkboxes and btn._tex then
+                local idx = GetMacroIndexByName(mdef.name)
+                if idx ~= 0 then
+                    local db = GetMacroDB(mdef.name)
+                    local newAvailableItemID = GetFirstAvailableItemID(mdef, db)
+                    local oldAvailableItemID = lastAvailableItems[mdef.name]
+                    if newAvailableItemID ~= oldAvailableItemID then
+                        lastAvailableItems[mdef.name] = newAvailableItemID
+                        UpdateMacro(mdef, db)
                     end
                 end
             end
@@ -661,31 +700,37 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         elapsed = elapsed + dt
         if elapsed < 2 then return end
         elapsed = 0
-        for mi, btn in pairs(allMacroButtons) do
-            if btn and btn._tex then
-                local mdef = GENERAL_DEFS[mi]
-                if mdef then
-                    local idx = GetMacroIndexByName(mdef.name)
-                    local ex = idx and idx ~= 0
-                    if btn._isGray and not ex then btn._tex:SetDesaturated(false); btn._isGray = false
-                    elseif not btn._isGray and ex then btn._tex:SetDesaturated(true); btn._isGray = true end
-                    if btn._refreshIcon then btn._refreshIcon() end
-                    local pf = allCogPopups[mi]
-                    if pf and pf:IsShown() and pf._refreshAction then pf._refreshAction() end
+        for _, btn in ipairs(allMacroButtons) do
+            local mdef = btn._def
+            if mdef and btn._tex then
+                local ex = GetMacroIndexByName(mdef.name) ~= 0
+                if btn._isGray and not ex then btn._tex:SetDesaturated(false); btn._isGray = false
+                elseif not btn._isGray and ex then btn._tex:SetDesaturated(true); btn._isGray = true end
+                if btn._refreshIcon then btn._refreshIcon() end
+                if btn._cogPopup and btn._cogPopup:IsShown() and btn._cogPopup._refreshAction then
+                    btn._cogPopup._refreshAction()
                 end
             end
         end
     end)
 
-    -- Update macros immediately when bag changes
-    local bagUpdateFrame = CreateFrame("Frame", nil, container)
-    bagUpdateFrame:RegisterEvent("BAG_UPDATE")
-    bagUpdateFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    bagUpdateFrame:SetScript("OnEvent", function(self, event)
+    -- Update macros when bag changes (throttled), spec changes, or combat ends
+    local eventFrame = CreateFrame("Frame", nil, container)
+    local bagUpdatePending = false
+    eventFrame:RegisterEvent("BAG_UPDATE")
+    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    eventFrame:SetScript("OnEvent", function(self, event)
         if event == "PLAYER_REGEN_ENABLED" then
             ProcessPendingMacroUpdates()
-        else
-            UpdateInventoryDependentMacros()
+        elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
+            EllesmereUI:RefreshPage()
+        elseif not bagUpdatePending then
+            bagUpdatePending = true
+            C_Timer.After(0.5, function()
+                bagUpdatePending = false
+                UpdateInventoryDependentMacros()
+            end)
         end
     end)
 

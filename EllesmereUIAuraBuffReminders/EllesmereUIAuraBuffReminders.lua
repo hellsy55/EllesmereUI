@@ -2071,6 +2071,18 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 local preferredKey = co.preferredFood or "last_used"
                 local lastUsedID = db.char and db.char.lastUsedFood or nil
                 local foodItemID = FindFoodItem(preferredKey, lastUsedID)
+                if not foodItemID then
+                    if preferredKey == "last_used" then
+                        foodItemID = lastUsedID
+                    else
+                        for _, f in ipairs(FOOD_ITEMS) do
+                            if f.key == preferredKey then foodItemID = f.itemID; break end
+                        end
+                    end
+                    if not foodItemID and FOOD_ITEMS[1] then
+                        foodItemID = FOOD_ITEMS[1].itemID
+                    end
+                end
                 if foodItemID then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = foodItemID
