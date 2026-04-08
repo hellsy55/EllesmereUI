@@ -444,11 +444,13 @@ initFrame:SetScript("OnEvent", function(self)
                             overlay:SetAllPoints(pip)
                             overlay:SetFrameLevel(pip:GetFrameLevel() + 3)
                             local fs = overlay:CreateFontString(nil, "OVERLAY")
-                            fs:SetPoint("CENTER", pip, "CENTER", 0, 0)
                             fs:SetTextColor(1, 1, 1, 0.9)
                             pip._pvCdText = fs
                         end
                         SetPVFont(pip._pvCdText, FONT_PATH, sp.textSize)
+                        pip._pvCdText:ClearAllPoints()
+                        pip._pvCdText:SetPoint("CENTER", pip, "CENTER",
+                            sp.textXOffset or 0, sp.textYOffset or 0)
                         if not active then
                             -- Fake durations: higher numbers for pips further right
                             local fakeDurations = { 2, 4, 7, 9, 10 }

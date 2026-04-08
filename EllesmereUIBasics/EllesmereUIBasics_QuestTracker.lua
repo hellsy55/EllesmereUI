@@ -3,16 +3,24 @@
 -------------------------------------------------------------------------------
 local addonName, ns = ...
 
+-- Accent slots are SHARED REFERENCES to EllesmereUI.ELLESMERE_GREEN. The
+-- accent table is mutated in place when the user changes their theme/color,
+-- so any read of C.accent.r/g/b automatically picks up the live values
+-- without needing to re-fetch. Non-accent colors stay as their own tables.
+-- A fallback table is used if EllesmereUI is not yet loaded (won't happen
+-- in practice because of the parent dependency, but keeps the file safe).
+local _accentLive = (EllesmereUI and EllesmereUI.ELLESMERE_GREEN)
+                    or { r=0.047, g=0.824, b=0.624 }
 local C = {
-    accent    = { r=0.047, g=0.824, b=0.624 },
+    accent    = _accentLive,
     complete  = { r=0.25,  g=1.0,   b=0.35  },
     failed    = { r=1.0,   g=0.3,   b=0.3   },
     header    = { r=1.0,   g=1.0,   b=1.0   },
-    section   = { r=0.047, g=0.824, b=0.624 },
+    section   = _accentLive,
     timer     = { r=1.0,   g=0.82,  b=0.2   },
     timerLow  = { r=1.0,   g=0.3,   b=0.3   },
     barBg     = { r=0.15,  g=0.15,  b=0.15  },
-    barFill   = { r=0.047, g=0.824, b=0.624 },
+    barFill   = _accentLive,
     focus     = { r=0.6,   g=0.3,   b=0.9   },
 }
 
@@ -615,23 +623,16 @@ local function AcquireItemBtn()
     icon:SetAllPoints(); icon:SetTexCoord(0.07, 0.93, 0.07, 0.93); b._icon = icon
     local cd = CreateFrame("Cooldown", nil, b, "CooldownFrameTemplate")
     cd:SetAllPoints(); b._cd = cd
-    b:SetScript("OnEnter", function(self)
+    -- No item tooltip on hover: creating a Lua-side GameTooltip from
+    -- GameTooltipTemplate taints Blizzard's tooltip data registry on
+    -- Midnight, which causes secret-value errors in unrelated tooltips
+    -- (world quests, area POIs, etc.). The button still triggers the
+    -- mouseover-show behavior for the quest tracker fade.
+    b:SetScript("OnEnter", function()
         if EQT._qtMouseoverIn then EQT._qtMouseoverIn() end
-        if self._itemID then
-            local tip = _G.EQT_ItemTooltip
-            if not tip then
-                tip = CreateFrame("GameTooltip", "EQT_ItemTooltip", UIParent, "GameTooltipTemplate")
-                tip:SetFrameStrata("TOOLTIP")
-            end
-            tip:SetOwner(self, "ANCHOR_LEFT")
-            tip:SetItemByID(self._itemID)
-            tip:Show()
-        end
     end)
     b:SetScript("OnLeave", function()
         if EQT._qtMouseoverOut then EQT._qtMouseoverOut() end
-        local tip = _G.EQT_ItemTooltip
-        if tip then tip:Hide() end
     end)
     allItemBtns[#allItemBtns + 1] = b
     return b
@@ -991,22 +992,19 @@ local function GetScenarioSection()
             end
         end
         if #affixSpellIDs > 0 then
-            -- Create a hidden scan tooltip once
-            if not _G._eqtScanTip then
-                _G._eqtScanTip = CreateFrame("GameTooltip", "EQTScanTip", nil, "GameTooltipTemplate")
-                _G._eqtScanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
-            end
-            local tip = _G._eqtScanTip
+            -- Read affix progress via C_TooltipInfo.GetSpellByID instead of
+            -- a Lua-side GameTooltipTemplate. The previous scan-tooltip
+            -- approach (CreateFrame "GameTooltip" + SetSpellByID + reading
+            -- TextLeft FontStrings) tainted Blizzard's tooltip data registry
+            -- on Midnight, causing secret-value arithmetic errors in
+            -- unrelated tooltips (world quests, area POIs, item displays).
             local GetName = C_Spell and C_Spell.GetSpellName or GetSpellInfo
             for _, sid in ipairs(affixSpellIDs) do
-                tip:SetOwner(WorldFrame, "ANCHOR_NONE")
-                tip:ClearLines()
-                tip:SetSpellByID(sid)
-                local nLines = tip:NumLines()
-                for li = 1, nLines do
-                    local left = _G["EQTScanTipTextLeft" .. li]
-                    if left then
-                        local txt = left:GetText()
+                local data = C_TooltipInfo and C_TooltipInfo.GetSpellByID
+                             and C_TooltipInfo.GetSpellByID(sid)
+                if data and data.lines then
+                    for _, line in ipairs(data.lines) do
+                        local txt = line.leftText
                         if txt then
                             -- Strip WoW color codes: |cnNAME:text|r and |cAARRGGBBtext|r
                             local clean = txt:gsub("|cn[^:]*:", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
@@ -2790,29 +2788,83 @@ function EQT:Init()
     self.frame:SetHeight(Cfg("height") or 500)
     self:ApplyPosition()
 
-    -- Hide Blizzard ObjectiveTrackerFrame by moving it off-screen.
-    -- SetPoint to a far-off position is taint-safe (no SetParent needed).
-    -- Hook SetPoint on the frame so whenever Blizzard repositions it,
-    -- we immediately re-suppress.
-    local _eqtSuppressing = false
-    local _eqtOffScreenPoint = { "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000 }
+    -- Re-paint quest tracker rows whenever the user changes their accent
+    -- color. The C.accent / C.section / C.barFill tables are shared
+    -- references to ELLESMERE_GREEN so per-call reads pick up live values
+    -- automatically, but textures and fontstrings already drawn with the
+    -- previous color need a structural rebuild to repaint. SetDirty(true)
+    -- coalesces internally so the multiple ticks during the accent fade
+    -- result in only one or two actual rebuilds.
+    if EllesmereUI and EllesmereUI.RegAccent and not EQT._accentReg then
+        EQT._accentReg = true
+        EllesmereUI.RegAccent({ type="callback", fn=function()
+            if EQT.SetDirty then EQT:SetDirty(true) end
+        end })
+    end
 
-    -- Suppress / unsuppress the Blizzard ObjectiveTrackerFrame.
+    -- Hide Blizzard ObjectiveTrackerFrame by moving it WAY off-screen.
+    --
+    -- Alpha-only suppression used to be the approach here, but some of the
+    -- tracker's child elements (quest-item buttons in particular) bypass
+    -- parent alpha -- likely via SetIgnoreParentAlpha(true) on modern
+    -- Blizzard builds -- so users saw floating quest items even with the
+    -- tracker at alpha 0. Moving the top-level frame -10000,10000 is a
+    -- bulletproof hide: children inherit position through SetPoint, so no
+    -- matter what alpha overrides they carry, they render off-screen too.
+    --
+    -- SetPoint is taint-safe on ObjectiveTrackerFrame (it's not a secure
+    -- template, and SetPoint is unrestricted in combat). Same pattern we
+    -- use for FriendsFrame: hooksecurefunc SetPoint only, guarded by a
+    -- single reentry flag, and re-apply our off-screen position whenever
+    -- Blizzard / Edit Mode repositions the frame.
+    --
     -- Only touch the top-level frame. Recursing into descendants
-    -- force-enables mouse on internal widget containers (scenario
-    -- and delve widget frames) that were never meant to receive
-    -- clicks, and those can behave as invisible click-catchers that
-    -- block mouse input across a large area of the screen.
+    -- force-enables mouse on internal widget containers (scenario and
+    -- delve widget frames) that were never meant to receive clicks --
+    -- this is what caused the v6.3.6 M+/Delves cursor lockout disaster.
+    local _eqtSuppressing     = false
+    local _eqtIgnoreSetPoint  = false
+    local _eqtSavedAnchors    = nil    -- captured original anchor list
+
+    local function CaptureAnchors(ot)
+        local n = ot:GetNumPoints() or 0
+        if n <= 0 then return nil end
+        local list = {}
+        for i = 1, n do
+            local p, rel, relP, x, y = ot:GetPoint(i)
+            list[i] = { p, rel, relP, x, y }
+        end
+        return list
+    end
+
     local function SuppressTracker(ot)
-        ot:SetAlpha(0)
+        if _eqtIgnoreSetPoint then return end
+        _eqtIgnoreSetPoint = true
+        if not _eqtSavedAnchors then
+            _eqtSavedAnchors = CaptureAnchors(ot)
+        end
+        ot:ClearAllPoints()
+        ot:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
         ot:EnableMouse(false)
         if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
+        _eqtIgnoreSetPoint = false
     end
 
     local function UnsuppressTracker(ot)
-        ot:SetAlpha(1)
+        if _eqtIgnoreSetPoint then return end
+        _eqtIgnoreSetPoint = true
+        if _eqtSavedAnchors and #_eqtSavedAnchors > 0 then
+            ot:ClearAllPoints()
+            for i = 1, #_eqtSavedAnchors do
+                local a = _eqtSavedAnchors[i]
+                -- pcall in case a stored anchor target is no longer valid
+                pcall(ot.SetPoint, ot, a[1], a[2], a[3], a[4], a[5])
+            end
+        end
+        _eqtSavedAnchors = nil
         ot:EnableMouse(true)
         if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
+        _eqtIgnoreSetPoint = false
     end
 
     local function ApplyBlizzardTrackerVisibility()
@@ -2831,18 +2883,18 @@ function EQT:Init()
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
     ApplyBlizzardTrackerVisibility()
 
-    -- Hook SetAlpha so whenever Blizzard restores visibility, we re-suppress
+    -- Single SetPoint hook (matches the FriendsFrame pattern at
+    -- EllesmereUIBasics.lua:3720). Any attempt by Blizzard / Edit Mode /
+    -- layout code to re-anchor the tracker while we're suppressing
+    -- immediately re-applies the off-screen position. The reentry guard
+    -- prevents an infinite loop when our own SuppressTracker calls
+    -- SetPoint inside the hook body.
     local ot = _G.ObjectiveTrackerFrame
     if ot then
-        hooksecurefunc(ot, "SetAlpha", function(self, a)
-            if _eqtSuppressing and a > 0 then
-                SuppressTracker(self)
-            end
-        end)
-        hooksecurefunc(ot, "Show", function(self)
-            if _eqtSuppressing then
-                SuppressTracker(self)
-            end
+        hooksecurefunc(ot, "SetPoint", function(self)
+            if _eqtIgnoreSetPoint then return end
+            if not _eqtSuppressing then return end
+            SuppressTracker(self)
         end)
     end
 
@@ -3115,6 +3167,16 @@ function EQT:Init()
             end
             EQT:ApplyPosition()
             UpdateQTVisibility()
+            -- GetInstanceInfo() returns stale data at PLAYER_ENTERING_WORLD
+            -- (the instance/difficulty fields aren't updated until a tick
+            -- or two after the zone transition completes). Without this
+            -- deferred re-check, IsInHiddenInstance() sees the PREVIOUS
+            -- zone's info and the tracker fails to hide on raid/M+ zone-in.
+            -- Same pattern as the CHALLENGE_MODE_START handler above.
+            C_Timer.After(0.5, function()
+                if ApplyBlizzardTrackerVisibility then ApplyBlizzardTrackerVisibility() end
+                UpdateQTVisibility()
+            end)
         end
         if EQT.UpdateQuestItemAttribute then EQT.UpdateQuestItemAttribute() end
     end)

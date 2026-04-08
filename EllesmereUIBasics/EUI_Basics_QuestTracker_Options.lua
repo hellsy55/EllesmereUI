@@ -398,11 +398,16 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("titleFontSize") or 11 end,
               setValue=function(v) Set("titleFontSize", v); Refresh() end })
         do
-            local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
+            local function AttachSwatch(rgn, label, colorKey, dr, dg, db, useAccent)
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local c = Cfg(colorKey) or {}
-                        return c.r or dr, c.g or dg, c.b or db
+                        if c.r then return c.r, c.g, c.b end
+                        if useAccent then
+                            local eg = EllesmereUI.ELLESMERE_GREEN
+                            if eg then return eg.r, eg.g, eg.b end
+                        end
+                        return dr, dg, db
                     end,
                     function(r, g, b)
                         local c = Cfg(colorKey) or {}
@@ -414,7 +419,9 @@ initFrame:SetScript("OnEvent", function(self)
                 sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             end
-            AttachSwatch(row._leftRegion,  "Header", "secColor",   0.047, 0.824, 0.624)
+            -- secColor passes useAccent=true so the swatch displays the
+            -- live accent when the user has not explicitly chosen a color
+            AttachSwatch(row._leftRegion,  "Header", "secColor",   0.047, 0.824, 0.624, true)
             AttachSwatch(row._rightRegion, "Title",  "titleColor", 1.0,   0.85,  0.1)
         end
         y = y - h

@@ -722,8 +722,23 @@ qolFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Sort by Mythic+ Rating
+    --  Sort by Mythic+ Rating (DISABLED -- taints Blizzard applicants viewer)
+    --
+    --  The implementation below hooksecurefunc'd LFGListUtil_SortApplicants
+    --  and called table.sort(applicants, ...) which mutated the Blizzard-
+    --  owned applicants table in place from our insecure addon context.
+    --  Every swap during the sort wrote applicant IDs back into the table
+    --  through insecure code, tainting every entry. Later, Blizzard's
+    --  LFGListApplicationViewer_UpdateInfo iterated that tainted table and
+    --  hit errors comparing applicantInfo.comment (secret string tainted by
+    --  EllesmereUI) and applicant dungeon scores.
+    --
+    --  Left commented out so we can revisit with a taint-safe approach
+    --  later (likely: maintain a local shadow ordering and use it purely
+    --  for display via a PostUpdate callback, without touching the live
+    --  Blizzard applicants table).
     ---------------------------------------------------------------------------
+    --[[
     do
         local function GetApplicantScore(applicantID)
             if not C_LFGList or not C_LFGList.GetApplicantMemberInfo then return nil end
@@ -763,6 +778,7 @@ qolFrame:SetScript("OnEvent", function(self)
             end)
         end)
     end
+    --]]
 
     ---------------------------------------------------------------------------
     --  Auto Insert Keystone

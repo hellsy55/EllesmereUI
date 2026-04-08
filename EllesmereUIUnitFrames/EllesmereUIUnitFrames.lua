@@ -858,8 +858,13 @@ ns.ApplyDarkTheme = ApplyDarkTheme
 local function EUI_IsSmartPowerPercent()
     local _, cls = UnitClass("player")
     if not cls then return false end
-    -- Druids: use percent in caster and travel form; other forms use raw value.
+    -- Druids: Restoration always uses percent (mana healer, % is always
+    -- what matters -- including Incarnation: Tree of Life, which lands on
+    -- a form index that varies by spec/talent loadout). Other specs use
+    -- percent in caster/travel form and raw value in cat/bear.
     if cls == "DRUID" then
+        local spec = GetSpecialization()
+        if spec == 4 then return true end
         local form = GetShapeshiftForm()
         return form == nil or form == 0 or form == 3
     end
@@ -1837,32 +1842,157 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
     return health
 end
 
+-- Shield texture path. DO NOT change this path -- users without the
+-- top-level symlink have been corrected; this is the path that resolves.
+local ABSORB_SHIELD_TEX = "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga"
+
+-- Two-segment absorb rendering using dynamic clip-frame trickery, so it
+-- works with secret-valued absorbs (player absorbs in 12.0+). We cannot
+-- split the absorb value in Lua (min/subtract on secret values is blocked),
+-- so we use STATUSBAR CLIPPING to do the math visually:
+--
+--   curClip  bounds: hpBar.LEFT  ->  healthTexture.RIGHT  (dynamic)
+--   missClip bounds: healthTexture.RIGHT -> hpBar.RIGHT   (dynamic)
+--
+--   backfill bar: child of curClip, reverse fill, TOPRIGHT anchored to
+--     healthTexture.TOPRIGHT, width = hpBar width. Its texture fills from
+--     the current-HP edge leftward by (absorbAmt / maxHealth) * hpWidth.
+--     curClip clips anything past hpBar.LEFT, so the visible portion is
+--     exactly min(absorb, curHealth) pixels wide.
+--
+--   forward bar: child of missClip, forward fill, TOPLEFT anchored to
+--     hpBar.TOPLEFT, width = hpBar width. Its texture fills from
+--     hpBar.LEFT rightward by (absorbAmt / maxHealth) * hpWidth. missClip
+--     clips anything left of healthTexture.RIGHT, so the visible portion
+--     is exactly max(0, absorb - curHealth) pixels wide.
+--
+-- Both bars receive the raw (secret-safe) absorbAmt via SetValue. No Lua
+-- arithmetic on the absorb value is ever performed. Wired into oUF via
+-- HealthPrediction.Override so oUF still owns event registration
+-- (UNIT_HEALTH, UNIT_ABSORB_AMOUNT_CHANGED, etc.) and enable/disable.
 local function CreateAbsorbBar(frame, unit, settings)
     if not frame.Health then return end
 
     local hpBar = frame.Health
-    local barWidth = settings.frameWidth
-    local barHeight = settings.healthHeight
 
-    hpBar:SetClipsChildren(true)
+    -- Current HP clip: bounds the backfill bar to the filled health area.
+    -- The BOTTOMRIGHT anchor tracks healthTexture.BOTTOMRIGHT, so as the
+    -- health value changes the clip's right edge follows the fill edge.
+    local curClip = CreateFrame("Frame", nil, hpBar)
+    curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
+    curClip:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    curClip:SetClipsChildren(true)
 
-    local shieldBar = CreateFrame("StatusBar", nil, hpBar)
-    shieldBar:SetStatusBarTexture("Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga")
-    shieldBar:SetStatusBarColor(1, 1, 1, 0.8)
-    shieldBar:SetReverseFill(true)
-    shieldBar:ClearAllPoints()
-    shieldBar:SetPoint("TOPRIGHT", hpBar:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-    shieldBar:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
-    shieldBar:SetWidth(barWidth)
-    shieldBar:SetHeight(barHeight)
-    shieldBar:Show()
+    -- Missing HP clip: bounds the forward bar to the empty health area.
+    -- TOPLEFT anchor tracks healthTexture.TOPRIGHT, so the clip's left edge
+    -- follows the fill edge as current HP changes.
+    local missClip = CreateFrame("Frame", nil, hpBar)
+    missClip:SetPoint("TOPLEFT",     hpBar:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    missClip:SetClipsChildren(true)
+
+    -- Backfill bar: grows leftward from the current-HP edge into filled HP.
+    -- Width is full hpBar width; the right edge is pinned to the health
+    -- texture's right edge, so the left edge trails off to (curHealth -
+    -- hpWidth) which is clipped by curClip's left edge (= hpBar.LEFT).
+    local backfillBar = CreateFrame("StatusBar", nil, curClip)
+    backfillBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
+    local bfFill = backfillBar:GetStatusBarTexture()
+    if bfFill then bfFill:SetDrawLayer("ARTWORK", 1) end
+    backfillBar:SetStatusBarColor(1, 1, 1, 0.8)
+    backfillBar:SetReverseFill(true)
+    backfillBar:SetPoint("TOPRIGHT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
+    backfillBar:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    backfillBar:SetWidth(hpBar:GetWidth())
+    backfillBar:SetHeight(hpBar:GetHeight())
+    backfillBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
+    backfillBar:Hide()
+
+    -- Forward bar: grows rightward from hpBar.LEFT; the missClip cuts off
+    -- anything left of the current-HP edge, so only the portion past
+    -- curHealth actually renders (= max(0, absorb - curHealth) visible).
+    local forwardBar = CreateFrame("StatusBar", nil, missClip)
+    forwardBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
+    local fwFill = forwardBar:GetStatusBarTexture()
+    if fwFill then fwFill:SetDrawLayer("ARTWORK", 1) end
+    forwardBar:SetStatusBarColor(1, 1, 1, 0.8)
+    forwardBar:SetReverseFill(false)
+    forwardBar:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
+    forwardBar:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+    forwardBar:SetWidth(hpBar:GetWidth())
+    forwardBar:SetHeight(hpBar:GetHeight())
+    forwardBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
+    forwardBar:Hide()
+
+    -- Per-frame calculator for reading the absorb value (secret-safe).
+    -- Matches nameplate UpdateHealthValues init exactly.
+    local hpCalc
+    if CreateUnitHealPredictionCalculator then
+        hpCalc = CreateUnitHealPredictionCalculator()
+        if hpCalc.SetMaximumHealthMode then
+            hpCalc:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
+            hpCalc:SetDamageAbsorbClampMode(Enum.UnitDamageAbsorbClampMode.MaximumHealth)
+        end
+    end
+
+    -- Attach extras to the main bar (backfill) so anything that references
+    -- HealthPrediction.damageAbsorb can hide/show both segments together.
+    backfillBar._forward      = forwardBar
+    backfillBar._hpBar        = hpBar
+    backfillBar._hpCalculator = hpCalc
+    backfillBar._curClip      = curClip
+    backfillBar._missClip     = missClip
+
+    backfillBar:HookScript("OnHide", function()
+        forwardBar:Hide()
+    end)
 
     frame.HealthPrediction = {
-        damageAbsorb = shieldBar,
-        damageAbsorbClampMode = 2,
+        damageAbsorb = backfillBar,
+        Override = function(self, event, updUnit)
+            if self.unit ~= updUnit then return end
+
+            local element = self.HealthPrediction
+            local ab = element.damageAbsorb
+            if not ab then return end
+            local fw   = ab._forward
+            local hp   = ab._hpBar
+            local calc = ab._hpCalculator
+            if not hp then return end
+
+            local maxHealth, absorbAmt
+            if calc and UnitGetDetailedHealPrediction then
+                UnitGetDetailedHealPrediction(updUnit, nil, calc)
+                calc:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
+                maxHealth = calc:GetMaximumHealth()
+                absorbAmt = calc:GetDamageAbsorbs()
+            else
+                maxHealth = UnitHealthMax(updUnit) or 0
+                absorbAmt = (UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(updUnit)) or 0
+            end
+
+            -- Keep bars sized to the health bar every update.
+            local hpW, hpH = hp:GetWidth(), hp:GetHeight()
+            ab:SetWidth(hpW); ab:SetHeight(hpH)
+            if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
+
+            -- Both bars get the raw absorb value and the normal maxHealth.
+            -- The clip frames do the "min(absorb, curHealth)" and
+            -- "max(0, absorb - curHealth)" math visually so we never need
+            -- Lua arithmetic on the (possibly secret) absorb value.
+            ab:SetMinMaxValues(0, maxHealth)
+            ab:SetValue(absorbAmt)
+            ab:Show()
+
+            if fw then
+                fw:SetMinMaxValues(0, maxHealth)
+                fw:SetValue(absorbAmt)
+                fw:Show()
+            end
+        end,
     }
 
-    return shieldBar
+    return backfillBar
 end
 
 local function CreatePowerBar(frame, unit, settings)
@@ -2503,10 +2633,18 @@ local function SetupShowOnCastBar(frame, unit)
     castbar.PostChannelStop = dismissCastBar
     castbar.PostCastFail = dismissCastBar
 
-    -- Catch-all: hide the icon whenever the castbar hides for any reason
-    -- (oUF holdTime expiry, target switch, etc.) so it never gets stuck.
+    -- Catch-all: hide the icon AND the background whenever the castbar
+    -- hides for any reason (oUF holdTime expiry, target/focus switch, etc.)
+    -- so neither ever gets stuck. Target/focus switching while the previous
+    -- unit is mid-cast is the key case: oUF's CastStart hides the castbar
+    -- but never fires PostCastStop, so dismissCastBar never runs and the
+    -- background frame would otherwise remain visible as a black rectangle.
     castbar:HookScript("OnHide", function(self)
         if self._iconFrame then self._iconFrame:Hide() end
+        if shouldHideWhenInactive() then
+            local bg = self:GetParent()
+            if bg then bg:Hide() end
+        end
     end)
 end
 
@@ -4555,27 +4693,20 @@ local function ReloadFrames()
                         end
                     end
 
-                    -- Live toggle player absorbs
-                    if frame.HealthPrediction then
+                    -- Live toggle player absorbs.
+                    -- Never Enable/Disable the oUF HealthPrediction element
+                    -- here: tearing down the element unregisters events and
+                    -- resets the calculator, which causes the absorb display
+                    -- to go stale over time on the player frame specifically
+                    -- (target/focus don't do this toggle and stay accurate).
+                    -- Instead, just Show/Hide the bar itself -- the element
+                    -- keeps running in the background and the value stays
+                    -- live whether the bar is visible or not.
+                    if frame.HealthPrediction and frame.HealthPrediction.damageAbsorb then
                         if settings.showPlayerAbsorb then
-                            if not frame:IsElementEnabled("HealthPrediction") then
-                                frame:EnableElement("HealthPrediction")
-                            end
-                            if frame.HealthPrediction.damageAbsorb then
-                                frame.HealthPrediction.damageAbsorb:Show()
-                            end
-                            if frame.HealthPrediction.ForceUpdate then
-                                frame.HealthPrediction:ForceUpdate()
-                            elseif frame.UpdateAllElements then
-                                frame:UpdateAllElements("ReloadFrames")
-                            end
+                            frame.HealthPrediction.damageAbsorb:Show()
                         else
-                            if frame:IsElementEnabled("HealthPrediction") then
-                                frame:DisableElement("HealthPrediction")
-                            end
-                            if frame.HealthPrediction.damageAbsorb then
-                                frame.HealthPrediction.damageAbsorb:Hide()
-                            end
+                            frame.HealthPrediction.damageAbsorb:Hide()
                         end
                     end
 
@@ -5864,7 +5995,7 @@ local function UnitFrame_OnEnter(self)
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        self:SetAlpha(1)
+        (self._visWrap or self):SetAlpha(1)
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
         local showTooltip = not s or s.showUnitTooltip ~= false
@@ -5882,7 +6013,7 @@ local function UnitFrame_OnLeave(self)
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        self:SetAlpha(0)
+        (self._visWrap or self):SetAlpha(0)
     end
     if GameTooltip and GameTooltip:IsOwned(self) then
         GameTooltip:Hide()
@@ -5924,6 +6055,25 @@ function InitializeFrames()
     -- Always spawn all frames; hide disabled ones for zero performance impact
     oUF:SetActiveStyle("EllesmerePlayer")
     frames.player = oUF:Spawn("player", "EllesmereUIUnitFrames_Player")
+
+    -- Visibility wrapper for the player frame only. Parent the player frame
+    -- to a non-secure wrapper and drive visibility via the wrapper's alpha
+    -- instead of the frame's own alpha. Alpha inherits multiplicatively down
+    -- the parent chain, so the wrapper's alpha wins regardless of anything
+    -- that touches the inner frame's alpha directly (oUF elements, combat
+    -- transitions, etc.). Target/focus/pet frames don't need this because
+    -- RegisterUnitWatch already handles their visibility via unit existence.
+    --
+    -- The wrapper is inserted between the player frame and whatever parent
+    -- oUF originally gave it (PetBattleFrameHider), so the pet-battle state
+    -- driver chain continues to work.
+    local origParent = frames.player:GetParent() or UIParent
+    local playerVisWrap = CreateFrame("Frame", nil, origParent)
+    playerVisWrap:SetAllPoints(origParent)
+    playerVisWrap:SetFrameStrata(frames.player:GetFrameStrata())
+    frames.player:SetParent(playerVisWrap)
+    frames.player._visWrap = playerVisWrap
+
     ApplyFramePosition(frames.player, "player")
     SetupUnitMenu(frames.player, "player")
 
@@ -6468,15 +6618,13 @@ function InitializeFrames()
         end
     end
 
-    -- Player absorbs: disable oUF element if not wanted (bar is always created)
-    if frames.player and frames.player.HealthPrediction then
+    -- Player absorbs: hide the bar if not wanted, but leave the oUF
+    -- HealthPrediction element enabled so events keep flowing and the
+    -- calculator stays in sync. Toggling the element itself caused the
+    -- player absorb display to drift stale over time.
+    if frames.player and frames.player.HealthPrediction and frames.player.HealthPrediction.damageAbsorb then
         if not db.profile.player.showPlayerAbsorb then
-            if frames.player:IsElementEnabled("HealthPrediction") then
-                frames.player:DisableElement("HealthPrediction")
-            end
-            if frames.player.HealthPrediction.damageAbsorb then
-                frames.player.HealthPrediction.damageAbsorb:Hide()
-            end
+            frames.player.HealthPrediction.damageAbsorb:Hide()
         end
     end
 
@@ -6555,17 +6703,24 @@ function InitializeFrames()
                 -- Combat-sensitive and mouseover modes use SetAlpha to show/hide
                 -- (SetAlpha is not a restricted API). The frame stays technically
                 -- shown so it can transition instantly; alpha controls visibility.
+                --
+                -- For the player frame we drive alpha on a non-secure wrapper
+                -- (see _visWrap) so nothing that touches the inner frame's
+                -- alpha (oUF updates, secure templates, etc.) can make it
+                -- reappear/disappear against our will. Alpha inherits down the
+                -- parent chain so wrapper alpha 0 always wins.
+                local alphaTarget = frame._visWrap or frame
                 if vis == "in_combat" then
-                    frame:SetAlpha((not hiddenByOpts and _ufInCombat) and 1 or 0)
+                    alphaTarget:SetAlpha((not hiddenByOpts and _ufInCombat) and 1 or 0)
                 elseif vis == "out_of_combat" then
-                    frame:SetAlpha((not hiddenByOpts and not _ufInCombat) and 1 or 0)
+                    alphaTarget:SetAlpha((not hiddenByOpts and not _ufInCombat) and 1 or 0)
                 elseif vis == "mouseover" then
                     -- Hidden by default; OnEnter/OnLeave toggle alpha.
-                    frame:SetAlpha(0)
+                    alphaTarget:SetAlpha(0)
                 else
                     -- Non-combat modes: restore full alpha; Show/Hide controls
                     -- visibility in the block below.
-                    frame:SetAlpha(1)
+                    alphaTarget:SetAlpha(1)
                 end
 
                 -- Show/Hide and SetAttribute are restricted during lockdown.

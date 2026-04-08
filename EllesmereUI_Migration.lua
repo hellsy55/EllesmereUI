@@ -169,6 +169,30 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
     --  (which is not stable across sessions). Group definitions, colors,
     --  order, and collapsed states are preserved.
     ---------------------------------------------------------------------------
+    ---------------------------------------------------------------------------
+    --  Migration: clear quest tracker secColor when it matches the legacy
+    --  hardcoded default. Previously the default was a fixed green table
+    --  which DeepMergeDefaults baked into every user's DB, preventing the
+    --  fallback to the live accent color from ever firing. Wiping the
+    --  legacy default lets the quest tracker pick up the user's chosen
+    --  accent color. Users who explicitly picked a different color keep it.
+    ---------------------------------------------------------------------------
+    if EllesmereUIDB.profiles and not EllesmereUIDB._questTrackerSecColorMigrated then
+        for _, profData in pairs(EllesmereUIDB.profiles) do
+            if type(profData) == "table" and profData.addons then
+                local basics = profData.addons.EllesmereUIBasics
+                if basics and basics.questTracker then
+                    local sc = basics.questTracker.secColor
+                    if type(sc) == "table"
+                       and sc.r == 0.047 and sc.g == 0.824 and sc.b == 0.624 then
+                        basics.questTracker.secColor = nil
+                    end
+                end
+            end
+        end
+        EllesmereUIDB._questTrackerSecColorMigrated = true
+    end
+
     if EllesmereUIDB.global and not EllesmereUIDB.global._friendNotesMigrated then
         -- Check if user had any group assignments before wiping
         local hadAssignments = false

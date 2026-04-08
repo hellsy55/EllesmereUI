@@ -920,7 +920,16 @@ do
             local c, f = entry.container, entry.frame
             if c and f then
                 local bd = _ppBorderData[f]
-                SnapBorderTextures(c, f, bd and bd.borderSize or 1)
+                -- Wrapped in pcall: some registered frames can become
+                -- invalid during loading screens (teleports, pool releases)
+                -- and throw "bad self" when methods are called on them.
+                -- Invalidate the entry on failure so we skip it forever
+                -- and don't spam the error on every scale/PEW event.
+                local ok = pcall(SnapBorderTextures, c, f, bd and bd.borderSize or 1)
+                if not ok then
+                    entry.container = nil
+                    entry.frame = nil
+                end
             end
         end
     end
@@ -6125,7 +6134,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.3.7"
+EllesmereUI.VERSION = "6.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7605,25 +7614,25 @@ end
         if not UnitIsPlayer(unit) then return end
         local _, classFile = UnitClass(unit)
         if not classFile or (_isSecret and _isSecret(classFile)) then return end
-        -- Strip player titles (default off)
+        if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
+        if not _nameL1 then return end
+        -- Strip player titles (default on: tooltipPlayerTitles is opt-in)
         local db = EllesmereUIDB
         if not (db and db.tooltipPlayerTitles) then
-            if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-            if _nameL1 then
-                local name = UnitName(unit)
-                if name and not (_isSecret and _isSecret(name)) then
-                    local realm = select(2, UnitName(unit))
-                    local display = (realm and realm ~= "") and (name .. "-" .. realm) or name
-                    _nameL1:SetText(display)
-                end
+            local name = UnitName(unit)
+            if name and not (_isSecret and _isSecret(name)) then
+                local realm = select(2, UnitName(unit))
+                local display = (realm and realm ~= "") and (name .. "-" .. realm) or name
+                _nameL1:SetText(display)
             end
         end
-        -- Class color (accent gated)
-        if _accentEnabled() then
-            local cc = _RAID_CC and _RAID_CC[classFile]
-            if not cc then return end
-            if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-            if _nameL1 then _nameL1:SetTextColor(cc.r, cc.g, cc.b) end
+        -- Class color the name line and the status bar. Always on when the
+        -- unit is a player, independent of the "Accent Colored Elements"
+        -- toggle (which only governs accent recoloring of headers, arrows,
+        -- and spell titles).
+        local cc = _RAID_CC and _RAID_CC[classFile]
+        if cc then
+            _nameL1:SetTextColor(cc.r, cc.g, cc.b)
             if GameTooltipStatusBar then
                 GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
             end
@@ -7698,57 +7707,11 @@ end
         end
     end
 
-    local function _menuRecolorHeaders(frame)
-        if not frame or frame:IsForbidden() or not _enabled() or not _accentEnabled() then return end
-        local EG = EllesmereUI.ELLESMERE_GREEN
-        if not EG then return end
-        local acR, acG, acB = EG.r, EG.g, EG.b
-        local function ScanChildren(f, depth)
-            if depth > 3 then return end
-            for i = 1, _select("#", f:GetRegions()) do
-                local r = _select(i, f:GetRegions())
-                if r and r:IsObjectType("FontString") then
-                    local cr, cg, cb = r:GetTextColor()
-                    if cr and cg and cb then
-                        -- Skip white/near-white text (normal items) and grey (disabled)
-                        local isWhite = cr > 0.9 and cg > 0.9 and cb > 0.9
-                        local isGrey = cr < 0.6 and cg < 0.6 and cb < 0.6
-                        -- Anything else is a colored header/name -- recolor to accent
-                        if not isWhite and not isGrey then
-                            r:SetTextColor(acR, acG, acB)
-                        end
-                    end
-                elseif r and r:IsObjectType("Texture") and not r._euiOwned then
-                    -- Submenu arrows: small textures (~11x17)
-                    local h, w = r:GetHeight(), r:GetWidth()
-                    if not (_isSecret and (_isSecret(h) or _isSecret(w))) then
-                        if h > 5 and h < 20 and w > 5 and w < 20 then
-                            r:SetDesaturated(true)
-                            r:SetVertexColor(acR, acG, acB)
-                        end
-                    end
-                end
-            end
-            for i = 1, _select("#", f:GetChildren()) do
-                local c = _select(i, f:GetChildren())
-                if c and not c:IsForbidden() then
-                    ScanChildren(c, depth + 1)
-                end
-            end
-        end
-        ScanChildren(frame, 0)
-    end
-
     local function _menuOnOpen(manager, _, menuDescription)
         if not _enabled() then return end
         local menu = manager.GetOpenMenu and manager:GetOpenMenu()
         if menu then
             _menuSkinFrame(menu)
-            C_Timer.After(0, function()
-                if menu and not menu:IsForbidden() and menu:IsShown() then
-                    _menuRecolorHeaders(menu)
-                end
-            end)
         end
         if menuDescription and menuDescription.AddMenuAcquiredCallback then
             menuDescription:AddMenuAcquiredCallback(_menuSkinFrame)

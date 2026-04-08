@@ -1815,13 +1815,45 @@ initFrame:SetScript("OnEvent", function(self)
 
         local friendlyRow
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Friendly Player Nameplates",
+            { type="toggle", text="Show EUI Friendly Player Nameplates",
+              tooltip="When disabled, EUI relinquishes full control of friendly player nameplates to Blizzard. Use Blizzard's own Nameplate settings (Esc > Options > Nameplates) to control them.",
               getValue=function() return DBVal("showFriendlyPlayers") ~= false end,
               setValue=function(v)
                 DB().showFriendlyPlayers = v
                 if SetCVar then
-                    pcall(SetCVar, "nameplateShowFriendlyPlayers", v and 1 or 0)
-                    pcall(SetCVar, "nameplateShowFriends", v and 1 or 0)
+                    if v then
+                        -- Enabling: re-assert every friendly player CVar
+                        -- that SetupAuraCVars sets on load. SetupAuraCVars
+                        -- skips these while the toggle is off, so toggling
+                        -- back on at runtime is the only chance to restore
+                        -- them without a /reload.
+                        local p = DB()
+                        local nameOnly = (p and p.friendlyNameOnly ~= false)
+                        local classColor = (p and p.classColorFriendly ~= false)
+                        pcall(SetCVar, "nameplateShowFriendlyPlayers", 1)
+                        pcall(SetCVar, "nameplateShowFriends", 1)
+                        pcall(SetCVar, "UnitNameFriendlyPlayerName", 1)
+                        pcall(SetCVar, "nameplateShowOnlyNameForFriendlyPlayerUnits", nameOnly and 1 or 0)
+                        pcall(SetCVar, "ShowClassColorInFriendlyNameplate", classColor and 1 or 0)
+                        pcall(SetCVar, "nameplateUseClassColorForFriendlyPlayerUnitNames", classColor and 1 or 0)
+                    else
+                        -- Disabling: reset the three CVars EUI uniquely
+                        -- manages (name-only override + class color) back
+                        -- to Blizzard defaults so the user starts from a
+                        -- clean slate. The visibility CVars are left
+                        -- untouched so the Blizzard Nameplate panel keeps
+                        -- whatever the user already had there.
+                        if GetCVarDefault then
+                            for _, cvar in ipairs({
+                                "nameplateShowOnlyNameForFriendlyPlayerUnits",
+                                "ShowClassColorInFriendlyNameplate",
+                                "nameplateUseClassColorForFriendlyPlayerUnitNames",
+                            }) do
+                                local d = GetCVarDefault(cvar)
+                                if d ~= nil then pcall(SetCVar, cvar, d) end
+                            end
+                        end
+                    end
                 end
                 if ns.UpdateFriendlyNameplateSystem then ns.UpdateFriendlyNameplateSystem() end
                 -- Re-assert stacking after friendly CVar changes, since Blizzard
@@ -4211,6 +4243,12 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(plate.castIconFrame, "TOPRIGHT", plate.cast, "TOPLEFT", 0, 0)
                     plate.castSpark:SetHeight(v)
                 end
+                -- Re-anchor any active cast overlays so their height
+                -- matches the new castBarHeight setting
+                if ns.ClearAllCastOverlays then ns.ClearAllCastOverlays() end
+                for _, plate in pairs(plates) do
+                    if ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
+                end
                 UpdatePreview()
               end },
             { type="toggle", text="Spell Icon",
@@ -5974,7 +6012,19 @@ initFrame:SetScript("OnEvent", function(self)
                     C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
                   end,
                   tooltip="Show a glow on the cast bar when the enemy is casting a spell Blizzard marks as important." },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Casts In Front of Nameplates",
+                  tooltip="Forces all casts to be shown in front of nameplates for visual clarity",
+                  getValue=function() return DBVal("castOverlayEnabled") == true end,
+                  setValue=function(v)
+                    DB().castOverlayEnabled = v
+                    if not v and ns.ClearAllCastOverlays then
+                        ns.ClearAllCastOverlays()
+                    else
+                        for _, plate in pairs(plates) do
+                            if ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
+                        end
+                    end
+                  end });  y = y - h
 
             -- Inline color swatch
             do

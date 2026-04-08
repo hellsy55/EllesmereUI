@@ -3327,14 +3327,17 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Sort by Mythic+ Rating",
-              tooltip="Sorts applicants in the Premade Groups viewer by their Mythic+ dungeon score, highest first.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.sortByMythicScore or false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.sortByMythicScore = v
-              end }
+              -- Feature temporarily disabled: the previous implementation
+              -- hooksecurefunc'd LFGListUtil_SortApplicants and mutated the
+              -- Blizzard applicants table in place via table.sort, which
+              -- tainted subsequent applicantInfo.comment and dungeon-score
+              -- comparisons in Blizzard's LFGListApplicationViewer. Needs
+              -- a taint-safe reimplementation before re-enabling. See the
+              -- commented-out logic in EUI_QoL.lua around line 724.
+              disabled = function() return true end,
+              disabledTooltip = "This option is temporarily disabled",
+              getValue=function() return false end,
+              setValue=function() end }
         );  y = y - h
 
         -- Cog on Auto Accept Role Check (left region)

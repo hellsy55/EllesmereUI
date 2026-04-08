@@ -1752,9 +1752,12 @@ local function BuildBars()
             secondaryBar:SetAllPoints(secondaryFrame)
 
             -- Bar texture and orientation must be applied before colors since
-            -- SetStatusBarTexture and SetRotatesTexture both reset vertex color
+            -- SetStatusBarTexture and SetRotatesTexture both reset vertex color.
+            -- Use the Class Resource's own pipOrientation setting (same key the
+            -- dropdown writes to), not p.general.orientation which was unrelated
+            -- and caused vertical fill to render horizontally.
             ApplyBarTexture(secondaryBar, g.barTexture or "none")
-            ApplyBarOrientation(secondaryBar, p.general.orientation)
+            ApplyBarOrientation(secondaryBar, pipOri)
 
             -- Colors
             local pc = POWER_COLORS[cachedSecondary.power]
@@ -1797,10 +1800,17 @@ local function BuildBars()
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
                         0, 0, 0, 0, 0)
                     local cdText = runeFrames[i]:CreateFontString(nil, "OVERLAY")
-                    SetRBFont(cdText, GetRBFont(), 9)
                     cdText:SetTextColor(1, 1, 1, 0.8)
-                    cdText:SetPoint("CENTER")
                     runeFrames[i]._cdText = cdText
+                end
+                -- Re-apply font size and offsets every rebuild so textSize,
+                -- textXOffset, and textYOffset changes take effect live
+                local cdText = runeFrames[i]._cdText
+                if cdText then
+                    SetRBFont(cdText, GetRBFont(), sp.textSize or 9)
+                    cdText:ClearAllPoints()
+                    cdText:SetPoint("CENTER", runeFrames[i], "CENTER",
+                        sp.textXOffset or 0, sp.textYOffset or 0)
                 end
                 local x0 = slots[i].x0
                 local x1 = slots[i].x1

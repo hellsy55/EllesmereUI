@@ -937,22 +937,30 @@ function ns.UpdateFriendlyNameplateSystem()
     local shouldEnable = IsFriendlyEnabled()       -- health-bar mode
     local nameOnly     = IsNameOnlyMode()           -- name-only mode
 
-    -- In follower dungeons, force-hide all friendly nameplates via CVars
+    -- In follower dungeons, force-hide friendly nameplates via CVars.
     -- SetCVar for nameplate CVars is protected in combat; skip to avoid taint.
+    -- Friendly player CVars are only touched when the user has EUI managing
+    -- friendly player nameplates. When disabled we leave those CVars alone
+    -- so Blizzard's own Nameplate settings own them. Friendly NPC CVars are
+    -- always managed because they have their own EUI toggle.
     if not InCombatLockdown() and SetCVar then
+        local fp = FP()
+        local euiManagesPlayers = fp and (fp.showFriendlyPlayers ~= false)
         if IsInFollowerDungeon() then
-            pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
-            pcall(SetCVar, "nameplateShowFriends", 0)
+            if euiManagesPlayers then
+                pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
+                pcall(SetCVar, "nameplateShowFriends", 0)
+            end
             pcall(SetCVar, "nameplateShowFriendlyNPCs", 0)
             pcall(SetCVar, "nameplateShowFriendlyNpcs", 0)
         else
             -- Restore user's preferred friendly CVar state
-            local fp = FP()
             if fp then
-                local showPlayers = (fp.showFriendlyPlayers ~= false)
                 local showNPCs = (fp.showFriendlyNPCs == true)
-                pcall(SetCVar, "nameplateShowFriendlyPlayers", showPlayers and 1 or 0)
-                pcall(SetCVar, "nameplateShowFriends", showPlayers and 1 or 0)
+                if euiManagesPlayers then
+                    pcall(SetCVar, "nameplateShowFriendlyPlayers", 1)
+                    pcall(SetCVar, "nameplateShowFriends", 1)
+                end
                 pcall(SetCVar, "nameplateShowFriendlyNPCs", showNPCs and 1 or 0)
                 pcall(SetCVar, "nameplateShowFriendlyNpcs", showNPCs and 1 or 0)
             end

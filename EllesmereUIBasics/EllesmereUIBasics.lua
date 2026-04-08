@@ -268,7 +268,10 @@ local defaults = {
             worldCollapsed       = false,
             showQuestItems       = true,
             questItemSize        = 22,
-            secColor             = { r=0.047, g=0.824, b=0.624 },
+            -- secColor intentionally has no default: nil triggers the
+            -- "use live accent color" fallback in the quest tracker so
+            -- theme changes propagate. Set explicitly via the options
+            -- color swatch to override.
             delveCollapsed       = false,
             questsCollapsed      = false,
             showPreyQuests       = true,
@@ -678,18 +681,28 @@ local function CreateFlyoutToggle()
     local norm = btn:CreateTexture(nil, "ARTWORK")
     norm:SetAllPoints()
     norm:SetAtlas("Map-Filter-Button")
+    norm:SetVertexColor(EG.r, EG.g, EG.b, 1)
     btn:SetNormalTexture(norm)
 
     local pushed = btn:CreateTexture(nil, "ARTWORK")
     pushed:SetAllPoints()
     pushed:SetAtlas("Map-Filter-Button-down")
+    pushed:SetVertexColor(EG.r, EG.g, EG.b, 1)
     btn:SetPushedTexture(pushed)
 
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetAtlas("Map-Filter-Button")
+    hl:SetVertexColor(EG.r, EG.g, EG.b, 1)
     hl:SetAlpha(0.3)
     btn:SetHighlightTexture(hl)
+
+    -- Keep the three textures in sync with the accent color.
+    -- Vertex alpha stays at 1; the highlight's SetAlpha(0.3) still applies
+    -- on top since the two multiply.
+    EllesmereUI.RegAccent({ type = "vertex", obj = norm })
+    EllesmereUI.RegAccent({ type = "vertex", obj = pushed })
+    EllesmereUI.RegAccent({ type = "vertex", obj = hl })
 
     -- Black background to match indicator icons
     local bg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
@@ -5418,6 +5431,10 @@ local function SkinFriendsFrame()
         btn._ebsDivLabelBtn:SetScript("OnClick", function()
             local ck = btn._ebsColorKey
             if not ck then return end
+            -- Widgets file is deferred; make sure ShowColorPicker exists
+            -- before we call it (CDM is normally what triggers EnsureLoaded
+            -- on startup, so without CDM the picker is still nil here).
+            if EllesmereUI.EnsureLoaded then EllesmereUI:EnsureLoaded() end
             local fg3 = GetFriendGroupsGlobal()
             local gc2 = fg3.friendGroupColors[ck]
             local cr, cg, cb
