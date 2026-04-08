@@ -2825,6 +2825,7 @@ function EQT:Init()
     local _eqtSuppressing     = false
     local _eqtIgnoreSetPoint  = false
     local _eqtSavedAnchors    = nil    -- captured original anchor list
+    local _eqtSavedClamped    = nil    -- captured original clamped-to-screen state
 
     local function CaptureAnchors(ot)
         local n = ot:GetNumPoints() or 0
@@ -2843,6 +2844,16 @@ function EQT:Init()
         if not _eqtSavedAnchors then
             _eqtSavedAnchors = CaptureAnchors(ot)
         end
+        -- ObjectiveTrackerFrame is clampedToScreen="true" by default in
+        -- Blizzard's XML template. Without turning that off, SetPoint
+        -- (-10000, 10000) gets clamped back to UIParent's TOPLEFT and the
+        -- tracker reappears at the top-left of the screen instead of
+        -- actually going off-screen. Save the original state so we can
+        -- restore it on unsuppress.
+        if _eqtSavedClamped == nil and ot.IsClampedToScreen then
+            _eqtSavedClamped = ot:IsClampedToScreen() and true or false
+        end
+        if ot.SetClampedToScreen then ot:SetClampedToScreen(false) end
         ot:ClearAllPoints()
         ot:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
         ot:EnableMouse(false)
@@ -2862,6 +2873,12 @@ function EQT:Init()
             end
         end
         _eqtSavedAnchors = nil
+        -- Restore clamped-to-screen state (default true, matching Blizzard's
+        -- XML template).
+        if ot.SetClampedToScreen then
+            ot:SetClampedToScreen(_eqtSavedClamped ~= false)
+        end
+        _eqtSavedClamped = nil
         ot:EnableMouse(true)
         if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
         _eqtIgnoreSetPoint = false
