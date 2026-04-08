@@ -3270,6 +3270,12 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         SnapshotPlayerAuras()
         SnapshotOwnOnRaidBuffs()
         _encounterSnapshotTime = GetTime()
+        -- Mark combat immediately: ENCOUNTER_START fires before
+        -- InCombatLockdown() returns true, but aura APIs are already
+        -- restricted. Without this, all non-whitelisted buffs flash
+        -- as "missing" for ~1s until PLAYER_REGEN_DISABLED fires.
+        _eabrInCombat = true
+        RequestRefresh()
         return
     end
 

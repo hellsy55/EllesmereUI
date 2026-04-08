@@ -2797,6 +2797,44 @@ function EQT:Init()
     local _eqtSuppressing = false
     local _eqtOffScreenPoint = { "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000 }
 
+    -- Recursively disable mouse on a frame and all its children.
+    -- Skips protected frames to avoid taint.
+    local function DisableMouseRecursive(frame)
+        if not frame or frame:IsForbidden() then return end
+        if frame.IsProtected and frame:IsProtected() then return end
+        if frame.EnableMouse then frame:EnableMouse(false) end
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+        if frame.GetChildren then
+            for i = 1, select("#", frame:GetChildren()) do
+                local child = select(i, frame:GetChildren())
+                DisableMouseRecursive(child)
+            end
+        end
+    end
+
+    local function EnableMouseRecursive(frame)
+        if not frame or frame:IsForbidden() then return end
+        if frame.IsProtected and frame:IsProtected() then return end
+        if frame.EnableMouse then frame:EnableMouse(true) end
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        if frame.GetChildren then
+            for i = 1, select("#", frame:GetChildren()) do
+                local child = select(i, frame:GetChildren())
+                EnableMouseRecursive(child)
+            end
+        end
+    end
+
+    local function SuppressTracker(ot)
+        ot:SetAlpha(0)
+        DisableMouseRecursive(ot)
+    end
+
+    local function UnsuppressTracker(ot)
+        ot:SetAlpha(1)
+        EnableMouseRecursive(ot)
+    end
+
     local function ApplyBlizzardTrackerVisibility()
         local ot = _G.ObjectiveTrackerFrame
         if not ot then return end
@@ -2805,13 +2843,9 @@ function EQT:Init()
         local shouldHide = Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus
         _eqtSuppressing = shouldHide
         if shouldHide then
-            ot:SetAlpha(0)
-            ot:EnableMouse(false)
-            if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
+            SuppressTracker(ot)
         else
-            ot:SetAlpha(1)
-            ot:EnableMouse(true)
-            if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
+            UnsuppressTracker(ot)
         end
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
@@ -2822,16 +2856,12 @@ function EQT:Init()
     if ot then
         hooksecurefunc(ot, "SetAlpha", function(self, a)
             if _eqtSuppressing and a > 0 then
-                self:SetAlpha(0)
-                self:EnableMouse(false)
-                if self.EnableMouseMotion then self:EnableMouseMotion(false) end
+                SuppressTracker(self)
             end
         end)
         hooksecurefunc(ot, "Show", function(self)
             if _eqtSuppressing then
-                self:SetAlpha(0)
-                self:EnableMouse(false)
-                if self.EnableMouseMotion then self:EnableMouseMotion(false) end
+                SuppressTracker(self)
             end
         end)
     end

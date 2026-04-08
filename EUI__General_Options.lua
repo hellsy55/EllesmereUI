@@ -820,8 +820,9 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 4: Reskin Blizzard Elements | (spacer)
-        _, h = W:DualRow(parent, y,
+        -- Row 4: Reskin Blizzard Elements | Accent Colored Elements
+        local reskinRow
+        reskinRow, h = W:DualRow(parent, y,
             { type="toggle", text="Reskin Blizzard Elements",
               tooltip="Reskins Blizzard tooltips, right-click context menus, and popups with a dark, minimal style matching the EUI aesthetic. Requires reload to apply.",
               getValue=function()
@@ -850,6 +851,58 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.accentReskinElements = v
               end }
         );  y = y - h
+        -- Inline cog on Reskin toggle: tooltip sub-settings
+        do
+            local reskinOff = function() return EllesmereUIDB and EllesmereUIDB.customTooltips == false end
+            local leftRgn = reskinRow._leftRegion
+
+            local _, reskinCogShow = EllesmereUI.BuildCogPopup({
+                title = "Tooltip Settings",
+                rows = {
+                    { type="toggle", label="Show Player Titles",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipPlayerTitles or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipPlayerTitles = v
+                      end },
+                },
+            })
+
+            local reskinCogBtn = CreateFrame("Button", nil, leftRgn)
+            reskinCogBtn:SetSize(26, 26)
+            reskinCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = reskinCogBtn
+            reskinCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            reskinCogBtn:SetAlpha(reskinOff() and 0.15 or 0.4)
+            local reskinCogTex = reskinCogBtn:CreateTexture(nil, "OVERLAY")
+            reskinCogTex:SetAllPoints()
+            reskinCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            reskinCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            reskinCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(reskinOff() and 0.15 or 0.4) end)
+            reskinCogBtn:SetScript("OnClick", function(self) reskinCogShow(self) end)
+
+            local reskinCogBlock = CreateFrame("Frame", nil, reskinCogBtn)
+            reskinCogBlock:SetAllPoints()
+            reskinCogBlock:SetFrameLevel(reskinCogBtn:GetFrameLevel() + 10)
+            reskinCogBlock:EnableMouse(true)
+            reskinCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(reskinCogBtn, EllesmereUI.DisabledTooltip("Reskin Blizzard Elements"))
+            end)
+            reskinCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if reskinOff() then
+                    reskinCogBtn:SetAlpha(0.15)
+                    reskinCogBlock:Show()
+                else
+                    reskinCogBtn:SetAlpha(0.4)
+                    reskinCogBlock:Hide()
+                end
+            end)
+
+            reskinCogBtn:SetAlpha(reskinOff() and 0.15 or 0.4)
+            if reskinOff() then reskinCogBlock:Show() else reskinCogBlock:Hide() end
+        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 

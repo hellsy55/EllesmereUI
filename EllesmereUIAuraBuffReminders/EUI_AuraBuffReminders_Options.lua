@@ -1060,6 +1060,28 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 10);  y = y - h
 
         -----------------------------------------------------------------------
+        --  PETS section
+        -----------------------------------------------------------------------
+        local petHdr
+        petHdr, h = W:SectionHeader(parent, "PETS", y);  y = y - h
+
+        local petFirstRow
+        petFirstRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Missing Pet Reminder",
+              tooltip="Show a reminder when you don't have an active pet summoned. Only applies to pet classes (Hunter, Warlock, Death Knight, Mage).",
+              getValue=function() local c = CDB(); return c and c.enabled and c.enabled.pet ~= false end,
+              setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.pet = v; RefreshAll(); RebuildPreviewHeader() end end },
+            { type="toggle", text="Wrong Pet Reminder (Demo Lock)",
+              tooltip="Show a reminder when your Demonology Warlock has the wrong pet summoned (not Felguard).",
+              getValue=function() local c = CDB(); return c and c.enabled and c.enabled.wrong_pet ~= false end,
+              setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.wrong_pet = v; RefreshAll(); RebuildPreviewHeader() end end }
+        );  y = y - h
+
+        _eabrClickMappings.pet = { section = petHdr, target = petFirstRow }
+
+        _, h = W:Spacer(parent, y, 10);  y = y - h
+
+        -----------------------------------------------------------------------
         --  CONSUMABLES section
         -----------------------------------------------------------------------
         local consumHdr

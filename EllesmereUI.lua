@@ -6125,7 +6125,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.3.5"
+EllesmereUI.VERSION = "6.3.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7596,7 +7596,7 @@ end
     end
 
     local function _ttUnitColor(tt)
-        if tt ~= _GameTooltip or tt:IsForbidden() or not _accentEnabled() then return end
+        if tt ~= _GameTooltip or tt:IsForbidden() then return end
         local _, unit = tt:GetUnit()
         if not unit then
             if UnitExists("mouseover") then unit = "mouseover" end
@@ -7605,12 +7605,28 @@ end
         if not UnitIsPlayer(unit) then return end
         local _, classFile = UnitClass(unit)
         if not classFile or (_isSecret and _isSecret(classFile)) then return end
-        local cc = _RAID_CC and _RAID_CC[classFile]
-        if not cc then return end
-        if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-        if _nameL1 then _nameL1:SetTextColor(cc.r, cc.g, cc.b) end
-        if GameTooltipStatusBar then
-            GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
+        -- Strip player titles (default off)
+        local db = EllesmereUIDB
+        if not (db and db.tooltipPlayerTitles) then
+            if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
+            if _nameL1 then
+                local name = UnitName(unit)
+                if name and not (_isSecret and _isSecret(name)) then
+                    local realm = select(2, UnitName(unit))
+                    local display = (realm and realm ~= "") and (name .. "-" .. realm) or name
+                    _nameL1:SetText(display)
+                end
+            end
+        end
+        -- Class color (accent gated)
+        if _accentEnabled() then
+            local cc = _RAID_CC and _RAID_CC[classFile]
+            if not cc then return end
+            if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
+            if _nameL1 then _nameL1:SetTextColor(cc.r, cc.g, cc.b) end
+            if GameTooltipStatusBar then
+                GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
+            end
         end
     end
 

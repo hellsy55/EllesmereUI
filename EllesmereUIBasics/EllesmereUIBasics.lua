@@ -3827,12 +3827,11 @@ local function SkinFriendsFrame()
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
             tab._label = label
-            -- Sync our label when Blizzard updates the text (e.g. Quick Join count)
-            if blizLabel then
-                hooksecurefunc(blizLabel, "SetText", function(_, newText)
-                    if newText and label then label:SetText(newText) end
-                end)
-            end
+            -- Sync our label when Blizzard updates the text (e.g. Quick Join count).
+            -- Blizzard calls tab:SetText() on the button, not the FontString directly.
+            hooksecurefunc(tab, "SetText", function(_, newText)
+                if newText and label then label:SetText(newText) end
+            end)
 
             -- Accent underline (1px pixel-perfect)
             if not tab._underline then
