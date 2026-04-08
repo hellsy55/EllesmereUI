@@ -503,9 +503,14 @@ qolFrame:SetScript("OnEvent", function(self)
 
         local f = CreateFrame("Frame")
         f:RegisterEvent("PLAYER_LOGIN")
-        f:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_LOGIN")
-            ApplyTrainAllButton()
+        f:RegisterEvent("ADDON_LOADED")
+        f:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_LOGIN" then
+                self:UnregisterEvent("PLAYER_LOGIN")
+                ApplyTrainAllButton()
+            elseif event == "ADDON_LOADED" then
+                ApplyTrainAllButton()
+            end
         end)
     end
 
