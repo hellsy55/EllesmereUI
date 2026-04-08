@@ -2802,86 +2802,31 @@ function EQT:Init()
         end })
     end
 
-    -- Hide Blizzard ObjectiveTrackerFrame by moving it WAY off-screen.
+    -- Hide Blizzard ObjectiveTrackerFrame by reparenting it to a hidden
+    -- frame. When a frame's parent is hidden, ALL its children become
+    -- invisible regardless of any SetIgnoreParentAlpha(true) overrides
+    -- they carry. This is bulletproof and leaves the original Edit Mode
+    -- anchor untouched, so unsuppressing (e.g. for the M+ timer) drops
+    -- the tracker back into its proper Blizz position automatically.
     --
-    -- Alpha-only suppression used to be the approach here, but some of the
-    -- tracker's child elements (quest-item buttons in particular) bypass
-    -- parent alpha -- likely via SetIgnoreParentAlpha(true) on modern
-    -- Blizzard builds -- so users saw floating quest items even with the
-    -- tracker at alpha 0. Moving the top-level frame -10000,10000 is a
-    -- bulletproof hide: children inherit position through SetPoint, so no
-    -- matter what alpha overrides they carry, they render off-screen too.
-    --
-    -- SetPoint is taint-safe on ObjectiveTrackerFrame (it's not a secure
-    -- template, and SetPoint is unrestricted in combat). Same pattern we
-    -- use for FriendsFrame: hooksecurefunc SetPoint only, guarded by a
-    -- single reentry flag, and re-apply our off-screen position whenever
-    -- Blizzard / Edit Mode repositions the frame.
-    --
-    -- Only touch the top-level frame. Recursing into descendants
-    -- force-enables mouse on internal widget containers (scenario and
-    -- delve widget frames) that were never meant to receive clicks --
-    -- this is what caused the v6.3.6 M+/Delves cursor lockout disaster.
-    local _eqtSuppressing     = false
-    local _eqtIgnoreSetPoint  = false
-    local _eqtSavedAnchors    = nil    -- captured original anchor list
-    local _eqtSavedClamped    = nil    -- captured original clamped-to-screen state
-
-    local function CaptureAnchors(ot)
-        local n = ot:GetNumPoints() or 0
-        if n <= 0 then return nil end
-        local list = {}
-        for i = 1, n do
-            local p, rel, relP, x, y = ot:GetPoint(i)
-            list[i] = { p, rel, relP, x, y }
-        end
-        return list
-    end
+    -- Only touches the top-level frame. No recursion into children, no
+    -- anchor manipulation, no clamping changes -- preserves the v6.3.6
+    -- M+/Delves cursor lockout protection.
+    local hiddenParent = CreateFrame("Frame")
+    hiddenParent:Hide()
+    local _eqtOriginalParent = nil
 
     local function SuppressTracker(ot)
-        if _eqtIgnoreSetPoint then return end
-        _eqtIgnoreSetPoint = true
-        if not _eqtSavedAnchors then
-            _eqtSavedAnchors = CaptureAnchors(ot)
+        if ot:GetParent() == hiddenParent then return end
+        if not _eqtOriginalParent then
+            _eqtOriginalParent = ot:GetParent() or UIParent
         end
-        -- ObjectiveTrackerFrame is clampedToScreen="true" by default in
-        -- Blizzard's XML template. Without turning that off, SetPoint
-        -- (-10000, 10000) gets clamped back to UIParent's TOPLEFT and the
-        -- tracker reappears at the top-left of the screen instead of
-        -- actually going off-screen. Save the original state so we can
-        -- restore it on unsuppress.
-        if _eqtSavedClamped == nil and ot.IsClampedToScreen then
-            _eqtSavedClamped = ot:IsClampedToScreen() and true or false
-        end
-        if ot.SetClampedToScreen then ot:SetClampedToScreen(false) end
-        ot:ClearAllPoints()
-        ot:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
-        ot:EnableMouse(false)
-        if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
-        _eqtIgnoreSetPoint = false
+        ot:SetParent(hiddenParent)
     end
 
     local function UnsuppressTracker(ot)
-        if _eqtIgnoreSetPoint then return end
-        _eqtIgnoreSetPoint = true
-        if _eqtSavedAnchors and #_eqtSavedAnchors > 0 then
-            ot:ClearAllPoints()
-            for i = 1, #_eqtSavedAnchors do
-                local a = _eqtSavedAnchors[i]
-                -- pcall in case a stored anchor target is no longer valid
-                pcall(ot.SetPoint, ot, a[1], a[2], a[3], a[4], a[5])
-            end
-        end
-        _eqtSavedAnchors = nil
-        -- Restore clamped-to-screen state (default true, matching Blizzard's
-        -- XML template).
-        if ot.SetClampedToScreen then
-            ot:SetClampedToScreen(_eqtSavedClamped ~= false)
-        end
-        _eqtSavedClamped = nil
-        ot:EnableMouse(true)
-        if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
-        _eqtIgnoreSetPoint = false
+        if ot:GetParent() ~= hiddenParent then return end
+        ot:SetParent(_eqtOriginalParent or UIParent)
     end
 
     local function ApplyBlizzardTrackerVisibility()
@@ -2890,7 +2835,6 @@ function EQT:Init()
         local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
         local shouldHide = Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus
-        _eqtSuppressing = shouldHide
         if shouldHide then
             SuppressTracker(ot)
         else
@@ -2899,21 +2843,6 @@ function EQT:Init()
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
     ApplyBlizzardTrackerVisibility()
-
-    -- Single SetPoint hook (matches the FriendsFrame pattern at
-    -- EllesmereUIBasics.lua:3720). Any attempt by Blizzard / Edit Mode /
-    -- layout code to re-anchor the tracker while we're suppressing
-    -- immediately re-applies the off-screen position. The reentry guard
-    -- prevents an infinite loop when our own SuppressTracker calls
-    -- SetPoint inside the hook body.
-    local ot = _G.ObjectiveTrackerFrame
-    if ot then
-        hooksecurefunc(ot, "SetPoint", function(self)
-            if _eqtIgnoreSetPoint then return end
-            if not _eqtSuppressing then return end
-            SuppressTracker(self)
-        end)
-    end
 
     -- Re-evaluate on zone/spec/cinematic changes
     do
