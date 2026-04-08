@@ -10,125 +10,6 @@ local PP = EllesmereUI.PP
 
 local EG = EllesmereUI.ELLESMERE_GREEN
 
--------------------------------------------------------------------------------
---  DEBUG: /ebsfriend - inspect first visible friend button (remove after)
--------------------------------------------------------------------------------
-SLASH_EBSRAID1 = "/ebsraid"
-SlashCmdList["EBSRAID"] = function()
-    local rf = _G.RaidFrame
-    if not rf then print("|cffff0000[EBS] RaidFrame not found|r"); return end
-    print(format("|cff00ccff[EBS]|r RaidFrame: shown=%s w=%.0f h=%.0f", tostring(rf:IsShown()), rf:GetWidth(), rf:GetHeight()))
-    print(format("  strata=%s level=%d parent=%s", rf:GetFrameStrata(), rf:GetFrameLevel(), rf:GetParent() and rf:GetParent():GetName() or "?"))
-    local p1, rel, p2, ox, oy = rf:GetPoint(1)
-    print(format("  point1: %s, %s, %s, %.0f, %.0f", tostring(p1), tostring(rel and rel:GetName()), tostring(p2), ox or 0, oy or 0))
-    print("|cffffcc00Children:|r")
-    for i = 1, select("#", rf:GetChildren()) do
-        local child = select(i, rf:GetChildren())
-        local name = child:GetName() or ("anon_" .. i)
-        local cw, ch = child:GetSize()
-        print(format("  %s: type=%s shown=%s size=%.0fx%.0f", name, child:GetObjectType(), tostring(child:IsShown()), cw or 0, ch or 0))
-        -- Check for ScrollBox
-        if child.ScrollBox or child.scrollFrame then
-            print("    ^ HAS ScrollBox/scrollFrame")
-        end
-        if child:GetObjectType() == "Button" then
-            local fs = child:GetFontString()
-            if fs then print("    ^ text: " .. (fs:GetText() or "")) end
-        end
-    end
-end
-
-SLASH_EBSTEX1 = "/ebstex"
-SlashCmdList["EBSTEX"] = function()
-    if not FriendsFrame or not FriendsFrame:IsShown() then
-        print("|cffff0000[EBS] Open friends list first|r"); return
-    end
-    local sb = FriendsListFrame and FriendsListFrame.ScrollBox
-    if not sb then return end
-    for _, btn in sb:EnumerateFrames() do
-        if btn.buttonType and btn.buttonType ~= FRIENDS_BUTTON_TYPE_DIVIDER then
-            local nm = (btn.name or btn.Name)
-            print(format("|cff00ccff[EBS]|r Textures on: %s", nm and nm:GetText() or "?"))
-            for j = 1, select("#", btn:GetRegions()) do
-                local rgn = select(j, btn:GetRegions())
-                if rgn:IsObjectType("Texture") then
-                    local dl, sl = rgn:GetDrawLayer()
-                    local atlas = rgn:GetAtlas()
-                    local tex = rgn:GetTexture()
-                    local r, g, b, a = rgn:GetVertexColor()
-                    local shown = rgn:IsShown()
-                    local al = rgn:GetAlpha()
-                    print(format("  [%s/%s] shown=%s a=%.2f vColor=(%.2f,%.2f,%.2f,%.2f) atlas=%s tex=%s",
-                        tostring(dl), tostring(sl), tostring(shown), al,
-                        r or 0, g or 0, b or 0, a or 0,
-                        tostring(atlas), tostring(tex)))
-                end
-            end
-            break
-        end
-    end
-end
-
-SLASH_EBSFRIEND1 = "/ebsfriend"
-SlashCmdList["EBSFRIEND"] = function()
-    if not FriendsFrame or not FriendsFrame:IsShown() then
-        print("|cffff0000[EBS-DBG] Open friends list first|r"); return
-    end
-    local sb = FriendsListFrame and FriendsListFrame.ScrollBox
-    if not sb then print("|cffff0000[EBS-DBG] No ScrollBox|r"); return end
-    for _, btn in sb:EnumerateFrames() do
-        if btn.buttonType and btn.buttonType ~= FRIENDS_BUTTON_TYPE_DIVIDER then
-            local nm = (btn.name or btn.Name)
-            local nameStr = nm and nm:GetText() or "?"
-            print(format("|cff00ccff[EBS-DBG]|r === %s ===", nameStr))
-
-            -- Tile bg
-            local tile = btn._ebsTileBg
-            if tile then
-                local dl, sl = tile:GetDrawLayer()
-                local l, b, w, h = tile:GetRect()
-                print(format("  tile: shown=%s alpha=%.2f layer=%s/%s size=%.0fx%.0f",
-                    tostring(tile:IsShown()), tile:GetAlpha(), tostring(dl), tostring(sl),
-                    w or 0, h or 0))
-            else
-                print("  tile: MISSING")
-            end
-
-            -- Faction bg
-            local fac = btn._ebsFactionBg
-            if fac then
-                local dl, sl = fac:GetDrawLayer()
-                local l, b, w, h = fac:GetRect()
-                print(format("  faction: shown=%s alpha=%.2f tex=%s layer=%s/%s size=%.0fx%.0f",
-                    tostring(fac:IsShown()), fac:GetAlpha(), tostring(fac:GetTexture()),
-                    tostring(dl), tostring(sl), w or 0, h or 0))
-            else
-                print("  faction: MISSING")
-            end
-
-            -- Button itself
-            local bw, bh = btn:GetSize()
-            print(format("  button: alpha=%.2f size=%.0fx%.0f visible=%s parentAlpha=%.2f",
-                btn:GetAlpha(), bw or 0, bh or 0, tostring(btn:IsVisible()),
-                btn:GetParent() and btn:GetParent():GetAlpha() or -1))
-
-            -- All BACKGROUND layer textures (check for Blizzard covering ours)
-            local bgList = {}
-            for j = 1, select("#", btn:GetRegions()) do
-                local rgn = select(j, btn:GetRegions())
-                if rgn:IsObjectType("Texture") then
-                    local dl, sl = rgn:GetDrawLayer()
-                    if dl == "BACKGROUND" and rgn:IsShown() then
-                        bgList[#bgList + 1] = format("sl=%s a=%.2f tex=%s",
-                            tostring(sl), rgn:GetAlpha(), tostring(rgn:GetTexture()))
-                    end
-                end
-            end
-            print(format("  BG textures (%d): %s", #bgList, table.concat(bgList, " | ")))
-            break  -- only first button
-        end
-    end
-end
 
 
 
@@ -273,6 +154,11 @@ local defaults = {
             addonBtnSize         = 24,
             interactableBtnSize  = 21,
             ungroupedButtons     = {},
+            freeMoveBtns         = false,
+            btnBackgrounds       = true,
+            customBtnSizeEnabled = false,
+            customBtnSize        = 24,
+            btnPositions         = {},
             showClock     = true,
             clockInside   = true,
             clockFormat   = "12h",
@@ -555,30 +441,61 @@ local function IsJunkTexture(region)
 end
 
 local function StripButtonDecorations(btn)
-    local saved = {}
-    for _, region in ipairs({ btn:GetRegions() }) do
-        if IsJunkTexture(region) then
-            saved[#saved + 1] = { region = region, alpha = region:GetAlpha(), shown = region:IsShown() }
-            region:SetAlpha(0)
-            region:Hide()
+    -- Only snapshot original state once; subsequent calls just re-hide
+    if not flyoutSavedRegions[btn] then
+        local saved = { junk = {} }
+        for _, region in ipairs({ btn:GetRegions() }) do
+            if IsJunkTexture(region) then
+                saved.junk[#saved.junk + 1] = { region = region, alpha = region:GetAlpha(), shown = region:IsShown() }
+            end
         end
+        local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+        if hl and IsJunkTexture(hl) then
+            saved.junk[#saved.junk + 1] = { region = hl, alpha = hl:GetAlpha(), shown = hl:IsShown() }
+        end
+        -- Snapshot icon anchors/texcoord so we can restore native layout
+        local icon = btn.icon or btn.Icon
+        if icon then
+            local nPts = icon:GetNumPoints()
+            local pts = {}
+            for i = 1, nPts do
+                pts[i] = { icon:GetPoint(i) }
+            end
+            saved.icon = icon
+            saved.iconPoints = pts
+            saved.iconTC = { icon:GetTexCoord() }
+        end
+        -- Snapshot native button size
+        saved.btnW, saved.btnH = btn:GetWidth(), btn:GetHeight()
+        flyoutSavedRegions[btn] = saved
     end
-    -- Also hide highlight/pushed overlays that have junk textures
-    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
-    if hl and IsJunkTexture(hl) then
-        saved[#saved + 1] = { region = hl, alpha = hl:GetAlpha(), shown = hl:IsShown() }
-        hl:SetAlpha(0)
-        hl:Hide()
+    -- Hide junk textures (runs every call)
+    for _, info in ipairs(flyoutSavedRegions[btn].junk) do
+        info.region:SetAlpha(0)
+        info.region:Hide()
     end
-    flyoutSavedRegions[btn] = saved
 end
 
 local function RestoreButtonDecorations(btn)
     local saved = flyoutSavedRegions[btn]
     if not saved then return end
-    for _, info in ipairs(saved) do
+    for _, info in ipairs(saved.junk) do
         info.region:SetAlpha(info.alpha)
         if info.shown then info.region:Show() end
+    end
+    -- Restore icon anchors and texcoord
+    if saved.icon and saved.iconPoints then
+        saved.icon:ClearAllPoints()
+        for _, pt in ipairs(saved.iconPoints) do
+            saved.icon:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
+        end
+        if saved.iconTC and #saved.iconTC >= 8 then
+            saved.icon:SetTexCoord(unpack(saved.iconTC))
+        end
+    end
+    -- Restore native button size
+    if saved.btnW and saved.btnH then
+        btn:SetSize(saved.btnW, saved.btnH)
     end
     flyoutSavedRegions[btn] = nil
 end
@@ -712,7 +629,7 @@ end
 
 local function ShowFlyoutPanel()
     if not flyoutPanel then
-        flyoutPanel = CreateFrame("Frame", nil, Minimap, "BackdropTemplate")
+        flyoutPanel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
         flyoutPanel:SetFrameStrata("DIALOG")
         flyoutPanel:SetBackdrop({
             bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -780,8 +697,12 @@ local function CreateFlyoutToggle()
     bg:SetBackdropColor(0, 0, 0, 0.8)
     bg:SetAllPoints(btn)
     bg:SetFrameLevel(btn:GetFrameLevel() - 1)
+    btn._bg = bg
 
-    btn:SetScript("OnClick", ToggleFlyoutPanel)
+    btn:SetScript("OnClick", function(self)
+        if self._ebsFreeMoveJustDragged then return end
+        ToggleFlyoutPanel()
+    end)
 
     -- Safety: ensure mouse stays enabled. Some Blizzard code or addon hooks
     -- on minimap children can disable mouse input. Re-assert on every Show.
@@ -873,6 +794,141 @@ local function UpdateLocation()
     if locationBg then
         local tw = locationFrame:GetStringWidth() or 0
         locationBg:SetSize(tw + 20, 18)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Free Move Button System
+--  When freeMoveBtns is enabled, shift+click any minimap-area button to drag
+--  it. Positions are stored as offsets in DB.profile.minimap.btnPositions
+--  keyed by a stable identifier string.
+-------------------------------------------------------------------------------
+local function GetBtnPosKey(frame)
+    -- Custom indicator buttons store their key directly
+    if frame._indicatorKey then return frame._indicatorKey end
+    local name = frame:GetName()
+    if name then return name end
+    if frame == flyoutToggle then return "_flyoutToggle" end
+    return nil
+end
+
+local function GetBtnOffset(key)
+    local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    if not mp or not mp.freeMoveBtns or not mp.btnPositions then return 0, 0 end
+    local pos = mp.btnPositions[key]
+    if not pos then return 0, 0 end
+    return pos.x or 0, pos.y or 0
+end
+
+local function SaveBtnOffset(key, x, y)
+    local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+    if not mp then return end
+    if not mp.btnPositions then mp.btnPositions = {} end
+    mp.btnPositions[key] = { x = x, y = y }
+end
+
+local _freeMoveHooked = {}  -- [frame] = true, one-time hook guard
+
+local function EnableFreeMove(frame)
+    if not frame or _freeMoveHooked[frame] then return end
+    _freeMoveHooked[frame] = true
+
+    local key = GetBtnPosKey(frame)
+    if not key then return end
+
+    frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
+
+    -- Guard third-party buttons (LibDBIcon, etc.) that have their own OnClick.
+    -- Wrap their handler so the drag flag blocks click-through.
+    if not frame._indicatorKey and frame ~= flyoutToggle then
+        local origClick = frame:GetScript("OnClick")
+        if origClick then
+            frame:SetScript("OnClick", function(self, ...)
+                if self._ebsFreeMoveJustDragged then return end
+                origClick(self, ...)
+            end)
+        end
+    end
+
+    local isDragging = false
+    local startX, startY, origOffX, origOffY
+
+    local origPoint, origRel, origRelPoint, origX, origY
+
+    local function FreeMoveOnUpdate(self)
+        if not IsMouseButtonDown("LeftButton") then
+            isDragging = false
+            self:SetScript("OnUpdate", nil)
+            -- Clear the drag flag on the next frame (set in OnMouseDown)
+            C_Timer.After(0, function() self._ebsFreeMoveJustDragged = nil end)
+            -- Save final offset and re-layout once on release
+            local es = self:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            cx, cy = cx / es, cy / es
+            local dx, dy = cx - startX, cy - startY
+            SaveBtnOffset(key, origOffX + dx, origOffY + dy)
+            if _G._EBS_ApplyMinimap then _G._EBS_ApplyMinimap() end
+            return
+        end
+        -- Move the button directly during drag (no full relayout)
+        local es = self:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = cx / es, cy / es
+        local dx, dy = cx - startX, cy - startY
+        if origPoint then
+            self:ClearAllPoints()
+            self:SetPoint(origPoint, origRel, origRelPoint, origX + origOffX + dx, origY + origOffY + dy)
+        end
+    end
+
+    frame:HookScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        if not IsShiftKeyDown() then return end
+        local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+        if not mp or not mp.freeMoveBtns then return end
+        isDragging = true
+        -- Block click actions immediately so OnClick can never fire during a drag,
+        -- regardless of WoW's event ordering. Cleared on the frame after release.
+        self._ebsFreeMoveJustDragged = true
+        local es = self:GetEffectiveScale()
+        startX, startY = GetCursorPosition()
+        startX, startY = startX / es, startY / es
+        origOffX, origOffY = GetBtnOffset(key)
+        -- Snapshot the button's current anchor (before any offset)
+        origPoint, origRel, origRelPoint, origX, origY = self:GetPoint(1)
+        -- Subtract current offset to get the base anchor position
+        origX = (origX or 0) - origOffX
+        origY = (origY or 0) - origOffY
+        self:SetScript("OnUpdate", FreeMoveOnUpdate)
+    end)
+
+    frame:HookScript("OnMouseUp", function(self, button)
+        if button ~= "LeftButton" or not isDragging then return end
+        isDragging = false
+        self:SetScript("OnUpdate", nil)
+        local es = self:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = cx / es, cy / es
+        local dx, dy = cx - startX, cy - startY
+        SaveBtnOffset(key, origOffX + dx, origOffY + dy)
+        -- Clear the drag flag on the next frame (set in OnMouseDown)
+        C_Timer.After(0, function() frame._ebsFreeMoveJustDragged = nil end)
+        if _G._EBS_ApplyMinimap then _G._EBS_ApplyMinimap() end
+    end)
+
+end
+
+-- Apply saved offset to a button (called during layout)
+local function ApplyBtnOffset(frame)
+    if not frame then return end
+    local key = GetBtnPosKey(frame)
+    if not key then return end
+    local ox, oy = GetBtnOffset(key)
+    if ox == 0 and oy == 0 then return end
+    local p1, rel, p2, x, y = frame:GetPoint(1)
+    if p1 then
+        frame:SetPoint(p1, rel, p2, (x or 0) + ox, (y or 0) + oy)
     end
 end
 
@@ -1008,66 +1064,274 @@ local function ShowAllMinimapButtons()
 end
 
 -------------------------------------------------------------------------------
---  Minimap Indicator Frames (top-left outer: Tracking, Calendar, Mail, Crafting)
+--  Minimap Indicator Buttons (custom replacements for Blizzard's reparented frames)
+--  Each is our own Button with a black bg, icon texture, and simple click handler.
+--  No Blizzard frame reparenting = no taint, no layout fights.
 -------------------------------------------------------------------------------
-local indicatorBg = nil
-local indicatorIconBgs = {}
+local indicatorBg = nil  -- combined bg strip for square mode (legacy, still used when free move is off)
+local _customIndicators = {}  -- { tracking, calendar, mail, crafting }
 
-local function GetIconBg(frame)
-    if indicatorIconBgs[frame] then return indicatorIconBgs[frame] end
-    local bg = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+-- Native atlas aspect ratios (width / height) and per-icon scale multipliers
+local INDICATOR_ATLAS_RATIO = {
+    ["UI-HUD-Minimap-Tracking-Up"]           = 15 / 14,
+    ["UI-HUD-Minimap-Tracking-Mouseover"]    = 15 / 14,
+    ["UI-HUD-Minimap-Tracking-Down"]         = 16 / 15,
+    ["UI-HUD-Minimap-Mail-Up"]               = 19.5 / 15,
+    ["UI-HUD-Minimap-Mail-Mouseover"]        = 19.5 / 15,
+    ["UI-HUD-Minimap-CraftingOrder-Up-2x"]   = 17 / 16,
+    ["UI-HUD-Minimap-CraftingOrder-Over-2x"] = 17 / 16,
+    ["UI-HUD-Minimap-CraftingOrder-Down-2x"] = 17 / 16,
+}
+local INDICATOR_ATLAS_SCALE = {}
+-- Calendar atlases: all 31 days share the same ratio/scale
+for day = 1, 31 do
+    local prefix = "UI-HUD-Calendar-" .. day
+    INDICATOR_ATLAS_RATIO[prefix .. "-Up"]        = 21 / 19
+    INDICATOR_ATLAS_RATIO[prefix .. "-Mouseover"] = 21 / 19
+    INDICATOR_ATLAS_RATIO[prefix .. "-Down"]      = 21 / 19
+    INDICATOR_ATLAS_SCALE[prefix .. "-Up"]        = 1.25
+    INDICATOR_ATLAS_SCALE[prefix .. "-Mouseover"] = 1.25
+    INDICATOR_ATLAS_SCALE[prefix .. "-Down"]      = 1.25
+end
+-- Per-icon pixel offset from center { x, y }
+local INDICATOR_ATLAS_OFFSET = {
+    _gameTime = { 2, -2 },
+    _mail     = { 1, -1 },
+}
+
+local function CreateIndicatorBtn(name, parent, upAtlas, overAtlas, downAtlas, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(GetInteractableBtnSize(), GetInteractableBtnSize())
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:EnableMouse(true)
+
+    -- Black background
+    local bg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     bg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
     bg:SetBackdropColor(0, 0, 0, 0.8)
-    bg:SetAllPoints(frame)
-    bg:SetFrameLevel(frame:GetFrameLevel() - 1)
-    indicatorIconBgs[frame] = bg
-    return bg
+    bg:SetAllPoints(btn)
+    bg:SetFrameLevel(btn:GetFrameLevel() - 1)
+    btn._bg = bg
+
+    -- Icon: sized to preserve atlas aspect ratio within the button
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    local inset = 3
+    local ratio = upAtlas and INDICATOR_ATLAS_RATIO[upAtlas]
+    if ratio then
+        local btnSz = GetInteractableBtnSize()
+        local avail = btnSz - inset * 2
+        local scale = INDICATOR_ATLAS_SCALE[upAtlas] or 1
+        local iconW, iconH
+        if ratio >= 1 then
+            iconW = avail * scale
+            iconH = (avail / ratio) * scale
+        else
+            iconH = avail * scale
+            iconW = (avail * ratio) * scale
+        end
+        icon:SetSize(iconW, iconH)
+        local off = INDICATOR_ATLAS_OFFSET[name]
+        icon:SetPoint("CENTER", btn, "CENTER", off and off[1] or 0, off and off[2] or 0)
+    else
+        icon:SetPoint("TOPLEFT", btn, "TOPLEFT", inset, -inset)
+        icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -inset, inset)
+    end
+    if upAtlas then icon:SetAtlas(upAtlas) end
+    btn._icon = icon
+    btn._upAtlas = upAtlas
+    btn._overAtlas = overAtlas
+    btn._downAtlas = downAtlas
+    btn._indicatorKey = name
+
+    -- Hover/push states
+    btn:SetScript("OnEnter", function(self)
+        if self._overAtlas and self._icon then self._icon:SetAtlas(self._overAtlas) end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if self._upAtlas and self._icon then self._icon:SetAtlas(self._upAtlas) end
+    end)
+    btn:SetScript("OnMouseDown", function(self)
+        if self._downAtlas and self._icon then self._icon:SetAtlas(self._downAtlas) end
+    end)
+    btn:SetScript("OnMouseUp", function(self)
+        local over = self:IsMouseOver()
+        local atlas = over and self._overAtlas or self._upAtlas
+        if atlas and self._icon then self._icon:SetAtlas(atlas) end
+    end)
+
+    if onClick then
+        btn:SetScript("OnClick", function(self)
+            if self._ebsFreeMoveJustDragged then return end
+            onClick(self)
+        end)
+    end
+
+    return btn
 end
 
-local function ShrinkTrackingIcon(tracking)
-    local tBtn = tracking.Button
-    if tBtn then
-        tBtn:ClearAllPoints()
-        tBtn:SetPoint("CENTER", tracking, "CENTER", 0, 0)
-        local tw2 = (tracking:GetWidth() or 22) - 5
-        local th2 = (tracking:GetHeight() or 22) - 5
-        tBtn:SetSize(tw2, th2)
+local function BuildCustomIndicators(minimap)
+    if _customIndicators.tracking then return end
+
+    -- Tracking
+    _customIndicators.tracking = CreateIndicatorBtn("_tracking", minimap,
+        "UI-HUD-Minimap-Tracking-Up", "UI-HUD-Minimap-Tracking-Mouseover", "UI-HUD-Minimap-Tracking-Down",
+        function(self)
+            local blizBtn = MinimapCluster and MinimapCluster.Tracking and MinimapCluster.Tracking.Button
+            if not blizBtn or not blizBtn.OpenMenu then return end
+
+            -- Toggle: close if already open
+            if blizBtn.menu and blizBtn.menu:IsShown() then
+                blizBtn.menu:Hide()
+                return
+            end
+
+            -- Position hidden Blizzard button at our custom button
+            blizBtn:ClearAllPoints()
+            blizBtn:SetPoint("CENTER", self, "CENTER", 0, 0)
+            blizBtn:SetAlpha(0)
+            blizBtn:EnableMouse(false)
+            blizBtn:OpenMenu()
+
+            -- Reposition menu so its top aligns with our button's top
+            if blizBtn.menu then
+                blizBtn.menu:ClearAllPoints()
+                blizBtn.menu:SetPoint("TOPRIGHT", self, "TOPLEFT", -4, 0)
+            end
+        end)
+
+    -- Calendar (day-of-month atlas)
+    local calDay = tonumber(date("%d")) or 1
+    local calPrefix = "UI-HUD-Calendar-" .. calDay
+    _customIndicators.calendar = CreateIndicatorBtn("_gameTime", minimap,
+        calPrefix .. "-Up", calPrefix .. "-Mouseover", calPrefix .. "-Down",
+        function()
+            if ToggleCalendar then ToggleCalendar() end
+        end)
+    _customIndicators.calendar._calDay = calDay
+
+    -- Mail (informational, tooltip on hover, with hover atlas)
+    _customIndicators.mail = CreateIndicatorBtn("_mail", minimap,
+        "UI-HUD-Minimap-Mail-Up", "UI-HUD-Minimap-Mail-Mouseover", nil, nil)
+    local mailBaseEnter = _customIndicators.mail:GetScript("OnEnter")
+    local mailBaseLeave = _customIndicators.mail:GetScript("OnLeave")
+    _customIndicators.mail:SetScript("OnEnter", function(self)
+        if mailBaseEnter then mailBaseEnter(self) end
+        if not self._ebsFreeMoveJustDragged then
+            EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail")
+        end
+    end)
+    _customIndicators.mail:SetScript("OnLeave", function(self)
+        if mailBaseLeave then mailBaseLeave(self) end
+        EllesmereUI.HideWidgetTooltip()
+    end)
+
+    -- Crafting Order (informational, tooltip on hover, with hover atlas)
+    _customIndicators.crafting = CreateIndicatorBtn("_crafting", minimap,
+        "UI-HUD-Minimap-CraftingOrder-Up-2x", "UI-HUD-Minimap-CraftingOrder-Over-2x", "UI-HUD-Minimap-CraftingOrder-Down-2x", nil)
+    local craftBaseEnter = _customIndicators.crafting:GetScript("OnEnter")
+    local craftBaseLeave = _customIndicators.crafting:GetScript("OnLeave")
+    _customIndicators.crafting:SetScript("OnEnter", function(self)
+        if craftBaseEnter then craftBaseEnter(self) end
+        if not self._ebsFreeMoveJustDragged then
+            EllesmereUI.ShowWidgetTooltip(self, PROFESSIONS_CRAFTING_ORDERS or "Crafting Orders")
+        end
+    end)
+    _customIndicators.crafting:SetScript("OnLeave", function(self)
+        if craftBaseLeave then craftBaseLeave(self) end
+        EllesmereUI.HideWidgetTooltip()
+    end)
+end
+
+-- Hide the Blizzard originals so they never render or intercept clicks
+local function HideBlizzardIndicators()
+    local tracking = MinimapCluster and MinimapCluster.Tracking
+    if tracking then tracking:SetAlpha(0); tracking:EnableMouse(false) end
+    local gameTime = _G.GameTimeFrame
+    if gameTime then gameTime:SetAlpha(0); gameTime:EnableMouse(false) end
+    local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
+    if indicator then
+        if indicator.MailFrame then indicator.MailFrame:SetAlpha(0); indicator.MailFrame:EnableMouse(false) end
+        if indicator.CraftingOrderFrame then indicator.CraftingOrderFrame:SetAlpha(0); indicator.CraftingOrderFrame:EnableMouse(false) end
     end
 end
 
-local function ApplyInteractableSize(frame)
-    if not frame then return end
-    local sz = GetInteractableBtnSize()
-    frame:SetSize(sz, sz)
+-- Sync visibility of custom mail/crafting indicators with Blizzard state
+local function SyncIndicatorVisibility()
+    local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
+    if _customIndicators.mail then
+        local hasMail = false
+        if HasNewMail then
+            local raw = HasNewMail()
+            if not issecretvalue or not issecretvalue(raw) then
+                hasMail = raw or false
+            end
+        end
+        _customIndicators.mail:SetShown(hasMail)
+    end
+    if _customIndicators.crafting then
+        local blizCraft = indicator and indicator.CraftingOrderFrame
+        local hasCraft = blizCraft and blizCraft:IsShown()
+        _customIndicators.crafting:SetShown(hasCraft or false)
+    end
 end
 
 local function LayoutIndicatorFrames(minimap, p, circleMode)
     local flvl = minimap:GetFrameLevel() + 10
 
-    local tracking = MinimapCluster and MinimapCluster.Tracking
-    local gameTime = _G.GameTimeFrame
-    local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
-    local mailFrame = indicator and indicator.MailFrame
-    local craftingFrame = indicator and indicator.CraftingOrderFrame
+    -- Build our custom buttons once, hide Blizzard originals
+    BuildCustomIndicators(minimap)
+    HideBlizzardIndicators()
+    SyncIndicatorVisibility()
 
-    -- Apply interactable button size
-    ApplyInteractableSize(tracking)
-    ApplyInteractableSize(gameTime)
-    ApplyInteractableSize(mailFrame)
-    ApplyInteractableSize(craftingFrame)
+    local ci = _customIndicators
+    local sz = GetInteractableBtnSize()
+    local showBg = p.btnBackgrounds ~= false
+    -- Resize buttons and update icon aspect ratios
+    local inset = 3
+    local avail = sz - inset * 2
+    local function ResizeIndicator(btn)
+        if not btn then return end
+        btn:SetSize(sz, sz)
+        if btn._bg then btn._bg:SetShown(showBg) end
+        local ratio = btn._upAtlas and INDICATOR_ATLAS_RATIO[btn._upAtlas]
+        if ratio and btn._icon then
+            local scale = INDICATOR_ATLAS_SCALE[btn._upAtlas] or 1
+            local iconW, iconH
+            if ratio >= 1 then iconW = avail * scale; iconH = (avail / ratio) * scale
+            else iconH = avail * scale; iconW = (avail * ratio) * scale end
+            btn._icon:ClearAllPoints()
+            btn._icon:SetSize(iconW, iconH)
+            local off = btn._indicatorKey and INDICATOR_ATLAS_OFFSET[btn._indicatorKey]
+            btn._icon:SetPoint("CENTER", btn, "CENTER", off and off[1] or 0, off and off[2] or 0)
+        end
+    end
+    ResizeIndicator(ci.tracking)
+    -- Update calendar day if it changed (midnight rollover)
+    if ci.calendar then
+        local today = tonumber(date("%d")) or 1
+        if ci.calendar._calDay ~= today then
+            ci.calendar._calDay = today
+            local prefix = "UI-HUD-Calendar-" .. today
+            ci.calendar._upAtlas = prefix .. "-Up"
+            ci.calendar._overAtlas = prefix .. "-Mouseover"
+            ci.calendar._downAtlas = prefix .. "-Down"
+            if ci.calendar._icon then ci.calendar._icon:SetAtlas(ci.calendar._upAtlas) end
+        end
+    end
+    ResizeIndicator(ci.calendar)
+    ResizeIndicator(ci.mail)
+    ResizeIndicator(ci.crafting)
     if flyoutToggle then
-        local sz = GetInteractableBtnSize()
         flyoutToggle:SetSize(sz, sz)
+        if flyoutToggle._bg then flyoutToggle._bg:SetShown(showBg) end
+        -- Reset to base anchor so free-move offsets don't accumulate across relayouts
+        flyoutToggle:ClearAllPoints()
+        flyoutToggle:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
     end
 
-    -- Reparent indicator children onto minimap (cluster is hidden).
-    -- Guard with InCombatLockdown to avoid tainting during protected operations.
-    if not InCombatLockdown() then
-        if tracking then tracking:SetParent(minimap); tracking:SetFrameLevel(flvl + 1) end
-        if gameTime then gameTime:SetParent(minimap); gameTime:SetFrameLevel(flvl + 1) end
-        if mailFrame then mailFrame:SetParent(minimap); mailFrame:SetFrameLevel(flvl + 1) end
-        if craftingFrame then craftingFrame:SetParent(minimap); craftingFrame:SetFrameLevel(flvl + 1) end
-    end
+    -- Calendar visibility
+    if ci.calendar then ci.calendar:SetShown(not p.hideGameTime) end
+
     -- Difficulty flag (instance type/size indicator)
     local diffFrame = (MinimapCluster and MinimapCluster.InstanceDifficulty) or _G.MiniMapInstanceDifficulty
     if diffFrame then
@@ -1081,162 +1345,80 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             diffFrame:SetAlpha(1)
         end
     end
-    -- Blizzard indicator children call self:GetParent():Layout() on events;
-    -- provide a no-op so reparented frames don't error
     if not minimap.Layout then minimap.Layout = function() end end
 
     if circleMode then
-        -----------------------------------------------------------------------
         -- Circle layout: horizontal row around the clock
-        -- [crafting][mail][tracking] [CLOCK] [calendar]
-        -----------------------------------------------------------------------
-
-        -- Tracking -- flush left of clock
-        if tracking then
-            tracking:ClearAllPoints()
+        if ci.tracking then
+            ci.tracking:ClearAllPoints()
             if clockBg and p.showClock then
-                tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
+                ci.tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
             else
-                tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
+                ci.tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
             end
-            tracking:Show()
-            ShrinkTrackingIcon(tracking)
+            ci.tracking:Show()
         end
 
-        -- Calendar -- flush right of clock
-        if gameTime then
-            if not p.hideGameTime then
-                gameTime:ClearAllPoints()
-                if clockBg and p.showClock then
-                    gameTime:SetPoint("LEFT", clockBg, "RIGHT", 0, 0)
-                else
-                    gameTime:SetPoint("TOP", minimap, "TOP", 20, -3)
-                end
-                gameTime:SetAlpha(1)
-                gameTime:Show()
-                gameTime:SetFrameLevel(flvl + 1)
+        if ci.calendar and not p.hideGameTime then
+            ci.calendar:ClearAllPoints()
+            if clockBg and p.showClock then
+                ci.calendar:SetPoint("LEFT", clockBg, "RIGHT", 0, 0)
             else
-                gameTime:Hide()
+                ci.calendar:SetPoint("TOP", minimap, "TOP", 20, -3)
             end
         end
 
-        -- Mail -- left of tracking, building left (nudged 1px right, 2px down)
-        if mailFrame then
-            mailFrame:ClearAllPoints()
-            if tracking then
-                mailFrame:SetPoint("RIGHT", tracking, "LEFT", 1, -2)
-            elseif clockBg and p.showClock then
-                mailFrame:SetPoint("RIGHT", clockBg, "LEFT", 1, -2)
-            end
+        if ci.mail and ci.mail:IsShown() then
+            ci.mail:ClearAllPoints()
+            ci.mail:SetPoint("RIGHT", ci.tracking, "LEFT", 0, 0)
         end
 
-        -- Crafting Order -- left of mail, building left
-        if craftingFrame then
-            craftingFrame:ClearAllPoints()
-            if mailFrame then
-                craftingFrame:SetPoint("RIGHT", mailFrame, "LEFT", 0, 0)
-            elseif tracking then
-                craftingFrame:SetPoint("RIGHT", tracking, "LEFT", 0, 0)
-            end
+        if ci.crafting and ci.crafting:IsShown() then
+            ci.crafting:ClearAllPoints()
+            local anchor = (ci.mail and ci.mail:IsShown()) and ci.mail or ci.tracking
+            ci.crafting:SetPoint("RIGHT", anchor, "LEFT", 0, 0)
         end
 
-        -- Individual black backgrounds behind each icon
-        if tracking then GetIconBg(tracking):Show() end
-        if gameTime and not p.hideGameTime then GetIconBg(gameTime):Show() end
-        if mailFrame then
-            local bg = GetIconBg(mailFrame)
-            if mailFrame:IsShown() then bg:Show() else bg:Hide() end
-        end
-        if craftingFrame then
-            local bg = GetIconBg(craftingFrame)
-            if craftingFrame:IsShown() then bg:Show() else bg:Hide() end
-        end
         if indicatorBg then indicatorBg:Hide() end
 
     else
-        -----------------------------------------------------------------------
-        -- Square layout: vertical stack on the left side, building down
-        -- [tracking] [calendar] [mail] [crafting]
-        -----------------------------------------------------------------------
+        -- Square layout: vertical stack on the left side
         local y = 0
-        local w = 0
-        local visCount = 0
 
-        if tracking then
-            tracking:ClearAllPoints()
-            tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", -1, y)
-            tracking:Show()
-            ShrinkTrackingIcon(tracking)
-            local tw = tracking:GetWidth() or 22
-            y = y - (tracking:GetHeight() or 22)
-            if tw > w then w = tw end
-            visCount = visCount + 1
+        if ci.tracking then
+            ci.tracking:ClearAllPoints()
+            ci.tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            ci.tracking:Show()
+            y = y - sz
         end
 
-        if gameTime then
-            if not p.hideGameTime then
-                gameTime:ClearAllPoints()
-                gameTime:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 2, y)
-                gameTime:SetAlpha(1)
-                gameTime:Show()
-                gameTime:SetFrameLevel(flvl + 1)
-                local gw = gameTime:GetWidth() or 22
-                y = y - (gameTime:GetHeight() or 22)
-                if gw > w then w = gw end
-                visCount = visCount + 1
-            else
-                gameTime:Hide()
-            end
+        if ci.calendar and not p.hideGameTime then
+            ci.calendar:ClearAllPoints()
+            ci.calendar:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            y = y - sz
         end
 
-        if mailFrame then
-            mailFrame:ClearAllPoints()
-            mailFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 1, y - 2)
-            if mailFrame:IsShown() then
-                local mw = mailFrame:GetWidth() or 22
-                y = y - (mailFrame:GetHeight() or 22)
-                if mw > w then w = mw end
-                visCount = visCount + 1
-            end
+        if ci.mail and ci.mail:IsShown() then
+            ci.mail:ClearAllPoints()
+            ci.mail:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            y = y - sz
         end
 
-        if craftingFrame then
-            craftingFrame:ClearAllPoints()
-            craftingFrame:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
-            if craftingFrame:IsShown() then
-                local cw = craftingFrame:GetWidth() or 22
-                y = y - (craftingFrame:GetHeight() or 22)
-                if cw > w then w = cw end
-                visCount = visCount + 1
-            end
+        if ci.crafting and ci.crafting:IsShown() then
+            ci.crafting:ClearAllPoints()
+            ci.crafting:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
+            y = y - sz
         end
 
-        -- Hide individual icon backgrounds (square uses the combined one)
-        for frame, bg in pairs(indicatorIconBgs) do bg:Hide() end
-
-        -- Black background sized to visible icons only
-        local totalH = -y
-        if visCount > 0 and totalH > 0 then
-            if not indicatorBg then
-                indicatorBg = CreateFrame("Frame", nil, minimap, "BackdropTemplate")
-                indicatorBg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
-                indicatorBg:SetBackdropColor(0, 0, 0, 0.8)
-            end
-            indicatorBg:SetParent(minimap)
-            indicatorBg:ClearAllPoints()
-            indicatorBg:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, 0)
-            indicatorBg:SetSize(w, totalH)
-            indicatorBg:SetFrameLevel(flvl)
-            indicatorBg:Show()
-        elseif indicatorBg then
-            indicatorBg:Hide()
-        end
+        if indicatorBg then indicatorBg:Hide() end
     end
 
-    -- Position ungrouped buttons above the flyout toggle (in check order)
+    -- Position ungrouped buttons above the flyout toggle (or at its position if hidden)
     if flyoutToggle then
         local btnSize = GetInteractableBtnSize()
-        local anchor = flyoutToggle
+        local ungroupBtnSize = (p.customBtnSizeEnabled and p.customBtnSize) or btnSize
+        local flyoutVisible = flyoutToggle:IsShown()
+        local anchor = flyoutVisible and flyoutToggle or nil
         local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
         local ungrouped = {}
         for _, btn in ipairs(cachedAddonButtons) do
@@ -1248,7 +1430,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             end
         end
         table.sort(ungrouped, function(a, b) return a.order < b.order end)
-        for _, entry in ipairs(ungrouped) do
+        local freeMove = p.freeMoveBtns
+        -- Calculate base Y for free-move independent anchoring
+        local fmBaseY = 0
+        if freeMove and flyoutVisible then
+            fmBaseY = ungroupBtnSize  -- start above flyout toggle
+        end
+        for idx, entry in ipairs(ungrouped) do
             local btn = entry.btn
             -- Restore from flyout if needed
             if flyoutSavedParents[btn] then
@@ -1260,42 +1448,59 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             btn:SetParent(minimap)
             btn:SetFrameLevel(minimap:GetFrameLevel() + 11)
             btn:ClearAllPoints()
-            btn:SetSize(btnSize, btnSize)
-            btn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+            btn:SetSize(ungroupBtnSize, ungroupBtnSize)
+            if freeMove then
+                -- Anchor each button independently to the minimap so offsets work per-button
+                local yOff = fmBaseY + (idx - 1) * ungroupBtnSize
+                btn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
+            elseif anchor then
+                btn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+            else
+                -- First ungrouped button takes the flyout toggle's position
+                btn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
+            end
             -- Lock position: disable dragging
             btn:SetMovable(false)
             btn:RegisterForDrag()
             btn:SetScript("OnDragStart", nil)
             btn:SetScript("OnDragStop", nil)
-            -- Strip decorative textures and normalize icon
-            StripButtonDecorations(btn)
-            local icon = btn.icon or btn.Icon
-            if not icon then
-                for _, region in ipairs({ btn:GetRegions() }) do
-                    if region:IsObjectType("Texture") and region:IsShown()
-                       and region:GetAlpha() > 0 and not IsJunkTexture(region)
-                       and region ~= btn._ungroupBg then
-                        icon = region
-                        break
+            if showBg then
+                -- Strip decorative textures and normalize icon
+                StripButtonDecorations(btn)
+                local icon = btn.icon or btn.Icon
+                if not icon then
+                    for _, region in ipairs({ btn:GetRegions() }) do
+                        if region:IsObjectType("Texture") and region:IsShown()
+                           and region:GetAlpha() > 0 and not IsJunkTexture(region)
+                           and region ~= btn._ungroupBg then
+                            icon = region
+                            break
+                        end
                     end
                 end
+                if icon then
+                    icon:ClearAllPoints()
+                    icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
+                    icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
+                    icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+                end
+                -- Black square background
+                if not btn._ungroupBg then
+                    local ubg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+                    ubg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+                    ubg:SetBackdropColor(0, 0, 0, 0.8)
+                    ubg:SetAllPoints(btn)
+                    ubg:SetFrameLevel(btn:GetFrameLevel() - 1)
+                    btn._ungroupBg = ubg
+                end
+                btn._ungroupBg:Show()
+                if btn._ungroupRing then btn._ungroupRing:Hide() end
+            else
+                -- No backgrounds: restore native appearance, hide our overlays
+                RestoreButtonDecorations(btn)
+                if btn._ungroupBg then btn._ungroupBg:Hide() end
+                if btn._ungroupRing then btn._ungroupRing:Hide() end
             end
-            if icon then
-                icon:ClearAllPoints()
-                icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
-                icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
-                icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
-            end
-            -- Black square background
-            if not btn._ungroupBg then
-                local ubg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
-                ubg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
-                ubg:SetBackdropColor(0, 0, 0, 0.8)
-                ubg:SetAllPoints(btn)
-                ubg:SetFrameLevel(btn:GetFrameLevel() - 1)
-                btn._ungroupBg = ubg
-            end
-            btn._ungroupBg:Show()
             _suppressVisTrack = true
             btn:SetAlpha(1)
             btn:Show()
@@ -1303,51 +1508,44 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             anchor = btn
         end
     end
+
+    -- Free Move: hook shift+drag on all indicator buttons and apply saved offsets
+    local freeMove = p.freeMoveBtns
+    local fmTargets = {}
+    if ci.tracking then fmTargets[#fmTargets + 1] = ci.tracking end
+    if ci.calendar and not p.hideGameTime then fmTargets[#fmTargets + 1] = ci.calendar end
+    if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
+    if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
+    if flyoutToggle then fmTargets[#fmTargets + 1] = flyoutToggle end
+    -- Include ungrouped addon buttons
+    for _, btn in ipairs(cachedAddonButtons) do
+        if _addonVisible[btn] ~= false and IsUngrouped(btn) then
+            fmTargets[#fmTargets + 1] = btn
+        end
+    end
+    for _, frame in ipairs(fmTargets) do
+        EnableFreeMove(frame)
+        if freeMove then
+            ApplyBtnOffset(frame)
+        end
+    end
 end
 
 local function RestoreIndicatorFrames()
-    local tracking = MinimapCluster and MinimapCluster.Tracking
-    if tracking then
-        tracking:SetParent(MinimapCluster)
-        tracking:ClearAllPoints()
-        tracking:Show()
+    -- Hide our custom indicator buttons
+    for _, btn in pairs(_customIndicators) do
+        if btn and btn.Hide then btn:Hide() end
     end
-
+    -- Restore Blizzard originals
+    local tracking = MinimapCluster and MinimapCluster.Tracking
+    if tracking then tracking:SetAlpha(1); tracking:EnableMouse(true) end
+    local gameTime = _G.GameTimeFrame
+    if gameTime then gameTime:SetAlpha(1); gameTime:EnableMouse(true) end
     local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
     if indicator then
-        indicator:Show()
-        if indicator.MailFrame then
-            indicator.MailFrame:SetParent(indicator)
-            indicator.MailFrame:ClearAllPoints()
-        end
-        if indicator.CraftingOrderFrame then
-            indicator.CraftingOrderFrame:SetParent(indicator)
-            indicator.CraftingOrderFrame:ClearAllPoints()
-        end
-        -- Trigger Blizzard's layout so children get their default anchors back
-        if indicator.Layout then indicator:Layout() end
+        if indicator.MailFrame then indicator.MailFrame:SetAlpha(1); indicator.MailFrame:EnableMouse(true) end
+        if indicator.CraftingOrderFrame then indicator.CraftingOrderFrame:SetAlpha(1); indicator.CraftingOrderFrame:EnableMouse(true) end
     end
-
-    local gameTime = _G.GameTimeFrame
-    if gameTime then
-        if indicator then
-            gameTime:SetParent(indicator)
-        elseif MinimapCluster then
-            gameTime:SetParent(MinimapCluster)
-        end
-        gameTime:ClearAllPoints()
-        gameTime:SetAlpha(1)
-        gameTime:Show()
-    end
-
-    -- Remove the no-op Layout we added to the minimap
-    if Minimap and Minimap.Layout then Minimap.Layout = nil end
-
-    -- Trigger MinimapCluster layout to restore all default positions
-    if MinimapCluster and MinimapCluster.Layout then
-        MinimapCluster:Layout()
-    end
-
     if indicatorBg then indicatorBg:Hide() end
 end
 
@@ -1617,20 +1815,11 @@ local function ApplyMinimap()
     minimap:SetClampedToScreen(true)
     local bInset = isCircle and (p.borderSize or 1) or 0
     minimap:SetClampRectInsets(-bInset, bInset, bInset, -bInset)
-    -- Force the minimap engine to re-render at the new size. Nudge the zoom
-    -- to a different value now, then restore it on the next rendered frame.
-    -- Doing both in the same frame gets optimized away by the engine.
-    local savedZoom = minimap:GetZoom()
-    local nudgeZoom = savedZoom < minimap:GetZoomLevels() and savedZoom + 1 or savedZoom - 1
-    minimap:SetZoom(nudgeZoom)
-    if not minimap._zoomRestoreFrame then
-        minimap._zoomRestoreFrame = CreateFrame("Frame")
-    end
-    minimap._zoomRestoreFrame._targetZoom = savedZoom
-    minimap._zoomRestoreFrame:SetScript("OnUpdate", function(self)
-        self:SetScript("OnUpdate", nil)
-        minimap:SetZoom(self._targetZoom)
-    end)
+    -- Force the minimap engine to re-render at the new size.
+    -- Nudge zoom to a different value then immediately restore (same frame).
+    local curZoom = minimap:GetZoom()
+    minimap:SetZoom(curZoom > 0 and 0 or 1)
+    minimap:SetZoom(curZoom)
 
     -- Reposition zoom buttons to bottom-right corner of the minimap.
     -- Parent to minimap, raise frame level above the map surface, and
@@ -1691,10 +1880,17 @@ local function ApplyMinimap()
 
     -- Flyout toggle button (bottom-left corner) -- create before hiding children
     CreateFlyoutToggle()
-    flyoutToggle:Show()
 
     -- Hide ALL minimap child frames from the map surface
     HideAllMinimapButtons()
+
+    -- Show/hide flyout toggle based on whether any grouped buttons exist
+    local groupedButtons = CollectFlyoutButtons()
+    if #groupedButtons > 0 then
+        flyoutToggle:Show()
+    else
+        flyoutToggle:Hide()
+    end
 
     -- Poll for late-loading addons that attach buttons after ADDON_LOADED
     if not addonButtonPoll then
@@ -1796,35 +1992,31 @@ local function ApplyMinimap()
     -- Indicator frames (tracking, calendar, mail, crafting)
     LayoutIndicatorFrames(minimap, p, isCircle)
 
-    -- Hook mail/crafting Show/Hide so backdrops update when status changes
+    -- Hook Blizzard mail/crafting Show/Hide to sync our custom indicator visibility
     local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
     local mailFrame = indicator and indicator.MailFrame
     local craftingFrame = indicator and indicator.CraftingOrderFrame
     if mailFrame and not mailFrame._ebsVisHooked then
         mailFrame._ebsVisHooked = true
-        hooksecurefunc(mailFrame, "Show", function()
+        local function onMailChange()
             local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
             if not mp or not mp.enabled then return end
+            SyncIndicatorVisibility()
             LayoutIndicatorFrames(minimap, mp, (mp.shape or "square") ~= "square")
-        end)
-        hooksecurefunc(mailFrame, "Hide", function()
-            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
-            if not mp or not mp.enabled then return end
-            LayoutIndicatorFrames(minimap, mp, (mp.shape or "square") ~= "square")
-        end)
+        end
+        hooksecurefunc(mailFrame, "Show", onMailChange)
+        hooksecurefunc(mailFrame, "Hide", onMailChange)
     end
     if craftingFrame and not craftingFrame._ebsVisHooked then
         craftingFrame._ebsVisHooked = true
-        hooksecurefunc(craftingFrame, "Show", function()
+        local function onCraftChange()
             local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
             if not mp or not mp.enabled then return end
+            SyncIndicatorVisibility()
             LayoutIndicatorFrames(minimap, mp, (mp.shape or "square") ~= "square")
-        end)
-        hooksecurefunc(craftingFrame, "Hide", function()
-            local mp = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
-            if not mp or not mp.enabled then return end
-            LayoutIndicatorFrames(minimap, mp, (mp.shape or "square") ~= "square")
-        end)
+        end
+        hooksecurefunc(craftingFrame, "Show", onCraftChange)
+        hooksecurefunc(craftingFrame, "Hide", onCraftChange)
     end
 
     -- Location bar -- bottom center (outside) or bottom inside the minimap
@@ -2206,6 +2398,11 @@ local function SkinRaidGroupButton(btn)
 end
 
 local function SkinRaidTab()
+    -- Full block: skip ALL styling during M+ or raid combat
+    local inMplus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
+    local inRaidCombat = InCombatLockdown() and IsInRaid()
+    if inMplus or inRaidCombat then return end
+
     for _, name in ipairs(RAID_TAB_BUTTONS) do
         local btn
         if name:find("%.") then
@@ -2257,20 +2454,23 @@ local function SkinRaidTab()
     end
     SkinRaidInfoFrame()
 
+    if raidFrame and not raidFrame._ebsBorderAdded then
+        raidFrame._ebsBorderAdded = true
+        local bdr = CreateFrame("Frame", nil, raidFrame)
+        bdr:SetPoint("TOPLEFT", raidFrame, "TOPLEFT", 0, 0)
+        bdr:SetPoint("BOTTOMRIGHT", raidFrame, "BOTTOMRIGHT", 0, 0)
+        bdr:SetFrameLevel(raidFrame:GetFrameLevel() + 2)
+        PP.CreateBorder(bdr, 1, 1, 1, 0.1, 1, "OVERLAY", 7)
+    end
+
+    -- Skip layout changes during any combat (styling above is safe)
+    if InCombatLockdown() then return end
+
     -- Reposition RaidFrame content
     if raidFrame then
         raidFrame:ClearAllPoints()
         raidFrame:SetPoint("TOPLEFT", FriendsFrame, "TOPLEFT", 15, -76)
         raidFrame:SetPoint("BOTTOMRIGHT", FriendsFrame, "BOTTOMRIGHT", -15, 35)
-
-        if not raidFrame._ebsBorderAdded then
-            raidFrame._ebsBorderAdded = true
-            local bdr = CreateFrame("Frame", nil, raidFrame)
-            bdr:SetPoint("TOPLEFT", raidFrame, "TOPLEFT", 0, 0)
-            bdr:SetPoint("BOTTOMRIGHT", raidFrame, "BOTTOMRIGHT", 0, 0)
-            bdr:SetFrameLevel(raidFrame:GetFrameLevel() + 2)
-            PP.CreateBorder(bdr, 1, 1, 1, 0.1, 1, "OVERLAY", 7)
-        end
     end
 
     -- Reposition buttons
@@ -2745,10 +2945,8 @@ local function SkinFriendButton(button)
     button._ebsTileBg = tileBg
 
     -- Strip Blizzard's highlight texture (SetVertexColor to avoid taint risk)
-    local blizzHighlight = button:GetHighlightTexture()
+    local blizzHighlight = button.GetHighlightTexture and button:GetHighlightTexture()
     if blizzHighlight then blizzHighlight:SetVertexColor(0, 0, 0, 0) end
-    button.LockHighlight = function() end
-    button.UnlockHighlight = function() end
 
     -- Hover highlight (OnEnter/OnLeave)
     local hover = button:CreateTexture(nil, "ARTWORK", nil, -7)
@@ -3500,6 +3698,31 @@ local function SkinFriendsFrame()
         end)
         ApplySize()
         ApplyScaleAndPosition()
+
+        -- Prevent Blizzard's panel system from overriding our position.
+        -- When ShowUIPanel or UpdateUIPanelPositions fires (opening character
+        -- panel, clicking bottom tabs, etc.), Blizzard calls SetPoint on
+        -- FriendsFrame. This hook re-applies our saved position immediately.
+        local _ebsIgnoreSetPoint = false
+        hooksecurefunc(frame, "SetPoint", function()
+            if _ebsIgnoreSetPoint then return end
+            if InCombatLockdown() then return end
+            if not EBS.db or not EBS.db.profile.friends.enabled then return end
+            local fp = EBS.db.profile.friends
+            local pos = _ebsTempPos or fp.position
+            if not pos then return end
+            _ebsIgnoreSetPoint = true
+            local px, py = pos.x, pos.y
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapForES and px and py then
+                local es = frame:GetEffectiveScale()
+                px = PPa.SnapForES(px, es)
+                py = PPa.SnapForES(py, es)
+            end
+            frame:ClearAllPoints()
+            frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
+            _ebsIgnoreSetPoint = false
+        end)
     end
 
     -- Dark background
@@ -3604,6 +3827,12 @@ local function SkinFriendsFrame()
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
             tab._label = label
+            -- Sync our label when Blizzard updates the text (e.g. Quick Join count)
+            if blizLabel then
+                hooksecurefunc(blizLabel, "SetText", function(_, newText)
+                    if newText and label then label:SetText(newText) end
+                end)
+            end
 
             -- Accent underline (1px pixel-perfect)
             if not tab._underline then
@@ -3626,8 +3855,8 @@ local function SkinFriendsFrame()
     -- reading bliz:IsEnabled() during OnShow which taints.
     local _activeSubTab = 1
 
-    local function UpdateCustomTabs()
-        local selected = PanelTemplates_GetSelectedTab(FriendsFrame) or 1
+    local function UpdateCustomTabs(overrideTab)
+        local selected = overrideTab or PanelTemplates_GetSelectedTab(FriendsFrame) or 1
         local isContacts = (selected == 1)
         local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
         local useAccent = fp and fp.accentColors ~= false
@@ -3650,8 +3879,8 @@ local function SkinFriendsFrame()
         -- Show/hide bottom buttons based on whether Contacts tab is active
         local addBtn = _G.FriendsFrameAddFriendButton
         local msgBtn = _G.FriendsFrameSendMessageButton
-        if addBtn then addBtn:SetShown(isContacts) end
-        if msgBtn then msgBtn:SetShown(isContacts) end
+        if addBtn then addBtn:SetAlpha(isContacts and 1 or 0); addBtn:EnableMouse(isContacts) end
+        if msgBtn then msgBtn:SetAlpha(isContacts and 1 or 0); msgBtn:EnableMouse(isContacts) end
         if frame._ebsOfflineBtn then frame._ebsOfflineBtn:SetShown(isContacts) end
         -- Show top links on all tabs except Raid
         local showTopUI = (selected ~= 3)
@@ -3712,23 +3941,40 @@ local function SkinFriendsFrame()
 
     frame._ebsUpdateCustomTabs = UpdateCustomTabs
 
-    -- Update our tab visuals when Blizzard switches tabs (secure hook,
-    -- only updates visuals, never calls PanelTemplates_SetTab).
-    hooksecurefunc("PanelTemplates_SetTab", function(f)
-        if f ~= FriendsFrame then return end
-        UpdateCustomTabs()
-        local selected = PanelTemplates_GetSelectedTab(FriendsFrame) or 1
-        if selected == 3 then
-            C_Timer.After(0, function() SkinRaidTab() end)
+    -- Detect tab changes by hooking each sub-frame's OnShow.
+    -- Blizzard shows/hides these frames when tabs switch -- no global hooks needed.
+    local tabFrames = {
+        { _G.FriendsListFrame, 1 },
+        { _G.WhoFrame,         2 },
+        { _G.RaidFrame,        3 },
+        { _G.QuickJoinFrame,   4 },
+    }
+    for _, entry in ipairs(tabFrames) do
+        local sf, tabIdx = entry[1], entry[2]
+        if sf then
+            sf:HookScript("OnShow", function()
+                UpdateCustomTabs(tabIdx)
+                if tabIdx == 3 then C_Timer.After(0, SkinRaidTab) end
+            end)
         end
-    end)
+    end
+    -- RaidFrame may not exist yet; hook it after Blizzard creates it
+    if not _G.RaidFrame then
+        C_Timer.After(0.25, function()
+            local rf = _G.RaidFrame
+            if rf then
+                rf:HookScript("OnShow", function()
+                    UpdateCustomTabs(3)
+                    C_Timer.After(0, SkinRaidTab)
+                end)
+            end
+        end)
+    end
 
-    -- Update tab visuals on frame show
     frame:HookScript("OnShow", function()
         UpdateCustomTabs()
     end)
 
-    -- Hide all scrollbar tracks when FriendsFrame closes
     frame:HookScript("OnHide", function()
         local function HideTrack(sb)
             if sb and sb._ebsTrack then
@@ -4793,7 +5039,6 @@ local function SkinFriendsFrame()
             if not FriendsFrame:IsShown() then return end
             if not EBS.db or not EBS.db.profile.friends.enabled then return end
             if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
-
             -- Structural skinning always runs (guarded by _ebsSkinned, only fires once per button)
             SkinFriendButton(button)
 
@@ -5524,9 +5769,10 @@ local function SkinFriendsFrame()
         local ourSB = CreateFrame("Frame", nil, UIParent, "WowScrollBoxList")
         local ourBar = CreateFrame("EventFrame", nil, UIParent, "MinimalScrollBar")
         ourSB:SetFrameStrata("HIGH")
-        ourSB:SetFrameLevel(20)
+        ourSB:SetFrameLevel(1)
         ourSB:Hide()
         ourBar:SetFrameStrata("HIGH")
+        ourBar:SetFrameLevel(2)
         ourBar:Hide()
 
         local ourBg = ourSB:CreateTexture(nil, "BACKGROUND")

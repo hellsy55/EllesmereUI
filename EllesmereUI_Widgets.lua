@@ -1534,12 +1534,7 @@ local function ApplyAccentLive(r, g, b)
     -- 3. Invalidate cached popups so they rebuild with new accent
     EllesmereUI._InvalidateConfirmPopup()
 
-    -- 4. Background tint (for Custom Color picker dragging -- no crossfade)
-    if EllesmereUI._applyBgTint then
-        EllesmereUI._applyBgTint(r, g, b)
-    end
-
-    -- 5. Fast-path refresh only (no full rebuild to avoid memory churn)
+    -- 4. Fast-path refresh only (no full rebuild to avoid memory churn)
     EllesmereUI:RefreshPage()
 end
 
@@ -1559,14 +1554,11 @@ EllesmereUI.SetActiveTheme = function(theme)
     ApplyAccentAnimated(r, g, b)
 end
 
---- SetAccentColor: for Custom Color mode -- persists user's color and applies live.
+--- SetAccentColor: persists accent color and applies live.
 EllesmereUI.SetAccentColor = function(r, g, b)
     if not EllesmereUIDB then EllesmereUIDB = {} end
-    EllesmereUIDB.accentColor = { r = r, g = g, b = b }
-    -- Only apply live if we're actually in Custom Color mode
-    if EllesmereUI.GetActiveTheme() == "Custom Color" then
-        ApplyAccentLive(r, g, b)
-    end
+    EllesmereUIDB.customAccentColor = { r = r, g = g, b = b }
+    ApplyAccentLive(r, g, b)
 end
 
 --- GetPlayerClassColor: returns the class color for the current player

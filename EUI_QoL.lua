@@ -728,6 +728,8 @@ qolFrame:SetScript("OnEvent", function(self)
         local function GetApplicantScore(applicantID)
             if not C_LFGList or not C_LFGList.GetApplicantMemberInfo then return nil end
             local _, _, _, _, _, _, _, _, _, _, _, dungeonScore = C_LFGList.GetApplicantMemberInfo(applicantID, 1)
+            if dungeonScore == nil then return nil end
+            if issecretvalue and issecretvalue(dungeonScore) then return nil end
             if type(dungeonScore) ~= "number" then return nil end
             return dungeonScore
         end
@@ -754,9 +756,9 @@ qolFrame:SetScript("OnEvent", function(self)
             table.sort(applicants, function(a, b)
                 local sa = scores[a]
                 local sb = scores[b]
-                if sa ~= nil and sb ~= nil and sa ~= sb then return sa > sb end
-                if sa ~= nil and sb == nil then return true end
-                if sa == nil and sb ~= nil then return false end
+                if sa and sb and sa ~= sb then return sa > sb end
+                if sa and not sb then return true end
+                if not sa and sb then return false end
                 return (originalOrder[a] or 0) < (originalOrder[b] or 0)
             end)
         end)

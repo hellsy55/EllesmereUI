@@ -1455,9 +1455,10 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
     if not childBar or not targetBar then return end
-    -- Skip protected frames during combat (action bars), but allow
-    -- non-protected frames (resource bars, CDM, unit frames) to position.
-    if InCombatLockdown() and (childBar:IsProtected() or targetBar:IsProtected()) then return end
+    -- Skip protected child frames during combat (action bars). Reading
+    -- target bounds is safe even if the target is protected (e.g. oUF
+    -- unit frames) -- we only call SetPoint on the child, not the target.
+    if InCombatLockdown() and childBar:IsProtected() then return end
 
     -- If the target frame has no valid screen bounds (hidden / not yet laid out),
     -- bail to avoid computing garbage coordinates that cause oscillation.

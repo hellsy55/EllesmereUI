@@ -722,6 +722,7 @@ local function DecorateFrame(frame, barData)
                     cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
                     if isActive then
                         fd._hideActiveOverriding = true
+                        fd._wasActive = true
                     elseif fd._hideActiveOverriding then
                         fd._hideActiveOverriding = false
                         if cd.SetUseAuraDisplayTime then
@@ -744,9 +745,27 @@ local function DecorateFrame(frame, barData)
                     ca = (ss2 and ss2.activeSwipeA) or 0.7
                     cd:SetSwipeColor(cr, cg, cb, ca)
                     if fd.tex then fd.tex:SetDesaturated(false) end
+                    fd._wasActive = true
                 else
-                    -- Not active: black swipe
+                    -- Not active: black swipe.
                     cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    -- Transition: buff just ended, CD starting. Re-apply the
+                    -- cooldown duration so the swipe shows immediately
+                    -- (e.g. Invoke Niuzao). Only fires once per transition,
+                    -- and only if the spell actually has an active cooldown.
+                    if fd._wasActive then
+                        fd._wasActive = false
+                        if sid2 and cd.SetCooldownFromDurationObject and C_Spell.GetSpellCooldown then
+                            local cdInfo = C_Spell.GetSpellCooldown(sid2)
+                            if cdInfo and cdInfo.isActive then
+                                local durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                                if durObj then
+                                    cd:SetCooldownFromDurationObject(durObj)
+                                    cd:SetDrawSwipe(true)
+                                end
+                            end
+                        end
+                    end
                 end
 
                 -- Active glow (per-spell)
@@ -1772,8 +1791,18 @@ local function CollectAndReanchor(bypassSpecGuard)
             local efd = hookFrameData[frame]
             if efd then efd._cdmAnchor = nil end
             local vf = frame.viewerFrame
-            if vf == buffViewer or vf == barViewer then
-                -- Buff frame: only disable swipe, touch nothing else
+            if vf == barViewer then
+                -- Bar viewer frame: skip entirely when using Blizzard tracked bars
+                local pp = ECME.db and ECME.db.profile
+                if pp and pp.cdmBars and pp.cdmBars.useBlizzardBuffBars then
+                    -- Leave untouched so Blizzard's tracked bars work
+                else
+                    if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
+                        frame.Cooldown:SetDrawSwipe(false)
+                    end
+                end
+            elseif vf == buffViewer then
+                -- Buff icon frame: only disable swipe, touch nothing else
                 if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
                     frame.Cooldown:SetDrawSwipe(false)
                 end
@@ -2185,6 +2214,11 @@ function ns.SetupViewerHooks()
             if v.OnAcquireItemFrame then
                 hooksecurefunc(v, "OnAcquireItemFrame", function(_, itemFrame)
                     if not ns._initialReanchorDone then return end
+                    -- Skip blanking bar viewer children when user wants Blizzard tracked bars
+                    if isBarViewer then
+                        local pp = ECME.db and ECME.db.profile
+                        if pp and pp.cdmBars and pp.cdmBars.useBlizzardBuffBars then return end
+                    end
                     if itemFrame then
                         itemFrame:SetAlpha(0)
                         if itemFrame.Cooldown and itemFrame.Cooldown.SetDrawSwipe then
@@ -2346,9 +2380,11 @@ function ns.SetupViewerHooks()
 
                                 -- Pandemic glow
                                 if bd.pandemicGlow and sid and sid > 0 and fd then
-                                    -- Check our own detection + Blizzard's native
-                                    -- PandemicIcon (covers debuffs on target)
+                                    -- Check player auras, child frame aura data
+                                    -- (covers buffs on other units like Lifebloom),
+                                    -- and Blizzard's native PandemicIcon
                                     local inPandemic = ns.IsInPandemicWindow(sid)
+                                        or ns.IsInPandemicFromChild(frame)
                                         or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
                                     if inPandemic then
                                         if not fd.pandemicGlowActive then

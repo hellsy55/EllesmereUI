@@ -278,28 +278,30 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Accent Color | Interactable Button Size
+        -- Accent Color | (spacer)
         _, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Accent Color",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
               swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) },
-            { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
-              tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.interactableBtnSize = v
-                RefreshMinimap()
-              end }
+            { type="label", text="" }
         );  y = y - h
 
-        -- Minimap Button Size | Ungroup Minimap Button
+        y = y - 10
+
+        -- ICONS AND BUTTONS section header
+        _, h = W:SectionHeader(parent, "ICONS AND BUTTONS", y);  y = y - h
+
+        -- Ungroup Minimap Buttons | In-Group Button Size
         local ungroupRow
         ungroupRow, h = W:DualRow(parent, y,
-            { type="slider", text="Minimap Button Size", min=14, max=40, step=1,
+            { type="dropdown", text="Ungroup Minimap Buttons",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue = function() return "__placeholder" end,
+              setValue = function() end },
+            { type="slider", text="In-Group Button Size", min=14, max=40, step=1,
               tooltip="Size of addon minimap buttons in the flyout grid",
               disabled=function() local m = MinimapDB(); return m and not m.enabled end,
               disabledTooltip="Module is disabled",
@@ -308,19 +310,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local m = MinimapDB(); if not m then return end
                 m.addonBtnSize = v
                 RefreshMinimap()
-              end },
-            { type="dropdown", text="Ungroup Minimap Button",
-              values = { __placeholder = "..." }, order = { "__placeholder" },
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              getValue = function() return "__placeholder" end,
-              setValue = function() end }
+              end }
         );  y = y - h
 
         -- Replace placeholder dropdown with checkbox dropdown
         do
-            local rightRgn = ungroupRow._rightRegion
-            if rightRgn._control then rightRgn._control:Hide() end
+            local leftRgn = ungroupRow._leftRegion
+            if leftRgn._control then leftRgn._control:Hide() end
 
             -- Build items from currently collected minimap buttons
             local function GetUngroupItems()
@@ -339,7 +335,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                leftRgn, 210, leftRgn:GetFrameLevel() + 2,
                 GetUngroupItems(),
                 function(k)
                     local m = MinimapDB(); if not m then return false end
@@ -361,11 +357,105 @@ initFrame:SetScript("OnEvent", function(self)
                     RefreshMinimap()
                 end)
             local PP = EllesmereUI.PP
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
-            rightRgn._control = cbDD
-            rightRgn._lastInline = nil
+            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            leftRgn._control = cbDD
+            leftRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
+
+        -- Interactable Button Size | Outer-Group MM Button Size (toggle + cog)
+        local customBtnRow
+        customBtnRow, h = W:DualRow(parent, y,
+            { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
+              tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.interactableBtnSize = v
+                RefreshMinimap()
+              end },
+            { type="toggle", text="Outer-Group MM Button Size",
+              tooltip="Override the size of ungrouped minimap buttons independently from the interactable button size.",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.customBtnSizeEnabled end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.customBtnSizeEnabled = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Inline cog on Outer-Group MM Button Size for size slider
+        do
+            local rgn = customBtnRow._rightRegion
+            local function isOff()
+                local m = MinimapDB(); return m and (not m.enabled or not m.customBtnSizeEnabled)
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Ungrouped Button Size",
+                rows = {
+                    { type = "slider", label = "Size", min = 16, max = 40, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.customBtnSize or 24 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.customBtnSize = v
+                          RefreshMinimap()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(isOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(isOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local cogBlock = CreateFrame("Frame", nil, cogBtn)
+            cogBlock:SetAllPoints(); cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10); cogBlock:EnableMouse(true)
+            cogBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Outer-Group MM Button Size")) end)
+            cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then cogBlock:Show() else cogBlock:Hide() end
+            end)
+            if isOff() then cogBlock:Show() else cogBlock:Hide() end
+        end
+
+        -- Free Move Buttons | Button Backgrounds
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Free Move Buttons",
+              tooltip="When enabled, Shift+Click any minimap button (mail, calendar, tracking, addon buttons) to drag it to a custom position.",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.freeMoveBtns end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.freeMoveBtns = v
+                if not v then
+                    m.btnPositions = {}
+                end
+                RefreshMinimap()
+              end },
+            { type="toggle", text="Button Backgrounds",
+              tooltip="Show black backgrounds behind minimap indicator buttons (tracking, calendar, mail, crafting, addon buttons, flyout toggle).",
+              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local m = MinimapDB(); return m and m.btnBackgrounds ~= false end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.btnBackgrounds = v
+                RefreshMinimap()
+              end }
+        );  y = y - h
 
         y = y - 10
 

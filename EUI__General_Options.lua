@@ -654,9 +654,27 @@ initFrame:SetScript("OnEvent", function(self)
             themeValues[name] = name
         end
 
+        -- Row 1: UI Accent Color | EUI Options Theme
         local themeRow
         themeRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Active Theme",
+            { type="multiSwatch", text="UI Accent Color",
+              tooltip="Sets the accent color used across all EllesmereUI elements (tabs, glows, highlights, borders). Defaults to your theme color.",
+              swatches = {
+                { hasAlpha = false,
+                  getValue = function()
+                      local ca = EllesmereUIDB and EllesmereUIDB.customAccentColor
+                      if ca then return ca.r, ca.g, ca.b, 1 end
+                      local EG = EllesmereUI.ELLESMERE_GREEN
+                      return EG.r, EG.g, EG.b, 1
+                  end,
+                  setValue = function(r, g, b)
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.customAccentColor = { r = r, g = g, b = b }
+                      -- Live apply using the same optimized system as theme colors
+                      EllesmereUI.SetAccentColor(r, g, b)
+                  end },
+              } },
+            { type="dropdown", text="EUI Options Theme",
               values=themeValues,
               order=EllesmereUI.THEME_ORDER,
               getValue=function()
@@ -665,8 +683,92 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 EllesmereUI.SetActiveTheme(v)
                 EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Inline color swatch on EUI Options Theme (right region)
+        do
+            local rightRgn = themeRow._rightRegion
+            local function isCustomColorOff()
+                return EllesmereUI.GetActiveTheme() ~= "Custom Color"
+            end
+
+            local tcGet = function()
+                local db = EllesmereUIDB
+                local sa = db and db.accentColor
+                if sa then return sa.r, sa.g, sa.b, 1 end
+                return EllesmereUI.GetAccentColor()
+            end
+            local tcSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.accentColor = { r = r, g = g, b = b }
+                -- Only update the window background, not the accent color
+                if EllesmereUI._applyBgTint then
+                    EllesmereUI._applyBgTint(r, g, b)
+                end
+            end
+            local tcSwatch, tcUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, tcGet, tcSet, nil, 20)
+            PP.Point(tcSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            rightRgn._lastInline = tcSwatch
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isCustomColorOff()
+                tcSwatch:SetAlpha(off and 0.15 or 1)
+                tcSwatch:EnableMouse(not off)
+                tcUpdateSwatch()
+            end)
+            tcSwatch:SetAlpha(isCustomColorOff() and 0.15 or 1)
+            tcSwatch:EnableMouse(not isCustomColorOff())
+            tcSwatch:SetScript("OnEnter", function(self)
+                if isCustomColorOff() then
+                    EllesmereUI.ShowWidgetTooltip(self, "This option is only available for the Custom Color Theme")
+                end
+            end)
+            tcSwatch:SetScript("OnLeave", function()
+                EllesmereUI.HideWidgetTooltip()
+            end)
+        end
+
+        -- Row 2: UI Scale | EUI Options Scale
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="UI Scale",
+              min=0.40, max=1.00, step=0.01,
+              tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
+              getValue=function()
+                if EllesmereUI._uiScaleDragVal then
+                    return EllesmereUI._uiScaleDragVal
+                end
+                return EllesmereUIDB and EllesmereUIDB.ppUIScale or EllesmereUI.PP.PixelBestSize()
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUI._uiScaleDragVal = v
+                EllesmereUIDB.ppUIScaleAuto = false
+                local mf = EllesmereUI._mainFrame
+                local panelScaleBefore
+                if mf then panelScaleBefore = mf:GetEffectiveScale() end
+                EllesmereUI.PP.SetUIScale(v)
+                if mf and panelScaleBefore then
+                    local newEff = UIParent:GetEffectiveScale()
+                    if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
+                end
+                if not EllesmereUI._uiScaleCleanup then
+                    EllesmereUI._uiScaleCleanup = true
+                    C_Timer.After(0, function()
+                        if not EllesmereUI._sliderDragging then
+                            EllesmereUI._uiScaleDragVal = nil
+                            EllesmereUI:ShowConfirmPopup({
+                                title = "UI Scale Changed",
+                                message = "Blizzard's Edit Mode snapping may not work correctly until you reload your UI.",
+                                confirmText = "Reload Now",
+                                cancelText = "Later",
+                                onConfirm = function() ReloadUI() end,
+                            })
+                        end
+                        EllesmereUI._uiScaleCleanup = false
+                    end)
+                end
               end },
-            { type="dropdown", text="Window Scale",
+            { type="dropdown", text="EUI Options Scale",
               values={ ["Tiny (75%)"]="Tiny (75%)", ["Small (90%)"]="Small (90%)", ["Normal (100%)"]="Normal (100%)", ["Large (110%)"]="Large (110%)", ["Huge (125%)"]="Huge (125%)", ["Massive (150%)"]="Massive (150%)" },
               order={ "Tiny (75%)", "Small (90%)", "Normal (100%)", "Large (110%)", "Huge (125%)", "Massive (150%)" },
               getValue=function()
@@ -689,73 +791,11 @@ initFrame:SetScript("OnEvent", function(self)
                 if EllesmereUI.SetPanelScale then
                     EllesmereUI:SetPanelScale(scale)
                 end
-              end });  y = y - h
+              end }
+        );  y = y - h
 
-        -- Inline color swatch on Active Theme (left region)
-        do
-            local leftRgn = themeRow._leftRegion
-            local function isCustomColorOff()
-                return EllesmereUI.GetActiveTheme() ~= "Custom Color"
-            end
-
-            -- Color swatch (closest to dropdown)
-            local tcGet = function() return EllesmereUI.GetAccentColor() end
-            local tcSet = function(r, g, b) EllesmereUI.SetAccentColor(r, g, b) end
-            local tcSwatch, tcUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, tcGet, tcSet, nil, 20)
-            PP.Point(tcSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-            leftRgn._lastInline = tcSwatch
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isCustomColorOff()
-                tcSwatch:SetAlpha(off and 0.15 or 1)
-                tcSwatch:EnableMouse(not off)
-                tcUpdateSwatch()
-            end)
-            tcSwatch:SetAlpha(isCustomColorOff() and 0.15 or 1)
-            tcSwatch:EnableMouse(not isCustomColorOff())
-            tcSwatch:SetScript("OnEnter", function(self)
-                if isCustomColorOff() then
-                    EllesmereUI.ShowWidgetTooltip(self, "This option is only available for the Custom Color Theme")
-                end
-            end)
-            tcSwatch:SetScript("OnLeave", function()
-                EllesmereUI.HideWidgetTooltip()
-            end)
-        end
-
+        -- Row 3: Show Minimap Button | Hide Pause Menu Button
         _, h = W:DualRow(parent, y,
-            { type="slider", text="UI Scale",
-              min=0.40, max=1.00, step=0.01,
-              tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
-              getValue=function()
-                if EllesmereUI._uiScaleDragVal then
-                    return EllesmereUI._uiScaleDragVal
-                end
-                return EllesmereUIDB and EllesmereUIDB.ppUIScale or EllesmereUI.PP.PixelBestSize()
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUI._uiScaleDragVal = v
-                EllesmereUIDB.ppUIScaleAuto = false
-                -- Snapshot panel scale before changing UIParent
-                local mf = EllesmereUI._mainFrame
-                local panelScaleBefore
-                if mf then panelScaleBefore = mf:GetEffectiveScale() end
-                EllesmereUI.PP.SetUIScale(v)
-                -- Counter-scale panel so it stays visually identical
-                if mf and panelScaleBefore then
-                    local newEff = UIParent:GetEffectiveScale()
-                    if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
-                end
-                if not EllesmereUI._uiScaleCleanup then
-                    EllesmereUI._uiScaleCleanup = true
-                    C_Timer.After(0, function()
-                        if not EllesmereUI._sliderDragging then
-                            EllesmereUI._uiScaleDragVal = nil
-                        end
-                        EllesmereUI._uiScaleCleanup = false
-                    end)
-                end
-              end },
             { type="toggle", text="Show Minimap Button",
               getValue=function()
                 return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
@@ -768,9 +808,7 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     EllesmereUI.HideMinimapButton()
                 end
-              end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              end },
             { type="toggle", text="Hide Pause Menu Button",
               tooltip="Hides the EllesmereUI button from the game's Escape/pause menu.",
               getValue=function()
@@ -779,8 +817,38 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.hideGameMenuButton = v
+              end }
+        );  y = y - h
+
+        -- Row 4: Reskin Blizzard Elements | (spacer)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reskin Blizzard Elements",
+              tooltip="Reskins Blizzard tooltips, right-click context menus, and popups with a dark, minimal style matching the EUI aesthetic. Requires reload to apply.",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.customTooltips = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Reskin setting requires a UI reload to fully apply.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Accent Colored Elements",
+              tooltip="Recolors headers, arrows, and spell titles in Blizzard tooltips and context menus to match your UI Accent Color.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.accentReskinElements or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.accentReskinElements = v
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -1616,7 +1684,7 @@ initFrame:SetScript("OnEvent", function(self)
     local function CreateFPSCounter()
         if fpsFrame then return end
         local FONT = EllesmereUI.GetFontPath("extras")
-        local FONT_SIZE = 12
+        local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
         local LABEL_SIZE = FONT_SIZE - 2
         local SHADOW_X, SHADOW_Y = 1, -1
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
@@ -1742,6 +1810,16 @@ initFrame:SetScript("OnEvent", function(self)
         local shouldShow = EllesmereUIDB and EllesmereUIDB.showFPS
         if shouldShow then
             CreateFPSCounter()
+            -- Re-apply text size from DB
+            local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+            local lblSz = sz - 2
+            local fp = EllesmereUI.GetFontPath("extras")
+            local outF = EllesmereUI.GetFontOutlineFlag()
+            if fpsFrame._text then fpsFrame._text:SetFont(fp, sz, outF) end
+            if fpsFrame._textWorld then fpsFrame._textWorld:SetFont(fp, sz, outF) end
+            if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
+            if fpsFrame._lblWorld then fpsFrame._lblWorld:SetFont(fp, lblSz, outF) end
+            if fpsFrame._lblLocal then fpsFrame._lblLocal:SetFont(fp, lblSz, outF) end
             -- Apply saved position and scale
             local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
             if pos and pos.point then
@@ -1918,7 +1996,8 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Font -- pull from the global "extras" font key
             local fontPath = EllesmereUI.GetFontPath("extras")
-            fs:SetFont(fontPath, 18, EllesmereUI.GetFontOutlineFlag())
+            local durSz = (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
+            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag())
 
             -- Color
             local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
@@ -1962,6 +2041,7 @@ initFrame:SetScript("OnEvent", function(self)
         CreateDurabilityWarning()
         durWarnOverlay._applySettings()
     end
+    EllesmereUI._durWarnApplySettings = EllesmereUI._applyDurWarn
 
     -- Preview: show durability warning at its configured position
     EllesmereUI._durWarnPreview = function()
@@ -2465,6 +2545,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, fpsCogShow = EllesmereUI.BuildCogPopup({
                 title = "FPS Counter Settings",
                 rows = {
+                    { type="slider", label="Text Size",
+                      min=8, max=24, step=1,
+                      get=function()
+                        return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.fpsTextSize = v
+                        if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
+                      end },
                     { type="toggle", label="Show Local MS",
                       get=function()
                         if not EllesmereUIDB or EllesmereUIDB.fpsShowLocalMS == nil then return true end
@@ -2729,6 +2819,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, durCogShow = EllesmereUI.BuildCogPopup({
                 title = "Durability Settings",
                 rows = {
+                    { type="slider", label="Text Size",
+                      min=10, max=50, step=1,
+                      get=function()
+                        return (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.durWarnTextSize = v
+                        if EllesmereUI._durWarnApplySettings then EllesmereUI._durWarnApplySettings() end
+                      end },
                     { type="slider", label="Y-Offset",
                       min=-600, max=600, step=1,
                       get=function()

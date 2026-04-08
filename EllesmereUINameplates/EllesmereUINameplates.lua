@@ -1508,7 +1508,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.kickTick:SetPoint("TOP", plate.kickMarker, "TOP", 0, 0)
     plate.kickTick:SetPoint("BOTTOM", plate.kickMarker, "BOTTOM", 0, 0)
     plate.kickTick:SetPoint("LEFT", plate.kickMarker:GetStatusBarTexture(), "RIGHT")
-    -- Cast bar text: three independent fixed zones (Plater pattern).
+    -- Cast bar text: three independent fixed zones
     -- [castName LEFT 50%] [castTarget CENTER-RIGHT 25%] [castTimer RIGHT 15%]
     plate.castName = plate.cast:CreateFontString(nil, "OVERLAY")
     SetFSFont(plate.castName, 10, GetNPOutline())

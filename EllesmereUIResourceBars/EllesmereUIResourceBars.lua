@@ -2557,14 +2557,18 @@ local function UpdateSecondaryResource()
         local useThresh = sp.thresholdEnabled and cur >= sp.thresholdCount
         local tr, tg, tb = sp.thresholdR, sp.thresholdG, sp.thresholdB
 
-        -- Fractional resource detection (e.g. Destro warlock soul shards)
+        -- Fractional resource detection (Destruction warlock only, specID 267)
         local frac = 0
         local preciseCur = cur
         if powerType == PT.SOUL_SHARDS then
-            local raw = UnitPower("player", powerType, true)
-            if raw and (not issecretvalue or not issecretvalue(raw)) then
-                preciseCur = raw / 10
-                frac = preciseCur - cur
+            local specIdx = GetSpecialization()
+            local specID = specIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(specIdx)
+            if specID == 267 then
+                local raw = UnitPower("player", powerType, true)
+                if raw and (not issecretvalue or not issecretvalue(raw)) then
+                    preciseCur = raw / 10
+                    frac = preciseCur - cur
+                end
             end
         end
 

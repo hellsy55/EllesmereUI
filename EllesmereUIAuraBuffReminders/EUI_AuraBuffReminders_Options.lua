@@ -1866,9 +1866,9 @@ initFrame:SetScript("OnEvent", function(self)
                 child:SetHeight(math.max(1, visIdx * T_ITEM_H))
                 tScrollTarget = 0
                 tSmoothing = false
-                tSmoothFrame:Hide()
+                if tSmoothFrame then tSmoothFrame:Hide() end
                 sf:SetVerticalScroll(0)
-                UpdateTThumb()
+                if UpdateTThumb then UpdateTThumb() end
             end)
 
             -- Scrollbar + smooth scroll

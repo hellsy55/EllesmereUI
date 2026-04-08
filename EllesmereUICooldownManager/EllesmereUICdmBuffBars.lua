@@ -107,8 +107,7 @@ local PANDEMIC_THRESHOLD = 0.30
 
 --- Check if a spell is in the pandemic window via C_UnitAuras.
 --- Returns true if the aura exists, has duration, and remaining <= 30%.
---- Only checks player auras; target debuffs use Blizzard's native
---- PandemicIcon on CDM frames (avoids tainted secret values).
+--- Only checks player auras (self-buffs).
 function ns.IsInPandemicWindow(spellID)
     if not spellID or spellID <= 0 then return false end
     local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
@@ -116,6 +115,25 @@ function ns.IsInPandemicWindow(spellID)
     local rem = aura.expirationTime - GetTime()
     return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
 end
+
+--- Check pandemic via a Blizzard child frame's auraInstanceID.
+--- Works for buffs on any unit (self, target, party members).
+local function IsInPandemicFromChild(blzChild)
+    if not blzChild then return false end
+    local auraInstID = blzChild.auraInstanceID
+    local auraUnit = blzChild.auraDataUnit
+    if not auraInstID or not auraUnit then return false end
+    local ad = C_UnitAuras.GetAuraDataByAuraInstanceID(auraUnit, auraInstID)
+    if not ad then return false end
+    local dur = ad.duration
+    local exp = ad.expirationTime
+    if not dur or not exp then return false end
+    if issecretvalue and (issecretvalue(dur) or issecretvalue(exp)) then return false end
+    if dur <= 0 then return false end
+    local rem = exp - GetTime()
+    return rem > 0 and (rem / dur) <= PANDEMIC_THRESHOLD
+end
+ns.IsInPandemicFromChild = IsInPandemicFromChild
 
 -------------------------------------------------------------------------------
 --  Popular Buffs (derived from BUFF_BAR_PRESETS, with compat alias)
@@ -878,8 +896,7 @@ end
 --  Stacks Helper (reads Blizzard child Applications frame)
 -------------------------------------------------------------------------------
 local function UpdateStacks(bar, blzChild, cfg)
-    -- Read stacks from blzChild.Icon.Applications (same as BetterBuffBars).
-    -- BuffBar viewer children have Icon -> Applications FontString.
+    -- Read stacks from blzChild.Icon.Applications FontString.
     if blzChild and blzChild.Icon and blzChild.Icon.Applications then
         -- Pass the text straight through without comparing (it may be tainted).
         -- SetText accepts secret strings natively.
@@ -887,9 +904,23 @@ local function UpdateStacks(bar, blzChild, cfg)
         if ok and txt then
             bar._stacksText:SetText(txt)
             bar._stacksText:Show()
-            -- stackCount for threshold overlay: pcall the tonumber
-            local ok2, n = pcall(tonumber, txt)
-            bar._stackCount = (ok2 and n) or 0
+            -- Stack count for threshold overlay: read from aura data via the
+            -- Blizzard child's auraInstanceID. The applications field is a
+            -- secret number so we can't compare it directly, but StatusBar
+            -- SetValue accepts secret numbers natively. Feed it straight to
+            -- the threshold overlay (FeedTBBThresholdOverlay uses SetValue).
+            local auraInstID = blzChild.auraInstanceID
+            local auraUnit = blzChild.auraDataUnit
+            if auraInstID and auraUnit then
+                local ad = C_UnitAuras.GetAuraDataByAuraInstanceID(auraUnit, auraInstID)
+                if ad and ad.applications then
+                    bar._stackCount = ad.applications  -- secret number, fed to SetValue
+                else
+                    bar._stackCount = 0
+                end
+            else
+                bar._stackCount = 0
+            end
             return
         end
     end
@@ -899,10 +930,21 @@ local function UpdateStacks(bar, blzChild, cfg)
         if appsText then
             local ok, txt = pcall(appsText.GetText, appsText)
             if ok and txt and txt ~= "" then
-                bar._stackCount = tonumber(txt) or 0
                 if bar._stacksText and not bar._stacksHidden then
                     bar._stacksText:SetText(txt)
                     bar._stacksText:Show()
+                end
+                local auraInstID = blzChild.auraInstanceID
+                local auraUnit = blzChild.auraDataUnit
+                if auraInstID and auraUnit then
+                    local ad = C_UnitAuras.GetAuraDataByAuraInstanceID(auraUnit, auraInstID)
+                    if ad and ad.applications then
+                        bar._stackCount = ad.applications
+                    else
+                        bar._stackCount = 0
+                    end
+                else
+                    bar._stackCount = 0
                 end
                 return
             end
@@ -1183,10 +1225,11 @@ function ns.UpdateTrackedBuffBarTimers()
                     end
 
                     -- Pandemic glow (via C_UnitAuras, combat-safe)
-                    -- Also check Blizzard's PandemicIcon on the source
-                    -- frame for debuffs (avoids tainted secret values).
+                    -- Checks player auras first, then the child's auraInstanceID
+                    -- for buffs on other units (e.g. Lifebloom on a target).
                     if _anyPandemic and cfg.pandemicGlow then
                         local inPandemic = ns.IsInPandemicWindow(cfg.spellID)
+                            or IsInPandemicFromChild(blzChild)
                             or (blzChild and blzChild.PandemicIcon
                                 and blzChild.PandemicIcon:IsShown())
                         if inPandemic then

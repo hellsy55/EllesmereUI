@@ -168,22 +168,25 @@ function ns.GetCDMSpellsForBar(barKey)
                 if sid > 0 and not seenSpellID[sid] then
                     local name = C_Spell.GetSpellName(sid)
                     local tex = C_Spell.GetSpellTexture(sid)
-                    -- Dedup by both spellID and name: some spells have
-                    -- multiple cdIDs with different spellIDs but the same
-                    -- name (e.g. "Voidfall" ability vs "Voidfall" aura).
-                    -- Prefer the version that's in the buff viewer (tracked).
                     if not cdInfo then
                         cdInfo = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
                     end
                     local baseSid = cdInfo and cdInfo.spellID
                     if baseSid and baseSid > 0 then seenSpellID[baseSid] = true end
                     local isTracked = blizzTracked[sid]
-                    -- Skip if we already have a tracked version with this name
-                    -- (keeps the viewer-tracked version, drops the other)
+                    -- Name dedup: collapse same-name entries only when they
+                    -- span different category groups (e.g. "Voidfall" ability
+                    -- in CD category vs "Voidfall" aura in buff category).
+                    -- Within the same group (both buffs), keep both entries
+                    -- (e.g. Consecration ground effect vs standing-in buff).
+                    local catGroup = (cat == 2 or cat == 3) and "buff" or "cooldown"
                     local nameUsed = seenSpellID[name]
-                    if name and (tex or cat == 2 or cat == 3) and (not nameUsed or (isTracked and not nameUsed._tracked)) then
-                        -- If replacing a previous entry, remove it
-                        if nameUsed then
+                    local nameDuped = nameUsed and nameUsed._catGroup == catGroup
+                    if name and (tex or cat == 2 or cat == 3) and (not nameUsed or nameDuped or (isTracked and not nameUsed._tracked)) then
+                        -- If replacing a cross-category entry, remove it.
+                        -- Same-category duplicates (e.g. two Consecrations
+                        -- both in buffs) are kept as separate entries.
+                        if nameUsed and not nameDuped then
                             for si = #spells, 1, -1 do
                                 if spells[si].name == name then
                                     table.remove(spells, si)
@@ -192,7 +195,7 @@ function ns.GetCDMSpellsForBar(barKey)
                             end
                         end
                         seenSpellID[sid] = true
-                        seenSpellID[name] = { _tracked = isTracked }
+                        seenSpellID[name] = { _tracked = isTracked, _catGroup = catGroup }
                         local usedOnBar = SpellUsedOnAnyOtherBar(sid, barKey)
                         local baseKnown = cdInfo and cdInfo.spellID
                             and cdInfo.spellID > 0 and spellIDKnown[cdInfo.spellID]

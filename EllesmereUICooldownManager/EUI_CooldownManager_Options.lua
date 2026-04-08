@@ -3809,12 +3809,15 @@ initFrame:SetScript("OnEvent", function(self)
                     if rbd and (rbd.barType == "buffs" or rbd.key == "buffs") then
                         assignedBarKey = routedBar
                     end
-                elseif ns._tickBuffIconTrackedSet and ns._tickBuffIconTrackedSet[sid] then
-                    -- On main buff bar icon viewer
-                    assignedBarKey = "buffs"
-                elseif ns.IsSpellInBuffBarViewer and ns.IsSpellInBuffBarViewer(sid) then
-                    -- On Tracked Buff Bars (TBB)
-                    assignedBarKey = "_tbb"
+                end
+                -- Fallback: check live viewer tracked sets if route didn't
+                -- resolve to a buff bar (e.g. spells in both CD and buff categories)
+                if not assignedBarKey and not isHidden then
+                    if ns._tickBuffIconTrackedSet and ns._tickBuffIconTrackedSet[sid] then
+                        assignedBarKey = "buffs"
+                    elseif ns.IsSpellInBuffBarViewer and ns.IsSpellInBuffBarViewer(sid) then
+                        assignedBarKey = "_tbb"
+                    end
                 end
 
                 sp._assignedBarKey = assignedBarKey
@@ -6943,17 +6946,22 @@ initFrame:SetScript("OnEvent", function(self)
                 tracked = {}
                 local allBuffSpells = GetTrackedBuffSpellList()
                 for _, sid in ipairs(allBuffSpells) do
-                    -- Only consider routed if target is a BUFF bar (not CD/utility)
-                    local routedBar = ns._spellRouteMap and ns._spellRouteMap[sid]
-                    local routedIsBuff = false
-                    if routedBar then
-                        local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
-                        local rType = rbd and rbd.barType or routedBar
-                        routedIsBuff = (rType == "buffs")
-                    end
-                    local effectiveRoute = routedIsBuff and routedBar or nil
-                    if not effectiveRoute or effectiveRoute == bd.key then
-                        tracked[#tracked + 1] = sid
+                    -- Skip spells hidden via the ghost buff bar
+                    if ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(sid) then
+                        -- excluded
+                    else
+                        -- Only consider routed if target is a BUFF bar (not CD/utility)
+                        local routedBar = ns._spellRouteMap and ns._spellRouteMap[sid]
+                        local routedIsBuff = false
+                        if routedBar then
+                            local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
+                            local rType = rbd and rbd.barType or routedBar
+                            routedIsBuff = (rType == "buffs")
+                        end
+                        local effectiveRoute = routedIsBuff and routedBar or nil
+                        if not effectiveRoute or effectiveRoute == bd.key then
+                            tracked[#tracked + 1] = sid
+                        end
                     end
                 end
                 count = #tracked

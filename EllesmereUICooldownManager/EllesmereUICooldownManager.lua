@@ -1931,26 +1931,24 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
     if pos.point == "CENTER" and (pos.relPoint == "CENTER" or not pos.relPoint) then
         local bd = barKey and barDataByKey[barKey]
         local isDynamic = bd and (bd.barType == "buffs" or barKey == "buffs" or bd.barType == "custom_buff")
-        if not isDynamic then
-            local grow = bd and bd.growDirection or "CENTER"
-            local fw = frame:GetWidth() or 0
-            local fh = frame:GetHeight() or 0
-            local halfW = math.floor(fw / 2)
-            local halfH = math.floor(fh / 2)
+        local grow = bd and bd.growDirection or "CENTER"
+        local fw = frame:GetWidth() or 0
+        local fh = frame:GetHeight() or 0
+        local halfW = math.floor(fw / 2)
+        local halfH = math.floor(fh / 2)
 
-            if grow == "RIGHT" then
-                anchor = "LEFT"
-                px = px - halfW
-            elseif grow == "LEFT" then
-                anchor = "RIGHT"
-                px = px + (fw - halfW)
-            elseif grow == "DOWN" then
-                anchor = "TOP"
-                py = py + (fh - halfH)
-            elseif grow == "UP" then
-                anchor = "BOTTOM"
-                py = py - halfH
-            end
+        if not isDynamic and grow == "RIGHT" then
+            anchor = "LEFT"
+            px = px - halfW
+        elseif not isDynamic and grow == "LEFT" then
+            anchor = "RIGHT"
+            px = px + (fw - halfW)
+        elseif grow == "DOWN" then
+            anchor = "TOP"
+            py = py + (fh - halfH)
+        elseif grow == "UP" then
+            anchor = "BOTTOM"
+            py = py - halfH
         end
     end
 
@@ -1975,22 +1973,20 @@ local function SaveCDMBarPosition(barKey, frame)
     local uiW, uiH = UIParent:GetSize()
     local ratio = fScale / uiScale
 
-    -- Determine anchor point from grow direction so the bar's near edge
-    -- stays fixed when icon count changes across specs.
-    -- Dynamic bars (buffs/custom_buff) always save as CENTER -- their icon
-    -- count varies at runtime, so edge-based anchors would drift.
+    -- Determine anchor point from grow direction so the bar's fixed edge
+    -- stays put when icon count changes (spec swaps, combat buff churn).
+    -- Dynamic bars (buffs/custom_buff) use edge anchoring only for UP/DOWN;
+    -- LEFT/RIGHT stays CENTER to avoid horizontal drift from icon count changes.
     local bd = barDataByKey[barKey]
     local isDynamic = bd and (bd.barType == "buffs" or barKey == "buffs" or bd.barType == "custom_buff")
     local grow = bd and bd.growDirection or "CENTER"
     local pt
-    if isDynamic then
-        pt = "CENTER"
-    elseif grow == "RIGHT" then pt = "LEFT"
-    elseif grow == "LEFT"  then pt = "RIGHT"
+    if not isDynamic and grow == "RIGHT" then pt = "LEFT"
+    elseif not isDynamic and grow == "LEFT"  then pt = "RIGHT"
     elseif grow == "DOWN"  then pt = "TOP"
     elseif grow == "UP"    then pt = "BOTTOM"
     elseif grow == "CENTER" then pt = "CENTER"
-    else                        pt = "LEFT"
+    else                        pt = "CENTER"
     end
 
     local ax, ay
@@ -3175,12 +3171,18 @@ local function RefreshCDMIconAppearance(barKey)
                 local cdR = barData.cooldownTextR or 1
                 local cdG = barData.cooldownTextG or 1
                 local cdB = barData.cooldownTextB or 1
+                local cdX = barData.cooldownTextX or 0
+                local cdY = barData.cooldownTextY or 0
                 -- Find Blizzard's countdown text FontString on the Cooldown widget
                 for _, rgn in pairs({ cd:GetRegions() }) do
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
                         rgn:SetFont(cdFont, cdSize, "OUTLINE")
                         rgn:SetShadowOffset(0, 0)
                         rgn:SetTextColor(cdR, cdG, cdB)
+                        if cdX ~= 0 or cdY ~= 0 then
+                            rgn:ClearAllPoints()
+                            rgn:SetPoint("CENTER", cd, "CENTER", cdX, cdY)
+                        end
                     end
                 end
             end
@@ -3985,6 +3987,7 @@ BuildAllCDMBars = function()
     if p.cdmBars.useBlizzardBuffBars and p.cdmBars.hideBlizzard then
         RestoreBlizzardBuffFrame()
     end
+
 
     -- Build each bar and populate fast lookup
     local hookActive = ns.IsViewerHooked and ns.IsViewerHooked()
@@ -5622,45 +5625,9 @@ function ECME:CDMFinishSetup()
             for sid in pairs(tickSet) do buffIconTracked[sid] = true end
         end
 
-        -- Helper: clean a spell list by removing non-tracked dupes by name
+        -- Helper: dedup exact same spellID in a spell list (keep first)
         local function CleanSpellList(spellList)
             if not spellList or #spellList == 0 then return end
-            -- Build name groups: name -> { {idx, sid, tracked}, ... }
-            local byName = {}
-            for i, sid in ipairs(spellList) do
-                if sid and sid > 0 then
-                    local name = C_Spell.GetSpellName(sid)
-                    if name then
-                        if not byName[name] then byName[name] = {} end
-                        local group = byName[name]
-                        group[#group + 1] = { idx = i, sid = sid, tracked = buffIconTracked[sid] and true or false }
-                    end
-                end
-            end
-            -- For each name with multiple entries, keep only the tracked one
-            local removeSet = {}
-            for name, group in pairs(byName) do
-                if #group > 1 then
-                    local hasTracked = false
-                    for _, e in ipairs(group) do
-                        if e.tracked then hasTracked = true; break end
-                    end
-                    if hasTracked then
-                        for _, e in ipairs(group) do
-                            if not e.tracked then removeSet[e.idx] = true end
-                        end
-                    end
-                end
-            end
-            -- Remove marked entries (reverse order to preserve indices)
-            if next(removeSet) then
-                for i = #spellList, 1, -1 do
-                    if removeSet[i] then
-                        table.remove(spellList, i)
-                    end
-                end
-            end
-            -- Also dedup exact same spellID (keep first)
             local seen = {}
             for i = #spellList, 1, -1 do
                 local sid = spellList[i]
@@ -6095,6 +6062,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         C_Timer.After(1, function()
             InstallRotationHook()
         end)
+        -- Safety: re-apply visibility after rebuild settles. Blizzard may
+        -- hide/re-show CDM viewers during loading screens (PvP scoreboard,
+        -- barbershop) and the timing race can leave viewer alpha at 0.
+        C_Timer.After(1.5, _CDMApplyVisibility)
     end
     if event == "SPELLS_CHANGED" then
         -- SPELLS_CHANGED fires reliably after spec data is available.

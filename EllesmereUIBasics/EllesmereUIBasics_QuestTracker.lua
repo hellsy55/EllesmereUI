@@ -142,24 +142,28 @@ local function ShowContextMenu(anchor, items)
         -- Background
         local bg = ctxMenu:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(E.DD_BG_R, E.DD_BG_G, E.DD_BG_B, E.DD_BG_HA)
+        local RS = E.RESKIN or {}
+        bg:SetColorTexture(RS.BG_R or 0.067, RS.BG_G or 0.067, RS.BG_B or 0.067, RS.QT_ALPHA or 0.97)
         ctxMenu._bg = bg
 
         -- Pixel-perfect border
         if PP then
-            PP.CreateBorder(ctxMenu, 1, 1, 1, E.DD_BRD_A, 1)
+            PP.CreateBorder(ctxMenu, 1, 1, 1, RS.BRD_ALPHA or 0.18, 1)
         end
 
         ctxMenu._items = {}
+        ctxMenu._elapsed = 0
 
-        -- Close when clicking anywhere outside the menu (non-blocking)
-        ctxMenu:HookScript("OnShow", function(self)
-            self:SetScript("OnUpdate", function(self)
-                if not self:IsMouseOver() and IsMouseButtonDown("LeftButton") then
-                    self:Hide()
-                end
-            end)
-        end)
+        -- Single reusable poll function (throttled to ~10/sec)
+        ctxMenu._pollClickOff = function(self, dt)
+            self._elapsed = self._elapsed + dt
+            if self._elapsed < 0.1 then return end
+            self._elapsed = 0
+            if not self:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                self:Hide()
+            end
+        end
+
         ctxMenu:HookScript("OnHide", function(self)
             self:SetScript("OnUpdate", nil)
         end)
@@ -258,6 +262,10 @@ local function ShowContextMenu(anchor, items)
     ctxMenu:ClearAllPoints()
     ctxMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
     ctxMenu:Show()
+    -- Ensure click-outside polling is active (HookScript OnShow misses first show)
+    -- Throttled to ~10 checks/sec instead of every frame
+    ctxMenu._elapsed = 0
+    ctxMenu:SetScript("OnUpdate", ctxMenu._pollClickOff)
 end
 
 -------------------------------------------------------------------------------
@@ -386,6 +394,24 @@ local function TitleRowOnClick(self, btn)
         end
         return
     end
+    local collectType = self._collectableType
+    local collectID = self._collectableID
+    if collectType and collectID then
+        local function UntrackCollectable()
+            if C_ContentTracking and C_ContentTracking.StopTracking then
+                C_ContentTracking.StopTracking(collectType, collectID, Enum.ContentTrackingStopType.Manual)
+                EQT:SetDirty(true)
+            end
+        end
+        if btn == "RightButton" then
+            ShowContextMenu(self, {
+                { text = "Stop Tracking", onClick = UntrackCollectable },
+            })
+        elseif IsShiftKeyDown() then
+            UntrackCollectable()
+        end
+        return
+    end
     local qID = self._questID
     if not qID then return end
     if btn == "RightButton" then
@@ -500,6 +526,7 @@ local function ReleaseRow(r)
     r.frame._questID = nil
     r.frame._isAutoComplete = nil; r.frame._isComplete = nil
     r.frame._recipeID = nil; r.frame._isRecraft = nil
+    r.frame._collectableType = nil; r.frame._collectableID = nil
     r._baseR, r._baseG, r._baseB = nil, nil, nil
     r._rowType = nil; r._objIndex = nil; r._objCount = nil
     if r.numFS then r.numFS:Hide() end
@@ -625,13 +652,21 @@ RemoveWatch = function(qID)
     if C_QuestLog and C_QuestLog.RemoveQuestWatch then C_QuestLog.RemoveQuestWatch(qID) end
 end
 
+local _questItemCache = {}  -- [qID] = {itemID, name, texture, ...} or false
 local function GetQuestItem(qID)
     if not GetQuestLogSpecialItemInfo then return nil end
     local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(qID)
-    if not idx or idx == 0 then return nil end
-    local name, tex, charges, _, t0, dur, _, _, _, itemID = GetQuestLogSpecialItemInfo(idx)
-    if not name then return nil end
-    return {itemID=itemID, name=name, texture=tex, charges=charges, startTime=t0, duration=dur}
+    if idx and idx > 0 then
+        local name, tex, charges, _, t0, dur, _, _, _, itemID = GetQuestLogSpecialItemInfo(idx)
+        if name then
+            local item = {itemID=itemID, name=name, texture=tex, charges=charges, startTime=t0, duration=dur}
+            _questItemCache[qID] = item
+            return item
+        end
+    end
+    -- API returned nil (quest log reloading); use cached result if available
+    local cached = _questItemCache[qID]
+    return cached or nil
 end
 
 local INTERNAL_TITLES = { ["Tracking Quest"]=true, [""]=true }
@@ -692,10 +727,10 @@ local function BuildEntry(info, qID, list)
     local objN = 0
     local ot = C_QuestLog.GetQuestObjectives and C_QuestLog.GetQuestObjectives(qID)
     if ot then
-        for _, o in ipairs(ot) do
+        for objIdx, o in ipairs(ot) do
             local nf, nr = o.numFulfilled, o.numRequired
             if o.type == "progressbar" then
-                local pct = GetQuestProgressBarPercent(qID)
+                local pct = GetQuestProgressBarPercent(qID, objIdx)
                 if pct then
                     nf = pct
                     nr = 100
@@ -861,13 +896,15 @@ local function GetScenarioSection()
     local seenText = {}
     local timerDuration, timerStartTime = nil, nil
 
-    if C_ScenarioInfo then
-        for i = 1, (numCriteria or 0) + 3 do
+    -- Helper: read criteria from a given scenario step and append to objectives
+    local function ReadStepCriteria(stepIndex, maxCriteria)
+        if not C_ScenarioInfo then return end
+        for i = 1, (maxCriteria or 0) + 3 do
             local cOk, crit
             if C_ScenarioInfo.GetCriteriaInfoByStep then
-                cOk, crit = pcall(C_ScenarioInfo.GetCriteriaInfoByStep, 1, i)
+                cOk, crit = pcall(C_ScenarioInfo.GetCriteriaInfoByStep, stepIndex, i)
             end
-            if (not cOk or not crit) and C_ScenarioInfo.GetCriteriaInfo then
+            if (not cOk or not crit) and stepIndex == 1 and C_ScenarioInfo.GetCriteriaInfo then
                 cOk, crit = pcall(C_ScenarioInfo.GetCriteriaInfo, i)
             end
             if cOk and crit then
@@ -926,6 +963,91 @@ local function GetScenarioSection()
                     end
                 end
                 end -- if desc
+            end
+        end
+    end
+
+    -- Delve affix objectives first (so they render above main criteria)
+    -- Scan spell tooltips for trackable progress
+    -- (e.g. Nemesis Strongbox "Enemy groups remaining: 3 / 4")
+    if isDelve then
+        local WM = C_UIWidgetManager
+        local affixSpellIDs = {}
+        for _, setID in ipairs(setsToScan) do
+            local wOk, wids = pcall(WM.GetAllWidgetsBySetID, setID)
+            if wOk and wids then
+                for _, w in ipairs(wids) do
+                    if w.widgetType == WIDGET_TYPE_DELVE_HEADER and WM.GetScenarioHeaderDelvesWidgetVisualizationInfo then
+                        local dOk, wi = pcall(WM.GetScenarioHeaderDelvesWidgetVisualizationInfo, w.widgetID)
+                        if dOk and wi and wi.spells then
+                            for _, sp in ipairs(wi.spells) do
+                                if sp.spellID and sp.spellID > 0 then
+                                    affixSpellIDs[#affixSpellIDs+1] = sp.spellID
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if #affixSpellIDs > 0 then
+            -- Create a hidden scan tooltip once
+            if not _G._eqtScanTip then
+                _G._eqtScanTip = CreateFrame("GameTooltip", "EQTScanTip", nil, "GameTooltipTemplate")
+                _G._eqtScanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+            end
+            local tip = _G._eqtScanTip
+            local GetName = C_Spell and C_Spell.GetSpellName or GetSpellInfo
+            for _, sid in ipairs(affixSpellIDs) do
+                tip:SetOwner(WorldFrame, "ANCHOR_NONE")
+                tip:ClearLines()
+                tip:SetSpellByID(sid)
+                local nLines = tip:NumLines()
+                for li = 1, nLines do
+                    local left = _G["EQTScanTipTextLeft" .. li]
+                    if left then
+                        local txt = left:GetText()
+                        if txt then
+                            -- Strip WoW color codes: |cnNAME:text|r and |cAARRGGBBtext|r
+                            local clean = txt:gsub("|cn[^:]*:", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+                            local remaining, total = clean:lower():match("remaining:%s*(%d+)%s*/%s*(%d+)")
+                            if remaining and total then
+                                local rem = tonumber(remaining) or 0
+                                local tot = tonumber(total) or 0
+                                local killed = tot - rem
+                                local spName = GetName and GetName(sid) or "Objective"
+                                local displayText = string.format("%d/%d %s", killed, tot, spName)
+                                if not seenText[displayText] then
+                                    seenText[displayText] = true
+                                    table.insert(objectives, {
+                                        text         = displayText,
+                                        finished     = rem == 0,
+                                    })
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Read main step criteria
+    ReadStepCriteria(1, numCriteria)
+
+    -- Read bonus step criteria (Nemesis groups, bonus objectives, etc.)
+    if C_Scenario.GetBonusSteps then
+        local bOk, bonusSteps = pcall(C_Scenario.GetBonusSteps)
+        if bOk and bonusSteps then
+            for _, stepIdx in ipairs(bonusSteps) do
+                local bNumCriteria = 5
+                if C_ScenarioInfo and C_ScenarioInfo.GetScenarioStepInfo then
+                    local sOk, stepInfo = pcall(C_ScenarioInfo.GetScenarioStepInfo, stepIdx)
+                    if sOk and stepInfo and stepInfo.numCriteria then
+                        bNumCriteria = stepInfo.numCriteria
+                    end
+                end
+                ReadStepCriteria(stepIdx, bNumCriteria)
             end
         end
     end
@@ -1401,6 +1523,55 @@ local function GetTrackedRecipes()
 end
 
 -------------------------------------------------------------------------------
+-- Tracked Collections (Appearances, Mounts)
+-------------------------------------------------------------------------------
+local _collections = {}
+local _collection_entries = {}
+local _collectionTrackTypes   -- built once on first call
+
+local function GetTrackedCollections()
+    for i = 1, #_collections do _collections[i] = nil end
+    if not C_ContentTracking or not C_ContentTracking.GetTrackedIDs then return _collections end
+
+    -- Build type list once (Enum values never change at runtime)
+    if not _collectionTrackTypes then
+        _collectionTrackTypes = {}
+        if Enum and Enum.ContentTrackingType then
+            if Enum.ContentTrackingType.Appearance ~= nil then
+                _collectionTrackTypes[#_collectionTrackTypes + 1] = Enum.ContentTrackingType.Appearance
+            end
+            if Enum.ContentTrackingType.Mount ~= nil then
+                _collectionTrackTypes[#_collectionTrackTypes + 1] = Enum.ContentTrackingType.Mount
+            end
+        end
+    end
+
+    local listN = 0
+    for _, trackType in ipairs(_collectionTrackTypes) do
+        local ids = C_ContentTracking.GetTrackedIDs(trackType)
+        if ids then
+            for _, trackableID in ipairs(ids) do
+                local title = C_ContentTracking.GetTitle(trackType, trackableID)
+                if title then
+                    listN = listN + 1
+                    local entry = _collection_entries[listN]
+                    if not entry then
+                        entry = {}
+                        _collection_entries[listN] = entry
+                    end
+                    entry.trackType = trackType
+                    entry.trackableID = trackableID
+                    entry.title = title
+                    entry.objective = C_ContentTracking.GetObjectiveText(trackType, trackableID)
+                    _collections[listN] = entry
+                end
+            end
+        end
+    end
+    return _collections
+end
+
+-------------------------------------------------------------------------------
 -- Refresh
 -------------------------------------------------------------------------------
 local PAD_H    = 8
@@ -1669,7 +1840,7 @@ function EQT:Refresh(skipAlphaFlash)
         self.rows[#self.rows + 1] = r
     end
 
-    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft)
+    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft, collectableType, collectableID)
         local r = AcquireRow(content)
         if r.numFS then r.numFS:Hide() end
         SetFontSafe(r.text, tfp, tfs, tff)
@@ -1743,6 +1914,7 @@ function EQT:Refresh(skipAlphaFlash)
                 end
                 btn._chargeFS:SetText(item.charges); btn._chargeFS:Show()
             elseif btn._chargeFS then btn._chargeFS:Hide() end
+            if not InCombatLockdown() then btn:Show() end
             self.itemBtns[#self.itemBtns + 1] = btn
         end
         -- Find Group eyeball button for elite world quests
@@ -1806,13 +1978,18 @@ function EQT:Refresh(skipAlphaFlash)
             r.frame._recipeID = recipeID; r.frame:EnableMouse(true)
             r.frame._isRecraft = isRecraft or false
             r.frame:SetScript("OnMouseUp", TitleRowOnClick)
+        elseif collectableType and collectableID then
+            r.frame._collectableType = collectableType; r.frame:EnableMouse(true)
+            r.frame._collectableID = collectableID
+            r.frame:SetScript("OnMouseUp", TitleRowOnClick)
         end
         r._rowType = "title"
         yOff = yOff + rh + ROW_GAP
         self.rows[#self.rows + 1] = r
     end
 
-    local function AddObjRow(text, cr, cg, cb, isFinished)
+    local function AddObjRow(text, cr, cg, cb, isFinished, indent)
+        local leftInset = indent or 20
         local r = AcquireRow(content)
         local objFS = isFinished and (compFS or ofs) or ofs
         SetFontSafe(r.text, ofp, objFS, off)
@@ -1821,13 +1998,13 @@ function EQT:Refresh(skipAlphaFlash)
         r.text:SetText(text)
         r.text:Show()
         r.text:ClearAllPoints()
-        r.text:SetPoint("TOPLEFT",  r.frame, "TOPLEFT",  20, 0)
+        r.text:SetPoint("TOPLEFT",  r.frame, "TOPLEFT",  leftInset, 0)
         r.text:SetPoint("TOPRIGHT", r.frame, "TOPRIGHT",  0, 0)
         r.frame:SetWidth(rowW)
         r.frame:SetPoint("TOPLEFT",  content, "TOPLEFT",  TXT_PAD, -yOff)
         r.frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -yOff)
         -- Force text width so GetStringHeight respects word wrap on first layout
-        r.text:SetWidth(rowW - 20)
+        r.text:SetWidth(rowW - leftInset)
         local th = r.text:GetStringHeight()
         if th < ofs then th = ofs end
         local rh = th + 4; r.frame:SetHeight(rh); r.text:SetHeight(rh)
@@ -1912,8 +2089,27 @@ function EQT:Refresh(skipAlphaFlash)
         end
     end
 
+    -- Collections Tracking section (after recipes, before delves)
+    local collections = GetTrackedCollections()
+    if #collections > 0 then
+        if #recipes > 0 then yOff = yOff + 4 end
+        local clc = db.collectionsCollapsed or false
+        AddCollapsibleSection("COLLECTIONS", clc, function()
+            DB().collectionsCollapsed = not DB().collectionsCollapsed; EQT:Refresh()
+        end)
+        if not clc then
+            for _, col in ipairs(collections) do
+                AddTitleRow(col.title, tc.r, tc.g, tc.b, nil, nil, nil, nil, nil, col.trackType, col.trackableID)
+                if col.objective and col.objective ~= "" then
+                    AddObjRow(col.objective, oc.r, oc.g, oc.b)
+                end
+                yOff = yOff + 3
+            end
+        end
+    end
+
     -- Scenario / Delve section
-    local anyAboveScenario = #recipes > 0
+    local anyAboveScenario = #recipes > 0 or #collections > 0
     if scenario then
         if anyAboveScenario or #watched > 0 or #zone > 0 or #world > 0 then yOff = yOff + 4 end
 
@@ -2044,12 +2240,13 @@ function EQT:Refresh(skipAlphaFlash)
             local cb = obj.finished and cc.b or oc.b
             if obj.objType == "progressbar" and obj.numRequired and obj.numRequired > 0 then
                 if obj.text and obj.text ~= "" then
-                    AddObjRow(obj.text, cr, cg, cb)
+                    AddObjRow(obj.text, cr, cg, cb, nil, 14)
                 end
+                yOff = yOff + 3
                 AddProgressRow(obj.numFulfilled or 0, obj.numRequired)
             else
                 if obj.text and obj.text ~= "" then
-                    AddObjRow(obj.text, cr, cg, cb)
+                    AddObjRow(obj.text, cr, cg, cb, nil, 14)
                 end
             end
         end
@@ -2057,8 +2254,8 @@ function EQT:Refresh(skipAlphaFlash)
         yOff = yOff + 10
     end
 
-    -- Order: Recipes (top), Delves, Active WQ, Prey, Zone, World, Quests (bottom)
-    local anyAbove = #recipes > 0 or scenario ~= nil
+    -- Order: Recipes, Collections, Delves, Active WQ, Prey, Zone, World, Quests (bottom)
+    local anyAbove = #recipes > 0 or #collections > 0 or scenario ~= nil
 
     if #active > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
@@ -2098,7 +2295,7 @@ function EQT:Refresh(skipAlphaFlash)
         end)
         if not qc then RenderList(watched, 0) end
     end
-    local hasContent = scenario or #active > 0 or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0
+    local hasContent = scenario or #active > 0 or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0 or #collections > 0
     if not hasContent then
         if f.inner then f.inner:Hide() end
         if f.bg then f.bg:Hide() end
@@ -2251,7 +2448,7 @@ function EQT:RefreshProgress()
                 local nf = o.numFulfilled or 0
                 local nr = o.numRequired or 1
                 if o.type == "progressbar" or o.objType == "progressbar" then
-                    local pct = GetQuestProgressBarPercent(qID)
+                    local pct = GetQuestProgressBarPercent(qID, objIdx)
                     if pct then nf = pct; nr = 100 end
                 end
                 local pct = math.max(0, math.min(1, nf / nr))
@@ -2593,73 +2790,64 @@ function EQT:Init()
     self.frame:SetHeight(Cfg("height") or 500)
     self:ApplyPosition()
 
-    -- Hide/show Blizzard ObjectiveTrackerFrame based on setting
-    -- We move it far off-screen so its children can't intercept clicks.
-    if not EQT._hiddenFrame then
-        EQT._hiddenFrame = CreateFrame("Frame")
-        EQT._hiddenFrame:Hide()
-    end
+    -- Hide Blizzard ObjectiveTrackerFrame by moving it off-screen.
+    -- SetPoint to a far-off position is taint-safe (no SetParent needed).
+    -- Hook SetPoint on the frame so whenever Blizzard repositions it,
+    -- we immediately re-suppress.
+    local _eqtSuppressing = false
+    local _eqtOffScreenPoint = { "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000 }
+
     local function ApplyBlizzardTrackerVisibility()
         local ot = _G.ObjectiveTrackerFrame
         if not ot then return end
-        -- Never hide Blizzard's tracker during M+ keystones -- the
-        -- scenario timer (M+ timer, death count, affixes) lives inside
-        -- ObjectiveTrackerFrame and must remain visible.
         local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
-        -- Use alpha + mouse disable instead of SetParent to avoid tainting
-        -- the ObjectiveTracker frame hierarchy. SetParent on a Blizzard frame
-        -- taints its ancestry and causes LayoutFrame/MoneyFrame taint errors.
-        if Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus then
+        local shouldHide = Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus
+        _eqtSuppressing = shouldHide
+        if shouldHide then
             ot:SetAlpha(0)
             ot:EnableMouse(false)
             if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
-            ot._eqtHidden = true
-            -- Persistent enforcer: Blizzard restores alpha on various updates.
-            -- Poll at low frequency to re-suppress.
-            if not ot._eqtEnforcer then
-                ot._eqtEnforcer = CreateFrame("Frame")
-            end
-            local _enfElapsed = 0
-            ot._eqtEnforcer:SetScript("OnUpdate", function(_, dt)
-                _enfElapsed = _enfElapsed + dt
-                if _enfElapsed < 0.5 then return end
-                _enfElapsed = 0
-                if ot:GetAlpha() > 0 then
-                    ot:SetAlpha(0)
-                    ot:EnableMouse(false)
-                    if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
-                end
-            end)
-            ot._eqtEnforcer:Show()
         else
-            if ot._eqtHidden then
-                ot:SetAlpha(1)
-                ot:EnableMouse(true)
-                if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
-                ot._eqtHidden = false
-                if ot._eqtEnforcer then
-                    ot._eqtEnforcer:SetScript("OnUpdate", nil)
-                    ot._eqtEnforcer:Hide()
-                end
-            end
+            ot:SetAlpha(1)
+            ot:EnableMouse(true)
+            if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
         end
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
-    -- Re-suppress when Blizzard restores alpha (e.g. Edit Mode, cinematic end).
-    -- Use a lightweight alpha watch instead of hooking Show (which taints the
-    -- secure frame's execution context).
+    ApplyBlizzardTrackerVisibility()
+
+    -- Hook SetAlpha so whenever Blizzard restores visibility, we re-suppress
     local ot = _G.ObjectiveTrackerFrame
     if ot then
+        hooksecurefunc(ot, "SetAlpha", function(self, a)
+            if _eqtSuppressing and a > 0 then
+                self:SetAlpha(0)
+                self:EnableMouse(false)
+                if self.EnableMouseMotion then self:EnableMouseMotion(false) end
+            end
+        end)
+        hooksecurefunc(ot, "Show", function(self)
+            if _eqtSuppressing then
+                self:SetAlpha(0)
+                self:EnableMouse(false)
+                if self.EnableMouseMotion then self:EnableMouseMotion(false) end
+            end
+        end)
+    end
+
+    -- Re-evaluate on zone/spec/cinematic changes
+    do
         local suppressFrame = CreateFrame("Frame")
         suppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        suppressFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
         suppressFrame:RegisterEvent("CINEMATIC_STOP")
         suppressFrame:RegisterEvent("STOP_MOVIE")
+        suppressFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         suppressFrame:SetScript("OnEvent", function()
             C_Timer.After(0, ApplyBlizzardTrackerVisibility)
         end)
     end
-    C_Timer.After(1, ApplyBlizzardTrackerVisibility)
 
     -- SplashFrame taint fix: Blizzard's SplashFrame:OnHide calls
     -- ObjectiveTrackerFrame:Update() which taints the Quest Button and
@@ -2779,6 +2967,9 @@ function EQT:Init()
         "SUPER_TRACKING_CHANGED",
         "TRACKED_RECIPE_UPDATE",
         "TRADE_SKILL_LIST_UPDATE",
+        "CONTENT_TRACKING_LIST_UPDATE",
+        "CONTENT_TRACKING_UPDATE",
+        "TRACKING_TARGET_INFO_UPDATE",
     }
     local ZONE_EVENTS = {"ZONE_CHANGED_NEW_AREA","ZONE_CHANGED"}
 
@@ -2819,6 +3010,8 @@ function EQT:Init()
         SCENARIO_UPDATE = true,
         SCENARIO_CRITERIA_UPDATE = true,
         TRACKED_RECIPE_UPDATE = true,
+        CONTENT_TRACKING_LIST_UPDATE = true,
+        CONTENT_TRACKING_UPDATE = true,
     }
     local SCENARIO_EVENTS = {
         SCENARIO_CRITERIA_UPDATE = true,
@@ -2854,7 +3047,7 @@ function EQT:Init()
         -- NOT a full quest re-sort, because isOnMap flags shift with focus and
         -- would cause quests to jump between sections.
         if event == "SUPER_TRACKING_CHANGED" then
-            EQT:RefreshProgress()
+            securecallfunction(EQT.RefreshProgress, EQT)
             return
         end
         -- World quest / task progress events: invalidate caches and refresh
@@ -2877,6 +3070,10 @@ function EQT:Init()
         if isStructural then
             _questListsCached = false
             EQT:ClearSectionCache()
+            -- Clear stale quest item cache entries when quests are removed
+            if event == "QUEST_REMOVED" or event == "QUEST_TURNED_IN" then
+                wipe(_questItemCache)
+            end
         end
         -- Invalidate scenario cache on scenario-related events.
         -- Force structural so the full Refresh() re-reads the scenario cache
@@ -3191,7 +3388,7 @@ function EQT:Init()
             if _refreshPendingAfterCombat then
                 _refreshPendingAfterCombat = false
                 C_Timer.After(0, function()
-                    EQT:Refresh(_refreshSkipAlphaFlash)
+                    securecallfunction(EQT.Refresh, EQT, _refreshSkipAlphaFlash)
                 end)
             end
             return
@@ -3236,7 +3433,7 @@ function EQT:Init()
                 setWidth = function(_, w)
                     w = math.max(120, math.floor(w + 0.5))
                     DB().width = w
-                    EQT:Refresh(true)
+                    securecallfunction(EQT.Refresh, EQT, true)
                 end,
                 setHeight = function(_, h)
                     h = math.max(60, math.floor(h + 0.5))
@@ -3278,7 +3475,7 @@ do
         if not EQT.frame then return end
         C_Timer.After(0, function()
             EQT:ApplyPosition()
-            EQT:Refresh(true)
+            securecallfunction(EQT.Refresh, EQT, true)
         end)
     end)
 end
@@ -3304,6 +3501,9 @@ loader:SetScript("OnEvent", function(self, _, loaded)
         end
         if EQT.ApplyBlizzardTrackerVisibility then
             EQT.ApplyBlizzardTrackerVisibility()
+            -- Blizzard's init scripts run after ADDON_LOADED handlers, so
+            -- defer a second call to catch any re-parenting they do.
+            C_Timer.After(0, EQT.ApplyBlizzardTrackerVisibility)
         end
     end
     -- Once both addons have loaded, unregister to stop processing future ADDON_LOADED

@@ -12,6 +12,7 @@ local EABR = EllesmereUI.Lite.NewAddon("EllesmereUIAuraBuffReminders")
 local _B = {}  -- beacon state table, populated later
 local Known = function(id) return id and (IsPlayerSpell(id) or IsSpellKnown(id)) end
 local _eabrInCombat = false
+local _encounterSnapshotTime = nil
 local InCombat = function() return _eabrInCombat or (InCombatLockdown and InCombatLockdown()) end
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local isSecret = issecretvalue or function() return false end
@@ -22,14 +23,9 @@ local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 -- Hunter's Mark combat state: set true on PLAYER_REGEN_DISABLED, cleared on
 -- cast or combat end. OOC falls back to target debuff check.
 local _huntersMarkNeeded = false
-local _huntersMarkCooldown = false  -- brief cooldown after casting OOC
 
 -- Flask state snapshotted before PvP restriction activates (aura API locked in PvP).
-local _pvpSnap = { flaskActive=false, wasRestricted=false, pollAccum=0 }
-local _pvpPollFrame = CreateFrame("Frame")
 
--- Flask/food/rune state snapshotted before M+ ChallengeMode restriction activates.
-local _cmSnap = { flaskActive=false, foodActive=false, runeActive=false, wasRestricted=false }
 
 local texCache = {}
 local function Tex(id)
@@ -594,20 +590,6 @@ local function PlayerOwnBuffOnAnyGroupMember(spellIDs)
 end
 
 -- Returns true if the target has the debuff. OOC only; suppresses in combat.
-local function TargetHasDebuffByID(spellIDs)
-    if not spellIDs or not spellIDs[1] then return true end
-    if not UnitExists("target") or UnitIsFriend("player", "target") then return true end
-    if InCombat() then return true end  -- can't read debuffs in combat, suppress reminder
-    for i = 1, AURA_SCAN_LIMIT do
-        local aura = C_UnitAuras.GetAuraDataByIndex("target", i, "HARMFUL")
-        if not aura then break end
-        local sid = aura.spellId
-        if sid and not isSecret(sid) then
-            for j = 1, #spellIDs do if sid == spellIDs[j] then return true end end
-        end
-    end
-    return false
-end
 
 -------------------------------------------------------------------------------
 --  Weapon type classification (for weapon enchant matching)
@@ -662,9 +644,9 @@ local RAID_BUFFS = {
 --  SPELL DATA Auras (some non-secret, some still OOC-only)
 -------------------------------------------------------------------------------
 local AURAS = {
-    -- Symbiotic Relationship: player gets a buff when active
+    -- Symbiotic Relationship: player gets a buff when active (group only)
     { key="symbiotic",  class="DRUID",   name="Symbiotic Relationship", castSpell=474750, buffIDs={474754},
-      check="player", combatOk=false },
+      check="player", combatOk=false, requireGroup=true },
     -- Warrior stances: NOT on non-secret list, OOC only
     { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
       check="player", specs={73}, combatOk=false },
@@ -713,28 +695,38 @@ local PARTNERED_TRINKET = {
     buffID = 389581, buffIDs = {389581, 383798}, icon = 134157, duration = 3600,
 }
 
--- Pet tracking: Hunter pets, Warlock pets
-local PET_CLASSES = { HUNTER = true, WARLOCK = true }
+-- Pet tracking: classes that summon permanent pets
+local PET_CLASSES = { HUNTER = true, WARLOCK = true, DEATHKNIGHT = true, MAGE = true }
 
--- Classes with custom weapon imbue systems (skip generic weapon enchant reminder).
--- Paladin excluded: only Lightsmith has rites, checked dynamically via HasImbueSpells.
-local _IMBUE_CLASSES = { ROGUE=true, SHAMAN=true, DEATHKNIGHT=true }
+-- Spells whose presence means the player uses their own imbue system
+-- instead of generic weapon oils/stones. If the player knows ANY of these,
+-- the weapon enchant reminder is suppressed for them.
+local _IMBUE_EXCLUDE_SPELLS = {
+    382021,  -- Earthliving Weapon (Shaman)
+    318038,  -- Flametongue Weapon (Shaman)
+    33757,   -- Windfury Weapon (Shaman)
+    433583,  -- Rite of Adjuration (Paladin Lightsmith)
+    433568,  -- Rite of Sanctification (Paladin Lightsmith)
+}
 
 -------------------------------------------------------------------------------
 --  SPELL DATA Consumables (OOC only, not during keystones)
 -------------------------------------------------------------------------------
--- Rogue Poisons (all non-secret in 12.0 but we treat as consumable = OOC check)
+-- Rogue Poisons: data table drives options UI; detection uses unified scan below.
+-- Lethal and non-lethal categories match WoW's internal classification.
 local ROGUE_POISONS = {
-    -- Damage poisons are mutually exclusive (only 1 active at a time)
-    { key="deadly",     name="Deadly Poison",     castSpell=2823,   buffIDs={2823,315584,8679} },
-    { key="instant",    name="Instant Poison",    castSpell=315584, buffIDs={2823,315584,8679} },
-    { key="wound",      name="Wound Poison",      castSpell=8679,   buffIDs={2823,315584,8679} },
-    -- Utility poisons are mutually exclusive (only 1 active at a time)
-    { key="amplifying", name="Amplifying Poison", castSpell=381664, buffIDs={381664,3408,5761,381637} },
-    { key="crippling",  name="Crippling Poison",  castSpell=3408,   buffIDs={381664,3408,5761,381637} },
-    { key="numbing",    name="Numbing Poison",     castSpell=5761,   buffIDs={381664,3408,5761,381637} },
-    { key="atrophic",   name="Atrophic Poison",   castSpell=381637, buffIDs={381664,3408,5761,381637} },
+    -- Lethal poisons (mutually exclusive per slot)
+    { key="deadly",     name="Deadly Poison",     castSpell=2823,   cat="lethal" },
+    { key="instant",    name="Instant Poison",    castSpell=315584, cat="lethal" },
+    { key="wound",      name="Wound Poison",      castSpell=8679,   cat="lethal" },
+    { key="amplifying", name="Amplifying Poison", castSpell=381664, cat="lethal" },
+    -- Non-lethal poisons (mutually exclusive per slot)
+    { key="crippling",  name="Crippling Poison",  castSpell=3408,   cat="nonlethal" },
+    { key="numbing",    name="Numbing Poison",    castSpell=5761,   cat="nonlethal" },
+    { key="atrophic",   name="Atrophic Poison",   castSpell=381637, cat="nonlethal" },
 }
+-- Dragon-Tempered Blades (381801): allows 2 of each poison category
+local DTB_SPELL_ID = 381801
 
 -- Paladin Rites (non-secret in 12.0)
 local PALADIN_RITES = {
@@ -742,29 +734,30 @@ local PALADIN_RITES = {
     { key="rite_sanc", name="Rite of Sanctification",  castSpell=433568, buffIDs={433568}, wepEnchID={7143} },
 }
 
--- Does the player know any Paladin rite spell? (Lightsmith only)
-local function HasImbueSpells()
-    for _, rite in ipairs(PALADIN_RITES) do
-        if IsSpellKnown(rite.castSpell) then return true end
-    end
-    return false
-end
+
 
 -- Shaman Imbues (non-secret in 12.0)
 local SHAMAN_IMBUES = {
     { key="flametongue", name="Flametongue Weapon", castSpell=318038, buffIDs={319778}, wepEnchID={5400} },
     { key="windfury",    name="Windfury Weapon",    castSpell=33757,  buffIDs={319773},  wepEnchID={5401} },
     { key="earthliving", name="Earthliving Weapon", castSpell=382021, buffIDs={382021, 382022}, wepEnchID={6498} },
-    { key="tidecaller",  name="Tidecaller's Guard", castSpell=457496, buffIDs={457496, 457481}, wepEnchID={0} },
+    { key="tidecaller",  name="Tidecaller's Guard", castSpell=457496, buffIDs={457496, 457481}, wepEnchID={7528} },
     { key="tstrike",     name="Thunderstrike Ward", castSpell=462757, buffIDs={462757, 462742}, wepEnchID={7587} },
 }
 
--- Shaman Shields (elemental orbit support)
+-- Shaman Shields: three entries based on Elemental Orbit (383010) talent.
+-- With Orbit: Earth Shield self-buff (383648) + Lightning/Water Shield both needed.
+-- Without Orbit: any of Earth/Lightning/Water Shield on self.
 local SHAMAN_SHIELDS = {
-    { key="ls", name="Lightning Shield", castSpell=192106, buffIDs={192106}, specs={262} },
-    { key="ws", name="Water Shield",     castSpell=52127,  buffIDs={52127},  specs={264} },
-    { key="es", name="Earth Shield",     castSpell=974,    buffIDs={974}, specs={264},
-      orbitTalent=383010, selfOrbitBuff={383648}, otherBuff={974} },
+    { key="es_orbit", name="Earth Shield (Self)",
+      castSpell=974, buffIDs={383648}, requireTalent=383010,
+      check="player" },
+    { key="ls_ws_orbit", name="Lightning/Water Shield",
+      castSpell=192106, buffIDs={192106, 52127}, requireTalent=383010,
+      check="player" },
+    { key="shield_basic", name="Shield",
+      castSpell=974, buffIDs={974, 192106, 52127}, excludeTalent=383010,
+      check="player" },
 }
 
 -- Weapon Enchant Items (temporary weapon enchants applied from items)
@@ -950,44 +943,23 @@ local function PlayerHasBuffByName(buffName)
     return false
 end
 
--- Build localized well-fed name set from known spell IDs (multi-language safe)
-local _wellFedNames = {}
-do
-    local wellFedSpellIDs = { 455369, 462187 }  -- "Well Fed", "Hearty Well Fed"
-    for _, id in ipairs(wellFedSpellIDs) do
-        local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
-        local name = info and info.name
-        if name then _wellFedNames[name] = true end
-    end
-    -- Hardcoded English fallback in case spell info isn't available yet
-    _wellFedNames["Well Fed"] = true
-    _wellFedNames["Hearty Well Fed"] = true
-end
-
 local function PlayerHasWellFed()
     if InCombat() then return true end  -- never show food reminder in combat
-    if InMythicPlusKey() then return _cmSnap.foodActive end
+    if InMythicPlusKey() then return true end  -- can't act on it during M+, suppress
     if InPvPInstance() then return true end  -- food not trackable in PvP, suppress
-    if _AC.valid then
-        _AC.ensureNames()
-        for name in pairs(_wellFedNames) do
-            if _AC.byName[name] then return true end
-        end
-        return false
-    end
     for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
-        local aName = aura.name
-        if aName and not isSecret(aName) and _wellFedNames[aName] then return true end
+        local ic = aura.icon
+        if ic and not isSecret(ic) and ic == 136000 then return true end
     end
     return false
 end
 
 local function PlayerHasFlaskBuff()
-    -- Aura API is fully locked in PvP and M+ keystones; use snapshots instead.
-    if InPvPInstance() then return _pvpSnap.flaskActive end
-    if InMythicPlusKey() then return _cmSnap.flaskActive end
+    -- Aura API is restricted in PvP and M+ keystones; suppress since player can't act on it.
+    if InPvPInstance() then return true end
+    if InMythicPlusKey() then return true end
     -- Direct ID lookup for known flask buff IDs (zero allocation)
     for id in pairs(FLASK_BUFF_ID_SET) do
         local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
@@ -1255,7 +1227,10 @@ end
 local function HideCombatIcons()
     for i = 1, #combatActiveIcons do
         local f = combatActiveIcons[i]
-        if f then f._text:SetText(""); f:Hide() end
+        if f then
+            if f._eabrGlowWrapper then f._eabrGlowWrapper:Hide() end
+            f._text:SetText(""); f:Hide()
+        end
     end
     wipe(combatActiveIcons)
     if combatAnchor then EllesmereUI.SetElementVisibility(combatAnchor, false) end
@@ -1264,8 +1239,8 @@ end
 local function ShowCombatIcon(iconIdx, spellID, texture, label)
     local f = GetOrCreateCombatIcon(iconIdx)
     f._icon:SetTexture(texture or Tex(spellID) or 134400)
-    if db and db.profile.display.showText then
-        local p = db.profile.display
+    local p = db and db.profile.display
+    if p and p.showText then
         local tc = p.textColor or DEFAULT_TEXT_COLOR
         local fontPath = ResolveFontPath(p.textFont)
         local textSize = p.textSize or 11
@@ -1329,7 +1304,10 @@ end
 local function HideCursorIcons()
     for i = 1, #cursorActiveIcons do
         local f = cursorActiveIcons[i]
-        if f then f._text:SetText(""); f:Hide() end
+        if f then
+            if f._eabrGlowWrapper then f._eabrGlowWrapper:Hide() end
+            f._text:SetText(""); f:Hide()
+        end
     end
     wipe(cursorActiveIcons)
     if cursorAnchor then EllesmereUI.SetElementVisibility(cursorAnchor, false) end
@@ -1338,8 +1316,8 @@ end
 local function ShowCursorIcon(iconIdx, spellID, texture, label)
     local f = GetOrCreateCursorIcon(iconIdx)
     f._icon:SetTexture(texture or Tex(spellID) or 134400)
-    if db and db.profile.display.showText then
-        local p = db.profile.display
+    local p = db and db.profile.display
+    if p and p.showText then
         local tc = p.textColor or DEFAULT_TEXT_COLOR
         local fontPath = ResolveFontPath(p.textFont)
         local textSize = p.textSize or 11
@@ -1740,13 +1718,7 @@ if inInstance or rb.showNonInstanced then
             if canCheck then
                 local isMissing = false
                 if buff.check == "huntersMark" then
-                    if inCombat then
-                        isMissing = _huntersMarkNeeded
-                    else
-                        -- OOC: show if we have a hostile target without the mark
-                        -- (skip briefly after casting to avoid flicker)
-                        isMissing = not _huntersMarkCooldown and not TargetHasDebuffByID(buff.buffIDs)
-                    end
+                    isMissing = inCombat and _huntersMarkNeeded
                 elseif rb.showOthersMissing and buff.check == "raid" and (IsInGroup() or IsInRaid()) then
                     if inCombat then
                         isMissing = not PlayerHasAuraByID(buff.buffIDs)
@@ -1790,6 +1762,10 @@ if inInstance or au.showNonInstanced then
             if specOk then
                 -- Skip auras that require instance + group when not in both
                 if aura.requireInstanceGroup and (not inInstance or not (IsInGroup() or IsInRaid())) then
+                    specOk = false
+                end
+                -- Skip auras that require a group when solo
+                if aura.requireGroup and not (IsInGroup() or IsInRaid()) then
                     specOk = false
                 end
             end
@@ -1854,19 +1830,44 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
 
         -- === SPECIALS (respect showSpecialsNonInstanced) ===
         if specialsActive then
-            -- Rogue Poisons
+            -- Rogue Poisons: unified scan counts active per category,
+            -- compares against required (1 each, or 2 each with Dragon-Tempered Blades).
+            -- Shows one reminder per deficient category using the first enabled+known+missing poison.
             if playerClass == "ROGUE" then
+                local activeL, activeNL = 0, 0
+                local knownL, knownNL = 0, 0
+                local missingL, missingNL = nil, nil
                 for _, poison in ipairs(ROGUE_POISONS) do
-                    if co.enabled[poison.key] and Known(poison.castSpell) then
-                        if not PlayerHasAuraByID(poison.buffIDs) then
-                            local e = AcquireEntry()
-                            e.mode = "spell"; e.spellID = poison.castSpell
-                            e.label = ShortLabel(poison.name, "ROGUE")
-                            e.cat = "consumable"; e.data = poison; e.scale = co.scale or 1.0
-                            e.dismissKey = "consumable:" .. poison.key
-                            missing[#missing+1] = e
+                    if Known(poison.castSpell) then
+                        local isLethal = (poison.cat == "lethal")
+                        if isLethal then knownL = knownL + 1 else knownNL = knownNL + 1 end
+                        local aura = C_UnitAuras.GetPlayerAuraBySpellID(poison.castSpell)
+                        if aura then
+                            if isLethal then activeL = activeL + 1 else activeNL = activeNL + 1 end
+                        elseif co.enabled[poison.key] then
+                            if isLethal and not missingL then missingL = poison
+                            elseif not isLethal and not missingNL then missingNL = poison end
                         end
                     end
+                end
+                local hasDTB = IsPlayerSpell(DTB_SPELL_ID)
+                local reqL = min(knownL, hasDTB and 2 or 1)
+                local reqNL = min(knownNL, hasDTB and 2 or 1)
+                if missingL and activeL < reqL then
+                    local e = AcquireEntry()
+                    e.mode = "spell"; e.spellID = missingL.castSpell
+                    e.label = ShortLabel(missingL.name, "ROGUE")
+                    e.cat = "consumable"; e.data = missingL; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:rogue_lethal"
+                    missing[#missing+1] = e
+                end
+                if missingNL and activeNL < reqNL then
+                    local e = AcquireEntry()
+                    e.mode = "spell"; e.spellID = missingNL.castSpell
+                    e.label = ShortLabel(missingNL.name, "ROGUE")
+                    e.cat = "consumable"; e.data = missingNL; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:rogue_nonlethal"
+                    missing[#missing+1] = e
                 end
             end
 
@@ -1913,23 +1914,23 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                     end
                 end
 
-                -- Shaman Shields (OOC only LS, WS are not non-secret)
-                -- Earth Shield is handled separately below (combat-safe).
+                -- Shaman Shields: talent-gated entries.
+                -- Earth Shield self-buff (383648) is combat-safe and handled
+                -- separately below. Other shields are OOC only.
                 for _, shield in ipairs(SHAMAN_SHIELDS) do
-                    if shield.key ~= "es" and co.enabled[shield.key] and Known(shield.castSpell) then
-                        local specOk = true
-                        if shield.specs then
-                            specOk = false
-                            for _, s in ipairs(shield.specs) do if s == specID then specOk = true; break end end
-                        end
-                        if specOk then
-                            if not PlayerHasAuraByID(shield.buffIDs) then
-                                local e = AcquireEntry()
-                                e.mode = "spell"; e.spellID = shield.castSpell
-                                e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
-                                e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
-                                missing[#missing+1] = e
-                            end
+                    if co.enabled[shield.key] ~= false and Known(shield.castSpell) then
+                        local ok = true
+                        if shield.requireTalent and not Known(shield.requireTalent) then ok = false end
+                        if shield.excludeTalent and Known(shield.excludeTalent) then ok = false end
+                        -- es_orbit is combat-safe, handled below
+                        if shield.key == "es_orbit" then ok = false end
+                        if ok and not PlayerHasAuraByID(shield.buffIDs) then
+                            local e = AcquireEntry()
+                            e.mode = "spell"; e.spellID = shield.castSpell
+                            e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
+                            e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
+                            e.dismissKey = "consumable:" .. shield.key
+                            missing[#missing+1] = e
                         end
                     end
                 end
@@ -1952,7 +1953,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 showRune = InRealInstancedContent()
             end
             if showRune then
-                local hasRuneBuff = InMythicPlusKey() and _cmSnap.runeActive or PlayerHasAuraByID(RUNE_BUFF_IDS)
+                local hasRuneBuff = InMythicPlusKey() or PlayerHasAuraByID(RUNE_BUFF_IDS)
                 if not hasRuneBuff then
                     local voidCount = GetItemCount(259085, false) or 0
                     local etherCount = GetItemCount(243191, false) or 0
@@ -1979,10 +1980,14 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             or (_cachedIType == "raid" and (_cachedDiffID == 14 or _cachedDiffID == 15 or _cachedDiffID == 16))) then
 
         -- Weapon Enchants (temp weapon enchant items)
-        -- Skip for classes with their own imbue system (poisons, imbues, runeforging).
-        -- Paladin: only skip if player knows a rite spell (Lightsmith only).
-        if co.enabled.weapon_enchant and not (_IMBUE_CLASSES[playerClass]
-            or (playerClass == "PALADIN" and HasImbueSpells())) then
+        -- Skip if the player knows any imbue spell (Shaman imbues, Paladin rites).
+        -- Rogues and DKs are NOT excluded: rogue poisons are temp enchants
+        -- (detected by GetWeaponEnchantInfo), and DKs can use oils alongside runeforges.
+        local _hasImbueSpell = false
+        for _, sid in ipairs(_IMBUE_EXCLUDE_SPELLS) do
+            if IsSpellKnown(sid) then _hasImbueSpell = true; break end
+        end
+        if co.enabled.weapon_enchant and not _hasImbueSpell then
             local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
             local mhCat = GetWeaponCategory(16)
             local ohCat = GetWeaponCategory(17)
@@ -2126,33 +2131,18 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         end -- end inInstance
     end -- end not inCombat
 
-    -- Earth Shield: combat-safe (974, 383648 non-secret). LS/WS are OOC-only above.
+    -- Earth Shield self-buff (383648): combat-safe, only with Elemental Orbit.
     if specialsActive and playerClass == "SHAMAN" then
-        for _, shield in ipairs(SHAMAN_SHIELDS) do
-            if shield.key == "es" and co.enabled[shield.key] and Known(shield.castSpell) then
-                local specOk = true
-                if shield.specs then
-                    specOk = false
-                    for _, s in ipairs(shield.specs) do if s == specID then specOk = true; break end end
-                end
-                if specOk then
-                    local isMissing = false
-                    if shield.orbitTalent and Known(shield.orbitTalent) then
-                        local selfHas = PlayerHasAuraByID(shield.selfOrbitBuff)
-                        local otherHas = PlayerOwnBuffOnAnyGroupMember(shield.otherBuff)
-                        isMissing = not selfHas or (not otherHas and (IsInGroup() or IsInRaid()))
-                    else
-                        isMissing = not PlayerHasAuraByID(shield.buffIDs)
-                    end
-                    if isMissing then
-                        local e = AcquireEntry()
-                        e.mode = "spell"; e.spellID = shield.castSpell
-                        e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
-                        e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
-                        e.dismissKey = "consumable:" .. shield.key
-                        missing[#missing+1] = e
-                    end
-                end
+        local esOrbit = SHAMAN_SHIELDS[1]  -- es_orbit entry
+        if co.enabled[esOrbit.key] ~= false and Known(esOrbit.castSpell)
+           and esOrbit.requireTalent and Known(esOrbit.requireTalent) then
+            if not PlayerHasAuraByID(esOrbit.buffIDs) then
+                local e = AcquireEntry()
+                e.mode = "spell"; e.spellID = esOrbit.castSpell
+                e.label = ShortLabel(esOrbit.name, "SHAMAN_SHIELD")
+                e.cat = "consumable"; e.data = esOrbit; e.scale = co.scale or 1.0
+                e.dismissKey = "consumable:" .. esOrbit.key
+                missing[#missing+1] = e
             end
         end
     end
@@ -2190,39 +2180,6 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 e.label = "HS"
                 e.cat = "consumable"; e.scale = co.scale or 1.0
                 e.dismissKey = "consumable:healthstone"
-                missing[#missing+1] = e
-            end
-        end
-    end
-
-    ---------------------------------------------------------------------------
-    --  Pet reminder (Hunter/Warlock, OOC only)
-    --  Suppressed for:
-    --    MM Hunter without Unbreakable Bond (1223323) -- petless spec
-    --    Warlock with Grimoire of Sacrifice buff (196099) -- intentionally no pet
-    ---------------------------------------------------------------------------
-    if not inCombat and PET_CLASSES[playerClass] then
-        local co = db.profile.consumables
-        if co and co.enabled and co.enabled.pet ~= false then
-            local suppress = false
-            if playerClass == "HUNTER" then
-                -- MM spec (254) without Unbreakable Bond = petless build
-                local spec = GetSpecialization and GetSpecialization()
-                if spec then
-                    local sid = GetSpecializationInfo(spec)
-                    if sid == 254 and not Known(1223323) then suppress = true end
-                end
-            elseif playerClass == "WARLOCK" then
-                -- Grimoire of Sacrifice active = intentionally petless
-                if Known(108503) and PlayerHasAuraByID({196099}) then suppress = true end
-            end
-            if not suppress and not (UnitExists("pet") and not UnitIsDeadOrGhost("pet")) then
-                local e = AcquireEntry()
-                e.mode = "texture"
-                e.texture = playerClass == "HUNTER" and 132161 or 136218
-                e.label = "Pet"
-                e.cat = "consumable"; e.scale = co.scale or 1.0
-                e.dismissKey = "consumable:pet"
                 missing[#missing+1] = e
             end
         end
@@ -2421,12 +2378,7 @@ local function Refresh()
         if InCombat() then FadeOutSecureIcons() else HideAllIcons() end
         return
     end
-    if _wasResting then
-        if InCombat() then
-            HideCombatIcons(); HideCursorIcons(); FadeOutSecureIcons(); return
-        end
-        _wasResting = false
-    end
+    _wasResting = false
 
     CacheInstanceInfo()
 
@@ -2477,7 +2429,61 @@ local function Refresh()
     if _memProbe then _m4 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  4) Talent Reminders (suppressed in M+ keystones and always in combat)
+    --  4) Pet Reminders (combat-safe: UnitExists/UnitIsDead are not restricted)
+    --  Suppressed for petless specs, Grimoire of Sacrifice, etc.
+    ---------------------------------------------------------------------------
+    if PET_CLASSES[playerClass] then
+        local co = db.profile.consumables
+        if co and co.enabled and co.enabled.pet ~= false then
+            local suppress = false
+            local petIcon = 132161
+            local petLabel = "Pet"
+            if playerClass == "HUNTER" then
+                local spec = GetSpecialization and GetSpecialization()
+                if spec then
+                    local sid = GetSpecializationInfo(spec)
+                    if sid == 254 and not Known(1223323) then suppress = true end
+                end
+            elseif playerClass == "WARLOCK" then
+                petIcon = 136218
+                if Known(108503) and PlayerHasAuraByID({196099}) then suppress = true end
+            elseif playerClass == "DEATHKNIGHT" then
+                petIcon = 1100170
+                petLabel = "Ghoul"
+                if specID ~= 252 then suppress = true end
+            elseif playerClass == "MAGE" then
+                petIcon = 135862
+                petLabel = "Water Elemental"
+                if specID ~= 64 or not Known(31687) then suppress = true end
+            end
+            if not suppress and not (UnitExists("pet") and not UnitIsDead("pet")) then
+                local e = AcquireEntry()
+                e.mode = "texture"
+                e.texture = petIcon
+                e.label = petLabel
+                e.cat = "consumable"; e.scale = co.scale or 1.0
+                e.dismissKey = "consumable:pet"
+                missing[#missing+1] = e
+            end
+            if not suppress and playerClass == "WARLOCK" and specID == 266
+               and co.enabled.wrong_pet ~= false
+               and UnitExists("pet") and not UnitIsDead("pet") then
+                local _, familyID = UnitCreatureFamily("pet")
+                if familyID ~= 29 then
+                    local e = AcquireEntry()
+                    e.mode = "texture"
+                    e.texture = 136216
+                    e.label = "Felguard"
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:wrong_pet"
+                    missing[#missing+1] = e
+                end
+            end
+        end
+    end
+
+    ---------------------------------------------------------------------------
+    --  5) Talent Reminders (suppressed in M+ keystones and always in combat)
     ---------------------------------------------------------------------------
     local talentMissing = _refreshTalentMissing
     wipe(talentMissing)
@@ -2506,7 +2512,9 @@ local function Refresh()
                     -- Only show reminders with all-whitelisted buff IDs.
                     -- huntersMark uses a state flag, always safe.
                     local safe = false
-                    if m.data and m.data.check == "huntersMark" then
+                    if m.mode == "texture" then
+                        safe = true  -- texture-mode entries (pets) use no aura API
+                    elseif m.data and m.data.check == "huntersMark" then
                         safe = true
                     elseif m.data and m.data.buffIDs then
                         safe = true
@@ -2516,14 +2524,25 @@ local function Refresh()
                     end
                     if safe then
                         local spellID = m.data and m.data.castSpell
-                        local texture = spellID and Tex(spellID) or 134400
-                        local label = m.data and ShortLabel(m.data.name) or ""
+                        local texture = m.texture or (spellID and Tex(spellID)) or 134400
+                        local label = m.label or (m.data and ShortLabel(m.data.name)) or ""
+                        local f
                         if useCursor and IsImportantBuff(m) then
                             cursorIdx = cursorIdx + 1
                             ShowCursorIcon(cursorIdx, spellID, texture, label)
+                            f = cursorActiveIcons[#cursorActiveIcons]
                         else
                             combatIdx = combatIdx + 1
                             ShowCombatIcon(combatIdx, spellID, texture, label)
+                            f = combatActiveIcons[#combatActiveIcons]
+                        end
+                        if f then
+                            RemoveGlow(f)
+                            local p = db.profile.display
+                            local gc = p.glowColor or DEFAULT_GLOW_COLOR
+                            local baseScale = p.scale or 1.0
+                            local sz = floor(ICON_SIZE * baseScale + 0.5)
+                            ApplyGlow(f, p.glowType or 0, gc.r, gc.g, gc.b, sz)
                         end
                     end
                 end
@@ -2580,11 +2599,6 @@ local function Refresh()
         _memProbe.display    = (_memProbe.display    or 0) + (_m6 - _m5)
         _memProbe.total      = (_memProbe.total      or 0) + (_m6 - _m0)
         if _memProbe.n >= 20 then
-            local n = _memProbe.n
-            print(string.format("|cff00ff00[ABR Mem/call]|r cache=%.2f rb=%.2f aura=%.2f cons=%.2f tal=%.2f disp=%.2f |cffffffTOTAL=%.2f KB|r",
-                _memProbe.auraCache/n, _memProbe.raidBuffs/n, _memProbe.auras/n,
-                _memProbe.consumables/n, _memProbe.talents/n, _memProbe.display/n,
-                _memProbe.total/n))
             _memProbe.n = 0; _memProbe.auraCache = 0; _memProbe.raidBuffs = 0
             _memProbe.auras = 0; _memProbe.consumables = 0; _memProbe.talents = 0
             _memProbe.display = 0; _memProbe.total = 0
@@ -3055,82 +3069,6 @@ function EABR:OnEnable()
         end
     end
 
-    -- Snapshot flask/food/rune before PvP and M+ restrictions activate.
-    -- Uses zero-allocation GetPlayerAuraBySpellID lookups instead of iterating.
-    local function _scanFlaskOOC()
-        for id in pairs(FLASK_BUFF_ID_SET) do
-            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            if ok and result ~= nil then return true end
-        end
-        return false
-    end
-    local _wellFedSpellIDs = { 455369, 462187 }
-    local function _scanFoodOOC()
-        for _, id in ipairs(_wellFedSpellIDs) do
-            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            if ok and result ~= nil then return true end
-        end
-        return false
-    end
-    local function _scanRuneOOC()
-        for _, id in ipairs(RUNE_BUFF_IDS) do
-            local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            if ok and result ~= nil then return true end
-        end
-        return false
-    end
-    -- Update snapshots on player aura changes (event-driven, no polling).
-    local function _updateSnapshots()
-        if C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive then
-            local pvpActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.PvPMatch)
-            local cmActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.ChallengeMode)
-            if not pvpActive then
-                _pvpSnap.flaskActive = _scanFlaskOOC()
-            end
-            if not cmActive then
-                _cmSnap.flaskActive = _scanFlaskOOC()
-                _cmSnap.foodActive = _scanFoodOOC()
-                _cmSnap.runeActive = _scanRuneOOC()
-            end
-        end
-    end
-    local _snapFrame = CreateFrame("Frame")
-    _snapFrame:RegisterEvent("UNIT_AURA")
-    _snapFrame:SetScript("OnEvent", function(_, _, unit)
-        if unit == "player" then _updateSnapshots() end
-    end)
-    -- Initial scan
-    _updateSnapshots()
-
-    -- Lightweight poll: only detect restriction state transitions (no aura scans).
-    _pvpPollFrame:SetScript("OnUpdate", function(_, elapsed)
-        if not (C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive) then return end
-        _pvpSnap.pollAccum = _pvpSnap.pollAccum + elapsed
-        if _pvpSnap.pollAccum < 1.0 then return end
-        _pvpSnap.pollAccum = 0
-
-        -- PvP state transitions
-        local pvpActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.PvPMatch)
-        if pvpActive and not _pvpSnap.wasRestricted then
-            _pvpSnap.wasRestricted = true
-        elseif not pvpActive and _pvpSnap.wasRestricted then
-            _pvpSnap.wasRestricted = false
-            _pvpSnap.flaskActive = false
-            RequestRefresh()
-        end
-
-        -- M+ state transitions
-        local cmActive = C_RestrictedActions.IsAddOnRestrictionActive(Enum.AddOnRestrictionType.ChallengeMode)
-        if cmActive and not _cmSnap.wasRestricted then
-            _cmSnap.wasRestricted = true
-        elseif not cmActive and _cmSnap.wasRestricted then
-            _cmSnap.wasRestricted = false
-            _cmSnap.flaskActive = false
-            _cmSnap.foodActive = false
-            _cmSnap.runeActive = false
-            RequestRefresh()
-        end
-    end)
     _G._EABR_RequestRefresh = RequestRefresh
     _G._EABR_HideAllIcons = HideAllIcons
     _G._EABR_GLOW_VALUES = GLOW_VALUES
@@ -3331,6 +3269,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     if e == "ENCOUNTER_START" then
         SnapshotPlayerAuras()
         SnapshotOwnOnRaidBuffs()
+        _encounterSnapshotTime = GetTime()
         return
     end
 
@@ -3342,8 +3281,15 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         HideAllIcons()
         HideCursorIcons()
         _eabrInCombat = true
-        SnapshotPlayerAuras()
-        SnapshotOwnOnRaidBuffs()
+        -- Only re-snapshot if ENCOUNTER_START didn't just snapshot (it fires
+        -- milliseconds before REGEN_DISABLED and produces a cleaner snapshot
+        -- since the aura API is fully available pre-lockdown).
+        if not _encounterSnapshotTime or (GetTime() - _encounterSnapshotTime) > 1 then
+            SnapshotPlayerAuras()
+            SnapshotOwnOnRaidBuffs()
+        end
+        _encounterSnapshotTime = nil
+        RequestRefresh()
         return
     end
 
@@ -3351,7 +3297,6 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         _eabrInCombat = false
         -- Leaving combat: clean up combat icons, do full OOC refresh with secure buttons
         _huntersMarkNeeded = false
-        _huntersMarkCooldown = false
         HideCombatIcons()
         HideCursorIcons()
         pendingOOCRefresh = false
@@ -3363,13 +3308,6 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         -- arg1 = unit ("player"), arg2 = castGUID, arg3 = spellID
         if arg3 == 257284 then
             _huntersMarkNeeded = false
-            if not InCombat() then
-                _huntersMarkCooldown = true
-                C_Timer.After(5, function()
-                    _huntersMarkCooldown = false
-                    RequestRefresh()
-                end)
-            end
             RequestRefresh()
         end
         return
@@ -3386,6 +3324,10 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     if e == "PLAYER_ENTERING_WORLD" then
         wipe(_dismissedUntilLoad)
         RequestRefresh()
+        -- Deferred refresh: GetInstanceInfo() can return stale data on the
+        -- first frame after a loading screen. A second refresh after 0.5s
+        -- picks up the correct zone for talent reminders and consumables.
+        C_Timer.After(0.5, RequestRefresh)
         return
     end
 
@@ -3498,6 +3440,7 @@ mainFrame:RegisterEvent("PLAYER_ALIVE")
 mainFrame:RegisterEvent("PLAYER_UNGHOST")
 mainFrame:RegisterEvent("BAG_UPDATE")
 mainFrame:RegisterEvent("BAG_UPDATE_COOLDOWN")
+mainFrame:RegisterUnitEvent("UNIT_PET", "player")
 
 -------------------------------------------------------------------------------
 --  Ready Check Mana Warning
@@ -3621,14 +3564,3 @@ do
     end)
 end
 
--- Temporary: /abrmem toggles per-Refresh memory probes
-SLASH_ABRMEM1 = "/abrmem"
-SlashCmdList.ABRMEM = function()
-    if _G._EABR_MemProbe then
-        _G._EABR_MemProbe = nil
-        print("|cff00ff00[ABR]|r Memory probes OFF")
-    else
-        _G._EABR_MemProbe = { n=0 }
-        print("|cff00ff00[ABR]|r Memory probes ON -- will print every 20 refreshes")
-    end
-end
