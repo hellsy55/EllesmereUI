@@ -2797,42 +2797,22 @@ function EQT:Init()
     local _eqtSuppressing = false
     local _eqtOffScreenPoint = { "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000 }
 
-    -- Recursively disable mouse on a frame and all its children.
-    -- Skips protected frames to avoid taint.
-    local function DisableMouseRecursive(frame)
-        if not frame or frame:IsForbidden() then return end
-        if frame.IsProtected and frame:IsProtected() then return end
-        if frame.EnableMouse then frame:EnableMouse(false) end
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
-        if frame.GetChildren then
-            for i = 1, select("#", frame:GetChildren()) do
-                local child = select(i, frame:GetChildren())
-                DisableMouseRecursive(child)
-            end
-        end
-    end
-
-    local function EnableMouseRecursive(frame)
-        if not frame or frame:IsForbidden() then return end
-        if frame.IsProtected and frame:IsProtected() then return end
-        if frame.EnableMouse then frame:EnableMouse(true) end
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
-        if frame.GetChildren then
-            for i = 1, select("#", frame:GetChildren()) do
-                local child = select(i, frame:GetChildren())
-                EnableMouseRecursive(child)
-            end
-        end
-    end
-
+    -- Suppress / unsuppress the Blizzard ObjectiveTrackerFrame.
+    -- Only touch the top-level frame. Recursing into descendants
+    -- force-enables mouse on internal widget containers (scenario
+    -- and delve widget frames) that were never meant to receive
+    -- clicks, and those can behave as invisible click-catchers that
+    -- block mouse input across a large area of the screen.
     local function SuppressTracker(ot)
         ot:SetAlpha(0)
-        DisableMouseRecursive(ot)
+        ot:EnableMouse(false)
+        if ot.EnableMouseMotion then ot:EnableMouseMotion(false) end
     end
 
     local function UnsuppressTracker(ot)
         ot:SetAlpha(1)
-        EnableMouseRecursive(ot)
+        ot:EnableMouse(true)
+        if ot.EnableMouseMotion then ot:EnableMouseMotion(true) end
     end
 
     local function ApplyBlizzardTrackerVisibility()
