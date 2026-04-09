@@ -6329,25 +6329,11 @@ function EAB:OnInitialize()
 
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIActionBarsDB", defaults, true)
 
-    -- Round width/height to whole pixels (one-time migration)
-    if self.db.profile and self.db.profile.bars and EllesmereUI.RoundSizeFields then
-        local sizeKeys = { "buttonWidth", "buttonHeight" }
-        for _, barSettings in pairs(self.db.profile.bars) do
-            if type(barSettings) == "table" then
-                EllesmereUI.RoundSizeFields(sizeKeys, { barSettings })
-            end
-        end
-    end
-
     -- Mark whether we need to capture Blizzard layout on first install.
     -- The actual capture is deferred to PLAYER_ENTERING_WORLD when
     -- Edit Mode has fully applied bar positions/sizes.
     -- Uses the per-install flag on the SV root, not per-profile.
     local sv = self.db.sv
-    -- Migrate old shared flag to per-addon key (v5.9.6+)
-    if sv._capturedOnce and not sv._capturedOnce_EAB then
-        sv._capturedOnce_EAB = true
-    end
     self._needsCapture = not sv._capturedOnce_EAB
 
     -- Slash commands

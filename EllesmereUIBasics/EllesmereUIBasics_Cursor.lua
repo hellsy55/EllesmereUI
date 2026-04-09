@@ -53,6 +53,24 @@ local function ParseHex(raw)
     return HexToRGB(raw)
 end
 
+-------------------------------------------------------------------------------
+--  Color resolution: accent > class > custom hex. Shared by all three
+--  cursor modules (Circle, GCD, Cast). Mutually exclusive: useAccentColor
+--  wins over useClassColor which wins over the stored hex.
+-------------------------------------------------------------------------------
+local function ResolveColor(cfg)
+    if not cfg then return 1, 1, 1 end
+    if cfg.useAccentColor and EllesmereUI.GetAccentColor then
+        return EllesmereUI.GetAccentColor()
+    end
+    if cfg.useClassColor then
+        local _, engClass = UnitClass("player")
+        local cc = engClass and RAID_CLASS_COLORS and RAID_CLASS_COLORS[engClass]
+        if cc then return cc.r, cc.g, cc.b end
+    end
+    return ParseHex(cfg.hex or DEF_HEX)
+end
+
 local function InRealInstancedContent()
     local _, instanceType, difficultyID = GetInstanceInfo()
     difficultyID = tonumber(difficultyID) or 0
@@ -83,23 +101,15 @@ local function Apply()
     end
 
     local hex = p.hex or DEF_HEX
-    local classColorChanged = (p.useClassColor ~= lastUseClassColor)
+    local colorModeChanged = (p.useClassColor ~= lastUseClassColor)
     lastUseClassColor = p.useClassColor
-    if hex ~= lastHex or p.useClassColor or classColorChanged then
+    -- Recompute whenever hex, class mode, accent mode, or the mode flag
+    -- changed. Accent mode also needs per-frame re-read since ELLESMERE_GREEN
+    -- mutates in place when the user changes their accent color mid-session.
+    if hex ~= lastHex or p.useClassColor or p.useAccentColor or colorModeChanged then
         lastHex = hex
-        local r, g, b
-        if p.useClassColor then
-            local _, engClass = UnitClass("player")
-            local cc = RAID_CLASS_COLORS[engClass]
-            if cc then r, g, b = cc.r, cc.g, cc.b else r, g, b = HexToRGB(hex) end
-        else
-            hex = strupper(strgsub(hex, "#", ""))
-            if not strmatch(hex, "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]$") then
-                hex = "FFFFFF"
-            end
-            r, g, b = HexToRGB(hex)
-        end
-        if r ~= lastR or g ~= lastG or b ~= lastB or classColorChanged then
+        local r, g, b = ResolveColor(p)
+        if r ~= lastR or g ~= lastG or b ~= lastB or colorModeChanged then
             lastR, lastG, lastB = r, g, b
             t:SetVertexColor(r, g, b, 1)
         end
@@ -153,13 +163,7 @@ end
 
 local function GetTrailColor()
     local p = ECL.db and ECL.db.profile
-    if not p then return 1, 1, 1 end
-    if p.useClassColor then
-        local _, engClass = UnitClass("player")
-        local cc = RAID_CLASS_COLORS[engClass]
-        if cc then return cc.r, cc.g, cc.b end
-    end
-    return ParseHex(p.hex or DEF_HEX)
+    return ResolveColor(p)
 end
 
 local function SpawnTrailDot(cx, cy)
@@ -446,7 +450,8 @@ local function ApplyGCDCircle()
     local attached = g.attached ~= false  -- default true
     local radius = g.radius or 30
     local scale = (g.scale or 100) / 100
-    local r, ng, b = ParseHex(g.hex)
+    -- ResolveColor picks accent > class > custom hex automatically
+    local r, ng, b = ResolveColor(g)
     local a = (g.alpha or 100) / 100
 
     gcdAttached = attached
@@ -455,15 +460,6 @@ local function ApplyGCDCircle()
     gcdRing:SetRingRadius(radius)
     gcdRing:SetRingTexture(g.ringTex or "normal")
     gcdRoot:SetSize(radius * 2, radius * 2)
-
-    -- Class color support for ring
-    if g.useClassColor then
-        local _, engClass = UnitClass("player")
-        local cc = RAID_CLASS_COLORS[engClass]
-        if cc then
-            gcdRing:SetRingColor(cc.r, cc.g, cc.b, a)
-        end
-    end
 
     gcdRoot:Show()
     -- Respect instance-only: hide if not in instance
@@ -793,7 +789,8 @@ local function ApplyCastCircle()
     local attached = c.attached ~= false  -- default true
     local radius = c.radius or 36
     local scale = (c.scale or 100) / 100
-    local r, ng, b = ParseHex(c.hex)
+    -- ResolveColor picks accent > class > custom hex automatically
+    local r, ng, b = ResolveColor(c)
     local a = (c.alpha or 100) / 100
 
     castAttached = attached
@@ -809,10 +806,11 @@ local function ApplyCastCircle()
         castRoot._spark:SetSize(sparkSize, sparkSize)
         if c.sparkEnabled then
             local sr, sg, sb
-            if c.useClassColor then
-                local _, engClass = UnitClass("player")
-                local cc = RAID_CLASS_COLORS[engClass]
-                if cc then sr, sg, sb = cc.r, cc.g, cc.b else sr, sg, sb = r, ng, b end
+            -- In accent or class mode, the spark inherits the ring color.
+            -- In custom mode, the spark uses its own sparkHex (or falls
+            -- back to the ring hex if sparkHex isn't set).
+            if c.useAccentColor or c.useClassColor then
+                sr, sg, sb = r, ng, b
             else
                 sr, sg, sb = ParseHex(c.sparkHex or c.hex)
             end
@@ -823,15 +821,6 @@ local function ApplyCastCircle()
                 castRoot._sparkGlow:SetSize(radius * 0.9, radius * 0.9)
                 castRoot._sparkGlow:SetAlpha(0.5)
             end
-        end
-    end
-
-    -- Class color support for ring
-    if c.useClassColor then
-        local _, engClass = UnitClass("player")
-        local cc = RAID_CLASS_COLORS[engClass]
-        if cc then
-            castRing:SetRingColor(cc.r, cc.g, cc.b, a)
         end
     end
 

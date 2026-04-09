@@ -156,8 +156,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   onClick = function(self)
                       local p = DB(); if not p then return end
-                      if p.useClassColor then
+                      if p.useClassColor or p.useAccentColor then
                           p.useClassColor = false
+                          p.useAccentColor = false
                           RefreshAddon(); EllesmereUI:RefreshPage()
                           return
                       end
@@ -166,7 +167,7 @@ initFrame:SetScript("OnEvent", function(self)
                   refreshAlpha = function()
                       local p = DB()
                       if not p or p.enabled == false then return 0.15 end
-                      return (p.useClassColor) and 0.3 or 1
+                      return (p.useClassColor or p.useAccentColor) and 0.3 or 1
                   end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
@@ -180,12 +181,31 @@ initFrame:SetScript("OnEvent", function(self)
                   onClick = function()
                       local p = DB(); if not p then return end
                       p.useClassColor = true
+                      p.useAccentColor = false
                       RefreshAddon(); EllesmereUI:RefreshPage()
                   end,
                   refreshAlpha = function()
                       local p = DB()
                       if not p or p.enabled == false then return 0.15 end
                       return (p.useClassColor) and 1 or 0.3
+                  end },
+                { tooltip = "Accent Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.GetAccentColor()
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local p = DB(); if not p then return end
+                      p.useAccentColor = true
+                      p.useClassColor = false
+                      RefreshAddon(); EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local p = DB()
+                      if not p or p.enabled == false then return 0.15 end
+                      return (p.useAccentColor) and 1 or 0.3
                   end },
               } }
         );  y = y - h
@@ -287,8 +307,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   onClick = function(self)
                       local g = GCD_DB()
-                      if g.useClassColor then
+                      if g.useClassColor or g.useAccentColor then
                           g.useClassColor = false
+                          g.useAccentColor = false
                           RefreshGCD(); EllesmereUI:RefreshPage()
                           return
                       end
@@ -297,7 +318,7 @@ initFrame:SetScript("OnEvent", function(self)
                   refreshAlpha = function()
                       local g = GCD_DB()
                       if not g.enabled then return 0.15 end
-                      return g.useClassColor and 0.3 or 1
+                      return (g.useClassColor or g.useAccentColor) and 0.3 or 1
                   end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
@@ -311,12 +332,31 @@ initFrame:SetScript("OnEvent", function(self)
                   onClick = function()
                       local g = GCD_DB()
                       g.useClassColor = true
+                      g.useAccentColor = false
                       RefreshGCD(); EllesmereUI:RefreshPage()
                   end,
                   refreshAlpha = function()
                       local g = GCD_DB()
                       if not g.enabled then return 0.15 end
                       return g.useClassColor and 1 or 0.3
+                  end },
+                { tooltip = "Accent Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.GetAccentColor()
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local g = GCD_DB()
+                      g.useAccentColor = true
+                      g.useClassColor = false
+                      RefreshGCD(); EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local g = GCD_DB()
+                      if not g.enabled then return 0.15 end
+                      return g.useAccentColor and 1 or 0.3
                   end },
               } }
         );  y = y - h
@@ -407,8 +447,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   onClick = function(self)
                       local c = Cast_DB()
-                      if c.useClassColor then
+                      if c.useClassColor or c.useAccentColor then
                           c.useClassColor = false
+                          c.useAccentColor = false
                           RefreshCast(); EllesmereUI:RefreshPage()
                           return
                       end
@@ -417,7 +458,7 @@ initFrame:SetScript("OnEvent", function(self)
                   refreshAlpha = function()
                       local c = Cast_DB()
                       if not c.enabled then return 0.15 end
-                      return c.useClassColor and 0.3 or 1
+                      return (c.useClassColor or c.useAccentColor) and 0.3 or 1
                   end },
                 { tooltip = "Class Colored",
                   hasAlpha = false,
@@ -431,12 +472,31 @@ initFrame:SetScript("OnEvent", function(self)
                   onClick = function()
                       local c = Cast_DB()
                       c.useClassColor = true
+                      c.useAccentColor = false
                       RefreshCast(); EllesmereUI:RefreshPage()
                   end,
                   refreshAlpha = function()
                       local c = Cast_DB()
                       if not c.enabled then return 0.15 end
                       return c.useClassColor and 1 or 0.3
+                  end },
+                { tooltip = "Accent Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.GetAccentColor()
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local c = Cast_DB()
+                      c.useAccentColor = true
+                      c.useClassColor = false
+                      RefreshCast(); EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local c = Cast_DB()
+                      if not c.enabled then return 0.15 end
+                      return c.useAccentColor and 1 or 0.3
                   end },
               } }
         );  y = y - h

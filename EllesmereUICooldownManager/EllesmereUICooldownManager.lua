@@ -82,9 +82,6 @@ ns.CDM_SHAPE_ZOOM_DEFAULTS = CDM_SHAPES.zoomDefaults
 -- Forward declarations for glow helpers (defined later, used by consolidated helpers)
 local StartNativeGlow, StopNativeGlow
 
--- Hover states for CDM bar fade in/out
-local _cdmHoverStates = {}       -- [barKey] = { isHovered=false, fadeDir=nil }
-
 -- Keybind cache: built once out-of-combat, looked up per tick
 local _cdmKeybindCache       = {}   -- [spellID] -> formatted key string
 local _keybindRebuildPending = false
@@ -267,10 +264,6 @@ local RegisterCDMUnlockElements
 local DEFAULTS = {
     global = {},
     profile = {
-        -- _capturedOnce intentionally omitted from defaults so StripDefaults
-        -- never removes it on logout. It is set to true after first capture
-        -- and must survive profile switches and reloads.
-        -- _capturedOnce = nil,
         -- CDM Look
         reskinBorders   = true,
         -- Bar Glows (per-spec)
@@ -388,20 +381,6 @@ function ns.GetBarSpellData(barKey)
         bs = {}
         prof.barSpells[barKey] = bs
     end
-    -- Migrate old key names to assignedSpells
-    if not bs.assignedSpells then
-        if bs.trackedSpells then
-            bs.assignedSpells = bs.trackedSpells
-            bs.trackedSpells = nil
-        elseif bs.customSpells then
-            bs.assignedSpells = bs.customSpells
-            bs.customSpells = nil
-        end
-    else
-        -- Clean up stale keys
-        bs.trackedSpells = nil
-        bs.customSpells = nil
-    end
     return bs
 end
 
@@ -414,65 +393,48 @@ function ns.GetBarSpellDataForSpec(barKey, specKey)
     if not prof.barSpells then return nil end
     local bs = prof.barSpells[barKey]
     if not bs then return nil end
-    -- Migrate old key names to assignedSpells
-    if not bs.assignedSpells then
-        if bs.trackedSpells then
-            bs.assignedSpells = bs.trackedSpells
-            bs.trackedSpells = nil
-        elseif bs.customSpells then
-            bs.assignedSpells = bs.customSpells
-            bs.customSpells = nil
-        end
-    else
-        bs.trackedSpells = nil
-        bs.customSpells = nil
-    end
     return bs
 end
 
 -------------------------------------------------------------------------------
 --  Spec helpers
+--
+--  Single source of truth: the live game API. We cache the resolved spec key
+--  on first read and invalidate it on PLAYER_SPECIALIZATION_CHANGED. Nothing
+--  is ever stored to SavedVariables -- the live API IS the truth.
+--
+--  Returns nil when the spec API is not ready yet (very early login). All
+--  consumers must bail when this returns nil rather than fall back to a
+--  stored value, so CDM never builds with a wrong/guessed spec.
 -------------------------------------------------------------------------------
-local function GetCurrentSpecKey()
+local _cachedSpecKey = nil
+
+function ns.GetActiveSpecKey()
+    if _cachedSpecKey then return _cachedSpecKey end
     local specIndex = GetSpecialization and GetSpecialization()
-    if not specIndex then return "0" end
+    if not specIndex or specIndex == 0 then return nil end
     local specID = select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex))
-    return tostring(specID or 0)
+    if not specID or specID == 0 then return nil end
+    _cachedSpecKey = tostring(specID)
+    return _cachedSpecKey
 end
 
--- Per-character activeSpecKey storage.
--- Stored in EllesmereUIDB.cdmActiveSpec[charKey] so shared profiles
--- can never cause cross-character spell contamination.
--- Placed on ns to avoid consuming file-scope local slots.
+function ns.InvalidateSpecKey()
+    _cachedSpecKey = nil
+end
+
+-- Kept for any legacy callers that need a per-character identifier.
+-- No longer used for spec storage.
 function ns.GetCharKey()
     local name = UnitName("player") or "Unknown"
     local realm = GetRealmName() or "Unknown"
     return name .. "-" .. realm
 end
 
-function ns.GetActiveSpecKey()
-    if not EllesmereUIDB then return "0" end
-    if not EllesmereUIDB.cdmActiveSpec then EllesmereUIDB.cdmActiveSpec = {} end
-    return EllesmereUIDB.cdmActiveSpec[ns.GetCharKey()] or "0"
-end
-
-function ns.SetActiveSpecKey(specKey)
-    if not EllesmereUIDB then return end
-    if not EllesmereUIDB.cdmActiveSpec then EllesmereUIDB.cdmActiveSpec = {} end
-    EllesmereUIDB.cdmActiveSpec[ns.GetCharKey()] = specKey
-end
-
--- Validates that activeSpecKey matches the real spec. If not, triggers a full
--- spec switch. Called from multiple events as a safety net so the CDM can
--- NEVER show the wrong spec's icons.
-local _specValidated = false
 function ns.IsReconcileReady()
     local p = ECME.db and ECME.db.profile
     if not p then return false end
-    if not _specValidated then return false end
-    local realKey = GetCurrentSpecKey()
-    if realKey == "0" then return false end
-    if ns.GetActiveSpecKey() ~= realKey then return false end
+    if not ns.GetActiveSpecKey() then return false end
     local now = GetTime()
     if RECONCILE.lastSpecChangeAt > 0 and (now - RECONCILE.lastSpecChangeAt) < RECONCILE.readyDelay then return false end
     if RECONCILE.lastZoneInAt > 0 and (now - RECONCILE.lastZoneInAt) < RECONCILE.readyDelay then return false end
@@ -484,23 +446,6 @@ function ns.IsReconcileReady()
         end
     end
     return true
-end
-
-local function ValidateSpec()
-    if not ECME.db then return end
-    local realKey = GetCurrentSpecKey()
-    if realKey == "0" then return end  -- spec API not ready yet
-    if ns.GetActiveSpecKey() == realKey then
-        _specValidated = true
-        return
-    end
-    -- Mismatch detected -- force a full spec switch
-    _specValidated = true
-    -- SwitchSpecProfile is defined later; called via ns reference
-    if ns.SwitchSpecProfile then
-        RECONCILE.lastSpecChangeAt = GetTime()
-        ns.SwitchSpecProfile(realKey)
-    end
 end
 
 local function EnsureSpec(profile, key)
@@ -763,19 +708,6 @@ local function SaveCurrentSpecProfile()
     ns.SaveCachedBarSizes()
 end
 
---- Restore non-spell per-spec data for a spec.
---- Spell data is read directly from the global store by all consumers.
-local function LoadSpecProfile(specKey)
-    local p = ECME.db.profile
-    local specProfiles = SpellStore.GetSpecProfiles()
-    local prof = specProfiles[specKey]
-
-    -- Bar Glows and Tracked Buff Bars are stored directly in
-    -- specProfiles[specKey]. GetBarGlows() and GetTrackedBuffBars()
-    -- read/write there directly. No copying needed on spec switch.
-    -- (If no spec profile exists yet, these functions auto-initialize.)
-end
-
 -- Timestamp of the last spec switch. Used to suppress TalentAwareReconcile
 -- during the transition window where spell data may be stale.
 local _lastSpecSwitchTime = 0
@@ -802,7 +734,6 @@ local function SwitchSpecProfile(newSpecKey)
     if ns.HideAllTBB then ns.HideAllTBB() end
 
     local p = ECME.db.profile
-    local oldSpecKey = ns.GetActiveSpecKey()
 
     -- Check if the new spec is truly new (no spell data yet) BEFORE
     -- EnsureSpec/GetBarSpellData create empty tables.
@@ -818,19 +749,20 @@ local function SwitchSpecProfile(newSpecKey)
         isNewSpec = cdNil and utNil
     end
 
-    -- Save old spec, switch to new spec, load new spec
-    if oldSpecKey and oldSpecKey ~= "0" then
-        SaveCurrentSpecProfile()
-    end
-    ns.SetActiveSpecKey(newSpecKey)
+    -- The caller (PLAYER_SPECIALIZATION_CHANGED handler) has already saved
+    -- the old spec's data and invalidated the cache, so ns.GetActiveSpecKey()
+    -- now returns newSpecKey directly from the live API. All we need is to
+    -- ensure the per-spec profile substructure exists.
     EnsureSpec(p, newSpecKey)
-    LoadSpecProfile(newSpecKey)
 
     -- Deferred spec swap: rebuild data, unblock, queue.
     -- The normal reanchor handles everything else -- no special clearing.
+    -- _specProfileSwitching stays TRUE through this entire callback and is
+    -- cleared by the deferred anchor-resync block at the bottom, so
+    -- NotifyElementResized stays suppressed during the whole rebuild window.
+    -- (Previously it was cleared here at the top, defeating the purpose.)
     C_Timer.After(0.5, function()
         if _specSwapVersion ~= myVersion then return end  -- superseded
-        if EllesmereUI then EllesmereUI._specProfileSwitching = false end
 
         -- 1. Rebuild data for the new spec
         if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
@@ -960,8 +892,37 @@ local function SwitchSpecProfile(newSpecKey)
         if ns.RegisterTBBUnlockElements then ns.RegisterTBBUnlockElements() end
         if ns.UpdateCDMKeybinds then ns.UpdateCDMKeybinds() end
         if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
-        if EllesmereUI.ResyncAnchorOffsets then EllesmereUI.ResyncAnchorOffsets() end
-        if EllesmereUI.ApplyAllWidthHeightMatches then EllesmereUI.ApplyAllWidthHeightMatches() end
+
+        -- Defer width/height match + anchor resync until AFTER the queued
+        -- reanchors have actually processed. The reanchor flow is:
+        --   t+0:    QueueReanchor sets dirty flag
+        --   t+next frame: ProcessReanchorQueue runs CollectAndReanchor
+        --   t+0.3:  Stage 2 queues another reanchor (catches late frames)
+        --
+        -- Running ResyncAnchorOffsets / ApplyAllWidthHeightMatches at t+0
+        -- (as the previous code did) read STALE container sizes -- the new
+        -- spec's icons hadn't been collected/laid out yet, so width-match
+        -- pushed the old spec's bar widths to dependent elements, then the
+        -- subsequent reanchor's OnSizeChanged was throttled or suppressed,
+        -- leaving anchored bars at the wrong width until the next /reload.
+        --
+        -- 0.4s lands AFTER Stage 2's reanchor (0.3s) and gives one frame of
+        -- breathing room for ProcessReanchorQueue + LayoutCDMBar to settle.
+        -- Stage 3 at t+1.0s catches anything still late.
+        C_Timer.After(0.4, function()
+            if _specSwapVersion ~= myVersion then return end
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
+            end
+            if EllesmereUI.ResyncAnchorOffsets then
+                EllesmereUI.ResyncAnchorOffsets()
+            end
+            -- Clear the suppression flag AFTER the resync completes so any
+            -- post-rebuild OnSizeChanged events that fire from here on can
+            -- propagate normally through NotifyElementResized.
+            if EllesmereUI then EllesmereUI._specProfileSwitching = false end
+        end)
+
         if EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
             if EllesmereUI.InvalidateContentHeaderCache then EllesmereUI:InvalidateContentHeaderCache() end
             if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
@@ -1309,16 +1270,16 @@ end
 _G._ECME_GetBarFrame = function(barKey)
     return cdmBarFrames[barKey]
 end
--- Global accessor: apply a spec profile to the live bars (used by profile import)
--- Loads non-spell per-spec data and rebuilds bars. Spell data is already
--- in the global store and will be read directly by BuildAllCDMBars.
+-- Global accessor: apply a spec profile to the live bars (used by profile import).
+-- Spell data is read directly from the global store by all consumers; this
+-- just needs to trigger a rebuild against the (now-active) spec.
 _G._ECME_LoadSpecProfile = function(specKey)
-    LoadSpecProfile(specKey)
     ns.FullCDMRebuild("profile_import")
 end
--- Global accessor: get the current spec key string (e.g. "250")
+-- Global accessor: get the current spec key string (e.g. "250"), or nil if
+-- the spec API isn't ready yet.
 _G._ECME_GetCurrentSpecKey = function()
-    return GetCurrentSpecKey()
+    return ns.GetActiveSpecKey()
 end
 -- Global accessor: returns a set of all spellIDs currently in the user's CDM
 -- viewer (all categories, displayed + known). Used by profile import to filter
@@ -3311,80 +3272,6 @@ local function EnsureGhostBars()
             growDirection = "RIGHT",
         }
     end
-    -- Migration: move existing removedSpells to the ghost CD bar.
-    -- Before the ghost bar existed, removed spells were tracked via a
-    -- per-bar removedSpells set and filtered by allowSet. Now they route
-    -- to the ghost bar instead.
-    -- Iterate ALL spec profiles (not just active spec) so every spec's
-    -- removedSpells are migrated on first load after this update.
-    local specProfiles = SpellStore.GetSpecProfiles()
-    if specProfiles then
-        for specKey, prof in pairs(specProfiles) do
-            local barSpells = prof and prof.barSpells
-            if barSpells then
-                local ghostBS = barSpells[GHOST_CD_BAR_KEY]
-                if not ghostBS then
-                    ghostBS = {}
-                    barSpells[GHOST_CD_BAR_KEY] = ghostBS
-                end
-                if not ghostBS.assignedSpells then ghostBS.assignedSpells = {} end
-                for barKey, bs in pairs(barSpells) do
-                    if barKey ~= GHOST_CD_BAR_KEY and barKey ~= GHOST_BUFF_BAR_KEY
-                       and bs.removedSpells and next(bs.removedSpells) then
-                        for sid in pairs(bs.removedSpells) do
-                            local found = false
-                            for _, existing in ipairs(ghostBS.assignedSpells) do
-                                if existing == sid then found = true; break end
-                            end
-                            if not found then
-                                ghostBS.assignedSpells[#ghostBS.assignedSpells + 1] = sid
-                            end
-                        end
-                        wipe(bs.removedSpells)
-                    end
-                end
-            end
-        end
-    end
-    -- One-time cleanup: remove preset/trinket IDs (negative) and custom
-    -- spell IDs from ghost CD bar. Only Blizzard viewer spells belong there.
-    if specProfiles then
-        for specKey, prof in pairs(specProfiles) do
-            if not prof._ghostBarCleaned3 then
-                local barSpells = prof and prof.barSpells
-                local ghostBS = barSpells and barSpells[GHOST_CD_BAR_KEY]
-                if ghostBS and ghostBS.assignedSpells then
-                    -- Build set of all spells on real (non-ghost) bars
-                    local realBarSpells = {}
-                    local customSet = {}
-                    for bk, bs in pairs(barSpells) do
-                        if bk ~= GHOST_CD_BAR_KEY and bk ~= GHOST_BUFF_BAR_KEY then
-                            if bs.assignedSpells then
-                                for _, sid in ipairs(bs.assignedSpells) do
-                                    if sid and sid > 0 then realBarSpells[sid] = true end
-                                end
-                            end
-                            if bs.customSpellIDs then
-                                for sid in pairs(bs.customSpellIDs) do
-                                    customSet[sid] = true
-                                end
-                            end
-                        end
-                    end
-                    local racialsSet = ns._myRacialsSet
-                    for i = #ghostBS.assignedSpells, 1, -1 do
-                        local sid = ghostBS.assignedSpells[i]
-                        if sid <= 0 or customSet[sid]
-                           or (racialsSet and racialsSet[sid])
-                           or realBarSpells[sid] then
-                            table.remove(ghostBS.assignedSpells, i)
-                        end
-                    end
-                end
-                prof._ghostBarCleaned3 = true
-            end
-        end
-    end
 end
 ns.EnsureGhostBars = EnsureGhostBars
 
@@ -3449,111 +3336,8 @@ ns.BuildCustomBarSpellSet = BuildCustomBarSpellSet
 local function UpdateAllCDMBars(dt) end
 
 -------------------------------------------------------------------------------
---  Bar Visibility (always / in combat / mouseover / never) + Housing
+--  Bar Visibility (always / in combat / never) + Housing
 -------------------------------------------------------------------------------
-
-local function _CDMFadeTo(frame, toAlpha, duration)
-    if not frame._cdmFadeAG then
-        frame._cdmFadeAG = frame:CreateAnimationGroup()
-        frame._cdmFadeAG:SetLooping("NONE")
-        frame._cdmFadeAnim = frame._cdmFadeAG:CreateAnimation("Alpha")
-        frame._cdmFadeAG:SetScript("OnFinished", function()
-            local a = frame._cdmFadeAG._toAlpha or toAlpha
-            frame:SetAlpha(a)
-            -- Sync viewer alpha so all child icons inherit it at once
-            local vn = BLIZZ_CDM_FRAMES[frame._barKey]
-            local vf = vn and _G[vn]
-            if vf then vf:SetAlpha(a > 0 and 1 or 0) end
-            frame._cdmFadeSyncing = nil
-        end)
-    end
-    local ag = frame._cdmFadeAG
-    local anim = frame._cdmFadeAnim
-    if ag:IsPlaying() then ag:Stop() end
-    ag._toAlpha = toAlpha
-    anim:SetFromAlpha(frame:GetAlpha())
-    anim:SetToAlpha(toAlpha)
-    anim:SetDuration(duration or 0.15)
-    anim:SetStartDelay(0)
-    -- Sync icon alpha each frame during the fade animation
-    frame._cdmFadeSyncing = true
-    if not frame._cdmFadeSyncUpdate then
-        frame._cdmFadeSyncUpdate = true
-        frame:HookScript("OnUpdate", function(self)
-            if not self._cdmFadeSyncing then return end
-            -- Sync viewer alpha each frame so icons fade with the container
-            local a = self:GetAlpha()
-            local vn = BLIZZ_CDM_FRAMES[self._barKey]
-            local vf = vn and _G[vn]
-            if vf then vf:SetAlpha(a > 0 and 1 or 0) end
-        end)
-    end
-    ag:Restart()
-end
-
-local function _CDMStopFade(frame)
-    if frame._cdmFadeAG and frame._cdmFadeAG:IsPlaying() then
-        frame._cdmFadeAG:Stop()
-        frame._cdmFadeAG._toAlpha = nil
-    end
-end
-
-local function _CDMAttachHoverHooks(barKey)
-    local frame = cdmBarFrames[barKey]
-    if not frame then return end
-
-    local state = _cdmHoverStates[barKey]
-    if not state then
-        state = { isHovered = false, fadeDir = nil }
-        _cdmHoverStates[barKey] = state
-    end
-
-    if not frame._cdmHoverHooked then
-        frame._cdmHoverHooked = true
-
-        local function OnEnter()
-            state.isHovered = true
-            local p = ECME.db and ECME.db.profile
-            local barData = p and GetBarData(barKey)
-            if barData and (barData.barVisibility or "always") == "mouseover" and state.fadeDir ~= "in" then
-                state.fadeDir = "in"
-                _CDMStopFade(frame)
-                _CDMFadeTo(frame, 1, 0.15)
-            end
-        end
-
-        local function OnLeave()
-            state.isHovered = false
-            C_Timer.After(0.1, function()
-                if state.isHovered then return end
-                local p = ECME.db and ECME.db.profile
-                local barData = p and GetBarData(barKey)
-                if barData and (barData.barVisibility or "always") == "mouseover" and state.fadeDir ~= "out" then
-                    state.fadeDir = "out"
-                    _CDMFadeTo(frame, 0, 0.15)
-                end
-            end)
-        end
-
-        frame:HookScript("OnEnter", OnEnter)
-        frame:HookScript("OnLeave", OnLeave)
-        -- Store callbacks so we can hook new icons later
-        frame._cdmHoverOnEnter = OnEnter
-        frame._cdmHoverOnLeave = OnLeave
-    end
-
-    -- Hook any new child icons (CollectAndReanchor reparents fresh frames each pass)
-    local icons = cdmBarIcons[barKey]
-    if icons and frame._cdmHoverOnEnter then
-        for _, icon in ipairs(icons) do
-            if icon and not icon._cdmHoverHooked then
-                icon._cdmHoverHooked = true
-                icon:HookScript("OnEnter", frame._cdmHoverOnEnter)
-                icon:HookScript("OnLeave", frame._cdmHoverOnLeave)
-            end
-        end
-    end
-end
 
 _CDMApplyVisibility = function()
     local p = ECME.db and ECME.db.profile
@@ -3573,7 +3357,6 @@ _CDMApplyVisibility = function()
             -- Unlock mode: bars must stay visible for dragging
             -- Ghost bar stays hidden even in unlock mode
             if unlockActive and not barData.isGhostBar then
-                _CDMStopFade(frame)
                 frame:SetAlpha(1)
                 if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
@@ -3601,16 +3384,11 @@ _CDMApplyVisibility = function()
                 shouldHide = not (inParty or inRaid)
             elseif vis == "solo" then
                 shouldHide = inRaid or inParty
-            elseif vis == "mouseover" then
-                _CDMAttachHoverHooks(barData.key)
-                local state = _cdmHoverStates[barData.key]
-                shouldHide = not state or not state.isHovered
             end
 
             if shouldHide then
-                if vis ~= "mouseover" then _CDMStopFade(frame) end
                 frame:SetAlpha(0)
-                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(vis == "mouseover") end
+                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(false) end
                 frame._visHidden = true
                 -- Hide this bar's icons individually. The viewer may stay
                 -- at alpha 1 (other bars need it), so icon alpha must be
@@ -3623,7 +3401,6 @@ _CDMApplyVisibility = function()
                 end
             else
                 local wasHidden = frame._visHidden
-                _CDMStopFade(frame)
                 frame:SetAlpha(1)
                 if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
@@ -3845,105 +3622,15 @@ ns.ApplyCachedKeybinds = ApplyCachedKeybinds
 ns.CDMKeybindCache = _cdmKeybindCache
 
 BuildAllCDMBars = function()
-    -- Last-resort spec guard: if we're about to build bars with wrong spec, fix it
-    if not _specValidated then
-        ValidateSpec()
-    end
+    -- Hard guard: never build with an unknown spec. CDMFinishSetup is
+    -- gated on GetActiveSpecKey() at OnEnable, so this is a defense in
+    -- depth for any other path that calls BuildAllCDMBars too early.
+    if not ns.GetActiveSpecKey() then return end
 
     -- Ensure ghost bars exist before iterating bars
     EnsureGhostBars()
 
     local p = ECME.db.profile
-
-    -- Migration: remove misc bars and unanchor anything that referenced them
-    do
-        local bars = p.cdmBars and p.cdmBars.bars
-        if bars then
-            local miscKeys = {}
-            for i = #bars, 1, -1 do
-                if bars[i].barType == "misc" then
-                    miscKeys[bars[i].key] = true
-                    table.remove(bars, i)
-                end
-            end
-            if next(miscKeys) then
-                for _, bd in ipairs(bars) do
-                    if bd.anchorTo and miscKeys[bd.anchorTo] then
-                        bd.anchorTo = "none"
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migration: "none" (No Animation) -> "hideActive" (Hide Active State)
-    for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.activeStateAnim == "none" then
-            bd.activeStateAnim = "hideActive"
-        end
-    end
-
-    -- Migration: per-bar activeStateAnim="hideActive" -> per-icon activeSwipeMode="none"
-    -- Old system had a per-bar "Hide Active State" setting. New system is per-icon.
-    -- For bars with hideActive, set all their spells to "Hide Active State" mode
-    -- across ALL spec profiles, then clear the bar-level setting.
-    for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.activeStateAnim == "hideActive" and not bd.isGhostBar then
-            local specProfiles = SpellStore.GetSpecProfiles()
-            if specProfiles then
-                for specKey, prof in pairs(specProfiles) do
-                    local barSpells = prof and prof.barSpells
-                    local bs = barSpells and barSpells[bd.key]
-                    if bs and bs.assignedSpells then
-                        if not bs.spellSettings then bs.spellSettings = {} end
-                        for _, sid in ipairs(bs.assignedSpells) do
-                            if sid and sid > 0 then
-                                if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
-                                local ss = bs.spellSettings[sid]
-                                -- Only migrate if user hasn't already set per-icon active state
-                                if not ss.activeSwipeMode and not ss.activeSwipeR then
-                                    ss.activeSwipeMode = "none"
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            -- Clear old per-bar setting so migration doesn't run again
-            bd.activeStateAnim = "blizzard"
-        end
-    end
-
-    -- Migration: repair bars missing `key` field.
-    -- Lite DB delta-save can strip `key` when it matches the default template.
-    -- If the merge fails to restore it, bars become identity-less stubs and
-    -- visibility/routing breaks. Assign missing core keys in order.
-    do
-        local bars = p.cdmBars and p.cdmBars.bars
-        if bars then
-            local CORE_KEYS = { "cooldowns", "utility", "buffs" }
-            local CORE_NAMES = { cooldowns = "Cooldowns", utility = "Utility", buffs = "Buffs" }
-            local present = {}
-            for _, bd in ipairs(bars) do
-                if bd.key then present[bd.key] = true end
-            end
-            local missing = {}
-            for _, ck in ipairs(CORE_KEYS) do
-                if not present[ck] then missing[#missing + 1] = ck end
-            end
-            if #missing > 0 then
-                local mi = 1
-                for _, bd in ipairs(bars) do
-                    if not bd.key and mi <= #missing then
-                        bd.key = missing[mi]
-                        bd.name = bd.name or CORE_NAMES[missing[mi]]
-                        if bd.enabled == nil then bd.enabled = true end
-                        mi = mi + 1
-                    end
-                end
-            end
-        end
-    end
 
     if not p.cdmBars.enabled then
         -- Restore Blizzard CDM if we're disabled
@@ -4400,7 +4087,6 @@ local function CDMFirstLoginCapture()
         end
     end
 
-    p._capturedOnce = nil  -- no longer per-profile
     ECME.db.sv._capturedOnce_CDM = true
 end
 
@@ -4671,12 +4357,7 @@ end
 -------------------------------------------------------------------------------
 --  Initialization
 -------------------------------------------------------------------------------
-local function SetActiveSpec()
-    local p = ECME.db.profile
-    local specKey = GetCurrentSpecKey()
-    ns.SetActiveSpecKey(specKey)
-    EnsureSpec(p, specKey)
-end
+-- (SetActiveSpec removed -- ns.GetActiveSpecKey reads live API directly)
 
 -------------------------------------------------------------------------------
 --  Bootstrap / Addon Enable
@@ -4689,78 +4370,6 @@ end
 function ECME:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUICooldownManagerDB", DEFAULTS, true)
 
-    -- Migrate old pandemicR/G/B flat keys to pandemicGlowColor table
-    do
-        local p = self.db and self.db.profile
-        if p and p.cdmBars and p.cdmBars.bars then
-            for _, barData in ipairs(p.cdmBars.bars) do
-                if barData.pandemicR and not barData.pandemicGlowColor then
-                    barData.pandemicGlowColor = {
-                        r = barData.pandemicR or 1,
-                        g = barData.pandemicG or 1,
-                        b = barData.pandemicB or 0,
-                    }
-                    barData.pandemicGlowStyle = barData.pandemicGlowStyle or 1
-                end
-            end
-        end
-    end
-
-    -- Migration: repair bars missing `key` across ALL profiles (not just active).
-    -- The BuildAllCDMBars migration only fixes the active profile. Inactive
-    -- profiles with keyless stubs stay broken until switched to.
-    if EllesmereUIDB and EllesmereUIDB.profiles then
-        local CORE_KEYS = { "cooldowns", "utility", "buffs" }
-        local CORE_NAMES = { cooldowns = "Cooldowns", utility = "Utility", buffs = "Buffs" }
-        for _, profileData in pairs(EllesmereUIDB.profiles) do
-            local cdmData = profileData.addons and profileData.addons["EllesmereUICooldownManager"]
-            local bars = cdmData and cdmData.cdmBars and cdmData.cdmBars.bars
-            if bars then
-                local present = {}
-                for _, bd in ipairs(bars) do
-                    if bd.key then present[bd.key] = true end
-                end
-                local missing = {}
-                for _, ck in ipairs(CORE_KEYS) do
-                    if not present[ck] then missing[#missing + 1] = ck end
-                end
-                if #missing > 0 then
-                    local mi = 1
-                    for _, bd in ipairs(bars) do
-                        if not bd.key and mi <= #missing then
-                            bd.key = missing[mi]
-                            bd.name = bd.name or CORE_NAMES[missing[mi]]
-                            if bd.enabled == nil then bd.enabled = true end
-                            mi = mi + 1
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migration: strip stale _linkedFrame/_linkedCdID/_linkedGen from TBB
-    -- bar configs inside spellAssignments. These are vestiges of removed code
-    -- that serialized entire Blizzard frame trees (800-1200 lines each),
-    -- causing performance issues on any deep-copy or iteration of spec data.
-    do
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local specProfiles = sa and sa.specProfiles
-        if specProfiles then
-            for _, specData in pairs(specProfiles) do
-                local tbb = specData.trackedBuffBars
-                local tbbBars = tbb and tbb.bars
-                if tbbBars then
-                    for _, barCfg in ipairs(tbbBars) do
-                        barCfg._linkedFrame = nil
-                        barCfg._linkedCdID = nil
-                        barCfg._linkedGen = nil
-                    end
-                end
-            end
-        end
-    end
-
     -- Save spec profile before StripDefaults runs on logout
     EllesmereUI.Lite.RegisterPreLogout(function()
         local specKey = ns.GetActiveSpecKey()
@@ -4770,10 +4379,6 @@ function ECME:OnInitialize()
     end)
 
     -- Check if we need first-login capture (per-install flag on SV root)
-    -- Migrate old shared flag to per-addon key (v5.9.6+)
-    if self.db.sv._capturedOnce and not self.db.sv._capturedOnce_CDM then
-        self.db.sv._capturedOnce_CDM = true
-    end
     self._needsCapture = not self.db.sv._capturedOnce_CDM
 
     -- Expose for options
@@ -4802,6 +4407,11 @@ function ECME:OnInitialize()
         )
     end
 end
+
+-- Tracks whether CDMFinishSetup has already run for this session.
+-- Set when the spec resolves and we kick off the build, prevents double-init
+-- if multiple wakeup events fire (PLAYER_LOGIN + first PLAYER_SPECIALIZATION_CHANGED).
+local _cdmSetupStarted = false
 
 function ECME:OnEnable()
     -- Cache player race/class for trinket/racial/potion tracking
@@ -4833,41 +4443,43 @@ function ECME:OnEnable()
         pcall(C_CVar.SetCVar, "cooldownViewerEnabled", "1")
     end
 
-    -- Detect spec/character change since last session and swap profiles
-    local p = ECME.db.profile
-    local oldSpecKey = ns.GetActiveSpecKey()
-    local newSpecKey = GetCurrentSpecKey()
-    if newSpecKey ~= "0" and oldSpecKey and oldSpecKey ~= "0" and oldSpecKey ~= newSpecKey then
-        -- Spec changed (different character or respec while offline).
-        -- Non-spell per-spec data needs loading.
-        SetActiveSpec()
-        LoadSpecProfile(newSpecKey)
-        _specValidated = true
-    elseif newSpecKey ~= "0" then
-        SetActiveSpec()
-        -- Load non-spell per-spec data for the current spec
-        local specKey = ns.GetActiveSpecKey()
-        local specProfiles = SpellStore.GetSpecProfiles()
-        if specKey and specKey ~= "0" and specProfiles[specKey] then
-            LoadSpecProfile(specKey)
+    -- Spec-gated build: only run CDMFinishSetup once we have a real spec key
+    -- from the live API. If the API isn't ready yet, defer until it is. This
+    -- replaces the old "guess the spec, validate later, repair if wrong"
+    -- model with "wait until the truth is known, then build once."
+    local function TryBuildCDM()
+        if _cdmSetupStarted then return end
+        if not ns.GetActiveSpecKey() then return end -- spec API not ready yet
+        _cdmSetupStarted = true
+        EnsureMappings(GetStore())
+        if self._needsCapture then
+            -- Defer one more step so Edit Mode has applied positions
+            self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnCDMFirstLogin")
+        else
+            self:CDMFinishSetup()
         end
-        _specValidated = true
-    else
-        -- GetSpecialization() not ready yet -- leave activeSpecKey as-is,
-        -- ValidateSpec will fix it when SPELLS_CHANGED or PEW fires
-        _specValidated = false
     end
 
-    EnsureMappings(GetStore())
+    -- Try immediately. If the spec API is already populated (most reloads),
+    -- this builds in-place and we're done.
+    TryBuildCDM()
 
-    -- (BarGlows + TBB init removed -- disabled pending rewrite)
-
-    -- CDM Bars: first-login capture or normal setup
-    if self._needsCapture then
-        -- Defer to PLAYER_ENTERING_WORLD so Edit Mode has applied positions
-        self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnCDMFirstLogin")
-    else
-        self:CDMFinishSetup()
+    -- If the immediate try didn't fire, wake up on the events that signal
+    -- spec data is now available and try again. The handler is idempotent
+    -- via _cdmSetupStarted so multiple wakeups are harmless.
+    if not _cdmSetupStarted then
+        local wakeFrame = CreateFrame("Frame")
+        wakeFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+        wakeFrame:RegisterEvent("PLAYER_LOGIN")
+        wakeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        wakeFrame:SetScript("OnEvent", function(self)
+            ns.InvalidateSpecKey()
+            TryBuildCDM()
+            if _cdmSetupStarted then
+                self:UnregisterAllEvents()
+                self:SetScript("OnEvent", nil)
+            end
+        end)
     end
 
     if ns.ApplyPerSlotHidingAndPackSoon then ns.ApplyPerSlotHidingAndPackSoon() end
@@ -5316,205 +4928,6 @@ do
 end
 
 function ECME:CDMFinishSetup()
-    -- ONE-TIME MIGRATION: wipe all buff bar data across ALL specs.
-    -- Removes extra buff bars from the bar list and clears assignedSpells
-    -- for all buff-type bars in every spec profile. The new system has the
-    -- main "buffs" bar auto-show everything from CDM with no assignments.
-    do
-        if not EllesmereUIDB then EllesmereUIDB = {} end
-        if not EllesmereUIDB._buffBarMigrationV2Done then
-            EllesmereUIDB._buffBarMigrationV2Done = true
-
-            -- Collect the keys of all extra buff bars being removed so we
-            -- can also clean their spell assignments. Custom bars use keys
-            -- like "custom_5_1234" so we can't rely on name patterns.
-            local removedBuffBarKeys = {}
-
-            -- 1. Remove extra buff bars from the bar list (all profiles)
-            local function WipeBuffBarsFromProfile(p)
-                if not p or not p.cdmBars or not p.cdmBars.bars then return end
-                local kept = {}
-                for _, bd in ipairs(p.cdmBars.bars) do
-                    if bd.barType == "buffs" and bd.key ~= "buffs" then
-                        removedBuffBarKeys[bd.key] = true
-                    else
-                        kept[#kept + 1] = bd
-                    end
-                end
-                p.cdmBars.bars = kept
-            end
-
-            -- Current profile
-            WipeBuffBarsFromProfile(self.db and self.db.profile)
-
-            -- All other profiles in the DB
-            if EllesmereUIDB and EllesmereUIDB.profiles then
-                for _, prof in pairs(EllesmereUIDB.profiles) do
-                    WipeBuffBarsFromProfile(prof)
-                end
-            end
-
-            -- 2. Clear spell assignments for all buff-type bars
-            local store = EllesmereUIDB.spellAssignments
-            if store and store.specProfiles then
-                for _, specProf in pairs(store.specProfiles) do
-                    if specProf.barSpells then
-                        -- Clear main buffs bar assignments (auto-populated now)
-                        if specProf.barSpells["buffs"] then
-                            specProf.barSpells["buffs"].assignedSpells = nil
-                        end
-                        -- Remove spell data for every extra buff bar we deleted
-                        for removedKey in pairs(removedBuffBarKeys) do
-                            specProf.barSpells[removedKey] = nil
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migrate: clear stale assignedSpells on the main buffs bar.
-    -- The main bar is Blizzard-owned and should never have assignedSpells.
-    do
-        if not EllesmereUIDB._buffsBarCleanupV2 then
-            EllesmereUIDB._buffsBarCleanupV2 = true
-            local store = EllesmereUIDB.spellAssignments
-            if store and store.specProfiles then
-                for _, specProf in pairs(store.specProfiles) do
-                    if specProf.barSpells and specProf.barSpells.buffs then
-                        specProf.barSpells.buffs.assignedSpells = nil
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migrate: mouseover visibility is no longer supported on CDM bars.
-    -- Move any bars using it to "always".
-    do
-        local p = self.db and self.db.profile
-        if p and p.cdmBars and p.cdmBars.bars then
-            for _, bd in ipairs(p.cdmBars.bars) do
-                if bd.barVisibility == "mouseover" then
-                    bd.barVisibility = "always"
-                end
-            end
-        end
-    end
-
-    -- Migrate: de-anchor anything anchored to a buff-type bar.
-    -- Buff bars resize dynamically with auras, causing cascading position
-    -- shifts. Anchoring to them is no longer supported.
-    do
-        local p = self.db and self.db.profile
-        if p and p.cdmBars and p.cdmBars.bars then
-            -- Build set of buff bar keys
-            local buffKeys = {}
-            for _, bd in ipairs(p.cdmBars.bars) do
-                if bd.barType == "buffs" or bd.key == "buffs" or bd.barType == "custom_buff" then
-                    buffKeys["CDM_" .. bd.key] = true
-                end
-            end
-            -- Also include AuraBuff Reminders (dynamic icon count)
-            buffKeys["EABR_Reminders"] = true
-            -- Check unlock anchors and clear any pointing to dynamic bars
-            local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
-            if anchors then
-                for childKey, info in pairs(anchors) do
-                    if info.target and buffKeys[info.target] then
-                        anchors[childKey] = nil
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migrate: bar glows and TBB from old locations to spec-specific storage.
-    -- Old locations:
-    --   barGlows: EllesmereUIDB.spellAssignments.barGlows (global)
-    --             or specProfiles[specKey].barGlows (from old save/load cycle)
-    --   trackedBuffBars: ECME.db.profile.trackedBuffBars
-    --   tbbPositions: ECME.db.profile.tbbPositions
-    -- New location: specProfiles[specKey].barGlows / .trackedBuffBars / .tbbPositions
-    do
-        local specKey = ns.GetActiveSpecKey()
-        if specKey and specKey ~= "0" and EllesmereUIDB and EllesmereUIDB.spellAssignments then
-            local sa = EllesmereUIDB.spellAssignments
-            if not sa.specProfiles then sa.specProfiles = {} end
-            if not sa.specProfiles[specKey] then sa.specProfiles[specKey] = { barSpells = {} } end
-            local prof = sa.specProfiles[specKey]
-
-            -- Migrate barGlows: old global -> spec profile (one-time)
-            if not prof.barGlows and sa.barGlows and next(sa.barGlows) then
-                prof.barGlows = DeepCopy(sa.barGlows)
-            end
-
-            -- Migrate trackedBuffBars: old profile -> spec profile (one-time)
-            local p = self.db and self.db.profile
-            if p then
-                if not prof.trackedBuffBars and p.trackedBuffBars and p.trackedBuffBars.bars and #p.trackedBuffBars.bars > 0 then
-                    prof.trackedBuffBars = DeepCopy(p.trackedBuffBars)
-                end
-                if not prof.tbbPositions and p.tbbPositions and next(p.tbbPositions) then
-                    prof.tbbPositions = DeepCopy(p.tbbPositions)
-                end
-            end
-        end
-    end
-
-    -- Migrate: remove Bloodlust/Time Spiral/warlock presets from all bars
-    -- (these can't be tracked via cooldown detection). Only removes preset
-    -- versions (customSpellDurations entry), not real class spells like a
-    -- Shaman's Heroism or a Warlock's pet summons. Safe to run every login
-    -- because these presets were removed from the picker entirely.
-    do
-        local removedPresets = { [2825] = true, [32182] = true, [80353] = true,
-            [264667] = true, [390386] = true, [381301] = true, [444062] = true, [444257] = true, -- Bloodlust variants
-            [104316] = true, [265187] = true, [264119] = true, [111898] = true, -- Warlock pets
-        }
-        local removedPopularKeys = { bloodlust = true, time_spiral = true,
-            call_dreadstalkers = true, demonic_tyrant = true,
-            summon_vilefiend = true, grimoire_felguard = true }
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        if sa and sa.specProfiles then
-            for _, prof in pairs(sa.specProfiles) do
-                -- Clean preset versions of these spells from ALL bars.
-                -- Only remove if customSpellDurations has an entry for the
-                -- spell (meaning it was added as a preset, not a real class
-                -- spell like a Shaman's Heroism or a Warlock's pet summons).
-                if prof.barSpells then
-                    for bk, bs in pairs(prof.barSpells) do
-                        if bs.assignedSpells and bs.customSpellDurations then
-                            for i = #bs.assignedSpells, 1, -1 do
-                                local sid = bs.assignedSpells[i]
-                                if removedPresets[sid] and bs.customSpellDurations[sid] then
-                                    table.remove(bs.assignedSpells, i)
-                                    bs.customSpellDurations[sid] = nil
-                                end
-                            end
-                        end
-                        bs.presetVariants = nil
-                    end
-                end
-                -- Clean only removed presets from TBB (bloodlust, time spiral,
-                -- warlock pets). Other popular presets (potions etc.) are kept.
-                if prof.trackedBuffBars and prof.trackedBuffBars.bars then
-                    for i = #prof.trackedBuffBars.bars, 1, -1 do
-                        local bar = prof.trackedBuffBars.bars[i]
-                        if bar.popularKey and removedPopularKeys[bar.popularKey] then
-                            table.remove(prof.trackedBuffBars.bars, i)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Migrate: cleanse custom spells (presets, custom spell IDs) off ALL
-    -- buff-type bars across ALL spec profiles. Buff bars are now exclusively
-    -- (Old buff bar cleanse migration removed -- the main buffs bar no longer
-    -- uses assignedSpells. Secondary buff bars are user-created and should
-    -- not be auto-cleansed.)
 
     -- This is the one-time construction hub for a normal login/reload enable:
     -- preload unlock helpers, build the initial bar set, spin up the periodic
@@ -6035,15 +5448,15 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
         RECONCILE.lastZoneInAt = GetTime()
-        -- Validate spec on every zone-in (catches auto spec swaps, login, etc.)
+        -- Zone-in: invalidate the spec cache (in case the player auto-swapped
+        -- spec via LFG / dungeon role) and rebuild if the spec is known.
         local gen = ns.GetRebuildGen()
         C_Timer.After(0.5, function()
             if ns.GetRebuildGen() ~= gen then return end  -- another rebuild already ran
-            ValidateSpec()
-            if not _specValidated then return end
-            local newSpecKey = GetCurrentSpecKey()
+            ns.InvalidateSpecKey()
+            if not ns.GetActiveSpecKey() then return end -- spec API not ready
             local p = ECME.db and ECME.db.profile
-            if p and newSpecKey == ns.GetActiveSpecKey() then
+            if p then
                 ns.FullCDMRebuild("zone_in")
                 if RECONCILE.pending then
                     C_Timer.After(0.5, function()
@@ -6068,33 +5481,16 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         C_Timer.After(1.5, _CDMApplyVisibility)
     end
     if event == "SPELLS_CHANGED" then
-        -- SPELLS_CHANGED fires reliably after spec data is available.
-        -- Use it as a safety net to catch spec mismatches that OnEnable missed.
-        local scheduleReconcile = RECONCILE.pending
-        if not _specValidated then
-            ValidateSpec()
-            -- If ValidateSpec just fixed the spec, rebuild bars now.
-            -- (PLAYER_ENTERING_WORLD may have bailed early because spec wasn't ready.)
-            if _specValidated then
-                C_Timer.After(0.3, function()
-                    ns.FullCDMRebuild("spells_changed")
-                    if scheduleReconcile and RECONCILE.pending then
-                        C_Timer.After(0.5, function()
-                            if RECONCILE.pending then
-                                ns.RequestTalentReconcile("SPELLS_CHANGED")
-                            end
-                        end)
-                    end
-                end)
-                scheduleReconcile = false
-            end
-        end
-        if scheduleReconcile and RECONCILE.pending then
-            -- Only reconcile if the spec actually changed, not for
-            -- equipment swaps that temporarily remove spells.
+        -- SPELLS_CHANGED only matters now as a "spec data became available"
+        -- signal AFTER OnEnable bailed without a spec, OR as a "talents
+        -- changed" signal that should trigger reconcile.
+        if RECONCILE.pending then
             local currentSpec = ns.GetActiveSpecKey()
             local lastSpec = ns._lastReconciledSpec
-            if currentSpec ~= lastSpec then
+            -- Only reconcile if the spec actually changed since the last
+            -- reconcile -- equipment swaps that temporarily remove spells
+            -- shouldn't trigger this path.
+            if currentSpec and currentSpec ~= lastSpec then
                 C_Timer.After(0.2, function()
                     if RECONCILE.pending then
                         ns.RequestTalentReconcile("SPELLS_CHANGED")
@@ -6109,21 +5505,24 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             EllesmereUI.InvalidateFrameCache()
         end
         RECONCILE.lastSpecChangeAt = GetTime()
-        local newSpecKey = GetCurrentSpecKey()
-        local curSpecKey = ns.GetActiveSpecKey()
-        if newSpecKey ~= "0" and newSpecKey ~= curSpecKey then
+        -- Save the old spec's per-spec data BEFORE invalidating the cache,
+        -- so SaveCurrentSpecProfile / SaveCachedBarSizes write to the right
+        -- key. Then invalidate and re-resolve from the live API.
+        local prevSpecKey = ns.GetActiveSpecKey()
+        if prevSpecKey then
+            SaveCurrentSpecProfile()
+        end
+        ns.InvalidateSpecKey()
+        local newSpecKey = ns.GetActiveSpecKey()
+        if newSpecKey and newSpecKey ~= prevSpecKey then
             SwitchSpecProfile(newSpecKey)
-            _specValidated = true
-            if RECONCILE.pending then
-                C_Timer.After(0.6, function()
-                    if RECONCILE.pending then
-                        ns.RequestTalentReconcile("spec")
-                    end
-                end)
-            end
-        elseif newSpecKey ~= "0" then
-            SetActiveSpec()
-            _specValidated = true
+            -- Unconditionally request reconcile -- new talents on the new
+            -- spec need to be auto-added to the bars.
+            C_Timer.After(0.6, function()
+                ns.RequestTalentReconcile("spec")
+            end)
+        elseif newSpecKey then
+            -- Same spec re-fire. Treat as a forced rebuild of the current spec.
             C_Timer.After(0.5, function()
                 if EllesmereUI then EllesmereUI._specProfileSwitching = false end
                 ns.FullCDMRebuild("spec_same_key")

@@ -4022,13 +4022,6 @@ end
 function ERB:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIResourceBarsDB", DEFAULTS, true)
 
-    -- Round width/height to whole pixels (one-time migration)
-    local p = self.db.profile
-    local sizeKeys = { "width", "height", "pipWidth", "pipHeight" }
-    if p and EllesmereUI.RoundSizeFields then
-        EllesmereUI.RoundSizeFields(sizeKeys, { p.primary, p.secondary, p.health, p.castBar })
-    end
-
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end
     _G._ERB_GetSecondaryResource = GetSecondaryResource

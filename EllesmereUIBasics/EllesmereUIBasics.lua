@@ -268,10 +268,13 @@ local defaults = {
             worldCollapsed       = false,
             showQuestItems       = true,
             questItemSize        = 22,
-            -- secColor intentionally has no default: nil triggers the
-            -- "use live accent color" fallback in the quest tracker so
-            -- theme changes propagate. Set explicitly via the options
-            -- color swatch to override.
+            -- Header color: secColorUseAccent=true (default) uses the live
+            -- EllesmereUI accent color so theme changes propagate. When
+            -- the user picks a custom color via the inline swatch, the
+            -- options panel flips secColorUseAccent=false and writes to
+            -- secColor. secColor has no default on purpose -- it only
+            -- exists once the user explicitly overrides.
+            secColorUseAccent    = true,
             delveCollapsed       = false,
             questsCollapsed      = false,
             showPreyQuests       = true,
@@ -295,21 +298,12 @@ local defaults = {
 -------------------------------------------------------------------------------
 --  Utility
 -------------------------------------------------------------------------------
-local function GetClassColor()
-    local _, classFile = UnitClass("player")
-    local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-    if cc then return cc.r, cc.g, cc.b, 1 end
-    return 0.05, 0.05, 0.05, 1
-end
-
 local function GetBorderColor(cfg)
     if cfg.useClassColor then
-        -- Friends uses accent color, minimap uses class color
-        if cfg == (EBS.db and EBS.db.profile and EBS.db.profile.friends) then
-            local ar, ag, ab = EG.r, EG.g, EG.b
-            return ar, ag, ab, 1
-        end
-        return GetClassColor()
+        -- Flag name is legacy ("useClassColor") but both minimap and friends
+        -- now use the live EllesmereUI accent color when it's set. The flag
+        -- name is kept as-is for backwards compat with stored SV data.
+        return EG.r, EG.g, EG.b, 1
     end
     return cfg.borderR, cfg.borderG, cfg.borderB, cfg.borderA or 1
 end
@@ -6952,29 +6946,6 @@ end
 -------------------------------------------------------------------------------
 function EBS:OnInitialize()
     EBS.db = EllesmereUI.Lite.NewDB("EllesmereUIBasicsDB", defaults)
-
-    -- Migrate old hideButtons to individual keys
-    local mp = EBS.db.profile.minimap
-    if mp.hideButtons ~= nil then
-        if mp.hideButtons == true then
-            mp.hideZoomButtons    = true
-            mp.hideTrackingButton = true
-            mp.hideGameTime       = true
-        else
-            mp.hideZoomButtons    = false
-            mp.hideTrackingButton = false
-            mp.hideGameTime       = false
-        end
-        mp.hideButtons = nil
-    end
-
-    -- Migrate old "round" shape to "circle"
-    if mp.shape == "round" then
-        mp.shape = "circle"
-    end
-
-    -- Scale removed in favor of direct sizing via snapshot; clean up stale key
-    mp.scale = nil
 
     -- Global bridge for options <-> main communication
     _G._EBS_AceDB        = EBS.db

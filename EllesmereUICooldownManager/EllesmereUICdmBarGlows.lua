@@ -61,8 +61,8 @@ end
 
 --- Get barGlows data from SavedVariables (with lazy init)
 function ns.GetBarGlows()
-    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey() or "0"
-    if specKey == "0" then return { enabled = true, selectedBar = 1, assignments = {} } end
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not specKey then return { enabled = true, selectedBar = 1, assignments = {} } end
     if not EllesmereUIDB then return { enabled = true, selectedBar = 1, assignments = {} } end
     if not EllesmereUIDB.spellAssignments then
         EllesmereUIDB.spellAssignments = { specProfiles = {} }
@@ -152,31 +152,6 @@ function ns.GetAllCDMBuffSpells()
     end
 
     return tracked, untracked
-end
-
--------------------------------------------------------------------------------
---  Migration: clear old position-based CDM bar glow assignments (101_*, 102_*)
---  These were index-based and broke when icons reordered during reanchor.
---  Action bar assignments (1_* through 8_*) are stable and kept.
--------------------------------------------------------------------------------
-local function MigrateCDMAssignments()
-    if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return end
-    local sa = EllesmereUIDB.spellAssignments
-    if not sa.specProfiles then return end
-    for _, prof in pairs(sa.specProfiles) do
-        local bg = prof.barGlows
-        if bg and bg.assignments then
-            local toRemove = {}
-            for key in pairs(bg.assignments) do
-                if key:match("^10[12]_") then
-                    toRemove[#toRemove + 1] = key
-                end
-            end
-            for _, key in ipairs(toRemove) do
-                bg.assignments[key] = nil
-            end
-        end
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -330,7 +305,6 @@ ns.RequestUpdate = ns.RequestBarGlowUpdate
 
 -- Called once during CDMFinishSetup
 function ns.InitBarGlows()
-    MigrateCDMAssignments()
     SetupOverlays()
 end
 

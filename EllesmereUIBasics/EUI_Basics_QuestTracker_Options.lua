@@ -397,17 +397,14 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Title Size", min=8, max=24, step=1,
               getValue=function() return Cfg("titleFontSize") or 11 end,
               setValue=function(v) Set("titleFontSize", v); Refresh() end })
+
+        -- Title color: single custom swatch (unchanged behavior)
         do
-            local function AttachSwatch(rgn, label, colorKey, dr, dg, db, useAccent)
+            local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local c = Cfg(colorKey) or {}
-                        if c.r then return c.r, c.g, c.b end
-                        if useAccent then
-                            local eg = EllesmereUI.ELLESMERE_GREEN
-                            if eg then return eg.r, eg.g, eg.b end
-                        end
-                        return dr, dg, db
+                        return c.r or dr, c.g or dg, c.b or db
                     end,
                     function(r, g, b)
                         local c = Cfg(colorKey) or {}
@@ -419,10 +416,99 @@ initFrame:SetScript("OnEvent", function(self)
                 sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             end
-            -- secColor passes useAccent=true so the swatch displays the
-            -- live accent when the user has not explicitly chosen a color
-            AttachSwatch(row._leftRegion,  "Header", "secColor",   0.047, 0.824, 0.624, true)
-            AttachSwatch(row._rightRegion, "Title",  "titleColor", 1.0,   0.85,  0.1)
+            AttachSwatch(row._rightRegion, "Title",  "titleColor", 1.0, 0.85, 0.1)
+        end
+
+        -- Header color: double inline swatch (custom | accent), matching the
+        -- CDM border-size pattern but using the live EllesmereUI accent
+        -- instead of class color. Right swatch = accent mode (activates on
+        -- click, shows live ELLESMERE_GREEN). Left swatch = custom color
+        -- (activates on click, color picker opens). While accent mode is
+        -- active, the custom swatch is dimmed and blocked.
+        do
+            local leftRgn = row._leftRegion
+            local ctrl = leftRgn._control
+            local PP = EllesmereUI.PP
+
+            -- Right (accent) swatch: one-click to activate accent mode.
+            -- getValue reads ELLESMERE_GREEN live so theme/accent changes
+            -- repaint the swatch automatically.
+            local accentSwatch, updateAccentSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, row:GetFrameLevel() + 3,
+                function()
+                    local eg = EllesmereUI.ELLESMERE_GREEN
+                    if eg then return eg.r, eg.g, eg.b end
+                    return 0.047, 0.824, 0.624
+                end,
+                function() end,  -- no color picker, read-only display
+                false, 20)
+            PP.Point(accentSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            accentSwatch:SetScript("OnClick", function()
+                Set("secColorUseAccent", true)
+                Refresh()
+                EllesmereUI:RefreshPage()
+            end)
+            accentSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
+            end)
+            accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Left (custom) swatch: color picker when accent mode is off.
+            local customSwatch, updateCustomSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, row:GetFrameLevel() + 3,
+                function()
+                    local c = Cfg("secColor") or {}
+                    if c.r then return c.r, c.g, c.b end
+                    return 0.047, 0.824, 0.624
+                end,
+                function(r, g, b)
+                    local c = Cfg("secColor") or {}
+                    c.r = r; c.g = g; c.b = b
+                    Set("secColor", c)
+                    -- Picking a custom color implicitly disables accent mode
+                    Set("secColorUseAccent", false)
+                    Refresh()
+                end,
+                false, 20)
+            PP.Point(customSwatch, "RIGHT", accentSwatch, "LEFT", -8, 0)
+            customSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
+            end)
+            customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Block overlay: while accent mode is active, clicking the
+            -- custom swatch flips accent mode off instead of opening the
+            -- color picker. Prevents the user from accidentally picking a
+            -- color before choosing whether to deviate from accent.
+            local customBlock = CreateFrame("Button", nil, customSwatch)
+            customBlock:SetAllPoints()
+            customBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 10)
+            customBlock:EnableMouse(true)
+            customBlock:SetScript("OnClick", function()
+                if Cfg("secColorUseAccent") then
+                    Set("secColorUseAccent", false)
+                    Refresh()
+                    EllesmereUI:RefreshPage()
+                end
+            end)
+            customBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
+            end)
+            customBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function UpdateHeaderSwatchState()
+                local useAccent = Cfg("secColorUseAccent")
+                if useAccent then
+                    customSwatch:SetAlpha(0.3); customBlock:Show()
+                else
+                    customSwatch:SetAlpha(1); customBlock:Hide()
+                end
+                accentSwatch:SetAlpha(useAccent and 1 or 0.3)
+            end
+            EllesmereUI.RegisterWidgetRefresh(function()
+                updateCustomSwatch(); updateAccentSwatch(); UpdateHeaderSwatchState()
+            end)
+            UpdateHeaderSwatchState()
         end
         y = y - h
 

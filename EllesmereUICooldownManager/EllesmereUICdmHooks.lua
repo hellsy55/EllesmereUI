@@ -1817,6 +1817,43 @@ local function CollectAndReanchor(bypassSpecGuard)
         end
     end
 
+    -- Hide orphaned custom frames (trinkets, potions, racials, custom
+    -- spells) that are no longer referenced by any bar. Custom frames are
+    -- never added to allActiveFrames (that table only holds Blizzard viewer
+    -- pool frames), so the main Phase 4 loop above cannot see them.
+    --
+    -- The common case this catches is a spec swap where the new spec has
+    -- fewer custom items than the old spec. Phase 3's write loop overwrites
+    -- cdmBarIcons[barKey][i] in place, silently losing the reference to the
+    -- previous frame at that index without hiding it. The "clear excess"
+    -- loop only handles trailing indices (i > #newFrames), so a custom
+    -- frame that was at index 1 in the old list gets overwritten and leaks:
+    -- it stays shown, still parented to the bar container, and its stale
+    -- SetPoint anchor drifts with the container on the new spec's layout.
+    --
+    -- Trinket frames are the most obvious offender because _trinketFrames
+    -- is persistent across spec swaps (unlike _presetFrames, which gets
+    -- wiped in SwitchSpecProfile). Preset frames are handled belt-and-
+    -- suspenders here too: the spec-swap wipe hides them, but any other
+    -- path that removes a preset from assignedSpells without going through
+    -- SwitchSpecProfile would leak without this sweep.
+    --
+    -- Custom BUFF frames (f._isCustomBuffFrame) are skipped: their
+    -- lifecycle lives in UpdateCustomBuffBars on a separate ticker, and
+    -- hiding them here would flicker against that ticker's next Show call.
+    for _, tf in pairs(_trinketFrames) do
+        if tf and not usedFrames[tf] then
+            tf:ClearAllPoints()
+            tf:Hide()
+        end
+    end
+    for _, pf in pairs(_presetFrames) do
+        if pf and not pf._isCustomBuffFrame and not usedFrames[pf] then
+            pf:ClearAllPoints()
+            pf:Hide()
+        end
+    end
+
     if not ns._initialReanchorDone then ns._initialReanchorDone = true end
 
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end

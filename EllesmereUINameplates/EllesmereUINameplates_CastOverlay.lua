@@ -21,6 +21,7 @@ local pairs, tremove = pairs, table.remove
 local CreateFrame = CreateFrame
 local UnitCastingInfo, UnitChannelInfo = UnitCastingInfo, UnitChannelInfo
 local UnitCastingDuration, UnitChannelDuration = UnitCastingDuration, UnitChannelDuration
+local UnitEmpoweredChannelDuration = UnitEmpoweredChannelDuration
 local UnitIsUnit = UnitIsUnit
 local UnitName = UnitName
 local UnitSpellTargetName = UnitSpellTargetName
@@ -470,11 +471,15 @@ local function ConfigureOverlay(ov, plate)
     -- it has no castID field.
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(unit)
     local isChannel = false
-    if name == nil then
+    local isEmpowered = false
+    -- type(name) == "nil" is the taint-safe nil check for secret strings:
+    -- comparing the secret string directly to a literal (like "") taints,
+    -- but type() returns a plain string that's safe to compare.
+    if type(name) == "nil" then
         name, _, texture, _, _, _, kickProtected, castSpellID = UnitChannelInfo(unit)
         isChannel = true
     end
-    if name == nil then dprint("  bail: no name") return end
+    if type(name) == "nil" then dprint("  bail: no name") return end
 
     -- Apply all cast text settings (sizes/colors/widths/showTimer) the
     -- same way the on-plate cast bar does. Run on every config so option
@@ -530,11 +535,25 @@ local function ConfigureOverlay(ov, plate)
     local timerOk = false
     local castDuration
     if UnitCastingDuration and ov.bar.SetTimerDuration and Enum and Enum.StatusBarTimerDirection then
-        castDuration = isChannel and UnitChannelDuration(unit)
-                                   or UnitCastingDuration(unit)
+        if isChannel then
+            -- Empowered channels (Evoker) need UnitEmpoweredChannelDuration;
+            -- UnitChannelDuration can return nil during the empower phase.
+            if UnitEmpoweredChannelDuration then
+                castDuration = UnitEmpoweredChannelDuration(unit, true)
+                if castDuration then isEmpowered = true end
+            end
+            if not castDuration then
+                castDuration = UnitChannelDuration(unit)
+            end
+        else
+            castDuration = UnitCastingDuration(unit)
+        end
         if castDuration then
-            local direction = isChannel and Enum.StatusBarTimerDirection.RemainingTime
-                                         or Enum.StatusBarTimerDirection.ElapsedTime
+            -- Empowered channels fill forward (stages), normal channels
+            -- fill backward (remaining), normal casts fill forward (elapsed).
+            local direction = (isChannel and not isEmpowered)
+                and Enum.StatusBarTimerDirection.RemainingTime
+                or Enum.StatusBarTimerDirection.ElapsedTime
             ov.bar:SetReverseFill(false)
             timerOk = pcall(ov.bar.SetTimerDuration, ov.bar, castDuration, nil, direction)
         end

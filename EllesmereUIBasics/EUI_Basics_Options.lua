@@ -146,15 +146,17 @@ initFrame:SetScript("OnEvent", function(self)
                   if not c or not c.enabled then return 0.15 end
                   return c.useClassColor and 0.3 or 1
               end },
-            { tooltip = "Class Colored",
+            { tooltip = "Accent Color",
               hasAlpha = false,
               getValue = function()
-                  local _, classFile = UnitClass("player")
-                  local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-                  if cc then return cc.r, cc.g, cc.b end
-                  return 0.05, 0.05, 0.05
+                  local ar, ag, ab = EllesmereUI.GetAccentColor()
+                  return ar, ag, ab
               end,
               setValue = function() end,
+              -- Flag name stays `useClassColor` for backwards compat with
+              -- users who already have it stamped in their SavedVariables.
+              -- Only the color resolution changes -- the flag now means
+              -- "use live accent" rather than "use class color".
               onClick = function()
                   local c = getCfg(); if not c then return end
                   c.useClassColor = true

@@ -214,8 +214,8 @@ ns.TBB_DEFAULT_BAR = TBB_DEFAULT_BAR
 -------------------------------------------------------------------------------
 function ns.GetTrackedBuffBars()
     -- TBB is fully spec-specific, stored in specProfiles[specKey]
-    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey() or "0"
-    if specKey == "0" then return { selectedBar = 1, bars = {} } end
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not specKey then return { selectedBar = 1, bars = {} } end
     if not EllesmereUIDB then return { selectedBar = 1, bars = {} } end
     if not EllesmereUIDB.spellAssignments then
         EllesmereUIDB.spellAssignments = { specProfiles = {} }
@@ -232,8 +232,8 @@ end
 
 function ns.GetTBBPositions()
     -- TBB positions are spec-specific, stored alongside trackedBuffBars
-    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey() or "0"
-    if specKey == "0" then return {} end
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not specKey then return {} end
     if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return {} end
     local sa = EllesmereUIDB.spellAssignments
     if not sa.specProfiles or not sa.specProfiles[specKey] then return {} end

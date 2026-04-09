@@ -1542,6 +1542,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         if not owner._showCastTimer then return end
         if UnitCastingDuration then
             local durObj = UnitCastingDuration(owner.unit)
+                or (UnitEmpoweredChannelDuration and UnitEmpoweredChannelDuration(owner.unit, true))
                 or (UnitChannelDuration and UnitChannelDuration(owner.unit))
             if durObj then
                 local remaining = durObj:GetRemainingDuration()
@@ -3264,6 +3265,9 @@ end
     self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
+    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", unit)
+    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_UPDATE", unit)
+    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", unit)
     ApplyHealthBarTexture(self)
@@ -4237,6 +4241,11 @@ function NameplateFrame:UpdateCast()
     end
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
     local isChannel = false
+    local isEmpowered = false
+    -- type(name) == "nil" is the taint-safe pattern for secret strings:
+    -- type() returns a plain string ("string" / "nil"), so comparing that
+    -- to "nil" never touches the secret value itself. Direct equality on
+    -- the secret string ("" or another string literal) taints.
     if type(name) == "nil" then
         name, _, texture, _, _, _, kickProtected, castSpellID = UnitChannelInfo(self.unit)
         isChannel = true
@@ -4332,10 +4341,27 @@ function NameplateFrame:UpdateCast()
     
     if UnitCastingDuration and self.cast.SetTimerDuration then
         if isChannel then
-            local castDuration = UnitChannelDuration(self.unit)
+            local castDuration
+            -- Try empowered channel duration first (Evoker empower spells
+            -- like Fire Breath, Eternity Surge, Dream Breath, Spiritbloom).
+            -- Normal UnitChannelDuration can return nil during the empower
+            -- phase, which would leave the bar unticked even though
+            -- UnitChannelInfo did return a spell name.
+            if UnitEmpoweredChannelDuration then
+                castDuration = UnitEmpoweredChannelDuration(self.unit, true)
+                if castDuration then isEmpowered = true end
+            end
+            if not castDuration then
+                castDuration = UnitChannelDuration(self.unit)
+            end
             if castDuration then
                 self.cast:SetReverseFill(false)
-                self.cast:SetTimerDuration(castDuration, nil, Enum.StatusBarTimerDirection.RemainingTime)
+                -- Empowered channels fill forward (elapsed time / stages);
+                -- normal channels fill backward (remaining time).
+                local direction = isEmpowered
+                    and Enum.StatusBarTimerDirection.ElapsedTime
+                    or Enum.StatusBarTimerDirection.RemainingTime
+                self.cast:SetTimerDuration(castDuration, nil, direction)
                 if not self.isCasting then NotifyCastStarted() end
                 self.isCasting = true
             end
@@ -4359,7 +4385,7 @@ function NameplateFrame:UpdateCast()
         end
     end
     self:ApplyScale()
-    self:UpdateKickTick(kickProtected, isChannel)
+    self:UpdateKickTick(kickProtected, isChannel, isEmpowered)
     -- Important cast glow
     self:UpdateImportantCastGlow(castSpellID)
     -- Reposition class power pips (cast bar now visible, pips move below it)
@@ -4411,7 +4437,7 @@ function NameplateFrame:HideKickTick()
         self._kickTicker = nil
     end
 end
-function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
+function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
     if not GetKickTickEnabled() or not activeKickSpell then
         self:HideKickTick()
         return
@@ -4425,7 +4451,17 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
     end
     -- Midnight path: use secret duration objects
     if UnitCastingDuration and self.cast.SetTimerDuration then
-        local castDuration = isChannel and UnitChannelDuration(self.unit) or UnitCastingDuration(self.unit)
+        local castDuration
+        if isChannel then
+            if isEmpowered and UnitEmpoweredChannelDuration then
+                castDuration = UnitEmpoweredChannelDuration(self.unit, true)
+            end
+            if not castDuration then
+                castDuration = UnitChannelDuration(self.unit)
+            end
+        else
+            castDuration = UnitCastingDuration(self.unit)
+        end
         if not castDuration then
             self:HideKickTick()
             return
@@ -4451,8 +4487,9 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
         -- Apply color
         local kr, kg, kb = GetKickTickColor()
         self.kickTick:SetColorTexture(kr, kg, kb, 1)
-        -- Handle channel vs cast fill direction
-        if isChannel then
+        -- Handle channel vs cast fill direction. Empowered channels fill
+        -- forward (like a normal cast), so treat them as non-channel here.
+        if isChannel and not isEmpowered then
             self.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
             self.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
             self.kickMarker:ClearAllPoints()
@@ -4648,6 +4685,15 @@ function NameplateFrame:UNIT_SPELLCAST_INTERRUPTIBLE()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_NOT_INTERRUPTIBLE()
+    self:UpdateCast()
+end
+function NameplateFrame:UNIT_SPELLCAST_EMPOWER_START()
+    self:UpdateCast()
+end
+function NameplateFrame:UNIT_SPELLCAST_EMPOWER_UPDATE()
+    self:UpdateCast()
+end
+function NameplateFrame:UNIT_SPELLCAST_EMPOWER_STOP()
     self:UpdateCast()
 end
 local manager = CreateFrame("Frame")

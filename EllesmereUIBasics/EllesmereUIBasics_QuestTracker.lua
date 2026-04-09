@@ -1607,7 +1607,11 @@ function EQT:Refresh(skipAlphaFlash)
     local ffs     = db.focusedFontSize
     local fbgA    = (db.focusBgOpacity or 0) / 100
     local iqSize  = db.questItemSize or 22
-    local sc      = db.secColor or C.section
+    -- Header color: when secColorUseAccent is true (default), always use
+    -- the live accent (C.section is a shared reference to ELLESMERE_GREEN
+    -- so theme changes propagate automatically). When false, use the
+    -- user's custom secColor, falling back to accent if nil.
+    local sc      = (db.secColorUseAccent and C.section) or db.secColor or C.section
     local compFS  = db.completedFontSize
     local superQID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
 
@@ -2502,7 +2506,8 @@ local function BuildFrame()
     topLine:SetHeight(1)
     topLine:SetPoint("TOPLEFT",  inner, "TOPLEFT",  0, 0)
     topLine:SetPoint("TOPRIGHT", inner, "TOPRIGHT", 0, 0)
-    local sc = Cfg("secColor") or C.section
+    -- Same resolution as the main refresh: accent-first when the flag is set.
+    local sc = (Cfg("secColorUseAccent") and C.section) or Cfg("secColor") or C.section
     topLine:SetColorTexture(sc.r, sc.g, sc.b, 0.7)
     if not Cfg("showTopLine") then topLine:Hide() end
     f.topLine = topLine
@@ -2685,19 +2690,7 @@ function EQT:ApplyPosition()
         return
     end
     f:ClearAllPoints()
-    -- Migrate legacy xPos/yPos to new pos format
     local db = DB()
-    if db.xPos and db.yPos and not db.pos then
-        local uiW, uiH = UIParent:GetSize()
-        local fW, fH = f:GetSize()
-        local cx = db.xPos + fW / 2
-        local cy = (db.yPos + uiH) - fH / 2
-        db.pos = {
-            point = "CENTER", relPoint = "CENTER",
-            x = cx - uiW / 2, y = cy - uiH / 2,
-        }
-        db.xPos = nil; db.yPos = nil
-    end
     local pos = db.pos
     if pos and pos.point then
         local px, py = pos.x or 0, pos.y or 0
@@ -2855,6 +2848,18 @@ function EQT:Init()
         suppressFrame:SetScript("OnEvent", function()
             C_Timer.After(0, ApplyBlizzardTrackerVisibility)
         end)
+    end
+
+    -- Edit Mode reparents ObjectiveTrackerFrame back to UIParent so the
+    -- user can drag it. Re-suppress when Edit Mode closes. Same hook
+    -- pattern as CDM (EllesmereUICdmHooks.lua:2483).
+    do
+        local emf = _G.EditModeManagerFrame
+        if emf then
+            hooksecurefunc(emf, "Hide", function()
+                C_Timer.After(0.1, ApplyBlizzardTrackerVisibility)
+            end)
+        end
     end
 
     -- SplashFrame taint fix: Blizzard's SplashFrame:OnHide calls
