@@ -1237,7 +1237,6 @@ initFrame:SetScript("OnEvent", function(self)
                             "autoRepairGuild", "hideScreenshotStatus", "autoUnwrapCollections",
                             "trainAllButton", "ahCurrentExpansion", "quickLoot",
                             "autoFillDelete", "skipCinematics", "skipCinematicsAuto",
-                            "autoAcceptRoleCheck", "autoAcceptRoleCheckShift",
                             "sortByMythicScore", "autoInsertKeystone", "quickSignup",
                             "persistSignupNote", "hideBlizzardPartyFrame",
                             "instanceResetAnnounce", "instanceResetAnnounceMsg",
@@ -3314,18 +3313,7 @@ initFrame:SetScript("OnEvent", function(self)
         ---------------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "GROUP FINDER", y);  y = y - h
 
-        local roleCheckRow
-        roleCheckRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Auto Accept Role Check",
-              tooltip="Automatically accepts the role check popup when queuing via Premade Groups, using your already selected roles.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck or false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.autoAcceptRoleCheck = v
-                  EllesmereUI:RefreshPage()
-              end },
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Sort by Mythic+ Rating",
               -- Feature temporarily disabled: the previous implementation
               -- hooksecurefunc'd LFGListUtil_SortApplicants and mutated the
@@ -3337,61 +3325,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = function() return true end,
               disabledTooltip = "This option is temporarily disabled",
               getValue=function() return false end,
-              setValue=function() end }
-        );  y = y - h
-
-        -- Cog on Auto Accept Role Check (left region)
-        do
-            local leftRgn = roleCheckRow._leftRegion
-            local function roleCheckOff()
-                return not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck)
-            end
-
-            local _, rcCogShow = EllesmereUI.BuildCogPopup({
-                title = "Role Check Settings",
-                rows = {
-                    { type="toggle", label="Hold Shift to Skip Auto-Accept",
-                      get=function()
-                          return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheckShift or false
-                      end,
-                      set=function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.autoAcceptRoleCheckShift = v
-                      end },
-                },
-            })
-
-            local rcCogBtn = CreateFrame("Button", nil, leftRgn)
-            rcCogBtn:SetSize(26, 26)
-            rcCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = rcCogBtn
-            rcCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            rcCogBtn:SetAlpha(roleCheckOff() and 0.15 or 0.4)
-            local rcCogTex = rcCogBtn:CreateTexture(nil, "OVERLAY")
-            rcCogTex:SetAllPoints()
-            rcCogTex:SetTexture(EllesmereUI.COGS_ICON)
-            rcCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            rcCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(roleCheckOff() and 0.15 or 0.4) end)
-            rcCogBtn:SetScript("OnClick", function(self) rcCogShow(self) end)
-
-            local rcCogBlock = CreateFrame("Frame", nil, rcCogBtn)
-            rcCogBlock:SetAllPoints()
-            rcCogBlock:SetFrameLevel(rcCogBtn:GetFrameLevel() + 10)
-            rcCogBlock:EnableMouse(true)
-            rcCogBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(rcCogBtn, EllesmereUI.DisabledTooltip("Auto Accept Role Check"))
-            end)
-            rcCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = roleCheckOff()
-                rcCogBtn:SetAlpha(off and 0.15 or 0.4)
-                if off then rcCogBlock:Show() else rcCogBlock:Hide() end
-            end)
-            if roleCheckOff() then rcCogBlock:Show() else rcCogBlock:Hide() end
-        end
-
-        _, h = W:DualRow(parent, y,
+              setValue=function() end },
             { type="toggle", text="Auto Insert Keystone",
               tooltip="Automatically inserts your key into the Font of Power.",
               getValue=function()
@@ -3401,7 +3335,10 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.autoInsertKeystone = v
-              end },
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Announce Instance Reset",
               tooltip="After a successful instance reset, automatically announces it in party or raid chat so your group knows they can re-enter.",
               getValue=function()
@@ -3416,7 +3353,7 @@ initFrame:SetScript("OnEvent", function(self)
         local quickSignupRow
         quickSignupRow, h = W:DualRow(parent, y,
             { type="toggle", text="Quick Signup",
-              tooltip="Double-click a group listing to instantly sign up without pressing the Sign Up button.",
+              tooltip="Double-click a group listing to instantly sign up. Automatically accepts role check.",
               getValue=function()
                   return EllesmereUIDB and EllesmereUIDB.quickSignup or false
               end,
@@ -3437,6 +3374,57 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end }
         );  y = y - h
+
+        -- Cog on Quick Signup (left region)
+        do
+            local leftRgn = quickSignupRow._leftRegion
+            local function quickSignupOff()
+                return not (EllesmereUIDB and EllesmereUIDB.quickSignup)
+            end
+
+            local _, qsCogShow = EllesmereUI.BuildCogPopup({
+                title = "Quick Signup Settings",
+                rows = {
+                    { type="toggle", label="Hold Shift to stop automatic Role Check",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.quickSignupAutoRoleShift or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.quickSignupAutoRoleShift = v
+                      end },
+                },
+            })
+
+            local qsCogBtn = CreateFrame("Button", nil, leftRgn)
+            qsCogBtn:SetSize(26, 26)
+            qsCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = qsCogBtn
+            qsCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            qsCogBtn:SetAlpha(quickSignupOff() and 0.15 or 0.4)
+            local qsCogTex = qsCogBtn:CreateTexture(nil, "OVERLAY")
+            qsCogTex:SetAllPoints()
+            qsCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            qsCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            qsCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(quickSignupOff() and 0.15 or 0.4) end)
+            qsCogBtn:SetScript("OnClick", function(self) qsCogShow(self) end)
+
+            local qsCogBlock = CreateFrame("Frame", nil, qsCogBtn)
+            qsCogBlock:SetAllPoints()
+            qsCogBlock:SetFrameLevel(qsCogBtn:GetFrameLevel() + 10)
+            qsCogBlock:EnableMouse(true)
+            qsCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(qsCogBtn, EllesmereUI.DisabledTooltip("Quick Signup"))
+            end)
+            qsCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            if quickSignupOff() then
+                qsCogBtn:Disable()
+                qsCogBlock:Show()
+            else
+                qsCogBtn:Enable()
+                qsCogBlock:Hide()
+            end
+        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -4969,8 +4957,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.unlockHeightMatch = nil
                 -- QoL Features defaults
                 EllesmereUIDB.hideBlizzardPartyFrame = false
-                EllesmereUIDB.autoAcceptRoleCheck = false
-                EllesmereUIDB.autoAcceptRoleCheckShift = false
                 EllesmereUIDB.quickLoot = false
                 EllesmereUIDB.quickLootShiftSkip = false
                 EllesmereUIDB.skipCinematics = false

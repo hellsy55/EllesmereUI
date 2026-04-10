@@ -691,42 +691,6 @@ qolFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Auto Accept Role Check
-    ---------------------------------------------------------------------------
-    do
-        -- Premade Groups: skip if Shift is held and shift-bypass is enabled
-        LFGListApplicationDialog:HookScript("OnShow", function(self)
-            if not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck) then return end
-            local shiftBypass = EllesmereUIDB.autoAcceptRoleCheckShift and IsShiftKeyDown()
-            if self.SignUpButton:IsEnabled() and not shiftBypass then
-                self.SignUpButton:Click()
-            end
-        end)
-
-        -- Classic Dungeon Finder role check
-        local roleFrame = CreateFrame("Frame")
-        roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
-        roleFrame:SetScript("OnEvent", function()
-            if not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck) then return end
-            if not UnitInParty("player") then return end
-            -- Skip if Shift is held and shift-bypass is enabled
-            if EllesmereUIDB.autoAcceptRoleCheckShift and IsShiftKeyDown() then return end
-            local leader, tank, healer, dps = GetLFGRoles()
-            if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
-            end
-            if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
-            end
-            if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
-            end
-            LFDRoleCheckPopupAcceptButton:Enable()
-            LFDRoleCheckPopupAcceptButton:Click()
-        end)
-    end
-
-    ---------------------------------------------------------------------------
     --  Sort by Mythic+ Rating (DISABLED -- taints Blizzard applicants viewer)
     --
     --  The implementation below hooksecurefunc'd LFGListUtil_SortApplicants
@@ -857,6 +821,37 @@ qolFrame:SetScript("OnEvent", function(self)
                 lastClickEntry = entry.resultID
                 lastClickTime  = now
             end
+        end)
+
+        -- Auto-accept role check for Quick Signup
+        LFGListApplicationDialog:HookScript("OnShow", function(self)
+            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+            local shiftBypass = EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown()
+            if self.SignUpButton:IsEnabled() and not shiftBypass then
+                self.SignUpButton:Click()
+            end
+        end)
+
+        -- Classic Dungeon Finder role check for Quick Signup
+        local roleFrame = CreateFrame("Frame")
+        roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
+        roleFrame:SetScript("OnEvent", function()
+            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+            if not UnitInParty("player") then return end
+            -- Skip if Shift is held and shift-bypass is enabled
+            if EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown() then return end
+            local leader, tank, healer, dps = GetLFGRoles()
+            if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+            end
+            if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
+            end
+            if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
+                LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
+            end
+            LFDRoleCheckPopupAcceptButton:Enable()
+            LFDRoleCheckPopupAcceptButton:Click()
         end)
     end
 
