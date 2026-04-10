@@ -913,8 +913,6 @@ qolFrame:SetScript("OnEvent", function(self)
                         end
                     end)
                 end
-            else
-                mgr:Show()
             end
         end
 
@@ -922,8 +920,11 @@ qolFrame:SetScript("OnEvent", function(self)
 
         local initFrame = CreateFrame("Frame")
         initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        initFrame:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        initFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+        initFrame:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_ENTERING_WORLD" then
+                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            end
             ApplyHideBlizzardPartyFrame()
         end)
     end
