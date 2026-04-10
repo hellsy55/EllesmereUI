@@ -199,12 +199,61 @@ initFrame:SetScript("OnEvent", function(self)
         square = AB_SHAPE_MEDIA .. "square_border.tga",
     }
 
-    local BG_ACTION_BAR_VALUES = {
-        [101] = "CDM Cooldowns Bar", [102] = "CDM Utility Bar",
+    -- Action bar entries (1-8) are stable. CDM bar entries are built dynamically
+    -- via BuildBGTargetList because the user can add extra cooldown/utility/buff
+    -- bars beyond the defaults.
+    local BG_ACTION_BAR_LABELS = {
         [1] = "Action Bar 1 (Main)", [2] = "Action Bar 2", [3] = "Action Bar 3", [4] = "Action Bar 4",
         [5] = "Action Bar 5", [6] = "Action Bar 6", [7] = "Action Bar 7", [8] = "Action Bar 8",
     }
-    local BG_ACTION_BAR_ORDER = { 101, 102, 1, 2, 3, 4, 5, 6, 7, 8 }
+
+    -- Backward-compat normalizer: legacy installs saved selectedBar as 101/102
+    -- for the default cooldowns/utility CDM bars. Convert to the bar key string.
+    -- New saves use the bar key directly.
+    local function NormalizeSelectedBar(sel)
+        if sel == 101 then return "cooldowns" end
+        if sel == 102 then return "utility" end
+        return sel
+    end
+
+    -- Build the live dropdown list. Returns an array of
+    -- { value, label } entries in display order:
+    --   1. CDM bars from p.cdmBars.bars (default + extras, skipping ghost/custom_buff)
+    --   2. Action bars 1-8
+    -- "value" is a string for CDM bars (the bar key) or an integer 1-8 for action bars.
+    local function BuildBGTargetList()
+        local list = {}
+        local p = ns.ECME and ns.ECME.db and ns.ECME.db.profile
+        if p and p.cdmBars and p.cdmBars.bars then
+            for _, bd in ipairs(p.cdmBars.bars) do
+                if bd.enabled and not bd.isGhostBar
+                   and bd.barType ~= "custom_buff" then
+                    list[#list + 1] = {
+                        value = bd.key,
+                        label = bd.name or bd.key,
+                    }
+                end
+            end
+        end
+        for i = 1, 8 do
+            list[#list + 1] = { value = i, label = BG_ACTION_BAR_LABELS[i] }
+        end
+        return list
+    end
+
+    local function GetBGTargetLabel(sel)
+        sel = NormalizeSelectedBar(sel)
+        if type(sel) == "number" then
+            return BG_ACTION_BAR_LABELS[sel] or ("Action Bar " .. sel)
+        end
+        local p = ns.ECME and ns.ECME.db and ns.ECME.db.profile
+        if p and p.cdmBars and p.cdmBars.bars then
+            for _, bd in ipairs(p.cdmBars.bars) do
+                if bd.key == sel then return bd.name or bd.key end
+            end
+        end
+        return tostring(sel)
+    end
 
     local BG_MODE_VALUES = { ACTIVE = "Buff Active", MISSING = "Buff Missing" }
     local BG_MODE_ORDER  = { "ACTIVE", "MISSING" }
@@ -533,15 +582,14 @@ initFrame:SetScript("OnEvent", function(self)
         return nil
     end
 
-    -- Check if a specific action bar uses a custom shape (not "none"/"cropped")
+    -- Check if a specific bar target uses a custom shape (not "none"/"cropped").
+    -- barIdx can be a number 1-8 (action bar) or a string (CDM bar key).
     local function BarHasCustomShape(barIdx)
-        if barIdx >= 100 then
-            local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[barIdx]
-            if cdmKey then
-                local cdmBd = ns.barDataByKey and ns.barDataByKey[cdmKey]
-                if cdmBd and cdmBd.iconShape and cdmBd.iconShape ~= "none" and cdmBd.iconShape ~= "cropped" then
-                    return true
-                end
+        barIdx = NormalizeSelectedBar(barIdx)
+        if type(barIdx) == "string" then
+            local cdmBd = ns.barDataByKey and ns.barDataByKey[barIdx]
+            if cdmBd and cdmBd.iconShape and cdmBd.iconShape ~= "none" and cdmBd.iconShape ~= "cropped" then
+                return true
             end
             return false
         end
@@ -603,9 +651,12 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Get tracked and untracked buff spells
+        -- Get tracked and untracked buff spells (CDM buff icon bars)
         local tracked, untracked = ns.GetAllCDMBuffSpells()
-        if #tracked == 0 and #untracked == 0 then return end
+        -- Tracked Bar spells are added later in the picker -- check them
+        -- here too so the menu doesn't bail when only Tracked Bars exist.
+        local hasTrackedBars = ns.GetTrackedBarSpells and #ns.GetTrackedBarSpells() > 0 or false
+        if #tracked == 0 and #untracked == 0 and not hasTrackedBars then return end
 
         -- Standard dropdown colors
         local mBgR  = EllesmereUI.DD_BG_R  or 0.075
@@ -640,9 +691,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local mH = 4
 
-        local function MakeCheckItem(sp, isUntrackedLegacy)
-            -- Use centralized tracked check instead of legacy parameter
-            local isUntracked = not ns.IsSpellTrackedForBarType(sp.spellID, "buffs")
+        local function MakeCheckItem(sp)
             local item = CreateFrame("Button", nil, inner)
             item:SetHeight(ITEM_H)
             item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -704,25 +753,6 @@ initFrame:SetScript("OnEvent", function(self)
                 hl:SetColorTexture(1, 1, 1, 0)
             end)
             item:SetScript("OnClick", function()
-                if isUntracked then
-                    -- Fire popup to send user to Blizzard CDM
-                    menu:Hide()
-                    if EllesmereUI and EllesmereUI.ShowConfirmPopup then
-                        EllesmereUI:ShowConfirmPopup({
-                            title = "Spell Not Tracked",
-                            message = "This spell is not currently tracked in any of your CDM bars. Add it to a CDM bar first, or enable it in Blizzard's Cooldown Manager.",
-                            confirmText = "Open Blizzard CDM",
-                            cancelText = "Close",
-                            onConfirm = function()
-                                if CooldownViewerSettings and CooldownViewerSettings.Show then
-                                    CooldownViewerSettings:Show()
-                                end
-                                if EllesmereUI._mainFrame then EllesmereUI._mainFrame:Hide() end
-                            end,
-                        })
-                    end
-                    return
-                end
                 -- Toggle assignment
                 if assignedSet[sp.spellID] then
                     -- Remove
@@ -767,7 +797,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Tracked buffs
-        for _, sp in ipairs(tracked) do MakeCheckItem(sp, false) end
+        for _, sp in ipairs(tracked) do MakeCheckItem(sp) end
 
         -- Divider
         if #tracked > 0 and #untracked > 0 then
@@ -779,7 +809,23 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Untracked buffs
-        for _, sp in ipairs(untracked) do MakeCheckItem(sp, true) end
+        for _, sp in ipairs(untracked) do MakeCheckItem(sp) end
+
+        -- Blizzard CDM "Tracked Bars" section (BuffBarCooldownViewer).
+        -- Drag-and-drop in Blizzard CDM means a spell is in either the
+        -- Tracked Buffs icon strip OR the Tracked Bars section, never
+        -- both -- no dedup needed.
+        local trackedBars = ns.GetTrackedBarSpells and ns.GetTrackedBarSpells() or {}
+        if #trackedBars > 0 then
+            if #tracked > 0 or #untracked > 0 then
+                local div = inner:CreateTexture(nil, "ARTWORK")
+                div:SetHeight(1); div:SetColorTexture(1, 1, 1, 0.10)
+                div:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
+                div:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
+                mH = mH + 9
+            end
+            for _, sp in ipairs(trackedBars) do MakeCheckItem(sp) end
+        end
 
         local totalH = mH + 4
         inner:SetHeight(totalH)
@@ -835,7 +881,7 @@ initFrame:SetScript("OnEvent", function(self)
         local _, h
 
         local bg = ns.GetBarGlows()
-        local curBar = bg.selectedBar or 101
+        local curBar = NormalizeSelectedBar(bg.selectedBar or "cooldowns")
         local curBtn = _glowSelectedButton  -- nil = no selection
 
         local ACCENT = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
@@ -855,9 +901,12 @@ initFrame:SetScript("OnEvent", function(self)
         _glowHeaderBuilder = function(headerFrame, width)
             -- Re-read current state each build
             local bgData = ns.GetBarGlows()
-            local barIdx = bgData.selectedBar or 1
-            local isCDMBar = (barIdx >= 100)
-            local cdmBarKey = isCDMBar and ({ [101] = "cooldowns", [102] = "utility" })[barIdx] or nil
+            local sel = NormalizeSelectedBar(bgData.selectedBar or 1)
+            local isCDMBar = (type(sel) == "string")
+            -- For CDM bars: cdmBarKey is the bar key string. For action bars:
+            -- barIdx is the integer 1-8 used for prefix lookup.
+            local cdmBarKey = isCDMBar and sel or nil
+            local barIdx = isCDMBar and nil or sel
             local ok, EAB_ADDON = pcall(EllesmereUI.Lite.GetAddon, "EllesmereUIActionBars")
             if not ok then EAB_ADDON = nil end
             local barKeyList = { "MainBar", "Bar2", "Bar3", "Bar4", "Bar5", "Bar6", "Bar7", "Bar8" }
@@ -903,7 +952,7 @@ initFrame:SetScript("OnEvent", function(self)
             ddLbl:SetPoint("LEFT", ddBtn, "LEFT", 12, 0)
             local ddArrow = EllesmereUI.MakeDropdownArrow(ddBtn, 12, EllesmereUI.PanelPP)
             ddLbl:SetPoint("RIGHT", ddArrow, "LEFT", -5, 0)
-            ddLbl:SetText(BG_ACTION_BAR_VALUES[barIdx] or "Action Bar 1 (Main)")
+            ddLbl:SetText(GetBGTargetLabel(sel))
 
             local ddMenu
             local function BuildDDMenu()
@@ -918,7 +967,9 @@ initFrame:SetScript("OnEvent", function(self)
                 bg2:SetAllPoints(); bg2:SetColorTexture(mBgR, mBgG, mBgB, mBgHA)
                 EllesmereUI.MakeBorder(menu, 1, 1, 1, mBrdA, EllesmereUI.PP)
                 local mH = 4
-                for _, idx in ipairs(BG_ACTION_BAR_ORDER) do
+                local targets = BuildBGTargetList()
+                for _, t in ipairs(targets) do
+                    local entryVal = t.value
                     local item = CreateFrame("Button", nil, menu)
                     item:SetHeight(ITEM_H)
                     item:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, -mH)
@@ -929,15 +980,16 @@ initFrame:SetScript("OnEvent", function(self)
                     iLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                     iLbl:SetJustifyH("LEFT"); iLbl:SetWordWrap(false); iLbl:SetMaxLines(1)
                     iLbl:SetPoint("LEFT", item, "LEFT", 10, 0)
-                    iLbl:SetText(BG_ACTION_BAR_VALUES[idx] or ("Action Bar " .. idx))
+                    iLbl:SetText(t.label)
                     local iHl = item:CreateTexture(nil, "ARTWORK")
                     iHl:SetAllPoints(); iHl:SetColorTexture(1, 1, 1, 1)
-                    iHl:SetAlpha(idx == barIdx and selA or 0)
+                    local isCurrent = (entryVal == sel)
+                    iHl:SetAlpha(isCurrent and selA or 0)
                     item:SetScript("OnEnter", function() iLbl:SetTextColor(1,1,1,1); iHl:SetAlpha(hlA) end)
-                    item:SetScript("OnLeave", function() iLbl:SetTextColor(tDimR,tDimG,tDimB,tDimA); iHl:SetAlpha(idx == barIdx and selA or 0) end)
+                    item:SetScript("OnLeave", function() iLbl:SetTextColor(tDimR,tDimG,tDimB,tDimA); iHl:SetAlpha(isCurrent and selA or 0) end)
                     item:SetScript("OnClick", function()
                         menu:Hide()
-                        bgData.selectedBar = idx
+                        bgData.selectedBar = entryVal
                         bgData.selectedButton = nil
                         _glowSelectedButton = nil
                         EllesmereUI:RefreshPage(true)
@@ -1396,10 +1448,9 @@ initFrame:SetScript("OnEvent", function(self)
         else
             -- Button selected: show per-buff sections
             local assignKey
-            local isCurCDM = (curBar >= 100)
+            local isCurCDM = (type(curBar) == "string")
             if isCurCDM then
-                local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[curBar]
-                local cdmIcons = cdmKey and ns.cdmBarIcons and ns.cdmBarIcons[cdmKey]
+                local cdmIcons = ns.cdmBarIcons and ns.cdmBarIcons[curBar]
                 local icon = cdmIcons and cdmIcons[curBtn]
                 if icon and icon.cooldownID then
                     assignKey = "cdm_" .. icon.cooldownID
@@ -1432,8 +1483,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Get the button's spell name for the header
                     local btnSpellName = "Button " .. curBtn
                     if isCurCDM then
-                        local cdmKey = ({ [101] = "cooldowns", [102] = "utility" })[curBar]
-                        local cdmIcons = cdmKey and ns.cdmBarIcons and ns.cdmBarIcons[cdmKey]
+                        local cdmIcons = ns.cdmBarIcons and ns.cdmBarIcons[curBar]
                         local icon = cdmIcons and cdmIcons[curBtn]
                         if icon and icon.cooldownID then
                             btnSpellName = C_Spell.GetSpellName(icon.cooldownID) or btnSpellName
@@ -1871,11 +1921,13 @@ initFrame:SetScript("OnEvent", function(self)
     local function ShowTBBSpellPicker(anchorFrame, barCfg, onChanged)
         if _tbbSpellPickerMenu then _tbbSpellPickerMenu:Hide() end
 
-        local tracked, untracked = ns.GetAllCDMBuffSpells()
+        -- TBB IS our display of Blizzard's "Tracked Bars" section, so the
+        -- picker must enumerate BuffBarCooldownViewer (NOT BuffIconCooldownViewer
+        -- which is the "Tracked Buffs" icon strip).
+        local trackedBars = ns.GetTrackedBarSpells and ns.GetTrackedBarSpells() or {}
         local popular = ns.TBB_POPULAR_BUFFS or {}
 
-        local hasAny = #tracked > 0 or #untracked > 0
-        if not hasAny then return end
+        if #trackedBars == 0 then return end
 
         local mBgR  = EllesmereUI.DD_BG_R  or 0.075
         local mBgG  = EllesmereUI.DD_BG_G  or 0.113
@@ -2003,8 +2055,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Divider before CDM-tracked buffs (only if there are any)
-        if #tracked > 0 or #untracked > 0 then
+        -- Divider before tracked-bar entries
+        if #trackedBars > 0 then
             local div2 = inner:CreateTexture(nil, "ARTWORK")
             div2:SetHeight(1); div2:SetColorTexture(1, 1, 1, 0.10)
             div2:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
@@ -2012,9 +2064,9 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + 9
         end
 
-        local function MakeSpellItem(sp, isUntrackedLegacy)
-            -- Use centralized tracked check: TBB needs spell in BuffBar viewer
-            local isUntracked = not ns.IsSpellTrackedForBarType(sp.spellID, "tbb")
+        local function MakeSpellItem(sp)
+            -- Every spell here came from BuffBarCooldownViewer enumeration,
+            -- so it's by definition tracked. No popup needed.
             -- Check if spell is already on another Tracking Bar
             local usedOnBar = ns.SpellUsedOnAnyOtherTBB and ns.SpellUsedOnAnyOtherTBB(sp.spellID, nil)
             local isSelected = not barCfg.popularKey and not barCfg.spellIDs
@@ -2073,22 +2125,6 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             item:SetScript("OnClick", function()
                 menu:Hide()
-                if isUntracked then
-                    if EllesmereUI and EllesmereUI.ShowConfirmPopup then
-                        EllesmereUI:ShowConfirmPopup({
-                            title = "Not in Tracked Bars",
-                            message = "This spell needs to be added to Blizzard CDM's Tracked Bars section for the Tracking Bar to display properly.",
-                            confirmText = "Open Blizzard CDM",
-                            cancelText = "Close",
-                            onConfirm = function()
-                                if ns.OpenBlizzardCDMTab then
-                                    ns.OpenBlizzardCDMTab(true)
-                                end
-                            end,
-                        })
-                    end
-                    return
-                end
                 barCfg.spellID        = sp.spellID
                 barCfg.spellIDs       = nil
                 barCfg.popularKey     = nil
@@ -2102,15 +2138,7 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + ITEM_H
         end
 
-        for _, sp in ipairs(tracked) do MakeSpellItem(sp, false) end
-        if #tracked > 0 and #untracked > 0 then
-            local div3 = inner:CreateTexture(nil, "ARTWORK")
-            div3:SetHeight(1); div3:SetColorTexture(1, 1, 1, 0.10)
-            div3:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
-            div3:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
-            mH = mH + 9
-        end
-        for _, sp in ipairs(untracked) do MakeSpellItem(sp, true) end
+        for _, sp in ipairs(trackedBars) do MakeSpellItem(sp) end
 
         local totalH = mH + 4
         inner:SetHeight(totalH)
@@ -3685,25 +3713,6 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
 
-    ---------------------------------------------------------------------------
-    --  "Not Displayed in CDM" popup  (standard EllesmereUI confirm style)
-    ---------------------------------------------------------------------------
-    local function ShowNotDisplayedPopup()
-        if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then return end
-        EllesmereUI:ShowConfirmPopup({
-            title = "Spell Not Displayed",
-            message = "This spell is not currently displayed in your Blizzard Cooldown Manager. Enable it there to get full cooldown, charge, and active state tracking.",
-            confirmText = "Open Blizzard CDM",
-            cancelText = "Close",
-            onConfirm = function()
-                if CooldownViewerSettings and CooldownViewerSettings.Show then
-                    CooldownViewerSettings:Show()
-                end
-                if EllesmereUI._mainFrame then EllesmereUI._mainFrame:Hide() end
-            end,
-        })
-    end
-
     local function ShowWrongBarTypePopup(spellName, isSpellBuff)
         if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then return end
         local correctBar = isSpellBuff and "a Buff bar" or "a Cooldown or Utility bar"
@@ -3786,37 +3795,23 @@ initFrame:SetScript("OnEvent", function(self)
         -- Categorize spells: every buff spell is shown. Spells assigned to
         -- any buff bar are grayed out with a tooltip. Ghost bar spells are
         -- clickable (can be restored to the current bar).
-        local ghostKey = ns.GHOST_BUFF_BAR_KEY
-        local knownSpells = {}       -- known buff spells (main list)
-        local unlearnedSpells = {}   -- not yet talented (grayed out)
+        local knownSpells = {}       -- buff spells from picker (always learned)
 
         for _, sp in ipairs(allSpells) do
             if sp.cdmCatGroup ~= "buff" then
                 -- skip non-buff category spells
-            elseif not sp.isKnown then
-                unlearnedSpells[#unlearnedSpells + 1] = sp
             else
                 local sid = sp.spellID
-                local routedBar = ns._spellRouteMap and ns._spellRouteMap[sid]
+                local routedBar = ns.ResolveVariantValue
+                    and ns._divertedSpells
+                    and ns.ResolveVariantValue(ns._divertedSpells, sid)
                 local isHidden = ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(sid)
 
-                -- Determine which buff bar this spell is assigned to
+                -- Determine which buff bar this spell is currently routed to
                 local assignedBarKey = nil
-                if isHidden then
-                    -- On ghost bar = not assigned, available to add
-                elseif routedBar and routedBar ~= ghostKey then
-                    local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
-                    if rbd and (rbd.barType == "buffs" or rbd.key == "buffs") then
+                if not isHidden and routedBar and routedBar ~= ghostKey then
+                    if ns.IsBarBuffFamily and ns.IsBarBuffFamily(routedBar) then
                         assignedBarKey = routedBar
-                    end
-                end
-                -- Fallback: check live viewer tracked sets if route didn't
-                -- resolve to a buff bar (e.g. spells in both CD and buff categories)
-                if not assignedBarKey and not isHidden then
-                    if ns._tickBuffIconTrackedSet and ns._tickBuffIconTrackedSet[sid] then
-                        assignedBarKey = "buffs"
-                    elseif ns.IsSpellInBuffBarViewer and ns.IsSpellInBuffBarViewer(sid) then
-                        assignedBarKey = "_tbb"
                     end
                 end
 
@@ -3825,7 +3820,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        if #knownSpells == 0 and #unlearnedSpells == 0 then return end
+        if #knownSpells == 0 then return end
 
         -- Build menu
         local menu = CreateFrame("Frame", nil, UIParent)
@@ -3910,54 +3905,12 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + 9
         end
 
-        -- Helper: untracked popup (same as CD/utility)
-        local function ShowUntrackedPopup()
-            menu:Hide()
-            if EllesmereUI and EllesmereUI.ShowConfirmPopup then
-                EllesmereUI:ShowConfirmPopup({
-                    title = "Spell Not Tracked",
-                    message = "This spell is not currently tracked in any of your CDM bars. Add it to a CDM bar first, or enable it in Blizzard's Cooldown Manager.",
-                    confirmText = "Open Blizzard CDM",
-                    cancelText = "Close",
-                    onConfirm = function()
-                        if CooldownViewerSettings and CooldownViewerSettings.Show then
-                            CooldownViewerSettings:Show()
-                        end
-                        if EllesmereUI._mainFrame then EllesmereUI._mainFrame:Hide() end
-                    end,
-                })
-            end
-        end
-
-        -- Split known spells into buff icon bar spells (top) and rest
-        local displayedSpells = {}
-        local otherSpells = {}
-        for _, sp in ipairs(knownSpells) do
-            if sp.isDisplayed and sp._assignedBarKey ~= "_tbb" then
-                displayedSpells[#displayedSpells + 1] = sp
-            else
-                otherSpells[#otherSpells + 1] = sp
-            end
-        end
-
         local function RenderSpell(sp)
             local assigned = sp._assignedBarKey
             if assigned then
-                local barName
-                if assigned == "_tbb" then
-                    barName = "Tracking Bars"
-                else
-                    local rbd = ns.barDataByKey and ns.barDataByKey[assigned]
-                    barName = rbd and (rbd.name or assigned) or assigned
-                end
+                local rbd = ns.barDataByKey and ns.barDataByKey[assigned]
+                local barName = rbd and (rbd.name or assigned) or assigned
                 MakeSpellRow(sp, true, "Already assigned to " .. barName)
-            elseif not sp.isDisplayed then
-                -- Not tracked in Blizzard CDM: open Blizzard CDM to enable it
-                local item = MakeSpellRow(sp, false)
-                item:SetScript("OnClick", function()
-                    menu:Hide()
-                    ShowUntrackedPopup()
-                end)
             else
                 -- Available: add to this bar
                 local item = MakeSpellRow(sp, false)
@@ -3968,26 +3921,19 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Tracked spells first
-        for _, sp in ipairs(displayedSpells) do RenderSpell(sp) end
-
-        -- Divider
-        if #displayedSpells > 0 and (#otherSpells > 0 or #unlearnedSpells > 0) then
-            AddDivider()
+        -- Available spells first, then assigned ones at the bottom
+        local availableSpells, assignedSpells = {}, {}
+        for _, sp in ipairs(knownSpells) do
+            if sp._assignedBarKey then
+                assignedSpells[#assignedSpells + 1] = sp
+            else
+                availableSpells[#availableSpells + 1] = sp
+            end
         end
 
-        -- Rest of known spells
-        for _, sp in ipairs(otherSpells) do RenderSpell(sp) end
-
-        -- Divider before unlearned
-        if (#displayedSpells > 0 or #otherSpells > 0) and #unlearnedSpells > 0 then
-            AddDivider()
-        end
-
-        -- Unlearned spells (grayed out, no click)
-        for _, sp in ipairs(unlearnedSpells) do
-            MakeSpellRow(sp, true)
-        end
+        for _, sp in ipairs(availableSpells) do RenderSpell(sp) end
+        if #availableSpells > 0 and #assignedSpells > 0 then AddDivider() end
+        for _, sp in ipairs(assignedSpells) do RenderSpell(sp) end
 
         inner:SetHeight(mH + 4)
         local totalH = math.min(mH + 4, MAX_H)
@@ -4053,7 +3999,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local bd = SelectedCDMBar()
         local isCustomBuff = bd and bd.barType == "custom_buff"
-        local isBuffBar = bd and (bd.barType == "buffs" or bd.key == "buffs")
+        local isBuffBar = bd and ns.IsBarBuffFamily(bd)
         local allSpells = {}
         if not removeOnly and not isCustomBuff then
             allSpells = ns.GetCDMSpellsForBar(barKey) or {}
@@ -4099,32 +4045,29 @@ initFrame:SetScript("OnEvent", function(self)
         -- Determine primary/secondary category order based on bar type.
         -- Cooldown-type bars: Essential (0) first, Utility (1) second.
         -- Utility-type bars: Utility (1) first, Essential (0) second.
-        local resolvedType = (bd and bd.barType) or barKey
+        local resolvedType = ns.GetBarType and ns.GetBarType(bd or barKey) or barKey
         local isCooldownType = (resolvedType == "cooldowns")
         local isUtilityType  = (resolvedType == "utility")
         local isCDorUtil = isCooldownType or isUtilityType
         local primaryCat   = isCooldownType and 0 or (isUtilityType and 1 or nil)
         local secondaryCat = isCooldownType and 1 or (isUtilityType and 0 or nil)
 
-        local isBuffBar = bd and (bd.barType == "buffs" or bd.key == "buffs")
+        local isBuffBar = bd and ns.IsBarBuffFamily(bd)
 
         -- Buckets for cooldown/utility bars (three-section layout)
         local priUnassigned, priAssigned = {}, {}
         local secUnassigned, secAssigned = {}, {}
         local notTracked = {}
         local itemsExtra = {}
-        -- Buckets for other bar types (original single-section layout)
-        local itemsDisplayed, itemsOther = {}, {}
-        local itemsDisabled = {}
+        -- Single bucket for buff/trinket/other bars (picker only enumerates
+        -- live pool members, so all spells are tracked + learned).
+        local itemsDisplayed = {}
 
         for _, sp in ipairs(allSpells) do
             if sp.isExtra then
                 if not isBuffBar then itemsExtra[#itemsExtra + 1] = sp end
             elseif isCDorUtil then
-                -- Not tracked: unlearned OR learned but user removed from Blizzard CDM
-                if not sp.isKnown or not sp.isTrackedForBar then
-                    notTracked[#notTracked + 1] = sp
-                elseif sp.cdmCat == primaryCat then
+                if sp.cdmCat == primaryCat then
                     if sp.onEUIBar then priAssigned[#priAssigned + 1] = sp
                     else priUnassigned[#priUnassigned + 1] = sp end
                 elseif sp.cdmCat == secondaryCat then
@@ -4134,13 +4077,7 @@ initFrame:SetScript("OnEvent", function(self)
                     notTracked[#notTracked + 1] = sp
                 end
             else
-                if not sp.isKnown then
-                    itemsDisabled[#itemsDisabled + 1] = sp
-                elseif sp.isDisplayed then
-                    itemsDisplayed[#itemsDisplayed + 1] = sp
-                else
-                    itemsOther[#itemsOther + 1] = sp
-                end
+                itemsDisplayed[#itemsDisplayed + 1] = sp
             end
         end
 
@@ -5630,13 +5567,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        local function MakeItem(sp, isDisabled, firesPopupLegacy)
-            -- Popup logic: use centralized isTrackedForBar from spell data.
-            -- Racials/trinkets/potions/custom items are never in Blizzard CDM
-            -- so they never fire the popup.
-            local isNonCDMSpell = sp.isExtra or (sp.spellID and sp.spellID < 0)
-            local firesPopup = not isDisabled and not isNonCDMSpell and not sp.isTrackedForBar
-
+        local function MakeItem(sp, isDisabled)
             -- Check if this spell belongs to the wrong category group for this bar type.
             local wrongCatGroup = false
             if not isDisabled and sp.cdmCatGroup then
@@ -5672,10 +5603,11 @@ initFrame:SetScript("OnEvent", function(self)
             local hl = item:CreateTexture(nil, "ARTWORK")
             hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0); hl:SetAlpha(0)
 
-            -- Check if this spell is already in use
+            -- Check if this spell is already on THIS bar (only gray-out we
+            -- still do for CD/util/buff custom bars). Spells on OTHER bars
+            -- are always claimable -- AddTrackedSpell auto-moves them.
             local onThisBar = not isDisabled and excludeSet
                 and (excludeSet[sp.cdID] or excludeSet[sp.spellID])
-            local usedBarName = not isDisabled and not onThisBar and sp.usedOnBar
 
             if isDisabled then
                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
@@ -5689,19 +5621,6 @@ initFrame:SetScript("OnEvent", function(self)
                 local barName = bd and (bd.name or bd.key) or barKey
                 item:SetScript("OnEnter", function()
                     EllesmereUI.ShowWidgetTooltip(item, "This spell is already being used on " .. barName)
-                    hl:SetColorTexture(1, 1, 1, hlA * 0.3); hl:SetAlpha(1)
-                end)
-                item:SetScript("OnLeave", function()
-                    EllesmereUI.HideWidgetTooltip()
-                    hl:SetAlpha(0)
-                end)
-            elseif usedBarName then
-                -- Already assigned to another bar: grayed out with tooltip
-                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
-                ico:SetDesaturated(true)
-                ico:SetAlpha(0.4)
-                item:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(item, "This spell is already being used on " .. usedBarName)
                     hl:SetColorTexture(1, 1, 1, hlA * 0.3); hl:SetAlpha(1)
                 end)
                 item:SetScript("OnLeave", function()
@@ -5722,10 +5641,6 @@ initFrame:SetScript("OnEvent", function(self)
                     menu:Hide()
                     if wrongCatGroup then
                         ShowWrongBarTypePopup(sp.name, sp.cdmCatGroup == "buff")
-                        return
-                    end
-                    if firesPopup then
-                        ShowNotDisplayedPopup()
                         return
                     end
                     -- Always pass spellID (assignedSpells stores spellIDs)
@@ -5759,45 +5674,32 @@ initFrame:SetScript("OnEvent", function(self)
             local needDiv = false
 
             if hasPri then
-                for _, sp in ipairs(priUnassigned) do MakeItem(sp, false, true) end
-                for _, sp in ipairs(priAssigned) do MakeItem(sp, false, false) end
+                for _, sp in ipairs(priUnassigned) do MakeItem(sp, false) end
+                for _, sp in ipairs(priAssigned) do MakeItem(sp, false) end
                 needDiv = true
             end
 
             if hasSec then
                 if needDiv then MakeDivider() end
-                for _, sp in ipairs(secUnassigned) do MakeItem(sp, false, true) end
-                for _, sp in ipairs(secAssigned) do MakeItem(sp, false, false) end
+                for _, sp in ipairs(secUnassigned) do MakeItem(sp, false) end
+                for _, sp in ipairs(secAssigned) do MakeItem(sp, false) end
                 needDiv = true
             end
 
             if hasNotTracked then
                 if needDiv then MakeDivider() end
-                -- Sort: known + pickable first, then unlearned
                 table.sort(notTracked, function(a, b)
-                    local aK = a.isKnown and 1 or 0
-                    local bK = b.isKnown and 1 or 0
-                    if aK ~= bK then return aK > bK end
                     return (a.name or "") < (b.name or "")
                 end)
-                for _, sp in ipairs(notTracked) do MakeItem(sp, not sp.isKnown, false) end
+                for _, sp in ipairs(notTracked) do MakeItem(sp, false) end
             end
         else
             -- Original layout for buff/trinket/other bars
-            for _, sp in ipairs(itemsDisplayed) do MakeItem(sp, false, false) end
+            for _, sp in ipairs(itemsDisplayed) do MakeItem(sp, false) end
 
-            local hasAfterDisplayed = #itemsExtra > 0 or #itemsOther > 0 or #itemsDisabled > 0
-            if #itemsDisplayed > 0 and hasAfterDisplayed then MakeDivider() end
+            if #itemsDisplayed > 0 and #itemsExtra > 0 then MakeDivider() end
 
-            for _, sp in ipairs(itemsExtra) do MakeItem(sp, false, false) end
-
-            if #itemsExtra > 0 and (#itemsOther > 0 or #itemsDisabled > 0) then MakeDivider() end
-
-            for _, sp in ipairs(itemsOther) do MakeItem(sp, false, true) end
-
-            if #itemsDisabled > 0 and (#itemsDisplayed > 0 or #itemsExtra > 0 or #itemsOther > 0) then MakeDivider() end
-
-            for _, sp in ipairs(itemsDisabled) do MakeItem(sp, true, false) end
+            for _, sp in ipairs(itemsExtra) do MakeItem(sp, false) end
         end
 
         local totalH = mH + 4
@@ -6786,7 +6688,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if button ~= "LeftButton" then return end
                 -- No drag reordering on buff bars (Blizzard controls order)
                 local bdDrag = SelectedCDMBar()
-                if bdDrag and (bdDrag.barType == "buffs" or bdDrag.key == "buffs") then return end
+                if bdDrag and ns.IsBarBuffFamily(bdDrag) then return end
                 local cx, cy = GetCursorPosition()
                 pendingDragSlot = self
                 pendingStartX = cx
@@ -6855,11 +6757,23 @@ initFrame:SetScript("OnEvent", function(self)
         addBtn:SetScript("OnClick", function(self)
             local bd = SelectedCDMBar()
             if not bd then return end
-            local bdIsBuffBar = (bd.barType == "buffs" or bd.key == "buffs")
 
-            if bdIsBuffBar then
-                -- Buff bars: show hidden spells (ghost bar) that can be restored.
-                -- Also show all tracked buff spells not currently on this bar.
+            -- Shared post-add finalization for ALL families (buff + CD/util).
+            -- Forces an immediate reanchor so source bars (where the spell
+            -- got auto-removed from) re-render without waiting for the
+            -- throttled queue. Then schedules a +0.05s preview refresh.
+            local function FinalizeAdd()
+                if ns.CollectAndReanchor then ns.CollectAndReanchor() end
+                C_Timer.After(0.05, function()
+                    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                    if pf.Update then pf:Update() end
+                    UpdateCDMPreviewAndResize()
+                end)
+            end
+
+            if ns.IsBarBuffFamily(bd) then
+                -- Buff bars use ShowBuffBarPicker (its own UI for popular
+                -- buffs + tracked buff spells + manual ID entry).
                 local pickerBarKey = bd.key
                 ShowBuffBarPicker(self, pickerBarKey, function(restoredSID)
                     if restoredSID then
@@ -6872,16 +6786,10 @@ initFrame:SetScript("OnEvent", function(self)
                             ns.AddTrackedSpell(pickerBarKey, restoredSID)
                         end
                     end
-                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
-                    Refresh()
-                    C_Timer.After(0.05, function()
-                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
-                        if pf.Update then pf:Update() end
-                        UpdateCDMPreviewAndResize()
-                    end)
+                    FinalizeAdd()
                 end)
             else
-                -- CD/utility: existing behavior
+                -- CD/utility bars use ShowSpellPicker.
                 local sdAdd = EnsureAssignedSpells(bd.key)
                 local excl = {}
                 local _FindOvr = C_SpellBook and C_SpellBook.FindSpellOverrideByID
@@ -6898,16 +6806,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 ShowSpellPicker(self, bd.key, nil, excl, function(newSpellID, isExtra)
                     ns.AddTrackedSpell(bd.key, newSpellID, isExtra)
-                    local isBuff2 = bd and (bd.barType == "buffs" or bd.key == "buffs")
-                    if isBuff2 then
-                        if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_add") end
-                        Refresh()
-                    end
-                    C_Timer.After(0.05, function()
-                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
-                        if pf.Update then pf:Update() end
-                        UpdateCDMPreviewAndResize()
-                    end)
+                    FinalizeAdd()
                 end)
             end
         end)
@@ -6932,7 +6831,7 @@ initFrame:SetScript("OnEvent", function(self)
             local numRows  = bd.numRows or 1
             if numRows < 1 then numRows = 1 end
 
-            local isBuffBar = (bd.barType == "buffs" or bd.key == "buffs")
+            local isBuffBar = ns.IsBarBuffFamily(bd)
             local isCustomBuffBar = (bd.barType == "custom_buff")
             local tracked
             local count
@@ -6951,12 +6850,13 @@ initFrame:SetScript("OnEvent", function(self)
                         -- excluded
                     else
                         -- Only consider routed if target is a BUFF bar (not CD/utility)
-                        local routedBar = ns._spellRouteMap and ns._spellRouteMap[sid]
+                        local routedBar = ns.ResolveVariantValue
+                            and ns._divertedSpells
+                            and ns.ResolveVariantValue(ns._divertedSpells, sid)
                         local routedIsBuff = false
                         if routedBar then
                             local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
-                            local rType = rbd and rbd.barType or routedBar
-                            routedIsBuff = (rType == "buffs")
+                            routedIsBuff = ns.IsBarBuffFamily and rbd and ns.IsBarBuffFamily(rbd) or false
                         end
                         local effectiveRoute = routedIsBuff and routedBar or nil
                         if not effectiveRoute or effectiveRoute == bd.key then
@@ -7217,27 +7117,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
 
                 if i <= count then
-                    -- Use centralized tracked check for overlay.
-                    -- Skip overlays for racials/trinkets/items/custom_buff — not tracked via Blizzard CDM.
-                    local sid = tracked[i]
-                    local isNonCDM = (sid and sid < 0)
-                        or (sid and ns._myRacialsSet and ns._myRacialsSet[sid])
-                        or isCustomBuffBar
-                        or (sid and sid > 0 and ns.IsSpellInAnyCDMCategory and not ns.IsSpellInAnyCDMCategory(sid))
-                    if sid and sid > 0 and not isNonCDM and ns.ApplyUntrackedOverlay then
-                        local barType = (bd.barType or bd.key)
-                        local isUntracked = not ns.IsSpellTrackedForBarType(sid, barType)
-                        -- Skip overlay for untalented spells
-                        if isUntracked and not IsSpellKnown(sid) then isUntracked = false end
-                        slot._barKey = barKey
-                        slot._spellID = sid
-                        ns.ApplyUntrackedOverlay(slot, isUntracked)
-                    elseif slot._untrackedOverlay then
-                        slot._untrackedOverlay:Hide()
-                    end
                     slot:Show()
                 else
-                    if slot._untrackedOverlay then slot._untrackedOverlay:Hide() end
                     slot:Hide()
                 end
             end
@@ -7444,7 +7325,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local isDefault = (barData.key == "cooldowns" or barData.key == "utility" or barData.key == "buffs")
-        local isBuffBar = (barData.barType == "buffs" or barData.key == "buffs")
+        local isBuffBar = ns.IsBarBuffFamily(barData)
 
         -------------------------------------------------------------------
         --  CONTENT HEADER  (dropdown + live preview)
@@ -8083,7 +7964,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Hide Buffs When Inactive (global setting, applies to all buff bars)
-        if barData.barType == "buffs" or barData.key == "buffs" then
+        if ns.IsBarBuffFamily(barData) then
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
             -- Hide Buffs When Inactive toggle removed: always forced ON.
         end

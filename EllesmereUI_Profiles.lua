@@ -552,7 +552,7 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ERB_Apply then _G._ERB_Apply() end
     -- CDM: skip during spec-profile switch. CDM's own PLAYER_SPECIALIZATION_CHANGED
     -- handler will update the active spec key and rebuild with the correct spec
-    -- spells via SwitchSpecProfile's deferred FullCDMRebuild. Running it here
+    -- spells via OnSpecChanged's deferred FullCDMRebuild. Running it here
     -- would use a stale active spec key (not yet updated by CDM) and show the
     -- wrong spec's spells until the deferred rebuild overwrites them.
     if not EllesmereUI._specProfileSwitching then
@@ -587,6 +587,16 @@ function EllesmereUI.RefreshAllAddons()
     C_Timer.After(0, function()
         C_Timer.After(0, function()
             C_Timer.After(0, function()
+                -- Skip during spec-driven profile switch. _applySavedPositions
+                -- iterates registered elements and calls each one's
+                -- applyPosition callback, which for CDM bars is BuildAllCDMBars.
+                -- That triggers a rebuild + ApplyAllWidthHeightMatches before
+                -- CDMFinishSetup has had a chance to run, propagating
+                -- transient mid-rebuild sizes through width-match and
+                -- corrupting iconSize in saved variables. CDM's OnSpecChanged
+                -- handles the rebuild at spec_change + 0.5s; other addons'
+                -- positions don't change on spec swap so skipping is safe.
+                if EllesmereUI._specProfileSwitching then return end
                 -- Re-apply centralized positions (migrates legacy formats)
                 if EllesmereUI._applySavedPositions then
                     EllesmereUI._applySavedPositions()
@@ -598,6 +608,12 @@ function EllesmereUI.RefreshAllAddons()
             end)
         end)
     end)
+    -- Note: _specProfileSwitching is cleared by CDM's OnSpecChanged after
+    -- its deferred rebuild settles -- not here. CDMFinishSetup runs at
+    -- spec_change + 0.5s, which is well after this triple-deferred chain
+    -- (~3 frames = ~50ms), so clearing the flag here would let width-match
+    -- propagation run against transient mid-rebuild bar sizes once CDM
+    -- starts rebuilding and corrupt iconSize in saved variables.
 end
 
 -------------------------------------------------------------------------------

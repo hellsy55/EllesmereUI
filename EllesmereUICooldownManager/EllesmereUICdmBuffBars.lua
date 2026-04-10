@@ -868,6 +868,45 @@ function ns.IsSpellInBuffBarViewer(spellID)
     return false
 end
 
+--- Enumerate all spells currently in BuffBarCooldownViewer (Blizzard's
+--- "Tracked Bars" section). Returns an array of {spellID, cdID, name, icon}
+--- entries sorted by layoutIndex then spellID. This is the source of truth
+--- for the TBB spell picker -- TBB IS our display of these bars, so the
+--- picker must enumerate THIS pool and not the Tracked Buffs icon viewer.
+function ns.GetTrackedBarSpells()
+    local result = {}
+    local viewer = _G["BuffBarCooldownViewer"]
+    if not viewer or not viewer.itemFramePool then return result end
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    if not gci then return result end
+
+    local seen = {}
+    for frame in viewer.itemFramePool:EnumerateActive() do
+        local cdID = frame.cooldownID
+        if cdID then
+            local info = gci(cdID)
+            local sid = info and (info.overrideSpellID or info.spellID)
+            if sid and sid > 0 and not seen[sid] then
+                seen[sid] = true
+                local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                result[#result + 1] = {
+                    spellID     = sid,
+                    cdID        = cdID,
+                    name        = spInfo and spInfo.name or ("Spell " .. sid),
+                    icon        = spInfo and spInfo.iconID,
+                    layoutIndex = frame.layoutIndex or 0,
+                }
+            end
+        end
+    end
+
+    table.sort(result, function(a, b)
+        if a.layoutIndex ~= b.layoutIndex then return a.layoutIndex < b.layoutIndex end
+        return (a.name or "") < (b.name or "")
+    end)
+    return result
+end
+
 --- Frame-based check: is a spellID present in Essential or Utility viewers?
 --- Same pattern as IsSpellInBuffBarViewer but for CD/Utility bars.
 function ns.IsSpellInCDUtilViewer(spellID)
@@ -1015,62 +1054,6 @@ local function UpdatePandemic(bar, cfg)
 end
 
 -------------------------------------------------------------------------------
---  "Not Tracked in CDM" Overlay for Tracking Bars
---  Shown when a bar has a valid spell but it isn't in Blizzard's CDM.
---  Clicking opens the Blizzard CDM settings to the Buffs tab.
--------------------------------------------------------------------------------
-local function ShowTBBUntrackedOverlay(bar, cfg)
-    if not bar._untrackedOverlay then
-        local ov = CreateFrame("Button", nil, bar)
-        ov:SetAllPoints(bar._bar or bar)
-        ov:SetFrameLevel(bar:GetFrameLevel() + 8)
-        local ovTex = ov:CreateTexture(nil, "OVERLAY", nil, 6)
-        ovTex:SetAllPoints()
-        ovTex:SetColorTexture(0.6, 0.075, 0.075, 0.65)
-        local label = ov:CreateFontString(nil, "OVERLAY")
-        local outFlag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
-        label:SetFont(GetFont(), 10, outFlag)
-        if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
-            label:SetShadowOffset(1, -1)
-        else
-            label:SetShadowOffset(0, 0)
-        end
-        label:SetPoint("CENTER", ov, "CENTER", 0, 0)
-        label:SetText("Click to Track")
-        label:SetTextColor(1, 1, 1, 0.9)
-        label:SetJustifyH("CENTER")
-        ov._label = label
-        ov:SetScript("OnClick", function()
-            if ns.OpenBlizzardCDMTab then
-                ns.OpenBlizzardCDMTab(true)
-            end
-        end)
-        ov:SetScript("OnEnter", function(self)
-            local spellName = ""
-            local sid = cfg.spellID
-            if sid and sid > 0 then
-                spellName = C_Spell.GetSpellName(sid) or ""
-            elseif cfg.name and cfg.name ~= "" then
-                spellName = cfg.name
-            end
-            if spellName ~= "" then spellName = "|cff0cd29d" .. spellName .. "|r " end
-            EllesmereUI.ShowWidgetTooltip(self,
-                spellName .. "needs to be in Blizzard CDM's |cff0cd29dTracked Bars|r.\nClick to open CDM settings and add it.")
-        end)
-        ov:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-        bar._untrackedOverlay = ov
-    end
-    bar._untrackedOverlay:Show()
-    if not bar:IsShown() then bar:Show() end
-end
-
-local function HideTBBUntrackedOverlay(bar)
-    if bar._untrackedOverlay then bar._untrackedOverlay:Hide() end
-end
-ns.ShowTBBUntrackedOverlay = ShowTBBUntrackedOverlay
-ns.HideTBBUntrackedOverlay = HideTBBUntrackedOverlay
-
--------------------------------------------------------------------------------
 --  Blizzard Bar FontString Discovery
 --  Finds the name and timer FontStrings on a Blizzard Bar StatusBar.
 --  Caches references on the frame for subsequent ticks (zero alloc after first).
@@ -1145,12 +1128,7 @@ function ns.UpdateTrackedBuffBarTimers()
             -- Read Blizzard's StatusBar (the data source for fill/timer)
             local blizzBar = blzChild and blzChild.Bar
 
-            -- If untracked overlay is showing, keep it visible regardless of aura state
-            local untrackedShowing = bar._untrackedOverlay and bar._untrackedOverlay:IsShown()
-            if untrackedShowing then
-                if not bar:IsShown() then bar:Show() end
-            elseif isActive then
-                HideTBBUntrackedOverlay(bar)
+            if isActive then
                 if not bar:IsShown() then bar:Show() end
                 local sb = bar._bar
 
@@ -1198,11 +1176,19 @@ function ns.UpdateTrackedBuffBarTimers()
 
                     -- Name + timer from Blizzard's FontStrings (passthrough)
                     local blizzNameFS, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
-                    -- Name: set once (doesn't change while active)
+                    -- Name: set once (doesn't change while active). Only lock
+                    -- _nameSet when we got real text -- otherwise the empty
+                    -- string from Blizzard's not-yet-populated FontString
+                    -- would lock us into a blank-text state until the bar
+                    -- next goes inactive. The end-of-tick deferred loop
+                    -- recovers via C_Spell.GetSpellInfo when this misses.
                     if bar._nameText and bar._nameText:IsShown() and blizzNameFS
                         and not bar._nameSet then
-                        bar._nameText:SetText(blizzNameFS:GetText())
-                        bar._nameSet = true
+                        local txt = blizzNameFS:GetText()
+                        if txt and txt ~= "" then
+                            bar._nameText:SetText(txt)
+                            bar._nameSet = true
+                        end
                     end
                     -- Timer: passthrough every frame (changes constantly)
                     if cfg.showTimer and bar._timerText and blizzTimerFS then
@@ -1265,20 +1251,14 @@ function ns.UpdateTrackedBuffBarTimers()
                     end
                 end
             else
-                -- Inactive: clear state
+                -- Inactive: clear state and hide
                 bar._nameSet = nil
                 bar._cachedBlizzFillTex = nil
                 bar._cachedOurFillTex = nil
                 if _anyPandemic and bar._pandemicGlowActive then ClearPandemic(bar) end
                 if bar._stacksText then bar._stacksText:Hide() end
                 bar._stackCount = 0
-
-                -- Keep bar visible if untracked overlay is shown
-                if bar._untrackedOverlay and bar._untrackedOverlay:IsShown() then
-                    if not bar:IsShown() then bar:Show() end
-                else
-                    if bar:IsShown() then bar:Hide() end
-                end
+                if bar:IsShown() then bar:Hide() end
             end
         end
     end
@@ -1332,12 +1312,6 @@ end
 -------------------------------------------------------------------------------
 --  Build / Rebuild All Tracking Bars
 -------------------------------------------------------------------------------
-function ns.HideAllTBB()
-    for i = 1, #tbbFrames do
-        if tbbFrames[i] then tbbFrames[i]:Hide() end
-    end
-end
-
 function ns.BuildTrackedBuffBars()
     ECME = ns.ECME
     if not ECME or not ECME.db then return end
@@ -1400,7 +1374,7 @@ function ns.BuildTrackedBuffBars()
         end
         local bar = tbbFrames[i]
 
-        if cfg.enabled == false or ns._tbbSpecSwapPending then
+        if cfg.enabled == false then
             bar:Hide()
         else
             anyEnabled = true
@@ -1469,7 +1443,6 @@ function ns.BuildTrackedBuffBars()
                 if tbbAccum < 0.016 then return end
                 self._lastDt = tbbAccum
                 tbbAccum = 0
-                if ns._specChangePending or ns._tbbSpecSwapPending then return end
                 ns.UpdateTrackedBuffBarTimers()
             end)
         end

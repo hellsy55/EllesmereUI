@@ -13,9 +13,6 @@ local StopNativeGlow  = function(...) if ns.StopNativeGlow then return ns.StopNa
 -- Slot offsets per bar index (matches EllesmereUIActionBars BAR_SLOT_OFFSETS)
 local BAR_OFFSETS = { 0, 60, 48, 24, 36, 144, 156, 168 }
 
--- CDM bar key mapping for bar glow indices 101+
-local CDM_GLOW_BAR_KEYS = { [101] = "cooldowns", [102] = "utility" }
-
 -------------------------------------------------------------------------------
 --  Button Lookup
 -------------------------------------------------------------------------------
@@ -42,14 +39,17 @@ local function GetActionBarButton(barIdx, btnIdx)
     return btn
 end
 
--- CDM bar icon lookup by cooldownID (stable across reanchors)
-local function GetCDMButtonByCooldownID(cdmBarKey, cooldownID)
-    local icons = ns.cdmBarIcons and ns.cdmBarIcons[cdmBarKey]
-    if not icons then return nil end
-    for i = 1, #icons do
-        local icon = icons[i]
-        if icon and icon.cooldownID == cooldownID then
-            return icon
+-- CDM bar icon lookup by cooldownID (stable across reanchors).
+-- Walks all CDM bars (default + extras) since the 1-spell-per-bar invariant
+-- guarantees a cooldownID can only live on one bar at a time.
+local function FindCDMButtonByCooldownID(cooldownID)
+    if not ns.cdmBarIcons then return nil end
+    for _, icons in pairs(ns.cdmBarIcons) do
+        for i = 1, #icons do
+            local icon = icons[i]
+            if icon and icon.cooldownID == cooldownID then
+                return icon
+            end
         end
     end
     return nil
@@ -74,7 +74,7 @@ function ns.GetBarGlows()
     if not prof.barGlows or not next(prof.barGlows) then
         prof.barGlows = {
             enabled = true,
-            selectedBar = 101,
+            selectedBar = "cooldowns",
             assignments = {},
         }
     end
@@ -117,8 +117,7 @@ function ns.GetAllCDMBuffSpells()
     local trackedOrder = {}
 
     for _, bar in ipairs(p.cdmBars.bars) do
-        local isBuff = (bar.barType == "buffs") or (bar.key == "buffs")
-        if isBuff then
+        if ns.IsBarBuffFamily(bar) then
             local spells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(bar.key)
             if spells then
                 for _, sp in ipairs(spells) do
@@ -130,7 +129,6 @@ function ns.GetAllCDMBuffSpells()
                             icon = sp.icon,
                             barKey = bar.key,
                             barName = bar.name or bar.key,
-                            isDisplayed = sp.isDisplayed,
                         }
                         trackedSet[sp.spellID] = entry
                         trackedOrder[#trackedOrder + 1] = entry
@@ -182,9 +180,8 @@ local function SetupOverlays()
             local cdID = assignKey:match("^cdm_(%d+)$")
             if cdID then
                 cdID = tonumber(cdID)
-                -- Find which CDM bar has this cooldownID
-                btn = GetCDMButtonByCooldownID("cooldowns", cdID)
-                    or GetCDMButtonByCooldownID("utility", cdID)
+                -- Find which CDM bar has this cooldownID (walks all bars)
+                btn = FindCDMButtonByCooldownID(cdID)
             else
                 -- Action bar assignment: "<barIdx>_<btnIdx>"
                 local barIdx, btnIdx = assignKey:match("^(%d+)_(%d+)$")
@@ -308,6 +305,3 @@ function ns.InitBarGlows()
     SetupOverlays()
 end
 
--- No-ops for removed functionality (options may reference these)
-ns.ApplyPerSlotHidingAndPackSoon = function() end
-ns.HookAllCDMChildren = function() end

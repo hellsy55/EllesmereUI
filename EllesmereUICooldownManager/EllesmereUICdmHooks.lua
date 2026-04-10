@@ -153,352 +153,162 @@ end
 ns.ResolveFrameSpellID = ResolveFrameSpellID
 
 -------------------------------------------------------------------------------
---  Spell Route Map + CooldownID Route Map
+--  Spell Routing State
 --
---  _spellRouteMap: spellID -> barKey (used by options/preview/picker)
---  _cdidRouteMap:  cooldownID -> barKey (used at runtime by CategorizeFrame)
+--  _divertedSpells: variant-keyed map of every spell ID that's been claimed
+--                   by a specific bar (default OR custom OR ghost). Built
+--                   once by RebuildSpellRouteMap from the bar list. Queried
+--                   per-frame at reanchor time by ResolveCDIDToBar. A spell
+--                   with no entry here falls through to the bar that owns
+--                   the viewer pool the frame was enumerated from.
 --
---  The cdidRouteMap is built by iterating all CDM cooldownIDs from the
---  category API and matching against assignedSpells. Runtime routing is
---  a single table lookup on frame.cooldownID -- no spell ID resolution
---  needed, no taint risk.
+--  _cdidRouteMap:   memoization cache, cooldownID -> barKey. Lazily
+--                   populated by ResolveCDIDToBar on first lookup. Wiped
+--                   by RebuildSpellRouteMap.
 -------------------------------------------------------------------------------
-local _spellRouteMap = {}
 local _cdidRouteMap = {}
-local _buffSpellRouteMap = {}  -- spellID -> barKey for buff-type bars only
 
+local _divertedSpells = {}
+ns._divertedSpells = _divertedSpells
+
+-- Sentinel: set true at the end of RebuildSpellRouteMap on a successful
+-- build. CollectAndReanchor's safety net tests this (NOT _cdidRouteMap,
+-- which is a lazy cache and intentionally empty post-build, NOT
+-- _divertedSpells, which can legitimately be empty for users with no
+-- diversions).
+local _routeMapBuilt = false
+
+--- Rebuild the diversion set. The cdID->bar route is computed lazily at
+--- reanchor time via ResolveCDIDToBar (below) which uses the FRAME's actual
+--- viewerFrame as the source-of-truth default, not the static category API.
+---
+--- Why frame-driven default routing instead of category API:
+---   Blizzard's GetCooldownViewerCategorySet returns the STATIC category
+---   for a cooldownID. But Blizzard's actual CDM viewer can show a spell
+---   in a different viewer than its static category (e.g. user dragged
+---   Lay on Hands from Essential to Utility in Edit Mode, OR a per-spec
+---   layout reassigns it). The viewer the FRAME is in is the user-visible
+---   ground truth.
+---
+--- Default bars contribute to the diversion set: putting a spellID into
+--- cooldowns.assignedSpells or utility.assignedSpells is how the user says
+--- "this spell goes on this default bar regardless of viewer category."
+--- This enables cross-routing between default bars (e.g. Lay on Hands in
+--- Essential viewer routed to utility bar via utility.assignedSpells).
+---
+--- Priority for collisions (rare under the 1-spell-per-bar invariant):
+---   ghost bars (lowest) -> custom buff -> custom CD/util -> default bars
+---   (highest). Later passes overwrite earlier via preserveExisting=false.
 function ns.RebuildSpellRouteMap()
-    wipe(_spellRouteMap)
     wipe(_cdidRouteMap)
-    wipe(_buffSpellRouteMap)
+    wipe(_divertedSpells)
+    _routeMapBuilt = false
+
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
-    -- Pre-build a reverse override map from CDM cooldownInfo:
-    -- overrideSpellID -> base spellID. This handles conditional overrides
-    -- (e.g. Glacial Spike -> Frostbolt) that C_Spell.GetBaseSpell may not
-    -- resolve because the override is state-dependent, not a spell chain.
-    local overrideToBase = {}
-    local gcs0 = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
-    local gci0 = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-    if gcs0 and gci0 then
-        for cat = 0, 3 do
-            local allIDs = gcs0(cat, true)
-            if allIDs then
-                for _, cdID in ipairs(allIDs) do
-                    local info = gci0(cdID)
-                    if info and info.overrideSpellID and info.overrideSpellID > 0
-                       and info.spellID and info.spellID > 0
-                       and info.overrideSpellID ~= info.spellID then
-                        overrideToBase[info.overrideSpellID] = info.spellID
-                    end
-                end
-            end
-        end
-    end
+    local SVV = ns.StoreVariantValue
+    if not SVV then return end
 
-    -- Step 1: build spellID -> barKey from assignedSpells (for options/preview)
-    -- Two-pass approach: buffs bars first, then CD/utility bars. This ensures
-    -- CD/utility bars always win when a spell is assigned to both a buffs bar
-    -- and a CD/utility bar, so the CooldownViewer frame (which carries
-    -- ChargeCount) routes to the CD bar instead of being rejected by the
-    -- buffs bar's viewer type mismatch.
-    local spellToBar = {}
-    local _FindOverride = C_SpellBook and C_SpellBook.FindSpellOverrideByID
-
-    local function MapBarSpells(bd)
+    local function CollectDiversionsFor(bd)
         local sd = ns.GetBarSpellData(bd.key)
-        if not (sd and sd.assignedSpells) then return end
+        if not sd or not sd.assignedSpells then return end
         for _, sid in ipairs(sd.assignedSpells) do
             if type(sid) == "number" and sid > 0 then
-                _spellRouteMap[sid] = bd.key
-                spellToBar[sid] = bd.key
-                -- Forward: stored spell -> current override
-                if _FindOverride then
-                    local ovr = _FindOverride(sid)
-                    if ovr and ovr > 0 and ovr ~= sid then
-                        _spellRouteMap[ovr] = bd.key
-                        spellToBar[ovr] = bd.key
-                    end
-                end
-                -- Reverse: stored spell may be the override form
-                -- (added while transformed). Resolve the base spell
-                -- so the cooldownID lookup can match via info.spellID.
-                -- Try C_Spell.GetBaseSpell first, fall back to the
-                -- CDM cooldownInfo reverse map for conditional overrides
-                -- (e.g. Glacial Spike, Frostfire Bolt).
-                local base
-                if C_Spell and C_Spell.GetBaseSpell then
-                    base = C_Spell.GetBaseSpell(sid)
-                    if base == sid then base = nil end
-                end
-                if not base then
-                    base = overrideToBase[sid]
-                end
-                if base and base > 0 and base ~= sid then
-                    _spellRouteMap[base] = bd.key
-                    spellToBar[base] = bd.key
-                end
+                SVV(_divertedSpells, sid, bd.key, false)
             end
         end
     end
 
-    -- Pass 1: ghost bars (lowest priority -- real bars always override)
+    -- Pass 1: ghost bars (lowest priority)
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and bd.isGhostBar then
-            MapBarSpells(bd)
+            CollectDiversionsFor(bd)
         end
     end
-    -- Pass 2: buffs-type bars
+    -- Pass 2: custom buff bars
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
-            MapBarSpells(bd)
-            -- Also populate buff-only route map (not overwritten by CD pass)
-            local sd = ns.GetBarSpellData(bd.key)
-            if sd and sd.assignedSpells then
-                for _, sid in ipairs(sd.assignedSpells) do
-                    if type(sid) == "number" and sid > 0 then
-                        _buffSpellRouteMap[sid] = bd.key
-                        if _FindOverride then
-                            local ovr = _FindOverride(sid)
-                            if ovr and ovr > 0 and ovr ~= sid then
-                                _buffSpellRouteMap[ovr] = bd.key
-                            end
-                        end
-                        local base
-                        if C_Spell and C_Spell.GetBaseSpell then
-                            base = C_Spell.GetBaseSpell(sid)
-                            if base == sid then base = nil end
-                        end
-                        if base and base > 0 and base ~= sid then
-                            _buffSpellRouteMap[base] = bd.key
-                        end
-                    end
-                end
-            end
+            CollectDiversionsFor(bd)
         end
     end
-    -- Bridge cooldownID -> barKey for extra buff bars.
-    -- Spell IDs stored by the picker (e.g. aura IDs like 48517 Eclipse Solar)
-    -- may differ from the CDM viewer's resolved ID (e.g. 1239669 Eclipse).
-    -- Iterate CDM cooldownIDs and check if any info field (spellID,
-    -- overrideSpellID, linkedSpellIDs) matches an extra buff bar's assigned
-    -- spell. If so, map that cooldownID directly so CategorizeFrame can
-    -- route the viewer frame by cooldownID without needing spell ID matches.
-    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
-       and C_CooldownViewer.GetCooldownViewerCooldownInfo then
-        -- Collect all assigned spells from extra buff bars into a lookup
-        local buffBarSpells = {}
-        for _, bd in ipairs(p.cdmBars.bars) do
-            if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
-                local sd = ns.GetBarSpellData(bd.key)
-                if sd and sd.assignedSpells then
-                    for _, sid in ipairs(sd.assignedSpells) do
-                        if type(sid) == "number" and sid > 0 then
-                            buffBarSpells[sid] = bd.key
-                        end
-                    end
-                end
-            end
-        end
-        if next(buffBarSpells) then
-            for cat = 0, 3 do
-                local cdIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
-                if cdIDs then
-                    for _, cdID in ipairs(cdIDs) do
-                        if not _cdidRouteMap[cdID] then
-                            local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                            if info then
-                                local barKey
-                                if info.overrideSpellID and info.overrideSpellID > 0 then
-                                    barKey = buffBarSpells[info.overrideSpellID]
-                                end
-                                if not barKey and info.spellID and info.spellID > 0 then
-                                    barKey = buffBarSpells[info.spellID]
-                                end
-                                if not barKey and info.linkedSpellIDs then
-                                    for _, lid in ipairs(info.linkedSpellIDs) do
-                                        if lid and lid > 0 then
-                                            barKey = buffBarSpells[lid]
-                                            if barKey then break end
-                                        end
-                                    end
-                                end
-                                if barKey then
-                                    _cdidRouteMap[cdID] = barKey
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Pass 3: CD/utility bars (highest priority -- overwrite all)
+    -- Pass 3: custom CD/utility bars
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and not bd.isGhostBar and bd.key ~= "buffs" and bd.barType ~= "custom_buff" and bd.barType ~= "buffs" then
-            MapBarSpells(bd)
+        if bd.enabled and not bd.isGhostBar
+           and bd.key ~= "cooldowns" and bd.key ~= "utility" and bd.key ~= "buffs"
+           and bd.barType ~= "buffs" and bd.barType ~= "custom_buff" then
+            CollectDiversionsFor(bd)
+        end
+    end
+    -- Pass 4: default bars (highest priority -- the user's explicit
+    -- assignment to a default bar overrides everything)
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and not bd.isGhostBar
+           and (bd.key == "cooldowns" or bd.key == "utility" or bd.key == "buffs") then
+            CollectDiversionsFor(bd)
         end
     end
 
-    -- Step 2: build cooldownID -> barKey by cross-referencing the category
-    -- API against the spellToBar table we just built.
-    local gcs = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
-    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-    local evc = Enum and Enum.CooldownViewerCategory
-    if gcs and gci and evc then
-        -- Resolve a single cooldownID against spellToBar
-        local function MatchCooldownToBar(cdID)
-            local info = gci(cdID)
-            if not info then return end
-            -- Gather all candidate spell IDs from this cooldown entry
-            local candidates = {}
-            if info.overrideSpellID and info.overrideSpellID > 0
-                and info.overrideSpellID ~= info.spellID then
-                candidates[#candidates + 1] = info.overrideSpellID
-            end
-            if info.spellID and info.spellID > 0 then
-                candidates[#candidates + 1] = info.spellID
-            end
-            if info.linkedSpellIDs then
-                for _, lid in ipairs(info.linkedSpellIDs) do
-                    if lid and lid > 0 then
-                        candidates[#candidates + 1] = lid
-                    end
-                end
-            end
-            for _, sid in ipairs(candidates) do
-                if spellToBar[sid] then return spellToBar[sid] end
-            end
-        end
-
-        local viewerCategories = { evc.Essential, evc.Utility, evc.TrackedBuff }
-        for _, cat in ipairs(viewerCategories) do
-            local ids = gcs(cat, true)
-            if ids then
-                for _, cdID in ipairs(ids) do
-                    local barKey = MatchCooldownToBar(cdID)
-                    if barKey then _cdidRouteMap[cdID] = barKey end
-                end
-            end
-        end
-    end
+    _routeMapBuilt = true
 end
-ns._spellRouteMap = _spellRouteMap
+
+--- Lazily resolve a cooldownID to a bar key. Called per-frame at reanchor
+--- time. Uses _cdidRouteMap as a memoization cache; on cache miss, computes
+--- the route from the diversion set or falls back to viewerDefaultBar (the
+--- bar that owns the viewer the frame came from). Caches the result.
+---
+--- viewerDefaultBar is "cooldowns" / "utility" / "buffs" depending on which
+--- viewer pool the frame was enumerated from -- this is the user-visible
+--- ground truth, not the static category API.
+local function ResolveCDIDToBar(cdID, viewerDefaultBar)
+    if not cdID then return viewerDefaultBar end
+    local cached = _cdidRouteMap[cdID]
+    if cached then return cached end
+
+    local RVV = ns.ResolveVariantValue
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    if not RVV or not gci then
+        _cdidRouteMap[cdID] = viewerDefaultBar
+        return viewerDefaultBar
+    end
+
+    local info = gci(cdID)
+    local routedBar = nil
+    if info then
+        if info.spellID and info.spellID > 0 then
+            routedBar = RVV(_divertedSpells, info.spellID)
+        end
+        if not routedBar and info.overrideSpellID and info.overrideSpellID > 0
+           and info.overrideSpellID ~= info.spellID then
+            routedBar = RVV(_divertedSpells, info.overrideSpellID)
+        end
+        if not routedBar and info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                if type(lid) == "number" and lid > 0 then
+                    routedBar = RVV(_divertedSpells, lid)
+                    if routedBar then break end
+                end
+            end
+        end
+    end
+
+    routedBar = routedBar or viewerDefaultBar
+    _cdidRouteMap[cdID] = routedBar
+    return routedBar
+end
+ns.ResolveCDIDToBar = ResolveCDIDToBar
 ns._cdidRouteMap = _cdidRouteMap
 
 -------------------------------------------------------------------------------
---  Side-Effect Caches (consumed by options, spell picker, bar glows)
+--  Active aura cache (consumed by bar glow overlays)
+--
+--  Maintained by the 0.1s buff ticker, NOT here. The ticker walks viewer
+--  pools cheaply and writes spellID->true for any frame whose Blizzard-set
+--  wasSetFromAura/auraInstanceID indicates an active aura. Bar glows read
+--  via ns._tickBlizzActiveCache.
 -------------------------------------------------------------------------------
-local _activeCache      = {}
-local _barViewerCache   = {}
-local _cdUtilTrackedSet = {}
-local _buffIconTrackedSet = {}
-local _allChildCache    = {}
-local _buffChildCache   = {}
-
-ns._tickBlizzActiveCache    = _activeCache
-ns._tickBarViewerCache      = _barViewerCache
-ns._tickCDUtilTrackedSet    = _cdUtilTrackedSet
-ns._tickBuffIconTrackedSet  = _buffIconTrackedSet
-ns._tickBlizzAllChildCache  = _allChildCache
-ns._tickBlizzBuffChildCache = _buffChildCache
-
-local function RebuildSideEffectCaches()
-    wipe(_activeCache)
-    wipe(_barViewerCache)
-    wipe(_cdUtilTrackedSet)
-    wipe(_buffIconTrackedSet)
-    wipe(_allChildCache)
-    wipe(_buffChildCache)
-
-    for vi = 1, 4 do
-        local vf = _G[VIEWER_NAMES[vi]]
-        local isBuffViewer     = (vi == 3 or vi == 4)
-        local isBuffIconViewer = (vi == 3)
-        if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
-            for frame in vf.itemFramePool:EnumerateActive() do
-                local displaySID, baseSID = ResolveFrameSpellID(frame)
-                if displaySID and displaySID > 0 then
-                    _allChildCache[displaySID] = frame
-                    if baseSID and baseSID > 0 and baseSID ~= displaySID then
-                        _allChildCache[baseSID] = frame
-                    end
-
-                    if isBuffViewer then
-                        if isBuffIconViewer or not _buffChildCache[displaySID] then
-                            _buffChildCache[displaySID] = frame
-                        end
-                        if not isBuffIconViewer then
-                            _barViewerCache[displaySID] = frame
-                            if baseSID and baseSID > 0 then
-                                _barViewerCache[baseSID] = frame
-                            end
-                        end
-                        if isBuffIconViewer then
-                            _buffIconTrackedSet[displaySID] = true
-                            if baseSID and baseSID > 0 then
-                                _buffIconTrackedSet[baseSID] = true
-                            end
-                        end
-                        local fc = _ecmeFC[frame]
-                        local linked = fc and fc.linkedSpellIDs
-                        if linked then
-                            for li = 1, #linked do
-                                local lsid = linked[li]
-                                if lsid and lsid > 0 then
-                                    _allChildCache[lsid] = frame
-                                    if isBuffIconViewer or not _buffChildCache[lsid] then
-                                        _buffChildCache[lsid] = frame
-                                    end
-                                    if isBuffIconViewer then
-                                        _buffIconTrackedSet[lsid] = true
-                                    end
-                                    if not isBuffIconViewer then
-                                        _barViewerCache[lsid] = frame
-                                    end
-                                end
-                            end
-                        end
-                    else
-                        _cdUtilTrackedSet[displaySID] = true
-                        if baseSID and baseSID > 0 then
-                            _cdUtilTrackedSet[baseSID] = true
-                        end
-                        local fc3 = _ecmeFC[frame]
-                        local linked3 = fc3 and fc3.linkedSpellIDs
-                        if linked3 then
-                            for li = 1, #linked3 do
-                                local lsid = linked3[li]
-                                if lsid and lsid > 0 then
-                                    _cdUtilTrackedSet[lsid] = true
-                                end
-                            end
-                        end
-                    end
-
-                    if frame.wasSetFromAura == true or frame.auraInstanceID ~= nil then
-                        _activeCache[displaySID] = true
-                        if baseSID and baseSID > 0 then
-                            _activeCache[baseSID] = true
-                        end
-                        local fc2 = _ecmeFC[frame]
-                        local linked2 = fc2 and fc2.linkedSpellIDs
-                        if linked2 then
-                            for li = 1, #linked2 do
-                                local lsid = linked2[li]
-                                if lsid and lsid > 0 then
-                                    _activeCache[lsid] = true
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
+local _activeCache = {}
+ns._tickBlizzActiveCache = _activeCache
 
 -------------------------------------------------------------------------------
 --  IsFrameIncluded
@@ -862,17 +672,12 @@ local function CategorizeFrame(frame, viewerBarKey)
     local displaySID, baseSID = ResolveFrameSpellID(frame)
     if not displaySID or displaySID <= 0 then return nil, nil, nil end
 
-    -- Route by cooldownID first, fall back to spellID if the
-    -- cdidRouteMap hasn't been rebuilt since this cooldownID appeared.
+    -- Lazy route resolution: ResolveCDIDToBar handles cache lookup,
+    -- diversion-set match, and viewer-default fallback (defaultBar =
+    -- viewerBarKey, the viewer this frame came from). Always returns a
+    -- valid bar key for any non-nil cdID.
     local cdID = frame.cooldownID
-    local claimBarKey = cdID and _cdidRouteMap[cdID]
-    if not claimBarKey then
-        claimBarKey = _spellRouteMap[baseSID] or _spellRouteMap[displaySID]
-        -- Backfill the cdidRouteMap so future lookups are instant
-        if claimBarKey and cdID then
-            _cdidRouteMap[cdID] = claimBarKey
-        end
-    end
+    local claimBarKey = ResolveCDIDToBar(cdID, viewerBarKey)
     if claimBarKey then
         local claimBD = barDataByKey[claimBarKey]
         local claimType = claimBD and claimBD.barType or claimBarKey
@@ -881,14 +686,10 @@ local function CategorizeFrame(frame, viewerBarKey)
         if viewerIsBuff == claimIsBuff then
             return claimBarKey, displaySID, baseSID
         end
-        -- Type mismatch: buff viewer frame routed to CD bar (or vice versa).
-        -- Check the buff-specific route map for a matching buff bar.
-        if viewerIsBuff then
-            local buffBar = _buffSpellRouteMap[baseSID] or _buffSpellRouteMap[displaySID]
-            if buffBar then
-                return buffBar, displaySID, baseSID
-            end
-        end
+        -- Type mismatch (buff viewer routing to CD bar, or vice versa).
+        -- Under the 1-spell-per-bar rule this can't happen via picker
+        -- claims, but legacy data could trigger it. Fall through to the
+        -- viewer's default bar so the frame still renders somewhere.
     end
     return viewerBarKey, displaySID, baseSID
 end
@@ -1211,10 +1012,18 @@ local function _sortByLayoutIndex(a, b)
     return (a.layoutIndex or 0) < (b.layoutIndex or 0)
 end
 -- CD/utility sort: by sort order stored on the FC cache during collection.
+-- Tiebreak by Blizzard's layoutIndex so frames with no user-defined order
+-- (e.g. default bar with empty assignedSpells) render in Blizzard's natural
+-- ordering instead of an unstable sort result.
 local function _sortByCDOrder(a, b)
     local fcA = _ecmeFC[a]
     local fcB = _ecmeFC[b]
-    return (fcA and fcA.sortOrder or 99999) < (fcB and fcB.sortOrder or 99999)
+    local keyA = (fcA and fcA.sortOrder) or 99999
+    local keyB = (fcB and fcB.sortOrder) or 99999
+    if keyA ~= keyB then return keyA < keyB end
+    local liA = a.layoutIndex or 99999
+    local liB = b.layoutIndex or 99999
+    return liA < liB
 end
 
 -------------------------------------------------------------------------------
@@ -1230,20 +1039,18 @@ local reanchorDirty = false
 local reanchorFrame = nil
 local viewerHooksInstalled = false
 
-local function CollectAndReanchor(bypassSpecGuard)
-    -- Block reanchors during spec transitions. FullCDMRebuild's direct
-    -- call passes bypassSpecGuard=true so it runs while the flag is up.
-    if not bypassSpecGuard and ns._specChangePending then return end
-
+local function CollectAndReanchor()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.enabled then return end
 
-    RebuildSideEffectCaches()
     if ns.RebuildCDMSpellCaches then ns.RebuildCDMSpellCaches() end
 
-    -- Safety: if route map is empty (API was unavailable during zone-in
-    -- rebuild, e.g. fast arena transitions), attempt a fresh rebuild now.
-    if not next(_cdidRouteMap) and ns.RebuildSpellRouteMap then
+    -- Safety: if RebuildSpellRouteMap has never run successfully (API was
+    -- unavailable during zone-in rebuild, e.g. fast arena transitions),
+    -- attempt a fresh rebuild now. Test the build sentinel, NOT _divertedSpells
+    -- (which can legitimately be empty for users with no diversions) and NOT
+    -- _cdidRouteMap (which is a lazy cache, intentionally empty post-build).
+    if not _routeMapBuilt and ns.RebuildSpellRouteMap then
         ns.RebuildSpellRouteMap()
     end
 
@@ -1295,10 +1102,11 @@ local function CollectAndReanchor(bypassSpecGuard)
                         end
                     else
                         -------------------------------------------------------
-                        --  CD/UTILITY PATH: cdidRouteMap only
+                        --  CD/UTILITY PATH: lazy resolve via ResolveCDIDToBar
+                        --  Default bar = the viewer this frame came from.
                         -------------------------------------------------------
                         local cdID = frame.cooldownID
-                        local barKey = cdID and _cdidRouteMap[cdID]
+                        local barKey = ResolveCDIDToBar(cdID, defaultBarKey)
                         if barKey then
                             local bd = barDataByKey[barKey]
                             if bd and bd.barType ~= "buffs" and not bd.isGhostBar then
@@ -1355,12 +1163,6 @@ local function CollectAndReanchor(bypassSpecGuard)
                         end
                         frame.Cooldown:SetHideCountdownNumbers(hideCD)
                     end
-                    local ov = frame._untrackedOverlay
-                    if not ov then
-                        local fd = hookFrameData[frame]
-                        ov = fd and fd.untrackedOverlay
-                    end
-                    if ov then ov:Hide() end
                 end
 
                 -- Clear excess buff icons (Blizzard owns lifecycle, only disable swipe)
@@ -1410,7 +1212,7 @@ local function CollectAndReanchor(bypassSpecGuard)
 
     -- Clean up empty buff bars
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and (bd.barType == "buffs" or bd.key == "buffs")
+        if bd.enabled and ns.IsBarBuffFamily(bd)
            and not bd.isGhostBar and not barLists[bd.key] then
             local icons = cdmBarIcons[bd.key]
             if icons then
@@ -1833,10 +1635,10 @@ local function CollectAndReanchor(bypassSpecGuard)
     --
     -- Trinket frames are the most obvious offender because _trinketFrames
     -- is persistent across spec swaps (unlike _presetFrames, which gets
-    -- wiped in SwitchSpecProfile). Preset frames are handled belt-and-
+    -- wiped in FullCDMRebuild). Preset frames are handled belt-and-
     -- suspenders here too: the spec-swap wipe hides them, but any other
     -- path that removes a preset from assignedSpells without going through
-    -- SwitchSpecProfile would leak without this sweep.
+    -- FullCDMRebuild would leak without this sweep.
     --
     -- Custom BUFF frames (f._isCustomBuffFrame) are skipped: their
     -- lifecycle lives in UpdateCustomBuffBars on a separate ticker, and
@@ -1856,10 +1658,33 @@ local function CollectAndReanchor(bypassSpecGuard)
 
     if not ns._initialReanchorDone then ns._initialReanchorDone = true end
 
+    -- Per-spec migration: convert pre-refactor "assignedSpells as content
+    -- filter" data into "ghost-bar diversion" data. Must run AFTER reanchor
+    -- because it walks the live viewer pools, which only get populated by
+    -- Blizzard's CDM after our init code runs. The first reanchor that
+    -- completes for a spec is the earliest moment we can guarantee the
+    -- pools have content.
+    --
+    -- Per-spec flag is checked inside the migration, so this call is a
+    -- no-op for already-migrated specs. After a successful migration, we
+    -- rebuild the route map (so the new ghost entries become diversions)
+    -- and queue another reanchor (so the now-ghost-routed frames get
+    -- moved out of the default bars).
+    if ns.MigrateSpecToBarFilterModelV6 then
+        local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+        local prof = sa and sa.specProfiles and specKey and sa.specProfiles[specKey]
+        local needsMigration = prof and not prof._barFilterModelV6
+        if needsMigration then
+            local added = ns.MigrateSpecToBarFilterModelV6()
+            if added and added > 0 then
+                if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                if ns.QueueReanchor then ns.QueueReanchor() end
+            end
+        end
+    end
+
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
-    ns.RefreshAllOverlays()
-    MemDelta("ProcessBars")
-    MemReport()
 end
 ns.CollectAndReanchor = CollectAndReanchor
 
@@ -1984,98 +1809,6 @@ ns.UpdateCustomBuffBars = UpdateCustomBuffBars
 function ns.UpdateCustomBuffAuraTracking() end
 
 -------------------------------------------------------------------------------
---  RefreshAllOverlays
--------------------------------------------------------------------------------
-function ns.RefreshAllOverlays()
-    local p = ECME.db and ECME.db.profile
-    if not p or not p.cdmBars then return end
-    local ApplyOverlay = ns.ApplyUntrackedOverlay
-    if not ApplyOverlay then return end
-
-    for _, barData in ipairs(p.cdmBars.bars) do
-        if barData.enabled then
-            local icons = cdmBarIcons[barData.key]
-            if icons then
-                local barType = barData.barType or barData.key
-                local isBuff = (barType == "buffs")
-                -- Buff bars: no overlays. They only contain tracked CDM buffs.
-                if isBuff then
-                    for _, icon in ipairs(icons) do
-                        ApplyOverlay(icon, false)
-                    end
-                else
-                    for _, icon in ipairs(icons) do
-                        if icon._isRacialFrame or icon._isTrinketFrame
-                           or icon._isPresetFrame or icon._isItemPresetFrame
-                           or icon._isCustomSpellFrame then
-                            ApplyOverlay(icon, false)
-                        else
-                            local fc = _ecmeFC[icon]
-                            local sid = fc and fc.spellID
-                            if sid and sid > 0 then
-                                local untracked = not _cdUtilTrackedSet[sid]
-                                -- Skip overlay for untalented spells
-                                if untracked and not IsSpellKnown(sid) then
-                                    untracked = false
-                                end
-                                ApplyOverlay(icon, untracked)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- TBB overlays: cache lookup (rebuilt at top of reanchor, always fresh here)
-    local ShowTBB = ns.ShowTBBUntrackedOverlay
-    local HideTBB = ns.HideTBBUntrackedOverlay
-    if ShowTBB and HideTBB then
-        local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
-        local bars = tbb and tbb.bars
-        if bars then
-            for i, cfg in ipairs(bars) do
-                local bar = ns.GetTBBFrame and ns.GetTBBFrame(i)
-                if bar and cfg.enabled ~= false then
-                    local hasSpell = (cfg.spellID and cfg.spellID > 0) or (cfg.spellIDs and #cfg.spellIDs > 0)
-                    local isNonCDM = false
-                    if cfg.spellID and cfg.spellID > 0 then
-                        isNonCDM = (ns._myRacialsSet and ns._myRacialsSet[cfg.spellID])
-                    end
-                    if hasSpell and not cfg.popularKey and not isNonCDM then
-                        local tracked = false
-                        if cfg.spellIDs then
-                            for _, sid in ipairs(cfg.spellIDs) do
-                                if _barViewerCache[sid] then tracked = true; break end
-                            end
-                        elseif cfg.spellID and cfg.spellID > 0 then
-                            tracked = _barViewerCache[cfg.spellID]
-                        end
-                        if not tracked then
-                            -- Don't show overlay for untalented spells -- the user
-                            -- can't add them to tracked bars, so the overlay is misleading.
-                            local isUnlearned = false
-                            if cfg.spellID and cfg.spellID > 0 then
-                                isUnlearned = not IsSpellKnown(cfg.spellID)
-                            end
-                            if isUnlearned then
-                                HideTBB(bar)
-                            else
-                                ShowTBB(bar, cfg)
-                            end
-                        else
-                            HideTBB(bar)
-                        end
-                    else
-                        HideTBB(bar)
-                    end
-                end
-            end
-        end
-    end
-end
-
--------------------------------------------------------------------------------
 --  Lightweight position re-snap: re-applies stored _cdmAnchor on all claimed
 --  icons without re-enumerating viewers or re-categorizing frames.
 --  Used by OnActiveStateChanged where Blizzard may move frames but the icon
@@ -2114,11 +1847,17 @@ local function QueueReanchor()
 end
 ns.QueueReanchor = QueueReanchor
 
+-- Cancel any pending queued reanchor. Used by FullCDMRebuild's spec swap
+-- branch when it runs CollectAndReanchor directly -- without this, the
+-- reanchor BuildAllCDMBars queued earlier in the same call would fire a
+-- second time after the throttle expires.
+local function ClearQueuedReanchor()
+    reanchorDirty = false
+end
+ns.ClearQueuedReanchor = ClearQueuedReanchor
+
 local function ProcessReanchorQueue(self)
     if not reanchorDirty then self:Hide(); return end
-    -- Gate: hold queued reanchors while a spec swap is in progress.
-    -- The queue stays dirty so it fires as soon as the flag clears.
-    if ns._specChangePending then return end
     local now = GetTime()
     if now - _lastReanchorTime < REANCHOR_THROTTLE then return end
     reanchorDirty = false
@@ -2148,14 +1887,6 @@ function ns.SetupViewerHooks()
     --    Reset frame spell cache so the next reanchor re-resolves the spellID
     --    (handles spell transforms like Avenging Crusader -> Crusader Strike).
     local function ResetFrameAndReanchor(frame)
-        if ns._specChangePending then
-            -- Queue instead of drop: ProcessReanchorQueue will hold
-            -- until the flag clears, then fire the queued reanchor.
-            -- Skip per-frame cache clear -- FullCDMRebuild handles that
-            -- wholesale during spec swap.
-            QueueReanchor()
-            return
-        end
         if frame then
             local fc = _ecmeFC[frame]
             if fc then
@@ -2212,12 +1943,6 @@ function ns.SetupViewerHooks()
                         _activeStateReanchorPending = true
                         C_Timer.After(0, function()
                             _activeStateReanchorPending = false
-                            -- During spec swap, queue instead of direct reanchor.
-                            -- ProcessReanchorQueue will hold until flag clears.
-                            if ns._specChangePending then
-                                QueueReanchor()
-                                return
-                            end
                             CollectAndReanchor()
                         end)
                     end)
@@ -2321,20 +2046,12 @@ function ns.SetupViewerHooks()
     local buffViewer = _G["BuffIconCooldownViewer"]
     if buffViewer and buffViewer.RefreshLayout then
         hooksecurefunc(buffViewer, "RefreshLayout", function()
-            if ns._specChangePending then
-                QueueReanchor()
-                return
-            end
             CollectAndReanchor()
         end)
     end
     local buffBarViewer = _G["BuffBarCooldownViewer"]
     if buffBarViewer and buffBarViewer.RefreshLayout then
         hooksecurefunc(buffBarViewer, "RefreshLayout", function()
-            if ns._specChangePending then
-                QueueReanchor()
-                return
-            end
             CollectAndReanchor()
         end)
     end
@@ -2456,9 +2173,14 @@ function ns.SetupViewerHooks()
                 end
             end
             if needsReanchor then QueueReanchor() end
-            -- Refresh aura active cache + bar glow overlays. The full
-            -- RebuildSideEffectCaches is too heavy for 0.1s polling, so
-            -- just re-check aura state on already-known frames.
+            -- Refresh aura active cache. This is the sole maintainer of
+            -- _activeCache; bar glow overlays read from ns._tickBlizzActiveCache.
+            -- Walk the live pools and mark any frame whose Blizzard-set
+            -- wasSetFromAura/auraInstanceID indicates an active aura.
+            -- Calls ResolveFrameSpellID (which has its own resolve cache)
+            -- so BuffBarCooldownViewer frames -- which CollectAndReanchor
+            -- never visits -- still get their fc populated for bar glow
+            -- triggers on Tracked Bar spells (Divine Protection etc).
             do
                 local ac = _activeCache
                 wipe(ac)
@@ -2467,12 +2189,11 @@ function ns.SetupViewerHooks()
                     if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
                         for frame in vf.itemFramePool:EnumerateActive() do
                             if frame.wasSetFromAura == true or frame.auraInstanceID ~= nil then
-                                local fc = _ecmeFC[frame]
-                                local sid = fc and fc.resolvedSid
+                                local sid, baseSID = ResolveFrameSpellID(frame)
                                 if sid and sid > 0 then
                                     ac[sid] = true
-                                    local baseSID = fc.baseSpellID
                                     if baseSID and baseSID > 0 then ac[baseSID] = true end
+                                    local fc = _ecmeFC[frame]
                                     local linked = fc and fc.linkedSpellIDs
                                     if linked then
                                         for li = 1, #linked do
@@ -2565,6 +2286,20 @@ local function IsCooldownViewerSystemFrame(frame)
     return cooldownSystem and frame and frame.system == cooldownSystem
 end
 
+-- Skip locking the BuffBarCooldownViewer when the user has enabled
+-- "Use Blizzard CDM Bars" -- they want to drag/configure that frame in
+-- Edit Mode themselves. All other CDM viewers stay locked because EUI
+-- manages their position via icon-level anchoring.
+local function ShouldLockViewer(frame)
+    if frame == _G["BuffBarCooldownViewer"] then
+        local p = ECME and ECME.db and ECME.db.profile
+        if p and p.cdmBars and p.cdmBars.useBlizzardBuffBars then
+            return false
+        end
+    end
+    return true
+end
+
 local function ShowEditModeLockNotice()
     if not _editModeLockNoticeShown then
         print("|cff0cd29fEllesmereUI CDM:|r Cooldown Viewer settings are managed by EllesmereUI. Edit Mode changes are disabled.")
@@ -2575,7 +2310,7 @@ end
 local function LockCooldownViewerFrames()
     for _, vName in ipairs(VIEWER_NAMES) do
         local frame = _G[vName]
-        if IsCooldownViewerSystemFrame(frame) then
+        if IsCooldownViewerSystemFrame(frame) and ShouldLockViewer(frame) then
             frame:SetMovable(false)
             local selection = frame.Selection
             if selection then
@@ -2598,6 +2333,7 @@ function ns.SetupEditModeLock()
         -- When EditMode tries to show the settings dialog for a CDM frame, hide it
         hooksecurefunc(dialog, "AttachToSystemFrame", function(dlg, systemFrame)
             if not IsCooldownViewerSystemFrame(systemFrame) then return end
+            if not ShouldLockViewer(systemFrame) then return end
             dlg:Hide()
             ShowEditModeLockNotice()
         end)
@@ -2607,6 +2343,7 @@ function ns.SetupEditModeLock()
             local frame = _G[vName]
             if IsCooldownViewerSystemFrame(frame) then
                 hooksecurefunc(frame, "SelectSystem", function(sf)
+                    if not ShouldLockViewer(sf) then return end
                     sf:SetMovable(false)
                     if dialog.attachedToSystem == sf then
                         dialog:Hide()
