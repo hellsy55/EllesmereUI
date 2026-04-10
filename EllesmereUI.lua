@@ -5575,6 +5575,7 @@ function EllesmereUI:RegisterModule(folderName, config)
             EllesmereUIRaidFrames = true,
             EllesmereUIResourceBars = true,
             EllesmereUIUnitFrames = true,
+            EllesmereUIMythicTimer = true,
         }
         if not ALLOWED[callerFolder] then return end
     end
