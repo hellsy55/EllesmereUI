@@ -708,6 +708,7 @@ local function GetOrCreateTrinketFrame(slotID)
     f = CreateFrame("Frame", nil, UIParent)
     f:SetSize(36, 36)
     f:Hide()
+    f:EnableMouse(false)
 
     local tex = f:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
@@ -720,6 +721,9 @@ local function GetOrCreateTrinketFrame(slotID)
     cd:SetDrawEdge(false)
     cd:SetDrawBling(false)
     cd:SetHideCountdownNumbers(true)
+    cd:EnableMouse(false)
+    if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
+    if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
     f.Cooldown = cd
     f._cooldown = cd
 
@@ -1326,6 +1330,7 @@ local function CollectAndReanchor()
                                 if icon then
                                     f = CreateFrame("Frame", nil, UIParent)
                                     f:SetSize(36, 36); f:Hide()
+                                    f:EnableMouse(false)
                                     local tex = f:CreateTexture(nil, "ARTWORK")
                                     tex:SetAllPoints(); tex:SetTexture(icon)
                                     tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -1333,6 +1338,9 @@ local function CollectAndReanchor()
                                     local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
                                     cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
                                     cd:SetHideCountdownNumbers(true)
+                                    cd:EnableMouse(false)
+                                    if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
+                                    if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
                                     f.Cooldown = cd; f._cooldown = cd
                                     f._isItemPresetFrame = true
                                     f._presetItemID = itemID; f._presetData = preset
@@ -1507,11 +1515,28 @@ local function CollectAndReanchor()
                         frame.Cooldown:SetHideCountdownNumbers(hideCDText)
                     end
                     -- Reparent custom frames to our container (never to Blizzard viewers)
+                    -- and force click-through. Something in the Decorate /
+                    -- Show / SetParent / Cooldown path re-enables mouse on
+                    -- these frames despite our creation-time EnableMouse(false),
+                    -- so we re-disable them defensively here (mirroring the
+                    -- custom aura bar pattern at ~L1792).
                     if frame._isRacialFrame or frame._isTrinketFrame
                        or frame._isPresetFrame or frame._isItemPresetFrame
                        or frame._isCustomSpellFrame then
                         if frame:GetParent() ~= container then
                             frame:SetParent(container)
+                        end
+                        frame:EnableMouse(false)
+                        if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
+                        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                        if frame.Cooldown then
+                            frame.Cooldown:EnableMouse(false)
+                            if frame.Cooldown.SetMouseClickEnabled then
+                                frame.Cooldown:SetMouseClickEnabled(false)
+                            end
+                            if frame.Cooldown.SetMouseMotionEnabled then
+                                frame.Cooldown:SetMouseMotionEnabled(false)
+                            end
                         end
                     end
                     -- Active state hooks handled in DecorateFrame (SetSwipeColor
@@ -1694,12 +1719,20 @@ local function CollectAndReanchor()
     -- redundantly run the layout pass.
     if ns._pendingApplyOnReanchor then
         ns._pendingApplyOnReanchor = nil
+        -- CDM is done populating icons; lift the rebuild gate so width
+        -- matching can propagate against settled bar widths. Must happen
+        -- BEFORE ApplyAllWidthHeightMatches so it isn't gated off.
+        if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
         if EllesmereUI.ApplyAllWidthHeightMatches then
             EllesmereUI.ApplyAllWidthHeightMatches()
         end
         if EllesmereUI._applySavedPositions then
             EllesmereUI._applySavedPositions()
         end
+    else
+        -- Routine reanchor (icon churn, mob death, etc.) -- still clear
+        -- the gate so subsequent layout calls don't get stuck.
+        if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
     end
 end
 ns.CollectAndReanchor = CollectAndReanchor

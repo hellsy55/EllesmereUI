@@ -500,6 +500,10 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     -- Menu bg/border: same colours for both styles (DD_BTN with menu-specific alpha)
     local _menuOpts = values._menuOpts
     local _moIcon = _menuOpts and _menuOpts.icon
+    local _moIconAtlas = _menuOpts and _menuOpts.iconAtlas
+    local _moIconPressedAtlas = _menuOpts and _menuOpts.iconPressedAtlas
+    local _moIconOnClick = _menuOpts and _menuOpts.iconOnClick
+    local _moIconTooltip = _menuOpts and _menuOpts.iconTooltip
     local _moBackground = _menuOpts and _menuOpts.background
     local _moBgVertexColor = _menuOpts and _menuOpts.backgroundVertexColor
     local _moItemH = _menuOpts and _menuOpts.itemHeight or 26
@@ -715,15 +719,84 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             iLbl:SetJustifyH("LEFT")
             iLbl:SetText(mainText)
             -- Optional annotation (smaller font, 75% alpha, same color)
-            -- Optional icon from _menuOpts.icon callback
-            if _moIcon then
-                local iconPath, il, ir, it, ib = _moIcon(key)
-                if iconPath then
+            -- Optional icon. Three sources supported:
+            --   _menuOpts.icon(key)            -> texture path (+ optional texcoord)
+            --   _menuOpts.iconAtlas(key)       -> atlas name (Blizzard atlas)
+            --   _menuOpts.iconPressedAtlas(key)-> pressed-state atlas name
+            -- When _menuOpts.iconOnClick is also provided, the icon becomes
+            -- a clickable Button with its own frame level so clicks don't
+            -- propagate to the item's OnClick (used for sound previews).
+            local _haveAtlas = _moIconAtlas and _moIconAtlas(key) or nil
+            local _iconPath, _il, _ir, _it, _ib
+            if _moIcon and not _haveAtlas then
+                _iconPath, _il, _ir, _it, _ib = _moIcon(key)
+            end
+            if _haveAtlas or _iconPath then
+                local icoSz = _moItemH - 8
+                if _moIconOnClick then
+                    local iconBtn = CreateFrame("Button", nil, item)
+                    iconBtn:SetSize(icoSz, icoSz)
+                    iconBtn:SetPoint("RIGHT", item, "RIGHT", -6, 0)
+                    iconBtn:SetFrameLevel(item:GetFrameLevel() + 2)
+                    if _haveAtlas then
+                        iconBtn:SetNormalAtlas(_haveAtlas)
+                        local pressedAtlas = _moIconPressedAtlas and _moIconPressedAtlas(key)
+                        if pressedAtlas then
+                            iconBtn:SetPushedAtlas(pressedAtlas)
+                        end
+                        iconBtn:SetHighlightAtlas(_haveAtlas)
+                        -- Atlas icons like common-icon-sound have an intrinsic
+                        -- colour (yellow). SetVertexColor alone just scales that
+                        -- colour, so we desaturate first, then tint to #929292.
+                        local _nr, _ng, _nb = 0.573, 0.573, 0.573
+                        local nrmTex = iconBtn:GetNormalTexture()
+                        if nrmTex then
+                            if nrmTex.SetDesaturated then nrmTex:SetDesaturated(true) end
+                            nrmTex:SetVertexColor(_nr, _ng, _nb, 1)
+                        end
+                        local psdTex = iconBtn:GetPushedTexture()
+                        if psdTex then
+                            if psdTex.SetDesaturated then psdTex:SetDesaturated(true) end
+                            psdTex:SetVertexColor(_nr, _ng, _nb, 1)
+                        end
+                        local hlTex = iconBtn:GetHighlightTexture()
+                        if hlTex then
+                            if hlTex.SetDesaturated then hlTex:SetDesaturated(true) end
+                            hlTex:SetVertexColor(_nr, _ng, _nb, 1)
+                            hlTex:SetAlpha(0.4)
+                        end
+                    else
+                        local ico = iconBtn:CreateTexture(nil, "ARTWORK")
+                        ico:SetAllPoints()
+                        ico:SetTexture(_iconPath)
+                        if _il then ico:SetTexCoord(_il, _ir, _it, _ib) end
+                        ico:SetVertexColor(0.8, 0.8, 0.8, 1)
+                        iconBtn._ico = ico
+                    end
+                    iconBtn:SetScript("OnEnter", function()
+                        if iconBtn._ico then iconBtn._ico:SetVertexColor(1, 1, 1, 1) end
+                        if _moIconTooltip then
+                            ShowWidgetTooltip(iconBtn, _moIconTooltip(key))
+                        end
+                    end)
+                    iconBtn:SetScript("OnLeave", function()
+                        if iconBtn._ico then iconBtn._ico:SetVertexColor(0.8, 0.8, 0.8, 1) end
+                        if _moIconTooltip then HideWidgetTooltip() end
+                    end)
+                    iconBtn:SetScript("OnClick", function()
+                        _moIconOnClick(key)
+                    end)
+                    iLbl:SetPoint("RIGHT", iconBtn, "LEFT", -4, 0)
+                else
                     local ico = item:CreateTexture(nil, "ARTWORK")
-                    local icoSz = _moItemH - 8; ico:SetSize(icoSz, icoSz)
+                    ico:SetSize(icoSz, icoSz)
                     ico:SetPoint("RIGHT", item, "RIGHT", -6, 0)
-                    ico:SetTexture(iconPath)
-                    if il then ico:SetTexCoord(il, ir, it, ib) end
+                    if _haveAtlas then
+                        ico:SetAtlas(_haveAtlas)
+                    else
+                        ico:SetTexture(_iconPath)
+                        if _il then ico:SetTexCoord(_il, _ir, _it, _ib) end
+                    end
                     iLbl:SetPoint("RIGHT", ico, "LEFT", -4, 0)
                 end
             end

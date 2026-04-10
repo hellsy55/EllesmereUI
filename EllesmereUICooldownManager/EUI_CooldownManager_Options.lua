@@ -6833,6 +6833,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local isBuffBar = ns.IsBarBuffFamily(bd)
             local isCustomBuffBar = (bd.barType == "custom_buff")
+            local isFocusKick = (bd.key == "focuskick")
             local tracked
             local count
 
@@ -7222,10 +7223,30 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, hr in ipairs(self._hiddenRows) do hr:Hide() end
                 end
                 if self._hiddenHeader then self._hiddenHeader:Hide() end
+                if self._focusKickInfoText then self._focusKickInfoText:Hide() end
                 self:SetHeight(totalH + 10 + infoFS:GetStringHeight() + 20 + 14)
+            elseif isFocusKick then
+                if self._buffInfoText then self._buffInfoText:Hide() end
+                if self._buffInfoClick then self._buffInfoClick:Hide() end
+                if not self._focusKickInfoText then
+                    local fkFS = self:CreateFontString(nil, "OVERLAY")
+                    fkFS:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                    fkFS:SetJustifyH("CENTER")
+                    fkFS:SetWordWrap(true)
+                    fkFS:SetTextColor(1, 1, 1, 1)
+                    fkFS:SetText("This bar will always be attached to your focus target's nameplate")
+                    self._focusKickInfoText = fkFS
+                end
+                local fkFS = self._focusKickInfoText
+                fkFS:ClearAllPoints()
+                fkFS:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
+                fkFS:SetWidth(self:GetWidth() - 20)
+                fkFS:Show()
+                self:SetHeight(totalH + 10 + fkFS:GetStringHeight() + 20)
             else
                 if self._buffInfoText then self._buffInfoText:Hide() end
                 if self._buffInfoClick then self._buffInfoClick:Hide() end
+                if self._focusKickInfoText then self._focusKickInfoText:Hide() end
                 self:SetHeight(totalH + 10)
             end
 
@@ -8019,8 +8040,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="toggle", text="Focus Reminders",
                   getValue = function()
                       local bd = BD()
-                      if bd.focusReminderEnabled == nil then return true end
-                      return bd.focusReminderEnabled
+                      return bd.focusReminderEnabled == true
                   end,
                   setValue = function(v)
                       BD().focusReminderEnabled = v
@@ -8156,7 +8176,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 local function UpdateFRSwatchState()
                     local bd = BD()
-                    local on = (bd.focusReminderEnabled == nil) or (bd.focusReminderEnabled == true)
+                    local on = bd.focusReminderEnabled == true
                     if not on then
                         accentSwatch:SetAlpha(0.3); customSwatch:SetAlpha(0.3)
                         customBlock:Hide(); enableBlock:Show()
@@ -8177,6 +8197,88 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 UpdateFRSwatchState()
             end
+
+            -- Row 2: Focus Cast Sound (left) | Interrupt Spell picker (right)
+            -- Sound dropdown values are built from the runtime sound table
+            -- (built-in EllesmereUI sounds + LSM sounds appended at init).
+            -- Spell picker is rebuilt fresh every page render so it always
+            -- reflects the bar's current spell list.
+            --
+            -- Shallow-copy the runtime names table so we can attach per-row
+            -- menu options (preview icon) without polluting the shared
+            -- ns.FOCUSKICK_SOUND_NAMES table that other code reads.
+            local soundValues = {}
+            if ns.FOCUSKICK_SOUND_NAMES then
+                for k, v in pairs(ns.FOCUSKICK_SOUND_NAMES) do soundValues[k] = v end
+            else
+                soundValues.none = "None"
+            end
+            local soundOrder = ns.FOCUSKICK_SOUND_ORDER or { "none" }
+            soundValues._menuOpts = {
+                itemHeight = 26,
+                iconAtlas = function(key)
+                    if key == "none" then return nil end
+                    local paths = ns.FOCUSKICK_SOUND_PATHS
+                    if not paths or not paths[key] then return nil end
+                    return "common-icon-sound"
+                end,
+                iconPressedAtlas = function(key)
+                    if key == "none" then return nil end
+                    return "common-icon-sound-pressed"
+                end,
+                iconOnClick = function(key)
+                    local paths = ns.FOCUSKICK_SOUND_PATHS
+                    local path = paths and paths[key]
+                    if path then PlaySoundFile(path, "Master") end
+                end,
+                iconTooltip = function() return "Preview Sound" end,
+            }
+
+            local spellValues = {}
+            local spellOrder  = {}
+            do
+                local sd = ns.GetBarSpellData and ns.GetBarSpellData("focuskick")
+                local list = sd and sd.assignedSpells
+                if list then
+                    for _, sid in ipairs(list) do
+                        -- Only positive spell IDs (Blizzard cooldownable spells).
+                        -- Skip negative preset markers (trinkets / items).
+                        if type(sid) == "number" and sid > 0 then
+                            local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                            local label = (info and info.name) or ("Spell " .. sid)
+                            local key = tostring(sid)
+                            if not spellValues[key] then
+                                spellValues[key] = label
+                                spellOrder[#spellOrder + 1] = key
+                            end
+                        end
+                    end
+                end
+                if #spellOrder == 0 then
+                    spellValues["__none"] = "(no spells on bar)"
+                    spellOrder[#spellOrder + 1] = "__none"
+                end
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type = "dropdown", text = "Focus Cast Sound",
+                  values = soundValues, order = soundOrder,
+                  getValue = function() return BD().focusCastSoundKey or "none" end,
+                  setValue = function(v) BD().focusCastSoundKey = v end },
+                { type = "dropdown", text = "Interrupt Spell",
+                  values = spellValues, order = spellOrder,
+                  getValue = function()
+                      local sid = BD().focusKickInterruptSpellID
+                      if not sid then return spellOrder[1] end
+                      return tostring(sid)
+                  end,
+                  setValue = function(v)
+                      if v == "__none" then
+                          BD().focusKickInterruptSpellID = nil
+                      else
+                          BD().focusKickInterruptSpellID = tonumber(v)
+                      end
+                  end });  y = y - h
 
             _, h = W:Spacer(parent, y, 8);  y = y - h
         else
@@ -8247,10 +8349,11 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       local bd = BD()
                       bd.iconSize = v
-                      -- Manual iconSize override -- clear width/height match
-                      -- caches so the new value takes effect (LayoutCDMBar
-                      -- otherwise uses _matchIconPhys cached from a prior
-                      -- width/height match, ignoring the new iconSize).
+                      -- Manual iconSize override -- clear ALL match cache
+                      -- (legacy + new) so LayoutCDMBar uses bd.iconSize
+                      -- instead of deriving from a stored target width/height.
+                      bd._matchPhysWidth = nil
+                      bd._matchPhysHeight = nil
                       bd._matchIconPhys = nil
                       bd._matchExtraPixels = nil
                       bd._matchStride = nil
@@ -8378,8 +8481,10 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   local bd = BD()
                   bd.iconSize = v
-                  -- Manual iconSize override -- clear width/height match
-                  -- caches so the new value takes effect.
+                  -- Manual iconSize override -- clear ALL match cache so the
+                  -- new value wins over any stored target width/height.
+                  bd._matchPhysWidth = nil
+                  bd._matchPhysHeight = nil
                   bd._matchIconPhys = nil
                   bd._matchExtraPixels = nil
                   bd._matchStride = nil

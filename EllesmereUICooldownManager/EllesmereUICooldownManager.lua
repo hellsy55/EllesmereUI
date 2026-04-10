@@ -1950,6 +1950,18 @@ BuildCDMBar = function(barIndex)
     end
     frame._mouseGrow = nil
 
+    -- FocusKick bar is exclusively owned by ApplyFocusKickAnchor. Skip the
+    -- generic position block entirely so the else-branch default fallback
+    -- never snaps the bar to UIParent CENTER 0,0 between a rebuild and the
+    -- next nameplate event. Without this, the frame briefly teleports to
+    -- screen center when BuildCDMBar runs before ApplyFocusKickAnchor.
+    -- Uses the literal key because FOCUSKICK_BAR_KEY is declared later in
+    -- this file (~L3076) and would be nil here.
+    if key == "focuskick" then
+        frame:Show()
+        return
+    end
+
     -- Position
     local anchorKey = barData.anchorTo
     if anchorKey == "mouse" then
@@ -2277,19 +2289,17 @@ LayoutCDMBar = function(barKey)
     local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     local spacing = SnapForScale(barData.spacing or 2, 1)
 
-    -- Width/height match: use stored physical pixel count to avoid floating
-    -- point precision loss in the iconSize → PP.Scale roundtrip.
-    -- linkedDimensions ensures only ONE of width-match / height-match is
-    -- active at a time, so the cache uses a single _matchIconPhys (the base
-    -- icon size in physical pixels) plus axis-specific stride/extras:
-    --   width-match  → _matchStride (W-axis dim) + _matchExtraPixels
-    --   height-match → _matchStrideH (H-axis dim) + _matchExtraPixelsH
+    -- Width/height match: derive iconSize live from the SOURCE bar's
+    -- current width on every layout pass. The source bar IS the truth, so
+    -- reading it live auto-corrects across spec swaps, source resizes, etc.
+    -- Nothing is persisted -- no _matchPhysWidth field, no migration story,
+    -- no possibility of cross-spec corruption.
     local extraPixels = 0
     local extraPixelsH = 0
-    local hasWidthMatch = EllesmereUI.GetWidthMatchTarget
-        and EllesmereUI.GetWidthMatchTarget("CDM_" .. barKey) ~= nil
-    local hasHeightMatch = EllesmereUI.GetHeightMatchTarget
-        and EllesmereUI.GetHeightMatchTarget("CDM_" .. barKey) ~= nil
+    local widthMatchTarget = EllesmereUI.GetWidthMatchTarget
+        and EllesmereUI.GetWidthMatchTarget("CDM_" .. barKey) or nil
+    local heightMatchTarget = EllesmereUI.GetHeightMatchTarget
+        and EllesmereUI.GetHeightMatchTarget("CDM_" .. barKey) or nil
     local PP = EllesmereUI.PP
     local onePx = PP.mult
     local iconW
@@ -2301,43 +2311,54 @@ LayoutCDMBar = function(barKey)
     local function CurHeightDim()
         return isHoriz and numRows or ComputeTopRowStride(barData, #icons)
     end
-    if hasWidthMatch and barData._matchIconPhys and barData._matchStride then
-        -- Preserve the cache when icons aren't populated yet (#icons == 0).
-        -- During the initial BuildAllCDMBars pass before CollectAndReanchor
-        -- runs, the icon array is empty, so curDim = 0, which would falsely
-        -- mismatch the saved stride and nuke the cache. That forces a fall
-        -- back to SnapForScale(iconSize) which produces a slightly different
-        -- value than the precise _matchIconPhys * onePx, causing a visible
-        -- half-pixel shift on login when ApplyAllWidthHeightMatches later
-        -- recomputes the precise value.
+    -- Resolve a width/height match target unlock key to a live frame.
+    -- The match DB stores keys like "CDM_cooldowns" or "MainBar"; the
+    -- registered unlock element provides a getFrame() callback.
+    local function GetMatchTargetFrame(targetKey)
+        if not targetKey then return nil end
+        local elems = EllesmereUI._unlockRegisteredElements
+        local elem = elems and elems[targetKey]
+        if elem and elem.getFrame then return elem.getFrame(targetKey) end
+        return nil
+    end
+    if widthMatchTarget and #icons > 0 then
+        local targetFrame = GetMatchTargetFrame(widthMatchTarget)
+        local targetW = targetFrame and targetFrame:GetWidth() or 0
         local curDim = CurWidthDim()
-        if curDim == barData._matchStride or #icons == 0 then
-            iconW = barData._matchIconPhys * onePx
-            extraPixels = barData._matchExtraPixels or 0
-        else
-            barData._matchExtraPixels = nil
-            barData._matchStride = nil
-            barData._matchIconPhys = nil
-            iconW = SnapForScale(barData.iconSize or 36, 1)
+        if targetW > 1 and curDim and curDim > 0 then
+            local physTarget = math.floor(targetW / onePx + 0.5)
+            local physSp = math.floor(spacing / onePx + 0.5)
+            local rawPhysIcon = (physTarget - (curDim - 1) * physSp) / curDim
+            if rawPhysIcon < 8 then rawPhysIcon = 8 end
+            local basePhysIcon = math.floor(rawPhysIcon)
+            iconW = basePhysIcon * onePx
+            local idealPhys = curDim * basePhysIcon + (curDim - 1) * physSp
+            local extra = physTarget - idealPhys
+            if extra > 0 and extra <= curDim then extraPixels = extra end
         end
-    elseif hasHeightMatch and barData._matchIconPhys and barData._matchStrideH then
-        -- Same cache-preserve logic on the height axis.
+    elseif heightMatchTarget and #icons > 0 then
+        local targetFrame = GetMatchTargetFrame(heightMatchTarget)
+        local targetH = targetFrame and targetFrame:GetHeight() or 0
         local curDim = CurHeightDim()
-        if curDim == barData._matchStrideH or #icons == 0 then
-            iconW = barData._matchIconPhys * onePx
-            extraPixelsH = barData._matchExtraPixelsH or 0
-        else
-            barData._matchExtraPixelsH = nil
-            barData._matchStrideH = nil
-            barData._matchIconPhys = nil
-            iconW = SnapForScale(barData.iconSize or 36, 1)
+        if targetH > 1 and curDim and curDim > 0 then
+            local shape = barData.iconShape or "none"
+            local cropFactor = (shape == "cropped") and 0.80 or 1.0
+            local physTarget = math.floor(targetH / onePx + 0.5)
+            local physSp = math.floor(spacing / onePx + 0.5)
+            local rawPhysIcon = (physTarget - (curDim - 1) * physSp) / curDim / cropFactor
+            if rawPhysIcon < 8 then rawPhysIcon = 8 end
+            local basePhysIcon = math.floor(rawPhysIcon)
+            iconW = basePhysIcon * onePx
+            local basePhysIconH = math.floor(basePhysIcon * cropFactor)
+            local idealPhys = curDim * basePhysIconH + (curDim - 1) * physSp
+            local extra = physTarget - idealPhys
+            if extra > 0 and extra <= curDim then extraPixelsH = extra end
         end
-    else
-        barData._matchExtraPixels = nil
-        barData._matchStride = nil
-        barData._matchExtraPixelsH = nil
-        barData._matchStrideH = nil
-        barData._matchIconPhys = nil
+    end
+    if not iconW then
+        -- Not matched, OR target frame couldn't be read (early in build,
+        -- before source bar exists, etc.). Use the user's stored iconSize.
+        -- A subsequent LayoutCDMBar pass will re-read live and correct it.
         iconW = SnapForScale(barData.iconSize or 36, 1)
     end
 
@@ -3111,12 +3132,15 @@ local function EnsureFocusKickBar()
         nameplateOffsetX = 0,
         nameplateOffsetY = 0,
         -- FocusKick-specific: "FOCUS" reminder text on caster/miniboss plates
-        focusReminderEnabled = true,
+        focusReminderEnabled = false,
         focusReminderUseAccent = true,
         focusReminderR = 1, focusReminderG = 1, focusReminderB = 1,
         focusReminderSize = 26,
         focusReminderOffsetX = 0,
         focusReminderOffsetY = 0,
+        -- FocusKick-specific: focus-cast sound trigger
+        focusCastSoundKey = "none",
+        focusKickInterruptSpellID = nil,
         growDirection = "RIGHT",
     })
     local sd = ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
@@ -3149,6 +3173,26 @@ local function SetFocusKickAlpha(a)
     end
 end
 
+-- Find the scale-aware anchor frame inside a Blizzard nameplate. The
+-- EllesmereUINameplates addon mixes a custom NameplateFrame into a child of
+-- the Blizzard plate and applies the user's "Scale Target Nameplate" /
+-- "Scale Nameplate On Cast" settings via NameplateFrame:ApplyScale(). The
+-- Blizzard plate itself does NOT scale, so anchoring the FocusKick bar to
+-- the plate ignores those scale settings. Walk the plate's children to
+-- find the mixed-in frame and its visible health bar, which carries the
+-- correct scaled bounds. Returns (healthFrame, scaledParent) or nil.
+local function GetScaledPlateHealth(plate)
+    if not plate then return nil end
+    local children = { plate:GetChildren() }
+    for i = 1, #children do
+        local c = children[i]
+        if c and c._mixedIn and c.health then
+            return c.health, c
+        end
+    end
+    return nil
+end
+
 local function ApplyFocusKickAnchor()
     local frame = cdmBarFrames[FOCUSKICK_BAR_KEY]
     if not frame then return end
@@ -3160,20 +3204,25 @@ local function ApplyFocusKickAnchor()
         SetFocusKickAlpha(0)
         return
     end
+    -- Prefer the scaled health bar from our custom NameplateFrame so the
+    -- icon tracks Target / Cast scale changes. Fall back to the raw plate
+    -- when the nameplates addon isn't loaded or the plate hasn't been
+    -- decorated yet.
+    local anchorFrame = GetScaledPlateHealth(plate) or plate
     local side = bd.nameplateAnchorSide or "LEFT"
     local ox = bd.nameplateOffsetX or 0
     local oy = bd.nameplateOffsetY or 0
     frame:ClearAllPoints()
     if side == "LEFT" then
-        frame:SetPoint("RIGHT", plate, "LEFT", ox, oy)
+        frame:SetPoint("RIGHT", anchorFrame, "LEFT", ox, oy)
     elseif side == "RIGHT" then
-        frame:SetPoint("LEFT", plate, "RIGHT", ox, oy)
+        frame:SetPoint("LEFT", anchorFrame, "RIGHT", ox, oy)
     elseif side == "TOP" then
-        frame:SetPoint("BOTTOM", plate, "TOP", ox, oy)
+        frame:SetPoint("BOTTOM", anchorFrame, "TOP", ox, oy)
     elseif side == "BOTTOM" then
-        frame:SetPoint("TOP", plate, "BOTTOM", ox, oy)
+        frame:SetPoint("TOP", anchorFrame, "BOTTOM", ox, oy)
     else
-        frame:SetPoint("CENTER", plate, "CENTER", ox, oy)
+        frame:SetPoint("CENTER", anchorFrame, "CENTER", ox, oy)
     end
     SetFocusKickAlpha(1)
 end
@@ -3181,7 +3230,17 @@ ns.ApplyFocusKickAnchor = ApplyFocusKickAnchor
 
 -- Single event proxy. Cheap: just calls ApplyFocusKickAnchor on relevant
 -- events. The proxy is created once and persists.
+--
+-- Range-fade handling: when the focus target walks out of range, Blizzard
+-- fades the nameplate alpha without firing NAME_PLATE_UNIT_REMOVED. The bar
+-- icons don't inherit plate visibility (they're parented to the Blizzard
+-- viewer pool) so we throttle-poll the plate's visibility on OnUpdate and
+-- propagate alpha changes to the icons manually. Only ticks when a focus
+-- plate exists -- zero work when there is no focus.
 local _focusKickProxy
+local _focusKickLastPlateVisible
+local _focusKickTickAccum = 0
+local _FOCUSKICK_TICK_INTERVAL = 0.1
 local function EnsureFocusKickProxy()
     if _focusKickProxy then return _focusKickProxy end
     _focusKickProxy = CreateFrame("Frame")
@@ -3190,21 +3249,124 @@ local function EnsureFocusKickProxy()
     _focusKickProxy:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
     _focusKickProxy:SetScript("OnEvent", function(_, event, unit)
         if event == "PLAYER_FOCUS_CHANGED" then
+            _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
             -- Always re-evaluate. By the time this fires the unit is
             -- already invalid, so UnitIsUnit(unit, "focus") returns false
             -- and we'd never catch the focus nameplate disappearing.
+            _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_ADDED" then
             if unit == "focus" or UnitIsUnit(unit or "none", "focus") then
+                _focusKickLastPlateVisible = nil
                 ApplyFocusKickAnchor()
             end
+        end
+    end)
+    _focusKickProxy:SetScript("OnUpdate", function(_, elapsed)
+        _focusKickTickAccum = _focusKickTickAccum + elapsed
+        if _focusKickTickAccum < _FOCUSKICK_TICK_INTERVAL then return end
+        _focusKickTickAccum = 0
+        -- Cheap reject: no focus -> nothing to watch.
+        if not UnitExists("focus") then return end
+        local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit
+            and C_NamePlate.GetNamePlateForUnit("focus")
+        local visibleNow
+        if plate then
+            local alpha = plate:GetEffectiveAlpha() or 0
+            visibleNow = plate:IsVisible() and alpha > 0.01
+        else
+            visibleNow = false
+        end
+        if visibleNow ~= _focusKickLastPlateVisible then
+            _focusKickLastPlateVisible = visibleNow
+            SetFocusKickAlpha(visibleNow and 1 or 0)
         end
     end)
     return _focusKickProxy
 end
 ns.EnsureFocusKickProxy = EnsureFocusKickProxy
+
+-- Sound dropdown data: built-in EllesmereUI sounds + LibSharedMedia sounds
+-- appended at runtime via EllesmereUI.AppendSharedMediaSounds.
+local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
+local FOCUSKICK_SOUND_PATHS = {
+    ["none"]     = nil,
+    ["airhorn"]  = _SOUNDS_DIR .. "AirHorn.ogg",
+    ["banana"]   = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
+    ["bikehorn"] = _SOUNDS_DIR .. "BikeHorn.ogg",
+    ["boxing"]   = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
+    ["water"]    = _SOUNDS_DIR .. "WaterDrop.ogg",
+}
+local FOCUSKICK_SOUND_NAMES = {
+    ["none"]     = "None",
+    ["airhorn"]  = "Air Horn",
+    ["banana"]   = "Banana Peel Slip",
+    ["bikehorn"] = "Bike Horn",
+    ["boxing"]   = "Boxing Arena",
+    ["water"]    = "Water Drop",
+}
+local FOCUSKICK_SOUND_ORDER = {
+    "none", "airhorn", "banana", "bikehorn", "boxing", "water",
+}
+ns.FOCUSKICK_SOUND_PATHS = FOCUSKICK_SOUND_PATHS
+ns.FOCUSKICK_SOUND_NAMES = FOCUSKICK_SOUND_NAMES
+ns.FOCUSKICK_SOUND_ORDER = FOCUSKICK_SOUND_ORDER
+
+-- Focus-cast sound trigger. When the focus target starts a cast and the
+-- user's selected interrupt is off cooldown, play the configured sound.
+-- One single proxy registered with RegisterUnitEvent on "focus" -- the
+-- token follows focus changes automatically.
+local _focusCastProxy
+local function EnsureFocusCastProxy()
+    if _focusCastProxy then return _focusCastProxy end
+    _focusCastProxy = CreateFrame("Frame")
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", "focus")
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "focus")
+    _focusCastProxy:SetScript("OnEvent", function()
+        local bd = barDataByKey and barDataByKey[FOCUSKICK_BAR_KEY]
+        if not bd then return end
+        local soundKey = bd.focusCastSoundKey or "none"
+        if soundKey == "none" then return end
+        local spellID = bd.focusKickInterruptSpellID
+        -- Auto-fallback: if user hasn't explicitly picked a spell, use the
+        -- first positive spell on the bar. The picker exists for users who
+        -- want a specific spell when multiple are on the bar.
+        if not spellID or spellID <= 0 then
+            local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
+            if sd and sd.assignedSpells then
+                for _, sid in ipairs(sd.assignedSpells) do
+                    if type(sid) == "number" and sid > 0 then
+                        spellID = sid
+                        break
+                    end
+                end
+            end
+        end
+        if not spellID or spellID <= 0 then return end
+
+        -- No interruptible check. The kickProtected flag on UnitCastingInfo
+        -- and UnitChannelInfo is a secret boolean in Midnight and any
+        -- laundering path that returns a value back into Lua produces a
+        -- tainted result we cannot branch on. We accept that the sound will
+        -- occasionally fire on uninterruptible casts -- the nameplate
+        -- shield icon still tells the player visually.
+
+        -- Cooldown check: only play if our interrupt is ready. cdInfo.isActive
+        -- is a clean bool -- the duration/startTime fields are secret in
+        -- Midnight and can't be compared in Lua, but isActive is safe.
+        if C_Spell and C_Spell.GetSpellCooldown then
+            local cdInfo = C_Spell.GetSpellCooldown(spellID)
+            if cdInfo and cdInfo.isActive then return end
+        end
+        local path = FOCUSKICK_SOUND_PATHS[soundKey]
+        if not path then return end
+        PlaySoundFile(path, "Master")
+    end)
+    return _focusCastProxy
+end
+ns.EnsureFocusCastProxy = EnsureFocusCastProxy
 
 -- "FOCUS" reminder text shown on caster/miniboss nameplates when the
 -- player has no focus set. Activated by the FocusKick bar's
@@ -3311,7 +3473,7 @@ local function ShowFocusReminder(token)
     if not _focusKickInDungeon then HideFocusReminder(token); return end
     if _focusKickIsHealer then HideFocusReminder(token); return end
     local bd = GetFocusKickBarData()
-    if not bd or bd.focusReminderEnabled == false then
+    if not bd or bd.focusReminderEnabled ~= true then
         HideFocusReminder(token); return
     end
     if not FocusReminderUnitMatches(token) then
@@ -3401,7 +3563,7 @@ local function RefreshFocusReminders()
     if not _focusKickInDungeon then return end
     if _focusKickIsHealer then return end
     local bd = GetFocusKickBarData()
-    if not bd or bd.focusReminderEnabled == false then return end
+    if not bd or bd.focusReminderEnabled ~= true then return end
     for i = 1, 40 do
         local token = "nameplate" .. i
         if UnitExists(token) then
@@ -3468,6 +3630,7 @@ local function EnsureFocusReminderProxy()
     return _focusReminderProxy
 end
 ns.EnsureFocusReminderProxy = EnsureFocusReminderProxy
+
 
 -- Ghost bars: ensure both buff and CD ghost bars exist in the bars array.
 -- Called from BuildAllCDMBars before iterating bars.
@@ -3870,6 +4033,13 @@ BuildAllCDMBars = function()
     -- depth for any other path that calls BuildAllCDMBars too early.
     if not ns.GetActiveSpecKey() then return end
 
+    -- Mark CDM as rebuilding so width/height match propagation gates off
+    -- (it would otherwise read transient bar widths sized for the previous
+    -- spec's icon count and bake them into _matchPhysWidth on dependent
+    -- bars). Cleared at the end of CollectAndReanchor when _pendingApplyOnReanchor
+    -- fires the authoritative ApplyAllWidthHeightMatches pass.
+    if EllesmereUI then EllesmereUI._cdmRebuilding = true end
+
     -- Ensure ghost bars exist before iterating bars
     EnsureGhostBars()
     EnsureFocusKickBar()
@@ -3932,9 +4102,14 @@ BuildAllCDMBars = function()
             ApplyCDMTooltipState(barData.key)
         end
     end
-    -- When hooks are active, queue a reanchor to repopulate default bars
+    -- When hooks are active, queue a reanchor to repopulate default bars.
+    -- The queued CollectAndReanchor will lift _cdmRebuilding when it
+    -- finishes; if no reanchor is queued (hooks not yet installed) we
+    -- must clear the flag here ourselves so width matching can run again.
     if hookActive and ns.QueueReanchor then
         ns.QueueReanchor()
+    else
+        if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
     end
     -- Re-apply saved positions now that LayoutCDMBar has set correct frame
     -- sizes. The initial BuildCDMBar call used stale dimensions for the
@@ -4357,104 +4532,34 @@ RegisterCDMUnlockElements = function()
                 end,
                 linkedDimensions = true,
                 setWidth = function(_, newW)
-                    -- Reverse-engineer iconSize from target width (physical pixels).
-                    -- Width-match writes width-axis extras and clears the height-axis
-                    -- extras (linkedDimensions = only one match active at a time).
+                    -- iconSize is derived live in LayoutCDMBar from the
+                    -- source bar's current width. setWidth just triggers a
+                    -- re-layout. Nothing is persisted -- no iconSize, no
+                    -- _matchPhysWidth, no cache. The source bar IS the truth.
+                    -- Wipe any legacy cache fields left over from previous
+                    -- versions so they can't poison anything.
                     local bd2 = barDataByKey[key]
                     if not bd2 then return end
-                    local onePx = EllesmereUI.PP.mult
-                    local count = CountCDMBarSpells(key)
-                    if count == 0 then return end
-                    local rows = bd2.numRows or 1
-                    if rows < 1 then rows = 1 end
-                    local stride = ComputeTopRowStride(bd2, count)
-                    local grow = bd2.growDirection or "CENTER"
-                    local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
-                    local sp = SnapForScale(bd2.spacing or 2, 1)
-                    -- Width-axis dim: how many icons span the WIDTH of the bar.
-                    -- Horizontal bar: width is determined by the top row's stride.
-                    -- Vertical bar: width is determined by the column count (numRows).
-                    local dim = isH and stride or rows
-                    -- Convert to physical pixels, solve for icon size
-                    local physTarget = math.floor(newW / onePx + 0.5)
-                    local physSp = math.floor(sp / onePx + 0.5)
-                    local rawPhysIcon = (physTarget - (dim - 1) * physSp) / dim
-                    if rawPhysIcon < 8 then rawPhysIcon = 8 end
-                    -- Floor so base icons fit within target; remainder becomes
-                    -- extra physical pixels distributed as +1px expanded icons.
-                    local basePhysIcon = math.floor(rawPhysIcon)
-                    -- Store physical pixel count directly to avoid floating point
-                    -- precision loss in the iconSize → PP.Scale roundtrip.
-                    bd2._matchIconPhys = basePhysIcon
-                    bd2.iconSize = basePhysIcon * onePx
+                    bd2._matchPhysWidth = nil
+                    bd2._matchPhysHeight = nil
+                    bd2._matchIconPhys = nil
                     bd2._matchStride = nil
-                    local idealPhys = dim * basePhysIcon + (dim - 1) * physSp
-                    local extra = physTarget - idealPhys
-                    if extra > 0 and extra <= dim then
-                        bd2._matchExtraPixels = extra
-                        bd2._matchStride = dim
-                    else
-                        bd2._matchExtraPixels = nil
-                        bd2._matchStride = nil
-                    end
-                    -- Clear height-axis extras (linkedDimensions blocks both)
+                    bd2._matchExtraPixels = nil
                     bd2._matchExtraPixelsH = nil
                     bd2._matchStrideH = nil
                     LayoutCDMBar(key)
                 end,
                 setHeight = function(_, newH)
-                    -- Reverse-engineer iconSize from target height (physical pixels).
-                    -- Mirrors setWidth's precise pixel math so vertical bars get the
-                    -- same pixel-perfect treatment as horizontal: cropped icons get
-                    -- iconH != iconW so the math accounts for the cropped ratio.
-                    -- Stores _matchIconPhys (base size) + _matchExtraPixelsH +
-                    -- _matchStrideH for the height-axis cache.
+                    -- See setWidth -- live-derive in LayoutCDMBar.
                     local bd2 = barDataByKey[key]
                     if not bd2 then return end
-                    local onePx = EllesmereUI.PP.mult
-                    local count = CountCDMBarSpells(key)
-                    if count == 0 then return end
-                    local rows = bd2.numRows or 1
-                    if rows < 1 then rows = 1 end
-                    local stride = ComputeTopRowStride(bd2, count)
-                    local grow = bd2.growDirection or "CENTER"
-                    local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
-                    local sp = SnapForScale(bd2.spacing or 2, 1)
-                    -- Height-axis dim: how many icons span the HEIGHT of the bar.
-                    -- Horizontal bar: height is determined by the row count (numRows).
-                    -- Vertical bar: height is determined by the icons stacked (stride).
-                    local dim = isH and rows or stride
-                    -- Cropped icons render at iconH = iconW * 0.80, so the underlying
-                    -- iconW must be larger than the visible iconH to fit the target.
-                    local shape = bd2.iconShape or "none"
-                    local cropFactor = (shape == "cropped") and 0.80 or 1.0
-                    -- Convert to physical pixels, solve for icon size
-                    local physTarget = math.floor(newH / onePx + 0.5)
-                    local physSp = math.floor(sp / onePx + 0.5)
-                    -- (physTarget - (dim-1)*physSp) is the total icon height in phys px.
-                    -- Divide by dim to get per-icon height, then divide by cropFactor
-                    -- to get the underlying iconW (= iconSize) in phys px.
-                    local rawPhysIcon = (physTarget - (dim - 1) * physSp) / dim / cropFactor
-                    if rawPhysIcon < 8 then rawPhysIcon = 8 end
-                    local basePhysIcon = math.floor(rawPhysIcon)
-                    bd2._matchIconPhys = basePhysIcon
-                    bd2.iconSize = basePhysIcon * onePx
-                    bd2._matchStrideH = nil
-                    -- Compute the actual rendered iconH in phys px (= base * cropFactor,
-                    -- floored to whole pixels) and the ideal total height.
-                    local basePhysIconH = math.floor(basePhysIcon * cropFactor)
-                    local idealPhys = dim * basePhysIconH + (dim - 1) * physSp
-                    local extra = physTarget - idealPhys
-                    if extra > 0 and extra <= dim then
-                        bd2._matchExtraPixelsH = extra
-                        bd2._matchStrideH = dim
-                    else
-                        bd2._matchExtraPixelsH = nil
-                        bd2._matchStrideH = nil
-                    end
-                    -- Clear width-axis extras (linkedDimensions blocks both)
-                    bd2._matchExtraPixels = nil
+                    bd2._matchPhysWidth = nil
+                    bd2._matchPhysHeight = nil
+                    bd2._matchIconPhys = nil
                     bd2._matchStride = nil
+                    bd2._matchExtraPixels = nil
+                    bd2._matchExtraPixelsH = nil
+                    bd2._matchStrideH = nil
                     LayoutCDMBar(key)
                 end,
                 savePos = function(_, point, relPoint, x, y)
@@ -5027,6 +5132,15 @@ function ECME:CDMFinishSetup()
     -- FocusKick: install Focus Reminder text proxy + initial pass
     EnsureFocusReminderProxy()
     RefreshFocusReminders()
+    -- FocusKick: install focus cast sound proxy + append SharedMedia sounds
+    EnsureFocusCastProxy()
+    if EllesmereUI.AppendSharedMediaSounds then
+        EllesmereUI.AppendSharedMediaSounds(
+            FOCUSKICK_SOUND_PATHS,
+            FOCUSKICK_SOUND_NAMES,
+            FOCUSKICK_SOUND_ORDER
+        )
+    end
 
     -- One-time vehicle/petbattle proxy. Drives _CDMApplyVisibility on state
     -- change so CDM bars hide while the vehicle UI or pet battle UI is active.

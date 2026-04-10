@@ -1290,24 +1290,56 @@ function MatchH.BreakMatchCycles(db)
     end
 end
 
+-- Apply every entry in a width/height match DB in dependency order
+-- (roots first, then their children, then grandchildren). This is
+-- required for chains like A -> B -> C: if C is processed before B,
+-- C reads B's stale width and ends up wrong even if B updates after.
+-- BreakMatchCycles runs before this, so the graph is guaranteed acyclic;
+-- the visited guard is defensive belt-and-suspenders.
+local function ApplyMatchesInDependencyOrder(db, applyFn)
+    if not db then return end
+    local depth = {}
+    local function GetDepth(k, visiting)
+        if depth[k] ~= nil then return depth[k] end
+        if visiting[k] then return 0 end
+        visiting[k] = true
+        local target = db[k]
+        if target and db[target] then
+            depth[k] = 1 + GetDepth(target, visiting)
+        else
+            depth[k] = 0
+        end
+        visiting[k] = nil
+        return depth[k]
+    end
+    local order = {}
+    for childKey in pairs(db) do
+        GetDepth(childKey, {})
+        order[#order + 1] = childKey
+    end
+    table.sort(order, function(a, b) return depth[a] < depth[b] end)
+    for _, childKey in ipairs(order) do
+        applyFn(childKey, db[childKey])
+    end
+end
+
 local function ApplyAllWidthHeightMatches()
+    -- Skip while CDM is mid-rebuild. CDM bars set this flag during their
+    -- own rebuild flow (login, spec swap, talent reconcile, etc.) and clear
+    -- it after CollectAndReanchor finishes populating cdmBarIcons. Width
+    -- matching that fires inside this window would read STALE bar widths
+    -- (sized for the previous spec's icon count) and propagate them as
+    -- the new target width. CDM itself fires ApplyAllWidthHeightMatches
+    -- at the end of its rebuild via _pendingApplyOnReanchor, so skipping
+    -- here is safe -- the right pass runs immediately after.
+    if EllesmereUI._cdmRebuilding then return end
     -- Break any circular chains from old data before applying
     MatchH.BreakMatchCycles(MatchH.GetWidthMatchDB())
     MatchH.BreakMatchCycles(MatchH.GetHeightMatchDB())
-    -- Width matches
-    local wdb = MatchH.GetWidthMatchDB()
-    if wdb then
-        for childKey, targetKey in pairs(wdb) do
-            MatchH.ApplyWidthMatch(childKey, targetKey)
-        end
-    end
-    -- Height matches
-    local hdb = MatchH.GetHeightMatchDB()
-    if hdb then
-        for childKey, targetKey in pairs(hdb) do
-            MatchH.ApplyHeightMatch(childKey, targetKey)
-        end
-    end
+    -- Width matches (dependency-sorted: roots first)
+    ApplyMatchesInDependencyOrder(MatchH.GetWidthMatchDB(), MatchH.ApplyWidthMatch)
+    -- Height matches (dependency-sorted)
+    ApplyMatchesInDependencyOrder(MatchH.GetHeightMatchDB(), MatchH.ApplyHeightMatch)
 end
 
 -------------------------------------------------------------------------------

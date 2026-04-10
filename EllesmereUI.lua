@@ -2073,6 +2073,40 @@ function EllesmereUI.AppendSharedMediaTextures(names, order, castBarNames, textu
 end
 
 -------------------------------------------------------------------------------
+--  Append LibSharedMedia-3.0 sounds into a runtime sound dropdown table.
+--  Signature: AppendSharedMediaSounds(paths, names, order)
+--    paths   – key → sound file path table
+--    names   – key → display name string table
+--    order   – ordered array of keys (receives "---" + SM keys appended)
+--  Safe to call multiple times; duplicate keys are skipped via the paths
+--  table guard.
+-------------------------------------------------------------------------------
+function EllesmereUI.AppendSharedMediaSounds(paths, names, order)
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if not LSM then return end
+    local smSounds = LSM:HashTable("sound")
+    if not smSounds then return end
+
+    local sorted = {}
+    for name in pairs(smSounds) do
+        local key = "sm:" .. name
+        if not paths[key] then
+            sorted[#sorted + 1] = name
+        end
+    end
+    if #sorted == 0 then return end
+    table.sort(sorted)
+
+    order[#order + 1] = "---"
+    for _, name in ipairs(sorted) do
+        local key = "sm:" .. name
+        paths[key] = smSounds[name]
+        names[key] = name
+        order[#order + 1] = key
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Append LibSharedMedia-3.0 fonts into a runtime font dropdown table.
 --  Signature: AppendSharedMediaFonts(values, order, opts)
 --    values  – key → { text, font } table (or key → path when keyByName=true)
@@ -6165,7 +6199,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.4.6"
+EllesmereUI.VERSION = "6.4.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

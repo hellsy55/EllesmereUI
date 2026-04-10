@@ -11,9 +11,9 @@ local function GetNPOptOutline() return EllesmereUI.GetFontOutlineFlag and Elles
 -------------------------------------------------------------------------------
 --  Page / section names
 -------------------------------------------------------------------------------
-local PAGE_GENERAL  = "General"
-local PAGE_DISPLAY  = "Display"
-local PAGE_COLORS   = "Colors"
+local PAGE_GENERAL   = "General"
+local PAGE_DISPLAY   = "Display"
+local PAGE_COLORS    = "Colors"
 
 local SECTION_FRIENDLY  = "OTHER NAMEPLATES"
 local SECTION_ENEMY_NP  = "ENEMY NAMEPLATE SPACING"
