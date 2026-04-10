@@ -199,6 +199,7 @@ end
 -------------------------------------------------------------------------------
 local _blizzHiddenParent
 local _blizzOrigScenarioParent
+local _blizzOrigObjectiveTrackerParent
 
 local function SuppressBlizzardMPlus()
     if not db or not db.profile.enabled then return end
@@ -214,12 +215,23 @@ local function SuppressBlizzardMPlus()
         _blizzOrigScenarioParent = sbf:GetParent()
         sbf:SetParent(_blizzHiddenParent)
     end
+
+    local otf = _G.ObjectiveTrackerFrame
+    if otf and otf:GetParent() ~= _blizzHiddenParent then
+        _blizzOrigObjectiveTrackerParent = otf:GetParent()
+        otf:SetParent(_blizzHiddenParent)
+    end
 end
 
 local function UnsuppressBlizzardMPlus()
     local sbf = _G.ScenarioBlocksFrame
     if sbf and _blizzOrigScenarioParent and sbf:GetParent() == _blizzHiddenParent then
         sbf:SetParent(_blizzOrigScenarioParent)
+    end
+
+    local otf = _G.ObjectiveTrackerFrame
+    if otf and _blizzOrigObjectiveTrackerParent and otf:GetParent() == _blizzHiddenParent then
+        otf:SetParent(_blizzOrigObjectiveTrackerParent)
     end
 end
 
@@ -324,7 +336,6 @@ end
 -------------------------------------------------------------------------------
 local standaloneFrame       -- main container
 local standaloneCreated = false
-
 -- Font/color helpers (mirrors QT approach but self-contained)
 local FALLBACK_FONT = "Fonts/FRIZQT__.TTF"
 local function SFont()
@@ -1143,4 +1154,3 @@ function EMT:OnEnable()
         })
     end
 end
-
