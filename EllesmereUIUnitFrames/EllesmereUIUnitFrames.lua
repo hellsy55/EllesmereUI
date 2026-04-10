@@ -1511,12 +1511,26 @@ local function ApplyFramePosition(frame, unit)
     if not frame or not db.profile.positions[unit] then return end
     local pos = db.profile.positions[unit]
     local x, y = pos.x, pos.y
-    -- Snap to physical pixel grid so positions are deterministic across reloads
+    -- Snap to physical pixel grid so positions are deterministic across reloads.
+    -- For CENTER-anchored frames, use SnapCenterForDim with the frame's actual
+    -- width/height: this preserves the +0.5 center offset that odd-pixel-dim
+    -- frames need so their edges land on whole pixels (plain SnapForES rounds
+    -- the center to whole pixels and forces edges to half pixels, causing
+    -- 1px drift on save & exit / spec swap / profile change).
     local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and PPa.SnapForES and x and y then
+    if PPa and x and y then
         local es = frame:GetEffectiveScale()
-        x = PPa.SnapForES(x, es)
-        y = PPa.SnapForES(y, es)
+        local isCenterAnchor = (pos.point == "CENTER" or pos.point == nil)
+            and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+        if isCenterAnchor and PPa.SnapCenterForDim then
+            local fw = frame:GetWidth() or 0
+            local fh = frame:GetHeight() or 0
+            x = PPa.SnapCenterForDim(x, fw, es)
+            y = PPa.SnapCenterForDim(y, fh, es)
+        elseif PPa.SnapForES then
+            x = PPa.SnapForES(x, es)
+            y = PPa.SnapForES(y, es)
+        end
     end
     frame:ClearAllPoints()
     frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, x, y)
@@ -7159,19 +7173,31 @@ function SetupOptionsPanel()
                     local pt = pos.point
                     local rpt = pos.relPoint or pt
                     local px, py = pos.x, pos.y
-                    -- Snap to physical pixel grid
                     local PPa = EllesmereUI and EllesmereUI.PP
+                    -- Helper: snap (x, y) for a frame using SnapCenterForDim for
+                    -- CENTER anchors and SnapForES otherwise. CENTER snap needs
+                    -- the frame's actual size to handle odd-pixel-dim frames
+                    -- correctly (cy must be integer + 0.5 for odd heights).
+                    local function SnapForFrame(fr, x, y)
+                        if not PPa or not fr or not x or not y then return x, y end
+                        local es = fr:GetEffectiveScale()
+                        local isCenterAnchor = (pt == "CENTER")
+                            and (rpt == "CENTER")
+                        if isCenterAnchor and PPa.SnapCenterForDim then
+                            return PPa.SnapCenterForDim(x, fr:GetWidth() or 0, es),
+                                   PPa.SnapCenterForDim(y, fr:GetHeight() or 0, es)
+                        elseif PPa.SnapForES then
+                            return PPa.SnapForES(x, es), PPa.SnapForES(y, es)
+                        end
+                        return x, y
+                    end
                     -- Castbar elements: reposition the castbarBg
                     if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
                         local cbUnit = k:gsub("Castbar", "")
                         if frames[cbUnit] and frames[cbUnit].Castbar then
                             local cbBg = frames[cbUnit].Castbar:GetParent()
                             if cbBg then
-                                if PPa and PPa.SnapForES and px and py then
-                                    local es = cbBg:GetEffectiveScale()
-                                    px = PPa.SnapForES(px, es)
-                                    py = PPa.SnapForES(py, es)
-                                end
+                                px, py = SnapForFrame(cbBg, px, py)
                                 cbBg:ClearAllPoints()
                                 cbBg:SetPoint(pt, UIParent, rpt, px, py)
                             end
@@ -7182,33 +7208,21 @@ function SetupOptionsPanel()
                             local bf = frames["boss" .. i]
                             if bf then
                                 local bx, by = pos.x, pos.y - ((i - 1) * spacing)
-                                if PPa and PPa.SnapForES and bx and by then
-                                    local es = bf:GetEffectiveScale()
-                                    bx = PPa.SnapForES(bx, es)
-                                    by = PPa.SnapForES(by, es)
-                                end
+                                bx, by = SnapForFrame(bf, bx, by)
                                 bf:ClearAllPoints()
                                 bf:SetPoint(pt, UIParent, rpt, bx, by)
                             end
                         end
                     elseif k == "classPower" then
                         if frames._classPowerBar then
-                            if PPa and PPa.SnapForES and px and py then
-                                local es = frames._classPowerBar:GetEffectiveScale()
-                                px = PPa.SnapForES(px, es)
-                                py = PPa.SnapForES(py, es)
-                            end
+                            px, py = SnapForFrame(frames._classPowerBar, px, py)
                             frames._classPowerBar:ClearAllPoints()
                             frames._classPowerBar:SetPoint(pt, UIParent, rpt, px, py)
                         end
                     else
                         local fr = frames[k]
                         if fr then
-                            if PPa and PPa.SnapForES and px and py then
-                                local es = fr:GetEffectiveScale()
-                                px = PPa.SnapForES(px, es)
-                                py = PPa.SnapForES(py, es)
-                            end
+                            px, py = SnapForFrame(fr, px, py)
                             fr:ClearAllPoints()
                             fr:SetPoint(pt, UIParent, rpt, px, py)
                         end

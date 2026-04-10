@@ -2145,10 +2145,17 @@ local function ApplyMinimap()
         if p.position then
             local px, py = p.position.x, p.position.y
             local PPa = EllesmereUI and EllesmereUI.PP
-            if PPa and PPa.SnapForES and px and py then
+            if PPa and px and py then
                 local es = minimap:GetEffectiveScale()
-                px = PPa.SnapForES(px, es)
-                py = PPa.SnapForES(py, es)
+                local isCenterAnchor = (p.position.point == "CENTER")
+                    and (p.position.relPoint == "CENTER" or p.position.relPoint == nil)
+                if isCenterAnchor and PPa.SnapCenterForDim then
+                    px = PPa.SnapCenterForDim(px, minimap:GetWidth() or 0, es)
+                    py = PPa.SnapCenterForDim(py, minimap:GetHeight() or 0, es)
+                elseif PPa.SnapForES then
+                    px = PPa.SnapForES(px, es)
+                    py = PPa.SnapForES(py, es)
+                end
             end
             minimap:SetPoint(p.position.point, UIParent, p.position.relPoint, px, py)
         else
@@ -3651,10 +3658,17 @@ local function SkinFriendsFrame()
             if pos then
                 local px, py = pos.x, pos.y
                 local PPa = EllesmereUI and EllesmereUI.PP
-                if PPa and PPa.SnapForES and px and py then
+                if PPa and px and py then
                     local es = frame:GetEffectiveScale()
-                    px = PPa.SnapForES(px, es)
-                    py = PPa.SnapForES(py, es)
+                    local isCenterAnchor = (pos.point == "CENTER")
+                        and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+                    if isCenterAnchor and PPa.SnapCenterForDim then
+                        px = PPa.SnapCenterForDim(px, frame:GetWidth() or 0, es)
+                        py = PPa.SnapCenterForDim(py, frame:GetHeight() or 0, es)
+                    elseif PPa.SnapForES then
+                        px = PPa.SnapForES(px, es)
+                        py = PPa.SnapForES(py, es)
+                    end
                 end
                 frame:ClearAllPoints()
                 frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
@@ -3721,10 +3735,17 @@ local function SkinFriendsFrame()
             _ebsIgnoreSetPoint = true
             local px, py = pos.x, pos.y
             local PPa = EllesmereUI and EllesmereUI.PP
-            if PPa and PPa.SnapForES and px and py then
+            if PPa and px and py then
                 local es = frame:GetEffectiveScale()
-                px = PPa.SnapForES(px, es)
-                py = PPa.SnapForES(py, es)
+                local isCenterAnchor = (pos.point == "CENTER")
+                    and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+                if isCenterAnchor and PPa.SnapCenterForDim then
+                    px = PPa.SnapCenterForDim(px, frame:GetWidth() or 0, es)
+                    py = PPa.SnapCenterForDim(py, frame:GetHeight() or 0, es)
+                elseif PPa.SnapForES then
+                    px = PPa.SnapForES(px, es)
+                    py = PPa.SnapForES(py, es)
+                end
             end
             frame:ClearAllPoints()
             frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)

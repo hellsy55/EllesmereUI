@@ -692,6 +692,37 @@ do
     end
 
     ---------------------------------------------------------------------------
+    --  SnapCenterForDim(value, dim, effectiveScale)
+    --
+    --  Snap a CENTER coordinate so that both edges of a frame with the given
+    --  dimension land on physical pixel boundaries. For frames with an EVEN
+    --  pixel dimension, the center must land on a whole pixel. For frames
+    --  with an ODD pixel dimension, the center must land on a half pixel
+    --  (integer + 0.5) so that center +/- dim/2 are both whole pixels.
+    --
+    --  This is the correct snap function for CENTER-anchored frames stored
+    --  in CENTER/CENTER coordinate format. Plain SnapForES rounds to whole
+    --  pixels, which loses the necessary +0.5 for odd-dimension frames and
+    --  causes a 1px drift on save & exit / profile change / spec swap.
+    ---------------------------------------------------------------------------
+    function PP.SnapCenterForDim(value, dim, es)
+        if value == nil then return value end
+        es = es or (UIParent and UIParent:GetEffectiveScale() or 1)
+        local onePixel = PP.perfect / es
+        local valuePx = value / onePixel
+        if dim and dim > 0 then
+            local dimPx = math.floor(dim / onePixel + 0.5)
+            if dimPx % 2 == 1 then
+                -- Odd dimension: snap center to nearest half-pixel grid point
+                -- (integer + 0.5) so edges land on whole pixels.
+                return (math.floor(valuePx) + 0.5) * onePixel
+            end
+        end
+        -- Even dimension (or unknown): snap center to nearest whole pixel.
+        return math.floor(valuePx + 0.5) * onePixel
+    end
+
+    ---------------------------------------------------------------------------
     --  Convenience wrappers — pixel-snapped frame geometry
     ---------------------------------------------------------------------------
     function PP.Size(frame, w, h)
@@ -6134,7 +6165,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.4.5"
+EllesmereUI.VERSION = "6.4.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

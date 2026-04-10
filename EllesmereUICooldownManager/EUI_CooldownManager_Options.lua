@@ -7326,6 +7326,10 @@ initFrame:SetScript("OnEvent", function(self)
 
         local isDefault = (barData.key == "cooldowns" or barData.key == "utility" or barData.key == "buffs")
         local isBuffBar = ns.IsBarBuffFamily(barData)
+        -- FocusKick is the special nameplate-anchored bar. Most options panel
+        -- sections are hidden for it; only Icon Display + a custom Nameplate
+        -- Anchor row are shown.
+        local isFocusKick = (barData.key == "focuskick")
 
         -------------------------------------------------------------------
         --  CONTENT HEADER  (dropdown + live preview)
@@ -7412,7 +7416,10 @@ initFrame:SetScript("OnEvent", function(self)
                     if b.isGhostBar then
                         -- skip ghost bar in dropdown
                     else
-                    local isCustom = (b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs")
+                    -- FocusKick is treated as a built-in: cannot be deleted
+                    -- or renamed even though its barType is "cooldowns".
+                    local isFocusKick = (b.key == "focuskick")
+                    local isCustom = (b.key ~= "cooldowns" and b.key ~= "utility" and b.key ~= "buffs" and not isFocusKick)
                     local item = CreateFrame("Button", nil, menu)
                     item:SetHeight(ITEM_H)
                     item:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, -mH)
@@ -7721,29 +7728,32 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  BAR LAYOUT
         -------------------------------------------------------------------
-        -- Sync helpers: different exclusion levels
-        -- General: all bars except ghost
+        -- Sync helpers: different exclusion levels.
+        -- FocusKick is excluded from every sync iterator -- it has its own
+        -- nameplate-anchored identity that should never receive global syncs.
+        -- General: all bars except ghost / focuskick
         local function ForEachSyncBar(fn)
             local pp = DB(); if not pp or not pp.cdmBars then return end
             for _, b in ipairs(pp.cdmBars.bars) do
-                if not b.isGhostBar then fn(b) end
+                if not b.isGhostBar and b.key ~= "focuskick" then fn(b) end
             end
         end
-        -- Pandemic: exclude ghost + custom_buff
+        -- Pandemic: exclude ghost + custom_buff + focuskick
         local function ForEachPandemicSyncBar(fn)
             local pp = DB(); if not pp or not pp.cdmBars then return end
             for _, b in ipairs(pp.cdmBars.bars) do
-                if not b.isGhostBar and b.barType ~= "custom_buff" then fn(b) end
+                if not b.isGhostBar and b.barType ~= "custom_buff" and b.key ~= "focuskick" then fn(b) end
             end
         end
-        -- Extras: exclude ghost + buffs + custom_buff
+        -- Extras: exclude ghost + buffs + custom_buff + focuskick
         local function ForEachExtrasSyncBar(fn)
             local pp = DB(); if not pp or not pp.cdmBars then return end
             for _, b in ipairs(pp.cdmBars.bars) do
-                if not b.isGhostBar and b.barType ~= "buffs" and b.key ~= "buffs" and b.barType ~= "custom_buff" then fn(b) end
+                if not b.isGhostBar and b.barType ~= "buffs" and b.key ~= "buffs" and b.barType ~= "custom_buff" and b.key ~= "focuskick" then fn(b) end
             end
         end
 
+        if not isFocusKick then
         _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
 
         -- Row 1: (Sync) Visibility | Visibility Options (checkbox dropdown)
@@ -7856,8 +7866,16 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Vertical Orientation",
               getValue=function() return BD().verticalOrientation end,
               setValue=function(v)
-                  BD().verticalOrientation = v
-                  BD().growDirection = v and "DOWN" or "RIGHT"
+                  local bd = BD()
+                  bd.verticalOrientation = v
+                  bd.growDirection = v and "DOWN" or "RIGHT"
+                  -- Orientation flip swaps the meaning of width-axis vs
+                  -- height-axis, so width/height match caches no longer apply.
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
@@ -7900,8 +7918,16 @@ initFrame:SetScript("OnEvent", function(self)
               min=1, max=6, step=1,
               getValue=function() return BD().numRows or 1 end,
               setValue=function(v)
-                  BD().numRows = v
-                  if v ~= 2 then BD().topRowCount = nil; BD().customTopRowEnabled = nil end
+                  local bd = BD()
+                  bd.numRows = v
+                  if v ~= 2 then bd.topRowCount = nil; bd.customTopRowEnabled = nil end
+                  -- numRows change invalidates cached match dims (rows is one
+                  -- of the inputs to the matched-axis dim calculation).
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   EllesmereUI:RefreshPage()
               end },
@@ -7968,8 +7994,194 @@ initFrame:SetScript("OnEvent", function(self)
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
             -- Hide Buffs When Inactive toggle removed: always forced ON.
         end
+        end -- not isFocusKick (Bar Layout section)
 
-        _, h = W:Spacer(parent, y, 8);  y = y - h
+        -------------------------------------------------------------------
+        --  FOCUSKICK OPTIONS (FocusKick only)
+        -------------------------------------------------------------------
+        if isFocusKick then
+            _, h = W:SectionHeader(parent, "FocusKick Options", y);  y = y - h
+
+            local NP_SIDE_VALUES = { LEFT = "Left", RIGHT = "Right", TOP = "Top", BOTTOM = "Bottom" }
+            local NP_SIDE_ORDER  = { "LEFT", "RIGHT", "TOP", "BOTTOM" }
+
+            -- Row 1: Nameplate Anchor (left) | Focus Reminders (right)
+            local npRow
+            npRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Nameplate Anchor",
+                  values = NP_SIDE_VALUES, order = NP_SIDE_ORDER,
+                  getValue = function() return BD().nameplateAnchorSide or "LEFT" end,
+                  setValue = function(v)
+                      BD().nameplateAnchorSide = v
+                      if ns.ApplyFocusKickAnchor then ns.ApplyFocusKickAnchor() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="toggle", text="Focus Reminders",
+                  getValue = function()
+                      local bd = BD()
+                      if bd.focusReminderEnabled == nil then return true end
+                      return bd.focusReminderEnabled
+                  end,
+                  setValue = function(v)
+                      BD().focusReminderEnabled = v
+                      if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                      EllesmereUI:RefreshPage()
+                  end });  y = y - h
+
+            -- Inline cog for Nameplate Offset (left)
+            do
+                local _, npCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Nameplate Offset",
+                    rows = {
+                        { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                          get = function() return BD().nameplateOffsetX or 0 end,
+                          set = function(v)
+                              BD().nameplateOffsetX = v
+                              if ns.ApplyFocusKickAnchor then ns.ApplyFocusKickAnchor() end
+                          end },
+                        { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                          get = function() return BD().nameplateOffsetY or 0 end,
+                          set = function(v)
+                              BD().nameplateOffsetY = v
+                              if ns.ApplyFocusKickAnchor then ns.ApplyFocusKickAnchor() end
+                          end },
+                    },
+                })
+                local rgn = npRow._leftRegion
+                MakeCogBtn(rgn, npCogShow, rgn._control, EllesmereUI.RESIZE_ICON)
+            end
+
+            -- Inline dual swatch + cog for Focus Reminders (right region).
+            -- Layout right-to-left along the row's right region:
+            --   [control] [accent swatch] [custom swatch] [cog]
+            -- Accent swatch (closest to control) is the active mode by
+            -- default; custom swatch dims and blocks while accent is on.
+            do
+                local rgn = npRow._rightRegion
+                local ctrl = rgn and rgn._control
+
+                -- Right (accent) swatch: one-click activation, displays live ELLESMERE_GREEN
+                local accentSwatch, updateAccentSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, npRow:GetFrameLevel() + 3,
+                    function()
+                        local eg = EllesmereUI.ELLESMERE_GREEN
+                        if eg then return eg.r, eg.g, eg.b end
+                        return 0.047, 0.824, 0.624
+                    end,
+                    function() end,  -- read-only display, no picker
+                    false, 20)
+                PP.Point(accentSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                accentSwatch:SetScript("OnClick", function()
+                    BD().focusReminderUseAccent = true
+                    if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                    EllesmereUI:RefreshPage()
+                end)
+                accentSwatch:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
+                end)
+                accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                -- Left (custom) swatch: color picker when accent mode is off
+                local customSwatch, updateCustomSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, npRow:GetFrameLevel() + 3,
+                    function()
+                        local bd = BD()
+                        return bd.focusReminderR or 1, bd.focusReminderG or 1, bd.focusReminderB or 1
+                    end,
+                    function(r, g, b)
+                        BD().focusReminderR, BD().focusReminderG, BD().focusReminderB = r, g, b
+                        BD().focusReminderUseAccent = false
+                        if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                    end,
+                    false, 20)
+                PP.Point(customSwatch, "RIGHT", accentSwatch, "LEFT", -8, 0)
+                customSwatch:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
+                end)
+                customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                -- Block overlay: while accent mode is active, clicking the
+                -- custom swatch flips accent mode off instead of opening the
+                -- color picker.
+                local customBlock = CreateFrame("Button", nil, customSwatch)
+                customBlock:SetAllPoints()
+                customBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 10)
+                customBlock:EnableMouse(true)
+                customBlock:SetScript("OnClick", function()
+                    if BD().focusReminderUseAccent then
+                        BD().focusReminderUseAccent = false
+                        if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                        EllesmereUI:RefreshPage()
+                    end
+                end)
+                customBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
+                end)
+                customBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local _, frCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Focus Reminder Settings",
+                    rows = {
+                        { type = "slider", label = "Text Size", min = 8, max = 50, step = 1,
+                          get = function() return BD().focusReminderSize or 26 end,
+                          set = function(v)
+                              BD().focusReminderSize = v
+                              if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                          end },
+                        { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                          get = function() return BD().focusReminderOffsetX or 0 end,
+                          set = function(v)
+                              BD().focusReminderOffsetX = v
+                              if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                          end },
+                        { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                          get = function() return BD().focusReminderOffsetY or 0 end,
+                          set = function(v)
+                              BD().focusReminderOffsetY = v
+                              if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
+                          end },
+                    },
+                })
+                MakeCogBtn(rgn, frCogShow, customSwatch, EllesmereUI.RESIZE_ICON)
+
+                -- Disable both swatches + cog when Focus Reminders toggle is off
+                local enableBlock = CreateFrame("Frame", nil, customSwatch)
+                enableBlock:SetAllPoints()
+                enableBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 20)
+                enableBlock:EnableMouse(true)
+                enableBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Enable Focus Reminders"))
+                end)
+                enableBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local function UpdateFRSwatchState()
+                    local bd = BD()
+                    local on = (bd.focusReminderEnabled == nil) or (bd.focusReminderEnabled == true)
+                    if not on then
+                        accentSwatch:SetAlpha(0.3); customSwatch:SetAlpha(0.3)
+                        customBlock:Hide(); enableBlock:Show()
+                    else
+                        enableBlock:Hide()
+                        local useAccent = bd.focusReminderUseAccent
+                        if useAccent then
+                            accentSwatch:SetAlpha(1)
+                            customSwatch:SetAlpha(0.3); customBlock:Show()
+                        else
+                            accentSwatch:SetAlpha(0.3)
+                            customSwatch:SetAlpha(1); customBlock:Hide()
+                        end
+                    end
+                end
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    updateAccentSwatch(); updateCustomSwatch(); UpdateFRSwatchState()
+                end)
+                UpdateFRSwatchState()
+            end
+
+            _, h = W:Spacer(parent, y, 8);  y = y - h
+        else
+            _, h = W:Spacer(parent, y, 8);  y = y - h
+        end
 
         -------------------------------------------------------------------
         --  ICON DISPLAY
@@ -8033,7 +8245,17 @@ initFrame:SetScript("OnEvent", function(self)
                   min=16, max=80, step=1,
                   getValue=function() return BD().iconSize or 36 end,
                   setValue=function(v)
-                      BD().iconSize = v
+                      local bd = BD()
+                      bd.iconSize = v
+                      -- Manual iconSize override -- clear width/height match
+                      -- caches so the new value takes effect (LayoutCDMBar
+                      -- otherwise uses _matchIconPhys cached from a prior
+                      -- width/height match, ignoring the new iconSize).
+                      bd._matchIconPhys = nil
+                      bd._matchExtraPixels = nil
+                      bd._matchStride = nil
+                      bd._matchExtraPixelsH = nil
+                      bd._matchStrideH = nil
                       ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   end },
                 { type="dropdown", text="Buff Glow",
@@ -8130,7 +8352,14 @@ initFrame:SetScript("OnEvent", function(self)
                   min=-10, max=20, step=1,
                   getValue=function() return BD().spacing or 2 end,
                   setValue=function(v)
-                      BD().spacing = v
+                      local bd = BD()
+                      bd.spacing = v
+                      -- Spacing change invalidates the width/height match cache.
+                      bd._matchIconPhys = nil
+                      bd._matchExtraPixels = nil
+                      bd._matchStride = nil
+                      bd._matchExtraPixelsH = nil
+                      bd._matchStrideH = nil
                       ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   end },
                 { type="slider", text="Icon Zoom",
@@ -8147,14 +8376,32 @@ initFrame:SetScript("OnEvent", function(self)
               min=16, max=80, step=1,
               getValue=function() return BD().iconSize or 36 end,
               setValue=function(v)
-                  BD().iconSize = v
+                  local bd = BD()
+                  bd.iconSize = v
+                  -- Manual iconSize override -- clear width/height match
+                  -- caches so the new value takes effect.
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end },
             { type="slider", text="Icon Spacing",
               min=-10, max=20, step=1,
               getValue=function() return BD().spacing or 2 end,
               setValue=function(v)
-                  BD().spacing = v
+                  local bd = BD()
+                  bd.spacing = v
+                  -- Spacing change invalidates the width/height match cache
+                  -- because the cached _matchIconPhys was computed against
+                  -- the old spacing -- new spacing means the icons no longer
+                  -- fit the matched bar dimension.
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end });  y = y - h
 
@@ -8170,7 +8417,15 @@ initFrame:SetScript("OnEvent", function(self)
             end,
             onClick = function()
                 local v = BD().spacing or 2
-                ForEachSyncBar(function(b) b.spacing = v end)
+                ForEachSyncBar(function(b)
+                    b.spacing = v
+                    -- Spacing change invalidates each bar's match cache.
+                    b._matchIconPhys = nil
+                    b._matchExtraPixels = nil
+                    b._matchStride = nil
+                    b._matchExtraPixelsH = nil
+                    b._matchStrideH = nil
+                end)
                 ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
             end,
         })
@@ -8307,6 +8562,14 @@ initFrame:SetScript("OnEvent", function(self)
                   else
                       bd.borderThickness = "thin"; bd.borderSize = BORDER_SIZES["thin"]
                   end
+                  -- Shape change affects iconH (cropped vs square), so any
+                  -- height-axis match cache computed against the old crop
+                  -- factor is now invalid. Clear all match caches to be safe.
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
               end },
             { type="slider", text="Icon Zoom",
@@ -8339,6 +8602,12 @@ initFrame:SetScript("OnEvent", function(self)
                         local isCS = (v ~= "none" and v ~= "cropped")
                         if isCS then b.borderThickness = "strong"; b.borderSize = BORDER_SIZES["strong"]
                         else b.borderThickness = "thin"; b.borderSize = BORDER_SIZES["thin"] end
+                        -- Shape change invalidates each bar's match cache.
+                        b._matchIconPhys = nil
+                        b._matchExtraPixels = nil
+                        b._matchStride = nil
+                        b._matchExtraPixelsH = nil
+                        b._matchStrideH = nil
                     end)
                     ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
                 end,
@@ -8477,11 +8746,11 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 8);  y = y - h
 
         -------------------------------------------------------------------
-        --  EXTRAS (not shown for custom aura bars)
+        --  EXTRAS (not shown for custom aura bars or FocusKick)
         -------------------------------------------------------------------
         local isCustomBuffBar = (barData.barType == "custom_buff")
         local isAnyBuffBar = isBuffGlowBar  -- buffs or custom_buff
-        if not isCustomBuffBar then
+        if not isCustomBuffBar and not isFocusKick then
         _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
 
         -- Show Tooltip | Show Keybind (not for buff bars)

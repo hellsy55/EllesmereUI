@@ -1685,6 +1685,22 @@ local function CollectAndReanchor()
     end
 
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+
+    -- Authoritative final layout pass. Set by CDMFinishSetup (login) and
+    -- ProcessSpecChange (spec swap). Now that icons are populated and bar
+    -- sizes are correct, propagate width/height matches with valid source
+    -- sizes, then apply saved positions so anchored elements latch onto
+    -- their now-positioned targets. Cleared so subsequent reanchors don't
+    -- redundantly run the layout pass.
+    if ns._pendingApplyOnReanchor then
+        ns._pendingApplyOnReanchor = nil
+        if EllesmereUI.ApplyAllWidthHeightMatches then
+            EllesmereUI.ApplyAllWidthHeightMatches()
+        end
+        if EllesmereUI._applySavedPositions then
+            EllesmereUI._applySavedPositions()
+        end
+    end
 end
 ns.CollectAndReanchor = CollectAndReanchor
 

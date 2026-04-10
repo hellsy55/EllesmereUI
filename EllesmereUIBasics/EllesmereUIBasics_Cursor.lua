@@ -990,10 +990,17 @@ _G._ECL_ApplyGCDPosition = function()
     if pos and pos.point then
         local px, py = pos.x or 0, pos.y or 0
         local PPa = EllesmereUI and EllesmereUI.PP
-        if PPa and PPa.SnapForES then
+        if PPa then
             local es = gcdRoot:GetEffectiveScale()
-            px = PPa.SnapForES(px, es)
-            py = PPa.SnapForES(py, es)
+            local isCenterAnchor = (pos.point == "CENTER")
+                and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+            if isCenterAnchor and PPa.SnapCenterForDim then
+                px = PPa.SnapCenterForDim(px, gcdRoot:GetWidth() or 0, es)
+                py = PPa.SnapCenterForDim(py, gcdRoot:GetHeight() or 0, es)
+            elseif PPa.SnapForES then
+                px = PPa.SnapForES(px, es)
+                py = PPa.SnapForES(py, es)
+            end
         end
         gcdRoot:ClearAllPoints()
         gcdRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
@@ -1014,10 +1021,17 @@ _G._ECL_ApplyCastPosition = function()
     if pos and pos.point then
         local px, py = pos.x or 0, pos.y or 0
         local PPa = EllesmereUI and EllesmereUI.PP
-        if PPa and PPa.SnapForES then
+        if PPa then
             local es = castRoot:GetEffectiveScale()
-            px = PPa.SnapForES(px, es)
-            py = PPa.SnapForES(py, es)
+            local isCenterAnchor = (pos.point == "CENTER")
+                and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+            if isCenterAnchor and PPa.SnapCenterForDim then
+                px = PPa.SnapCenterForDim(px, castRoot:GetWidth() or 0, es)
+                py = PPa.SnapCenterForDim(py, castRoot:GetHeight() or 0, es)
+            elseif PPa.SnapForES then
+                px = PPa.SnapForES(px, es)
+                py = PPa.SnapForES(py, es)
+            end
         end
         castRoot:ClearAllPoints()
         castRoot:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)

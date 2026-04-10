@@ -2642,10 +2642,20 @@ local function ApplyUnlockPos()
     if pos and pos.point then
         local px, py = pos.x or 0, pos.y or 0
         local PPa = EllesmereUI and EllesmereUI.PP
-        if PPa and PPa.SnapForES then
+        if PPa then
             local es = iconAnchor:GetEffectiveScale()
-            px = PPa.SnapForES(px, es)
-            py = PPa.SnapForES(py, es)
+            -- For CENTER anchor, use SnapCenterForDim with the frame's
+            -- actual size so odd-pixel-dim frames get the +0.5 center
+            -- offset that places their edges on whole pixels.
+            local isCenterAnchor = (pos.point == "CENTER")
+                and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+            if isCenterAnchor and PPa.SnapCenterForDim then
+                px = PPa.SnapCenterForDim(px, iconAnchor:GetWidth() or 0, es)
+                py = PPa.SnapCenterForDim(py, iconAnchor:GetHeight() or 0, es)
+            elseif PPa.SnapForES then
+                px = PPa.SnapForES(px, es)
+                py = PPa.SnapForES(py, es)
+            end
         end
         iconAnchor:ClearAllPoints()
         iconAnchor:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px, py)
