@@ -2582,8 +2582,17 @@ local function LayoutBar(key)
     end
     for i = 1, #buttons do
         local btn = buttons[i]
-        if btn and not InCombatLockdown() then
-            btn:SetAttribute("flyoutDirection", flyDir)
+        if btn then
+            -- Ensure the button has GetPopupDirection for Blizzard's SpellFlyout system
+            -- (must be available on all buttons, regardless of squareIcons setting)
+            if not btn.GetPopupDirection then
+                btn.GetPopupDirection = function(self)
+                    return self:GetAttribute("flyoutDirection") or "UP"
+                end
+            end
+            if not InCombatLockdown() then
+                btn:SetAttribute("flyoutDirection", flyDir)
+            end
         end
     end
 
