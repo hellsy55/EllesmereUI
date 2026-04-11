@@ -94,45 +94,25 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) Set("titleAlign", v); Refresh() end })
         y = y - h
 
-        -- ── TIMER ──────────────────────────────────────────────────────────
-        _, h = W:SectionHeader(parent, "TIMER", y); y = y - h
-
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="+3 Threshold Text",
+            { type="dropdown", text="Objective Align",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showPlusThreeTimer") ~= false end,
-              setValue=function(v) Set("showPlusThreeTimer", v); Refresh() end },
-            { type="toggle", text="+2 Threshold Text",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showPlusTwoTimer") ~= false end,
-              setValue=function(v) Set("showPlusTwoTimer", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="+3 Bar Marker",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showPlusThreeBar") ~= false end,
-              setValue=function(v) Set("showPlusThreeBar", v); Refresh() end },
-            { type="toggle", text="+2 Bar Marker",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showPlusTwoBar") ~= false end,
-              setValue=function(v) Set("showPlusTwoBar", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
+              values=alignValues,
+              order=alignOrder,
+              getValue=function() return Cfg("objectiveAlign") or "LEFT" end,
+              setValue=function(v) Set("objectiveAlign", v); Refresh() end },
             { type="dropdown", text="Timer Align",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
               values=alignValues,
               order=alignOrder,
               getValue=function() return Cfg("timerAlign") or "CENTER" end,
-              setValue=function(v) Set("timerAlign", v); Refresh() end },
-            { type="label", text="" })
+              setValue=function(v) Set("timerAlign", v); Refresh() end })
         y = y - h
+
+        -- ── TIMER ──────────────────────────────────────────────────────────
+        _, h = W:SectionHeader(parent, "TIMER", y); y = y - h
 
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Timer Inside Bar",
@@ -151,7 +131,34 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(r, g, b)
                   Set("timerBarTextColor", { r = r, g = g, b = b })
                   Refresh()
-              end })
+              end },
+            { type="label", text="" })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="+3 Threshold Text",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showPlusThreeTimer") ~= false end,
+              setValue=function(v) Set("showPlusThreeTimer", v); Refresh() end },
+            { type="toggle", text="+3 Bar Marker",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showPlusThreeBar") ~= false end,
+              setValue=function(v) Set("showPlusThreeBar", v); Refresh() end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="+2 Threshold Text",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showPlusTwoTimer") ~= false end,
+              setValue=function(v) Set("showPlusTwoTimer", v); Refresh() end },
+            { type="toggle", text="+2 Bar Marker",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showPlusTwoBar") ~= false end,
+              setValue=function(v) Set("showPlusTwoBar", v); Refresh() end })
         y = y - h
 
         -- ── OBJECTIVES ─────────────────────────────────────────────────────
@@ -163,19 +170,39 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Module is disabled",
               getValue=function() return Cfg("showAffixes") ~= false end,
               setValue=function(v) Set("showAffixes", v); Refresh() end },
-            { type="toggle", text="Show Deaths",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showDeaths") ~= false end,
-              setValue=function(v) Set("showDeaths", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
             { type="toggle", text="Show Boss Objectives",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
               getValue=function() return Cfg("showObjectives") ~= false end,
-              setValue=function(v) Set("showObjectives", v); Refresh() end },
+              setValue=function(v) Set("showObjectives", v); Refresh() end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Deaths",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showDeaths") ~= false end,
+              setValue=function(v) Set("showDeaths", v); Refresh() end },
+            { type="toggle", text="Deaths in Title",
+              disabled=function() return Cfg("enabled") == false or Cfg("showDeaths") == false end,
+              disabledTooltip=function()
+                  if Cfg("enabled") == false then return "the module" end
+                  return "Show Deaths"
+              end,
+              getValue=function() return Cfg("deathsInTitle") == true end,
+              setValue=function(v) Set("deathsInTitle", v); Refresh() end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Time Lost in Title",
+              disabled=function() return Cfg("enabled") == false or Cfg("showDeaths") == false or Cfg("deathsInTitle") ~= true end,
+              disabledTooltip=function()
+                  if Cfg("enabled") == false then return "the module" end
+                  if Cfg("showDeaths") == false then return "Show Deaths" end
+                  return "Deaths in Title"
+              end,
+              getValue=function() return Cfg("deathTimeInTitle") == true end,
+              setValue=function(v) Set("deathTimeInTitle", v); Refresh() end },
             { type="toggle", text="Show Enemy Forces",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
@@ -184,43 +211,28 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Deaths in Title",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("deathsInTitle") == true end,
-              setValue=function(v) Set("deathsInTitle", v); Refresh() end },
-            { type="toggle", text="Time Lost in Title",
-              disabled=function() return Cfg("enabled") == false or Cfg("deathsInTitle") ~= true end,
-              disabledTooltip="Requires Deaths in Title",
-              getValue=function() return Cfg("deathTimeInTitle") == true end,
-              setValue=function(v) Set("deathTimeInTitle", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Enemy Forces Text",
+              disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
+              disabledTooltip="Requires Show Enemy Forces",
+              getValue=function() return Cfg("showEnemyText") ~= false end,
+              setValue=function(v) Set("showEnemyText", v); Refresh() end },
             { type="dropdown", text="Enemy Forces Position",
               disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
               disabledTooltip="Requires Show Enemy Forces",
               values={ BOTTOM = "Bottom (default)", UNDER_BAR = "Under Timer Bar" },
               order={ "BOTTOM", "UNDER_BAR" },
               getValue=function() return Cfg("enemyForcesPos") or "BOTTOM" end,
-              setValue=function(v) Set("enemyForcesPos", v); Refresh() end },
+              setValue=function(v) Set("enemyForcesPos", v); Refresh() end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
             { type="dropdown", text="Enemy Forces %",
               disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
               disabledTooltip="Requires Show Enemy Forces",
               values={ LABEL = "In Label Text", BAR = "In Bar", BESIDE = "Beside Bar" },
               order={ "LABEL", "BAR", "BESIDE" },
               getValue=function() return Cfg("enemyForcesPctPos") or "LABEL" end,
-              setValue=function(v) Set("enemyForcesPctPos", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="dropdown", text="Objective Align",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              values=alignValues,
-              order=alignOrder,
-              getValue=function() return Cfg("objectiveAlign") or "LEFT" end,
-              setValue=function(v) Set("objectiveAlign", v); Refresh() end },
+              setValue=function(v) Set("enemyForcesPctPos", v); Refresh() end },
             { type="label", text="" })
         y = y - h
 
