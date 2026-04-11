@@ -56,12 +56,33 @@ local function SkinCharacterSheet()
         CharacterModelScene:Show()
         CharacterModelScene:ClearAllPoints()
         CharacterModelScene:SetPoint("TOPLEFT", frame, "TOPLEFT", 110, -100)
-        CharacterModelScene:SetFrameLevel(1)  -- Keep model behind text
+        CharacterModelScene:SetFrameLevel(2)  -- Keep model behind text
 
         -- Hide control frame (zoom, rotation buttons)
         if CharacterModelScene.ControlFrame then
             CharacterModelScene.ControlFrame:Hide()
         end
+
+        -- Create update loop to keep all control buttons hidden
+        local hideControlButtons = CreateFrame("Frame")
+        hideControlButtons:SetScript("OnUpdate", function()
+            if CharacterModelScene.ControlFrame then
+                -- Hide zoom buttons
+                if CharacterModelScene.ControlFrame.zoomInButton and CharacterModelScene.ControlFrame.zoomInButton:IsShown() then
+                    CharacterModelScene.ControlFrame.zoomInButton:Hide()
+                end
+                if CharacterModelScene.ControlFrame.zoomOutButton and CharacterModelScene.ControlFrame.zoomOutButton:IsShown() then
+                    CharacterModelScene.ControlFrame.zoomOutButton:Hide()
+                end
+                -- Hide all other buttons in ControlFrame (rotation buttons, etc)
+                for i = 1, CharacterModelScene.ControlFrame:GetNumChildren() do
+                    local child = select(i, CharacterModelScene.ControlFrame:GetChildren())
+                    if child and child:IsShown() then
+                        child:Hide()
+                    end
+                end
+            end
+        end)
     end
 
     -- Center the level text under character name
@@ -1264,7 +1285,7 @@ local function SkinCharacterSheet()
 
         -- Get item rarity color for border
         local itemLink = GetInventoryItemLink("player", slot:GetID())
-        local borderR, borderG, borderB = 1, 1, 0  -- Default yellow
+        local borderR, borderG, borderB = 0.4, 0.4, 0.4  -- Default dark gray
         if itemLink then
             local _, _, rarity = GetItemInfo(itemLink)
             if rarity then
@@ -1591,11 +1612,217 @@ local function SkinCharacterSheet()
     -- Track selected equipment set
     local selectedSetID = nil
 
+    -- Forward declare the refresh function (will be defined after buttons)
+    local RefreshEquipmentSets
+
+    -- Create "New Set" button once (outside refresh to avoid recreation)
+    local newSetBtn = CreateFrame("Button", nil, equipScrollChild)
+    newSetBtn:SetWidth(65)
+    newSetBtn:SetHeight(24)
+    newSetBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 0, -5)
+
+    local newSetBg = newSetBtn:CreateTexture(nil, "BACKGROUND")
+    newSetBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+    newSetBg:SetAllPoints()
+
+    -- Create border using pixelperfect
+    if EllesmereUI and EllesmereUI.PanelPP then
+        EllesmereUI.PanelPP.CreateBorder(newSetBtn, 0.8, 0.8, 0.8, 1, 1, "OVERLAY", 1)
+    end
+
+    local newSetText = newSetBtn:CreateFontString(nil, "OVERLAY")
+    newSetText:SetFont(fontPath, 10, "")
+    newSetText:SetText("New Set")
+    newSetText:SetTextColor(1, 1, 1, 0.7)
+    newSetText:SetPoint("CENTER", newSetBtn, "CENTER", 0, 0)
+
+    newSetBtn:SetScript("OnClick", function()
+        StaticPopupDialogs["EUI_NEW_EQUIPMENT_SET"] = {
+            text = "New equipment set name:",
+            button1 = "Create",
+            button2 = "Cancel",
+            OnAccept = function(dialog)
+                local newName = dialog.EditBox:GetText()
+                if newName ~= "" then
+                    C_EquipmentSet.CreateEquipmentSet(newName)
+                    RefreshEquipmentSets()
+                end
+            end,
+            hasEditBox = true,
+            editBoxWidth = 350,
+            timeout = 0,
+            whileDead = false,
+            hideOnEscape = true,
+        }
+        StaticPopup_Show("EUI_NEW_EQUIPMENT_SET")
+    end)
+
+    newSetBtn:SetScript("OnEnter", function()
+        newSetBg:SetColorTexture(0.047, 0.824, 0.616, 0.2)
+        newSetText:SetTextColor(0.15, 1, 0.8, 1)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(newSetBtn, 0.03, 0.6, 0.45, 1)
+        end
+    end)
+
+    newSetBtn:SetScript("OnLeave", function()
+        newSetBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+        newSetText:SetTextColor(1, 1, 1, 0.7)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(newSetBtn, 0.8, 0.8, 0.8, 1)
+        end
+    end)
+
+    -- Create Equip button once (outside refresh to preserve animation closure)
+    local equipTopBtn = CreateFrame("Button", nil, equipScrollChild)
+    equipTopBtn:SetWidth(60)
+    equipTopBtn:SetHeight(24)
+    equipTopBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 67, -5)
+
+    local equipTopBg = equipTopBtn:CreateTexture(nil, "BACKGROUND")
+    equipTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+    equipTopBg:SetAllPoints()
+
+    -- Create border using pixelperfect
+    if EllesmereUI and EllesmereUI.PanelPP then
+        EllesmereUI.PanelPP.CreateBorder(equipTopBtn, 0.8, 0.8, 0.8, 1, 1, "OVERLAY", 1)
+    end
+
+    local equipTopText = equipTopBtn:CreateFontString(nil, "OVERLAY")
+    equipTopText:SetFont(fontPath, 10, "")
+    equipTopText:SetText("Equip")
+    equipTopText:SetTextColor(1, 1, 1, 0.7)
+    equipTopText:SetPoint("CENTER", equipTopBtn, "CENTER", 0, 0)
+
+    equipTopBtn:SetScript("OnEnter", function()
+        equipTopBg:SetColorTexture(0.047, 0.824, 0.616, 0.2)
+        equipTopText:SetTextColor(0.15, 1, 0.8, 1)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(equipTopBtn, 0.03, 0.6, 0.45, 1)
+        end
+    end)
+
+    equipTopBtn:SetScript("OnLeave", function()
+        equipTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+        equipTopText:SetTextColor(1, 1, 1, 0.7)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(equipTopBtn, 0.8, 0.8, 0.8, 1)
+        end
+    end)
+
+    equipTopBtn:SetScript("OnClick", function()
+        -- Visual feedback: change text to "Equipped!" and color it green
+        equipTopText:SetText("Equipped!")
+        equipTopText:SetTextColor(0.047, 0.824, 0.616, 1)  -- Green
+
+        if selectedSetID then
+            C_EquipmentSet.UseEquipmentSet(selectedSetID)
+            activeEquipmentSetID = selectedSetID
+            -- Save to DB for persistence
+            if EllesmereUIDB then
+                EllesmereUIDB.lastEquippedSet = selectedSetID
+            end
+            RefreshEquipmentSets()
+        end
+
+        -- Change back to "Equip" after 1 second
+        C_Timer.After(1, function()
+            if equipTopText then
+                equipTopText:SetText("Equip")
+                equipTopText:SetTextColor(1, 1, 1, 0.7)  -- Zurück zu Standard
+            end
+        end)
+    end)
+
+    -- Create Save button once (outside refresh to preserve animation closure)
+    local saveTopBtn = CreateFrame("Button", nil, equipScrollChild)
+    saveTopBtn:SetWidth(71)
+    saveTopBtn:SetHeight(24)
+    saveTopBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 129, -5)
+
+    local saveTopBg = saveTopBtn:CreateTexture(nil, "BACKGROUND")
+    saveTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+    saveTopBg:SetAllPoints()
+
+    -- Create border using pixelperfect
+    if EllesmereUI and EllesmereUI.PanelPP then
+        EllesmereUI.PanelPP.CreateBorder(saveTopBtn, 0.8, 0.8, 0.8, 1, 1, "OVERLAY", 1)
+    end
+
+    local saveTopText = saveTopBtn:CreateFontString(nil, "OVERLAY")
+    saveTopText:SetFont(fontPath, 10, "")
+    saveTopText:SetText("Save")
+    saveTopText:SetTextColor(1, 1, 1, 0.7)
+    saveTopText:SetPoint("CENTER", saveTopBtn, "CENTER", 0, 0)
+
+    saveTopBtn:SetScript("OnEnter", function()
+        saveTopBg:SetColorTexture(0.047, 0.824, 0.616, 0.2)
+        saveTopText:SetTextColor(0.15, 1, 0.8, 1)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(saveTopBtn, 0.03, 0.6, 0.45, 1)
+        end
+    end)
+
+    saveTopBtn:SetScript("OnLeave", function()
+        saveTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
+        saveTopText:SetTextColor(1, 1, 1, 0.7)
+        if EllesmereUI and EllesmereUI.PanelPP then
+            EllesmereUI.PanelPP.SetBorderColor(saveTopBtn, 0.8, 0.8, 0.8, 1)
+        end
+    end)
+
+    saveTopBtn:SetScript("OnClick", function()
+        -- Visual feedback: change text to "Saved!" and color it green
+        saveTopText:SetText("Saved!")
+        saveTopText:SetTextColor(0.047, 0.824, 0.616, 1)  -- Green
+
+        if selectedSetID then
+            C_EquipmentSet.SaveEquipmentSet(selectedSetID)
+        end
+
+        -- Change back to "Save" after 1 second
+        C_Timer.After(1, function()
+            if saveTopText then
+                saveTopText:SetText("Save")
+                saveTopText:SetTextColor(1, 1, 1, 0.7)  -- Zurück zu Standard
+            end
+        end)
+    end)
+
+    -- Create "Sets" section header
+    local setsHeaderFrame = CreateFrame("Frame", nil, equipScrollChild)
+    setsHeaderFrame:SetWidth(200)
+    setsHeaderFrame:SetHeight(15)
+    setsHeaderFrame:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 0, -27)
+
+    -- Left line
+    local leftLine = setsHeaderFrame:CreateTexture(nil, "BACKGROUND")
+    leftLine:SetColorTexture(0.047, 0.824, 0.616, 1)
+    leftLine:SetPoint("LEFT", setsHeaderFrame, "LEFT", 0, -14)
+    leftLine:SetPoint("RIGHT", setsHeaderFrame, "CENTER", -25, -14)
+    leftLine:SetHeight(2)
+
+    -- Text
+    local setsHeaderText = setsHeaderFrame:CreateFontString(nil, "OVERLAY")
+    setsHeaderText:SetFont(fontPath, 13, "")
+    setsHeaderText:SetText("Sets")
+    setsHeaderText:SetTextColor(0.047, 0.824, 0.616, 1)
+    setsHeaderText:SetPoint("CENTER", setsHeaderFrame, "CENTER", 0, -14)
+
+    -- Right line
+    local rightLine = setsHeaderFrame:CreateTexture(nil, "BACKGROUND")
+    rightLine:SetColorTexture(0.047, 0.824, 0.616, 1)
+    rightLine:SetPoint("LEFT", setsHeaderFrame, "CENTER", 25, -14)
+    rightLine:SetPoint("RIGHT", setsHeaderFrame, "RIGHT", 0, -14)
+    rightLine:SetHeight(2)
+
     -- Function to reload equipment sets
-    local function RefreshEquipmentSets()
-        -- Clear old buttons
+    RefreshEquipmentSets = function()
+        -- Clear old set buttons (but keep the new set, equip, save buttons, and header)
         for _, child in ipairs({equipScrollChild:GetChildren()}) do
-            child:Hide()
+            if child ~= newSetBtn and child ~= equipTopBtn and child ~= saveTopBtn and child ~= setsHeaderFrame then
+                child:Hide()
+            end
         end
 
         local equipmentSets = {}
@@ -1611,122 +1838,7 @@ local function SkinCharacterSheet()
             end
         end
 
-        -- "New Set" button at top
-        local newSetBtn = CreateFrame("Button", nil, equipScrollChild)
-        newSetBtn:SetWidth(200)
-        newSetBtn:SetHeight(24)
-        newSetBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 0, 0)
-
-        local newSetBg = newSetBtn:CreateTexture(nil, "BACKGROUND")
-        newSetBg:SetColorTexture(0.047, 0.824, 0.616, 0.3)
-        newSetBg:SetAllPoints()
-
-        local newSetText = newSetBtn:CreateFontString(nil, "OVERLAY")
-        newSetText:SetFont(fontPath, 11, "")
-        newSetText:SetText("+ New Set")
-        newSetText:SetTextColor(1, 1, 1, 1)
-        newSetText:SetPoint("CENTER", newSetBtn, "CENTER", 0, 0)
-
-        newSetBtn:SetScript("OnClick", function()
-            StaticPopupDialogs["EUI_NEW_EQUIPMENT_SET"] = {
-                text = "New equipment set name:",
-                button1 = "Create",
-                button2 = "Cancel",
-                OnAccept = function(dialog)
-                    local newName = dialog.EditBox:GetText()
-                    if newName ~= "" then
-                        C_EquipmentSet.CreateEquipmentSet(newName)
-                        RefreshEquipmentSets()
-                    end
-                end,
-                hasEditBox = true,
-                editBoxWidth = 350,
-                timeout = 0,
-                whileDead = false,
-                hideOnEscape = true,
-            }
-            StaticPopup_Show("EUI_NEW_EQUIPMENT_SET")
-        end)
-
-        newSetBtn:SetScript("OnEnter", function()
-            newSetBg:SetColorTexture(0.047, 0.824, 0.616, 0.5)
-        end)
-
-        newSetBtn:SetScript("OnLeave", function()
-            newSetBg:SetColorTexture(0.047, 0.824, 0.616, 0.3)
-        end)
-
-        -- Equip and Save buttons at top
-        local equipTopBtn = CreateFrame("Button", nil, equipScrollChild)
-        equipTopBtn:SetWidth(95)
-        equipTopBtn:SetHeight(24)
-        equipTopBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 0, -44)
-
-        local equipTopBg = equipTopBtn:CreateTexture(nil, "BACKGROUND")
-        equipTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
-        equipTopBg:SetAllPoints()
-
-        if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(equipTopBtn, 0.8, 0.8, 0.8, 1, 1, "OVERLAY", 1)
-        end
-
-        local equipTopText = equipTopBtn:CreateFontString(nil, "OVERLAY")
-        equipTopText:SetFont(fontPath, 10, "")
-        equipTopText:SetText("Equip")
-        equipTopText:SetTextColor(1, 1, 1, 1)
-        equipTopText:SetPoint("CENTER", equipTopBtn, "CENTER", 0, 0)
-
-        equipTopBtn:SetScript("OnClick", function()
-            if selectedSetID then
-                C_EquipmentSet.UseEquipmentSet(selectedSetID)
-                activeEquipmentSetID = selectedSetID
-                -- Save to DB for persistence
-                if EllesmereUIDB then
-                    EllesmereUIDB.lastEquippedSet = selectedSetID
-                end
-                RefreshEquipmentSets()
-            end
-        end)
-
-        -- Save button at top
-        local saveTopBtn = CreateFrame("Button", nil, equipScrollChild)
-        saveTopBtn:SetWidth(95)
-        saveTopBtn:SetHeight(24)
-        saveTopBtn:SetPoint("TOPLEFT", equipScrollChild, "TOPLEFT", 105, -44)
-
-        local saveTopBg = saveTopBtn:CreateTexture(nil, "BACKGROUND")
-        saveTopBg:SetColorTexture(0.05, 0.07, 0.08, 1)
-        saveTopBg:SetAllPoints()
-
-        if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(saveTopBtn, 0.8, 0.8, 0.8, 1, 1, "OVERLAY", 1)
-        end
-
-        local saveTopText = saveTopBtn:CreateFontString(nil, "OVERLAY")
-        saveTopText:SetFont(fontPath, 10, "")
-        saveTopText:SetText("Save")
-        saveTopText:SetTextColor(1, 1, 1, 1)
-        saveTopText:SetPoint("CENTER", saveTopBtn, "CENTER", 0, 0)
-
-        saveTopBtn:SetScript("OnClick", function()
-            -- Visual feedback: change text to "Saved!" and color it green
-            saveTopText:SetText("Saved!")
-            saveTopText:SetTextColor(0.047, 0.824, 0.616, 1)  -- Green
-
-            if selectedSetID then
-                C_EquipmentSet.SaveEquipmentSet(selectedSetID)
-            end
-
-            -- Change back to "Save" after 1 second
-            C_Timer.After(1, function()
-                if saveTopText then
-                    saveTopText:SetText("Save")
-                    saveTopText:SetTextColor(1, 1, 1, 1)  -- White
-                end
-            end)
-        end)
-
-        local yOffset = -88  -- After buttons
+        local yOffset = -59  -- After buttons and header
         for _, setData in ipairs(equipmentSets) do
             local setBtn = CreateFrame("Button", nil, equipScrollChild)
             setBtn:SetWidth(200)
@@ -1757,7 +1869,7 @@ local function SkinCharacterSheet()
                     local specIconTexture = setBtn:CreateTexture(nil, "OVERLAY")
                     specIconTexture:SetTexture(specIcon)
                     specIconTexture:SetSize(16, 16)
-                    specIconTexture:SetPoint("RIGHT", setBtn, "RIGHT", -25, 0)
+                    specIconTexture:SetPoint("RIGHT", setBtn, "RIGHT", -45, 0)
                 end
             end
 
@@ -1914,6 +2026,43 @@ local function SkinCharacterSheet()
                 cogBtn.menuBackdrop:Show()
             end)
 
+            -- Delete button (X) for removing equipment set
+            local deleteBtn = CreateFrame("Button", nil, setBtn)
+            deleteBtn:SetWidth(14)
+            deleteBtn:SetHeight(14)
+            deleteBtn:SetPoint("RIGHT", cogBtn, "LEFT", -5, 0)
+
+            local deleteText = deleteBtn:CreateFontString(nil, "OVERLAY")
+            deleteText:SetFont(fontPath, 18, "")
+            deleteText:SetText("×")
+            deleteText:SetTextColor(1, 1, 1, 0.8)
+            deleteText:SetPoint("CENTER", deleteBtn, "CENTER", 0, 0)
+
+            deleteBtn:SetScript("OnEnter", function()
+                deleteText:SetTextColor(1, 0.2, 0.2, 1)  -- Red
+            end)
+
+            deleteBtn:SetScript("OnLeave", function()
+                deleteText:SetTextColor(1, 1, 1, 0.8)
+            end)
+
+            deleteBtn:SetScript("OnClick", function()
+                -- Show confirmation dialog
+                StaticPopupDialogs["EUI_DELETE_EQUIPMENT_SET"] = {
+                    text = "Delete equipment set '" .. setData.name .. "'?",
+                    button1 = "Delete",
+                    button2 = "Cancel",
+                    OnAccept = function()
+                        C_EquipmentSet.DeleteEquipmentSet(setData.id)
+                        RefreshEquipmentSets()
+                    end,
+                    timeout = 0,
+                    whileDead = false,
+                    hideOnEscape = true,
+                }
+                StaticPopup_Show("EUI_DELETE_EQUIPMENT_SET")
+            end)
+
             yOffset = yOffset - 30
         end
 
@@ -1985,6 +2134,13 @@ local function SkinCharacterSheet()
     globalSocketContainer:Show()
     frame._socketContainer = globalSocketContainer  -- Store reference on frame
 
+    -- Create overlay frame for text labels (above model, transparent, no mouse input)
+    local textOverlayFrame = CreateFrame("Frame", "EUI_CharSheet_TextOverlay", frame)
+    textOverlayFrame:SetFrameLevel(5)  -- Higher than model (FrameLevel 2)
+    textOverlayFrame:EnableMouse(false)
+    textOverlayFrame:Show()
+    frame._textOverlayFrame = textOverlayFrame
+
     for _, slotName in ipairs(itemSlots) do
         ApplyCustomSlotBorder(slotName)
 
@@ -1992,7 +2148,7 @@ local function SkinCharacterSheet()
         local slot = _G[slotName]
         if slot and not slot._itemLevelLabel then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
-            local label = frame:CreateFontString(nil, "OVERLAY")
+            local label = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             label:SetFont(fontPath, itemLevelSize, "")
             label:SetTextColor(1, 1, 1, 0.8)
             label:SetJustifyH("CENTER")
@@ -2018,7 +2174,7 @@ local function SkinCharacterSheet()
         -- Create enchant labels
         if slot and not slot._enchantLabel then
             local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
-            local enchantLabel = frame:CreateFontString(nil, "OVERLAY")
+            local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             enchantLabel:SetFont(fontPath, enchantSize, "")
             enchantLabel:SetTextColor(1, 1, 1, 0.8)
             enchantLabel:SetJustifyH("CENTER")
@@ -2040,7 +2196,7 @@ local function SkinCharacterSheet()
         -- Create upgrade track labels (positioned relative to itemlevel)
         if slot and not slot._upgradeTrackLabel and slot._itemLevelLabel then
             local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
-            local upgradeTrackLabel = frame:CreateFontString(nil, "OVERLAY")
+            local upgradeTrackLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, "")
             upgradeTrackLabel:SetTextColor(1, 1, 1, 0.6)
             upgradeTrackLabel:SetJustifyH("CENTER")
@@ -2063,6 +2219,35 @@ local function SkinCharacterSheet()
             slot._upgradeTrackLabel = upgradeTrackLabel
         end
     end
+
+    -- Update slot borders on inventory changes
+    local function UpdateSlotBorders()
+        for _, slotName in ipairs(itemSlots) do
+            local slot = _G[slotName]
+            if slot then
+                local itemLink = GetInventoryItemLink("player", slot:GetID())
+                local borderR, borderG, borderB = 0.4, 0.4, 0.4  -- Default dark gray
+                if itemLink then
+                    local _, _, rarity = GetItemInfo(itemLink)
+                    if rarity then
+                        borderR, borderG, borderB = C_Item.GetItemQualityColor(rarity)
+                    end
+                end
+                if EllesmereUI and EllesmereUI.PanelPP then
+                    EllesmereUI.PanelPP.SetBorderColor(slot, borderR, borderG, borderB, 1)
+                end
+            end
+        end
+    end
+
+    -- Listen for inventory changes and update borders
+    local inventoryFrame = CreateFrame("Frame")
+    inventoryFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
+    inventoryFrame:SetScript("OnEvent", function(self, event, unit)
+        if event == "UNIT_INVENTORY_CHANGED" and unit == "player" then
+            UpdateSlotBorders()
+        end
+    end)
 
     -- Socket icon creation and display logic
     local function GetOrCreateSocketIcons(slot, side, slotIndex)
@@ -2414,7 +2599,7 @@ local function SkinCharacterSlot(slotName, slotID)
     -- EUI-style background for the slot
     local slotBg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
     slotBg:SetAllPoints(slot)
-    slotBg:SetColorTexture(0.03, 0.045, 0.05, 0.7)  -- EUI frame BG with transparency
+    slotBg:SetColorTexture(0.5, 0.5, 0.5, 0.7)  -- Gray background with transparency
     slot._slotBg = slotBg
 
     -- Create custom border on the slot using PP.CreateBorder
@@ -2548,6 +2733,14 @@ function EllesmereUI._applyCharSheetTextSizes()
     local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
     local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
     local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
+
+    local itemLevelShadow = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelShadow or false
+    local itemLevelOutline = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelOutline or false
+    local upgradeTrackShadow = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackShadow or false
+    local upgradeTrackOutline = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackOutline or false
+    local enchantShadow = EllesmereUIDB and EllesmereUIDB.charSheetEnchantShadow or false
+    local enchantOutline = EllesmereUIDB and EllesmereUIDB.charSheetEnchantOutline or false
+
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
 
     -- Update all slot labels
@@ -2562,13 +2755,46 @@ function EllesmereUI._applyCharSheetTextSizes()
         local slot = _G[slotName]
         if slot then
             if slot._itemLevelLabel then
-                slot._itemLevelLabel:SetFont(fontPath, itemLevelSize, "")
+                local flags = ""
+                if itemLevelOutline then
+                    flags = "OUTLINE"
+                end
+                slot._itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
+                -- Apply shadow effect if enabled
+                if itemLevelShadow then
+                    slot._itemLevelLabel:SetShadowColor(0, 0, 0, 1)
+                    slot._itemLevelLabel:SetShadowOffset(1, -1)
+                else
+                    slot._itemLevelLabel:SetShadowColor(0, 0, 0, 0)
+                end
             end
             if slot._upgradeTrackLabel then
-                slot._upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, "")
+                local flags = ""
+                if upgradeTrackOutline then
+                    flags = "OUTLINE"
+                end
+                slot._upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
+                -- Apply shadow effect if enabled
+                if upgradeTrackShadow then
+                    slot._upgradeTrackLabel:SetShadowColor(0, 0, 0, 1)
+                    slot._upgradeTrackLabel:SetShadowOffset(1, -1)
+                else
+                    slot._upgradeTrackLabel:SetShadowColor(0, 0, 0, 0)
+                end
             end
             if slot._enchantLabel then
-                slot._enchantLabel:SetFont(fontPath, enchantSize, "")
+                local flags = ""
+                if enchantOutline then
+                    flags = "OUTLINE"
+                end
+                slot._enchantLabel:SetFont(fontPath, enchantSize, flags)
+                -- Apply shadow effect if enabled
+                if enchantShadow then
+                    slot._enchantLabel:SetShadowColor(0, 0, 0, 1)
+                    slot._enchantLabel:SetShadowOffset(1, -1)
+                else
+                    slot._enchantLabel:SetShadowColor(0, 0, 0, 0)
+                end
             end
         end
     end

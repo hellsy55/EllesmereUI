@@ -3588,7 +3588,6 @@ initFrame:SetScript("OnEvent", function(self)
             local function themedOff()
                 return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
             end
-
             local colorItemBlock = CreateFrame("Frame", nil, colorItemLevelRow)
             colorItemBlock:SetAllPoints(colorItemLevelRow)
             colorItemBlock:SetFrameLevel(colorItemLevelRow:GetFrameLevel() + 10)
@@ -3599,15 +3598,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.ShowWidgetTooltip(colorItemBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
             end)
             colorItemBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
             EllesmereUI.RegisterWidgetRefresh(function()
-                if themedOff() then
-                    colorItemBlock:Show()
-                    colorItemLevelRow:SetAlpha(0.3)
-                else
-                    colorItemBlock:Hide()
-                    colorItemLevelRow:SetAlpha(1)
-                end
+                if themedOff() then colorItemBlock:Show() colorItemLevelRow:SetAlpha(0.3) else colorItemBlock:Hide() colorItemLevelRow:SetAlpha(1) end
             end)
             if themedOff() then colorItemBlock:Show() colorItemLevelRow:SetAlpha(0.3) else colorItemBlock:Hide() colorItemLevelRow:SetAlpha(1) end
         end
@@ -3627,6 +3619,76 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI._applyCharSheetTextSizes()
                   end
               end },
+            { type="label", text="" }
+        );  y = y - h
+
+        -- Cogwheel for item level text effects (shadow and outline)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+            local leftRgn = itemLevelRow._leftRegion
+
+            local _, itemLevelCogShow = EllesmereUI.BuildCogPopup({
+                title = "Item Level Text Effects",
+                rows = {
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                },
+            })
+
+            local itemLevelCogBtn = CreateFrame("Button", nil, leftRgn)
+            itemLevelCogBtn:SetSize(26, 26)
+            itemLevelCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = itemLevelCogBtn
+            itemLevelCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            itemLevelCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local itemLevelCogTex = itemLevelCogBtn:CreateTexture(nil, "OVERLAY")
+            itemLevelCogTex:SetAllPoints()
+            itemLevelCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            itemLevelCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            itemLevelCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            itemLevelCogBtn:SetScript("OnClick", function(self) itemLevelCogShow(self) end)
+
+            local itemLevelCogBlock = CreateFrame("Frame", nil, itemLevelCogBtn)
+            itemLevelCogBlock:SetAllPoints()
+            itemLevelCogBlock:SetFrameLevel(itemLevelCogBtn:GetFrameLevel() + 10)
+            itemLevelCogBlock:EnableMouse(true)
+            itemLevelCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(itemLevelCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            itemLevelCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    itemLevelCogBtn:SetAlpha(0.15)
+                    itemLevelCogBlock:Show()
+                else
+                    itemLevelCogBtn:SetAlpha(0.4)
+                    itemLevelCogBlock:Hide()
+                end
+            end)
+            if themedOff() then itemLevelCogBtn:SetAlpha(0.15) itemLevelCogBlock:Show() else itemLevelCogBtn:SetAlpha(0.4) itemLevelCogBlock:Hide() end
+        end
+
+        local upgradeTrackRow
+        upgradeTrackRow, h = W:DualRow(parent, y,
             { type="slider", text="Upgrade Track Font Size",
               min=8, max=16, step=1,
               tooltip="Adjusts the font size for upgrade track text on the character sheet.",
@@ -3639,36 +3701,73 @@ initFrame:SetScript("OnEvent", function(self)
                   if EllesmereUI._applyCharSheetTextSizes then
                       EllesmereUI._applyCharSheetTextSizes()
                   end
-              end }
+              end },
+            { type="label", text="" }
         );  y = y - h
 
-        -- Disabled overlay for font size row when themed is off
+        -- Cogwheel for upgrade track text effects (shadow and outline)
         do
             local function themedOff()
                 return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
             end
+            local leftRgn = upgradeTrackRow._leftRegion
 
-            local fontBlock = CreateFrame("Frame", nil, itemLevelRow)
-            fontBlock:SetAllPoints(itemLevelRow)
-            fontBlock:SetFrameLevel(itemLevelRow:GetFrameLevel() + 10)
-            fontBlock:EnableMouse(true)
-            local fontBg = EllesmereUI.SolidTex(fontBlock, "BACKGROUND", 0, 0, 0, 0)
-            fontBg:SetAllPoints()
-            fontBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(fontBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            local _, upgradeTrackCogShow = EllesmereUI.BuildCogPopup({
+                title = "Upgrade Track Text Effects",
+                rows = {
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                },
+            })
+
+            local upgradeTrackCogBtn = CreateFrame("Button", nil, leftRgn)
+            upgradeTrackCogBtn:SetSize(26, 26)
+            upgradeTrackCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = upgradeTrackCogBtn
+            upgradeTrackCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            upgradeTrackCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local upgradeTrackCogTex = upgradeTrackCogBtn:CreateTexture(nil, "OVERLAY")
+            upgradeTrackCogTex:SetAllPoints()
+            upgradeTrackCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            upgradeTrackCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            upgradeTrackCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            upgradeTrackCogBtn:SetScript("OnClick", function(self) upgradeTrackCogShow(self) end)
+
+            local upgradeTrackCogBlock = CreateFrame("Frame", nil, upgradeTrackCogBtn)
+            upgradeTrackCogBlock:SetAllPoints()
+            upgradeTrackCogBlock:SetFrameLevel(upgradeTrackCogBtn:GetFrameLevel() + 10)
+            upgradeTrackCogBlock:EnableMouse(true)
+            upgradeTrackCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(upgradeTrackCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
             end)
-            fontBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            upgradeTrackCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
             EllesmereUI.RegisterWidgetRefresh(function()
                 if themedOff() then
-                    fontBlock:Show()
-                    itemLevelRow:SetAlpha(0.3)
+                    upgradeTrackCogBtn:SetAlpha(0.15)
+                    upgradeTrackCogBlock:Show()
                 else
-                    fontBlock:Hide()
-                    itemLevelRow:SetAlpha(1)
+                    upgradeTrackCogBtn:SetAlpha(0.4)
+                    upgradeTrackCogBlock:Hide()
                 end
             end)
-            if themedOff() then fontBlock:Show() itemLevelRow:SetAlpha(0.3) else fontBlock:Hide() itemLevelRow:SetAlpha(1) end
+            if themedOff() then upgradeTrackCogBtn:SetAlpha(0.15) upgradeTrackCogBlock:Show() else upgradeTrackCogBtn:SetAlpha(0.4) upgradeTrackCogBlock:Hide() end
         end
 
         local enchantRow
@@ -3689,12 +3788,76 @@ initFrame:SetScript("OnEvent", function(self)
             { type="label", text="" }
         );  y = y - h
 
+        -- Cogwheel for enchant text effects (shadow and outline)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+            local leftRgn = enchantRow._leftRegion
+
+            local _, enchantCogShow = EllesmereUI.BuildCogPopup({
+                title = "Enchant Text Effects",
+                rows = {
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                },
+            })
+
+            local enchantCogBtn = CreateFrame("Button", nil, leftRgn)
+            enchantCogBtn:SetSize(26, 26)
+            enchantCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = enchantCogBtn
+            enchantCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            enchantCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local enchantCogTex = enchantCogBtn:CreateTexture(nil, "OVERLAY")
+            enchantCogTex:SetAllPoints()
+            enchantCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            enchantCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            enchantCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            enchantCogBtn:SetScript("OnClick", function(self) enchantCogShow(self) end)
+
+            local enchantCogBlock = CreateFrame("Frame", nil, enchantCogBtn)
+            enchantCogBlock:SetAllPoints()
+            enchantCogBlock:SetFrameLevel(enchantCogBtn:GetFrameLevel() + 10)
+            enchantCogBlock:EnableMouse(true)
+            enchantCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(enchantCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            enchantCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    enchantCogBtn:SetAlpha(0.15)
+                    enchantCogBlock:Show()
+                else
+                    enchantCogBtn:SetAlpha(0.4)
+                    enchantCogBlock:Hide()
+                end
+            end)
+            if themedOff() then enchantCogBtn:SetAlpha(0.15) enchantCogBlock:Show() else enchantCogBtn:SetAlpha(0.4) enchantCogBlock:Hide() end
+        end
+
         -- Disabled overlay for enchant row when themed is off
         do
             local function themedOff()
                 return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
             end
-
             local enchantBlock = CreateFrame("Frame", nil, enchantRow)
             enchantBlock:SetAllPoints(enchantRow)
             enchantBlock:SetFrameLevel(enchantRow:GetFrameLevel() + 10)
@@ -3705,21 +3868,14 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.ShowWidgetTooltip(enchantBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
             end)
             enchantBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
             EllesmereUI.RegisterWidgetRefresh(function()
-                if themedOff() then
-                    enchantBlock:Show()
-                    enchantRow:SetAlpha(0.3)
-                else
-                    enchantBlock:Hide()
-                    enchantRow:SetAlpha(1)
-                end
+                if themedOff() then enchantBlock:Show() enchantRow:SetAlpha(0.3) else enchantBlock:Hide() enchantRow:SetAlpha(1) end
             end)
             if themedOff() then enchantBlock:Show() enchantRow:SetAlpha(0.3) else enchantBlock:Hide() enchantRow:SetAlpha(1) end
         end
 
         -- Stat Category Toggles
-        _, h = W:Spacer(parent, y, 10);  y = y - h
+        _, h = W:Spacer(parent, y, 5);  y = y - h
 
         local categoryRow1, h1 = W:DualRow(parent, y,
             { type="toggle", text="Show Attributes",
