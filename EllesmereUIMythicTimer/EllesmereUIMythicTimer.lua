@@ -13,7 +13,6 @@ ns.EMT = EMT
 -------------------------------------------------------------------------------
 local floor, min, max, abs = math.floor, math.min, math.max, math.abs
 local format = string.format
-local GetTime = GetTime
 local GetWorldElapsedTime = GetWorldElapsedTime
 local wipe = wipe
 
@@ -37,6 +36,7 @@ local DB_DEFAULTS = {
         showDeaths        = true,
         showObjectives    = true,
         showEnemyBar      = true,
+        showEnemyText     = true,
         objectiveAlign    = "LEFT",
         timerAlign        = "CENTER",
         titleAlign        = "CENTER",   -- title / affixes justify
@@ -410,7 +410,6 @@ local function CreateStandaloneFrame()
     standaloneCreated = true
 
     local FRAME_W = 260
-    local PAD = 8
 
     local f = CreateFrame("Frame", "EllesmereUIMythicTimerStandalone", UIParent, "BackdropTemplate")
     f:SetSize(FRAME_W, 200)
@@ -703,6 +702,7 @@ local function RenderStandalone()
         local ePad = ContentPad(objAlign)
         local pctRaw = min(100, max(0, enemyObj.quantity))
         local pctPos = p.enemyForcesPctPos or "LABEL"
+        local showEnemyText = p.showEnemyText ~= false
 
         -- Label text: include % only when pctPos is LABEL
         local label
@@ -774,6 +774,10 @@ local function RenderStandalone()
         end
 
         local function RenderEnemyLabel()
+            if not showEnemyText then
+                f._enemyFS:Hide()
+                return
+            end
             f._enemyFS:ClearAllPoints()
             f._enemyFS:SetPoint("TOPLEFT", f, "TOPLEFT", ePad, y)
             f._enemyFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -ePad, y)
@@ -1154,3 +1158,4 @@ function EMT:OnEnable()
         })
     end
 end
+
