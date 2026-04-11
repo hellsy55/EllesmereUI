@@ -3583,6 +3583,23 @@ initFrame:SetScript("OnEvent", function(self)
             { type="label", text="" }
         );  y = y - h
 
+        local mythicRatingRow
+        mythicRatingRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Mythic+ Rating",
+              tooltip="Display your Mythic+ rating above the item level on the character sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showMythicRating or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showMythicRating = v
+                  if EllesmereUI._updateMythicRatingDisplay then
+                      EllesmereUI._updateMythicRatingDisplay()
+                  end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
         -- Disabled overlay for Color Item Level by Rarity when themed is off
         do
             local function themedOff()

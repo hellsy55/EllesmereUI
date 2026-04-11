@@ -328,16 +328,16 @@ local function SkinCharacterSheet()
         CharacterFrameInset:SetClipsChildren(false)  -- Prevent clipping
     end
 
-    -- Hook SetWidth to prevent Blizzard from changing it back
+    -- Hook SetWidth to prevent Blizzard from changing it back (skip in combat)
     hooksecurefunc(frame, "SetWidth", function(self, w)
-        if w ~= newWidth then
+        if w ~= newWidth and not InCombatLockdown() then
             self:SetWidth(newWidth)
         end
     end)
 
-    -- Hook SetHeight to prevent Blizzard from changing it back
+    -- Hook SetHeight to prevent Blizzard from changing it back (skip in combat)
     hooksecurefunc(frame, "SetHeight", function(self, h)
-        if h ~= newHeight then
+        if h ~= newHeight and not InCombatLockdown() then
             self:SetHeight(newHeight)
         end
     end)
@@ -347,9 +347,11 @@ local function SkinCharacterSheet()
     hooksecurefunc(frame, "SetPoint", function(self, ...)
         if not hookLock and frame._sizeCheckDone then
             hookLock = true
-            self:SetSize(newWidth, newHeight)
-            if self._ebsBg then
-                self._ebsBg:SetSize(newWidth, newHeight)
+            if not InCombatLockdown() then
+                self:SetSize(newWidth, newHeight)
+                if self._ebsBg then
+                    self._ebsBg:SetSize(newWidth, newHeight)
+                end
             end
             hookLock = false
         end
@@ -358,7 +360,7 @@ local function SkinCharacterSheet()
     -- Aggressive size enforcement with immediate re-setup
     if not frame._sizeCheckDone then
         local function EnforceSize()
-            if frame:IsShown() then
+            if frame:IsShown() and not InCombatLockdown() then
                 frame:SetSize(newWidth, newHeight)
                 -- Regenerate background immediately
                 if frame._ebsBg then
@@ -539,6 +541,22 @@ local function SkinCharacterSheet()
         end
     end
 
+    -- Helper function to safely show frames (deferred in combat)
+    local function SafeShow(element)
+        if InCombatLockdown() then
+            -- Defer until out of combat
+            local deferredShow = CreateFrame("Frame")
+            deferredShow:RegisterEvent("PLAYER_REGEN_ENABLED")
+            deferredShow:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                if element then element:Show() end
+                self:Hide()
+            end)
+        else
+            if element then element:Show() end
+        end
+    end
+
     -- Hook Blizzard's tab selection to update our visuals and show/hide slots
     hooksecurefunc("PanelTemplates_SetTab", function(panel)
         if panel == frame then
@@ -551,7 +569,11 @@ local function SkinCharacterSheet()
                     local slot = _G[slotName]
                     if slot then
                         if isCharacterTab then
-                            slot:Show()
+                            if InCombatLockdown() then
+                                SafeShow(slot)
+                            else
+                                slot:Show()
+                            end
                             if slot._itemLevelLabel then slot._itemLevelLabel:Show() end
                             if slot._enchantLabel then slot._enchantLabel:Show() end
                             if slot._upgradeTrackLabel then slot._upgradeTrackLabel:Show() end
@@ -565,22 +587,22 @@ local function SkinCharacterSheet()
                 end
             end
 
-            -- Show/hide custom buttons based on tab
+            -- Show/hide custom buttons based on tab (deferred in combat)
             for _, btnName in ipairs({"EUI_CharSheet_Stats", "EUI_CharSheet_Titles", "EUI_CharSheet_Equipment"}) do
                 local btn = _G[btnName]
                 if btn then
                     if isCharacterTab then
-                        btn:Show()
+                        SafeShow(btn)
                     else
                         btn:Hide()
                     end
                 end
             end
 
-            -- Show/hide stats panel and titles panel based on tab
+            -- Show/hide stats panel and titles panel based on tab (deferred in combat)
             if frame._statsPanel then
                 if isCharacterTab then
-                    frame._statsPanel:Show()
+                    SafeShow(frame._statsPanel)
                 else
                     frame._statsPanel:Hide()
                 end
@@ -682,14 +704,169 @@ local function SkinCharacterSheet()
     statsBg:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 0, 0)
     frame._statsBg = statsBg  -- Store on frame for tab visibility control
 
+    -- Map INVTYPE to inventory slot numbers and display names
+    local INVTYPE_TO_SLOT = {
+        INVTYPE_HEAD = {slot = 1, name = "Head"},
+        INVTYPE_NECK = {slot = 2, name = "Neck"},
+        INVTYPE_SHOULDER = {slot = 3, name = "Shoulder"},
+        INVTYPE_CHEST = {slot = 5, name = "Chest"},
+        INVTYPE_WAIST = {slot = 6, name = "Waist"},
+        INVTYPE_LEGS = {slot = 7, name = "Legs"},
+        INVTYPE_FEET = {slot = 8, name = "Feet"},
+        INVTYPE_WRIST = {slot = 9, name = "Wrist"},
+        INVTYPE_HAND = {slot = 10, name = "Hands"},
+        INVTYPE_FINGER = {slots = {11, 12}, name = "Ring"},
+        INVTYPE_TRINKET = {slots = {13, 14}, name = "Trinket"},
+        INVTYPE_BACK = {slot = 15, name = "Back"},
+        INVTYPE_MAINHAND = {slot = 16, name = "Main Hand"},
+        INVTYPE_OFFHAND = {slot = 17, name = "Off Hand"},
+        INVTYPE_RELIC = {slot = 18, name = "Relic"},
+        INVTYPE_BODY = {slot = 4, name = "Body"},
+        INVTYPE_SHIELD = {slot = 17, name = "Shield"},
+        INVTYPE_2HWEAPON = {slot = 16, name = "Two-Hand"},
+    }
+
+    -- Function to get itemlevel of equipped item in a specific slot
+    local function GetEquippedItemLevel(slot)
+        local itemLink = GetInventoryItemLink("player", slot)
+        if itemLink then
+            local _, _, _, itemLevel = GetItemInfo(itemLink)
+            return tonumber(itemLevel) or 0
+        end
+        return 0
+    end
+
+    -- Function to get better items from inventory (equipment only)
+    local function GetBetterInventoryItems()
+        local betterItems = {}
+
+        -- Check all bag slots (0 = backpack, 1-4 = bag slots)
+        for bagSlot = 0, 4 do
+            local bagSize = C_Container.GetContainerNumSlots(bagSlot)
+            for slotIndex = 1, bagSize do
+                local itemLink = C_Container.GetContainerItemLink(bagSlot, slotIndex)
+                if itemLink then
+                    local itemName, _, itemRarity, itemLevel, _, itemType, _, _, equipSlot, itemIcon = GetItemInfo(itemLink)
+                    itemLevel = tonumber(itemLevel)
+
+                    -- Only show Weapon and Armor items
+                    if itemLevel and itemName and (itemType == "Weapon" or itemType == "Armor") and equipSlot then
+                        -- Get the slot(s) this item can equip to
+                        local slotInfo = INVTYPE_TO_SLOT[equipSlot]
+                        if slotInfo then
+                            local isBetter = false
+                            local compareSlots = slotInfo.slots or {slotInfo.slot}
+
+                            -- Check if item is better than ANY of its possible slots
+                            for _, slot in ipairs(compareSlots) do
+                                local equippedLevel = GetEquippedItemLevel(slot)
+                                if itemLevel > equippedLevel then
+                                    isBetter = true
+                                    break
+                                end
+                            end
+
+                            if isBetter then
+                                table.insert(betterItems, {
+                                    name = itemName,
+                                    level = itemLevel,
+                                    rarity = itemRarity or 1,
+                                    icon = itemIcon,
+                                    slot = slotInfo.name
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Sort by level descending
+        table.sort(betterItems, function(a, b) return a.level > b.level end)
+
+        return betterItems
+    end
+
+    -- Mythic+ Rating display (anchor above itemlevel)
+    local mythicRatingLabel = statsPanel:CreateFontString(nil, "OVERLAY")
+    mythicRatingLabel:SetFont(fontPath, 11, "")
+    mythicRatingLabel:SetPoint("TOP", statsBg, "TOP", 0, 80)
+    mythicRatingLabel:SetTextColor(0.8, 0.8, 0.8, 1)
+    mythicRatingLabel:SetText("Mythic+ Rating:")
+    frame._mythicRatingLabel = mythicRatingLabel
+
+    local mythicRatingValue = statsPanel:CreateFontString(nil, "OVERLAY")
+    mythicRatingValue:SetFont(fontPath, 13, "")
+    mythicRatingValue:SetPoint("TOP", mythicRatingLabel, "BOTTOM", 0, -2)
+    frame._mythicRatingValue = mythicRatingValue
+
     -- Itemlevel display (anchor to center of statsBg background)
     local iLvlText = statsPanel:CreateFontString(nil, "OVERLAY")
-    iLvlText:SetFont(fontPath, 20, "")
-    iLvlText:SetPoint("TOP", statsBg, "TOP", 0,60)
+    iLvlText:SetFont(fontPath, 18, "")
+    iLvlText:SetPoint("TOP", statsBg, "TOP", 0, 50)
     iLvlText:SetTextColor(0.6, 0.2, 1, 1)
     frame._iLvlText = iLvlText  -- Store on frame for tab visibility control
 
-    -- Function to update itemlevel
+    -- Button overlay for itemlevel tooltip
+    local iLvlButton = CreateFrame("Button", nil, statsPanel)
+    iLvlButton:SetPoint("TOP", statsBg, "TOP", 0, 60)
+    iLvlButton:SetSize(100, 30)
+    iLvlButton:EnableMouse(true)
+    iLvlButton:SetScript("OnEnter", function(self)
+        local betterItems = GetBetterInventoryItems()
+
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Equipped Item Level", 0.6, 0.2, 1, 1)
+
+        if #betterItems > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(
+                string.format("You have %d better item%s in inventory", #betterItems, #betterItems == 1 and "" or "s"),
+                0.2, 1, 0.2
+            )
+            GameTooltip:AddLine(" ")
+
+            -- Show up to 10 items with icons and slots (slot on right side)
+            local maxShow = math.min(#betterItems, 10)
+            for i = 1, maxShow do
+                local item = betterItems[i]
+                local leftText = string.format("|T%s:16|t  %s (iLvl %d)", item.icon, item.name, item.level)
+                GameTooltip:AddDoubleLine(leftText, item.slot, 1, 1, 1, 0.7, 0.7, 0.7)
+            end
+
+            if #betterItems > 10 then
+                GameTooltip:AddLine(
+                    string.format("  ... and %d more", #betterItems - 10),
+                    0.7, 0.7, 0.7
+                )
+            end
+        else
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("No better items in inventory", 0.7, 0.7, 0.7, true)
+        end
+
+        -- Calculate minimum width based on longest item text
+        local maxWidth = 250
+        if #betterItems > 0 then
+            local maxShow = math.min(#betterItems, 10)
+            for i = 1, maxShow do
+                local item = betterItems[i]
+                local text = string.format("%s (iLvl %d) - %s", item.name, item.level, item.slot)
+                -- Rough estimate: ~6 pixels per character + icon space
+                local estimatedWidth = #text * 6 + 30
+                if estimatedWidth > maxWidth then
+                    maxWidth = estimatedWidth
+                end
+            end
+        end
+        GameTooltip:SetMinimumWidth(maxWidth)
+        GameTooltip:Show()
+    end)
+    iLvlButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    -- Function to update itemlevel and mythic+ rating
     local function UpdateItemLevelDisplay()
         local avgItemLevel, avgItemLevelEquipped = GetAverageItemLevel()
 
@@ -699,6 +876,48 @@ local function SkinCharacterSheet()
 
         -- Display format: equipped / average
         iLvlText:SetText(format("%s / %s", avgEquippedFormatted, avgFormatted))
+
+        -- Update Mythic+ Rating if option is enabled
+        if EllesmereUIDB and EllesmereUIDB.showMythicRating and frame._mythicRatingValue then
+            local mythicRating = C_ChallengeMode.GetOverallDungeonScore()
+            if mythicRating and mythicRating > 0 then
+                -- Color brackets based on rating
+                local r, g, b = 0.7, 0.7, 0.7  -- Gray default
+
+                if mythicRating >= 2500 then
+                    r, g, b = 1.0, 0.64, 0.0  -- Orange/Gold
+                elseif mythicRating >= 2000 then
+                    r, g, b = 0.64, 0.21, 1.0  -- Purple
+                elseif mythicRating >= 1500 then
+                    r, g, b = 0.0, 0.44, 0.87  -- Blue
+                elseif mythicRating >= 1000 then
+                    r, g, b = 0.12, 1.0, 0.0  -- Green
+                end
+
+                frame._mythicRatingValue:SetText(tostring(math.floor(mythicRating)))
+                frame._mythicRatingValue:SetTextColor(r, g, b, 1)
+                frame._mythicRatingLabel:Show()
+                frame._mythicRatingValue:Show()
+
+                -- Adjust itemlevel display when mythic+ rating is shown
+                iLvlText:SetFont(fontPath, 18, "")
+                iLvlText:SetPoint("TOP", statsBg, "TOP", 0, 50)
+            else
+                frame._mythicRatingLabel:Hide()
+                frame._mythicRatingValue:Hide()
+
+                -- Restore itemlevel display when mythic+ rating is not available
+                iLvlText:SetFont(fontPath, 20, "")
+                iLvlText:SetPoint("TOP", statsBg, "TOP", 0, 60)
+            end
+        elseif frame._mythicRatingValue then
+            frame._mythicRatingLabel:Hide()
+            frame._mythicRatingValue:Hide()
+
+            -- Restore itemlevel display when mythic+ rating is disabled
+            iLvlText:SetFont(fontPath, 20, "")
+            iLvlText:SetPoint("TOP", statsBg, "TOP", 0, 60)
+        end
     end
 
     -- Create update frame for itemlevel and spec changes
@@ -709,6 +928,11 @@ local function SkinCharacterSheet()
     end)
 
     UpdateItemLevelDisplay()
+
+    -- Store callback for option changes
+    EllesmereUI._updateMythicRatingDisplay = function()
+        UpdateItemLevelDisplay()
+    end
 
     --[[ Stats panel border
     if EllesmereUI and EllesmereUI.PanelPP then
@@ -833,9 +1057,9 @@ local function SkinCharacterSheet()
 
         -- Return fixed order: Primary Stat, Stamina, Health
         return {
-            { name = primaryStat, func = function() return UnitStat("player", primaryStatIndex) end },
-            { name = "Stamina", func = function() return UnitStat("player", 3) end },
-            { name = "Health", func = function() return UnitHealthMax("player") end },
+            { name = primaryStat, func = function() return UnitStat("player", primaryStatIndex) end, statIndex = primaryStatIndex, tooltip = (primaryStatIndex == 1 and "Increases melee attack power") or (primaryStatIndex == 2 and "Increases dodge chance and melee attack power") or (primaryStatIndex == 4 and "Increase the magnitude of your attacks and Abilities") or "Primary stat" },
+            { name = "Stamina", func = function() return UnitStat("player", 3) end, statIndex = 3, tooltip = "Increases health" },
+            { name = "Health", func = function() return UnitHealthMax("player") end, tooltip = "The amount of damage you can take" },
         }
     end
 
@@ -851,28 +1075,28 @@ local function SkinCharacterSheet()
                 title = "Secondary Stats",
                 color = { r = 0.471, g = 0.255, b = 0.784 },
                 stats = {
-                    { name = "Crit", func = function() return GetCritChance("player") or 0 end, format = "%.2f%%" },
-                    { name = "Haste", func = function() return UnitSpellHaste("player") or 0 end, format = "%.2f%%" },
-                    { name = "Mastery", func = function() return GetMasteryEffect() or 0 end, format = "%.2f%%" },
-                    { name = "Versatility", func = function() return GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0 end, format = "%.2f%%" },
+                    { name = "Crit", func = function() return GetCritChance("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_CRIT_MELEE) or 0 end },
+                    { name = "Haste", func = function() return UnitSpellHaste("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_HASTE_MELEE) or 0 end },
+                    { name = "Mastery", func = function() return GetMasteryEffect() or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_MASTERY) or 0 end },
+                    { name = "Versatility", func = function() return GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0 end },
                 }
             },
             {
                 title = "Attack",
                 color = { r = 1, g = 0.353, b = 0.122 },
                 stats = {
-                    { name = "Spell Power", func = function() return GetSpellBonusDamage(7) end },
-                    { name = "Attack Speed", func = function() return UnitAttackSpeed("player") or 0 end, format = "%.2f" },
+                    { name = "Spell Power", func = function() return GetSpellBonusDamage(7) end, tooltip = "Increases the power of your spells and abilities" },
+                    { name = "Attack Speed", func = function() return UnitAttackSpeed("player") or 0 end, format = "%.2f", tooltip = "Attacks per second" },
                 }
             },
             {
                 title = "Defense",
                 color = { r = 0.247, g = 0.655, b = 1 },
                 stats = {
-                    { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end },
-                    { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%" },
-                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%" },
-                    { name = "Stagger Effect", func = function() return C_PaperDollInfo.GetStaggerPercentage("player") or 0 end, format = "%.2f%%", showWhen = "brewmaster" },
+                    { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end, tooltip = "Reduces physical damage taken" },
+                    { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%", tooltip = "Chance to avoid melee attacks" },
+                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%", tooltip = "Chance to block melee attacks" },
+                    { name = "Stagger Effect", func = function() return C_PaperDollInfo.GetStaggerPercentage("player") or 0 end, format = "%.2f%%", showWhen = "brewmaster", tooltip = "Converts damage into a delayed effect" },
                 }
             },
             {
@@ -1101,30 +1325,96 @@ local function SkinCharacterSheet()
                 value:SetJustifyH("RIGHT")
                 value:SetText("0")
 
-                -- Create button overlay for crest values to show tooltips
-                local valueButton = nil
-                if stat.currencyID then
-                    valueButton = CreateFrame("Button", nil, sectionContainer)
-                    valueButton:SetPoint("TOPRIGHT", sectionContainer, "TOPRIGHT", -2, statYOffset)
-                    valueButton:SetSize(50, 16)
-                    valueButton:EnableMouse(true)
-                    valueButton:SetScript("OnEnter", function()
+                -- Create button overlay for all stats with tooltips
+                local valueButton = CreateFrame("Button", nil, sectionContainer)
+                valueButton:SetPoint("TOPRIGHT", sectionContainer, "TOPRIGHT", -2, statYOffset)
+                valueButton:SetSize(90, 16)
+                valueButton:EnableMouse(true)
+
+                valueButton:SetScript("OnEnter", function()
+                    local statValue = stat.func()
+                    GameTooltip:SetOwner(valueButton, "ANCHOR_RIGHT")
+
+                    -- Format value according to stat's format string
+                    local displayValue = statValue
+                    if stat.format then
+                        displayValue = string.format(stat.format, statValue)
+                    else
+                        displayValue = tostring(statValue)
+                    end
+
+                    -- Build title line based on stat type
+                    local titleLine = stat.name .. " " .. displayValue
+
+                    -- Currency (Crests)
+                    if stat.currencyID then
                         local current = GetCrestValue(stat.currencyID)
                         local maximum = GetCrestMaxValue(stat.currencyID)
-                        GameTooltip:SetOwner(valueButton, "ANCHOR_RIGHT")
-                        GameTooltip:AddLine(stat.name .. " Crests", 1, 1, 1)
-                        GameTooltip:AddLine(string.format("%d / %d", current, maximum), 0.7, 0.7, 0.7)
-                        GameTooltip:Show()
-                    end)
-                    valueButton:SetScript("OnLeave", function()
-                        GameTooltip:Hide()
-                    end)
-                end
+                        GameTooltip:AddLine(stat.name .. " Crests", section.color.r, section.color.g, section.color.b, 1)
+                        GameTooltip:AddLine(string.format("%d / %d", current, maximum), 1, 1, 1, true)
+                    -- Secondary stats with raw rating
+                    elseif stat.rawFunc then
+                        local percentValue = stat.func()
+                        local rawValue = stat.rawFunc()
+                        GameTooltip:AddLine(
+                            string.format("%s %.2f%% (%d rating)", stat.name, percentValue, rawValue),
+                            section.color.r, section.color.g, section.color.b, 1  -- Use category color
+                        )
+                        -- Description for secondary stats
+                        local description = ""
+                        if stat.name == "Crit" then
+                            description = string.format("Increases your chance to critically hit by %.2f%%.", percentValue)
+                        elseif stat.name == "Haste" then
+                            description = string.format("Increases attack and casting speed by %.2f%%.", percentValue)
+                        elseif stat.name == "Mastery" then
+                            description = string.format("Increases the effectiveness of your Mastery by %.2f%%.", percentValue)
+                        elseif stat.name == "Versatility" then
+                            description = string.format("Increases damage and healing done by %.2f%% and reduces damage taken by %.2f%%.", percentValue, percentValue / 2)
+                        end
+                        GameTooltip:AddLine(description, 1, 1, 1, true)
+                    -- Attributes
+                    elseif stat.statIndex then
+                        local base, _, posBuff, negBuff = UnitStat("player", stat.statIndex)
+                        local statLabel = stat.name
+
+                        -- Map to Blizzard global names
+                        if stat.name == "Strength" then
+                            statLabel = STAT_STRENGTH or "Strength"
+                        elseif stat.name == "Agility" then
+                            statLabel = STAT_AGILITY or "Agility"
+                        elseif stat.name == "Intellect" then
+                            statLabel = STAT_INTELLECT or "Intellect"
+                        elseif stat.name == "Stamina" then
+                            statLabel = STAT_STAMINA or "Stamina"
+                        end
+
+                        local bonus = (posBuff or 0) + (negBuff or 0)
+                        local statLine = statLabel .. " " .. statValue
+                        if bonus ~= 0 then
+                            statLine = statLine .. " (" .. base .. (bonus > 0 and "+" or "") .. bonus .. ")"
+                        end
+                        GameTooltip:AddLine(statLine, section.color.r, section.color.g, section.color.b, 1)
+                        GameTooltip:AddLine(stat.tooltip, 1, 1, 1, true)
+                    -- Generic stats (Attack, Defense, etc.)
+                    else
+                        GameTooltip:AddLine(titleLine, section.color.r, section.color.g, section.color.b, 1)
+                        if stat.tooltip then
+                            GameTooltip:AddLine(stat.tooltip, 1, 1, 1, true)
+                        end
+                    end
+
+                    GameTooltip:Show()
+                end)
+
+                valueButton:SetScript("OnLeave", function()
+                    GameTooltip:Hide()
+                end)
 
                 -- Store for updates
                 table.insert(frame._statsValues, {
                     value = value,
                     func = stat.func,
+                    rawFunc = stat.rawFunc,
                     format = stat.format or "%d"
                 })
 
@@ -1688,6 +1978,8 @@ local function SkinCharacterSheet()
     newSetText:SetPoint("CENTER", newSetBtn, "CENTER", 0, 0)
 
     newSetBtn:SetScript("OnClick", function()
+        if InCombatLockdown() then return end
+
         StaticPopupDialogs["EUI_NEW_EQUIPMENT_SET"] = {
             text = "New equipment set name:",
             button1 = "Create",
@@ -1762,6 +2054,8 @@ local function SkinCharacterSheet()
     end)
 
     equipTopBtn:SetScript("OnClick", function()
+        if InCombatLockdown() then return end
+
         -- Visual feedback: change text to "Equipped!" and color it green
         equipTopText:SetText("Equipped!")
         equipTopText:SetTextColor(0.047, 0.824, 0.616, 1)  -- Green
@@ -1823,6 +2117,8 @@ local function SkinCharacterSheet()
     end)
 
     saveTopBtn:SetScript("OnClick", function()
+        if InCombatLockdown() then return end
+
         -- Visual feedback: change text to "Saved!" and color it green
         saveTopText:SetText("Saved!")
         saveTopText:SetTextColor(0.047, 0.824, 0.616, 1)  -- Green
@@ -1867,6 +2163,75 @@ local function SkinCharacterSheet()
     rightLine:SetPoint("RIGHT", setsHeaderFrame, "RIGHT", 0, -14)
     rightLine:SetHeight(2)
 
+    -- Function to check if all items of a set are equipped
+    local function IsEquipmentSetComplete(setName)
+        if not C_EquipmentSet or not C_EquipmentSet.GetEquipmentSetID then
+            return true  -- API not available
+        end
+
+        -- Get the set ID from the name
+        local setID = C_EquipmentSet.GetEquipmentSetID(setName)
+        if not setID then
+            return true  -- Set not found
+        end
+
+        -- Get the items in this set
+        local setItems = C_EquipmentSet.GetItemIDs(setID)
+        if not setItems then
+            return true  -- No items in set
+        end
+
+        -- Compare each slot
+        for slot, setItemID in pairs(setItems) do
+            if setItemID and setItemID ~= 0 then
+                local equippedID = GetInventoryItemID("player", slot)
+                if equippedID ~= setItemID then
+                    return false  -- Mismatch = incomplete set
+                end
+            end
+        end
+
+        return true  -- All items match
+    end
+
+    -- Function to get missing items from a set
+    local function GetMissingSetItems(setName)
+        if not C_EquipmentSet or not C_EquipmentSet.GetEquipmentSetID then
+            return {}
+        end
+
+        local setID = C_EquipmentSet.GetEquipmentSetID(setName)
+        if not setID then return {} end
+
+        local setItems = C_EquipmentSet.GetItemIDs(setID)
+        if not setItems then return {} end
+
+        local missing = {}
+        local slotNames = {
+            "Head", "Neck", "Shoulder", "Back",
+            "Chest", "Waist", "Legs", "Feet",
+            "Wrist", "Hands", "Finger 1", "Finger 2",
+            "Trinket 1", "Trinket 2", "Main Hand", "Off Hand",
+            "Tabard", "Chest (Relic)", "Back (Relic)"
+        }
+
+        for slot, setItemID in pairs(setItems) do
+            if setItemID and setItemID ~= 0 then
+                local equippedID = GetInventoryItemID("player", slot)
+                if equippedID ~= setItemID then
+                    local itemName = GetItemInfo(setItemID)
+                    table.insert(missing, {
+                        slot = slotNames[slot] or "Unknown",
+                        itemID = setItemID,
+                        itemName = itemName or "Unknown Item"
+                    })
+                end
+            end
+        end
+
+        return missing
+    end
+
     -- Function to reload equipment sets
     RefreshEquipmentSets = function()
         -- Clear old set buttons (but keep the new set, equip, save buttons, and header)
@@ -1909,8 +2274,19 @@ local function SkinCharacterSheet()
             local setText = setBtn:CreateFontString(nil, "OVERLAY")
             setText:SetFont(fontPath, 10, "")
             setText:SetText(setData.name)
-            setText:SetTextColor(1, 1, 1, 1)
+
+            -- Check if all items are equipped, if not, color red
+            if IsEquipmentSetComplete(setData.name) then
+                setText:SetTextColor(1, 1, 1, 1)  -- White
+            else
+                setText:SetTextColor(1, 0.3, 0.3, 1)  -- Red
+            end
+
             setText:SetPoint("LEFT", setBtn, "LEFT", 10, 0)
+
+            -- Store references for the color monitor
+            setBtn._setText = setText
+            setBtn._setName = setData.name
 
             -- Spec icon
             local assignedSpec = C_EquipmentSet.GetEquipmentSetAssignedSpec(setData.id)
@@ -1931,12 +2307,34 @@ local function SkinCharacterSheet()
                 RefreshEquipmentSets()
             end)
 
-            -- Hover effect
+            -- Hover effect and tooltip for missing items
             setBtn:SetScript("OnEnter", function()
                 btnBg:SetColorTexture(0.047, 0.824, 0.616, 0.2)
+
+                -- Show tooltip if set is incomplete
+                if not IsEquipmentSetComplete(setData.name) then
+                    local missing = GetMissingSetItems(setData.name)
+                    if #missing > 0 then
+                        GameTooltip:SetOwner(setBtn, "ANCHOR_RIGHT")
+                        GameTooltip:AddLine("Missing Items:", 1, 0.3, 0.3, 1)
+
+                        for _, item in ipairs(missing) do
+                            local icon = GetItemIcon(item.itemID)
+                            local iconText = icon and string.format("|T%s:16|t", icon) or ""
+                            GameTooltip:AddLine(
+                                string.format("%s %s: %s", iconText, item.slot, item.itemName),
+                                1, 1, 1, true
+                            )
+                        end
+
+                        GameTooltip:Show()
+                    end
+                end
             end)
 
             setBtn:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+
                 if selectedSetID == setData.id then
                     btnBg:SetColorTexture(0.047, 0.824, 0.616, 0.5)
                 elseif activeEquipmentSetID == setData.id then
@@ -2120,11 +2518,30 @@ local function SkinCharacterSheet()
         equipScrollChild:SetHeight(-yOffset)
     end
 
+    -- Continuous monitor to update set colors when equipment changes
+    local equipmentColorMonitor = CreateFrame("Frame")
+    equipmentColorMonitor:SetScript("OnUpdate", function()
+        if not (CharacterFrame and CharacterFrame:IsShown() and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown()) then
+            return
+        end
+
+        -- Update colors of all visible set buttons
+        for _, child in ipairs({equipScrollChild:GetChildren()}) do
+            if child._setText and child._setName then
+                if IsEquipmentSetComplete(child._setName) then
+                    child._setText:SetTextColor(1, 1, 1, 1)  -- White
+                else
+                    child._setText:SetTextColor(1, 0.3, 0.3, 1)  -- Red
+                end
+            end
+        end
+    end)
+
     -- Event handler for equipment set changes
     local equipSetChangeFrame = CreateFrame("Frame")
     equipSetChangeFrame:RegisterEvent("EQUIPMENT_SETS_CHANGED")
-    equipSetChangeFrame:SetScript("OnEvent", function()
-        -- activeEquipmentSetID is set by the Equip button and auto-equip logic
+    equipSetChangeFrame:SetScript("OnEvent", function(self, event)
+        -- Full refresh when sets change
         if CharacterFrame and CharacterFrame:IsShown() and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown() then
             RefreshEquipmentSets()
         end
@@ -2497,8 +2914,8 @@ local function SkinCharacterSheet()
     local enchantTooltip = CreateFrame("GameTooltip", "EUICharacterSheetEnchantTooltip", nil, "GameTooltipTemplate")
     enchantTooltip:SetOwner(UIParent, "ANCHOR_NONE")
 
-    -- Cache item IDs to only update when items change
-    local itemIdCache = {}
+    -- Cache item info (ID, level, upgrade track) to update when items change
+    local itemCache = {}
 
     -- Function to update enchant text and upgrade track for a slot
     local function UpdateSlotInfo(slotName)
@@ -2584,7 +3001,7 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Monitor and update only when items change
+    -- Monitor and update only when items change (including upgrade level)
     if not frame._itemLevelMonitor then
         frame._itemLevelMonitor = CreateFrame("Frame")
         frame._itemLevelMonitor:SetScript("OnUpdate", function()
@@ -2593,13 +3010,12 @@ local function SkinCharacterSheet()
             end
             if frame and frame:IsShown() then
                 for _, slotName in ipairs(itemSlots) do
-                    -- Use GetItemInfoInstant to check if item changed without tooltip overhead
+                    -- Get full item link (includes itemlevel and upgrade info)
                     local itemLink = GetInventoryItemLink("player", _G[slotName]:GetID())
-                    local itemId = itemLink and GetItemInfoInstant(itemLink) or nil
 
-                    -- Only update if item ID changed
-                    if itemIdCache[slotName] ~= itemId then
-                        itemIdCache[slotName] = itemId
+                    -- Compare full link to detect changes in itemlevel or upgrade track
+                    if itemCache[slotName] ~= itemLink then
+                        itemCache[slotName] = itemLink
                         UpdateSlotInfo(slotName)
                     end
                 end
