@@ -1015,14 +1015,18 @@ local function SkinCharacterSheet()
     local crestMaxValues = {
         [3347] = 400,  -- Myth
         [3345] = 400,  -- Hero
-        [3344] = 700,  -- Champion
+        [3343] = 700,  -- Champion
         [3341] = 700,  -- Veteran
-        [3391] = 700,  -- Adventurer
+        [3383] = 700,  -- Adventurer
     }
 
-    -- Helper function to get crest maximum value
+    -- Helper function to get crest maximum value (now using API to get seasonal max)
     local function GetCrestMaxValue(currencyID)
-        return crestMaxValues[currencyID] or 3000
+        local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(currencyID)
+        if currencyInfo and currencyInfo.maxQuantity then
+            return currencyInfo.maxQuantity
+        end
+        return crestMaxValues[currencyID] or 3000  -- Fallback to hardcoded values if API fails
     end
 
     -- Check if a stat should be shown based on class/spec conditions
@@ -1063,17 +1067,33 @@ local function SkinCharacterSheet()
         }
     end
 
+    -- Default category colors
+    local DEFAULT_CATEGORY_COLORS = {
+        Attributes = { r = 0.047, g = 0.824, b = 0.616 },
+        ["Secondary Stats"] = { r = 0.471, g = 0.255, b = 0.784 },
+        Attack = { r = 1, g = 0.353, b = 0.122 },
+        Defense = { r = 0.247, g = 0.655, b = 1 },
+        Crests = { r = 1, g = 0.784, b = 0.341 },
+    }
+
+    -- Get category color, applying customization if available
+    local function GetCategoryColor(title)
+        local custom = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors[title]
+        if custom then return custom end
+        return DEFAULT_CATEGORY_COLORS[title] or { r = 1, g = 1, b = 1 }
+    end
+
     -- Load stat sections order from saved data or use defaults
     local function GetStatSectionsOrder()
         local defaultOrder = {
             {
                 title = "Attributes",
-                color = { r = 0.047, g = 0.824, b = 0.616 },
+                color = GetCategoryColor("Attributes"),
                 stats = GetFilteredAttributeStats()
             },
             {
                 title = "Secondary Stats",
-                color = { r = 0.471, g = 0.255, b = 0.784 },
+                color = GetCategoryColor("Secondary Stats"),
                 stats = {
                     { name = "Crit", func = function() return GetCritChance("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_CRIT_MELEE) or 0 end },
                     { name = "Haste", func = function() return UnitSpellHaste("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_HASTE_MELEE) or 0 end },
@@ -1083,7 +1103,7 @@ local function SkinCharacterSheet()
             },
             {
                 title = "Attack",
-                color = { r = 1, g = 0.353, b = 0.122 },
+                color = GetCategoryColor("Attack"),
                 stats = {
                     { name = "Spell Power", func = function() return GetSpellBonusDamage(7) end, tooltip = "Increases the power of your spells and abilities" },
                     { name = "Attack Speed", func = function() return UnitAttackSpeed("player") or 0 end, format = "%.2f", tooltip = "Attacks per second" },
@@ -1091,7 +1111,7 @@ local function SkinCharacterSheet()
             },
             {
                 title = "Defense",
-                color = { r = 0.247, g = 0.655, b = 1 },
+                color = GetCategoryColor("Defense"),
                 stats = {
                     { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end, tooltip = "Reduces physical damage taken" },
                     { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%", tooltip = "Chance to avoid melee attacks" },
@@ -1101,13 +1121,13 @@ local function SkinCharacterSheet()
             },
             {
                 title = "Crests",
-                color = { r = 1, g = 0.784, b = 0.341 },
+                color = GetCategoryColor("Crests"),
                 stats = {
                     { name = "Myth", func = function() return GetCrestValue(3347) end, format = "%d", currencyID = 3347 },
                     { name = "Hero", func = function() return GetCrestValue(3345) end, format = "%d", currencyID = 3345 },
-                    { name = "Champion", func = function() return GetCrestValue(3344) end, format = "%d", currencyID = 3344 },
+                    { name = "Champion", func = function() return GetCrestValue(3343) end, format = "%d", currencyID = 3343 },
                     { name = "Veteran", func = function() return GetCrestValue(3341) end, format = "%d", currencyID = 3341 },
-                    { name = "Adventurer", func = function() return GetCrestValue(3391) end, format = "%d", currencyID = 3391 },
+                    { name = "Adventurer", func = function() return GetCrestValue(3383) end, format = "%d", currencyID = 3383 },
                 }
             }
         }
@@ -1302,7 +1322,10 @@ local function SkinCharacterSheet()
             stats = {},
             isCollapsed = false,
             height = 0,
-            sectionTitle = section.title  -- Store title for reordering
+            sectionTitle = section.title,  -- Store title for reordering
+            titleFS = sectionTitle,  -- Store title fontstring for color updates
+            leftBar = leftBar,  -- Store left bar for color updates
+            rightBar = rightBar  -- Store right bar for color updates
         }
         table.insert(frame._statsSections, sectionData)
 
@@ -1348,10 +1371,13 @@ local function SkinCharacterSheet()
 
                     -- Currency (Crests)
                     if stat.currencyID then
-                        local current = GetCrestValue(stat.currencyID)
-                        local maximum = GetCrestMaxValue(stat.currencyID)
-                        GameTooltip:AddLine(stat.name .. " Crests", section.color.r, section.color.g, section.color.b, 1)
-                        GameTooltip:AddLine(string.format("%d / %d", current, maximum), 1, 1, 1, true)
+                        local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(stat.currencyID)
+                        if currencyInfo then
+                            local earned = currencyInfo.totalEarned or 0
+                            local maximum = currencyInfo.maxQuantity or 0
+                            GameTooltip:AddLine(stat.name .. " Crests", section.color.r, section.color.g, section.color.b, 1)
+                            GameTooltip:AddLine(string.format("%d / %d", earned, maximum), 1, 1, 1, true)
+                        end
                     -- Secondary stats with raw rating
                     elseif stat.rawFunc then
                         local percentValue = stat.func()
@@ -2917,6 +2943,20 @@ local function SkinCharacterSheet()
     -- Cache item info (ID, level, upgrade track) to update when items change
     local itemCache = {}
 
+    -- Slots that can have enchants in current expansion
+    local ENCHANT_SLOTS = {
+        [INVSLOT_HEAD] = true,
+        [INVSLOT_SHOULDER] = true,
+        [INVSLOT_BACK] = false,
+        [INVSLOT_CHEST] = true,
+        [INVSLOT_WRIST] = false,
+        [INVSLOT_LEGS] = true,
+        [INVSLOT_FEET] = true,
+        [INVSLOT_FINGER1] = true,
+        [INVSLOT_FINGER2] = true,
+        [INVSLOT_MAINHAND] = true,
+    }
+
     -- Function to update enchant text and upgrade track for a slot
     local function UpdateSlotInfo(slotName)
         local slot = _G[slotName]
@@ -2928,6 +2968,8 @@ local function SkinCharacterSheet()
         local upgradeTrackText = ""
         local upgradeTrackColor = { r = 1, g = 1, b = 1 }
         local itemQuality = nil
+        local slotID = slot:GetID()
+        local canHaveEnchant = ENCHANT_SLOTS[slotID]
 
         if itemLink then
             local _, _, quality, ilvl = GetItemInfo(itemLink)
@@ -2978,26 +3020,93 @@ local function SkinCharacterSheet()
 
         -- Update itemlevel label with optional rarity color
         if slot._itemLevelLabel then
-            slot._itemLevelLabel:SetText(tostring(itemLevel) or "")
+            -- Check if itemlevel is enabled (default: true)
+            local showItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.showItemLevel ~= false)
 
-            -- Apply rarity color if enabled
-            if EllesmereUIDB and EllesmereUIDB.charSheetColorItemLevel and itemQuality then
-                local r, g, b = GetItemQualityColor(itemQuality)
-                slot._itemLevelLabel:SetTextColor(r, g, b, 0.9)
+            if showItemLevel then
+                slot._itemLevelLabel:SetText(tostring(itemLevel) or "")
+                slot._itemLevelLabel:Show()
+
+                -- Determine color to use
+                local displayColor
+                if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
+                    -- Use custom color if enabled
+                    displayColor = EllesmereUIDB.charSheetItemLevelColor
+                else
+                    -- Use rarity color by default, unless explicitly disabled
+                    if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and itemQuality then
+                        local r, g, b = GetItemQualityColor(itemQuality)
+                        displayColor = { r = r, g = g, b = b }
+                    else
+                        displayColor = { r = 1, g = 1, b = 1 }
+                    end
+                end
+
+                slot._itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
             else
-                slot._itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
+                slot._itemLevelLabel:Hide()
             end
         end
 
         -- Update enchant label
         if slot._enchantLabel then
-            slot._enchantLabel:SetText(enchantText or "")
+            -- Check if enchants are enabled (default: true)
+            local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.showEnchants ~= false)
+
+            if showEnchants then
+                -- Check if enchant is missing (only for slots that can have enchants)
+                local isMissing = canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
+
+                if isMissing then
+                    slot._enchantLabel:SetText("<missing enchant>")
+                    slot._enchantLabel:Show()
+                    -- Red for missing enchant
+                    slot._enchantLabel:SetTextColor(1, 0, 0, 1)
+                elseif enchantText and enchantText ~= "" then
+                    slot._enchantLabel:SetText(enchantText)
+                    slot._enchantLabel:Show()
+
+                    -- Determine color to use
+                    local displayColor
+                    if EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor and EllesmereUIDB.charSheetEnchantColor then
+                        -- Use custom color if enabled
+                        displayColor = EllesmereUIDB.charSheetEnchantColor
+                    else
+                        -- Use default white color
+                        displayColor = { r = 1, g = 1, b = 1 }
+                    end
+                    slot._enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
+                else
+                    slot._enchantLabel:Hide()
+                end
+            else
+                slot._enchantLabel:Hide()
+            end
         end
 
         -- Update upgrade track label
         if slot._upgradeTrackLabel then
-            slot._upgradeTrackLabel:SetText(upgradeTrackText or "")
-            slot._upgradeTrackLabel:SetTextColor(upgradeTrackColor.r, upgradeTrackColor.g, upgradeTrackColor.b, 0.8)
+            -- Check if upgradetrack is enabled (default: true)
+            local showUpgradeTrack = (not EllesmereUIDB) or (EllesmereUIDB.showUpgradeTrack ~= false)
+
+            if showUpgradeTrack then
+                slot._upgradeTrackLabel:SetText(upgradeTrackText or "")
+                slot._upgradeTrackLabel:Show()
+
+                -- Determine color to use
+                local displayColor
+                if EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor and EllesmereUIDB.charSheetUpgradeTrackColor then
+                    -- Use custom color if enabled
+                    displayColor = EllesmereUIDB.charSheetUpgradeTrackColor
+                else
+                    -- Use original rarity color by default
+                    displayColor = upgradeTrackColor
+                end
+
+                slot._upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
+            else
+                slot._upgradeTrackLabel:Hide()
+            end
         end
     end
 
@@ -3300,7 +3409,8 @@ function EllesmereUI._applyCharSheetItemColors()
             local itemLink = GetInventoryItemLink("player", slot:GetID())
             if itemLink then
                 local _, _, quality = GetItemInfo(itemLink)
-                if EllesmereUIDB and EllesmereUIDB.charSheetColorItemLevel and quality then
+                -- Use rarity color by default, unless explicitly disabled
+                if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and quality then
                     local r, g, b = GetItemQualityColor(quality)
                     slot._itemLevelLabel:SetTextColor(r, g, b, 0.9)
                 else
@@ -3308,6 +3418,247 @@ function EllesmereUI._applyCharSheetItemColors()
                 end
             else
                 slot._itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
+            end
+        end
+    end
+end
+
+-- Function to refresh category colors when changed in options
+function EllesmereUI._refreshCharacterSheetColors()
+    local charFrame = CharacterFrame
+    if not charFrame or not charFrame._statsSections then return end
+
+    -- Default category colors
+    local DEFAULT_CATEGORY_COLORS = {
+        Attributes = { r = 0.047, g = 0.824, b = 0.616 },
+        ["Secondary Stats"] = { r = 0.471, g = 0.255, b = 0.784 },
+        Attack = { r = 1, g = 0.353, b = 0.122 },
+        Defense = { r = 0.247, g = 0.655, b = 1 },
+        Crests = { r = 1, g = 0.784, b = 0.341 },
+    }
+
+    -- Helper to get category color
+    local function GetCategoryColor(title)
+        local custom = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors[title]
+        if custom then return custom end
+        return DEFAULT_CATEGORY_COLORS[title] or { r = 1, g = 1, b = 1 }
+    end
+
+    -- Update each section's colors
+    for _, sectionData in ipairs(charFrame._statsSections) do
+        local categoryName = sectionData.sectionTitle
+        local newColor = GetCategoryColor(categoryName)
+
+        -- Update title color
+        if sectionData.titleFS then
+            sectionData.titleFS:SetTextColor(newColor.r, newColor.g, newColor.b, 1)
+        end
+
+        -- Update bars
+        if sectionData.leftBar then
+            sectionData.leftBar:SetColorTexture(newColor.r, newColor.g, newColor.b, 0.8)
+        end
+        if sectionData.rightBar then
+            sectionData.rightBar:SetColorTexture(newColor.r, newColor.g, newColor.b, 0.8)
+        end
+
+        -- Update stat values
+        for _, stat in ipairs(sectionData.stats) do
+            if stat.value then
+                stat.value:SetTextColor(newColor.r, newColor.g, newColor.b, 1)
+            end
+        end
+    end
+end
+
+-- Function to refresh upgrade track visibility when toggle changes
+function EllesmereUI._refreshUpgradeTrackVisibility()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    local showUpgradeTrack = (not EllesmereUIDB) or (EllesmereUIDB.showUpgradeTrack ~= false)
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._upgradeTrackLabel then
+            if showUpgradeTrack then
+                slot._upgradeTrackLabel:Show()
+            else
+                slot._upgradeTrackLabel:Hide()
+            end
+        end
+    end
+end
+
+-- Function to refresh enchants visibility when toggle changes
+function EllesmereUI._refreshEnchantsVisibility()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.showEnchants ~= false)
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._enchantLabel then
+            if showEnchants then
+                slot._enchantLabel:Show()
+            else
+                slot._enchantLabel:Hide()
+            end
+        end
+    end
+end
+
+-- Function to refresh enchants colors
+function EllesmereUI._refreshEnchantsColors()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._enchantLabel then
+            -- Determine color to use
+            local displayColor
+            if EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor and EllesmereUIDB.charSheetEnchantColor then
+                -- Use custom color if enabled
+                displayColor = EllesmereUIDB.charSheetEnchantColor
+            else
+                -- Use default color
+                displayColor = { r = 1, g = 1, b = 1 }
+            end
+
+            slot._enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
+        end
+    end
+end
+
+-- Function to refresh item level visibility when toggle changes
+function EllesmereUI._refreshItemLevelVisibility()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    local showItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.showItemLevel ~= false)
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._itemLevelLabel then
+            if showItemLevel then
+                slot._itemLevelLabel:Show()
+            else
+                slot._itemLevelLabel:Hide()
+            end
+        end
+    end
+end
+
+-- Function to refresh item level colors
+function EllesmereUI._refreshItemLevelColors()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._itemLevelLabel then
+            -- Determine color to use
+            local displayColor
+            if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
+                -- Use custom color if enabled
+                displayColor = EllesmereUIDB.charSheetItemLevelColor
+            else
+                -- Use rarity color by default, unless explicitly disabled
+                local itemLink = GetInventoryItemLink("player", slot:GetID())
+                if itemLink and (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) then
+                    local _, _, quality = GetItemInfo(itemLink)
+                    if quality then
+                        local r, g, b = GetItemQualityColor(quality)
+                        displayColor = { r = r, g = g, b = b }
+                    else
+                        displayColor = { r = 1, g = 1, b = 1 }
+                    end
+                else
+                    displayColor = { r = 1, g = 1, b = 1 }
+                end
+            end
+
+            slot._itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
+        end
+    end
+end
+
+-- Function to refresh upgrade track colors
+function EllesmereUI._refreshUpgradeTrackColors()
+    local itemSlots = {
+        "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+        "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+        "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+        "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+    }
+
+    for _, slotName in ipairs(itemSlots) do
+        local slot = _G[slotName]
+        if slot and slot._upgradeTrackLabel then
+            local itemLink = GetInventoryItemLink("player", slot:GetID())
+            if itemLink then
+                -- Get the upgrade track text to determine the color
+                local enchantTooltip = CreateFrame("GameTooltip", "EUICharacterSheetEnchantTooltip", nil, "GameTooltipTemplate")
+                enchantTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+                enchantTooltip:SetInventoryItem("player", slot:GetID())
+
+                local upgradeTrackColor = { r = 1, g = 1, b = 1 }
+                for i = 1, enchantTooltip:NumLines() do
+                    local textLeft = _G["EUICharacterSheetEnchantTooltipTextLeft" .. i]:GetText() or ""
+                    if textLeft:match("Upgrade Level:") then
+                        local trackInfo = textLeft:gsub("Upgrade Level:%s*", "")
+                        local trk, nums = trackInfo:match("^(%w+)%s+(.+)$")
+
+                        if trk and nums then
+                            if trk == "Champion" then
+                                upgradeTrackColor = { r = 0.00, g = 0.44, b = 0.87 }
+                            elseif trk:match("Myth") then
+                                upgradeTrackColor = { r = 1.00, g = 0.50, b = 0.00 }
+                            elseif trk:match("Hero") then
+                                upgradeTrackColor = { r = 1.00, g = 0.30, b = 1.00 }
+                            elseif trk:match("Veteran") then
+                                upgradeTrackColor = { r = 0.12, g = 1.00, b = 0.00 }
+                            elseif trk:match("Adventurer") then
+                                upgradeTrackColor = { r = 1.00, g = 1.00, b = 1.00 }
+                            elseif trk:match("Delve") or trk:match("Explorer") then
+                                upgradeTrackColor = { r = 0.62, g = 0.62, b = 0.62 }
+                            end
+                        end
+                        break
+                    end
+                end
+
+                -- Apply color
+                local displayColor
+                if EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor and EllesmereUIDB.charSheetUpgradeTrackColor then
+                    displayColor = EllesmereUIDB.charSheetUpgradeTrackColor
+                else
+                    displayColor = upgradeTrackColor
+                end
+
+                slot._upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
             end
         end
     end
