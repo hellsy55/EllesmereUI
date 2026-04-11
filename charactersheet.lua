@@ -586,6 +586,53 @@ local function SkinCharacterSheet()
                 end
             end
 
+            -- Hide average itemlevel text when not on character tab
+            if frame._iLvlText then
+                if isCharacterTab then
+                    frame._iLvlText:Show()
+                else
+                    frame._iLvlText:Hide()
+                end
+            end
+
+            -- Hide/show all stat sections based on tab
+            if frame._statsSections then
+                for _, sectionData in ipairs(frame._statsSections) do
+                    if sectionData.container then
+                        if isCharacterTab then
+                            sectionData.container:Show()
+                        else
+                            sectionData.container:Hide()
+                        end
+                    end
+                end
+            end
+
+            -- Hide/show stat panel background, scrollFrame and scrollBar
+            if frame._statsBg then
+                if isCharacterTab then
+                    frame._statsBg:Show()
+                else
+                    frame._statsBg:Hide()
+                end
+            end
+
+            if frame._scrollFrame then
+                if isCharacterTab then
+                    frame._scrollFrame:Show()
+                else
+                    frame._scrollFrame:Hide()
+                end
+            end
+
+            if frame._scrollBar then
+                if isCharacterTab then
+                    frame._scrollBar:Show()
+                else
+                    frame._scrollBar:Hide()
+                end
+            end
+
             if frame._titlesPanel then
                 if not isCharacterTab then
                     frame._titlesPanel:Hide()
@@ -633,12 +680,14 @@ local function SkinCharacterSheet()
     statsBg:SetColorTexture(0.03, 0.045, 0.05, 0.95)
     statsBg:SetSize(220, 340)  -- Fixed size, doesn't expand
     statsBg:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 0, 0)
+    frame._statsBg = statsBg  -- Store on frame for tab visibility control
 
     -- Itemlevel display (anchor to center of statsBg background)
     local iLvlText = statsPanel:CreateFontString(nil, "OVERLAY")
     iLvlText:SetFont(fontPath, 20, "")
     iLvlText:SetPoint("TOP", statsBg, "TOP", 0,60)
     iLvlText:SetTextColor(0.6, 0.2, 1, 1)
+    frame._iLvlText = iLvlText  -- Store on frame for tab visibility control
 
     -- Function to update itemlevel
     local function UpdateItemLevelDisplay()
@@ -672,6 +721,7 @@ local function SkinCharacterSheet()
     scrollFrame:SetSize(260, 320)
     scrollFrame:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 5, -10)
     scrollFrame:SetFrameLevel(51)
+    frame._scrollFrame = scrollFrame  -- Store on frame for tab visibility control
 
     -- Create scroll child
     local scrollChild = CreateFrame("Frame", "EUI_CharSheet_ScrollChild", scrollFrame)
@@ -685,6 +735,7 @@ local function SkinCharacterSheet()
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValue(0)
     scrollBar:SetOrientation("VERTICAL")
+    frame._scrollBar = scrollBar  -- Store on frame for tab visibility control
 
     -- Scrollbar background (disabled - causes visual glitches)
     -- local scrollBarBg = scrollBar:CreateTexture(nil, "BACKGROUND")
@@ -2131,7 +2182,13 @@ local function SkinCharacterSheet()
     -- Create global socket container for all slot icons
     local globalSocketContainer = CreateFrame("Frame", "EUI_CharSheet_SocketContainer", frame)
     globalSocketContainer:SetFrameLevel(100)
-    globalSocketContainer:Show()
+    -- Only show if on character tab
+    local isCharacterTab = (frame.selectedTab or 1) == 1
+    if isCharacterTab then
+        globalSocketContainer:Show()
+    else
+        globalSocketContainer:Hide()
+    end
     frame._socketContainer = globalSocketContainer  -- Store reference on frame
 
     -- Create overlay frame for text labels (above model, transparent, no mouse input)
@@ -2405,14 +2462,24 @@ local function SkinCharacterSheet()
     socketWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
     socketWatcher:SetScript("OnEvent", function()
         if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
-            C_Timer.After(0.1, RefreshAllSocketIcons)
+            -- Only refresh if on character tab and frame is shown
+            local isCharacterTab = (frame.selectedTab or 1) == 1
+            if frame:IsShown() and isCharacterTab then
+                C_Timer.After(0.1, RefreshAllSocketIcons)
+            end
         end
     end)
 
     -- Hook frame show/hide
     frame:HookScript("OnShow", function()
-        RefreshAllSocketIcons()
-        globalSocketContainer:Show()
+        -- Only refresh sockets and show container if on character tab
+        local isCharacterTab = (frame.selectedTab or 1) == 1
+        if isCharacterTab then
+            RefreshAllSocketIcons()
+            globalSocketContainer:Show()
+        else
+            globalSocketContainer:Hide()
+        end
         -- Reset to Stats panel on open
         if statsPanel and CharacterFrame._titlesPanel and CharacterFrame._equipPanel then
             statsPanel:Show()
