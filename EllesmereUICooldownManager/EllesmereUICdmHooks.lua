@@ -155,26 +155,36 @@ ns.ResolveFrameSpellID = ResolveFrameSpellID
 -------------------------------------------------------------------------------
 --  Spell Routing State
 --
---  _divertedSpells: variant-keyed map of every spell ID that's been claimed
---                   by a specific bar (default OR custom OR ghost). Built
---                   once by RebuildSpellRouteMap from the bar list. Queried
---                   per-frame at reanchor time by ResolveCDIDToBar. A spell
---                   with no entry here falls through to the bar that owns
---                   the viewer pool the frame was enumerated from.
+--  _divertedSpellsBuff / _divertedSpellsCD:
+--                   variant-keyed maps of every spell ID claimed by a bar.
+--                   Split by viewer family so the same spellID (e.g. Divine
+--                   Shield 642, which exists as both a cooldown in the
+--                   essential viewer AND a buff in the buff viewer) can
+--                   route independently per family. Without the split, a
+--                   later pass writing the same spellID for a different
+--                   family would clobber the earlier pass and the frame
+--                   would fall through to its viewer default.
+--                   Built once by RebuildSpellRouteMap from the bar list.
+--                   Queried per-frame at reanchor time by ResolveCDIDToBar
+--                   using the viewer's family.
 --
 --  _cdidRouteMap:   memoization cache, cooldownID -> barKey. Lazily
 --                   populated by ResolveCDIDToBar on first lookup. Wiped
---                   by RebuildSpellRouteMap.
+--                   by RebuildSpellRouteMap. Safe as a single map because
+--                   a given cooldownID only exists in ONE viewer, so the
+--                   buff-vs-CD family is already implicit in the key.
 -------------------------------------------------------------------------------
 local _cdidRouteMap = {}
 
-local _divertedSpells = {}
-ns._divertedSpells = _divertedSpells
+local _divertedSpellsBuff = {}
+local _divertedSpellsCD   = {}
+ns._divertedSpellsBuff = _divertedSpellsBuff
+ns._divertedSpellsCD   = _divertedSpellsCD
 
 -- Sentinel: set true at the end of RebuildSpellRouteMap on a successful
 -- build. CollectAndReanchor's safety net tests this (NOT _cdidRouteMap,
--- which is a lazy cache and intentionally empty post-build, NOT
--- _divertedSpells, which can legitimately be empty for users with no
+-- which is a lazy cache and intentionally empty post-build, NOT the
+-- diversion maps, which can legitimately be empty for users with no
 -- diversions).
 local _routeMapBuilt = false
 
@@ -199,9 +209,17 @@ local _routeMapBuilt = false
 --- Priority for collisions (rare under the 1-spell-per-bar invariant):
 ---   ghost bars (lowest) -> custom buff -> custom CD/util -> default bars
 ---   (highest). Later passes overwrite earlier via preserveExisting=false.
+---
+--- Family split: each bar writes to either _divertedSpellsBuff (buff
+--- family) or _divertedSpellsCD (non-buff family). This prevents a
+--- buff-family bar and a CD-family bar from clobbering each other's
+--- diversion entries when they both claim the same spellID (e.g. Divine
+--- Shield, which has a cooldown frame AND a buff frame under the same
+--- spellID 642).
 function ns.RebuildSpellRouteMap()
     wipe(_cdidRouteMap)
-    wipe(_divertedSpells)
+    wipe(_divertedSpellsBuff)
+    wipe(_divertedSpellsCD)
     _routeMapBuilt = false
 
     local p = ECME.db and ECME.db.profile
@@ -210,12 +228,15 @@ function ns.RebuildSpellRouteMap()
     local SVV = ns.StoreVariantValue
     if not SVV then return end
 
+    local IsBuffFamily = ns.IsBarBuffFamily
+
     local function CollectDiversionsFor(bd)
         local sd = ns.GetBarSpellData(bd.key)
         if not sd or not sd.assignedSpells then return end
+        local targetMap = IsBuffFamily and IsBuffFamily(bd) and _divertedSpellsBuff or _divertedSpellsCD
         for _, sid in ipairs(sd.assignedSpells) do
             if type(sid) == "number" and sid > 0 then
-                SVV(_divertedSpells, sid, bd.key, false)
+                SVV(targetMap, sid, bd.key, false)
             end
         end
     end
@@ -226,10 +247,22 @@ function ns.RebuildSpellRouteMap()
             CollectDiversionsFor(bd)
         end
     end
-    -- Pass 2: custom buff bars
+    -- Pass 2: custom buff bars (extra buff bars) + custom_buff (TBB) bars.
+    -- TBB bars compete for the same buff icon spells, so their diversions
+    -- must land in _divertedSpellsBuff even though IsBarBuffFamily returns
+    -- false for custom_buff. We write directly to _divertedSpellsBuff here.
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs" and not bd.isGhostBar then
-            CollectDiversionsFor(bd)
+        if bd.enabled and not bd.isGhostBar
+           and ((bd.barType == "buffs" and bd.key ~= "buffs")
+                or bd.barType == "custom_buff") then
+            local sd = ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells then
+                for _, sid in ipairs(sd.assignedSpells) do
+                    if type(sid) == "number" and sid > 0 then
+                        SVV(_divertedSpellsBuff, sid, bd.key, false)
+                    end
+                end
+            end
         end
     end
     -- Pass 3: custom CD/utility bars
@@ -254,12 +287,14 @@ end
 
 --- Lazily resolve a cooldownID to a bar key. Called per-frame at reanchor
 --- time. Uses _cdidRouteMap as a memoization cache; on cache miss, computes
---- the route from the diversion set or falls back to viewerDefaultBar (the
---- bar that owns the viewer the frame came from). Caches the result.
+--- the route from the per-family diversion map or falls back to
+--- viewerDefaultBar (the bar that owns the viewer the frame came from).
+--- Caches the result.
 ---
 --- viewerDefaultBar is "cooldowns" / "utility" / "buffs" depending on which
 --- viewer pool the frame was enumerated from -- this is the user-visible
---- ground truth, not the static category API.
+--- ground truth, not the static category API. It also tells us which
+--- family to consult (buffs -> _divertedSpellsBuff, otherwise CD).
 local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     if not cdID then return viewerDefaultBar end
     local cached = _cdidRouteMap[cdID]
@@ -272,20 +307,22 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
         return viewerDefaultBar
     end
 
+    local divertMap = (viewerDefaultBar == "buffs") and _divertedSpellsBuff or _divertedSpellsCD
+
     local info = gci(cdID)
     local routedBar = nil
     if info then
         if info.spellID and info.spellID > 0 then
-            routedBar = RVV(_divertedSpells, info.spellID)
+            routedBar = RVV(divertMap, info.spellID)
         end
         if not routedBar and info.overrideSpellID and info.overrideSpellID > 0
            and info.overrideSpellID ~= info.spellID then
-            routedBar = RVV(_divertedSpells, info.overrideSpellID)
+            routedBar = RVV(divertMap, info.overrideSpellID)
         end
         if not routedBar and info.linkedSpellIDs then
             for _, lid in ipairs(info.linkedSpellIDs) do
                 if type(lid) == "number" and lid > 0 then
-                    routedBar = RVV(_divertedSpells, lid)
+                    routedBar = RVV(divertMap, lid)
                     if routedBar then break end
                 end
             end
@@ -629,14 +666,33 @@ local function DecorateFrame(frame, barData)
                         cdw:SetUseAuraDisplayTime(false)
                     end
                     if cdw.SetCooldownFromDurationObject then
+                        -- Resolve effective spell ID: when a spell is
+                        -- transformed (e.g. Judgment -> Hammer of Wrath
+                        -- under Wings), Blizzard's charge/cooldown APIs
+                        -- report against the override ID, not the base.
+                        -- Query the override first and fall back to the
+                        -- base ID so non-transformed spells still work.
+                        local effID = sid2
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                            if ovr and ovr > 0 and ovr ~= sid2 then
+                                effID = ovr
+                            end
+                        end
                         local hasCharges = type(frame.HasVisualDataSource_Charges) == "function"
                             and frame:HasVisualDataSource_Charges()
                         local durObj
                         if hasCharges and C_Spell.GetSpellChargeDuration then
-                            durObj = C_Spell.GetSpellChargeDuration(sid2)
+                            durObj = C_Spell.GetSpellChargeDuration(effID)
+                            if not durObj and effID ~= sid2 then
+                                durObj = C_Spell.GetSpellChargeDuration(sid2)
+                            end
                         end
                         if not durObj and C_Spell.GetSpellCooldownDuration then
-                            durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                            durObj = C_Spell.GetSpellCooldownDuration(effID)
+                            if not durObj and effID ~= sid2 then
+                                durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                            end
                         end
                         if durObj then
                             cdw:SetCooldownFromDurationObject(durObj)
@@ -682,7 +738,7 @@ local function CategorizeFrame(frame, viewerBarKey)
         local claimBD = barDataByKey[claimBarKey]
         local claimType = claimBD and claimBD.barType or claimBarKey
         local viewerIsBuff = (viewerBarKey == "buffs")
-        local claimIsBuff  = (claimType == "buffs")
+        local claimIsBuff  = (claimType == "buffs" or claimType == "custom_buff")
         if viewerIsBuff == claimIsBuff then
             return claimBarKey, displaySID, baseSID
         end
@@ -1051,9 +1107,9 @@ local function CollectAndReanchor()
 
     -- Safety: if RebuildSpellRouteMap has never run successfully (API was
     -- unavailable during zone-in rebuild, e.g. fast arena transitions),
-    -- attempt a fresh rebuild now. Test the build sentinel, NOT _divertedSpells
-    -- (which can legitimately be empty for users with no diversions) and NOT
-    -- _cdidRouteMap (which is a lazy cache, intentionally empty post-build).
+    -- attempt a fresh rebuild now. Test the build sentinel, NOT the
+    -- diversion maps (which can legitimately be empty for users with no
+    -- diversions) and NOT _cdidRouteMap (lazy cache, empty post-build).
     if not _routeMapBuilt and ns.RebuildSpellRouteMap then
         ns.RebuildSpellRouteMap()
     end
@@ -1391,7 +1447,8 @@ local function CollectAndReanchor()
                                     end
                                 end
                                 if f._itemCountText then
-                                    if total > 1 then
+                                    local showItemCount = barData.showItemCount ~= false
+                                    if total > 1 and showItemCount then
                                         f._itemCountText:SetText(total)
                                         f._itemCountText:Show()
                                     else
@@ -1430,7 +1487,21 @@ local function CollectAndReanchor()
                             if not hasClaim then
                                 local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
                                 local isCustomSpell = sd and sd.customSpellIDs and sd.customSpellIDs[sid]
-                                if not isRacial and not isCustomSpell and ns.IsSpellKnownInCDM and not ns.IsSpellKnownInCDM(sid) then
+                                -- Phase 3 injects custom frames for spells that
+                                -- are NOT in Blizzard's CDM category (user-added
+                                -- racials, user-added customs). If a spell IS in
+                                -- CDM, Blizzard's native frame is authoritative
+                                -- and renders on its own bar; injecting here
+                                -- would produce a ghost duplicate that the user
+                                -- cannot remove from the live bar (the picker
+                                -- only touches assignedSpells). Example: a
+                                -- Dracthyr Evoker utility preset with Wing
+                                -- Buffet in assignedSpells -- Blizzard already
+                                -- tracks it in CDM, so we must not inject.
+                                local isKnownInCDM = ns.IsSpellKnownInCDM and ns.IsSpellKnownInCDM(sid)
+                                if isKnownInCDM then
+                                    -- Leave it to Blizzard's native frame. Skip.
+                                elseif not isRacial and not isCustomSpell then
                                     -- Unknown spell, skip
                                 else
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
@@ -1706,6 +1777,23 @@ local function CollectAndReanchor()
                 if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
                 if ns.QueueReanchor then ns.QueueReanchor() end
             end
+        end
+    end
+
+    -- Per-spec one-shot: fold legacy dormantSpells back into assignedSpells
+    -- at their saved slot index. Under the new "assignedSpells is pure user
+    -- intent" model, dormant entries are restored so spells the old
+    -- reconcile system evicted (pet abilities, choice-node talents) return
+    -- to the user's chosen position. Rebuild the route map afterward so
+    -- the revived entries become diversions.
+    if ns.MergeDormantSpellsIntoAssigned then
+        local specKey2 = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+        local sa2 = EllesmereUIDB and EllesmereUIDB.spellAssignments
+        local prof2 = sa2 and sa2.specProfiles and specKey2 and sa2.specProfiles[specKey2]
+        if prof2 and not prof2._dormantMerged then
+            ns.MergeDormantSpellsIntoAssigned()
+            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
         end
     end
 

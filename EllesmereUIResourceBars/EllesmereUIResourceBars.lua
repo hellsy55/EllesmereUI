@@ -979,7 +979,17 @@ local function RegisterUnlockElements()
         elements[#elements + 1] = MK({
             key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
             getFrame = function() return healthBar end,
-            getSize  = function() local s = S(); return s.width, s.height end,
+            getSize  = function()
+                -- Return actual frame dimensions (post-PP.Scale snap in Rebuild)
+                -- so width-matching reads the real rendered size, not the raw
+                -- setting which may differ from the pixel-snapped value.
+                if healthBar then
+                    local w = healthBar:GetWidth()
+                    local h = healthBar:GetHeight()
+                    if w and w > 1 and h and h > 1 then return w, h end
+                end
+                local s = S(); return s.width, s.height
+            end,
             setWidth = function(_, w) S().width = w; Rebuild() end,
             setHeight = function(_, h) S().height = h; Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
@@ -995,7 +1005,17 @@ local function RegisterUnlockElements()
         elements[#elements + 1] = MK({
             key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
             getFrame = function() return primaryBar end,
-            getSize  = function() local s = S(); return s.width, s.height end,
+            getSize  = function()
+                -- Return actual frame dimensions (post-PP.Scale snap in Rebuild)
+                -- so width-matching reads the real rendered size, not the raw
+                -- setting which may differ from the pixel-snapped value.
+                if primaryBar then
+                    local w = primaryBar:GetWidth()
+                    local h = primaryBar:GetHeight()
+                    if w and w > 1 and h and h > 1 then return w, h end
+                end
+                local s = S(); return s.width, s.height
+            end,
             setWidth = function(_, w) S().width = w; Rebuild() end,
             setHeight = function(_, h) S().height = h; Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
@@ -1435,17 +1455,27 @@ local function BuildBars()
 
     -- Health bar
     local hp = p.health or FALLBACK.health
+    -- Snap stored width/height to the physical pixel grid so the frame is
+    -- always a whole number of physical pixels. Use SnapForES (round to
+    -- nearest) rather than PP.Scale (truncate) -- see Power bar note below.
+    local hpWidth = hp.width or 214
+    local hpHeight = hp.height or 16
+    local _hpEs = (healthBar and healthBar:GetEffectiveScale()) or (UIParent and UIParent:GetEffectiveScale()) or 1
+    if PP and PP.SnapForES then
+        hpWidth = PP.SnapForES(hpWidth, _hpEs)
+        hpHeight = PP.SnapForES(hpHeight, _hpEs)
+    end
     if hp.enabled then
         local hpOri = hp.orientation or g.orientation or "HORIZONTAL"
         if not healthBar then
-            healthBar = CreateStatusBar(mainFrame, "ERB_HealthBar", hp.width, hp.height,
+            healthBar = CreateStatusBar(mainFrame, "ERB_HealthBar", hpWidth, hpHeight,
                 hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA)
             healthBar:SetFrameStrata("MEDIUM")
             healthBar:SetFrameLevel(10)
         end
         local healthAnchorKey = NormalizeAnchorKey(hp.anchorTo)
         if healthAnchorKey ~= "none" then
-            local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
+            local ow, oh = OrientedSize(hpWidth, hpHeight, hpOri)
             local offsetX, offsetY = GetAnchorOffsets(hp)
             healthBar:SetSize(ow, oh)
             if not ApplyBarAnchor(healthBar, healthAnchorKey, hp.anchorPosition, offsetX, offsetY, hp.growthDirection, hp.growCentered) then
@@ -1453,7 +1483,7 @@ local function BuildBars()
             end
         elseif hp.unlockPos and hp.unlockPos.point then
             local rp = hp.unlockPos.relPoint or hp.unlockPos.point
-            local ow, oh = OrientedSize(hp.width, hp.height, hpOri)
+            local ow, oh = OrientedSize(hpWidth, hpHeight, hpOri)
             ApplyBarAnchor(healthBar, "none")
             healthBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
@@ -1468,14 +1498,14 @@ local function BuildBars()
             ApplyBarAnchor(healthBar, "none")
             if EllesmereUI._unlockActive then
                 -- During unlock mode, only update size -- position is managed by the mover
-                local ow, oh = OrientedSize(hp.width or 214, hp.height or 16, hpOri)
+                local ow, oh = OrientedSize(hpWidth, hpHeight, hpOri)
                 healthBar:SetSize(ow, oh)
             else
                 local function ApplyHealthBarTransform()
                     local ox = healthBar["_barAnim_ox"] or hp.offsetX or 0
                     local oy = healthBar["_barAnim_oy"] or hp.offsetY or -64
-                    local w = healthBar["_barAnim_w"] or hp.width or 214
-                    local h2 = healthBar["_barAnim_h"] or hp.height or 16
+                    local w = healthBar["_barAnim_w"] or hpWidth
+                    local h2 = healthBar["_barAnim_h"] or hpHeight
                     local ow, oh = OrientedSize(w, h2, hpOri)
                     healthBar:ClearAllPoints()
                     healthBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy)
@@ -1483,8 +1513,8 @@ local function BuildBars()
                 end
                 SmoothBarAnimate(healthBar, "ox", hp.offsetX or 0, function() ApplyHealthBarTransform() end)
                 SmoothBarAnimate(healthBar, "oy", hp.offsetY or -64, function() ApplyHealthBarTransform() end)
-                SmoothBarAnimate(healthBar, "w", hp.width or 214, function() ApplyHealthBarTransform() end)
-                SmoothBarAnimate(healthBar, "h", hp.height or 16, function() ApplyHealthBarTransform() end)
+                SmoothBarAnimate(healthBar, "w", hpWidth, function() ApplyHealthBarTransform() end)
+                SmoothBarAnimate(healthBar, "h", hpHeight, function() ApplyHealthBarTransform() end)
             end
         end
         healthBar:ApplyBorder(hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA)
@@ -1535,11 +1565,25 @@ local function BuildBars()
             ppHeight = ppHeight + ppExpandDelta
         end
     end
+    -- Snap stored width/height to the physical pixel grid so the frame is
+    -- always a whole number of physical pixels. Use SnapForES (round to
+    -- nearest) rather than PP.Scale (truncate toward zero) so a stored
+    -- value like 214.6 rounds to 215 instead of losing 1px to 214. Without
+    -- this, a stale stored value (e.g. from a previous ui scale) can land
+    -- 1px short of the width-match target, and the user would have to
+    -- un-match/re-match to correct it.
+    local ppWidthRaw = pp.width or 214
+    local _ppEs = (primaryBar and primaryBar:GetEffectiveScale()) or (UIParent and UIParent:GetEffectiveScale()) or 1
+    if PP and PP.SnapForES then
+        ppWidthRaw = PP.SnapForES(ppWidthRaw, _ppEs)
+        ppHeight = PP.SnapForES(ppHeight, _ppEs)
+    end
+    local ppWidth = ppWidthRaw
     -- Always create the frame when enabled so anchored elements (CDM bars,
     -- cast bar, etc.) have a valid target. If the spec has no primary power
     -- the frame stays at zero alpha but retains its position.
     if pp.enabled ~= false and not primaryBar then
-        primaryBar = CreateStatusBar(mainFrame, "ERB_PrimaryBar", pp.width, ppHeight,
+        primaryBar = CreateStatusBar(mainFrame, "ERB_PrimaryBar", ppWidth, ppHeight,
             pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
         primaryBar:SetFrameStrata("MEDIUM")
         primaryBar:SetFrameLevel(10)
@@ -1550,10 +1594,10 @@ local function BuildBars()
         local primaryUnlockAnchored = EllesmereUI.IsUnlockAnchored("ERB_Power")
         if primaryUnlockAnchored then
             -- Unlock anchor system owns positioning; only update size
-            local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
+            local ow, oh = OrientedSize(ppWidth, ppHeight, ppOri)
             primaryBar:SetSize(ow, oh)
         elseif primaryAnchorKey ~= "none" then
-            local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
+            local ow, oh = OrientedSize(ppWidth, ppHeight, ppOri)
             local offsetX, offsetY = GetAnchorOffsets(pp)
             primaryBar:SetSize(ow, oh)
             if not ApplyBarAnchor(primaryBar, primaryAnchorKey, pp.anchorPosition, offsetX, offsetY, pp.growthDirection, pp.growCentered) then
@@ -1561,7 +1605,7 @@ local function BuildBars()
             end
         elseif pp.unlockPos and pp.unlockPos.point then
             local rp = pp.unlockPos.relPoint or pp.unlockPos.point
-            local ow, oh = OrientedSize(pp.width, ppHeight, ppOri)
+            local ow, oh = OrientedSize(ppWidth, ppHeight, ppOri)
             ApplyBarAnchor(primaryBar, "none")
             primaryBar:SetSize(ow, oh)
             if not EllesmereUI._unlockActive then
@@ -1576,14 +1620,14 @@ local function BuildBars()
             ApplyBarAnchor(primaryBar, "none")
             if EllesmereUI._unlockActive then
                 -- During unlock mode, only update size -- position is managed by the mover
-                local ow, oh = OrientedSize(pp.width or 214, ppHeight or 4, ppOri)
+                local ow, oh = OrientedSize(ppWidth, ppHeight, ppOri)
                 primaryBar:SetSize(ow, oh)
             else
                 local function ApplyPowerBarTransform()
                     local ox = primaryBar["_barAnim_ox"] or pp.offsetX or 0
                     local oy = primaryBar["_barAnim_oy"] or pp.offsetY or -54
-                    local w = primaryBar["_barAnim_w"] or pp.width or 214
-                    local h2 = primaryBar["_barAnim_h"] or ppHeight or 4
+                    local w = primaryBar["_barAnim_w"] or ppWidth
+                    local h2 = primaryBar["_barAnim_h"] or ppHeight
                     local ow, oh = OrientedSize(w, h2, ppOri)
                     primaryBar:ClearAllPoints()
                     -- Internal layout: shift up by half expand delta within mainFrame
@@ -1592,8 +1636,8 @@ local function BuildBars()
                 end
                 SmoothBarAnimate(primaryBar, "ox", pp.offsetX or 0, function() ApplyPowerBarTransform() end)
                 SmoothBarAnimate(primaryBar, "oy", pp.offsetY or -54, function() ApplyPowerBarTransform() end)
-                SmoothBarAnimate(primaryBar, "w", pp.width or 214, function() ApplyPowerBarTransform() end)
-                SmoothBarAnimate(primaryBar, "h", ppHeight or 4, function() ApplyPowerBarTransform() end)
+                SmoothBarAnimate(primaryBar, "w", ppWidth, function() ApplyPowerBarTransform() end)
+                SmoothBarAnimate(primaryBar, "h", ppHeight, function() ApplyPowerBarTransform() end)
             end
         end
         primaryBar:ApplyBorder(pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
@@ -1634,7 +1678,7 @@ local function BuildBars()
         -- Enabled but no resource for this spec: keep the frame positioned
         -- at zero alpha so anchored elements (CDM bars, etc.) have a target.
         local ppOri = pp.orientation or g.orientation or "HORIZONTAL"
-        local ow, oh = OrientedSize(pp.width or 214, ppHeight or 4, ppOri)
+        local ow, oh = OrientedSize(ppWidth, ppHeight, ppOri)
         primaryBar:SetSize(ow, oh)
         primaryBar:Show()
         if not EllesmereUI.IsUnlockAnchored("ERB_Power") then

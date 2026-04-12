@@ -24,18 +24,6 @@ local GetTime = GetTime
 
 ns.DEFAULT_MAPPING_NAME = "Buff Name (eg: Divine Purpose)"
 
-local RECONCILE = {
-    readyDelay = 0.5,
-    retryDelay = 1,
-    retryMax = 5,
-    lastSpecChangeAt = 0,
-    lastZoneInAt = 0,
-    pending = false,
-    retries = 0,
-    retryToken = 0,
-}
-
-
 -------------------------------------------------------------------------------
 --  Shape Constants (shared with action bars)
 -------------------------------------------------------------------------------
@@ -142,7 +130,12 @@ local RACE_RACIALS = {
     ZandalariTroll     = { 291944 },
     Vulpera            = { 312411 },
     Mechagnome         = { 312924 },
-    Dracthyr           = { 357214, { 368970, class = "EVOKER" } },
+    -- Wing Buffet (357214) is available to every Dracthyr class, but
+    -- Evokers already have it tracked by Blizzard's CDM category, so
+    -- gate the custom-racial entry off for Evokers to avoid duplicate
+    -- injection. Tail Swipe (368970) is Evoker-only and also in CDM,
+    -- so it is omitted from this list entirely.
+    Dracthyr           = { { 357214, notClass = "EVOKER" } },
     EarthenDwarf       = { 436344 },
     Haranir            = { 1287685 },
 }
@@ -284,7 +277,7 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -303,7 +296,7 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -322,7 +315,7 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -425,23 +418,6 @@ function ns.GetCharKey()
     return name .. "-" .. realm
 end
 
-function ns.IsReconcileReady()
-    local p = ECME.db and ECME.db.profile
-    if not p then return false end
-    if not ns.GetActiveSpecKey() then return false end
-    local now = GetTime()
-    if RECONCILE.lastSpecChangeAt > 0 and (now - RECONCILE.lastSpecChangeAt) < RECONCILE.readyDelay then return false end
-    if RECONCILE.lastZoneInAt > 0 and (now - RECONCILE.lastZoneInAt) < RECONCILE.readyDelay then return false end
-    if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet) then return false end
-    for cat = 0, 3 do
-        local knownIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, false)
-        if knownIDs and next(knownIDs) then
-            return true
-        end
-    end
-    return true
-end
-
 local function EnsureSpec(profile, key)
     profile.spec[key] = profile.spec[key] or { mappings = {}, selectedMapping = 1 }
     return profile.spec[key]
@@ -503,10 +479,6 @@ MAIN_BAR_KEYS[GHOST_BUFF_BAR_KEY] = true
 -- eliminating the need for allowSet filtering during collection.
 local GHOST_CD_BAR_KEY = "__ghost_cd"
 MAIN_BAR_KEYS[GHOST_CD_BAR_KEY] = true
-
--- Bar types that support talent-aware dormant slot persistence.
--- Trinket/racial/potion and buff bars are excluded.
-local TALENT_AWARE_BAR_TYPES = { cooldowns = true, utility = true }
 
 -------------------------------------------------------------------------------
 --  Resolve the best spellID from a CooldownViewerCooldownInfo struct.
@@ -2172,26 +2144,41 @@ BuildCDMBar = function(barIndex)
             end
         end
     else
-        local pos = p.cdmBarPositions[key]
-        if pos and pos.point then
-            -- Skip for unlock-anchored bars (anchor system is authority)
-            local unlockKey = "CDM_" .. key
-            local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
-            if not anchored or not frame:GetLeft() then
-                ApplyBarPositionCentered(frame, pos, key)
-            end
+        -- If the bar is unlock-anchored and already positioned, DO NOT touch
+        -- its position. The anchor system (ApplyAnchorPosition / PropagateAnchorChain)
+        -- is authoritative for unlock-anchored bars. Previously, a rebuild
+        -- during combat (or any transient state) could fall into the "no
+        -- legacy pos saved" branch below and teleport the bar to a hardcoded
+        -- default (e.g. CENTER 0,-275 for cooldowns, CENTER 0,0 for custom
+        -- bars). The anchor system would later re-propagate, but if the
+        -- anchor target was temporarily unavailable (hidden frame, pre-layout
+        -- race, etc.) the re-anchor would bail and the bar would stay stuck
+        -- at the hardcoded fallback.
+        local unlockKey = "CDM_" .. key
+        local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
+        if anchored and frame:GetLeft() then
+            -- Unlock-anchored and already has bounds: leave position alone.
         else
-            -- Default fallback positions
-            frame:ClearAllPoints()
-            if key == "cooldowns" then
-                frame:SetPoint("CENTER", UIParent, "CENTER", 0, -275)
-            elseif key == "utility" then
-                frame:SetPoint("CENTER", UIParent, "CENTER", 0, -320)
-            elseif key == "buffs" then
-                frame:SetPoint("CENTER", UIParent, "CENTER", 0, -365)
-            else
-                frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            local pos = p.cdmBarPositions[key]
+            if pos and pos.point then
+                ApplyBarPositionCentered(frame, pos, key)
+            elseif not anchored then
+                -- Default fallback positions (only for truly un-anchored bars
+                -- with no saved position).
+                frame:ClearAllPoints()
+                if key == "cooldowns" then
+                    frame:SetPoint("CENTER", UIParent, "CENTER", 0, -275)
+                elseif key == "utility" then
+                    frame:SetPoint("CENTER", UIParent, "CENTER", 0, -320)
+                elseif key == "buffs" then
+                    frame:SetPoint("CENTER", UIParent, "CENTER", 0, -365)
+                else
+                    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                end
             end
+            -- If anchored but frame has no bounds yet, do not set a fallback
+            -- position. ReapplyOwnAnchor runs after BuildAllCDMBars and will
+            -- place the frame correctly once the target is available.
         end
     end
 
@@ -2234,12 +2221,14 @@ local function CountCDMBarSpells(barKey)
 end
 
 local function ComputeCDMBarSize(barData, count)
-    local iW = SnapForScale(barData.iconSize or 36, 1)
+    -- Raw coord values -- see LayoutCDMBar for why we don't pre-snap
+    -- with SnapForScale.
+    local iW = barData.iconSize or 36
     local iH = iW
     if (barData.iconShape or "none") == "cropped" then
-        iH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
+        iH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
     end
-    local sp = SnapForScale(barData.spacing or 2, 1)
+    local sp = barData.spacing or 2
     local rows = barData.numRows or 1
     if rows < 1 then rows = 1 end
     local stride = ComputeTopRowStride(barData, count)
@@ -2287,7 +2276,12 @@ LayoutCDMBar = function(barKey)
     local numRows = barData.numRows or 1
     if numRows < 1 then numRows = 1 end
     local isHoriz = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
-    local spacing = SnapForScale(barData.spacing or 2, 1)
+    -- spacing is a raw coord value; the per-frame pixel conversion below
+    -- (spacingPx = floor(spacing / onePx + 0.5)) rounds to nearest whole
+    -- physical pixel. Do NOT pre-snap with SnapForScale: PP.Scale truncates,
+    -- which can lose a pixel at UI scales where PP.mult > 1 (e.g. spacing=2
+    -- gets truncated from 2 coord to 1.0667 coord = 1 px instead of 2 px).
+    local spacing = barData.spacing or 2
 
     -- Width/height match: derive iconSize live from the SOURCE bar's
     -- current width on every layout pass. The source bar IS the truth, so
@@ -2358,14 +2352,16 @@ LayoutCDMBar = function(barKey)
     if not iconW then
         -- Not matched, OR target frame couldn't be read (early in build,
         -- before source bar exists, etc.). Use the user's stored iconSize.
-        -- A subsequent LayoutCDMBar pass will re-read live and correct it.
-        iconW = SnapForScale(barData.iconSize or 36, 1)
+        -- Raw coord value: the per-frame pixel conversion below rounds to
+        -- nearest whole physical pixel. Do NOT pre-snap with SnapForScale
+        -- (see spacing note above).
+        iconW = barData.iconSize or 36
     end
 
     local iconH = iconW
     local shape = barData.iconShape or "none"
     if shape == "cropped" then
-        iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
+        iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
     end
 
     -- Use ALL icons in the array (not just IsShown). CollectAndReanchor
@@ -2382,14 +2378,36 @@ LayoutCDMBar = function(barKey)
         local sd = ns.GetBarSpellData(barKey)
         if sd and sd.assignedSpells then
             local visibleAssigned = 0
+            local isRacialSet = ns._myRacialsSet
+            local customSet = sd.customSpellIDs
+            local IsKnown = ns.IsSpellKnownInCDM
             for _, sid in ipairs(sd.assignedSpells) do
                 if sid == -13 or sid == -14 then
                     local slot = -sid
                     local tf = ns._trinketFrames and ns._trinketFrames[slot]
                     local hasItem = GetInventoryItemID("player", slot) ~= nil
                     if hasItem and tf and tf._trinketIsOnUse then visibleAssigned = visibleAssigned + 1 end
-                elseif sid and sid ~= 0 then
+                elseif sid and sid <= -100 then
+                    -- Item preset: always counted (frame exists if icon resolved)
                     visibleAssigned = visibleAssigned + 1
+                elseif sid and sid > 0 then
+                    -- Positive spell: this counter reserves a minimum slot
+                    -- count so the bar doesn't shrink while Phase 3 custom
+                    -- injection runs. Only count spells that Phase 3 will
+                    -- actually render as a custom frame: racials and user
+                    -- customs that are NOT already in Blizzard's CDM
+                    -- category. CDM-known spells are handled by Blizzard's
+                    -- native frame (counted via `count` if on this bar, or
+                    -- not counted at all if on another bar). Unknown spells
+                    -- are skipped entirely.
+                    local isKnownInCDM = IsKnown and IsKnown(sid)
+                    if not isKnownInCDM then
+                        local isRacial = isRacialSet and isRacialSet[sid]
+                        local isCustom = customSet and customSet[sid]
+                        if isRacial or isCustom then
+                            visibleAssigned = visibleAssigned + 1
+                        end
+                    end
                 end
             end
             sizeCount = math.max(count, visibleAssigned)
@@ -2431,6 +2449,15 @@ LayoutCDMBar = function(barKey)
     local iconWPx  = math.floor(iconW  / onePx + 0.5)
     local iconHPx  = math.floor(iconH  / onePx + 0.5)
     local spacingPx = math.floor(spacing / onePx + 0.5)
+    -- Lock iconW / iconH / spacing to exact physical pixel multiples.
+    -- Positioning (stepW, stepH) uses these coord values, and the width-
+    -- match math uses the iconWPx / spacingPx integers. If coord and
+    -- pixel values aren't in lockstep, icons drift sub-pixel as col index
+    -- grows -- making spacing "shrink" and the final icon undershoot the
+    -- width-match target by 1 px.
+    iconW   = iconWPx  * onePx
+    iconH   = iconHPx  * onePx
+    spacing = spacingPx * onePx
     local totalWPx, totalHPx
     if isHoriz then
         totalWPx = stride  * iconWPx + (stride  - 1) * spacingPx + extraPixels
@@ -2440,12 +2467,14 @@ LayoutCDMBar = function(barKey)
         totalHPx = stride  * iconHPx + (stride  - 1) * spacingPx + extraPixelsH
     end
 
-    -- CENTER grow anchors icons to the container's center point. Center must
-    -- land on a physical pixel boundary, which requires an even pixel total.
-    if grow == "CENTER" then
-        if totalWPx % 2 == 1 then totalWPx = totalWPx + 1 end
-        if totalHPx % 2 == 1 then totalHPx = totalHPx + 1 end
-    end
+    -- NOTE: a previous "force even totalWPx for CENTER grow" adjustment
+    -- used to live here. It is no longer needed: SnapCenterForDim (used by
+    -- ApplyBarPositionCentered for CENTER-anchored frames) places the
+    -- frame's center on a half-pixel grid when the dimension is odd, so
+    -- both edges still land on whole physical pixels. The old +1 padded
+    -- the frame 1 px wider than the actual icon layout (icons+spacing),
+    -- leaving an empty pixel strip at the right/bottom that showed up as
+    -- the unlock-mode overlay being 1 px bigger than the rightmost icon.
 
     local totalW = totalWPx * onePx
     local totalH = totalHPx * onePx
@@ -3002,6 +3031,7 @@ local function RefreshCDMIconAppearance(barKey)
         local scSize = (barData.stackCountSize or 11) * fontScale
         local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
         local scX, scY = barData.stackCountX or 0, (barData.stackCountY or 0) + 2
+        local showItemCount = barData.showItemCount ~= false
         local borderLvl = icon:GetFrameLevel() + 5
         local textLvl = 25
         -- Applications (buff stacks / aura applications)
@@ -3012,6 +3042,7 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
                 appsFS:ClearAllPoints()
                 appsFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+                if showItemCount then appsFS:Show() else appsFS:Hide() end
             end
         end
         -- ChargeCount (spell charges like Holy Power spenders)
@@ -3022,6 +3053,7 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
                 chargeFS:ClearAllPoints()
                 chargeFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
+                if showItemCount then chargeFS:Show() else chargeFS:Hide() end
             end
         end
         -- Item count text (potions/healthstones) -- our own frame, safe to reparent
@@ -3030,6 +3062,7 @@ local function RefreshCDMIconAppearance(barKey)
             SetBlizzCDMFont(icon._itemCountText, scFont, scSize, scR, scG, scB)
             icon._itemCountText:ClearAllPoints()
             icon._itemCountText:SetPoint("BOTTOMRIGHT", txOverlay or icon, "BOTTOMRIGHT", scX, scY)
+            if showItemCount then icon._itemCountText:Show() else icon._itemCountText:Hide() end
         end
 
         -- Update keybind text style
@@ -3117,7 +3150,7 @@ local function EnsureFocusKickBar()
         iconZoom = 0.08, iconShape = "none",
         verticalOrientation = false, barBgEnabled = false,
         barBgR = 0, barBgG = 0, barBgB = 0,
-        showCooldownText = true, cooldownFontSize = 12,
+        showCooldownText = true, showItemCount = true, cooldownFontSize = 12,
         showCharges = true, chargeFontSize = 11,
         desaturateOnCD = true, swipeAlpha = 0.7,
         activeStateAnim = "blizzard",
@@ -4348,8 +4381,8 @@ end
 
 --- Repopulate all main bars from Blizzard CDM for the current spec.
 --- Wipes ONLY Blizzard-sourced entries (positive spell IDs that the CDM
---- viewer owns) from assignedSpells/removedSpells/dormantSpells, then
---- rebuilds route maps and reanchors. Preserves user-added entries:
+--- viewer owns) from assignedSpells/removedSpells, then rebuilds route
+--- maps and reanchors. Preserves user-added entries:
 ---   * Negative IDs (trinket slots -13/-14, item presets <= -100)
 ---   * Custom spell IDs (entries in sd.customSpellIDs)
 ---   * Racial spells (entries in _myRacialsSet)
@@ -4392,39 +4425,43 @@ function ns.RepopulateFromBlizzard()
         end
     end
 
-    -- Filter Blizzard entries off all CD/utility bars (main + custom).
-    -- Skip ghost, buffs, and custom_buff bars -- they're handled separately
+    -- Filter Blizzard entries off all CD/utility/buff bars (main + custom).
+    -- Skip ghost and custom_buff bars -- they're handled separately
     -- (or not at all, in custom_buff's case, since they're a separate system).
     for _, barData in ipairs(p.cdmBars.bars) do
-        if not barData.isGhostBar and barData.key ~= "buffs"
+        if not barData.isGhostBar
            and (barData.barType == "cooldowns" or barData.barType == "utility"
+                or barData.barType == "buffs"
                 or MAIN_BAR_KEYS[barData.key]) then
             local sd = ns.GetBarSpellData(barData.key)
             if sd then
                 FilterListPreservingUserAdded(sd, sd.assignedSpells)
                 FilterSetPreservingUserAdded(sd, sd.removedSpells)
-                FilterSetPreservingUserAdded(sd, sd.dormantSpells)
                 -- spellSettings is per-spell config (font color, etc.) -- preserve
                 -- entirely so user-added customs keep their styling.
             end
         end
     end
 
-    -- Ghost CD bar holds Blizzard-owned spells the user explicitly hid.
+    -- Ghost bars hold Blizzard-owned spells the user explicitly hid.
     -- Filter the same way so user-added presets that may have been routed
     -- here (rare edge case) are preserved.
     local ghostSD = ns.GetBarSpellData(GHOST_CD_BAR_KEY)
     if ghostSD then
         FilterListPreservingUserAdded(ghostSD, ghostSD.assignedSpells)
         FilterSetPreservingUserAdded(ghostSD, ghostSD.removedSpells)
-        FilterSetPreservingUserAdded(ghostSD, ghostSD.dormantSpells)
+    end
+    local ghostBuffSD = ns.GetBarSpellData(GHOST_BUFF_BAR_KEY)
+    if ghostBuffSD then
+        FilterListPreservingUserAdded(ghostBuffSD, ghostBuffSD.assignedSpells)
+        FilterSetPreservingUserAdded(ghostBuffSD, ghostBuffSD.removedSpells)
     end
 
     -- (Site #10 re-snapshot deleted: under the new model, "repopulate from
     -- Blizzard" is just "wipe diversions and let the route map's spillover
     -- show everything from the viewer." The wipes above already cleared
-    -- assignedSpells / removedSpells / dormantSpells / spellSettings and the
-    -- ghost CD bar -- nothing else needed.)
+    -- assignedSpells / removedSpells / spellSettings and the ghost CD bar
+    -- -- nothing else needed.)
 
     ns.FullCDMRebuild("repopulate")
     if ns.CollectAndReanchor then ns.CollectAndReanchor() end
@@ -4437,8 +4474,9 @@ function ns.RepopulateFromBlizzard()
     -- bar's icons and append any positive spell IDs (Blizzard frames)
     -- not already present, preserving the existing user-entry order.
     for _, barData in ipairs(p.cdmBars.bars) do
-        if not barData.isGhostBar and barData.key ~= "buffs"
+        if not barData.isGhostBar
            and (barData.barType == "cooldowns" or barData.barType == "utility"
+                or barData.barType == "buffs"
                 or MAIN_BAR_KEYS[barData.key]) then
             local sd = ns.GetBarSpellData(barData.key)
             local icons = ns.cdmBarIcons and ns.cdmBarIcons[barData.key]
@@ -4684,7 +4722,10 @@ function ECME:OnEnable()
         for _, entry in ipairs(racialList) do
             local sid = type(entry) == "table" and entry[1] or entry
             local reqClass = type(entry) == "table" and entry.class or nil
-            if not reqClass or reqClass == _playerClass then
+            local excludeClass = type(entry) == "table" and entry.notClass or nil
+            local classOk = (not reqClass or reqClass == _playerClass)
+                and (not excludeClass or excludeClass ~= _playerClass)
+            if classOk then
                 _myRacials[#_myRacials + 1] = sid
                 _myRacialsSet[sid] = true
             end
@@ -4756,263 +4797,15 @@ end
 
 -- (ForcePopulateBlizzardViewers removed -- replaced by viewer hooks)
 
--------------------------------------------------------------------------------
---  Talent-Aware Reconcile
---  When talents change, instead of wiping assignedSpells and losing ordering,
---  this function:
---  1) Moves unavailable spells from the active list to dormantSpells with
---     their original slot index preserved
---  2) Re-inserts any dormant spells that became available again at their
---     saved slot position (pushing existing spells forward)
---  3) Appends genuinely new spells (not previously tracked) at the end
---  Applies to: cooldown bar, utility bar, custom cooldown/utility bars
--------------------------------------------------------------------------------
-local function TalentAwareReconcile()
-    local p = ECME.db and ECME.db.profile
-    if not p or not p.cdmBars then return end
-
-    local knownSet = BuildAvailableSpellPool()
-
-    -- Build a reverse override map from CDM cooldownInfo:
-    -- overrideSpellID -> base spellID. Handles conditional overrides
-    -- (e.g. Glacial Spike -> Frostbolt) where C_Spell.GetBaseSpell
-    -- may not work because the relationship is state-dependent.
-    local overrideToBase = {}
-    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
-       and C_CooldownViewer.GetCooldownViewerCooldownInfo then
-        for cat = 0, 3 do
-            local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
-            if allIDs then
-                for _, cdID in ipairs(allIDs) do
-                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                    if info and info.overrideSpellID and info.overrideSpellID > 0
-                       and info.spellID and info.spellID > 0
-                       and info.overrideSpellID ~= info.spellID then
-                        overrideToBase[info.overrideSpellID] = info.spellID
-                    end
-                end
-            end
-        end
-    end
-
-    -- Helper: reconcile a single spell list (assignedSpells)
-    -- Returns the new active list with dormant spells removed and returning
-    -- spells re-inserted at their saved positions.
-    -- classSpellSet: optional set of ALL class spellIDs (from the full CDM
-    -- category set). When provided, spells in this set are never moved to
-    -- dormant -- they are permanent class abilities that may appear missing
-    -- from the "currently known" set during API timing gaps.
-    local function ReconcileSpellList(spellList, dormant, removed, classSpellSet)
-        if not spellList then return nil, dormant end
-        if not dormant then dormant = {} end
-
-        -- Phase 1: separate active list into still-known and newly-dormant
-        -- Also check IsPlayerSpell as a fallback for spells the CDM viewer
-        -- hasn't updated yet (e.g. choice-node talent swaps).
-        -- For conditional overrides (e.g. Glacial Spike from Frostbolt),
-        -- also check the base spell -- the override may not be "known" when
-        -- its condition isn't met (e.g. icicles = 0 on reload/zone change).
-        local _IPS = IsPlayerSpell
-        local _GBS = C_Spell and C_Spell.GetBaseSpell
-        local active = {}
-        local seenInActive = {}
-        for i, sid in ipairs(spellList) do
-            if sid and sid ~= 0 then
-                if sid < 0 then
-                    -- Negative IDs are items/trinkets -- always keep
-                    active[#active + 1] = sid
-                    seenInActive[sid] = true
-                elseif seenInActive[sid] then
-                    -- Duplicate already in active list -- skip silently
-                elseif knownSet[sid] or (_IPS and _IPS(sid))
-                       or (classSpellSet and classSpellSet[sid]) then
-                    active[#active + 1] = sid
-                    seenInActive[sid] = true
-                else
-                    -- Check if this is an override whose base spell is known
-                    -- (e.g. Glacial Spike stored while Frostbolt is the base).
-                    -- Try C_Spell.GetBaseSpell first, fall back to CDM
-                    -- cooldownInfo reverse map for conditional overrides.
-                    local base = _GBS and _GBS(sid)
-                    if base == sid then base = nil end
-                    if not base then base = overrideToBase[sid] end
-                    if base and base > 0 and base ~= sid
-                       and (_IPS and _IPS(sid))
-                       and (knownSet[base] or (_IPS and _IPS(base))
-                            or (classSpellSet and classSpellSet[base])) then
-                        active[#active + 1] = sid
-                        seenInActive[sid] = true
-                    else
-                        -- Spell is no longer known -- save its slot index and move to dormant
-                        dormant[sid] = i
-                    end
-                end
-            end
-        end
-
-        -- Build a set of spells already in the active list for dedup
-        local activeSet = seenInActive
-
-        -- Phase 2: check dormant spells -- any that are now known get re-inserted
-        -- Collect returning spells sorted by their saved slot index (lowest first)
-        -- so insertions don't shift each other's target positions.
-        -- Also check IsPlayerSpell directly on dormant spells as a fallback --
-        -- the CDM viewer may not have updated its entries yet after a talent
-        -- swap (e.g. choice-node spells like Bladestorm/Avatar share a viewer
-        -- slot and the viewer may still report the old spell's ID).
-        local returning = {}
-        for sid, savedSlot in pairs(dormant) do
-            local isKnown = knownSet[sid]
-                or (_IPS and _IPS(sid))
-                or (classSpellSet and classSpellSet[sid])
-            -- Also check base spell for conditional overrides
-            if not isKnown then
-                local base = _GBS and _GBS(sid)
-                if base == sid then base = nil end
-                if not base then base = overrideToBase[sid] end
-                if base and base > 0 and base ~= sid
-                   and (_IPS and _IPS(sid)) then
-                    isKnown = knownSet[base] or (_IPS and _IPS(base))
-                        or (classSpellSet and classSpellSet[base])
-                end
-            end
-            if isKnown and not (removed and removed[sid]) then
-                -- Only return spells that aren't already in the active list
-                if not activeSet[sid] then
-                    returning[#returning + 1] = { sid = sid, slot = savedSlot }
-                else
-                    -- Already active -- just clean it from dormant
-                    dormant[sid] = nil
-                end
-            end
-        end
-        table.sort(returning, function(a, b) return a.slot < b.slot end)
-
-        -- Insert each returning spell at its saved slot (clamped to list bounds)
-        for _, entry in ipairs(returning) do
-            dormant[entry.sid] = nil  -- no longer dormant
-            -- Clamp insertion index: if the list is shorter now, insert at end
-            local insertAt = entry.slot
-            if insertAt > #active + 1 then insertAt = #active + 1 end
-            if insertAt < 1 then insertAt = 1 end
-            table.insert(active, insertAt, entry.sid)
-        end
-
-        -- Phase 3: clean up dormant entries for spells that are no longer in
-        -- any CDM category at all (removed from game / different class)
-        -- Keep dormant entries for spells that exist but are just unlearned.
-        -- Store ALL related IDs (base, override, linked) so a spell stored
-        -- by its base ID is still recognized even if the viewer resolves it
-        -- to an override ID.
-        local allSpellIDs = {}
-        if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
-            for cat = 0, 3 do
-                local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
-                if allIDs then
-                    for _, cdID in ipairs(allIDs) do
-                        local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                        if info then
-                            if info.spellID and info.spellID > 0 then
-                                allSpellIDs[info.spellID] = true
-                            end
-                            if info.overrideSpellID and info.overrideSpellID > 0 then
-                                allSpellIDs[info.overrideSpellID] = true
-                            end
-                            if info.linkedSpellIDs then
-                                for _, lsid in ipairs(info.linkedSpellIDs) do
-                                    if lsid and lsid > 0 then
-                                        allSpellIDs[lsid] = true
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        for sid in pairs(dormant) do
-            if not allSpellIDs[sid] then
-                dormant[sid] = nil
-            end
-        end
-
-        return active, (next(dormant) and dormant or nil)
-    end
-
-    -- Build a set of ALL class spellIDs (regardless of current talents).
-    -- Used for custom bars so permanent class abilities (e.g. Stampeding Roar)
-    -- are never moved to dormant due to API timing gaps during talent swaps.
-    local classSpellSet = {}
-    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet then
-        for cat = 0, 3 do
-            local allIDs = C_CooldownViewer.GetCooldownViewerCategorySet(cat, true)
-            if allIDs then
-                for _, cdID in ipairs(allIDs) do
-                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                    if info then
-                        if info.spellID and info.spellID > 0 then
-                            classSpellSet[info.spellID] = true
-                        end
-                        if info.overrideSpellID and info.overrideSpellID > 0 then
-                            classSpellSet[info.overrideSpellID] = true
-                        end
-                        if info.linkedSpellIDs then
-                            for _, lsid in ipairs(info.linkedSpellIDs) do
-                                if lsid and lsid > 0 then
-                                    classSpellSet[lsid] = true
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Process each bar
-    for _, barData in ipairs(p.cdmBars.bars) do
-        local sd = ns.GetBarSpellData(barData.key)
-        if not sd then
-            -- no spell data for this bar/spec yet, skip
-        elseif MAIN_BAR_KEYS[barData.key] and TALENT_AWARE_BAR_TYPES[barData.key] then
-            if sd.assignedSpells and #sd.assignedSpells > 0 then
-                sd.assignedSpells, sd.dormantSpells =
-                    ReconcileSpellList(sd.assignedSpells, sd.dormantSpells, sd.removedSpells, nil)
-            end
-        elseif TALENT_AWARE_BAR_TYPES[barData.barType] then
-            if sd.assignedSpells and #sd.assignedSpells > 0 then
-                sd.assignedSpells, sd.dormantSpells =
-                    ReconcileSpellList(sd.assignedSpells, sd.dormantSpells, sd.removedSpells, nil)
-            end
-        end
-    end
-
-    ns._lastReconciledSpec = ns.GetActiveSpecKey()
-    ns.FullCDMRebuild("talent_reconcile")
-end
-
-function ns.RequestTalentReconcile(reason)
-    if reason ~= "retry" then
-        RECONCILE.retries = 0
-        RECONCILE.retryToken = RECONCILE.retryToken + 1
-    end
-    if ns.IsReconcileReady() then
-        RECONCILE.pending = false
-        RECONCILE.retries = 0
-        TalentAwareReconcile()
-        return
-    end
-    RECONCILE.pending = true
-    if RECONCILE.retries >= RECONCILE.retryMax then return end
-    RECONCILE.retries = RECONCILE.retries + 1
-    RECONCILE.retryToken = RECONCILE.retryToken + 1
-    local token = RECONCILE.retryToken
-    C_Timer.After(RECONCILE.retryDelay, function()
-        if token ~= RECONCILE.retryToken then return end
-        if not RECONCILE.pending then return end
-        ns.RequestTalentReconcile("retry")
-    end)
-end
+-- (TalentAwareReconcile / ReconcileSpellList / ns.RequestTalentReconcile /
+-- ns.IsReconcileReady / RECONCILE state removed. Under the new model
+-- assignedSpells is pure user intent and is never mutated based on "is
+-- this spell currently known." Talent/spec/reload events rebuild the
+-- cdID route map and reanchor instead -- the route map is the source of
+-- truth for which Blizzard frame renders on which bar. Spells whose
+-- backing frame is temporarily absent (pet dismissed, choice-node talent
+-- swapped away) simply don't render until the frame returns; their
+-- assigned slot is preserved for that return.)
 
 -- (ReconcileMainBarSpells / ForceResnapshotMainBars / StartResnapshotRetry
 -- removed -- CollectAndReanchor auto-snapshots and hooks handle everything)
@@ -5062,12 +4855,16 @@ function ECME:CDMFinishSetup()
                                 cdmBarFrames[key] = frame
                                 cdmBarIcons[key] = {}
                             end
-                            local iconW = SnapForScale(barData.iconSize or 36, 1)
+                            -- Raw coord values -- see LayoutCDMBar for why
+                            -- we don't pre-snap with SnapForScale (PP.Scale
+                            -- truncation loses a pixel at UI scales with
+                            -- PP.mult > 1).
+                            local iconW = barData.iconSize or 36
                             local iconH = iconW
                             if (barData.iconShape or "none") == "cropped" then
-                                iconH = SnapForScale(math.floor((barData.iconSize or 36) * 0.80 + 0.5), 1)
+                                iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
                             end
-                            local spacing = SnapForScale(barData.spacing or 2, 1)
+                            local spacing = barData.spacing or 2
                             local grow = barData.growDirection or "CENTER"
                             local numRows = barData.numRows or 1
                             if numRows < 1 then numRows = 1 end
@@ -5308,7 +5105,16 @@ eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
--- UPDATE_SHAPESHIFT_FORM not needed: OnCooldownIDSet hooks handle form shifts
+-- Druid travel/flight/aquatic form needs an explicit re-check for the
+-- visHideMounted option. PLAYER_MOUNT_DISPLAY_CHANGED only fires for real
+-- mounts, and the viewer hooks rebuild icon content on shapeshift but
+-- don't re-run bar-level visibility. Only register for druids -- non-druid
+-- classes have no mount-like shapeshift forms, and druid combat shifts
+-- (Bear/Cat) would otherwise trigger unnecessary visibility recomputes.
+local _, _playerClassCDM = UnitClass("player")
+if _playerClassCDM == "DRUID" then
+    eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+end
 
 -- Debounce token for talent-change rebuilds: rapid talent clicks collapse
 -- into a single deferred rebuild rather than firing once per click.
@@ -5335,10 +5141,12 @@ local function ScheduleTalentRebuild()
                 wipe(db.sv.multiChargeSpells)
             end
         end
-        -- Reconcile bar spellIDs against the new talent set.
-        -- Unavailable spells are moved to dormant slots (preserving position);
-        -- returning spells are re-inserted at their saved slot index.
-        ns.RequestTalentReconcile("talent")
+        -- Rebuild the cdID route map against the new talent set. The
+        -- stored assignedSpells is left untouched (it's pure user intent);
+        -- the route map is the live source of truth for which frame
+        -- renders on which bar. A full CDM rebuild + reanchor below picks
+        -- up the new routing.
+        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
         -- Clear cached viewer child info so the next tick re-reads from API
         -- (overrideSpellID may have changed with the new talent set)
         for _, vname in ipairs(_cdmViewerNames) do
@@ -5431,6 +5239,24 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         _CDMApplyVisibility()
         return
     end
+    if event == "UPDATE_SHAPESHIFT_FORM" then
+        -- Bail fast if no bar actually uses visHideMounted: druids shift
+        -- constantly in combat (Bear/Cat) and we don't want to re-run the
+        -- visibility pipeline for nothing.
+        local p = ECME.db and ECME.db.profile
+        local bars = p and p.cdmBars and p.cdmBars.bars
+        if not bars then return end
+        local anyMountedOpt = false
+        for _, bd in ipairs(bars) do
+            if bd.visHideMounted then anyMountedOpt = true; break end
+        end
+        if not anyMountedOpt then return end
+        -- Defer one frame: the Travel Form aura is applied slightly after
+        -- UPDATE_SHAPESHIFT_FORM fires, so IsPlayerMountedLike's aura check
+        -- would miss it on the immediate pass.
+        C_Timer.After(0, _CDMApplyVisibility)
+        return
+    end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then
         if event == "PLAYER_REGEN_DISABLED" then
             _inCombat = true
@@ -5466,7 +5292,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
-        RECONCILE.lastZoneInAt = GetTime()
         -- Zone-in: invalidate the spec cache (in case the player auto-swapped
         -- spec via LFG / dungeon role) and rebuild if the spec is known.
         local gen = ns.GetRebuildGen()
@@ -5477,13 +5302,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             local p = ECME.db and ECME.db.profile
             if p then
                 ns.FullCDMRebuild("zone_in")
-                if RECONCILE.pending then
-                    C_Timer.After(0.5, function()
-                        if RECONCILE.pending then
-                            ns.RequestTalentReconcile("PEW")
-                        end
-                    end)
-                end
             end
         end)
         -- Install rotation helper hook after CDM frames have been built
@@ -5503,29 +5321,12 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns._pendingSpecChange and ns.ProcessSpecChange then
             ns.ProcessSpecChange()
         end
-        -- Existing reconcile path: SPELLS_CHANGED also serves as a "talents
-        -- changed" signal that should trigger reconcile when pending.
-        if RECONCILE.pending then
-            local currentSpec = ns.GetActiveSpecKey()
-            local lastSpec = ns._lastReconciledSpec
-            -- Only reconcile if the spec actually changed since the last
-            -- reconcile -- equipment swaps that temporarily remove spells
-            -- shouldn't trigger this path.
-            if currentSpec and currentSpec ~= lastSpec then
-                C_Timer.After(0.2, function()
-                    if RECONCILE.pending then
-                        ns.RequestTalentReconcile("SPELLS_CHANGED")
-                    end
-                end)
-            end
-        end
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
         if EllesmereUI and EllesmereUI.InvalidateFrameCache then
             EllesmereUI.InvalidateFrameCache()
         end
-        RECONCILE.lastSpecChangeAt = GetTime()
         ns.OnSpecChanged()
     end
     if event == "UNIT_AURA" then return end

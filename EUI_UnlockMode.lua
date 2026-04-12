@@ -125,21 +125,9 @@ if not EllesmereUI.ReapplyOwnAnchor then
         local centerX = cx - uiW / 2
         local centerY = cy - uiH / 2
 
-        -- Snap CENTER offset to a grid that keeps the child's edges on
-        -- whole pixels. SnapCenterForDim picks the integer or integer+0.5
-        -- grid based on the child's pixel-dimension parity. Plain SnapForES
-        -- would round 540.5 to 541 and force half-pixel edges (1px drift).
-        local PPa = EllesmereUI.PP
-        if PPa then
-            if PPa.SnapCenterForDim then
-                centerX = PPa.SnapCenterForDim(centerX, cW, cS)
-                centerY = PPa.SnapCenterForDim(centerY, cH, cS)
-            elseif PPa.SnapForES then
-                centerX = PPa.SnapForES(centerX, cS)
-                centerY = PPa.SnapForES(centerY, cS)
-            end
-        end
-
+        -- No explicit snap: the center was computed from pixel-aligned target
+        -- edges and pixel-aligned child dimensions. Snapping here introduces
+        -- 1px drift from floating-point dust in the conversions.
         pcall(function()
             childBar:ClearAllPoints()
             childBar:SetPoint("CENTER", UIParent, "CENTER", centerX, centerY)
@@ -221,16 +209,11 @@ if not EllesmereUI.NotifyElementResized then
             return
         end
 
-        -- Snap to physical pixel grid. Edge anchor case (LEFT/RIGHT/TOP/BOTTOM
-        -- with raw fw/2 or fh/2): adjX/Y represents an EDGE offset that lands
-        -- on a whole pixel, so SnapForES (round-to-nearest) is correct.
-        local PPa = EllesmereUI.PP
-        if PPa and PPa.SnapForES then
-            local es = frame:GetEffectiveScale()
-            adjX = PPa.SnapForES(adjX, es)
-            adjY = PPa.SnapForES(adjY, es)
-        end
-
+        -- No explicit snap: the edge offset is derived from a stored CENTER
+        -- value that was computed from pixel-aligned edges. The derivation
+        -- cx +/- dim/2 reproduces the original edge within floating-point
+        -- epsilon. Snapping here can round that epsilon the wrong way,
+        -- causing 1px drift on every reload.
         pcall(function()
             frame:ClearAllPoints()
             frame:SetPoint(anchor, UIParent, "CENTER", adjX, adjY)
@@ -1605,30 +1588,16 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
     local centerY = cy - uiH / 2
 
     -- Only move the actual bar frame when noMove is not set
-    -- Convert UIParent-space offsets to child bar's coordinate space
-    -- and snap to physical pixel grid.
+    -- Convert UIParent-space offsets to child bar's coordinate space.
+    -- No explicit snap: the center was computed from pixel-aligned target
+    -- edges and pixel-aligned child dimensions. Applying SnapCenterForDim
+    -- here can shift the computed center by 1 physical pixel due to
+    -- floating-point dust in the coordinate-space conversions, breaking
+    -- the exact edge alignment that the anchor system guarantees.
     if not noMove then
         local acRatio = uiS / cS
         local bCenterX = centerX * acRatio
         local bCenterY = centerY * acRatio
-        -- Snap with SnapCenterForDim, NOT SnapForES. The two behave
-        -- differently for odd-pixel-dimension frames:
-        --   SnapForES rounds the center to the nearest WHOLE pixel,
-        --   which forces an odd-dim frame to have half-pixel edges
-        --   (1px drift on every save & exit).
-        --   SnapCenterForDim picks the right grid based on parity:
-        --   even dim => center on whole pixel; odd dim => center on
-        --   integer + 0.5 so both edges land on whole pixels.
-        -- Without snapping, any tiny sub-pixel error in the stored
-        -- offset propagates straight to the rendered position.
-        local PPa = EllesmereUI and EllesmereUI.PP
-        if PPa and PPa.SnapCenterForDim then
-            local es = childBar:GetEffectiveScale()
-            local cwS = childBar:GetWidth() or cW
-            local chS = childBar:GetHeight() or cH
-            bCenterX = PPa.SnapCenterForDim(bCenterX, cwS, es)
-            bCenterY = PPa.SnapCenterForDim(bCenterY, chS, es)
-        end
         pcall(function()
             childBar:ClearAllPoints()
             childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)
@@ -1991,27 +1960,14 @@ ApplyCenterPosition = function(barKey, pos)
         end
     end
 
-    -- Snap to physical pixel grid. Two cases:
-    --   1. Edge anchor (LEFT/RIGHT/TOP/BOTTOM with raw fw/2 or fh/2): adjX/Y
-    --      represents an EDGE offset that should land on a whole pixel.
-    --      SnapForES (round-to-nearest) is correct here.
-    --   2. CENTER anchor (no growDir / growDir=CENTER): adjX/Y is the
-    --      frame's center offset. For odd-pixel-dim frames, the center
-    --      must land on a half pixel (integer + 0.5) so that center +/-
-    --      dim/2 are both whole pixels. SnapCenterForDim handles this.
-    local PPa = EllesmereUI and EllesmereUI.PP
-    if PPa and adjX and adjY then
-        local es = frame:GetEffectiveScale()
-        if anchor == "CENTER" and PPa.SnapCenterForDim then
-            local fw = frame:GetWidth() or 0
-            local fh = frame:GetHeight() or 0
-            adjX = PPa.SnapCenterForDim(adjX, fw, es)
-            adjY = PPa.SnapCenterForDim(adjY, fh, es)
-        elseif PPa.SnapForES then
-            adjX = PPa.SnapForES(adjX, es)
-            adjY = PPa.SnapForES(adjY, es)
-        end
-    end
+    -- No explicit snap here. The stored CENTER values were computed from
+    -- pixel-aligned edges (via ConvertToCenterPos reading live frame bounds).
+    -- Deriving the edge back with cx +/- dim/2 reproduces the original edge
+    -- exactly (within floating-point epsilon, far below 0.5 px). Applying
+    -- SnapForES or SnapCenterForDim here would round-to-nearest, which can
+    -- shift a value like N - 0.0001 to N-1 instead of N, causing 1px drift
+    -- on every save/load cycle. The renderer handles sub-pixel epsilon
+    -- correctly without our help.
 
     pcall(function()
         if InCombatLockdown() and frame:IsProtected() then
@@ -2439,6 +2395,26 @@ if not EAB then
         C_Timer.After(2, function()
             if EllesmereUI.ReapplyAllUnlockAnchors then
                 EllesmereUI.ReapplyAllUnlockAnchors()
+            end
+        end)
+        -- Force a fresh width/height match propagation ~3s after login.
+        -- By this point CDM has finished its initial rebuild, all unlock
+        -- elements have registered, and frames are at their final sizes.
+        -- This guarantees that any element with a stale stored width
+        -- (e.g. from a previous ui scale, profile switch, or an earlier
+        -- propagation that was gated off by _cdmRebuilding / zone-transition
+        -- guards) is corrected to its target's current width without the
+        -- user having to manually un-match / re-match.
+        C_Timer.After(3, function()
+            if EllesmereUI._cdmRebuilding then
+                -- CDM still rebuilding -- retry a bit later
+                C_Timer.After(1.5, function()
+                    if EllesmereUI.ApplyAllWidthHeightMatches then
+                        EllesmereUI.ApplyAllWidthHeightMatches()
+                    end
+                end)
+            elseif EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
             end
         end)
     end)
@@ -4720,18 +4696,23 @@ local function CreateMover(barKey)
     function mover:SyncSize()
         local bk = self._barKey
         local elem = registeredElements[bk]
-        local floor = math.floor
         if elem and elem.getSize then
             local gw, gh = elem.getSize(bk)
-            if gw and gw > 0 then baseW = floor(gw + 0.5) end
-            if gh and gh > 0 then baseH = floor(gh + 0.5) end
+            -- Use the raw value from getSize without rounding. The layout
+            -- function (LayoutCDMBar, LayoutBar, etc.) already snapped
+            -- dimensions to the physical pixel grid. Re-rounding to the
+            -- nearest integer shifts values off the pixel grid when
+            -- PP.mult != 1.0 (e.g. 214.4 -> 214 instead of staying 214.4
+            -- which is exactly 402 physical pixels at mult=0.533).
+            if gw and gw > 0 then baseW = gw end
+            if gh and gh > 0 then baseH = gh end
         else
             local b = GetBarFrame(bk)
             if b then
                 local s = b:GetEffectiveScale()
                 local uiS = UIParent:GetEffectiveScale()
-                baseW = floor(((b:GetWidth() or baseW) * s / uiS) + 0.5)
-                baseH = floor(((b:GetHeight() or baseH) * s / uiS) + 0.5)
+                baseW = (b:GetWidth() or baseW) * s / uiS
+                baseH = (b:GetHeight() or baseH) * s / uiS
             end
         end
         -- moverCX/moverCY are already updated by RecenterBarAnchor (called before

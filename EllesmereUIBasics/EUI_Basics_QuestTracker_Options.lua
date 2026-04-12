@@ -149,13 +149,13 @@ initFrame:SetScript("OnEvent", function(self)
                   local f = EQT.frame
                   if not f then return end
                   f:SetHeight(v)
+                  local pv = EQT.PAD_V or 6
+                  local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
                   if f.inner then
-                      local pv = EQT.PAD_V or 6
-                      local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
                       f.inner:SetHeight(math.min(totalH, v))
                       if EQT.UpdateInnerAlignment then EQT.UpdateInnerAlignment(f) end
                   end
-                  if f._updateScrollThumb then f._updateScrollThumb() end
+                  if f._updateScrollThumb then f._updateScrollThumb(totalH > v) end
               end })
         y = y - h
 
@@ -170,7 +170,14 @@ initFrame:SetScript("OnEvent", function(self)
                   local br, bg, bb = Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0
                   if EQT.frame and EQT.frame.bg then EQT.frame.bg:SetColorTexture(br, bg, bb, v/100) end
               end },
-            { type="label", text="" })
+            { type="toggle", text="Hide Top Line",
+              getValue=function() return Cfg("showTopLine") == false end,
+              setValue=function(v)
+                  Set("showTopLine", not v)
+                  if EQT.frame and EQT.frame.topLine then
+                      if v then EQT.frame.topLine:Hide() else EQT.frame.topLine:Show() end
+                  end
+              end })
         do
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control
@@ -412,7 +419,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                     false, 20)
                 local ctrl = rgn._control
-                sw:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+                PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
                 sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             end
@@ -532,7 +539,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                     false, 20)
                 local ctrl = rgn._control
-                sw:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+                PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
                 sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             end
@@ -561,7 +568,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             local ctrl = rgn._control
-            sw:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+            PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
             sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Focused Color") end)
             sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         end

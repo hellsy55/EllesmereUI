@@ -2243,7 +2243,10 @@ local function ComputeBarLayout(key)
     if numRows < 1 then numRows = 1 end
     local stride = ceil(numIcons / numRows)
     numRows = ceil(numIcons / stride)
-    local padding = SnapForScale(s.buttonPadding or 2, 1)
+    -- Raw coord values -- do NOT pre-snap with SnapForScale (PP.Scale
+    -- truncates, which loses a pixel at UI scales where PP.mult > 1).
+    -- Pixel-lock happens below after shape adjustments.
+    local padding = s.buttonPadding or 2
     local isVertical = (s.orientation == "vertical")
     local growDir = (s.growDirection or "up"):upper()
     local shape = s.buttonShape or "none"
@@ -2258,12 +2261,21 @@ local function ComputeBarLayout(key)
         btnH = btnH + SHAPE_BTN_EXPAND
     end
     if shape == "cropped" then btnH = btnH * 0.80 end
-    btnW = SnapForScale(btnW, 1)
-    btnH = SnapForScale(btnH, 1)
-    local stepW = btnW + padding
-    local stepH = btnH + padding
     local PPc = EllesmereUI and EllesmereUI.PP
     local onePxC = PPc and PPc.mult or 1
+    -- Lock btnW / btnH / padding to exact physical pixel multiples so
+    -- positioning (stepW, stepH) and the frame-size math below use the
+    -- same pixel grid as the width-match extras (onePxC). Without this,
+    -- raw coord values drift sub-pixel as col index grows, shrinking
+    -- spacing and making the last button undershoot the match target.
+    local btnWPxC    = math.floor(btnW    / onePxC + 0.5)
+    local btnHPxC    = math.floor(btnH    / onePxC + 0.5)
+    local paddingPxC = math.floor(padding / onePxC + 0.5)
+    btnW    = btnWPxC    * onePxC
+    btnH    = btnHPxC    * onePxC
+    padding = paddingPxC * onePxC
+    local stepW = btnW + padding
+    local stepH = btnH + padding
     local extraWC = s._matchExtraPixels or 0
     local extraHC = s._matchExtraPixelsH or 0
 
@@ -2323,23 +2335,16 @@ local function ComputeBarLayout(key)
         end
     end
 
-    -- Compute frame size in integer physical pixels first, then convert
-    -- back to coord. Multiplying snapped coord values (e.g. 21.6666... * 3)
-    -- compounds floating-point dust; PP.Scale's floor then loses 1 phys px
-    -- when the result lands just below an integer pixel. The button row
-    -- ends up rendering one pixel wider/taller than the frame, leaving
-    -- the last button protruding past the mover overlay.
+    -- Frame size in integer physical pixels, then back to coord. btnW /
+    -- btnH / padding are already locked to exact pixel multiples above,
+    -- so these multiplies produce exact pixel counts without floating-
+    -- point dust or 1px truncation loss.
     local totalCols = isVertical and numRows or stride
     local totalRows = isVertical and stride or numRows
-    local PPlc = EllesmereUI and EllesmereUI.PP
-    local onePxLc = PPlc and PPlc.mult or 1
-    local btnWPx     = math.floor(btnW    / onePxLc + 0.5)
-    local btnHPx     = math.floor(btnH    / onePxLc + 0.5)
-    local paddingPx  = math.floor(padding / onePxLc + 0.5)
-    local frameWPx = totalCols * btnWPx + (totalCols - 1) * paddingPx + extraWC
-    local frameHPx = totalRows * btnHPx + (totalRows - 1) * paddingPx + extraHC
-    local frameW = frameWPx * onePxLc
-    local frameH = frameHPx * onePxLc
+    local frameWPx = totalCols * btnWPxC + (totalCols - 1) * paddingPxC + extraWC
+    local frameHPx = totalRows * btnHPxC + (totalRows - 1) * paddingPxC + extraHC
+    local frameW = frameWPx * onePxC
+    local frameH = frameHPx * onePxC
     return result, max(frameW, 1), max(frameH, 1)
 end
 
@@ -2365,7 +2370,10 @@ local function LayoutBar(key)
     if stride < 1 then stride = 1 end
     -- Recalculate actual rows needed (avoids empty trailing rows)
     numRows = ceil(numIcons / stride)
-    local padding = SnapForScale(s.buttonPadding or 2, 1)
+    -- Raw coord values -- do NOT pre-snap with SnapForScale (PP.Scale
+    -- truncates, which loses a pixel at UI scales where PP.mult > 1).
+    -- Pixel-lock happens below after shape adjustments.
+    local padding = s.buttonPadding or 2
     local isVertical = (s.orientation == "vertical")
     local growDir = (s.growDirection or "up"):upper()
     local shape = s.buttonShape or "none"
@@ -2386,15 +2394,22 @@ local function LayoutBar(key)
         btnH = btnH * 0.80
     end
 
-    -- Snap button dimensions
-    btnW = SnapForScale(btnW, 1)
-    btnH = SnapForScale(btnH, 1)
-    local stepW = btnW + padding
-    local stepH = btnH + padding
-
     -- Width/height match: distribute extra physical pixels across buttons
     local PP = EllesmereUI and EllesmereUI.PP
     local onePx = PP and PP.mult or 1
+    -- Lock btnW / btnH / padding to exact physical pixel multiples so
+    -- positioning (stepW) and width-match +1px extras share the same
+    -- pixel grid. Prevents sub-pixel drift that shrinks visible spacing
+    -- at UI scales with PP.mult > 1.
+    local btnWPx    = math.floor(btnW    / onePx + 0.5)
+    local btnHPx    = math.floor(btnH    / onePx + 0.5)
+    local paddingPx = math.floor(padding / onePx + 0.5)
+    btnW    = btnWPx    * onePx
+    btnH    = btnHPx    * onePx
+    padding = paddingPx * onePx
+    local stepW = btnW + padding
+    local stepH = btnH + padding
+
     local extraW = s._matchExtraPixels or 0
     local extraH = s._matchExtraPixelsH or 0
 
@@ -4801,14 +4816,10 @@ function EAB:UpdateHousingVisibility()
                 if not inInstance then return true end
             end
             if s.visHideHousing then
-                if C_Map and C_Map.GetBestMapForUnit then
-                    local mapID = C_Map.GetBestMapForUnit("player")
-                    if mapID and mapID > 2600 then return true end
+                if C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot() then
+                    return true
                 end
             end
-            -- Mounted is normally handled by secure [mounted] state conditions.
-            -- Also check the shared runtime mounted-like helper here so druid
-            -- travel/flight/aquatic forms hide correctly on non-macro refreshes.
             if s.visHideMounted then
                 if EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
                     return true
@@ -6141,7 +6152,7 @@ local function RegisterWithUnlockMode()
                 local PP = EllesmereUI and EllesmereUI.PP
                 local onePx = PP and PP.mult or 1
                 local physTarget = math.floor(w / onePx + 0.5)
-                local physPad = math.floor(SnapForScale(pad, 1) / onePx + 0.5)
+                local physPad = math.floor(pad / onePx + 0.5)
                 local rawPhysBtn = (physTarget - (cols - 1) * physPad) / cols
                 if shape ~= "none" and shape ~= "cropped" then
                     rawPhysBtn = rawPhysBtn - math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)
@@ -6181,7 +6192,7 @@ local function RegisterWithUnlockMode()
                 local PP = EllesmereUI and EllesmereUI.PP
                 local onePx = PP and PP.mult or 1
                 local physTarget = math.floor(h / onePx + 0.5)
-                local physPad = math.floor(SnapForScale(pad, 1) / onePx + 0.5)
+                local physPad = math.floor(pad / onePx + 0.5)
                 local rawPhysBtn = (physTarget - (rows - 1) * physPad) / rows
                 if shape ~= "none" and shape ~= "cropped" then
                     rawPhysBtn = rawPhysBtn - math.floor((SHAPE_BTN_EXPAND or 10) / onePx + 0.5)

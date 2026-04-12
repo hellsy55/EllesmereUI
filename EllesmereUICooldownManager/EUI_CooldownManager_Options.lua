@@ -115,55 +115,6 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Buff spell list from viewer pool
-    --  Enumerates active frames in BuffIconCooldownViewer, resolves spell IDs
-    --  using frame:GetSpellID() first, then cooldownInfo fallback.
-    ---------------------------------------------------------------------------
-    local function IsUntaintedPositive(v)
-        if type(v) ~= "number" then return false end
-        if issecretvalue(v) then return false end
-        return v > 0
-    end
-
-    local function ResolveBuffFrameSpellID(frame)
-        -- Try the frame's own spell ID first, then cooldown info as fallback.
-        if frame.GetSpellID then
-            local sid = frame:GetSpellID()
-            if IsUntaintedPositive(sid) then return sid end
-        end
-        local cdID = frame.cooldownID
-        if not cdID then return nil end
-        local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-        if not gci then return nil end
-        local info = gci(cdID)
-        if not info then return nil end
-        local sid = info.overrideSpellID or info.spellID
-        if IsUntaintedPositive(sid) then return sid end
-        return nil
-    end
-
-    local function GetTrackedBuffSpellList()
-        local seen, list = {}, {}
-        local buffViewer = _G["BuffIconCooldownViewer"]
-        if not buffViewer or not buffViewer.itemFramePool then return list end
-        local temp = {}
-        for frame in buffViewer.itemFramePool:EnumerateActive() do
-            local sid = ResolveBuffFrameSpellID(frame)
-            if sid and sid > 0 and not seen[sid] then
-                seen[sid] = true
-                local li = frame.layoutIndex
-                temp[#temp + 1] = { sid = sid, li = (type(li) == "number") and li or 0 }
-            end
-        end
-        table.sort(temp, function(a, b)
-            if a.li ~= b.li then return a.li < b.li end
-            return a.sid < b.sid
-        end)
-        for _, e in ipairs(temp) do
-            list[#list + 1] = e.sid
-        end
-        return list
-    end
-
     ---------------------------------------------------------------------------
     --  Bar Glows page buff action button glow assignments)
     ---------------------------------------------------------------------------
@@ -3790,32 +3741,15 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Use the same data source as CD/utility: GetCDMSpellsForBar
         local allSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(targetBarKey) or {}
-        local ghostKey = ns.GHOST_BUFF_BAR_KEY
 
-        -- Categorize spells: every buff spell is shown. Spells assigned to
-        -- any buff bar are grayed out with a tooltip. Ghost bar spells are
-        -- clickable (can be restored to the current bar).
-        local knownSpells = {}       -- buff spells from picker (always learned)
-
+        -- Every buff spell is shown and every row is clickable. Clicking a
+        -- spell routes AddTrackedSpell, whose family sweep removes the
+        -- spell from every other buff-family bar (including the ghost
+        -- hidden bar) before claiming it for the target. Same model as
+        -- CD/utility bars: one click, one move.
+        local knownSpells = {}
         for _, sp in ipairs(allSpells) do
-            if sp.cdmCatGroup ~= "buff" then
-                -- skip non-buff category spells
-            else
-                local sid = sp.spellID
-                local routedBar = ns.ResolveVariantValue
-                    and ns._divertedSpells
-                    and ns.ResolveVariantValue(ns._divertedSpells, sid)
-                local isHidden = ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(sid)
-
-                -- Determine which buff bar this spell is currently routed to
-                local assignedBarKey = nil
-                if not isHidden and routedBar and routedBar ~= ghostKey then
-                    if ns.IsBarBuffFamily and ns.IsBarBuffFamily(routedBar) then
-                        assignedBarKey = routedBar
-                    end
-                end
-
-                sp._assignedBarKey = assignedBarKey
+            if sp.cdmCatGroup == "buff" then
                 knownSpells[#knownSpells + 1] = sp
             end
         end
@@ -3840,7 +3774,7 @@ initFrame:SetScript("OnEvent", function(self)
         local mH = 4
 
         -- Helper: create a spell row
-        local function MakeSpellRow(sp, disabled, disabledMsg)
+        local function MakeSpellRow(sp)
             local item = CreateFrame("Button", nil, inner)
             item:SetHeight(ITEM_H)
             item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -3852,7 +3786,6 @@ initFrame:SetScript("OnEvent", function(self)
             iconTex:SetPoint("LEFT", 4, 0)
             iconTex:SetTexture(sp.icon)
             iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            if disabled then iconTex:SetDesaturated(true) end
 
             local lbl = item:CreateFontString(nil, "OVERLAY")
             lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
@@ -3860,80 +3793,31 @@ initFrame:SetScript("OnEvent", function(self)
             lbl:SetPoint("RIGHT", -4, 0)
             lbl:SetJustifyH("LEFT")
             lbl:SetText(sp.name or "")
-            if disabled then
-                lbl:SetTextColor(tDimR * 0.5, tDimG * 0.5, tDimB * 0.5, tDimA * 0.5)
-            else
-                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-            end
+            lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
 
             local hl = item:CreateTexture(nil, "ARTWORK")
             hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
 
-            if disabled then
-                item:SetScript("OnEnter", function()
-                    hl:SetColorTexture(1, 1, 1, hlA * 0.3)
-                    if disabledMsg then
-                        EllesmereUI.ShowWidgetTooltip(item, disabledMsg)
-                    end
-                end)
-                item:SetScript("OnLeave", function()
-                    hl:SetColorTexture(1, 1, 1, 0)
-                    EllesmereUI.HideWidgetTooltip()
-                end)
-            else
-                item:SetScript("OnEnter", function()
-                    lbl:SetTextColor(1, 1, 1, 1)
-                    hl:SetColorTexture(1, 1, 1, hlA)
-                end)
-                item:SetScript("OnLeave", function()
-                    lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                    hl:SetColorTexture(1, 1, 1, 0)
-                end)
-            end
+            item:SetScript("OnEnter", function()
+                lbl:SetTextColor(1, 1, 1, 1)
+                hl:SetColorTexture(1, 1, 1, hlA)
+            end)
+            item:SetScript("OnLeave", function()
+                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                hl:SetColorTexture(1, 1, 1, 0)
+            end)
 
             mH = mH + ITEM_H
             return item
         end
 
-        -- Helper: add a divider
-        local function AddDivider()
-            local div = inner:CreateTexture(nil, "ARTWORK")
-            div:SetHeight(1)
-            div:SetColorTexture(1, 1, 1, 0.10)
-            div:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
-            div:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
-            mH = mH + 9
-        end
-
-        local function RenderSpell(sp)
-            local assigned = sp._assignedBarKey
-            if assigned then
-                local rbd = ns.barDataByKey and ns.barDataByKey[assigned]
-                local barName = rbd and (rbd.name or assigned) or assigned
-                MakeSpellRow(sp, true, "Already assigned to " .. barName)
-            else
-                -- Available: add to this bar
-                local item = MakeSpellRow(sp, false)
-                item:SetScript("OnClick", function()
-                    menu:Hide()
-                    if onChanged then onChanged(sp.spellID) end
-                end)
-            end
-        end
-
-        -- Available spells first, then assigned ones at the bottom
-        local availableSpells, assignedSpells = {}, {}
         for _, sp in ipairs(knownSpells) do
-            if sp._assignedBarKey then
-                assignedSpells[#assignedSpells + 1] = sp
-            else
-                availableSpells[#availableSpells + 1] = sp
-            end
+            local item = MakeSpellRow(sp)
+            item:SetScript("OnClick", function()
+                menu:Hide()
+                if onChanged then onChanged(sp.spellID) end
+            end)
         end
-
-        for _, sp in ipairs(availableSpells) do RenderSpell(sp) end
-        if #availableSpells > 0 and #assignedSpells > 0 then AddDivider() end
-        for _, sp in ipairs(assignedSpells) do RenderSpell(sp) end
 
         inner:SetHeight(mH + 4)
         local totalH = math.min(mH + 4, MAX_H)
@@ -4118,23 +4002,8 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             rmItem:SetScript("OnClick", function()
                 menu:Hide()
-                -- Main buff bar: hide via ghost bar (no assignedSpells to remove from)
-                -- Extra buff bars: use RemoveTrackedSpell like CD/utility bars
-                local bd = ns.barDataByKey and ns.barDataByKey[barKey]
-                local isMainBuff = bd and bd.key == "buffs"
-                if isMainBuff and anchorFrame and anchorFrame._previewSpellID then
-                    ns.HideBuffSpell(anchorFrame._previewSpellID)
-                    if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
-                    Refresh()
-                    C_Timer.After(0.05, function()
-                        if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
-                        if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                        UpdateCDMPreviewAndResize()
-                    end)
-                else
-                    ns.RemoveTrackedSpell(barKey, slotIndex)
-                    RefreshCDPreview()
-                end
+                ns.RemoveTrackedSpell(barKey, slotIndex)
+                RefreshCDPreview()
             end)
 
             allItems[#allItems + 1] = rmItem
@@ -5269,9 +5138,14 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, rEntry in ipairs(racialList) do
                     local rSid = type(rEntry) == "table" and rEntry[1] or rEntry
                     local reqClass = type(rEntry) == "table" and rEntry.class or nil
-                    if not reqClass or reqClass == _pClass then
+                    local excludeClass = type(rEntry) == "table" and rEntry.notClass or nil
+                    local classOk = (not reqClass or reqClass == _pClass)
+                        and (not excludeClass or excludeClass ~= _pClass)
+                    if classOk then
                         local inBook = C_SpellBook and C_SpellBook.IsSpellInSpellBook and C_SpellBook.IsSpellInSpellBook(rSid)
                         if not inBook then rSid = nil end
+                    else
+                        rSid = nil
                     end
                     if rSid then
                         local rName = C_Spell.GetSpellName(rSid)
@@ -6414,25 +6288,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 local bd = SelectedCDMBar()
                 if not bd then return end
-                -- Main buff bar: hide via ghost bar (no assignedSpells)
-                -- Extra buff bars fall through to RemoveTrackedSpell below
-                if bd.key == "buffs" then
-                    local sid = self._previewSpellID
-                    if not sid then return end
-                    if button == "MiddleButton" then
-                        ns.HideBuffSpell(sid)
-                        if ns.FullCDMRebuild then ns.FullCDMRebuild("spell_remove") end
-                        Refresh()
-                        C_Timer.After(0.05, function()
-                            if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
-                            if _cdmPreview and _cdmPreview.Update then _cdmPreview:Update() end
-                            UpdateCDMPreviewAndResize()
-                        end)
-                    elseif button == "RightButton" or button == "LeftButton" then
-                        ShowSpellPicker(self, bd.key, self._slotIdx, {}, function() end, true)
-                    end
-                    return
-                end
 
                 if button == "MiddleButton" then
                     local si = self._slotIdx
@@ -6772,19 +6627,14 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             if ns.IsBarBuffFamily(bd) then
-                -- Buff bars use ShowBuffBarPicker (its own UI for popular
-                -- buffs + tracked buff spells + manual ID entry).
-                local pickerBarKey = bd.key
-                ShowBuffBarPicker(self, pickerBarKey, function(restoredSID)
-                    if restoredSID then
-                        -- Unhide from ghost bar if hidden
-                        if ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(restoredSID) then
-                            ns.UnhideBuffSpell(restoredSID)
-                        end
-                        -- For extra buff bars, add the spell to this bar
-                        if pickerBarKey ~= "buffs" then
-                            ns.AddTrackedSpell(pickerBarKey, restoredSID)
-                        end
+                -- Buff bars use ShowBuffBarPicker (walks the BuffIcon
+                -- viewer pool). Click routes AddTrackedSpell -- the
+                -- family sweep removes the spell from every other
+                -- buff-family bar (including the ghost hidden bar, which
+                -- is the "unhide" step) before claiming it for bd.key.
+                ShowBuffBarPicker(self, bd.key, function(newSpellID)
+                    if newSpellID then
+                        ns.AddTrackedSpell(bd.key, newSpellID)
                     end
                     FinalizeAdd()
                 end)
@@ -6834,57 +6684,14 @@ initFrame:SetScript("OnEvent", function(self)
             local isBuffBar = ns.IsBarBuffFamily(bd)
             local isCustomBuffBar = (bd.barType == "custom_buff")
             local isFocusKick = (bd.key == "focuskick")
-            local tracked
-            local count
 
-            local isMainBuffBar = isBuffBar and (bd.key == "buffs")
-
-            -- (debug removed)
-
-            if isMainBuffBar then
-                -- Main buff bar preview: use category API (all tracked buff spells).
-                tracked = {}
-                local allBuffSpells = GetTrackedBuffSpellList()
-                for _, sid in ipairs(allBuffSpells) do
-                    -- Skip spells hidden via the ghost buff bar
-                    if ns.IsBuffSpellHidden and ns.IsBuffSpellHidden(sid) then
-                        -- excluded
-                    else
-                        -- Only consider routed if target is a BUFF bar (not CD/utility)
-                        local routedBar = ns.ResolveVariantValue
-                            and ns._divertedSpells
-                            and ns.ResolveVariantValue(ns._divertedSpells, sid)
-                        local routedIsBuff = false
-                        if routedBar then
-                            local rbd = ns.barDataByKey and ns.barDataByKey[routedBar]
-                            routedIsBuff = ns.IsBarBuffFamily and rbd and ns.IsBarBuffFamily(rbd) or false
-                        end
-                        local effectiveRoute = routedIsBuff and routedBar or nil
-                        if not effectiveRoute or effectiveRoute == bd.key then
-                            tracked[#tracked + 1] = sid
-                        end
-                    end
-                end
-                count = #tracked
-            else
-                -- CD/utility/custom: read from assignedSpells (existing behavior)
-                local sdUpd = EnsureAssignedSpells(bd.key)
-                local rawTracked = sdUpd and sdUpd.assignedSpells or {}
-                tracked = rawTracked
-                if not isCustomBuffBar and #rawTracked > 0 then
-                    tracked = {}
-                    for _, sid in ipairs(rawTracked) do
-                        if not sid or sid <= 0 then
-                            tracked[#tracked + 1] = sid
-                        elseif ns.IsSpellKnownInCDM(sid) then
-                            tracked[#tracked + 1] = sid
-                        elseif not ns.IsSpellInAnyCDMCategory(sid) then
-                            tracked[#tracked + 1] = sid
-                        end
-                    end
-                end
-                count = #tracked
-            end
+            -- All bar types (CD/utility/buff/custom) read from assignedSpells.
+            -- assignedSpells is pure user intent -- every entry is something
+            -- the user wants on this bar, and the route map + live CDM viewer
+            -- decide at runtime whether the frame is currently available.
+            local sdUpd = EnsureAssignedSpells(bd.key)
+            local tracked = sdUpd and sdUpd.assignedSpells or {}
+            local count = #tracked
 
             -- Use the same stride logic as the runtime (ComputeTopRowStride)
             local stride, topRowCount
@@ -8234,9 +8041,15 @@ initFrame:SetScript("OnEvent", function(self)
                 iconTooltip = function() return "Preview Sound" end,
             }
 
+            -- Spell dropdown values/order -- rebuilt live on every dropdown
+            -- click (see OnClick hook below) so the list always reflects what
+            -- is currently on the focuskick bar, even if the user added or
+            -- removed spells via the spell picker without closing options.
             local spellValues = {}
             local spellOrder  = {}
-            do
+            local function RebuildSpellOptions()
+                wipe(spellValues)
+                for i = #spellOrder, 1, -1 do spellOrder[i] = nil end
                 local sd = ns.GetBarSpellData and ns.GetBarSpellData("focuskick")
                 local list = sd and sd.assignedSpells
                 if list then
@@ -8259,8 +8072,10 @@ initFrame:SetScript("OnEvent", function(self)
                     spellOrder[#spellOrder + 1] = "__none"
                 end
             end
+            RebuildSpellOptions()
 
-            _, h = W:DualRow(parent, y,
+            local focusKickRow
+            focusKickRow, h = W:DualRow(parent, y,
                 { type = "dropdown", text = "Focus Cast Sound",
                   values = soundValues, order = soundOrder,
                   getValue = function() return BD().focusCastSoundKey or "none" end,
@@ -8279,6 +8094,22 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().focusKickInterruptSpellID = tonumber(v)
                       end
                   end });  y = y - h
+
+            -- Live refresh: every click on the Interrupt Spell dropdown
+            -- rebuilds the option list from the bar's current spells and
+            -- invalidates the cached menu so the new options appear.
+            do
+                local rightRgn = focusKickRow and focusKickRow._rightRegion
+                local ddBtn = rightRgn and rightRgn._control
+                if ddBtn then
+                    local origOnClick = ddBtn:GetScript("OnClick")
+                    ddBtn:SetScript("OnClick", function(self, ...)
+                        RebuildSpellOptions()
+                        if ddBtn._invalidateMenu then ddBtn._invalidateMenu() end
+                        if origOnClick then origOnClick(self, ...) end
+                    end)
+                end
+            end
 
             _, h = W:Spacer(parent, y, 8);  y = y - h
         else
@@ -8824,13 +8655,32 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 20)
             PP.Point(scSwatch, "RIGHT", ctrl, "LEFT", -12, 0)
             rightRgn._lastInline = scSwatch
+
+            local scBlock = CreateFrame("Frame", nil, scSwatch)
+            scBlock:SetAllPoints(); scBlock:SetFrameLevel(scSwatch:GetFrameLevel() + 10); scBlock:EnableMouse(true)
+            scBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(scSwatch, EllesmereUI.DisabledTooltip("Enable Item Count"))
+            end)
+            scBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
                 if updateScSwatch then updateScSwatch() end
+                local on = BD().showItemCount ~= false
+                scSwatch:SetAlpha(on and 1 or 0.3)
+                if on then scBlock:Hide() else scBlock:Show() end
             end)
+            local on = BD().showItemCount ~= false
+            scSwatch:SetAlpha(on and 1 or 0.3)
+            if on then scBlock:Hide() else scBlock:Show() end
 
             local _, scCogShow = EllesmereUI.BuildCogPopup({
                 title = "Stack Count",
                 rows = {
+                    { type="toggle", label="Show Item Count",
+                      get=function() return BD().showItemCount ~= false end,
+                      set=function(v)
+                          BD().showItemCount = v
+                          ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                      end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return BD().stackCountX or 0 end,
                       set=function(v)
