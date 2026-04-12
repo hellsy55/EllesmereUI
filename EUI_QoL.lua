@@ -375,28 +375,32 @@ qolFrame:SetScript("OnEvent", function(self)
     --  Hide Screenshot Status
     ---------------------------------------------------------------------------
     do
-        local function ApplyScreenshotStatus()
+        local hooked = false
+
+        local function HideActionStatus()
             local actionStatus = _G.ActionStatus
-            if not actionStatus then return end
-            if not EllesmereUIDB or EllesmereUIDB.hideScreenshotStatus ~= false then
-                actionStatus:UnregisterEvent("SCREENSHOT_STARTED")
-                actionStatus:UnregisterEvent("SCREENSHOT_SUCCEEDED")
-                actionStatus:UnregisterEvent("SCREENSHOT_FAILED")
+            if actionStatus then
                 actionStatus:Hide()
-            else
-                actionStatus:RegisterEvent("SCREENSHOT_STARTED")
-                actionStatus:RegisterEvent("SCREENSHOT_SUCCEEDED")
-                actionStatus:RegisterEvent("SCREENSHOT_FAILED")
             end
+        end
+
+        local function ApplyScreenshotStatus()
+            -- ActionStatus is lazy-created by Blizzard on the first screenshot
+            -- event, so it may not exist yet. The ssFrame below catches the
+            -- events and hides it immediately after Blizzard shows it.
         end
 
         EllesmereUI._applyScreenshotStatus = ApplyScreenshotStatus
 
         local ssFrame = CreateFrame("Frame")
-        ssFrame:RegisterEvent("PLAYER_LOGIN")
-        ssFrame:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_LOGIN")
-            ApplyScreenshotStatus()
+        ssFrame:RegisterEvent("SCREENSHOT_STARTED")
+        ssFrame:RegisterEvent("SCREENSHOT_SUCCEEDED")
+        ssFrame:RegisterEvent("SCREENSHOT_FAILED")
+        ssFrame:SetScript("OnEvent", function()
+            if not EllesmereUIDB or EllesmereUIDB.hideScreenshotStatus ~= false then
+                -- Hide on next frame so Blizzard's handler runs first
+                C_Timer.After(0, HideActionStatus)
+            end
         end)
     end
 

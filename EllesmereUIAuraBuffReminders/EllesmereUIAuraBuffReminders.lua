@@ -2382,11 +2382,6 @@ local function Refresh()
 
     CacheInstanceInfo()
 
-    -- Suppress all non-beacon reminders in PvP instances (arenas/battlegrounds).
-    if InPvPInstance() then
-        HideCombatIcons(); HideCursorIcons(); HideAllIcons(); return
-    end
-
     -- MEMORY PROBES (temporary -- remove after diagnosis)
     local _memProbe = _G._EABR_MemProbe
     local _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7
@@ -2400,6 +2395,7 @@ local function Refresh()
     local inInstance = InRealInstancedContent()
     local inKeystone = InMythicPlusKey()
     local inCombat = InCombat()
+    local inPvP = InPvPInstance()
 
     -- Collect missing reminders (reuse pooled entry tables)
     ResetEntryPool()
@@ -2421,9 +2417,9 @@ local function Refresh()
     if _memProbe then _m3 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  3) Consumables (suppressed in M+ keystones and always in combat)
+    --  3) Consumables (suppressed in M+ keystones, in combat, and in PvP)
     ---------------------------------------------------------------------------
-    if not inKeystone and not inCombat then
+    if not inKeystone and not inCombat and not inPvP then
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
     end
     if _memProbe then _m4 = collectgarbage("count") end

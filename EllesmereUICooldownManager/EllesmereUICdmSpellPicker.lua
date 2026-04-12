@@ -245,8 +245,8 @@ ns.EnumerateCDMViewerSpells = EnumerateCDMViewerSpells
 --  (default bars, custom bars, ghost bars). Variant-aware via IsVariantOf so
 --  adding the same spell under a different variant ID collapses to a no-op.
 --
---  These are the canonical functions; AddTrackedSpell / RemoveTrackedSpell /
---  HideBuffSpell / UnhideBuffSpell now delegate to them.
+--  These are the canonical functions; AddTrackedSpell / RemoveTrackedSpell
+--  delegate to them.
 -------------------------------------------------------------------------------
 
 --- Find the index of an entry in a spell list.
@@ -569,6 +569,61 @@ function ns.MigrateSpecToBarFilterModelV6()
 
     prof._barFilterModelV6 = true
     return addedCount
+end
+
+--- One-shot per-spec migration: merge any pre-existing dormantSpells back
+--- into assignedSpells at their stored slot index. The old reconcile model
+--- evicted "currently-unknown" spells (pet abilities, choice-node talents,
+--- etc.) into dormantSpells to preserve their position. Under the new model
+--- assignedSpells is pure user intent and is never mutated based on
+--- "is this spell currently known", so dormant entries must be folded back
+--- in at their saved positions. After this runs, sd.dormantSpells is wiped.
+--- Flagged per-spec via prof._dormantMerged so it only runs once.
+function ns.MergeDormantSpellsIntoAssigned()
+    local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+    local sp = sa and sa.specProfiles
+    if not sp then return end
+
+    local specKey = ns.GetActiveSpecKey()
+    if not specKey or specKey == "0" then return end
+
+    local prof = sp[specKey]
+    if not prof or prof._dormantMerged then return end
+    if not prof.barSpells then prof._dormantMerged = true; return end
+
+    for _barKey, bs in pairs(prof.barSpells) do
+        if type(bs) == "table" and type(bs.dormantSpells) == "table" then
+            if not bs.assignedSpells then bs.assignedSpells = {} end
+
+            -- Collect dormant entries sorted by saved slot (lowest first)
+            -- so earlier inserts don't shift later slots.
+            local returning = {}
+            for sid, slot in pairs(bs.dormantSpells) do
+                if type(sid) == "number" and sid ~= 0 and type(slot) == "number" then
+                    returning[#returning + 1] = { sid = sid, slot = slot }
+                end
+            end
+            table.sort(returning, function(a, b) return a.slot < b.slot end)
+
+            -- Build dedup set for the active list so we don't double-insert
+            local activeSet = {}
+            for _, sid in ipairs(bs.assignedSpells) do activeSet[sid] = true end
+
+            for _, entry in ipairs(returning) do
+                if not activeSet[entry.sid] then
+                    local insertAt = entry.slot
+                    if insertAt > #bs.assignedSpells + 1 then insertAt = #bs.assignedSpells + 1 end
+                    if insertAt < 1 then insertAt = 1 end
+                    table.insert(bs.assignedSpells, insertAt, entry.sid)
+                    activeSet[entry.sid] = true
+                end
+            end
+
+            bs.dormantSpells = nil
+        end
+    end
+
+    prof._dormantMerged = true
 end
 
 --- Lazy-seed assignedSpells from the bar's currently rendered icons.
@@ -939,18 +994,18 @@ function ns.RemoveTrackedSpell(barKey, idx)
         end
     end
 
-    -- Route the removed spell to the ghost CD bar so frames stay in the
-    -- routing system but are hidden. Buff-type bars skip ghost routing
-    -- (the spell returns to the main buff bar naturally). Negative IDs
-    -- (presets/trinkets) and non-viewer spells (customs, racials) skip
-    -- ghost routing too.
+    -- Route the removed spell to the appropriate ghost bar so frames stay
+    -- in the routing system but are hidden. Buff-family bars route to the
+    -- ghost buff bar; CD/utility bars route to the ghost CD bar. Negative
+    -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
+    -- ghost routing entirely.
     local bd = barDataByKey[barKey]
-    local isBuff = bd and (bd.barType == "buffs")
     local isNonViewer = removedID and removedID > 0
         and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
           or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
-    if removedID and removedID > 0 and not isBuff and not isNonViewer then
-        ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
+    if removedID and removedID > 0 and not isNonViewer then
+        local ghostKey = IsBarBuffFamily(barKey) and ns.GHOST_BUFF_BAR_KEY or ns.GHOST_CD_BAR_KEY
+        ns.AddSpellToBar(ghostKey, removedID)
     end
 
     local frame = cdmBarFrames[barKey]
@@ -1026,7 +1081,7 @@ function ns.AddCDMBar(barType, name, numRows)
         bgR = 0.08, bgG = 0.08, bgB = 0.08, bgA = 0.6,
         iconZoom = 0.08, iconShape = "none",
         verticalOrientation = false, barBgEnabled = false,        barBgR = 0, barBgG = 0, barBgB = 0,
-        showCooldownText = true, cooldownFontSize = 12,
+        showCooldownText = true, showItemCount = true, cooldownFontSize = 12,
         showCharges = true, chargeFontSize = 11,
         desaturateOnCD = true, swipeAlpha = 0.7,
         activeStateAnim = "blizzard",
@@ -1131,26 +1186,3 @@ function ns.RemoveCDMBar(key)
     return false
 end
 
--------------------------------------------------------------------------------
---  Ghost Buff Bar helpers: route/unroute spells to hide them from buff bars
--------------------------------------------------------------------------------
-function ns.HideBuffSpell(spellID)
-    if ns.AddSpellToBar(ns.GHOST_BUFF_BAR_KEY, spellID) then
-        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-        if ns.QueueReanchor then ns.QueueReanchor() end
-    end
-end
-
-function ns.UnhideBuffSpell(spellID)
-    if ns.RemoveSpellFromBar(ns.GHOST_BUFF_BAR_KEY, spellID) then
-        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-        if ns.QueueReanchor then ns.QueueReanchor() end
-    end
-end
-
-function ns.IsBuffSpellHidden(spellID)
-    if not _IsUsableSID(spellID) then return false end
-    local sd = ns.GetBarSpellData(ns.GHOST_BUFF_BAR_KEY)
-    if not sd or not sd.assignedSpells then return false end
-    return FindVariantIndex(sd.assignedSpells, spellID) ~= nil
-end

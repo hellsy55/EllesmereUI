@@ -1226,6 +1226,24 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "cdm_buff_assignedspells_reseed_v1",
+    scope       = "specProfile",
+    description = "Clear buffs.assignedSpells so the unified model re-seeds from live icons (buff/CD unification).",
+    body = function(ctx)
+        -- The buff bar previously never wrote to assignedSpells. With the
+        -- unified model, EnsureAssignedSpells lazily seeds from live icons.
+        -- Any stale data from the first options-panel open (before the route
+        -- map fix for TBB diversions) must be cleared so it re-seeds cleanly.
+        local bs = ctx.specProfile.barSpells
+        if not bs then return end
+        local buffData = bs["buffs"]
+        if buffData and buffData.assignedSpells then
+            buffData.assignedSpells = nil
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

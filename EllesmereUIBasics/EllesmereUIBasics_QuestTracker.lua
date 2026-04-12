@@ -420,6 +420,40 @@ local function TitleRowOnClick(self, btn)
         end
         return
     end
+    local achievementID = self._achievementID
+    if achievementID then
+        local function UntrackAchievement()
+            if C_ContentTracking and C_ContentTracking.StopTracking
+                    and Enum and Enum.ContentTrackingType and Enum.ContentTrackingType.Achievement then
+                C_ContentTracking.StopTracking(Enum.ContentTrackingType.Achievement, achievementID, Enum.ContentTrackingStopType.Manual)
+                EQT:SetDirty(true)
+            elseif RemoveTrackedAchievement then
+                RemoveTrackedAchievement(achievementID)
+                EQT:SetDirty(true)
+            end
+        end
+        if btn == "RightButton" then
+            ShowContextMenu(self, {
+                { text = "Untrack Achievement", onClick = UntrackAchievement },
+            })
+        elseif IsShiftKeyDown() then
+            UntrackAchievement()
+        else
+            -- Open the Achievement UI focused on this achievement
+            if not AchievementFrame and UIParentLoadAddOn then
+                UIParentLoadAddOn("Blizzard_AchievementUI")
+            end
+            if OpenAchievementFrameToAchievement then
+                OpenAchievementFrameToAchievement(achievementID)
+            elseif AchievementFrame_SelectAchievement then
+                if AchievementFrame and not AchievementFrame:IsShown() and AchievementFrame_ToggleAchievementFrame then
+                    AchievementFrame_ToggleAchievementFrame()
+                end
+                AchievementFrame_SelectAchievement(achievementID)
+            end
+        end
+        return
+    end
     local qID = self._questID
     if not qID then return end
     if btn == "RightButton" then
@@ -535,6 +569,7 @@ local function ReleaseRow(r)
     r.frame._isAutoComplete = nil; r.frame._isComplete = nil
     r.frame._recipeID = nil; r.frame._isRecraft = nil
     r.frame._collectableType = nil; r.frame._collectableID = nil
+    r.frame._achievementID = nil
     r._baseR, r._baseG, r._baseB = nil, nil, nil
     r._rowType = nil; r._objIndex = nil; r._objCount = nil
     if r.numFS then r.numFS:Hide() end
@@ -1570,6 +1605,79 @@ local function GetTrackedCollections()
 end
 
 -------------------------------------------------------------------------------
+-- Tracked Achievements
+-------------------------------------------------------------------------------
+local _achievements = {}
+local _achievement_entries = {}
+local _criteria_pool = {}
+local _criteria_pool_n = 0
+
+local function GetTrackedAchievements()
+    -- Recycle criteria tables from previous call
+    for i = 1, #_achievements do
+        local e = _achievements[i]
+        if e and e.criteria then
+            for j = 1, #e.criteria do
+                _criteria_pool_n = _criteria_pool_n + 1
+                _criteria_pool[_criteria_pool_n] = e.criteria[j]
+                e.criteria[j] = nil
+            end
+        end
+        _achievements[i] = nil
+    end
+
+    if not (C_ContentTracking and C_ContentTracking.GetTrackedIDs
+            and Enum and Enum.ContentTrackingType and Enum.ContentTrackingType.Achievement) then
+        return _achievements
+    end
+
+    local ids = C_ContentTracking.GetTrackedIDs(Enum.ContentTrackingType.Achievement)
+    if not ids or #ids == 0 then return _achievements end
+
+    local listN = 0
+    for _, achievementID in ipairs(ids) do
+        local _, name = GetAchievementInfo(achievementID)
+        if name then
+            listN = listN + 1
+            local entry = _achievement_entries[listN]
+            if not entry then
+                entry = { criteria = {} }
+                _achievement_entries[listN] = entry
+            end
+            entry.achievementID = achievementID
+            entry.name = name
+
+            local critN = 0
+            local numCriteria = (GetAchievementNumCriteria and GetAchievementNumCriteria(achievementID)) or 0
+            for ci = 1, numCriteria do
+                local critName, _, completed, quantity, reqQuantity = GetAchievementCriteriaInfo(achievementID, ci)
+                if critName and critName ~= "" then
+                    local c
+                    if _criteria_pool_n > 0 then
+                        c = _criteria_pool[_criteria_pool_n]
+                        _criteria_pool[_criteria_pool_n] = nil
+                        _criteria_pool_n = _criteria_pool_n - 1
+                    else
+                        c = {}
+                    end
+                    -- Numeric-progress criteria get a "x/y" prefix; plain criteria are just the text.
+                    if reqQuantity and reqQuantity > 1 and quantity then
+                        c.text = quantity .. "/" .. reqQuantity .. " " .. critName
+                    else
+                        c.text = critName
+                    end
+                    c.finished = completed == true
+                    critN = critN + 1
+                    entry.criteria[critN] = c
+                end
+            end
+            _achievements[listN] = entry
+        end
+    end
+    return _achievements
+end
+
+-------------------------------------------------------------------------------
 -- Refresh
 -------------------------------------------------------------------------------
 local PAD_H    = 8
@@ -1842,7 +1950,7 @@ function EQT:Refresh(skipAlphaFlash)
         self.rows[#self.rows + 1] = r
     end
 
-    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft, collectableType, collectableID)
+    local function AddTitleRow(text, cr, cg, cb, qID, isAutoComplete, isComplete, recipeID, isRecraft, collectableType, collectableID, achievementID)
         local r = AcquireRow(content)
         if r.numFS then r.numFS:Hide() end
         SetFontSafe(r.text, tfp, tfs, tff)
@@ -1984,6 +2092,9 @@ function EQT:Refresh(skipAlphaFlash)
             r.frame._collectableType = collectableType; r.frame:EnableMouse(true)
             r.frame._collectableID = collectableID
             r.frame:SetScript("OnMouseUp", TitleRowOnClick)
+        elseif achievementID then
+            r.frame._achievementID = achievementID; r.frame:EnableMouse(true)
+            r.frame:SetScript("OnMouseUp", TitleRowOnClick)
         end
         r._rowType = "title"
         yOff = yOff + rh + ROW_GAP
@@ -2091,10 +2202,32 @@ function EQT:Refresh(skipAlphaFlash)
         end
     end
 
+    -- Achievements Tracking section (between recipes and collections)
+    local achievements = GetTrackedAchievements()
+    if #achievements > 0 then
+        if #recipes > 0 then yOff = yOff + 4 end
+        local ac = db.achievementsCollapsed or false
+        AddCollapsibleSection("ACHIEVEMENTS", ac, function()
+            DB().achievementsCollapsed = not DB().achievementsCollapsed; EQT:Refresh()
+        end)
+        if not ac then
+            for _, ach in ipairs(achievements) do
+                AddTitleRow(ach.name, tc.r, tc.g, tc.b, nil, nil, nil, nil, nil, nil, nil, ach.achievementID)
+                for _, crit in ipairs(ach.criteria) do
+                    local cr = crit.finished and cc.r or oc.r
+                    local cg = crit.finished and cc.g or oc.g
+                    local cb = crit.finished and cc.b or oc.b
+                    AddObjRow(crit.text, cr, cg, cb, crit.finished)
+                end
+                yOff = yOff + 3
+            end
+        end
+    end
+
     -- Collections Tracking section (after recipes, before delves)
     local collections = GetTrackedCollections()
     if #collections > 0 then
-        if #recipes > 0 then yOff = yOff + 4 end
+        if #recipes > 0 or #achievements > 0 then yOff = yOff + 4 end
         local clc = db.collectionsCollapsed or false
         AddCollapsibleSection("COLLECTIONS", clc, function()
             DB().collectionsCollapsed = not DB().collectionsCollapsed; EQT:Refresh()
@@ -2111,7 +2244,7 @@ function EQT:Refresh(skipAlphaFlash)
     end
 
     -- Scenario / Delve section
-    local anyAboveScenario = #recipes > 0 or #collections > 0
+    local anyAboveScenario = #recipes > 0 or #achievements > 0 or #collections > 0
     if scenario then
         if anyAboveScenario or #watched > 0 or #zone > 0 or #world > 0 then yOff = yOff + 4 end
 
@@ -2256,8 +2389,8 @@ function EQT:Refresh(skipAlphaFlash)
         yOff = yOff + 10
     end
 
-    -- Order: Recipes, Collections, Delves, Active WQ, Prey, Zone, World, Quests (bottom)
-    local anyAbove = #recipes > 0 or #collections > 0 or scenario ~= nil
+    -- Order: Recipes, Achievements, Collections, Delves, Active WQ, Prey, Zone, World, Quests (bottom)
+    local anyAbove = #recipes > 0 or #achievements > 0 or #collections > 0 or scenario ~= nil
 
     if #active > 0 then
         if anyAbove then yOff = yOff + 4 end; anyAbove = true
@@ -2297,7 +2430,7 @@ function EQT:Refresh(skipAlphaFlash)
         end)
         if not qc then RenderList(watched, 0) end
     end
-    local hasContent = scenario or #active > 0 or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0 or #collections > 0
+    local hasContent = scenario or #active > 0 or #watched > 0 or #zone > 0 or #world > 0 or #prey > 0 or #recipes > 0 or #achievements > 0 or #collections > 0
     if not hasContent then
         if f.inner then f.inner:Hide() end
         if f.bg then f.bg:Hide() end
@@ -2325,7 +2458,10 @@ function EQT:Refresh(skipAlphaFlash)
         if cur > maxScroll then
             f.sf:SetVerticalScroll(maxScroll)
         end
-        if f._updateScrollThumb then f._updateScrollThumb() end
+        -- Pass the deterministic overflow answer computed from totalH/maxH
+        -- so the scrollbar hides immediately when content fits, regardless
+        -- of whether the ScrollFrame's lazy scroll range has updated yet.
+        if f._updateScrollThumb then f._updateScrollThumb(totalH > maxH) end
     end
 
     -- Restore visibility after rebuild is complete (prevents teardown flicker)
@@ -2525,12 +2661,14 @@ local function BuildFrame()
     content:SetHeight(1)
     sf:SetScrollChild(content); f.content = content
 
-    -- Thin scrollbar (parented to inner so it isn't clipped by ScrollFrame)
+    -- Thin scrollbar (parented to inner so it isn't clipped by ScrollFrame).
+    -- Hidden by default; UpdateScrollThumb shows it only when content overflows.
     local scrollTrack = CreateFrame("Frame", nil, inner)
     scrollTrack:SetWidth(4)
     scrollTrack:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -4, -(PAD_V + 2 + 4))
     scrollTrack:SetPoint("BOTTOMRIGHT", inner, "BOTTOMRIGHT", -4, PAD_V + 5 + 4)
     scrollTrack:SetFrameLevel(sf:GetFrameLevel() + 3)
+    scrollTrack:Hide()
 
     local trackBg = scrollTrack:CreateTexture(nil, "BACKGROUND")
     trackBg:SetAllPoints()
@@ -2552,6 +2690,7 @@ local function BuildFrame()
     scrollHitArea:SetPoint("BOTTOMRIGHT", inner, "BOTTOMRIGHT", 0, PAD_V + 5 + 4)
     scrollHitArea:SetFrameLevel(scrollTrack:GetFrameLevel() + 2)
     scrollHitArea:EnableMouse(true)
+    scrollHitArea:Hide()
     scrollHitArea:RegisterForDrag("LeftButton")
     scrollHitArea:SetScript("OnDragStart", function() end)
     scrollHitArea:SetScript("OnDragStop", function() end)
@@ -2577,11 +2716,22 @@ local function BuildFrame()
     end
 
     local SCROLLBAR_ALPHA = 0.35
+    scrollTrack:SetAlpha(SCROLLBAR_ALPHA)
 
-    local function UpdateScrollThumb()
+    -- overflowHint: optional authoritative signal from callers that computed
+    -- overflow from known content/viewport heights (refresh path). Needed
+    -- because ScrollFrame:GetVerticalScrollRange() updates lazily on the
+    -- next layout pass, so calling it right after SetHeight can return a
+    -- stale non-zero value and leave the scrollbar visible when content fits.
+    local function UpdateScrollThumb(overflowHint)
         local maxScroll = EllesmereUI.SafeScrollRange(sf)
-        if maxScroll <= 0 then scrollTrack:SetAlpha(0); return end
-        scrollTrack:SetAlpha(SCROLLBAR_ALPHA)
+        if overflowHint == false or maxScroll <= 0 then
+            scrollTrack:Hide()
+            scrollHitArea:Hide()
+            return
+        end
+        scrollTrack:Show()
+        scrollHitArea:Show()
         local trackH = scrollTrack:GetHeight()
         local visH   = sf:GetHeight()
         local visibleRatio = visH / (visH + maxScroll)
@@ -2990,6 +3140,10 @@ function EQT:Init()
         "CONTENT_TRACKING_LIST_UPDATE",
         "CONTENT_TRACKING_UPDATE",
         "TRACKING_TARGET_INFO_UPDATE",
+        "TRACKED_ACHIEVEMENT_UPDATE",
+        "TRACKED_ACHIEVEMENT_LIST_CHANGED",
+        "ACHIEVEMENT_EARNED",
+        "CRITERIA_UPDATE",
     }
     local ZONE_EVENTS = {"ZONE_CHANGED_NEW_AREA","ZONE_CHANGED"}
 
@@ -3032,6 +3186,8 @@ function EQT:Init()
         TRACKED_RECIPE_UPDATE = true,
         CONTENT_TRACKING_LIST_UPDATE = true,
         CONTENT_TRACKING_UPDATE = true,
+        TRACKED_ACHIEVEMENT_LIST_CHANGED = true,
+        ACHIEVEMENT_EARNED = true,
     }
     local SCENARIO_EVENTS = {
         SCENARIO_CRITERIA_UPDATE = true,
@@ -3469,12 +3625,12 @@ function EQT:Init()
                     h = math.max(60, math.floor(h + 0.5))
                     DB().height = h
                     f:SetHeight(h)
+                    local totalH = (f.content and f.content:GetHeight() or 0) + PAD_V * 2 + 7
                     if f.inner then
-                        local totalH = (f.content and f.content:GetHeight() or 0) + PAD_V * 2 + 7
                         f.inner:SetHeight(math.min(totalH, h))
                         UpdateInnerAlignment(f)
                     end
-                    if f._updateScrollThumb then f._updateScrollThumb() end
+                    if f._updateScrollThumb then f._updateScrollThumb(totalH > h) end
                 end,
                 savePos = function(_, point, relPoint, x, y)
                     DB().pos = { point = point, relPoint = relPoint, x = x, y = y }

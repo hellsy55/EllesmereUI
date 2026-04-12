@@ -277,6 +277,7 @@ local defaults = {
             secColorUseAccent    = true,
             delveCollapsed       = false,
             questsCollapsed      = false,
+            achievementsCollapsed = false,
             showPreyQuests       = true,
             preyCollapsed        = false,
             questItemHotkey      = nil,
@@ -1732,6 +1733,24 @@ local function ApplyMinimap()
         minimap._texCircBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", inset, -inset)
         minimap._texCircBorder:SetVertexColor(r, g, b, 1)
         minimap._texCircBorder:Show()
+    end
+
+    -- Live-update border when accent color changes (only when using accent)
+    if p.useClassColor then
+        if not minimap._accentBorderCB then
+            minimap._accentBorderCB = function(ar, ag, ab)
+                if minimap._ppBorders then
+                    PP.SetBorderColor(minimap, ar, ag, ab, 1)
+                end
+                if minimap._circBorder and minimap._circBorder:IsShown() then
+                    minimap._circBorder._tex:SetVertexColor(ar, ag, ab, 1)
+                end
+                if minimap._texCircBorder and minimap._texCircBorder:IsShown() then
+                    minimap._texCircBorder:SetVertexColor(ar, ag, ab, 1)
+                end
+            end
+        end
+        EllesmereUI.RegAccent({ type = "callback", fn = minimap._accentBorderCB })
     end
 
     -- Size
@@ -7051,7 +7070,7 @@ function EBS:OnEnable()
     if EllesmereUI and EllesmereUI.RegisterUnlockElements then
         local MK = EllesmereUI.MakeUnlockElement
         local function MDB() return EBS.db and EBS.db.profile.minimap end
-        local function CDB() return EBS.db and EBS.db.profile.chat end
+        -- CDB removed: chat unlock element stripped (see comment below)
         EllesmereUI:RegisterUnlockElements({
             MK({
                 key   = "EBS_Minimap",
@@ -7090,38 +7109,10 @@ function EBS:OnEnable()
                     ApplyMinimap()
                 end,
             }),
-            MK({
-                key   = "EBS_Chat",
-                label = "Chat",
-                group = "Basics",
-                order = 510,
-                getFrame = function() return ChatFrame1 end,
-                getSize  = function()
-                    return ChatFrame1:GetWidth(), ChatFrame1:GetHeight()
-                end,
-                isHidden = function()
-                    local c = CDB()
-                    return not c or not c.enabled
-                end,
-                savePos = function(_, point, relPoint, x, y)
-                    local c = CDB(); if not c then return end
-                    c.position = { point = point, relPoint = relPoint, x = x, y = y }
-                    if not EllesmereUI._unlockActive then
-                        ApplyChat()
-                    end
-                end,
-                loadPos = function()
-                    local c = CDB()
-                    return c and c.position
-                end,
-                clearPos = function()
-                    local c = CDB(); if not c then return end
-                    c.position = nil
-                end,
-                applyPos = function()
-                    ApplyChat()
-                end,
-            }),
+            -- Chat unlock element removed: chat module is stripped for rebuild.
+            -- Registering ChatFrame1 as a moveable caused SetPoint from
+            -- EllesmereUIBasics context, tainting the frame. Blizzard's
+            -- ChatHistory_GetToken then failed on the tainted strings.
         })
     end
 end

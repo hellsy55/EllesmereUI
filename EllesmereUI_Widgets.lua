@@ -1731,6 +1731,22 @@ local function BuildDropdownControl(parent, ddW, fLevel, values, order, getValue
         ddBtn._ddRefresh = refresh
         WireDropdownScripts(ddBtn, ddLbl, ddBg, ddBrd, menu, refresh, RD_DD_COLOURS)
     end
+    -- Public hook: invalidate the cached menu so the next click rebuilds
+    -- from the current contents of `order` / `values`. Use this when the
+    -- dropdown's options can change at runtime (e.g. a dropdown listing
+    -- the spells currently on a CDM bar).
+    ddBtn._invalidateMenu = function()
+        if menu then
+            menu:Hide()
+            if menu.SetParent then pcall(menu.SetParent, menu, nil) end
+            menu = nil
+            refresh = nil
+            ddBtn._ddMenu = nil
+            ddBtn._ddRefresh = nil
+        end
+        -- Also refresh the label text in case the current selection's label changed
+        ddLbl:SetText(DDResolveLabel(values, order, getValue()))
+    end
 
     -- Lightweight hover scripts (before menu is created).
     -- Once EnsureMenu() runs, WireDropdownScripts replaces these with

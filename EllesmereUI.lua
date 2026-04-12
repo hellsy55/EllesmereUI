@@ -887,14 +887,11 @@ do
     ---------------------------------------------------------------------------
 
     local function SnapBorderTextures(container, frame, borderSize)
-        -- Calculate thickness that maps to exactly N physical pixels in this
-        -- frame's coordinate space, regardless of parent scale chains.
-        --   physPixels = borderSize (always an integer: 1, 2, 3 …)
-        --   1 physical pixel in screen coords = 1 / physicalHeight
-        --   1 physical pixel in frame coords  = (1 / physicalHeight) / effectiveScale
-        --                                     = perfect / (768 * effectiveScale)
-        -- Simplified: perfect / es  gives 1 physical pixel in frame coords.
-        local es = container:GetEffectiveScale()
+        -- Guard: container may have been recycled by Blizzard (e.g. tooltip
+        -- frames in the renown panel). Bail if it's no longer valid.
+        if not container.GetEffectiveScale then return end
+        local ok, es = pcall(container.GetEffectiveScale, container)
+        if not ok or not es then return end
         local onePixel = es > 0 and (PP.perfect / es) or PP.mult
         local bs = borderSize or 1
         local t = bs > 0 and math.max(onePixel, math.floor(bs + 0.5) * onePixel) or 0
@@ -6199,7 +6196,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.4.7"
+EllesmereUI.VERSION = "6.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6371,6 +6368,8 @@ if not _G._EUI_ConflictChecked then
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
             { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("friends") end },
+            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("questTracker") end,
+              message = "Account Wide Interface Settings interferes with the EllesmereUI Quest Tracker. Disable either Account Wide Interface Settings or the EUI Quest Tracker module in Basics settings." },
             { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
             { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
             -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIBasics" } },
@@ -7368,27 +7367,23 @@ EllesmereUI.VIS_OPT_ITEMS = {
       tooltip = "This bar will only show if you have an enemy targeted" },
 }
 
--- Runtime check: returns true if the element should be HIDDEN by visibility options.
--- `opts` is the settings table containing the vis option booleans.
-local DRUID_MOUNT_FORM_IDS = {
-    [3] = true,   -- travel form
-    [4] = true,   -- aquatic form
-    [27] = true,  -- flight form
-    [29] = true,  -- flight form variant
-}
-
-local DRUID_MOUNT_FORM_SPELLS = {
-    [783] = true,    -- Travel Form
-    [1066] = true,   -- Aquatic Form
-    [33943] = true,  -- Flight Form
-    [40120] = true,  -- Swift Flight Form
-    [165962] = true, -- Mount Form
-    [210053] = true, -- Mount Form (variant)
-}
-
 -- Cache player class once at load time (never changes).
 local _, _playerClass = UnitClass("player")
 
+-- Druid mount-like form spell IDs. Travel Form applies a player aura with
+-- spell ID 783 regardless of the active ground/swim/fly subform, so an
+-- aura lookup is the most reliable cross-patch detection.
+local DRUID_MOUNT_FORM_SPELLS = {
+    783,    -- Travel Form
+    1066,   -- Aquatic Form
+    33943,  -- Flight Form
+    40120,  -- Swift Flight Form
+    165962, -- Flight Form (variant)
+    210053, -- Mount Form (variant)
+}
+
+-- Runtime check: returns true if the element should be HIDDEN by visibility options.
+-- `opts` is the settings table containing the vis option booleans.
 function EllesmereUI.IsPlayerMountedLike()
     -- Fast path for regular mounts.
     if IsMounted and IsMounted() then return true end
@@ -7396,28 +7391,25 @@ function EllesmereUI.IsPlayerMountedLike()
     -- Only druids have mount-like shapeshift forms.
     if _playerClass ~= "DRUID" then return false end
 
-    -- Primary check: form ID lookup (covers the common cases).
-    if GetShapeshiftFormID then
-        local formID = GetShapeshiftFormID()
-        if formID and DRUID_MOUNT_FORM_IDS[formID] then
-            return true
-        end
-    end
-
-    -- Spell fallback for mount-form variants whose form IDs may differ.
-    -- GetShapeshiftFormInfo returns: icon, active, castable, spellID
-    local form = GetShapeshiftForm and GetShapeshiftForm()
-    if form and form > 0 and GetShapeshiftFormInfo then
-        local _, active, _, spellID = GetShapeshiftFormInfo(form)
-        if active and spellID and DRUID_MOUNT_FORM_SPELLS[spellID] then
-            return true
+    -- Aura check: the Travel Form buff is present on the player whenever
+    -- the druid is shifted, regardless of ground/swim/fly subform.
+    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        for i = 1, #DRUID_MOUNT_FORM_SPELLS do
+            if C_UnitAuras.GetPlayerAuraBySpellID(DRUID_MOUNT_FORM_SPELLS[i]) then
+                return true
+            end
         end
     end
 
     return false
 end
 
-function EllesmereUI.CheckVisibilityOptions(opts)
+-- Non-macro visibility subset: the options that CAN'T be expressed in a
+-- secure [macro] condition and must be evaluated in Lua. Used by secure
+-- action bar frames that delegate the macro-expressible options
+-- (target/combat/group) to their state-visibility driver and only need
+-- Lua handling for these three.
+function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
     if not opts then return false end
 
     -- Only Show in Instances
@@ -7437,16 +7429,24 @@ function EllesmereUI.CheckVisibilityOptions(opts)
 
     -- Hide in Housing
     if opts.visHideHousing then
-        if C_Map and C_Map.GetBestMapForUnit then
-            local mapID = C_Map.GetBestMapForUnit("player")
-            if mapID and mapID > 2600 then return true end
+        if C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot() then
+            return true
         end
     end
 
-    -- Hide when Mounted
+    -- Hide when Mounted (includes druid travel/flight/aquatic forms)
     if opts.visHideMounted then
         if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
     end
+
+    return false
+end
+
+function EllesmereUI.CheckVisibilityOptions(opts)
+    if not opts then return false end
+
+    -- Instances / housing / mounted (shared with secure-frame fast path).
+    if EllesmereUI.CheckVisibilityOptionsNonMacro(opts) then return true end
 
     -- Hide without Target
     if opts.visHideNoTarget then
