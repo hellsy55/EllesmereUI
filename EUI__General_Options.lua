@@ -1237,6 +1237,7 @@ initFrame:SetScript("OnEvent", function(self)
                             "autoRepairGuild", "hideScreenshotStatus", "autoUnwrapCollections",
                             "trainAllButton", "ahCurrentExpansion", "quickLoot",
                             "autoFillDelete", "skipCinematics", "skipCinematicsAuto",
+                            "autoAcceptRoleCheck", "autoAcceptRoleCheckShift",
                             "sortByMythicScore", "autoInsertKeystone", "quickSignup",
                             "persistSignupNote", "hideBlizzardPartyFrame",
                             "instanceResetAnnounce", "instanceResetAnnounceMsg",
@@ -3313,7 +3314,18 @@ initFrame:SetScript("OnEvent", function(self)
         ---------------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "GROUP FINDER", y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local roleCheckRow
+        roleCheckRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Auto Accept Role Check",
+              tooltip="Automatically accepts the role check popup when queuing via Premade Groups, using your already selected roles.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.autoAcceptRoleCheck = v
+                  EllesmereUI:RefreshPage()
+              end },
             { type="toggle", text="Sort by Mythic+ Rating",
               -- Feature temporarily disabled: the previous implementation
               -- hooksecurefunc'd LFGListUtil_SortApplicants and mutated the
@@ -3325,7 +3337,61 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = function() return true end,
               disabledTooltip = "This option is temporarily disabled",
               getValue=function() return false end,
-              setValue=function() end },
+              setValue=function() end }
+        );  y = y - h
+
+        -- Cog on Auto Accept Role Check (left region)
+        do
+            local leftRgn = roleCheckRow._leftRegion
+            local function roleCheckOff()
+                return not (EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheck)
+            end
+
+            local _, rcCogShow = EllesmereUI.BuildCogPopup({
+                title = "Role Check Settings",
+                rows = {
+                    { type="toggle", label="Hold Shift to Skip Auto-Accept",
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.autoAcceptRoleCheckShift or false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.autoAcceptRoleCheckShift = v
+                      end },
+                },
+            })
+
+            local rcCogBtn = CreateFrame("Button", nil, leftRgn)
+            rcCogBtn:SetSize(26, 26)
+            rcCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = rcCogBtn
+            rcCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            rcCogBtn:SetAlpha(roleCheckOff() and 0.15 or 0.4)
+            local rcCogTex = rcCogBtn:CreateTexture(nil, "OVERLAY")
+            rcCogTex:SetAllPoints()
+            rcCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            rcCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            rcCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(roleCheckOff() and 0.15 or 0.4) end)
+            rcCogBtn:SetScript("OnClick", function(self) rcCogShow(self) end)
+
+            local rcCogBlock = CreateFrame("Frame", nil, rcCogBtn)
+            rcCogBlock:SetAllPoints()
+            rcCogBlock:SetFrameLevel(rcCogBtn:GetFrameLevel() + 10)
+            rcCogBlock:EnableMouse(true)
+            rcCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(rcCogBtn, EllesmereUI.DisabledTooltip("Auto Accept Role Check"))
+            end)
+            rcCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = roleCheckOff()
+                rcCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then rcCogBlock:Show() else rcCogBlock:Hide() end
+            end)
+            if roleCheckOff() then rcCogBlock:Show() else rcCogBlock:Hide() end
+        end
+
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Auto Insert Keystone",
               tooltip="Automatically inserts your key into the Font of Power.",
               getValue=function()
@@ -3335,10 +3401,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.autoInsertKeystone = v
-              end }
-        );  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              end },
             { type="toggle", text="Announce Instance Reset",
               tooltip="After a successful instance reset, automatically announces it in party or raid chat so your group knows they can re-enter.",
               getValue=function()
@@ -3353,7 +3416,7 @@ initFrame:SetScript("OnEvent", function(self)
         local quickSignupRow
         quickSignupRow, h = W:DualRow(parent, y,
             { type="toggle", text="Quick Signup",
-              tooltip="Double-click a group listing to instantly sign up. Automatically accepts role check.",
+              tooltip="Double-click a group listing to instantly sign up without pressing the Sign Up button.",
               getValue=function()
                   return EllesmereUIDB and EllesmereUIDB.quickSignup or false
               end,
@@ -3374,57 +3437,6 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end }
         );  y = y - h
-
-        -- Cog on Quick Signup (left region)
-        do
-            local leftRgn = quickSignupRow._leftRegion
-            local function quickSignupOff()
-                return not (EllesmereUIDB and EllesmereUIDB.quickSignup)
-            end
-
-            local _, qsCogShow = EllesmereUI.BuildCogPopup({
-                title = "Quick Signup Settings",
-                rows = {
-                    { type="toggle", label="Hold Shift to stop automatic Role Check",
-                      get=function()
-                          return EllesmereUIDB and EllesmereUIDB.quickSignupAutoRoleShift or false
-                      end,
-                      set=function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.quickSignupAutoRoleShift = v
-                      end },
-                },
-            })
-
-            local qsCogBtn = CreateFrame("Button", nil, leftRgn)
-            qsCogBtn:SetSize(26, 26)
-            qsCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = qsCogBtn
-            qsCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            qsCogBtn:SetAlpha(quickSignupOff() and 0.15 or 0.4)
-            local qsCogTex = qsCogBtn:CreateTexture(nil, "OVERLAY")
-            qsCogTex:SetAllPoints()
-            qsCogTex:SetTexture(EllesmereUI.COGS_ICON)
-            qsCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            qsCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(quickSignupOff() and 0.15 or 0.4) end)
-            qsCogBtn:SetScript("OnClick", function(self) qsCogShow(self) end)
-
-            local qsCogBlock = CreateFrame("Frame", nil, qsCogBtn)
-            qsCogBlock:SetAllPoints()
-            qsCogBlock:SetFrameLevel(qsCogBtn:GetFrameLevel() + 10)
-            qsCogBlock:EnableMouse(true)
-            qsCogBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(qsCogBtn, EllesmereUI.DisabledTooltip("Quick Signup"))
-            end)
-            qsCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            if quickSignupOff() then
-                qsCogBtn:Disable()
-                qsCogBlock:Show()
-            else
-                qsCogBtn:Enable()
-                qsCogBlock:Hide()
-            end
-        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -3485,6 +3497,1197 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.autoOpenContainers = v
               end }
         );  y = y - h
+
+        ---------------------------------------------------------------------------
+        --  CHARACTER PANEL CUSTOMIZATIONS
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "CHARACTER PANEL CUSTOMIZATIONS", y);  y = y - h
+
+        local themedCharacterSheetRow
+        themedCharacterSheetRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Themed Character Sheet",
+              tooltip="Applies EllesmereUI theme styling to the character sheet window.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.themedCharacterSheet or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.themedCharacterSheet = v
+                  -- If turning off themed, disable all related options
+                  if not v then
+                      EllesmereUIDB.showMythicRating = false
+                      EllesmereUIDB.showItemLevel = false
+                      EllesmereUIDB.showUpgradeTrack = false
+                      EllesmereUIDB.showEnchants = false
+                      EllesmereUIDB.showStatCategory_Attributes = false
+                      EllesmereUIDB.showStatCategory_Attack = false
+                      EllesmereUIDB.showStatCategory_Crests = false
+                      EllesmereUIDB.showStatCategory_SecondaryStats = false
+                      EllesmereUIDB.showStatCategory_Defense = false
+                  end
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Character Sheet theme setting requires a UI reload to fully apply.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Show Attributes",
+              tooltip="Toggle visibility of the Attributes stat category.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_Attributes ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_Attributes = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for themedCharacterSheetRow when themed is off (only for Show Attributes on right)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local attrBlock = CreateFrame("Frame", nil, themedCharacterSheetRow._rightRegion)
+            attrBlock:SetAllPoints(themedCharacterSheetRow._rightRegion)
+            attrBlock:SetFrameLevel(themedCharacterSheetRow._rightRegion:GetFrameLevel() + 10)
+            attrBlock:EnableMouse(true)
+            local attrBg = EllesmereUI.SolidTex(attrBlock, "BACKGROUND", 0, 0, 0, 0)
+            attrBg:SetAllPoints()
+            attrBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(attrBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            attrBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    attrBlock:Show()
+                    themedCharacterSheetRow._rightRegion:SetAlpha(0.3)
+                else
+                    attrBlock:Hide()
+                    themedCharacterSheetRow._rightRegion:SetAlpha(1)
+                end
+            end)
+            if themedOff() then attrBlock:Show() themedCharacterSheetRow._rightRegion:SetAlpha(0.3) else attrBlock:Hide() themedCharacterSheetRow._rightRegion:SetAlpha(1) end
+        end
+
+        -- Cogwheel for Character Sheet settings (left) + Color picker for Attributes (right)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            -- THEMED COGWHEEL (LEFT)
+            local leftRgn = themedCharacterSheetRow._leftRegion
+            local _, themedCogShow = EllesmereUI.BuildCogPopup({
+                title = "Character Sheet Settings",
+                rows = {
+                    { type="slider", label="Scale",
+                      min=0.5, max=1.5, step=0.05,
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.themedCharacterSheetScale or 1
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.themedCharacterSheetScale = v
+                          if CharacterFrame then
+                              CharacterFrame:SetScale(v)
+                          end
+                      end },
+                },
+            })
+
+            local themedCogBtn = CreateFrame("Button", nil, leftRgn)
+            themedCogBtn:SetSize(26, 26)
+            themedCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = themedCogBtn
+            themedCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            themedCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local themedCogTex = themedCogBtn:CreateTexture(nil, "OVERLAY")
+            themedCogTex:SetAllPoints()
+            themedCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            themedCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            themedCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            themedCogBtn:SetScript("OnClick", function(self) themedCogShow(self) end)
+
+            local themedCogBlock = CreateFrame("Frame", nil, themedCogBtn)
+            themedCogBlock:SetAllPoints()
+            themedCogBlock:SetFrameLevel(themedCogBtn:GetFrameLevel() + 10)
+            themedCogBlock:EnableMouse(true)
+            themedCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(themedCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            themedCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    themedCogBtn:SetAlpha(0.15)
+                    themedCogBlock:Show()
+                else
+                    themedCogBtn:SetAlpha(0.4)
+                    themedCogBlock:Hide()
+                end
+            end)
+            if themedOff() then themedCogBtn:SetAlpha(0.15) themedCogBlock:Show() else themedCogBtn:SetAlpha(0.4) themedCogBlock:Hide() end
+
+            -- COGWHEEL + COLOR PICKER FOR ATTRIBUTES (RIGHT)
+            local rightRgn = themedCharacterSheetRow._rightRegion
+
+            local _, attrCogShow = EllesmereUI.BuildCogPopup({
+                title = "Attributes Color",
+                rows = {
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attributes or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                          EllesmereUIDB.statCategoryUseColor.Attributes = v
+                          if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local attrCogBtn = CreateFrame("Button", nil, rightRgn)
+            attrCogBtn:SetSize(26, 26)
+            attrCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = attrCogBtn
+            attrCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            attrCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local attrCogTex = attrCogBtn:CreateTexture(nil, "OVERLAY")
+            attrCogTex:SetAllPoints()
+            attrCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            attrCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            attrCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            attrCogBtn:SetScript("OnClick", function(self) attrCogShow(self) end)
+
+            local attrCogBlock = CreateFrame("Frame", nil, attrCogBtn)
+            attrCogBlock:SetAllPoints()
+            attrCogBlock:SetFrameLevel(attrCogBtn:GetFrameLevel() + 10)
+            attrCogBlock:EnableMouse(true)
+            attrCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(attrCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            attrCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local attrSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors.Attributes
+                if c then return c.r, c.g, c.b, 1 end
+                return 0.047, 0.824, 0.616, 1
+            end
+            local attrSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                EllesmereUIDB.statCategoryColors.Attributes = { r = r, g = g, b = b }
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local attrSwatch, attrUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, attrSwGet, attrSwSet, false, 20)
+            PP.Point(attrSwatch, "RIGHT", attrCogBtn, "LEFT", -9, 0)
+            rightRgn._lastInline = attrSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attributes
+                if themedOff() then
+                    attrCogBtn:SetAlpha(0.15)
+                    attrCogBlock:Show()
+                    attrSwatch:SetAlpha(0.15)
+                    attrSwatch:EnableMouse(false)
+                else
+                    attrCogBtn:SetAlpha(0.4)
+                    attrCogBlock:Hide()
+                    attrSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                    attrSwatch:EnableMouse(customEnabled)
+                end
+                attrUpdateSwatch()
+            end)
+            if themedOff() then
+                attrCogBtn:SetAlpha(0.15)
+                attrCogBlock:Show()
+                attrSwatch:SetAlpha(0.15)
+                attrSwatch:EnableMouse(false)
+            else
+                attrCogBtn:SetAlpha(0.4)
+                attrCogBlock:Hide()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attributes
+                attrSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                attrSwatch:EnableMouse(customEnabled)
+            end
+        end
+
+        local mythicRatingRow
+        mythicRatingRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Mythic+ Rating",
+              tooltip="Display your Mythic+ rating above the item level on the character sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showMythicRating or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showMythicRating = v
+                  if EllesmereUI._updateMythicRatingDisplay then
+                      EllesmereUI._updateMythicRatingDisplay()
+                  end
+              end },
+            { type="toggle", text="Show Attack",
+              tooltip="Toggle visibility of the Attack stat category.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_Attack ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_Attack = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for mythicRatingRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local mythicBlock = CreateFrame("Frame", nil, mythicRatingRow)
+            mythicBlock:SetAllPoints(mythicRatingRow)
+            mythicBlock:SetFrameLevel(mythicRatingRow:GetFrameLevel() + 10)
+            mythicBlock:EnableMouse(true)
+            local mythicBg = EllesmereUI.SolidTex(mythicBlock, "BACKGROUND", 0, 0, 0, 0)
+            mythicBg:SetAllPoints()
+            mythicBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(mythicBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            mythicBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    mythicBlock:Show()
+                    mythicRatingRow:SetAlpha(0.3)
+                else
+                    mythicBlock:Hide()
+                    mythicRatingRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then mythicBlock:Show() mythicRatingRow:SetAlpha(0.3) else mythicBlock:Hide() mythicRatingRow:SetAlpha(1) end
+        end
+
+        -- COGWHEEL + COLOR PICKER FOR ATTACK (RIGHT SIDE OF MYTHICRATINGROW)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local rightRgn = mythicRatingRow._rightRegion
+
+            local _, attackCogShow = EllesmereUI.BuildCogPopup({
+                title = "Attack Color",
+                rows = {
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attack or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                          EllesmereUIDB.statCategoryUseColor.Attack = v
+                          if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local attackCogBtn = CreateFrame("Button", nil, rightRgn)
+            attackCogBtn:SetSize(26, 26)
+            attackCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = attackCogBtn
+            attackCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            attackCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local attackCogTex = attackCogBtn:CreateTexture(nil, "OVERLAY")
+            attackCogTex:SetAllPoints()
+            attackCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            attackCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            attackCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            attackCogBtn:SetScript("OnClick", function(self) attackCogShow(self) end)
+
+            local attackCogBlock = CreateFrame("Frame", nil, attackCogBtn)
+            attackCogBlock:SetAllPoints()
+            attackCogBlock:SetFrameLevel(attackCogBtn:GetFrameLevel() + 10)
+            attackCogBlock:EnableMouse(true)
+            attackCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(attackCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            attackCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local attackSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors.Attack
+                if c then return c.r, c.g, c.b, 1 end
+                return 1, 0.353, 0.122, 1
+            end
+            local attackSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                EllesmereUIDB.statCategoryColors.Attack = { r = r, g = g, b = b }
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local attackSwatch, attackUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, attackSwGet, attackSwSet, false, 20)
+            PP.Point(attackSwatch, "RIGHT", attackCogBtn, "LEFT", -9, 0)
+            rightRgn._lastInline = attackSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attack
+                if themedOff() then
+                    attackCogBtn:SetAlpha(0.15)
+                    attackCogBlock:Show()
+                    attackSwatch:SetAlpha(0.15)
+                    attackSwatch:EnableMouse(false)
+                else
+                    attackCogBtn:SetAlpha(0.4)
+                    attackCogBlock:Hide()
+                    attackSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                    attackSwatch:EnableMouse(customEnabled)
+                end
+                attackUpdateSwatch()
+            end)
+            if themedOff() then
+                attackCogBtn:SetAlpha(0.15)
+                attackCogBlock:Show()
+                attackSwatch:SetAlpha(0.15)
+                attackSwatch:EnableMouse(false)
+            else
+                attackCogBtn:SetAlpha(0.4)
+                attackCogBlock:Hide()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Attack
+                attackSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                attackSwatch:EnableMouse(customEnabled)
+            end
+        end
+
+        local itemLevelRow
+        itemLevelRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Itemlevel",
+              tooltip="Toggle visibility of item level text on the character sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showItemLevel ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showItemLevel = v
+                  if EllesmereUI._refreshItemLevelVisibility then
+                      EllesmereUI._refreshItemLevelVisibility()
+                  end
+              end },
+            { type="toggle", text="Show Crests",
+              tooltip="Toggle visibility of the Crests stat category.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_Crests ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_Crests = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for itemLevelRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local itemLevelBlock = CreateFrame("Frame", nil, itemLevelRow)
+            itemLevelBlock:SetAllPoints(itemLevelRow)
+            itemLevelBlock:SetFrameLevel(itemLevelRow:GetFrameLevel() + 10)
+            itemLevelBlock:EnableMouse(true)
+            local itemLevelBg = EllesmereUI.SolidTex(itemLevelBlock, "BACKGROUND", 0, 0, 0, 0)
+            itemLevelBg:SetAllPoints()
+            itemLevelBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(itemLevelBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            itemLevelBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    itemLevelBlock:Show()
+                    itemLevelRow:SetAlpha(0.3)
+                else
+                    itemLevelBlock:Hide()
+                    itemLevelRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then itemLevelBlock:Show() itemLevelRow:SetAlpha(0.3) else itemLevelBlock:Hide() itemLevelRow:SetAlpha(1) end
+        end
+
+        -- Cogwheel for item level (left) + COGWHEEL + COLOR PICKER FOR CRESTS (right)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            -- ITEMLEVEL COGWHEEL (LEFT) - already in itemLevelRow above
+            -- COGWHEEL + Color picker for Crests (right side)
+            local rightRgn = itemLevelRow._rightRegion
+
+            local _, crestsCogShow = EllesmereUI.BuildCogPopup({
+                title = "Crests Color",
+                rows = {
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Crests or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                          EllesmereUIDB.statCategoryUseColor.Crests = v
+                          if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local crestsCogBtn = CreateFrame("Button", nil, rightRgn)
+            crestsCogBtn:SetSize(26, 26)
+            crestsCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = crestsCogBtn
+            crestsCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            crestsCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local crestsCogTex = crestsCogBtn:CreateTexture(nil, "OVERLAY")
+            crestsCogTex:SetAllPoints()
+            crestsCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            crestsCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            crestsCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            crestsCogBtn:SetScript("OnClick", function(self) crestsCogShow(self) end)
+
+            local crestsCogBlock = CreateFrame("Frame", nil, crestsCogBtn)
+            crestsCogBlock:SetAllPoints()
+            crestsCogBlock:SetFrameLevel(crestsCogBtn:GetFrameLevel() + 10)
+            crestsCogBlock:EnableMouse(true)
+            crestsCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(crestsCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            crestsCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local crestsSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors.Crests
+                if c then return c.r, c.g, c.b, 1 end
+                return 1, 0.784, 0.341, 1
+            end
+            local crestsSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                EllesmereUIDB.statCategoryColors.Crests = { r = r, g = g, b = b }
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local crestsSwatch, crestsUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, crestsSwGet, crestsSwSet, false, 20)
+            PP.Point(crestsSwatch, "RIGHT", crestsCogBtn, "LEFT", -9, 0)
+            rightRgn._lastInline = crestsSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Crests
+                if themedOff() then
+                    crestsCogBtn:SetAlpha(0.15)
+                    crestsCogBlock:Show()
+                    crestsSwatch:SetAlpha(0.15)
+                    crestsSwatch:EnableMouse(false)
+                else
+                    crestsCogBtn:SetAlpha(0.4)
+                    crestsCogBlock:Hide()
+                    crestsSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                    crestsSwatch:EnableMouse(customEnabled)
+                end
+                crestsUpdateSwatch()
+            end)
+            if themedOff() then
+                crestsCogBtn:SetAlpha(0.15)
+                crestsCogBlock:Show()
+                crestsSwatch:SetAlpha(0.15)
+                crestsSwatch:EnableMouse(false)
+            else
+                crestsCogBtn:SetAlpha(0.4)
+                crestsCogBlock:Hide()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Crests
+                crestsSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                crestsSwatch:EnableMouse(customEnabled)
+            end
+        end
+
+        local upgradeTrackRow
+        upgradeTrackRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Upgradetrack",
+              tooltip="Toggle visibility of upgrade track text on the character sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showUpgradeTrack ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showUpgradeTrack = v
+                  if EllesmereUI._refreshUpgradeTrackVisibility then
+                      EllesmereUI._refreshUpgradeTrackVisibility()
+                  end
+              end },
+            { type="toggle", text="Show Secondary Stats",
+              tooltip="Toggle visibility of the Secondary Stats category.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_SecondaryStats ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_SecondaryStats = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for upgradeTrackRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local upgradeTrackBlock = CreateFrame("Frame", nil, upgradeTrackRow)
+            upgradeTrackBlock:SetAllPoints(upgradeTrackRow)
+            upgradeTrackBlock:SetFrameLevel(upgradeTrackRow:GetFrameLevel() + 10)
+            upgradeTrackBlock:EnableMouse(true)
+            local upgradeTrackBg = EllesmereUI.SolidTex(upgradeTrackBlock, "BACKGROUND", 0, 0, 0, 0)
+            upgradeTrackBg:SetAllPoints()
+            upgradeTrackBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(upgradeTrackBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            upgradeTrackBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    upgradeTrackBlock:Show()
+                    upgradeTrackRow:SetAlpha(0.3)
+                else
+                    upgradeTrackBlock:Hide()
+                    upgradeTrackRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then upgradeTrackBlock:Show() upgradeTrackRow:SetAlpha(0.3) else upgradeTrackBlock:Hide() upgradeTrackRow:SetAlpha(1) end
+        end
+
+        -- Cogwheel for upgrade track (left) + Color picker for Secondary Stats (right)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            -- UPGRADETRACK COGWHEEL (LEFT) - moved here from itemLevelRow
+            local leftRgn = upgradeTrackRow._leftRegion
+            local _, upgradeTrackCogShow = EllesmereUI.BuildCogPopup({
+                title = "Upgradetrack Settings",
+                rows = {
+                    { type="slider", label="Font Size",
+                      min=8, max=16, step=1,
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackSize = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetUpgradeTrackUseColor = v
+                          if EllesmereUI._refreshUpgradeTrackColors then
+                              EllesmereUI._refreshUpgradeTrackColors()
+                          end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local upgradeTrackCogBtn = CreateFrame("Button", nil, leftRgn)
+            upgradeTrackCogBtn:SetSize(26, 26)
+            upgradeTrackCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = upgradeTrackCogBtn
+            upgradeTrackCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            upgradeTrackCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local upgradeTrackCogTex = upgradeTrackCogBtn:CreateTexture(nil, "OVERLAY")
+            upgradeTrackCogTex:SetAllPoints()
+            upgradeTrackCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            upgradeTrackCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            upgradeTrackCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            upgradeTrackCogBtn:SetScript("OnClick", function(self) upgradeTrackCogShow(self) end)
+
+            local upgradeTrackCogBlock = CreateFrame("Frame", nil, upgradeTrackCogBtn)
+            upgradeTrackCogBlock:SetAllPoints()
+            upgradeTrackCogBlock:SetFrameLevel(upgradeTrackCogBtn:GetFrameLevel() + 10)
+            upgradeTrackCogBlock:EnableMouse(true)
+            upgradeTrackCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(upgradeTrackCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            upgradeTrackCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local upgradeTrackSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackColor
+                if c then return c.r, c.g, c.b, 1 end
+                return 1, 1, 1, 1
+            end
+            local upgradeTrackSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.charSheetUpgradeTrackColor = { r = r, g = g, b = b }
+                if EllesmereUI._refreshUpgradeTrackColors then
+                    EllesmereUI._refreshUpgradeTrackColors()
+                end
+            end
+            local upgradeTrackSwatch, upgradeTrackUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, upgradeTrackSwGet, upgradeTrackSwSet, false, 20)
+            PP.Point(upgradeTrackSwatch, "RIGHT", upgradeTrackCogBtn, "LEFT", -9, 0)
+            leftRgn._lastInline = upgradeTrackSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor
+                if themedOff() then
+                    upgradeTrackCogBtn:SetAlpha(0.15)
+                    upgradeTrackCogBlock:Show()
+                    upgradeTrackSwatch:SetAlpha(0.15)
+                    upgradeTrackSwatch:EnableMouse(false)
+                else
+                    upgradeTrackCogBtn:SetAlpha(0.4)
+                    upgradeTrackCogBlock:Hide()
+                    upgradeTrackSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                    upgradeTrackSwatch:EnableMouse(colorEnabled)
+                end
+                upgradeTrackUpdateSwatch()
+            end)
+            local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor
+            if themedOff() then
+                upgradeTrackCogBtn:SetAlpha(0.15)
+                upgradeTrackCogBlock:Show()
+                upgradeTrackSwatch:SetAlpha(0.15)
+                upgradeTrackSwatch:EnableMouse(false)
+            else
+                upgradeTrackCogBtn:SetAlpha(0.4)
+                upgradeTrackCogBlock:Hide()
+                upgradeTrackSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                upgradeTrackSwatch:EnableMouse(colorEnabled)
+            end
+
+            -- COGWHEEL + COLOR PICKER FOR SECONDARY STATS (RIGHT)
+            local rightRgn = upgradeTrackRow._rightRegion
+
+            local _, secondaryCogShow = EllesmereUI.BuildCogPopup({
+                title = "Secondary Stats Color",
+                rows = {
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor["Secondary Stats"] or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                          EllesmereUIDB.statCategoryUseColor["Secondary Stats"] = v
+                          if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local secondaryCogBtn = CreateFrame("Button", nil, rightRgn)
+            secondaryCogBtn:SetSize(26, 26)
+            secondaryCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = secondaryCogBtn
+            secondaryCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            secondaryCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local secondaryCogTex = secondaryCogBtn:CreateTexture(nil, "OVERLAY")
+            secondaryCogTex:SetAllPoints()
+            secondaryCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            secondaryCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            secondaryCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            secondaryCogBtn:SetScript("OnClick", function(self) secondaryCogShow(self) end)
+
+            local secondaryCogBlock = CreateFrame("Frame", nil, secondaryCogBtn)
+            secondaryCogBlock:SetAllPoints()
+            secondaryCogBlock:SetFrameLevel(secondaryCogBtn:GetFrameLevel() + 10)
+            secondaryCogBlock:EnableMouse(true)
+            secondaryCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(secondaryCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            secondaryCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local secondarySwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors["Secondary Stats"]
+                if c then return c.r, c.g, c.b, 1 end
+                return 0.471, 0.255, 0.784, 1
+            end
+            local secondarySwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                EllesmereUIDB.statCategoryColors["Secondary Stats"] = { r = r, g = g, b = b }
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local secondarySwatch, secondaryUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, secondarySwGet, secondarySwSet, false, 20)
+            PP.Point(secondarySwatch, "RIGHT", secondaryCogBtn, "LEFT", -9, 0)
+            rightRgn._lastInline = secondarySwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor["Secondary Stats"]
+                if themedOff() then
+                    secondaryCogBtn:SetAlpha(0.15)
+                    secondaryCogBlock:Show()
+                    secondarySwatch:SetAlpha(0.15)
+                    secondarySwatch:EnableMouse(false)
+                else
+                    secondaryCogBtn:SetAlpha(0.4)
+                    secondaryCogBlock:Hide()
+                    secondarySwatch:SetAlpha(customEnabled and 1 or 0.3)
+                    secondarySwatch:EnableMouse(customEnabled)
+                end
+                secondaryUpdateSwatch()
+            end)
+            if themedOff() then
+                secondaryCogBtn:SetAlpha(0.15)
+                secondaryCogBlock:Show()
+                secondarySwatch:SetAlpha(0.15)
+                secondarySwatch:EnableMouse(false)
+            else
+                secondaryCogBtn:SetAlpha(0.4)
+                secondaryCogBlock:Hide()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor["Secondary Stats"]
+                secondarySwatch:SetAlpha(customEnabled and 1 or 0.3)
+                secondarySwatch:EnableMouse(customEnabled)
+            end
+        end
+
+        -- Cogwheel for item level settings (left) and upgrade track settings (right)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            -- ITEMLEVEL COGWHEEL (LEFT)
+            local leftRgn = itemLevelRow._leftRegion
+            local _, itemLevelCogShow = EllesmereUI.BuildCogPopup({
+                title = "Itemlevel Settings",
+                rows = {
+                    { type="slider", label="Font Size",
+                      min=8, max=16, step=1,
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelSize = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetItemLevelUseColor = v
+                          if EllesmereUI._refreshItemLevelColors then
+                              EllesmereUI._refreshItemLevelColors()
+                          end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local itemLevelCogBtn = CreateFrame("Button", nil, leftRgn)
+            itemLevelCogBtn:SetSize(26, 26)
+            itemLevelCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = itemLevelCogBtn
+            itemLevelCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            itemLevelCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local itemLevelCogTex = itemLevelCogBtn:CreateTexture(nil, "OVERLAY")
+            itemLevelCogTex:SetAllPoints()
+            itemLevelCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            itemLevelCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            itemLevelCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            itemLevelCogBtn:SetScript("OnClick", function(self) itemLevelCogShow(self) end)
+
+            local itemLevelCogBlock = CreateFrame("Frame", nil, itemLevelCogBtn)
+            itemLevelCogBlock:SetAllPoints()
+            itemLevelCogBlock:SetFrameLevel(itemLevelCogBtn:GetFrameLevel() + 10)
+            itemLevelCogBlock:EnableMouse(true)
+            itemLevelCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(itemLevelCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            itemLevelCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local itemLevelSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelColor
+                if c then return c.r, c.g, c.b, 1 end
+                return 1, 1, 1, 1
+            end
+            local itemLevelSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.charSheetItemLevelColor = { r = r, g = g, b = b }
+                if EllesmereUI._refreshItemLevelColors then
+                    EllesmereUI._refreshItemLevelColors()
+                end
+            end
+            local itemLevelSwatch, itemLevelUpdateSwatch
+            itemLevelSwatch, itemLevelUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, itemLevelSwGet, itemLevelSwSet, false, 20)
+            PP.Point(itemLevelSwatch, "RIGHT", itemLevelCogBtn, "LEFT", -9, 0)
+            leftRgn._lastInline = itemLevelSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor
+                if themedOff() then
+                    itemLevelCogBtn:SetAlpha(0.15)
+                    itemLevelCogBlock:Show()
+                    itemLevelSwatch:SetAlpha(0.15)
+                    itemLevelSwatch:EnableMouse(false)
+                else
+                    itemLevelCogBtn:SetAlpha(0.4)
+                    itemLevelCogBlock:Hide()
+                    itemLevelSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                    itemLevelSwatch:EnableMouse(colorEnabled)
+                end
+                itemLevelUpdateSwatch()
+            end)
+            local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor
+            if themedOff() then
+                itemLevelCogBtn:SetAlpha(0.15)
+                itemLevelCogBlock:Show()
+                itemLevelSwatch:SetAlpha(0.15)
+                itemLevelSwatch:EnableMouse(false)
+            else
+                itemLevelCogBtn:SetAlpha(0.4)
+                itemLevelCogBlock:Hide()
+                itemLevelSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                itemLevelSwatch:EnableMouse(colorEnabled)
+            end
+        end
+
+        local enchantRow
+        enchantRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Enchants",
+              tooltip="Toggle visibility of enchant text on the character sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showEnchants ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showEnchants = v
+                  if EllesmereUI._refreshEnchantsVisibility then
+                      EllesmereUI._refreshEnchantsVisibility()
+                  end
+              end },
+            { type="toggle", text="Show Defense",
+              tooltip="Toggle visibility of the Defense stat category.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_Defense ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_Defense = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for enchantRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local enchantBlock = CreateFrame("Frame", nil, enchantRow)
+            enchantBlock:SetAllPoints(enchantRow)
+            enchantBlock:SetFrameLevel(enchantRow:GetFrameLevel() + 10)
+            enchantBlock:EnableMouse(true)
+            local enchantBg = EllesmereUI.SolidTex(enchantBlock, "BACKGROUND", 0, 0, 0, 0)
+            enchantBg:SetAllPoints()
+            enchantBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(enchantBlock, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            enchantBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    enchantBlock:Show()
+                    enchantRow:SetAlpha(0.3)
+                else
+                    enchantBlock:Hide()
+                    enchantRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then enchantBlock:Show() enchantRow:SetAlpha(0.3) else enchantBlock:Hide() enchantRow:SetAlpha(1) end
+        end
+
+        -- COGWHEEL + COLOR PICKER FOR DEFENSE (RIGHT SIDE)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+            local rightRgn = enchantRow._rightRegion
+
+            local _, defenseCogShow = EllesmereUI.BuildCogPopup({
+                title = "Defense Color",
+                rows = {
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Defense or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                          EllesmereUIDB.statCategoryUseColor.Defense = v
+                          if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            local defenseCogBtn = CreateFrame("Button", nil, rightRgn)
+            defenseCogBtn:SetSize(26, 26)
+            defenseCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = defenseCogBtn
+            defenseCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            defenseCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local defenseCogTex = defenseCogBtn:CreateTexture(nil, "OVERLAY")
+            defenseCogTex:SetAllPoints()
+            defenseCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            defenseCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            defenseCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            defenseCogBtn:SetScript("OnClick", function(self) defenseCogShow(self) end)
+
+            local defenseCogBlock = CreateFrame("Frame", nil, defenseCogBtn)
+            defenseCogBlock:SetAllPoints()
+            defenseCogBlock:SetFrameLevel(defenseCogBtn:GetFrameLevel() + 10)
+            defenseCogBlock:EnableMouse(true)
+            defenseCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(defenseCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            defenseCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local defenseSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors.Defense
+                if c then return c.r, c.g, c.b, 1 end
+                return 0.247, 0.655, 1, 1
+            end
+            local defenseSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                EllesmereUIDB.statCategoryColors.Defense = { r = r, g = g, b = b }
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local defenseSwatch, defenseUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, defenseSwGet, defenseSwSet, false, 20)
+            PP.Point(defenseSwatch, "RIGHT", defenseCogBtn, "LEFT", -9, 0)
+            rightRgn._lastInline = defenseSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Defense
+                if themedOff() then
+                    defenseCogBtn:SetAlpha(0.15)
+                    defenseCogBlock:Show()
+                    defenseSwatch:SetAlpha(0.15)
+                    defenseSwatch:EnableMouse(false)
+                else
+                    defenseCogBtn:SetAlpha(0.4)
+                    defenseCogBlock:Hide()
+                    defenseSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                    defenseSwatch:EnableMouse(customEnabled)
+                end
+                defenseUpdateSwatch()
+            end)
+            if themedOff() then
+                defenseCogBtn:SetAlpha(0.15)
+                defenseCogBlock:Show()
+                defenseSwatch:SetAlpha(0.15)
+                defenseSwatch:EnableMouse(false)
+            else
+                defenseCogBtn:SetAlpha(0.4)
+                defenseCogBlock:Hide()
+                local customEnabled = EllesmereUIDB and EllesmereUIDB.statCategoryUseColor and EllesmereUIDB.statCategoryUseColor.Defense
+                defenseSwatch:SetAlpha(customEnabled and 1 or 0.3)
+                defenseSwatch:EnableMouse(customEnabled)
+            end
+        end
+
+        -- Cogwheel for enchant settings
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+            local leftRgn = enchantRow._leftRegion
+
+            local _, enchantCogShow = EllesmereUI.BuildCogPopup({
+                title = "Enchants Settings",
+                rows = {
+                    { type="slider", label="Font Size",
+                      min=8, max=12, step=1,
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantSize = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Shadow",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantShadow or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantShadow = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Font Outline",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantOutline or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantOutline = v
+                          if EllesmereUI._applyCharSheetTextSizes then
+                              EllesmereUI._applyCharSheetTextSizes()
+                          end
+                      end },
+                    { type="toggle", label="Use Custom Color",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantUseColor = v
+                          if EllesmereUI._refreshEnchantsColors then
+                              EllesmereUI._refreshEnchantsColors()
+                          end
+                          EllesmereUI:RefreshPage()
+                      end },
+                },
+            })
+
+            -- Cogwheel button
+            local enchantCogBtn = CreateFrame("Button", nil, leftRgn)
+            enchantCogBtn:SetSize(26, 26)
+            enchantCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = enchantCogBtn
+            enchantCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            enchantCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local enchantCogTex = enchantCogBtn:CreateTexture(nil, "OVERLAY")
+            enchantCogTex:SetAllPoints()
+            enchantCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            enchantCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            enchantCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            enchantCogBtn:SetScript("OnClick", function(self) enchantCogShow(self) end)
+
+            local enchantCogBlock = CreateFrame("Frame", nil, enchantCogBtn)
+            enchantCogBlock:SetAllPoints()
+            enchantCogBlock:SetFrameLevel(enchantCogBtn:GetFrameLevel() + 10)
+            enchantCogBlock:EnableMouse(true)
+            enchantCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(enchantCogBtn, EllesmereUI.DisabledTooltip("Themed Character Sheet"))
+            end)
+            enchantCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Color swatch (shown when custom color is enabled)
+            local enchantSwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.charSheetEnchantColor
+                if c then return c.r, c.g, c.b, 1 end
+                return 1, 1, 1, 1
+            end
+            local enchantSwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.charSheetEnchantColor = { r = r, g = g, b = b }
+                -- Refresh all item slots to update enchant colors
+                local itemSlots = {
+                    "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+                    "CharacterChestSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+                    "CharacterWristSlot", "CharacterHandsSlot", "CharacterFinger0Slot", "CharacterFinger1Slot",
+                    "CharacterTrinket0Slot", "CharacterTrinket1Slot", "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
+                }
+                for _, slotName in ipairs(itemSlots) do
+                    local slot = _G[slotName]
+                    if slot and slot._enchantLabel then
+                        local displayColor
+                        if EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor and EllesmereUIDB.charSheetEnchantColor then
+                            displayColor = EllesmereUIDB.charSheetEnchantColor
+                        else
+                            displayColor = { r = 1, g = 1, b = 1 }
+                        end
+                        slot._enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
+                    end
+                end
+            end
+            local enchantSwatch, enchantUpdateSwatch
+            enchantSwatch, enchantUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, enchantSwGet, enchantSwSet, false, 20)
+            PP.Point(enchantSwatch, "RIGHT", enchantCogBtn, "LEFT", -9, 0)
+            leftRgn._lastInline = enchantSwatch
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor
+                if themedOff() then
+                    enchantCogBtn:SetAlpha(0.15)
+                    enchantCogBlock:Show()
+                    enchantSwatch:SetAlpha(0.15)
+                    enchantSwatch:EnableMouse(false)
+                else
+                    enchantCogBtn:SetAlpha(0.4)
+                    enchantCogBlock:Hide()
+                    enchantSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                    enchantSwatch:EnableMouse(colorEnabled)
+                end
+                enchantUpdateSwatch()
+            end)
+            local colorEnabled = EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor
+            if themedOff() then
+                enchantCogBtn:SetAlpha(0.15)
+                enchantCogBlock:Show()
+                enchantSwatch:SetAlpha(0.15)
+                enchantSwatch:EnableMouse(false)
+            else
+                enchantCogBtn:SetAlpha(0.4)
+                enchantCogBlock:Hide()
+                enchantSwatch:SetAlpha(colorEnabled and 1 or 0.3)
+                enchantSwatch:EnableMouse(colorEnabled)
+            end
+        end
+
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
         return math.abs(y)
@@ -4957,6 +6160,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.unlockHeightMatch = nil
                 -- QoL Features defaults
                 EllesmereUIDB.hideBlizzardPartyFrame = false
+                EllesmereUIDB.autoAcceptRoleCheck = false
+                EllesmereUIDB.autoAcceptRoleCheckShift = false
                 EllesmereUIDB.quickLoot = false
                 EllesmereUIDB.quickLootShiftSkip = false
                 EllesmereUIDB.skipCinematics = false
