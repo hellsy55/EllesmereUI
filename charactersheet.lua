@@ -3272,6 +3272,7 @@ if EllesmereUI then
 
             -- Auto-equip equipment set when spec changes
             local specChangeFrame = CreateFrame("Frame")
+            local lastSpecIndex = GetSpecialization()
             specChangeFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
             specChangeFrame:RegisterEvent("EQUIPMENT_SETS_CHANGED")
             specChangeFrame:SetScript("OnEvent", function(self, event)
@@ -3283,20 +3284,23 @@ if EllesmereUI then
                         -- Equipment panel will be refreshed by the equipSetChangeFrame handler
                     end
                 else
-                    -- Auto-equip when spec changes
-                    local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
-                    if setIDs then
-                        for _, setID in ipairs(setIDs) do
-                            local assignedSpec = C_EquipmentSet.GetEquipmentSetAssignedSpec(setID)
-                            if assignedSpec then
-                                local currentSpecIndex = GetSpecialization()
-                                if assignedSpec == currentSpecIndex then
-                                    C_EquipmentSet.UseEquipmentSet(setID)
-                                    activeEquipmentSetID = setID
-                                    if EllesmereUIDB then
-                                        EllesmereUIDB.lastEquippedSet = setID
+                    -- Auto-equip when spec actually changes (not just event noise)
+                    local currentSpecIndex = GetSpecialization()
+                    if currentSpecIndex ~= lastSpecIndex then
+                        lastSpecIndex = currentSpecIndex
+                        local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
+                        if setIDs then
+                            for _, setID in ipairs(setIDs) do
+                                local assignedSpec = C_EquipmentSet.GetEquipmentSetAssignedSpec(setID)
+                                if assignedSpec then
+                                    if assignedSpec == currentSpecIndex then
+                                        C_EquipmentSet.UseEquipmentSet(setID)
+                                        activeEquipmentSetID = setID
+                                        if EllesmereUIDB then
+                                            EllesmereUIDB.lastEquippedSet = setID
+                                        end
+                                        break
                                     end
-                                    break
                                 end
                             end
                         end
