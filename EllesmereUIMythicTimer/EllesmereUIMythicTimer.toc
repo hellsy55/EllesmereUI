@@ -1,0 +1,19 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Mythic+ Timer
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Customizable Mythic+ dungeon timer with objective tracking
+## Author: Ellesmere
+## Version: 6.4.7
+## Dependencies: EllesmereUI
+## SavedVariables: EllesmereUIMythicTimerDB
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+# Main Lua
+EllesmereUIMythicTimer.lua
+
+# Best Runs Viewer
+EUI_MythicTimer_BestRuns.lua
+
+# Options
+EUI_MythicTimer_Options.lua
