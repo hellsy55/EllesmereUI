@@ -790,6 +790,30 @@ _G._EMT_ApplyPreset = function(presetID)
     return applied
 end
 
+-- Reset the current profile back to defaults and apply the EllesmereUI preset.
+-- Used by the module's "Reset" button in the EllesmereUI options panel.
+_G._EMT_ResetProfile = function()
+    if not db or not db.profile then return false end
+
+    -- Clear every key in the current profile
+    for key in pairs(db.profile) do
+        db.profile[key] = nil
+    end
+
+    -- Repopulate with DB defaults
+    for key, value in pairs(DB_DEFAULTS.profile) do
+        db.profile[key] = type(value) == "table" and CopyTable(value) or value
+    end
+
+    -- Apply the EllesmereUI preset on top (sets selectedPreset = "ELLESMERE")
+    ApplyPresetToProfile(db.profile, "ELLESMERE")
+
+    if _G._EMT_StandaloneRefresh then
+        _G._EMT_StandaloneRefresh()
+    end
+    return true
+end
+
 -- Standalone frame
 local standaloneFrame
 local standaloneCreated = false
