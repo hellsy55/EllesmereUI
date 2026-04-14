@@ -6365,7 +6365,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.5.5"
+EllesmereUI.VERSION = "6.5.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6628,14 +6628,19 @@ EllesmereUI._RunConflictCheck = function()
         end
 
         -- Show one popup at a time.
-        -- Non-ElvUI: never permanently dismissed (always shows next session).
-        -- ElvUI: permanently dismissed only when it was the sole conflict.
+        -- "Okay"             -> dismiss this session only; re-shows next login.
+        -- "Don't show again" -> permanently dismiss this specific addon.
         local pendingIndex = 0
         local function ShowNextConflict()
             pendingIndex = pendingIndex + 1
             local item = pending[pendingIndex]
             if not item then return end
             local entry, affected = item.entry, item.affected
+            -- Skip any conflict the user permanently dismissed previously.
+            if dismissed[entry.addon] then
+                ShowNextConflict()
+                return
+            end
             local names = {}
             for _, a in ipairs(affected) do
                 names[#names + 1] = a:gsub("^EllesmereUI", "")
@@ -6645,21 +6650,17 @@ EllesmereUI._RunConflictCheck = function()
                 .. ". Running both at the same time may cause errors or unexpected behavior."
                 .. "\n\nPlease disable one of them."
             )
-            local function onDismiss()
-                -- Only permanently dismiss ElvUI, and only when it is the sole conflict
-                if entry.addon == "ElvUI" and #pending == 1 then
-                    dismissed["ElvUI"] = true
-                end
-                ShowNextConflict()
-            end
             if EllesmereUI.ShowConfirmPopup then
                 EllesmereUI:ShowConfirmPopup({
                     title       = "Incompatible Addon Detected",
                     message     = msg,
                     confirmText = "Okay",
                     cancelText  = "Don't show again",
-                    onConfirm   = onDismiss,
-                    onCancel    = onDismiss,
+                    onConfirm   = function() ShowNextConflict() end,
+                    onCancel    = function()
+                        dismissed[entry.addon] = true
+                        ShowNextConflict()
+                    end,
                     modal       = true,
                 })
             else

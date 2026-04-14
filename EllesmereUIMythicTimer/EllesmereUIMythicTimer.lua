@@ -1706,13 +1706,29 @@ function EMT:OnEnable()
                     return false
                 end,
                 savePos = function(_, point, relPoint, x, y)
-                    -- Always save a CENTER offset so SetScale grows the
-                    -- frame symmetrically around the same on-screen point.
+                    -- Stored as delta in UIParent-logical units (matches the
+                    -- migration in _ensureCenterPos). ApplyStandalonePosition
+                    -- divides by profile.scale on apply; screen delta works
+                    -- out to stored_UIlogical * UIParent:GetEffectiveScale().
+                    --
+                    -- f:GetCenter() returns coords in the frame's OWN scaled
+                    -- units. At frame scale != 1 we must re-scale those to
+                    -- UIParent-logical units before subtracting upX. Multiply
+                    -- cx by (frame_effective / UIParent_effective) to land in
+                    -- the same space as upX. Without this the stored offset
+                    -- shrinks at larger scales and the frame snaps toward the
+                    -- middle every time settings re-apply (e.g. Show Preview).
                     local f = standaloneFrame
                     if f and f:GetCenter() then
                         local cx, cy = f:GetCenter()
                         local upX, upY = UIParent:GetCenter()
-                        db.profile.standalonePos = { centerX = cx - upX, centerY = cy - upY }
+                        local fes = f:GetEffectiveScale() or 1
+                        local ues = UIParent:GetEffectiveScale() or 1
+                        local ratio = fes / ues
+                        db.profile.standalonePos = {
+                            centerX = cx * ratio - upX,
+                            centerY = cy * ratio - upY,
+                        }
                     end
                     if f and not EllesmereUI._unlockActive then
                         local sx, sy = _centerPosFromSaved(db.profile.standalonePos)

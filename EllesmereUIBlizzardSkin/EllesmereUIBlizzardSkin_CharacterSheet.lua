@@ -230,6 +230,7 @@ do
             showItemLevel                = true,
             showUpgradeTrack             = true,
             showEnchants                 = true,
+            showGems                     = true,
             showStatCategory_Attributes  = true,
             showStatCategory_Attack      = true,
             showStatCategory_Defense     = true,
@@ -957,6 +958,7 @@ local function SkinCharacterSheet()
     _hookPaneOnShow(_G.PaperDollFrame,  true)
     _hookPaneOnShow(_G.ReputationFrame, false)
     _hookPaneOnShow(_G.TokenFrame,      false)
+
 
     ApplyTabVisibility((frame.selectedTab or 1) == 1)
 
@@ -3587,7 +3589,8 @@ local function SkinCharacterSheet()
         local socketIcons = GetOrCreateSocketIcons(slot, side, slotIndex)
 
         local link = GetInventoryItemLink("player", slotIndex)
-        if not link then
+        local gemsEnabled = not (EllesmereUIDB and EllesmereUIDB.showGems == false)
+        if not link or not gemsEnabled then
             for _, gemFrame in ipairs(slot._euiCharSocketsFrames or {}) do
                 gemFrame:Hide()
             end
@@ -3674,6 +3677,7 @@ local function SkinCharacterSheet()
             UpdateSocketIcons(slotName)
         end
     end
+    EllesmereUI._refreshGemsVisibility = RefreshAllSocketIcons
 
     -- Hook into equipment changes. Debounced via a pending flag so rapid
     -- swaps (e.g. equipping a full gear set) coalesce into one refresh
@@ -4094,10 +4098,19 @@ if EllesmereUI then
             -- user opens it for the first time this session.
             ApplyCharacterFramePos()
 
-            -- Hook styling on OnShow. Skinning is DEFERRED until the player
-            -- actually opens the sheet -- building every panel + scrollbar +
-            -- stat section + slot border at PLAYER_LOGIN was a measurable
-            -- ~2% CPU spike at load. Now it's zero cost until first open.
+            -- Kick off skinning 1s after PLAYER_LOGIN (off the critical path
+            -- so it doesn't add to the login CPU spike) instead of inside the
+            -- very first OnShow. Running the skin synchronously inside
+            -- Blizzard's OnShow -> ShowSubFrame chain leaves the Reputation
+            -- and Currency panes partially-initialized (content shown but
+            -- not rendered) until a later hide/show cycle heals them.
+            -- The OnShow hook remains as a fallback for the rare case where
+            -- the user somehow opens the sheet in the first second of login.
+            C_Timer.After(1, function()
+                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
+                    ApplyThemedCharacterSheet()
+                end
+            end)
             CharacterFrame:HookScript("OnShow", ApplyThemedCharacterSheet)
 
             -- Auto-close the character panel when a frame that would visually

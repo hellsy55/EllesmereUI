@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Customizable Mythic+ dungeon timer with objective tracking
 ## Author: Ellesmere
-## Version: 6.5.5
+## Version: 6.5.6
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIMythicTimerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

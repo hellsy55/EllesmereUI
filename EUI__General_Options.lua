@@ -3375,6 +3375,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUIDB.showItemLevel = false
                       EllesmereUIDB.showUpgradeTrack = false
                       EllesmereUIDB.showEnchants = false
+                      EllesmereUIDB.showGems = false
                       EllesmereUIDB.showStatCategory_Attributes = false
                       EllesmereUIDB.showStatCategory_Attack = false
                       EllesmereUIDB.showStatCategory_Crests = false
@@ -3927,6 +3928,18 @@ initFrame:SetScript("OnEvent", function(self)
 
         local tertiaryRow
         tertiaryRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Gems",
+              tooltip="Toggle visibility of gem icons inside equipment slots.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showGems ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showGems = v
+                  if EllesmereUI._refreshGemsVisibility then
+                      EllesmereUI._refreshGemsVisibility()
+                  end
+              end },
             { type="toggle", text="Show Tertiary",
               tooltip="Toggle visibility of the Tertiary stat category (Leech, Avoidance, Speed).",
               getValue=function()
@@ -3938,8 +3951,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if EllesmereUI._updateStatCategoryVisibility then
                       EllesmereUI._updateStatCategoryVisibility()
                   end
-              end },
-            { type="label", text="" }
+              end }
         );  y = y - h
 
         -- Disabled overlay for tertiaryRow when themed is off
@@ -3977,7 +3989,7 @@ initFrame:SetScript("OnEvent", function(self)
                 return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
             end
 
-            local leftRgn = tertiaryRow._leftRegion
+            local leftRgn = tertiaryRow._rightRegion
 
             local tertiarySwGet = function()
                 local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors["Tertiary Stats"]
