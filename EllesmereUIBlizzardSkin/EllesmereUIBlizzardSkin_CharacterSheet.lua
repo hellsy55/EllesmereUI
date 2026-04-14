@@ -3,13 +3,10 @@
 --------------------------------------------------------------------------------
 local ADDON_NAME = ...
 local skinned = false
-local activeEquipmentSetID = nil  -- Track currently equipped set
+local activeEquipmentSetID = nil
 
--- =========================================================================
--- Slot-name constants. The "gear" set is the 16 slots that hold actual
--- equipment with item levels / enchants / sockets. The "all" set adds
--- shirt + tabard (cosmetic) for full-character display loops.
--- =========================================================================
+-- "gear" = the 16 slots with ilvl/enchants/sockets.
+-- "all"  = gear + shirt + tabard (cosmetic), for full-character loops.
 local EUI_GEAR_SLOTS = {
     "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
     "CharacterChestSlot", "CharacterWaistSlot",   "CharacterLegsSlot",     "CharacterFeetSlot",
@@ -24,11 +21,8 @@ local EUI_ALL_SLOTS = {
     "CharacterMainHandSlot","CharacterSecondaryHandSlot",
 }
 
--- =========================================================================
--- Equipment-set equip helper. Prefer Blizzard's EquipmentManager_EquipSet
--- wrapper (cleaner path from insecure code) and fall back to the raw
--- C_EquipmentSet API. Always guarded against combat lockdown by callers.
--- =========================================================================
+-- Prefer EquipmentManager_EquipSet (cleaner from insecure code) over the
+-- raw C_EquipmentSet API. Callers must combat-guard.
 local function EUI_EquipSet(setID)
     if not setID then return end
     if EquipmentManager_EquipSet then
@@ -38,10 +32,8 @@ local function EUI_EquipSet(setID)
     end
 end
 
--- =========================================================================
--- Tooltip scanning helpers (C_TooltipInfo-based; NEVER create a scanning
--- GameTooltipTemplate from Lua -- see CLAUDE.md reference_tooltip_template_taint).
--- =========================================================================
+-- C_TooltipInfo-based scanning. NEVER create a scanning GameTooltipTemplate
+-- from Lua -- see CLAUDE.md reference_tooltip_template_taint.
 local function EUI_ScanInventoryItem(slotID)
     if not (C_TooltipInfo and C_TooltipInfo.GetInventoryItem) then return nil end
     local data = C_TooltipInfo.GetInventoryItem("player", slotID)
@@ -52,9 +44,8 @@ local function EUI_ScanInventoryItem(slotID)
     return data
 end
 
--- Hoisted upgrade-track color constants (shared, never mutated). Avoids
--- allocating a fresh {r,g,b} table on every EUI_GetUpgradeTrack call --
--- this runs per slot on every PLAYER_EQUIPMENT_CHANGED.
+-- Shared (immutable) so EUI_GetUpgradeTrack doesn't allocate a fresh
+-- {r,g,b} per slot on every PLAYER_EQUIPMENT_CHANGED.
 local _TRACK_WHITE  = { r = 1.00, g = 1.00, b = 1.00 }
 local _TRACK_CHAMP  = { r = 0.00, g = 0.44, b = 0.87 }
 local _TRACK_MYTH   = { r = 1.00, g = 0.50, b = 0.00 }
@@ -62,8 +53,8 @@ local _TRACK_HERO   = { r = 1.00, g = 0.30, b = 1.00 }
 local _TRACK_VET    = { r = 0.12, g = 1.00, b = 0.00 }
 local _TRACK_GRAY   = { r = 0.62, g = 0.62, b = 0.62 }
 
--- Upgrade-track info direct from C_Item.GetItemUpgradeInfo -- no tooltip
--- scanning needed. Returns trackText "(n/m)" (or "") and color {r,g,b}.
+-- Returns "(n/m)" (or "") + color, sourced from C_Item.GetItemUpgradeInfo
+-- so no tooltip scan is needed.
 local function EUI_GetUpgradeTrack(itemLink)
     if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
         return "", _TRACK_WHITE
@@ -84,18 +75,18 @@ local function EUI_GetUpgradeTrack(itemLink)
     return text, color
 end
 
--- Enchant text via C_TooltipInfo. Language-agnostic: prefers line-type match
--- (Enum.TooltipDataLineType.ItemEnchantmentPermanent / 15) and falls back to
--- a regex derived from Blizzard's localized ENCHANTED_TOOLTIP_LINE global.
--- Results cached by enchantID for the session.
+-- Language-agnostic: prefers line-type match
+-- (Enum.TooltipDataLineType.ItemEnchantmentPermanent / 15), falls back to a
+-- regex built from Blizzard's localized ENCHANTED_TOOLTIP_LINE global.
+-- Cached by enchantID per session.
 local _enchantNameCache = {}
 local _ENCHANT_LINE_TYPE = (Enum and Enum.TooltipDataLineType
     and (Enum.TooltipDataLineType.ItemEnchantmentPermanent
          or Enum.TooltipDataLineType.ItemEnchant))
     or 15
 
--- Build a Lua pattern from the localized "Enchanted: %s" string, escaping
--- all magic chars except the %s placeholder (which becomes the capture).
+-- Build a Lua pattern from "Enchanted: %s", escaping magic chars and
+-- turning %s into the capture group.
 local _ENCHANT_PATTERN
 do
     local fmt = ENCHANTED_TOOLTIP_LINE
@@ -112,9 +103,8 @@ end
 
 local function _stripLineEscapes(s)
     if not s then return "" end
-    -- NOTE: intentionally preserve |A:...|a atlas escapes -- the enchant
-    -- renderer keeps the atlas icon and hides the text. Only strip color
-    -- escapes and leading + / &.
+    -- Preserve |A:...|a atlas escapes (the enchant renderer keeps the
+    -- atlas icon and hides the text). Only strip color escapes + leading +/&.
     s = s:gsub("|cn.-:(.-)|r", "%1")         -- new-style color escapes
     s = s:gsub("|c%x%x%x%x%x%x%x%x", "")     -- classic color open
     s = s:gsub("|r", "")                     -- color close
@@ -179,10 +169,9 @@ local EUI_EMPTY_SOCKET_ATLAS = {
     EMPTY_SOCKET_TINKER     = "socket-tinker",
 }
 
--- Returns a list of socket textures (gem icons for filled, atlas names for
--- empty) derived entirely from GetItemStats + the item link's gem IDs --
--- NO tooltip scanning required.
--- Each entry is: { icon = fileID-or-atlas, isAtlas = bool }
+-- Returns { icon = fileID-or-atlas, isAtlas = bool } per socket -- gem
+-- icons for filled, empty-socket atlas for empty. Pure GetItemStats +
+-- C_Item.GetItemGem; no tooltip scan.
 local function EUI_GetSocketTextures(itemLink)
     local result = {}
     if not itemLink then return result end
@@ -201,10 +190,9 @@ local function EUI_GetSocketTextures(itemLink)
         end
     end
 
-    -- EMPTY_SOCKET_* in GetItemStats reports TOTAL sockets of that type (not
-    -- just empty ones). Compute total across all socket types, then subtract
-    -- filled count to get true empty-socket count. Use the first matching
-    -- socket-type key we saw for the atlas.
+    -- EMPTY_SOCKET_* counts TOTAL sockets, not empty ones. Subtract the
+    -- filled count to get the real empty count; use the first socket-type
+    -- key we saw for the atlas.
     if stats then
         local totalSockets = 0
         local firstAtlas
@@ -256,7 +244,6 @@ do
     end)
 end
 
--- Apply EUI theme to character sheet frame
 local function SkinCharacterSheet()
     if skinned then return end
     skinned = true
@@ -264,9 +251,8 @@ local function SkinCharacterSheet()
     local frame = CharacterFrame
     if not frame then return end
 
-    -- Hide Blizzard decorations
     if CharacterFrame.NineSlice then CharacterFrame.NineSlice:Hide() end
-    -- NOTE: Don't hide frame.Bg - we need it as anchor for slots!
+    -- frame.Bg and CharacterFrameBg stay visible -- they're anchors for slot positioning.
     if frame.Background then frame.Background:Hide() end
     if frame.TitleBg then frame.TitleBg:Hide() end
     if frame.TopTileStreaks then frame.TopTileStreaks:Hide() end
@@ -278,7 +264,6 @@ local function SkinCharacterSheet()
     if CharacterModelFrameBackgroundBotLeft then CharacterModelFrameBackgroundBotLeft:Hide() end
     if CharacterModelFrameBackgroundTopRight then CharacterModelFrameBackgroundTopRight:Hide() end
     if CharacterModelFrameBackgroundBotRight then CharacterModelFrameBackgroundBotRight:Hide() end
-    -- NOTE: Don't hide CharacterFrameBg - we need it as anchor point for item slots!
     if CharacterFrameInsetRight then
         if CharacterFrameInsetRight.NineSlice then CharacterFrameInsetRight.NineSlice:Hide() end
         CharacterFrameInsetRight:ClearAllPoints()
@@ -291,29 +276,24 @@ local function SkinCharacterSheet()
                 CharacterFrameInset.NineSlice[edge]:Hide()
             end
         end
-        -- Hide the NineSlice container itself via alpha. CLAUDE.md safe pattern:
-        -- SetAlpha on the top-level frame; children inherit; no mouse recursion.
+        -- Alpha 0 on the top-level NineSlice; children inherit. Never recurse
+        -- mouse state on Blizzard containers (see CLAUDE.md).
         CharacterFrameInset.NineSlice:SetAlpha(0)
     end
-    -- Add colored backgrounds to CharacterFrameInset (EUI FriendsList style)
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
     if CharacterFrameInset then
         if CharacterFrameInset.AbsBg then
             CharacterFrameInset.AbsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
         end
         if CharacterFrameInset.Bg then
-            -- Keep the color set for any downstream code that reads it, but
-            -- alpha it to 0 so it does not render on top of our panel.
             CharacterFrameInset.Bg:SetColorTexture(0.02, 0.02, 0.025, 1)
             CharacterFrameInset.Bg:SetAlpha(0)
         end
     end
 
-    -- Hide Blizzard's secure CharacterModelScene via alpha only, and disable
-    -- its mouse input so our replacement ModelScene receives clicks and
-    -- the wheel. We never reposition, resize, or touch its frame level --
-    -- that's the taint vector ElvUI carefully sidesteps. EnableMouse on the
-    -- top-level frame is safe (not a recursive walk of children).
+    -- Hide Blizzard's secure CharacterModelScene via alpha + top-level
+    -- EnableMouse(false) so our replacement PlayerModel receives input.
+    -- Never reposition or resize the secure frame, and never recurse into its children.
     if CharacterModelScene then
         CharacterModelScene:SetAlpha(0)
         CharacterModelScene:EnableMouse(false)
@@ -326,11 +306,9 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Plain PlayerModel widget. Natively reflects shapeshift forms (Bear /
-    -- Cat / Travel / Moonkin / Tree) and Dracthyr Visage via SetUnit("player")
-    -- without any of the ModelScene preset workarounds. The transmog atlas
-    -- backdrop and hover-glow live on a sibling frame so they survive the
-    -- swap from ModelScene.
+    -- PlayerModel widget. SetUnit("player") natively follows shapeshift forms
+    -- (Bear/Cat/Travel/Moonkin/Tree) and Dracthyr Visage -- no preset tricks
+    -- needed. Backdrop + hover glow live on a sibling frame (3D model draws on top).
     if not frame._euiModelScene then
         local myModel = CreateFrame("PlayerModel", "EUI_CharSheet_ModelScene", frame)
         myModel:SetFrameLevel(2)
@@ -348,7 +326,6 @@ local function SkinCharacterSheet()
         myModel:EnableMouse(true)
         myModel:EnableMouseWheel(true)
 
-        -- Background atlas (sibling frame so the 3D model draws on top).
         local bgFrame = CreateFrame("Frame", nil, frame)
         bgFrame:SetFrameLevel(math.max(1, myModel:GetFrameLevel() - 1))
         bgFrame:SetAllPoints(myModel)
@@ -371,18 +348,14 @@ local function SkinCharacterSheet()
         frame._euiModelBgGlow  = bgGlowTex
         frame._euiModelBgFrame = bgFrame
 
-        -- Bind to the live player. SetUnit natively follows the unit's
-        -- current rendered form, so shapeshift + Visage just work.
         myModel:SetUnit("player")
-        local zoomLevel = 0  -- 0 = full body; 1 = tight portrait
+        local zoomLevel = 0  -- 0 = full body, 1 = tight portrait
         myModel:SetPortraitZoom(zoomLevel)
 
-        frame._euiModelScene = myModel  -- name kept for back-compat
-        frame._euiModelActor = myModel  -- mouse handlers operate on the same widget
+        frame._euiModelScene = myModel  -- name retained for back-compat with older refs
+        frame._euiModelActor = myModel
 
-        ---------------------------------------------------------------------
-        --  Mouse controls: LMB drag rotates, RMB drag pans, wheel zooms.
-        ---------------------------------------------------------------------
+        -- LMB drag rotates, RMB drag pans, wheel zooms.
         local ROTATE_SPEED = 0.012
         local PAN_SPEED    = 0.01
         local ZOOM_STEP    = 0.1
@@ -417,9 +390,8 @@ local function SkinCharacterSheet()
             if dragMode == "rotate" then
                 myModel:SetFacing((myModel:GetFacing() or 0) + dx * ROTATE_SPEED)
             elseif dragMode == "pan" then
-                -- Model:SetPosition(forward, side, up) -- dx -> side, dy -> up.
-                -- Forward (depth) stays put so panning behaves like Blizzard's
-                -- character window: model slides around in screen space.
+                -- Model:SetPosition(forward, side, up). Depth is fixed so
+                -- panning slides the model in screen space only.
                 if myModel.GetPosition and myModel.SetPosition then
                     local px, py, pz = myModel:GetPosition()
                     myModel:SetPosition(px or 0, (py or 0) + dx * PAN_SPEED, (pz or 0) + dy * PAN_SPEED)
@@ -452,7 +424,7 @@ local function SkinCharacterSheet()
             myModel:SetPortraitZoom(zoomLevel)
         end)
 
-        -- Hover state: glow smoothly fades between 0.5 (idle) and 1.0 (hover).
+        -- Hover glow fades between 0.5 (idle) and 1.0 (hover).
         local GLOW_FADE_DURATION = 1.0
         local GLOW_IDLE, GLOW_HOVER = 0.5, 1.0
         local glowTarget = GLOW_IDLE
@@ -481,9 +453,8 @@ local function SkinCharacterSheet()
             glowTarget = GLOW_IDLE; glowFader:Show()
         end)
 
-        -- Re-bind on equipment / form / world events. Model:SetUnit handles
-        -- form transitions natively but we need to refresh on equipment so
-        -- the model picks up newly-equipped gear.
+        -- SetUnit handles form transitions natively; re-bind on equipment
+        -- changes so newly-equipped gear shows up on the model.
         local function _refreshPlayerModel()
             if frame._euiModelScene and frame._euiModelScene.SetUnit then
                 frame._euiModelScene:SetUnit("player")
@@ -509,8 +480,6 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Center the character name at the top of the frame, then stack the
-    -- level text directly below it (also centered).
     if CharacterFrameTitleText then
         CharacterFrameTitleText:ClearAllPoints()
         CharacterFrameTitleText:SetPoint("TOP", frame, "TOP", 0, -6)
@@ -522,7 +491,6 @@ local function SkinCharacterSheet()
         CharacterLevelText:SetJustifyH("CENTER")
     end
 
-    -- Hide model control help text
     if CharacterModelFrameHelpText then CharacterModelFrameHelpText:Hide() end
 
     if CharacterFrameInsetBG then CharacterFrameInsetBG:Hide() end
@@ -539,7 +507,6 @@ local function SkinCharacterSheet()
     end
 
 
-    -- Hide PaperDoll borders (Blizzard's outer window frame)
     if frame.PaperDollFrame then
         if frame.PaperDollFrame.InnerBorder then
             for _, name in ipairs({"Top", "Bottom", "Left", "Right", "TopLeft", "TopRight", "BottomLeft", "BottomRight"}) do
@@ -550,7 +517,6 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Hide all PaperDollInnerBorder textures
     for _, name in ipairs({"TopLeft", "TopRight", "BottomLeft", "BottomRight", "Top", "Bottom", "Left", "Right", "Bottom2"}) do
         if _G["PaperDollInnerBorder" .. name] then
             _G["PaperDollInnerBorder" .. name]:Hide()
@@ -562,18 +528,17 @@ local function SkinCharacterSheet()
         if CharacterStatPane.ClassBackground then
             CharacterStatPane.ClassBackground:Hide()
         end
-        -- Move CharacterStatPane off-screen
+        -- Park off-screen (never Hide -- that can taint the secure layout).
         CharacterStatPane:ClearAllPoints()
         CharacterStatPane:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -10000)
     end
 
-    -- Hide secondary hand slot extra element for testing
     if _G["CharacterSecondaryHandSlot.26129b81ae0"] then
         _G["CharacterSecondaryHandSlot.26129b81ae0"]:Hide()
     end
 
 
-    -- Hide all SlotFrame wrapper containers
+    -- Hide the SlotFrame wrappers -- we reposition the inner slot buttons directly.
     _G.CharacterBackSlotFrame:Hide()
     _G.CharacterChestSlotFrame:Hide()
     _G.CharacterFeetSlotFrame:Hide()
@@ -593,8 +558,8 @@ local function SkinCharacterSheet()
     _G.CharacterWaistSlotFrame:Hide()
     _G.CharacterWristSlotFrame:Hide()
 
-    -- Custom flexible grid layout (NO REPARENTING!)
-    -- Slots stay in original parents, positioned via grid system
+    -- Grid layout via SetPoint only. Never reparent -- slots are secure and
+    -- reparenting them would taint the paper-doll.
     if CharacterFrameBg then CharacterFrameBg:Show() end
 
     local slotNames = {
@@ -605,7 +570,6 @@ local function SkinCharacterSheet()
         "CharacterMainHandSlot", "CharacterSecondaryHandSlot"
     }
 
-    -- Show all slots AND their parents
     for _, slotName in ipairs(slotNames) do
         local slot = _G[slotName]
         if slot then
@@ -617,16 +581,13 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Grid-based layout system (2 columns)
     local gridCols = 2
     local cellWidth = 280
     local cellHeight = 41
     local gridStartX = 14
     local gridStartY = -60
 
-    -- Equipment slot grid positions (2 columns: left & right)
     local slotGridMap = {
-        -- Left column
         CharacterHeadSlot = {col = 0, row = 0},
         CharacterNeckSlot = {col = 0, row = 1},
         CharacterShoulderSlot = {col = 0, row = 2},
@@ -635,8 +596,6 @@ local function SkinCharacterSheet()
         CharacterShirtSlot = {col = 0, row = 5},
         CharacterTabardSlot = {col = 0, row = 6},
         CharacterWristSlot = {col = 0, row = 7},
-
-        -- Right column
         CharacterHandsSlot = {col = 1, row = 0},
         CharacterWaistSlot = {col = 1, row = 1},
         CharacterLegsSlot = {col = 1, row = 2},
@@ -647,7 +606,6 @@ local function SkinCharacterSheet()
         CharacterTrinket1Slot = {col = 1, row = 7},
     }
 
-    -- Position main grid slots using anchor calculations
     for slotName, gridPos in pairs(slotGridMap) do
         local slot = _G[slotName]
         if slot then
@@ -658,7 +616,7 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Weapons positioned in bottom-right area (separate from grid)
+    -- Weapons live in the bottom strip, outside the 2-column grid.
     _G.CharacterMainHandSlot:ClearAllPoints()
     _G.CharacterMainHandSlot:SetPoint("BOTTOMLEFT", CharacterFrame, "BOTTOMLEFT", 145, 10)
     _G.CharacterSecondaryHandSlot:ClearAllPoints()
@@ -666,13 +624,16 @@ local function SkinCharacterSheet()
 
 
 
-    -- Hide slot textures and borders (Chonky style)
+    -- Hide the two extra regions on weapon slots (indices 16/17 are the
+    -- ornamented border/frame textures). Shifting texcoords off-atlas is
+    -- cheaper than SetTexture("") and survives Blizzard re-applying the atlas.
     select(16, _G.CharacterMainHandSlot:GetRegions()):SetTexCoord(.8,.8,.8,.8,.8,.8,.8,.8)
     select(17, _G.CharacterMainHandSlot:GetRegions()):SetTexCoord(.8,.8,.8,.8,.8,.8,.8,.8)
     select(16, _G.CharacterSecondaryHandSlot:GetRegions()):SetTexCoord(.8,.8,.8,.8,.8,.8,.8,.8)
     select(17, _G.CharacterSecondaryHandSlot:GetRegions()):SetTexCoord(.8,.8,.8,.8,.8,.8,.8,.8)
 
-    -- Hide icon borders and adjust texcoords
+    -- Strip icon borders on the equipment slots and crop icon texcoords
+    -- so they fill the slot cleanly.
     local slotsToHide = {
         "CharacterBackSlot", "CharacterChestSlot", "CharacterFeetSlot",
         "CharacterFinger0Slot", "CharacterFinger1Slot", "CharacterHandsSlot",
@@ -700,13 +661,13 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Hide special regions on weapon slots
+    -- Re-apply to weapon-slot regions 16/17 after the loop above may have
+    -- clobbered them (the slots are also in slotsToHide).
     select(16, _G.CharacterMainHandSlot:GetRegions()):SetTexCoord(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
     select(17, _G.CharacterMainHandSlot:GetRegions()):SetTexCoord(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
     select(16, _G.CharacterSecondaryHandSlot:GetRegions()):SetTexCoord(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
     select(17, _G.CharacterSecondaryHandSlot:GetRegions()):SetTexCoord(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
 
-    -- Show all slots with blending
     local slotNames = {
         "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
         "CharacterChestSlot", "CharacterShirtSlot", "CharacterTabardSlot", "CharacterWristSlot",
@@ -724,22 +685,17 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Apply scale if saved
     local scale = EllesmereUIDB and EllesmereUIDB.themedCharacterSheetScale or 1
     frame:SetScale(scale)
-
-    -- Raise frame strata for visibility
     frame:SetFrameStrata("HIGH")
 
-    -- Frame size is entirely Blizzard's now (no SetWidth / SetHeight / hooks /
-    -- OnUpdate enforcers). Zero taint surface from our code re-sizing a secure
-    -- frame. Layout is designed to fit inside Blizzard's native dimensions.
+    -- Frame size is entirely Blizzard's -- no SetWidth/SetHeight or OnUpdate
+    -- enforcers on the secure frame. Our layout fits inside native dimensions.
     if CharacterFrameInset then
         CharacterFrameInset:SetClipsChildren(false)
     end
     frame._sizeCheckDone = true
 
-    -- Strip textures from frame regions
     for i = 1, select("#", frame:GetRegions()) do
         local region = select(i, frame:GetRegions())
         if region and region:IsObjectType("Texture") then
@@ -747,30 +703,24 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Add custom background with EUI colors (same as FriendsFrame)
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 
-    -- Main frame background at BACKGROUND layer -8 (fixed size, not scaled)
     frame._ebsBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
     frame._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
     frame._ebsBg:SetAllPoints(frame)
     frame._ebsBg:SetAlpha(1)
 
-    -- Create dark gray border using PP.CreateBorder
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
     end
 
-    -- Skin close button
     local closeBtn = frame.CloseButton or _G.CharacterFrameCloseButton
     if closeBtn then
-        -- Strip button textures
         if closeBtn.SetNormalTexture then closeBtn:SetNormalTexture("") end
         if closeBtn.SetPushedTexture then closeBtn:SetPushedTexture("") end
         if closeBtn.SetHighlightTexture then closeBtn:SetHighlightTexture("") end
         if closeBtn.SetDisabledTexture then closeBtn:SetDisabledTexture("") end
 
-        -- Strip texture regions
         for i = 1, select("#", closeBtn:GetRegions()) do
             local region = select(i, closeBtn:GetRegions())
             if region and region:IsObjectType("Texture") then
@@ -778,17 +728,14 @@ local function SkinCharacterSheet()
             end
         end
 
-        -- Get font path for close button
         local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
 
-        -- Create X text
         closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
         closeBtn._ebsX:SetFont(fontPath, 16, "")
         closeBtn._ebsX:SetText("x")
         closeBtn._ebsX:SetTextColor(1, 1, 1, 0.75)
         closeBtn._ebsX:SetPoint("CENTER", -2, -3)
 
-        -- Hover effect: simple alpha bump, no color/texture swaps
         closeBtn:HookScript("OnEnter", function()
             if closeBtn._ebsX then closeBtn._ebsX:SetTextColor(1, 1, 1, 1) end
         end)
@@ -797,14 +744,12 @@ local function SkinCharacterSheet()
         end)
     end
 
-    -- Restyle character frame tabs (matching FriendsFrame pattern)
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
 
     for i = 1, 3 do
         local tab = _G["CharacterFrameTab" .. i]
         if tab then
-            -- Strip Blizzard's tab textures
             for j = 1, select("#", tab:GetRegions()) do
                 local region = select(j, tab:GetRegions())
                 if region and region:IsObjectType("Texture") then
@@ -821,14 +766,12 @@ local function SkinCharacterSheet()
             local hl = tab:GetHighlightTexture()
             if hl then hl:SetTexture("") end
 
-            -- Dark background
             if not tab._ebsBg then
                 tab._ebsBg = tab:CreateTexture(nil, "BACKGROUND")
                 tab._ebsBg:SetAllPoints()
                 tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             end
 
-            -- Active highlight
             if not tab._activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
@@ -838,7 +781,7 @@ local function SkinCharacterSheet()
                 tab._activeHL = activeHL
             end
 
-            -- Hide Blizzard's label and use our own
+            -- Replace Blizzard's label with our own so font/size are under our control.
             local blizLabel = tab:GetFontString()
             local labelText = blizLabel and blizLabel:GetText() or ("Tab " .. i)
             if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
@@ -851,13 +794,11 @@ local function SkinCharacterSheet()
                 label:SetJustifyH("CENTER")
                 label:SetText(labelText)
                 tab._label = label
-                -- Sync our label when Blizzard updates the text
                 hooksecurefunc(tab, "SetText", function(_, newText)
                     if newText and label then label:SetText(newText) end
                 end)
             end
 
-            -- Accent underline (pixel-perfect)
             if not tab._underline then
                 local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
                 if EllesmereUI and EllesmereUI.PanelPP and EllesmereUI.PanelPP.DisablePixelSnap then
@@ -878,12 +819,12 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Hook to update tab visuals when selection changes
     local function UpdateTabVisuals()
         for i = 1, 3 do
             local tab = _G["CharacterFrameTab" .. i]
             if tab then
-                -- PanelTemplates_GetSelectedTab doesn't work reliably, use frame's attribute
+                -- PanelTemplates_GetSelectedTab is unreliable here -- Blizzard
+                -- updates frame.selectedTab before the template helper agrees.
                 local isActive = (frame.selectedTab or 1) == i
                 if tab._label then
                     tab._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
@@ -898,11 +839,9 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Combat-safe visibility helpers. Show/Hide on secure Blizzard frames
-    -- (PaperDollItemSlotButton, etc.) during InCombatLockdown() triggers
-    -- ADDON_ACTION_BLOCKED and can taint the secure frame. These defer the
-    -- call to PLAYER_REGEN_ENABLED when combat is active. Reuses a single
-    -- deferred frame so bursts of tab changes during combat don't leak.
+    -- Show/Hide on secure slot buttons during combat fires ADDON_ACTION_BLOCKED
+    -- and can taint. Defer those calls to PLAYER_REGEN_ENABLED. One shared
+    -- deferred frame handles bursts of tab changes without leaking event regs.
     local _deferredVisibility = CreateFrame("Frame")
     _deferredVisibility._shows = {}
     _deferredVisibility._hides = {}
@@ -933,12 +872,11 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Attach a faint atlas background to the Reputation + Currency panes.
-    -- Idempotent: tagged via _euiBg so it's only added once per frame.
+    -- Faint atlas background on Reputation + Currency panes. Idempotent via
+    -- _euiBg tag. Anchors to the inner ScrollBox so the texture stays inside
+    -- the list area and doesn't bleed over the tab chrome.
     local function _ensureTabBg(pane)
         if not pane or pane._euiBg then return end
-        -- Anchor to the inner content/ScrollBox, not the full pane, so the
-        -- texture only covers the list area (not the tab chrome above it).
         local anchor = pane.ScrollBox or pane.scrollFrame or pane
         local tex = pane:CreateTexture(nil, "BACKGROUND", nil, -7)
         tex:SetTexture("Interface\\Credits\\CreditsScreenBackground11Midnight")
@@ -950,28 +888,21 @@ local function SkinCharacterSheet()
     _ensureTabBg(_G.ReputationFrame)
     _ensureTabBg(_G.TokenFrame)
 
-    -- =============================================================
-    -- Tab visibility dispatcher. Matches the friends-list pattern:
-    -- hook each sub-pane's OnShow individually instead of intercepting
-    -- the global PanelTemplates_SetTab. Blizzard drives visibility --
-    -- we just react to it.
-    -- =============================================================
-    -- Pane OnShow fires from inside Blizzard's secure ShowSubFrame path;
-    -- any explicit :Show()/:Hide() reached from that stack (even on our
-    -- own named / SecureActionButtonTemplate frames) gets flagged as a
-    -- protected call. SetShown is NOT flagged, so we use it throughout
-    -- for all visibility toggles inside tab-change handlers (matches the
-    -- friends-list pattern).
+    -- Tab visibility dispatcher. We hook each sub-pane's OnShow rather than
+    -- intercept PanelTemplates_SetTab -- Blizzard drives visibility, we react.
+    --
+    -- Pane OnShow fires from inside the secure ShowSubFrame path. Any explicit
+    -- :Show()/:Hide() reached from that stack (even on our own named or
+    -- SecureActionButtonTemplate frames) is flagged as a protected call.
+    -- SetShown is NOT flagged, so every visibility toggle below uses SetShown.
     local function ApplyTabVisibility(isCharacterTab)
         UpdateTabVisuals()
-        -- When swapping back to the Character bottom-tab, also re-highlight
-        -- our top-row Character button. Hook is installed by the top-tab
-        -- setup code below (frame._reactivateCharTab).
+        -- Swapping back to the Character bottom-tab also needs to re-highlight
+        -- our top-row Character button (hook installed below as _reactivateCharTab).
         if isCharacterTab and frame._reactivateCharTab then
             frame._reactivateCharTab()
         end
 
-        -- Paper doll slot buttons (secure -- SetShown is the safe path).
         if frame._themedSlots then
             for _, slotName in ipairs(frame._themedSlots) do
                 local slot = _G[slotName]
@@ -984,13 +915,11 @@ local function SkinCharacterSheet()
             end
         end
 
-        -- Our custom top-row tab buttons.
         for _, btnName in ipairs({"EUI_CharSheet_Stats", "EUI_CharSheet_Titles", "EUI_CharSheet_Equipment"}) do
             local btn = _G[btnName]
             if btn then btn:SetShown(isCharacterTab) end
         end
 
-        -- Stats panel + its siblings.
         if frame._statsPanel       then frame._statsPanel:SetShown(isCharacterTab)       end
         if frame._iLvlText         then frame._iLvlText:SetShown(isCharacterTab)         end
         if frame._statsBg          then frame._statsBg:SetShown(isCharacterTab)          end
@@ -1006,19 +935,16 @@ local function SkinCharacterSheet()
             end
         end
 
-        -- Titles / Equipment panels are only ever visible ON the Character tab.
+        -- Titles / Equipment sub-panels only exist on the Character tab.
         if not isCharacterTab then
             if frame._titlesPanel then frame._titlesPanel:SetShown(false) end
             if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
         end
 
-        -- Custom model scene + its background.
         if frame._euiModelScene   then frame._euiModelScene:SetShown(isCharacterTab)   end
         if frame._euiModelBgFrame then frame._euiModelBgFrame:SetShown(isCharacterTab) end
     end
 
-    -- Hook each sub-pane's OnShow. This avoids hooking the global
-    -- PanelTemplates_SetTab and matches the friends-list approach.
     local function _hookPaneOnShow(pane, isChar)
         if not pane then return end
         pane:HookScript("OnShow", function()
@@ -1031,12 +957,9 @@ local function SkinCharacterSheet()
     _hookPaneOnShow(_G.ReputationFrame, false)
     _hookPaneOnShow(_G.TokenFrame,      false)
 
-    -- Initial paint for the current tab.
     ApplyTabVisibility((frame.selectedTab or 1) == 1)
 
-    -- Create custom stats panel with scroll.
-    -- Fixed 200px width, anchored to the left of the right-side area.
-    -- Height stretches from 60px below the frame top to 10px above the bottom.
+    -- Stats panel: fixed 200px wide, stretches from 60px below top to 10px above bottom.
     local statsPanel = CreateFrame("Frame", "EUI_CharSheet_StatsPanel", frame)
     statsPanel:SetWidth(190)
     statsPanel:SetPoint("TOPLEFT",    frame, "TOPLEFT",    345, -60)

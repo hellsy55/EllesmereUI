@@ -3,11 +3,18 @@ package-as: EllesmereUI
 move-folders:
   EllesmereUI/EllesmereUIActionBars: EllesmereUIActionBars
   EllesmereUI/EllesmereUIAuraBuffReminders: EllesmereUIAuraBuffReminders
-  EllesmereUI/EllesmereUICooldownManager: EllesmereUICooldownManager
-  EllesmereUI/EllesmereUICursor: EllesmereUICursor
-  EllesmereUI/EllesmereUINameplates: EllesmereUINameplates
-  EllesmereUI/EllesmereUIResourceBars: EllesmereUIResourceBars
   EllesmereUI/EllesmereUIBasics: EllesmereUIBasics
+  EllesmereUI/EllesmereUIBlizzardSkin: EllesmereUIBlizzardSkin
+  EllesmereUI/EllesmereUIChat: EllesmereUIChat
+  EllesmereUI/EllesmereUICooldownManager: EllesmereUICooldownManager
+  EllesmereUI/EllesmereUIDamageMeters: EllesmereUIDamageMeters
+  EllesmereUI/EllesmereUIFriends: EllesmereUIFriends
+  EllesmereUI/EllesmereUIMinimap: EllesmereUIMinimap
+  EllesmereUI/EllesmereUIMythicTimer: EllesmereUIMythicTimer
+  EllesmereUI/EllesmereUINameplates: EllesmereUINameplates
+  EllesmereUI/EllesmereUIQoL: EllesmereUIQoL
+  EllesmereUI/EllesmereUIQuestTracker: EllesmereUIQuestTracker
+  EllesmereUI/EllesmereUIResourceBars: EllesmereUIResourceBars
   EllesmereUI/EllesmereUIUnitFrames: EllesmereUIUnitFrames
 
 externals:
