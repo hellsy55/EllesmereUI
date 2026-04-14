@@ -284,6 +284,45 @@ initFrame:SetScript("OnEvent", function(self)
               min=4, max=30, step=1, isPercent=false,
               getValue=function() return Cfg("barHeight") or 8 end,
               setValue=function(v) Set("barHeight", v); Refresh() end })
+
+        -- Inline cog on Bar Height: extra "Expanded Height" slider that
+        -- controls the bar height when "Timer Inside Bar" is active.
+        do
+            local PP = EllesmereUI.PP
+            local rightRgn = row._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Bar Height Options",
+                rows = {
+                    { type="slider", label="Expanded Height",
+                      min=8, max=40, step=1,
+                      get=function() return Cfg("barHeightExpanded") or 22 end,
+                      set=function(v) Set("barHeightExpanded", v); Refresh() end },
+                    { type="slider", label="Expanded Fill",
+                      min=0, max=1, step=0.05,
+                      get=function() return Cfg("barFillAlphaExpanded") or 0.85 end,
+                      set=function(v) Set("barFillAlphaExpanded", v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rightRgn)
+            cogBtn:SetSize(26, 26)
+            PP.Point(cogBtn, "RIGHT", rightRgn._control or rightRgn, "LEFT", -6, 0)
+            cogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(Cfg("enabled") == false and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if Cfg("enabled") ~= false then cogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if Cfg("enabled") ~= false then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
+        end
         y = y - h
 
         -- ── TIMER ────────────────────────────────────────────────────────
@@ -364,6 +403,42 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); UpdateSwatchState() end)
                 UpdateSwatchState()
+
+                -- Inline cog beside the swatch with extra Timer Inside Bar
+                -- options (Left Text aligns the timer to bar's LEFT edge
+                -- with a 5px inset instead of being centered).
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Timer Inside Bar Options",
+                    rows = {
+                        { type="toggle", label="Left Text",
+                          get=function() return Cfg("timerInBarLeftText") == true end,
+                          set=function(v) Set("timerInBarLeftText", v); Refresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                PP.Point(cogBtn, "RIGHT", swatch, "LEFT", -6, 0)
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function UpdateCogAlpha()
+                    local off = Cfg("enabled") == false or Cfg("timerInBar") ~= true
+                    cogBtn:SetAlpha(off and 0.15 or 0.4)
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+                UpdateCogAlpha()
+                cogBtn:SetScript("OnClick", function(self)
+                    if Cfg("enabled") ~= false and Cfg("timerInBar") == true then
+                        cogShow(self)
+                    end
+                end)
+                cogBtn:SetScript("OnEnter", function(self)
+                    if Cfg("enabled") ~= false and Cfg("timerInBar") == true then
+                        self:SetAlpha(0.75)
+                    end
+                end)
+                cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
             end
 
             -- Inline RESIZE cog: threshold text size, anchored to the toggle on the RIGHT side
@@ -375,6 +450,13 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Size", min=6, max=20, step=1,
                           get=function() return Cfg("thresholdSize") or 12 end,
                           set=function(v) Set("thresholdSize", v); Refresh() end },
+                        { type="slider", label="Tick Opacity",
+                          min=0, max=1, step=0.05,
+                          get=function() return Cfg("tickAlpha") or 1 end,
+                          set=function(v) Set("tickAlpha", v); Refresh() end },
+                        { type="toggle", label="White Ticks",
+                          get=function() return Cfg("tickWhite") == true end,
+                          set=function(v) Set("tickWhite", v); Refresh() end },
                     },
                 })
                 local cogBtn = CreateFrame("Button", nil, rightRgn)
@@ -524,6 +606,45 @@ initFrame:SetScript("OnEvent", function(self)
                   order={ "BOTTOM", "UNDER_BAR" },
                   getValue=function() return Cfg("enemyForcesPos") or "BOTTOM" end,
                   setValue=function(v) Set("enemyForcesPos", v); Refresh() end })
+
+            -- Inline cog on the Enemy Forces % dropdown: extra options
+            -- (currently just Hide Label).
+            do
+                local PP = EllesmereUI.PP
+                local leftRgn = row._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Enemy Forces % Options",
+                    rows = {
+                        { type="toggle", label="Hide Label",
+                          get=function() return Cfg("hideEnemyForcesLabel") == true end,
+                          set=function(v) Set("hideEnemyForcesLabel", v); Refresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, leftRgn)
+                cogBtn:SetSize(26, 26)
+                PP.Point(cogBtn, "RIGHT", leftRgn._control or leftRgn, "LEFT", -6, 0)
+                cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function UpdateCogAlpha()
+                    local off = Cfg("enabled") == false or Cfg("showEnemyBar") == false
+                    cogBtn:SetAlpha(off and 0.15 or 0.4)
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+                UpdateCogAlpha()
+                cogBtn:SetScript("OnClick", function(self)
+                    if Cfg("enabled") ~= false and Cfg("showEnemyBar") ~= false then
+                        cogShow(self)
+                    end
+                end)
+                cogBtn:SetScript("OnEnter", function(self)
+                    if Cfg("enabled") ~= false and Cfg("showEnemyBar") ~= false then
+                        self:SetAlpha(0.75)
+                    end
+                end)
+                cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
+            end
             y = y - h
 
             row, h = W:DualRow(parent, y,

@@ -85,6 +85,7 @@ local DB_DEFAULTS = {
         titleSize         = 16,
         affixSize         = 12,
         thresholdSize     = 12,
+        tickAlpha         = 1,
         objectivesSize    = 12,
         timerExpiredColor = { r = 0.9, g = 0.2, b = 0.2 },
         enemyForcesTextFormat = "PERCENT",
@@ -95,6 +96,7 @@ local DB_DEFAULTS = {
         frameWidth        = 260,
         barWidth          = 210,
         barHeight         = 8,
+        barHeightExpanded = 22,
         rowGap            = 6,
         objectiveGap      = 4,
         timerPlusTwoColor = { r = 0.3, g = 0.8, b = 1 },
@@ -342,7 +344,12 @@ local function UpdateObjectives()
                 currentRun.objectives[i] = obj
             end
 
-            obj.name = info.description or ("Objective " .. i)
+            -- Strip Blizzard's leading checkmark so completed objectives
+            -- render as clean text. UTF-8 for U+2713 is 0xE2 0x9C 0x93.
+            local rawName = info.description or ("Objective " .. i)
+            rawName = rawName:gsub("^\226\156\147%s*", "")
+            rawName = rawName:gsub("^%-%s*", "")
+            obj.name = rawName
             local wasCompleted = obj.completed
             obj.completed = info.completed
 
@@ -501,8 +508,19 @@ local function InstallTrackerHook()
     _trackerHookInstalled = true
     hooksecurefunc(otf, "Show", function()
         if not (db and db.profile and db.profile.enabled) then return end
-        if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-           and C_ChallengeMode.IsChallengeModeActive() then
+        -- Hide during active challenge AND after it completes but before
+        -- the player has left the dungeon instance. Blizzard's end-of-run
+        -- fanfare flips IsChallengeModeActive() back to false while the
+        -- user is still inside -- without the completed + party gate the
+        -- tracker pops back up for the last seconds before zone-out.
+        local active = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+                       and C_ChallengeMode.IsChallengeModeActive()
+        local completedInInstance = currentRun and currentRun.completed
+        if completedInInstance then
+            local _, iType = GetInstanceInfo()
+            completedInInstance = (iType == "party")
+        end
+        if active or completedInInstance then
             otf:Hide()
         end
     end)
@@ -864,7 +882,8 @@ local function RenderStandalone()
     local ALIGN_PAD = 0
     local TBAR_PAD = 0
     local configuredTimerBarH = p.barHeight or 8
-    local TBAR_H = p.timerInBar and max(configuredTimerBarH, 22) or configuredTimerBarH
+    local expandedH = p.barHeightExpanded or 22
+    local TBAR_H = p.timerInBar and max(configuredTimerBarH, expandedH) or configuredTimerBarH
     local ENEMY_BAR_H = p.barHeight or 8
     local ROW_GAP = p.rowGap or 6
     local OBJ_GAP = p.objectiveGap or 4
@@ -1003,14 +1022,24 @@ local function RenderStandalone()
     local timerText
     local timerDetailText
     if run.completed then
-        timerText = FormatTime(completedElapsed, p.showCompletedMilliseconds ~= false)
+        -- Completed run: just freeze the clock at the final elapsed
+        -- seconds. No milliseconds -- the display format stays consistent
+        -- with the running timer and there's no "99:99.999" glitch.
+        timerText = FormatTime(run.elapsed or completedElapsed or 0)
     else
         local mode = p.timerDisplayMode or "REMAINING"
         local elaStr = FormatTime(elapsed)
         local maxStr = FormatTime(maxTime)
         local remStr = FormatTime(timeLeft)
         if mode == "REMAINING_TOTAL" then
-            timerText = elaStr .. " / " .. maxStr
+            if p.timerInBar then
+                timerText = elaStr .. " / " .. maxStr
+            else
+                -- Out-of-bar uses dual FS so the static "/ maxStr" never
+                -- shifts when live mm:ss digits change pixel widths.
+                timerText = elaStr
+                timerDetailText = " / " .. maxStr
+            end
         elseif mode == "ELAPSED" then
             timerText = remStr
         elseif mode == "ELAPSED_DETAIL" then
@@ -1111,9 +1140,17 @@ local function RenderStandalone()
         local showEnemyText = p.showEnemyText ~= false
 
         local enemyTextFormat = p.enemyForcesTextFormat or "PERCENT"
-        local label = pctPos == "LABEL"
-            and FormatEnemyForcesText(enemyObj, enemyTextFormat, false)
-            or "Enemy Forces"
+        local hideLabel = p.hideEnemyForcesLabel == true
+        local label
+        if pctPos == "LABEL" then
+            -- compact=true skips the " Enemy Forces" suffix baked into
+            -- FormatEnemyForcesText, so percent/count text shows alone.
+            label = FormatEnemyForcesText(enemyObj, enemyTextFormat, hideLabel)
+        elseif hideLabel then
+            label = ""
+        else
+            label = "Enemy Forces"
+        end
 
         SetFS(f._enemyFS, p.objectivesSize or 12)
         ApplyShadow(f._enemyFS)
@@ -1123,6 +1160,11 @@ local function RenderStandalone()
             f._enemyFS:SetTextColor(GetColor(p.objectiveTextColor, 0.9, 0.9, 0.9))
         end
         f._enemyFS:SetText(label)
+        if hideLabel and pctPos ~= "LABEL" then
+            f._enemyFS:Hide()
+        else
+            f._enemyFS:Show()
+        end
 
         local function RenderEnemyBar()
             local besideRoom = (not enemyObj.completed and pctPos == "BESIDE") and 62 or 0
@@ -1164,11 +1206,9 @@ local function RenderStandalone()
             if pctPos == "BAR" then
                 SetFS(f._enemyBarText, p.objectivesSize or 12)
                 ApplyShadow(f._enemyBarText)
-                if enemyObj.completed then
-                    f._enemyBarText:SetTextColor(GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3))
-                else
-                    f._enemyBarText:SetTextColor(GetColor(p.objectiveTextColor, 0.9, 0.9, 0.9))
-                end
+                -- In-bar percent is always white for readability over the
+                -- accent-filled bar regardless of completion / user colors.
+                f._enemyBarText:SetTextColor(1, 1, 1)
                 f._enemyBarText:SetText(FormatEnemyForcesText(enemyObj, enemyTextFormat, true))
                 f._enemyBarText:ClearAllPoints()
                 f._enemyBarText:SetPoint("CENTER", f._enemyBarBg, "CENTER", 0, 0)
@@ -1249,20 +1289,24 @@ local function RenderStandalone()
         end
 
         if timerDetailText then
-            SetFS(f._timerDetailFS, 12)
+            local _mode = (not run.completed) and (p.timerDisplayMode or "REMAINING") or nil
+            local detailSize = (_mode == "REMAINING_TOTAL") and 20 or 12
+            SetFS(f._timerDetailFS, detailSize)
             ApplyShadow(f._timerDetailFS)
             f._timerDetailFS:SetTextColor(1, 1, 1)
             f._timerDetailFS:SetText(timerDetailText)
-            -- Justify so the edge that touches the main timer is the stable one.
             if timerAlign == "RIGHT" then
                 f._timerDetailFS:SetJustifyH("RIGHT")
             else
                 f._timerDetailFS:SetJustifyH("LEFT")
             end
             f._timerDetailFS:ClearAllPoints()
-            local _detLen = #timerDetailText
-            if f._timerDetailFS._lastLen ~= _detLen then
-                f._timerDetailFS._lastLen = _detLen
+            -- Cache key includes font size: switching modes (12pt detail
+            -- ↔ 20pt detail) must re-measure the templatized width, else
+            -- the larger glyphs get clipped and the detail vanishes.
+            local _detKey = #timerDetailText .. "|" .. detailSize
+            if f._timerDetailFS._lastKey ~= _detKey then
+                f._timerDetailFS._lastKey = _detKey
                 local templ = timerDetailText:gsub("%d", "9")
                 f._timerDetailFS:SetText(templ)
                 f._timerDetailFS:SetWidth((f._timerDetailFS:GetStringWidth() or 0) + 2)
@@ -1330,7 +1374,8 @@ local function RenderStandalone()
         f._barFill:ClearAllPoints()
         f._barFill:SetPoint("TOPLEFT", f._barBg, "TOPLEFT", 0, 0)
         f._barFill:SetSize(fillW, TBAR_H)
-        f._barFill:SetColorTexture(timerBarR, timerBarG, timerBarB, 0.85)
+        local _fillA = p.timerInBar and (p.barFillAlphaExpanded or 0.85) or 0.85
+        f._barFill:SetColorTexture(timerBarR, timerBarG, timerBarB, _fillA)
         f._barFill:Show()
 
         -- Pixel-perfect 2-physical-pixel tick markers.
@@ -1339,23 +1384,26 @@ local function RenderStandalone()
         local _tickW = _PP and _PP.SnapForES(2, _es) or 2
         local function _snap(v) return _PP and _PP.SnapForES(v, _es) or v end
 
+        local tickA = p.tickAlpha or 1
+        local whiteTicks = p.tickWhite == true
+
         f._seg3:ClearAllPoints()
         f._seg3:SetSize(_tickW, TBAR_H)
         f._seg3:SetPoint("TOPLEFT", f._barBg, "TOPLEFT", _snap(barW * (plusThreeT / maxTime)) - _tickW / 2, 0)
-        if elapsed > plusThreeT then
-            f._seg3:SetColorTexture(1, 1, 1, 0.9)
+        if whiteTicks or elapsed > plusThreeT then
+            f._seg3:SetColorTexture(1, 1, 1, tickA)
         else
-            f._seg3:SetColorTexture(0.4, 1, 0.4, 0.9)
+            f._seg3:SetColorTexture(0.4, 1, 0.4, tickA)
         end
         f._seg3:Show()
 
         f._seg2:ClearAllPoints()
         f._seg2:SetSize(_tickW, TBAR_H)
         f._seg2:SetPoint("TOPLEFT", f._barBg, "TOPLEFT", _snap(barW * (plusTwoT / maxTime)) - _tickW / 2, 0)
-        if elapsed > plusTwoT then
-            f._seg2:SetColorTexture(1, 1, 1, 0.9)
+        if whiteTicks or elapsed > plusTwoT then
+            f._seg2:SetColorTexture(1, 1, 1, tickA)
         else
-            f._seg2:SetColorTexture(0.3, 0.8, 1, 0.9)
+            f._seg2:SetColorTexture(0.3, 0.8, 1, tickA)
         end
         f._seg2:Show()
 
@@ -1374,7 +1422,11 @@ local function RenderStandalone()
             end
             SetTextDiff(f._barTimerFS, timerText)
             f._barTimerFS:ClearAllPoints()
-            f._barTimerFS:SetPoint("CENTER", f._barBg, "CENTER", 0, 0)
+            if p.timerInBarLeftText then
+                f._barTimerFS:SetPoint("LEFT", f._barBg, "LEFT", 5, 0)
+            else
+                f._barTimerFS:SetPoint("CENTER", f._barBg, "CENTER", 0, 0)
+            end
             f._barTimerFS:Show()
         elseif f._barTimerFS then
             f._barTimerFS:Hide()

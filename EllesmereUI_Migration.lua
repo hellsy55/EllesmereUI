@@ -380,6 +380,50 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "quest_tracker_blizzard_skin_rebuild_v1",
+    scope       = "global",
+    description = "Archive obsolete custom-tracker keys (width/height/alignment/bg/font/color/zone/world/prey/topLine) into _legacy so they stop polluting questTracker defaults after the rebuild to a skin+QoL layer.",
+    body = function()
+        local sv = _G.EllesmereUIQuestTrackerDB
+        if type(sv) ~= "table" then return end
+        local profiles = sv.profiles
+        if type(profiles) ~= "table" then return end
+
+        local OBSOLETE = {
+            "width", "height", "alignment",
+            "bgR", "bgG", "bgB", "bgAlpha",
+            "showTopLine",
+            "showZoneQuests", "showWorldQuests", "showPreyQuests",
+            "showQuestItems", "questItemSize",
+            "zoneCollapsed", "worldCollapsed", "preyCollapsed",
+            "delveCollapsed", "questsCollapsed", "achievementsCollapsed",
+            "titleFontSize", "objFontSize", "completedFontSize",
+            "secFontSize", "focusedFontSize",
+            "titleColor", "objColor", "completedColor", "secColor", "focusedColor",
+            "secColorUseAccent",
+            "focusBgOpacity",
+            "hideBlizzardTracker",
+        }
+
+        for _, prof in pairs(profiles) do
+            if type(prof) == "table" and type(prof.questTracker) == "table" then
+                local qt = prof.questTracker
+                local legacy = qt._legacy or {}
+                local moved = false
+                for _, k in ipairs(OBSOLETE) do
+                    if qt[k] ~= nil then
+                        legacy[k] = qt[k]
+                        qt[k] = nil
+                        moved = true
+                    end
+                end
+                if moved then qt._legacy = legacy end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "friends_data_wipe_v1",
     scope       = "profile",
     description = "Wipe legacy friends list data across all profiles (sessions 15-17 module rebuild).",

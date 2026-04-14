@@ -237,6 +237,7 @@ do
             showStatCategory_SecondaryStats = true,
             showStatCategory_Tertiary    = true,
             showStatCategory_Crests      = true,
+            showStatCategory_PvP         = true,
         }
         for k, v in pairs(defaults) do
             if EllesmereUIDB[k] == nil then
@@ -1650,6 +1651,7 @@ local function SkinCharacterSheet()
         Attack = { r = 1, g = 0.353, b = 0.122 },
         Defense = { r = 0.247, g = 0.655, b = 1 },
         Crests = { r = 1, g = 0.784, b = 0.341 },
+        PvP = { r = 0.671, g = 0.431, b = 0.349 },
     }
 
     -- Get category color, applying customization if available
@@ -1725,6 +1727,42 @@ local function SkinCharacterSheet()
                     { name = "Champion", func = function() return GetCrestValue(3343) end, format = "%d", currencyID = 3343 },
                     { name = "Veteran", func = function() return GetCrestValue(3341) end, format = "%d", currencyID = 3341 },
                     { name = "Adventurer", func = function() return GetCrestValue(3383) end, format = "%d", currencyID = 3383 },
+                }
+            },
+            {
+                title = "PvP",
+                colorKey = "PvP",
+                settingKey = "PvP",
+                color = GetCategoryColor("PvP"),
+                stats = {
+                    {
+                        name = "Honor Level",
+                        format = "%s",
+                        func = function()
+                            return tostring(UnitHonorLevel and UnitHonorLevel("player") or 0)
+                        end,
+                    },
+                    {
+                        name = "Honor",
+                        format = "%s",
+                        func = function()
+                            local cur = (UnitHonor and UnitHonor("player")) or 0
+                            local max = (UnitHonorMax and UnitHonorMax("player")) or 0
+                            return BreakUpLargeNumbers(cur) .. "/" .. BreakUpLargeNumbers(max)
+                        end,
+                    },
+                    {
+                        name = "Conquest",
+                        format = "%d",
+                        currencyID = 1602,
+                        func = function()
+                            if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+                                local info = C_CurrencyInfo.GetCurrencyInfo(1602)
+                                return (info and info.quantity) or 0
+                            end
+                            return 0
+                        end,
+                    },
                 }
             }
         }
@@ -1951,30 +1989,57 @@ local function SkinCharacterSheet()
         sectionTitle:SetPoint("CENTER", titleContainer, "CENTER", 0, 0)
         sectionTitle:SetText(section.title)
 
-        -- Physical-pixel-snapped 1px dividers, tinted to the section's color
+        -- Absolute physical-pixel-perfect 1px dividers, same technique as
+        -- PP.CreateBorder: disable engine snap and set height to exactly
+        -- one physical pixel in the container's effective-scale units.
         local PP_SEC = EllesmereUI and EllesmereUI.PanelPP
-        local SEC_LINE_H = 1 * ((PP_SEC and PP_SEC.mult) or 1)
+        local PP_CORE = EllesmereUI and EllesmereUI.PP
+        local function _snapSecLine(tex)
+            if PP_SEC and PP_SEC.DisablePixelSnap then PP_SEC.DisablePixelSnap(tex) end
+            local perfect = (PP_CORE and PP_CORE.perfect) or (PP_SEC and PP_SEC.mult) or 1
+            local es = titleContainer.GetEffectiveScale and titleContainer:GetEffectiveScale() or 1
+            local onePixel = (es and es > 0) and (perfect / es) or (PP_SEC and PP_SEC.mult) or 1
+            tex:SetHeight(onePixel)
+        end
 
         local leftBar = titleContainer:CreateTexture(nil, "ARTWORK")
         leftBar:SetColorTexture(section.color.r, section.color.g, section.color.b, 0.8)
-        leftBar:SetHeight(SEC_LINE_H)
         leftBar:SetPoint("LEFT", titleContainer, "LEFT", 0, 0)
         leftBar:SetPoint("RIGHT", sectionTitle, "LEFT", -6, 0)
+        _snapSecLine(leftBar)
 
         local rightBar = titleContainer:CreateTexture(nil, "ARTWORK")
         rightBar:SetColorTexture(section.color.r, section.color.g, section.color.b, 0.8)
-        rightBar:SetHeight(SEC_LINE_H)
         rightBar:SetPoint("LEFT", sectionTitle, "RIGHT", 6, 0)
         rightBar:SetPoint("RIGHT", titleContainer, "RIGHT", 0, 0)
+        _snapSecLine(rightBar)
+
+        -- Re-snap once after layout settles so GetEffectiveScale returns the
+        -- final value (parents may not be fully positioned on first build).
+        titleContainer._barResnap = { leftBar, rightBar }
+        local _ticks = 0
+        titleContainer:SetScript("OnUpdate", function(self)
+            _ticks = _ticks + 1
+            _snapSecLine(leftBar)
+            _snapSecLine(rightBar)
+            if _ticks >= 2 then self:SetScript("OnUpdate", nil) end
+        end)
 
         local statYOffset = -22
 
-        -- Store section data for collapse/expand
+        -- Store section data for collapse/expand. Initial collapsed state
+        -- is restored from SavedVariables (EllesmereUIDB.charSheetCollapsedSections)
+        -- keyed by settingKey so user preference persists across sessions.
+        local _collapseKey = section.settingKey or section.title:gsub(" ", "")
+        local _savedCollapsed = false
+        if EllesmereUIDB and EllesmereUIDB.charSheetCollapsedSections then
+            _savedCollapsed = EllesmereUIDB.charSheetCollapsedSections[_collapseKey] == true
+        end
         local sectionData = {
             title = titleContainer,
             container = sectionContainer,
             stats = {},
-            isCollapsed = false,
+            isCollapsed = _savedCollapsed,
             height = 0,
             sectionTitle = section.title,  -- display name (used for reordering)
             -- Stable backend identifier for SavedVariables keys; falls back to
@@ -2136,9 +2201,8 @@ local function SkinCharacterSheet()
 
         sectionData.height = -statYOffset
 
-        -- Click handler for collapse/expand
-        titleContainer:SetScript("OnClick", function()
-            sectionData.isCollapsed = not sectionData.isCollapsed
+        -- Apply collapsed visual state to the section's stat rows.
+        local function _applyCollapsedState()
             for _, stat in ipairs(sectionData.stats) do
                 if sectionData.isCollapsed then
                     if stat.label then stat.label:Hide() end
@@ -2151,6 +2215,23 @@ local function SkinCharacterSheet()
                     if stat.button then stat.button:Show() end
                     if stat.divider then stat.divider:Show() end
                 end
+            end
+        end
+
+        -- Restore saved collapsed state immediately (before first layout).
+        if sectionData.isCollapsed then
+            _applyCollapsedState()
+        end
+
+        -- Click handler for collapse/expand
+        titleContainer:SetScript("OnClick", function()
+            sectionData.isCollapsed = not sectionData.isCollapsed
+            _applyCollapsedState()
+
+            -- Persist across sessions.
+            if EllesmereUIDB then
+                EllesmereUIDB.charSheetCollapsedSections = EllesmereUIDB.charSheetCollapsedSections or {}
+                EllesmereUIDB.charSheetCollapsedSections[_collapseKey] = sectionData.isCollapsed or nil
             end
 
             frame._recalculateSections()
@@ -2287,6 +2368,7 @@ local function SkinCharacterSheet()
         "UNIT_ATTACK_POWER", "UNIT_RANGED_ATTACK_POWER", "UNIT_SPELL_HASTE",
         "MASTERY_UPDATE", "SPELL_POWER_CHANGED", "PLAYER_DAMAGE_DONE_MODS",
         "PLAYER_SPECIALIZATION_CHANGED",
+        "HONOR_XP_UPDATE", "HONOR_LEVEL_UPDATE", "CURRENCY_DISPLAY_UPDATE",
     }
     statsEventFrame:SetScript("OnEvent", function(_, _, unit)
         if unit and unit ~= "player" then return end
@@ -4123,8 +4205,13 @@ if EllesmereUI then
                 end
             end
 
+            -- Forward-declared; actual body assigned after _otherPanelActive
+            -- is defined below (so ApplyCharacterFramePos can bail when
+            -- another UIPanel is shifting us).
+            local _otherPanelActive
             local function ApplyCharacterFramePos()
                 if InCombatLockdown() then return end
+                if _otherPanelActive and _otherPanelActive() then return end
                 local pos = _ebsTempPos
                     or (EllesmereUIDB and EllesmereUIDB.characterFramePos)
                 if not (pos and pos.point) then return end
@@ -4156,16 +4243,37 @@ if EllesmereUI then
             CharacterFrame:HookScript("OnShow", function()
                 _ebsTempPos = _ebsTempPos  -- preserve across open (cleared on hide)
                 ApplyCharacterFramePos()
+                -- Blizzard's UIPanelLayout sets the default position AFTER
+                -- OnShow fires, clobbering our initial apply. Re-apply on
+                -- the next frame so our saved position wins on fresh opens.
+                -- Subsequent UIPanelLayout shifts (when another panel opens)
+                -- are not fought -- they only happen while the frame is
+                -- already shown, so this one-shot delay doesn't interfere.
+                C_Timer.After(0, ApplyCharacterFramePos)
             end)
             CharacterFrame:HookScript("OnHide", function()
                 _ebsTempPos = nil
             end)
 
-            -- Catch every SetPoint (incl. Blizzard's UIPanelLayout pass) and
-            -- slam our saved position back on. Guarded against recursion.
+            -- Re-apply saved position on SetPoint, but ONLY when
+            -- CharacterFrame is the sole active UIPanel. If another panel
+            -- is in the stack ("left" / "center" / "right"), UIPanelLayout
+            -- is actively shifting it -- let Blizzard's panel system win
+            -- so the frame behaves like a normal Blizzard window.
+            -- Body of the forward-declared upvalue so ApplyCharacterFramePos
+            -- can see it. Assigns, doesn't shadow.
+            _otherPanelActive = function()
+                local slots = { "doublewide", "fullscreen", "left", "center", "right" }
+                for _, slot in ipairs(slots) do
+                    local f = GetUIPanel and GetUIPanel(slot)
+                    if f and f ~= CharacterFrame then return true end
+                end
+                return false
+            end
             hooksecurefunc(CharacterFrame, "SetPoint", function()
                 if _ebsIgnoreSetPoint then return end
                 if InCombatLockdown() then return end
+                if _otherPanelActive() then return end
                 ApplyCharacterFramePos()
             end)
 
@@ -4187,51 +4295,6 @@ if EllesmereUI then
                 end
             end)
             CharacterFrame:HookScript("OnShow", ApplyThemedCharacterSheet)
-
-            -- Auto-close the character panel when a frame that would visually
-            -- conflict opens (Friends list, Item Socketing / gem window).
-            -- Uses HideUIPanel -- the documented insecure-safe API for closing
-            -- UIPanel-managed frames. No SetParent, no SetPoint, no manual
-            -- repositioning -> zero taint surface.
-            local function _autoCloseCharIfShown()
-                if InCombatLockdown() then return end
-                if CharacterFrame and CharacterFrame:IsShown() then
-                    HideUIPanel(CharacterFrame)
-                end
-            end
-
-            local function _hookConflict(frame)
-                if frame and not frame._euiCharCloseHooked then
-                    frame._euiCharCloseHooked = true
-                    frame:HookScript("OnShow", _autoCloseCharIfShown)
-                end
-            end
-
-            -- FriendsFrame is always loaded; ItemSocketingFrame lives in
-            -- Blizzard_ItemSocketingUI which is on-demand. Hook on load.
-            _hookConflict(_G.FriendsFrame)
-            _hookConflict(_G.ItemSocketingFrame)
-
-            local _socketLoadWatcher = CreateFrame("Frame")
-            _socketLoadWatcher:RegisterEvent("ADDON_LOADED")
-            _socketLoadWatcher:SetScript("OnEvent", function(self, _, addon)
-                if addon == "Blizzard_ItemSocketingUI" then
-                    self:UnregisterAllEvents()
-                    _hookConflict(_G.ItemSocketingFrame)
-                end
-            end)
-
-            -- Reverse: when the character panel opens, close any panel that
-            -- would visually conflict with it.
-            CharacterFrame:HookScript("OnShow", function()
-                if InCombatLockdown() then return end
-                if _G.FriendsFrame and _G.FriendsFrame:IsShown() then
-                    HideUIPanel(_G.FriendsFrame)
-                end
-                if _G.ItemSocketingFrame and _G.ItemSocketingFrame:IsShown() then
-                    HideUIPanel(_G.ItemSocketingFrame)
-                end
-            end)
 
             -- Function to detect and set active equipment set
             local function UpdateActiveEquipmentSet()
@@ -4420,6 +4483,7 @@ function EllesmereUI._refreshCharacterSheetColors()
         Attack = { r = 1, g = 0.353, b = 0.122 },
         Defense = { r = 0.247, g = 0.655, b = 1 },
         Crests = { r = 1, g = 0.784, b = 0.341 },
+        PvP = { r = 0.671, g = 0.431, b = 0.349 },
     }
 
     -- Helper to get category color

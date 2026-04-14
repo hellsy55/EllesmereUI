@@ -116,6 +116,15 @@ local function ApplyShape()
     -----------------------------------------------------------------------
     if shape == "none" or shape == "cropped" then
         if iconTex._mask then
+            -- Remove the mask from the cooldown swipe and reset its
+            -- swipe texture BEFORE we nil out the mask reference.
+            -- Otherwise the swipe stays cropped to the previous shape.
+            if cooldownFrame and not cooldownFrame:IsForbidden() then
+                pcall(cooldownFrame.RemoveMaskTexture, cooldownFrame, iconTex._mask)
+                if cooldownFrame.SetSwipeTexture then
+                    pcall(cooldownFrame.SetSwipeTexture, cooldownFrame, "")
+                end
+            end
             iconTex:RemoveMaskTexture(iconTex._mask)
             iconTex._mask:SetTexture(nil)
             iconTex._mask:ClearAllPoints()
@@ -163,6 +172,24 @@ local function ApplyShape()
         iconTex._mask:SetTexture(maskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         iconTex._mask:Show()
         iconTex:SetTexCoord(0, 1, 0, 1)
+        -- Crop the cooldown swipe to the same shape (matches action bar
+        -- behavior). Adds the icon's mask to the cooldown frame and uses
+        -- the mask path as the swipe texture so the spinning swipe
+        -- follows the custom outline rather than a square.
+        if cooldownFrame and not cooldownFrame:IsForbidden() then
+            pcall(cooldownFrame.AddMaskTexture, cooldownFrame, iconTex._mask)
+            if cooldownFrame.SetSwipeTexture then
+                pcall(cooldownFrame.SetSwipeTexture, cooldownFrame, maskPath)
+            end
+        end
+    elseif cooldownFrame and not cooldownFrame:IsForbidden() then
+        -- Default shape: remove any prior mask + restore default swipe.
+        if iconTex._mask then
+            pcall(cooldownFrame.RemoveMaskTexture, cooldownFrame, iconTex._mask)
+        end
+        if cooldownFrame.SetSwipeTexture then
+            pcall(cooldownFrame.SetSwipeTexture, cooldownFrame, "")
+        end
     end
 
     local borderPath = SHAPE_BORDERS[shape]

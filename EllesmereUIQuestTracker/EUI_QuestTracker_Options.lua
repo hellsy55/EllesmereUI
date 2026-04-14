@@ -1,7 +1,12 @@
 -------------------------------------------------------------------------------
 -- EUI_QuestTracker_Options.lua
+--
+-- Options page for the Blizzard-backed quest tracker. All legacy display,
+-- font, and color options from the custom-tracker era have been removed.
+-- Surviving options are: enable, visibility mode, auto-hide rules,
+-- auto-accept / auto-turn-in, quest item hotkey, and skin toggles.
 -------------------------------------------------------------------------------
-local addonName, ns = ...
+local _, ns = ...
 local EQT = ns.EQT
 
 local initFrame = CreateFrame("Frame")
@@ -12,15 +17,14 @@ initFrame:SetScript("OnEvent", function(self)
     if not EQT then return end
 
     local function DB()
-        local basicsDB = _G._EQT_DB
-        if basicsDB and basicsDB.profile and basicsDB.profile.questTracker then
-            return basicsDB.profile.questTracker
+        local d = _G._EQT_DB
+        if d and d.profile and d.profile.questTracker then
+            return d.profile.questTracker
         end
         return {}
     end
     local function Cfg(k)    return DB()[k]  end
     local function Set(k, v) DB()[k] = v     end
-    local function Refresh() if EQT.Refresh       then EQT:Refresh()       end end
 
     local function MakeCogBtn(rgn, showFn)
         local cogBtn = CreateFrame("Button", nil, rgn)
@@ -32,80 +36,52 @@ initFrame:SetScript("OnEvent", function(self)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
         cogTex:SetAllPoints()
         cogTex:SetTexture(EllesmereUI.COGS_ICON)
-        cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-        cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-        cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+        cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+        cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+        cogBtn:SetScript("OnClick", function(s) showFn(s) end)
         return cogBtn
     end
 
-    local function GetColor(key, dr, dg, db)
-        local c = Cfg(key)
-        if not c then Set(key, {r=dr,g=dg,b=db}); c = Cfg(key) end
-        return c.r, c.g, c.b
+    local function RefreshAll()
+        if EQT.RefreshStateDriver then EQT.RefreshStateDriver() end
+        if EQT.UpdateVisibility   then EQT.UpdateVisibility()   end
+        if EQT.RestyleAll         then EQT.RestyleAll()         end
+        if EQT.ApplyBackground    then EQT.ApplyBackground()    end
     end
 
     local function BuildPage(_, parent, yOffset)
-        local W = EllesmereUI.Widgets
-        local y = yOffset
+        local W  = EllesmereUI.Widgets
+        local PP = EllesmereUI.PP
+        local y  = yOffset
         local row, h
 
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
-        local PP = EllesmereUI.PP
+        -- Drag instructions (centered, above settings)
+        do
+            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local infoLabel = parent:CreateFontString(nil, "OVERLAY")
+            infoLabel:SetFont(fontPath, 15, "")
+            infoLabel:SetTextColor(1, 1, 1, 0.75)
+            infoLabel:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoLabel:SetJustifyH("CENTER")
+            infoLabel:SetText("Reposition this element within Blizzard Edit Mode")
+            y = y - 40
+        end
 
-        -- ── DISPLAY ────────────────────────────────────────────────────────
+        -- -- DISPLAY ---------------------------------------------------------
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Module",
-              getValue=function() return Cfg("enabled") ~= false end,
-              setValue=function(v)
-                  Set("enabled", v)
-                  if v and EQT and not EQT.frame then
-                      EQT:Init()
-                  end
-                  local f = EQT and EQT.frame
-                  if f then
-                      if not v then f:Hide()
-                      else f:Show(); Refresh() end
-                  end
-                  if EQT.ApplyBlizzardTrackerVisibility then EQT.ApplyBlizzardTrackerVisibility() end
-                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                  EllesmereUI:RefreshPage()
-              end },
-            { type="dropdown", text="Alignment",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              values = { top = "Top", center = "Centered", bottom = "Bottom" },
-              order  = { "top", "center", "bottom" },
-              getValue=function() return Cfg("alignment") or "top" end,
-              setValue=function(v)
-                  Set("alignment", v)
-                  Refresh()
-              end })
-        y = y - h
-
-        local visRow, visH = W:DualRow(parent, y,
+        -- Row 1: Visibility | Visibility Options
+        local visRow
+        visRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Visibility",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
               values = EllesmereUI.VIS_VALUES,
               order  = EllesmereUI.VIS_ORDER,
-              getValue=function()
-                  return Cfg("visibility") or "always"
-              end,
-              setValue=function(v)
-                  Set("visibility", v)
-                  local f = EQT and EQT.frame
-                  if f then f:Show(); Refresh() end
-                  if EQT.ApplyBlizzardTrackerVisibility then EQT.ApplyBlizzardTrackerVisibility() end
-                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                  EllesmereUI:RefreshPage()
-              end },
+              getValue=function() return Cfg("visibility") or "always" end,
+              setValue=function(v) Set("visibility", v); RefreshAll() end },
             { type="dropdown", text="Visibility Options",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
               setValue=function() end })
@@ -116,88 +92,96 @@ initFrame:SetScript("OnEvent", function(self)
                 rightRgn, 210, rightRgn:GetFrameLevel() + 2,
                 EllesmereUI.VIS_OPT_ITEMS,
                 function(k) return Cfg(k) or false end,
-                function(k, v)
-                    Set(k, v)
-                    if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                    EllesmereUI:RefreshPage()
-                end)
+                function(k, v) Set(k, v); RefreshAll() end)
             PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
-        y = y - visH
-
-        local eqtWDis, eqtWTip, eqtWRaw = EllesmereUI.MatchGuard("EQT_Tracker", "Width",
-            function() return Cfg("enabled") == false end, "Module is disabled")
-        local eqtHDis, eqtHTip, eqtHRaw = EllesmereUI.MatchGuard("EQT_Tracker", "Height",
-            function() return Cfg("enabled") == false end, "Module is disabled")
-        _, h = W:DualRow(parent, y,
-            { type="slider", text="Width", min=160, max=400, step=5,
-              disabled=eqtWDis, disabledTooltip=eqtWTip, rawTooltip=eqtWRaw,
-              getValue=function() return Cfg("width") or 325 end,
-              setValue=function(v)
-                  Set("width", v)
-                  EQT:Refresh(true)
-              end },
-            { type="slider", text="Height",
-              disabled=eqtHDis, disabledTooltip=eqtHTip, rawTooltip=eqtHRaw,
-              min=100, max=800, step=10,
-              getValue=function() return Cfg("height") or 500 end,
-              setValue=function(v)
-                  Set("height", v)
-                  local f = EQT.frame
-                  if not f then return end
-                  f:SetHeight(v)
-                  local pv = EQT.PAD_V or 6
-                  local totalH = (f.content and f.content:GetHeight() or 0) + pv * 2 + 7
-                  if f.inner then
-                      f.inner:SetHeight(math.min(totalH, v))
-                      if EQT.UpdateInnerAlignment then EQT.UpdateInnerAlignment(f) end
-                  end
-                  if f._updateScrollThumb then f._updateScrollThumb(totalH > v) end
-              end })
         y = y - h
 
+        -- Row 2: Background Opacity (slider + inline color swatch) | blank
         local bgRow
         bgRow, h = W:DualRow(parent, y,
-            { type="slider", text="Background Opacity", min=0, max=100, step=5,
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return math.floor(((Cfg("bgAlpha") or 0.35)*100)+0.5) end,
-              setValue=function(v)
-                  Set("bgAlpha", v/100)
-                  local br, bg, bb = Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0
-                  if EQT.frame and EQT.frame.bg then EQT.frame.bg:SetColorTexture(br, bg, bb, v/100) end
-              end },
-            { type="toggle", text="Hide Top Line",
-              getValue=function() return Cfg("showTopLine") == false end,
-              setValue=function(v)
-                  Set("showTopLine", not v)
-                  if EQT.frame and EQT.frame.topLine then
-                      if v then EQT.frame.topLine:Hide() else EQT.frame.topLine:Show() end
-                  end
-              end })
+            { type="slider", text="Background Opacity",
+              min = 0, max = 1, step = 0.05,
+              getValue=function() return Cfg("bgAlpha") or 0.5 end,
+              setValue=function(v) Set("bgAlpha", v); if EQT.ApplyBackground then EQT.ApplyBackground() end end },
+            { type="toggle", text="Show Top Line",
+              tooltip="Draws a 1px accent line above the background at the top of the tracker.",
+              getValue=function() return Cfg("showTopLine") ~= false end,
+              setValue=function(v) Set("showTopLine", v); if EQT.ApplyBackground then EQT.ApplyBackground() end end })
         do
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+            local bgSwatch, bgSwatchRefresh = EllesmereUI.BuildColorSwatch(
                 rgn, bgRow:GetFrameLevel() + 3,
-                function() return Cfg("bgR") or 0, Cfg("bgG") or 0, Cfg("bgB") or 0 end,
+                function()
+                    return (Cfg("bgR") or 0), (Cfg("bgG") or 0), (Cfg("bgB") or 0)
+                end,
                 function(r, g, b)
                     Set("bgR", r); Set("bgG", g); Set("bgB", b)
-                    local a = Cfg("bgAlpha") or 0.35
-                    if EQT.frame and EQT.frame.bg then EQT.frame.bg:SetColorTexture(r, g, b, a) end
+                    if EQT.ApplyBackground then EQT.ApplyBackground() end
                 end,
                 false, 20)
-            PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
+            PP.Point(bgSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() bgSwatchRefresh() end)
         end
+        y = y - h
+
+        -- Row 3: Title Font Size | Objective Font Size
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Title Font Size",
+              min = 8, max = 24, step = 1,
+              getValue=function() return Cfg("titleFontSize") or 12 end,
+              setValue=function(v) Set("titleFontSize", v); RefreshAll() end },
+            { type="slider", text="Objective Font Size",
+              min = 8, max = 24, step = 1,
+              getValue=function() return Cfg("objectiveFontSize") or 10 end,
+              setValue=function(v) Set("objectiveFontSize", v); RefreshAll() end })
         y = y - h
 
         y = y - 10
 
-        -- ── EXTRAS ─────────────────────────────────────────────────────────
+        -- -- COLORS ----------------------------------------------------------
+        _, h = W:SectionHeader(parent, "COLORS", y); y = y - h
+
+        local function MakeColorRow(leftLabel, leftKeys, rightLabel, rightKeys)
+            local r, rowH = W:DualRow(parent, y,
+                { type="label", text = leftLabel },
+                { type="label", text = rightLabel })
+            local function wire(rgn, keys)
+                local sw, swRefresh = EllesmereUI.BuildColorSwatch(
+                    rgn, r:GetFrameLevel() + 3,
+                    function()
+                        return (Cfg(keys.r) or 0), (Cfg(keys.g) or 0), (Cfg(keys.b) or 0)
+                    end,
+                    function(cr, cg, cb)
+                        Set(keys.r, cr); Set(keys.g, cg); Set(keys.b, cb)
+                        RefreshAll()
+                    end,
+                    false, 20)
+                PP.Point(sw, "RIGHT", rgn, "RIGHT", -20, 0)
+                EllesmereUI.RegisterWidgetRefresh(function() swRefresh() end)
+            end
+            wire(r._leftRegion,  leftKeys)
+            wire(r._rightRegion, rightKeys)
+            return r, rowH
+        end
+
+        _, h = MakeColorRow(
+            "Title Color",    { r = "titleR",     g = "titleG",     b = "titleB"     },
+            "Quest Color",    { r = "questR",     g = "questG",     b = "questB"     })
+        y = y - h
+
+        _, h = MakeColorRow(
+            "Completed Color",{ r = "completedR", g = "completedG", b = "completedB" },
+            "Focused Color",  { r = "focusR",     g = "focusG",     b = "focusB"     })
+        y = y - h
+
+        y = y - 10
+
+        -- -- EXTRAS ----------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
 
         row, h = W:DualRow(parent, y,
@@ -213,7 +197,7 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "Auto Accept Settings",
                 rows = {
                     { type="toggle", label="Prevent Multi Quest Accept",
-                      get=function() return Cfg("autoAcceptPreventMulti") or false end,
+                      get=function() return Cfg("autoAcceptPreventMulti") ~= false end,
                       set=function(v) Set("autoAcceptPreventMulti", v) end },
                 },
             })
@@ -232,48 +216,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Zone Quests",
-              getValue=function() return Cfg("showZoneQuests") ~= false end,
-              setValue=function(v) Set("showZoneQuests", v); Refresh() end },
-            { type="toggle", text="Show World Quests",
-              getValue=function() return Cfg("showWorldQuests") ~= false end,
-              setValue=function(v) Set("showWorldQuests", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Prey Quests",
-              getValue=function() return Cfg("showPreyQuests") ~= false end,
-              setValue=function(v) Set("showPreyQuests", v); Refresh() end },
-            { type="toggle", text="Show Quest Items",
-              getValue=function() return Cfg("showQuestItems") ~= false end,
-              setValue=function(v) Set("showQuestItems", v); Refresh() end })
-        -- Resize icon on Show Quest Items for item size
-        do
-            local rgn = row._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Quest Item Settings",
-                rows = {
-                    { type="slider", label="Item Size", min=16, max=36, step=2,
-                      get=function() return Cfg("questItemSize") or 22 end,
-                      set=function(v) Set("questItemSize", v); Refresh() end },
-                },
-            })
-            local resBtn = CreateFrame("Button", nil, rgn)
-            resBtn:SetSize(26, 26)
-            resBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = resBtn
-            resBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            resBtn:SetAlpha(0.4)
-            local resTex = resBtn:CreateTexture(nil, "OVERLAY")
-            resTex:SetAllPoints()
-            resTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            resBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            resBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            resBtn:SetScript("OnClick", function(self) cogShow(self) end)
-        end
-        y = y - h
-
         -- Quest Item Hotkey row
         local kbRow
         kbRow, h = W:DualRow(parent, y,
@@ -284,7 +226,8 @@ initFrame:SetScript("OnEvent", function(self)
             local SIDE_PAD = 20
             local KB_W, KB_H = 120, 26
 
-            local label = EllesmereUI.MakeFont(rgn, 14, nil, EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
+            local label = EllesmereUI.MakeFont(rgn, 14, nil,
+                EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
             PP.Point(label, "LEFT", rgn, "LEFT", SIDE_PAD, 0)
             label:SetText("Quest Item Hotkey")
 
@@ -293,7 +236,8 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(kbBtn, "RIGHT", rgn, "RIGHT", -SIDE_PAD, 0)
             kbBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             kbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            local kbBg = EllesmereUI.SolidTex(kbBtn, "BACKGROUND", EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+            local kbBg = EllesmereUI.SolidTex(kbBtn, "BACKGROUND",
+                EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
             kbBg:SetAllPoints()
             kbBtn._border = EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, EllesmereUI.PanelPP)
             local kbLbl = EllesmereUI.MakeFont(kbBtn, 12, nil, 1, 1, 1)
@@ -310,22 +254,15 @@ initFrame:SetScript("OnEvent", function(self)
                 parts[#parts + 1] = actualKey
                 return table.concat(parts, " + ")
             end
-
-            local function RefreshLabel()
-                kbLbl:SetText(FormatKey(Cfg("questItemHotkey")))
-            end
+            local function RefreshLabel() kbLbl:SetText(FormatKey(Cfg("questItemHotkey"))) end
             RefreshLabel()
 
             local listening = false
-
             kbBtn:SetScript("OnClick", function(self, button)
                 if button == "RightButton" then
-                    if listening then
-                        listening = false
-                        self:EnableKeyboard(false)
-                    end
+                    if listening then listening = false; self:EnableKeyboard(false) end
                     Set("questItemHotkey", nil)
-                    if EQT and EQT.ApplyQuestItemHotkey then EQT.ApplyQuestItemHotkey() end
+                    if EQT.ApplyQuestItemHotkey then EQT.ApplyQuestItemHotkey() end
                     RefreshLabel()
                     return
                 end
@@ -334,23 +271,15 @@ initFrame:SetScript("OnEvent", function(self)
                 kbLbl:SetText("Press a key...")
                 kbBtn:EnableKeyboard(true)
             end)
-
             kbBtn:SetScript("OnKeyDown", function(self, key)
-                if not listening then
-                    self:SetPropagateKeyboardInput(true)
-                    return
-                end
+                if not listening then self:SetPropagateKeyboardInput(true); return end
                 if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
                    or key == "LALT" or key == "RALT" then
-                    self:SetPropagateKeyboardInput(true)
-                    return
+                    self:SetPropagateKeyboardInput(true); return
                 end
                 self:SetPropagateKeyboardInput(false)
                 if key == "ESCAPE" then
-                    listening = false
-                    self:EnableKeyboard(false)
-                    RefreshLabel()
-                    return
+                    listening = false; self:EnableKeyboard(false); RefreshLabel(); return
                 end
                 local mods = ""
                 if IsShiftKeyDown() then mods = mods .. "SHIFT-" end
@@ -358,12 +287,11 @@ initFrame:SetScript("OnEvent", function(self)
                 if IsAltKeyDown() then mods = mods .. "ALT-" end
                 local fullKey = mods .. key
                 Set("questItemHotkey", fullKey)
-                if EQT and EQT.ApplyQuestItemHotkey then EQT.ApplyQuestItemHotkey() end
+                if EQT.ApplyQuestItemHotkey then EQT.ApplyQuestItemHotkey() end
                 listening = false
                 self:EnableKeyboard(false)
                 RefreshLabel()
             end)
-
             kbBtn:SetScript("OnEnter", function(self)
                 kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
                 if kbBtn._border and kbBtn._border.SetColor then
@@ -379,9 +307,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.HideWidgetTooltip()
             end)
-
             EllesmereUI.RegisterWidgetRefresh(RefreshLabel)
-
             rgn:SetScript("OnHide", function()
                 if listening then
                     listening = false
@@ -392,214 +318,26 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        y = y - 10
-
-        -- ── TEXT ───────────────────────────────────────────────────────────
-        _, h = W:SectionHeader(parent, "TEXT", y); y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="slider", text="Header Size", min=6, max=24, step=1,
-              getValue=function() return Cfg("secFontSize") or 8 end,
-              setValue=function(v) Set("secFontSize", v); Refresh() end },
-            { type="slider", text="Title Size", min=8, max=24, step=1,
-              getValue=function() return Cfg("titleFontSize") or 11 end,
-              setValue=function(v) Set("titleFontSize", v); Refresh() end })
-
-        -- Title color: single custom swatch (unchanged behavior)
-        do
-            local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
-                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                    function()
-                        local c = Cfg(colorKey) or {}
-                        return c.r or dr, c.g or dg, c.b or db
-                    end,
-                    function(r, g, b)
-                        local c = Cfg(colorKey) or {}
-                        c.r = r; c.g = g; c.b = b; Set(colorKey, c); Refresh()
-                    end,
-                    false, 20)
-                local ctrl = rgn._control
-                PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
-                sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
-                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            end
-            AttachSwatch(row._rightRegion, "Title",  "titleColor", 1.0, 0.85, 0.1)
-        end
-
-        -- Header color: double inline swatch (custom | accent), matching the
-        -- CDM border-size pattern but using the live EllesmereUI accent
-        -- instead of class color. Right swatch = accent mode (activates on
-        -- click, shows live ELLESMERE_GREEN). Left swatch = custom color
-        -- (activates on click, color picker opens). While accent mode is
-        -- active, the custom swatch is dimmed and blocked.
-        do
-            local leftRgn = row._leftRegion
-            local ctrl = leftRgn._control
-            local PP = EllesmereUI.PP
-
-            -- Right (accent) swatch: one-click to activate accent mode.
-            -- getValue reads ELLESMERE_GREEN live so theme/accent changes
-            -- repaint the swatch automatically.
-            local accentSwatch, updateAccentSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, row:GetFrameLevel() + 3,
-                function()
-                    local eg = EllesmereUI.ELLESMERE_GREEN
-                    if eg then return eg.r, eg.g, eg.b end
-                    return 0.047, 0.824, 0.624
-                end,
-                function() end,  -- no color picker, read-only display
-                false, 20)
-            PP.Point(accentSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            accentSwatch:SetScript("OnClick", function()
-                Set("secColorUseAccent", true)
-                Refresh()
-                EllesmereUI:RefreshPage()
-            end)
-            accentSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
-            end)
-            accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Left (custom) swatch: color picker when accent mode is off.
-            local customSwatch, updateCustomSwatch = EllesmereUI.BuildColorSwatch(
-                leftRgn, row:GetFrameLevel() + 3,
-                function()
-                    local c = Cfg("secColor") or {}
-                    if c.r then return c.r, c.g, c.b end
-                    return 0.047, 0.824, 0.624
-                end,
-                function(r, g, b)
-                    local c = Cfg("secColor") or {}
-                    c.r = r; c.g = g; c.b = b
-                    Set("secColor", c)
-                    -- Picking a custom color implicitly disables accent mode
-                    Set("secColorUseAccent", false)
-                    Refresh()
-                end,
-                false, 20)
-            PP.Point(customSwatch, "RIGHT", accentSwatch, "LEFT", -8, 0)
-            customSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
-            end)
-            customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Block overlay: while accent mode is active, clicking the
-            -- custom swatch flips accent mode off instead of opening the
-            -- color picker. Prevents the user from accidentally picking a
-            -- color before choosing whether to deviate from accent.
-            local customBlock = CreateFrame("Button", nil, customSwatch)
-            customBlock:SetAllPoints()
-            customBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 10)
-            customBlock:EnableMouse(true)
-            customBlock:SetScript("OnClick", function()
-                if Cfg("secColorUseAccent") then
-                    Set("secColorUseAccent", false)
-                    Refresh()
-                    EllesmereUI:RefreshPage()
-                end
-            end)
-            customBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
-            end)
-            customBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            local function UpdateHeaderSwatchState()
-                local useAccent = Cfg("secColorUseAccent")
-                if useAccent then
-                    customSwatch:SetAlpha(0.3); customBlock:Show()
-                else
-                    customSwatch:SetAlpha(1); customBlock:Hide()
-                end
-                accentSwatch:SetAlpha(useAccent and 1 or 0.3)
-            end
-            EllesmereUI.RegisterWidgetRefresh(function()
-                updateCustomSwatch(); updateAccentSwatch(); UpdateHeaderSwatchState()
-            end)
-            UpdateHeaderSwatchState()
-        end
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="slider", text="Quest Size", min=7, max=24, step=1,
-              getValue=function() return Cfg("objFontSize") or 10 end,
-              setValue=function(v) Set("objFontSize", v); Refresh() end },
-            { type="slider", text="Completed Size", min=7, max=24, step=1,
-              getValue=function() return Cfg("completedFontSize") or Cfg("objFontSize") or 10 end,
-              setValue=function(v) Set("completedFontSize", v); Refresh() end })
-        do
-            local function AttachSwatch(rgn, label, colorKey, dr, dg, db)
-                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                    function()
-                        local c = Cfg(colorKey) or {}
-                        return c.r or dr, c.g or dg, c.b or db
-                    end,
-                    function(r, g, b)
-                        local c = Cfg(colorKey) or {}
-                        c.r = r; c.g = g; c.b = b; Set(colorKey, c); Refresh()
-                    end,
-                    false, 20)
-                local ctrl = rgn._control
-                PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
-                sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, label .. " Color") end)
-                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            end
-            AttachSwatch(row._leftRegion,  "Quest",     "objColor",       0.72, 0.72, 0.72)
-            AttachSwatch(row._rightRegion, "Completed", "completedColor", 0.25, 1.0,  0.35)
-        end
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="slider", text="Focused Size", min=8, max=24, step=1,
-              getValue=function() return Cfg("focusedFontSize") or Cfg("titleFontSize") or 11 end,
-              setValue=function(v) Set("focusedFontSize", v); Refresh() end },
-            { type="slider", text="Focus BG Opacity", min=0, max=100, step=5,
-              getValue=function() return Cfg("focusBgOpacity") or 25 end,
-              setValue=function(v) Set("focusBgOpacity", v); Refresh() end })
-        do
-            local rgn = row._leftRegion
-            local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                function()
-                    local c = Cfg("focusedColor") or {}
-                    return c.r or 0.871, c.g or 0.251, c.b or 1.0
-                end,
-                function(r, g, b)
-                    local c = Cfg("focusedColor") or {}
-                    c.r = r; c.g = g; c.b = b; Set("focusedColor", c); Refresh()
-                end,
-                false, 20)
-            local ctrl = rgn._control
-            PP.Point(sw, "RIGHT", ctrl, "LEFT", -8, 0)
-            sw:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Focused Color") end)
-            sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-        end
-        y = y - h
-
         return math.abs(y)
     end
 
     _G._EBS_BuildQuestTrackerPage = BuildPage
-    _G._EBS_ResetQuestTracker = function()
-        if EQT and EQT.Refresh then EQT:Refresh() end
-    end
 
-    -- Register Quest Tracker as its own sidebar module
     EllesmereUI:RegisterModule("EllesmereUIQuestTracker", {
         title       = "Quest Tracker",
-        description = "Custom quest tracker with grouping, auto-accept, and themed visuals.",
+        description = "Blizzard tracker skin, visibility rules, auto-accept/turn-in, quest-item hotkey.",
         pages       = { "Quest Tracker" },
-        buildPage   = function(pageName, parent, yOffset)
-            return BuildPage(pageName, parent, yOffset)
-        end,
+        buildPage   = function(pageName, p, yOffset) return BuildPage(pageName, p, yOffset) end,
         onReset = function()
             local d = _G._EQT_DB
             if d and d.ResetProfile then d:ResetProfile() end
-            if EQT and EQT.Refresh then EQT:Refresh() end
+            RefreshAll()
             EllesmereUI:InvalidatePageCache()
         end,
     })
 
-    SLASH_EQT1 = "/eqt"
-    SlashCmdList.EQT = function()
+    SLASH_EQTOPTS1 = "/eqtopts"
+    SlashCmdList.EQTOPTS = function()
         if InCombatLockdown and InCombatLockdown() then return end
         EllesmereUI:ShowModule("EllesmereUIQuestTracker")
     end

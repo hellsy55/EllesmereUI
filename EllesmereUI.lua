@@ -6365,7 +6365,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.5.8"
+EllesmereUI.VERSION = "6.6.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6522,20 +6522,27 @@ EllesmereUI._RunConflictCheck = function()
         -- message = optional custom popup message override
         -- moduleCheck = optional function returning true if the specific sub-module is active
         --              (used for Basics sub-modules: minimap, friends, chat, etc.)
-        -- Post-split: each former Basics sub-module now lives in its own
-        -- addon with its own DB global. Map old keys to new DB globals.
-        local function BasicsModuleEnabled(key)
+        -- Per-addon enable check. Each EUI addon owns its own DB global;
+        -- `key` is the profile sub-table name used inside that DB.
+        -- Minimap, Friends, and QuestTracker no longer have a module-level
+        -- enable toggle (loaded == enabled); their conflict entries rely
+        -- on IsLoaded alone.
+        local function AddonEnabled(key)
             local dbMap = {
-                minimap      = _G._EMM_DB,
-                friends      = _G._EFR_DB,
-                questTracker = _G._EQT_DB,
-                cursor       = _G._ECL_AceDB,
+                cursor = _G._ECL_AceDB,
             }
             local db = dbMap[key]
             if db and db.profile and db.profile[key] then
                 return db.profile[key].enabled ~= false
             end
             return true -- assume enabled if DB not yet available
+        end
+        -- Blizzard UI Enhanced has sub-features stored as flags on
+        -- EllesmereUIDB. Conflicts against a specific sub-feature only
+        -- fire when that feature is actually enabled.
+        local function BlizzardSkinSubEnabled(key)
+            if not EllesmereUIDB then return true end
+            return EllesmereUIDB[key] ~= false
         end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
@@ -6550,11 +6557,10 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
-            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIFriends" }, moduleCheck = function() return BasicsModuleEnabled("friends") end },
-            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, moduleCheck = function() return BasicsModuleEnabled("questTracker") end,
-              message = "Account Wide Interface Settings interferes with the EllesmereUI Quest Tracker. Disable either Account Wide Interface Settings or the EUI Quest Tracker." },
-            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
-            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
+            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIFriends" }, },
+            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, },
+            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, },
+            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, },
             -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIChat" } },
             -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIChat" } },
             -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIChat" } },
@@ -6565,8 +6571,7 @@ EllesmereUI._RunConflictCheck = function()
             -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBags" } },
             -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBags" } },
             -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBags" } },
-            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end,
-              message = "FarmHud controls the Minimap frame directly and is incompatible with the EllesmereUI Minimap module. Disable either FarmHud or the EUI Minimap addon." },
+            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIMinimap" }, },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUIQoL" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
@@ -6575,9 +6580,18 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "MythicPlusTimer",          label = "Mythic Plus Timer",          targets = { "EllesmereUIMythicTimer" } },
             { addon = "WarpDeplete",              label = "WarpDeplete",                targets = { "EllesmereUIMythicTimer" } },
             { addon = "MPlusTimer",               label = "MPlusTimer",                 targets = { "EllesmereUIMythicTimer" } },
-            { addon = "ChonkyCharacterSheet",     label = "Chonky Character Sheet",     targets = { "EllesmereUIBlizzardSkin" } },
-            { addon = "DejaCharacterStats",       label = "Deja Character Stats",       targets = { "EllesmereUIBlizzardSkin" } },
-            { addon = "BetterCharacterPanel",     label = "Better Character Panel",     targets = { "EllesmereUIBlizzardSkin" } },
+            { addon = "Drift",     label = "Drift",     targets = { "EllesmereUIBlizzardSkin" },
+              moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
+              message = "Drift conflicts with the EllesmereUI's Character Sheet and makes it so the window is not scalable." },
+            { addon = "ChonkyCharacterSheet",     label = "Chonky Character Sheet",     targets = { "EllesmereUIBlizzardSkin" },
+              moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
+              message = "Chonky Character Sheet conflicts with the EllesmereUI's Character Sheet. Disable either Chonky or the Character Sheet skin in Blizzard UI Enhanced settings." },
+            { addon = "DejaCharacterStats",       label = "Deja Character Stats",       targets = { "EllesmereUIBlizzardSkin" },
+              moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
+              message = "Deja Character Stats conflicts with the EllesmereUI's Character Sheet. Disable either Deja or the Character Sheet skin in Blizzard UI Enhanced settings." },
+            { addon = "BetterCharacterPanel",     label = "Better Character Panel",     targets = { "EllesmereUIBlizzardSkin" },
+              moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
+              message = "Better Character Panel conflicts with the EllesmereUI's Character Sheet. Disable either Better Character Panel or the Character Sheet skin in Blizzard UI Enhanced settings." },
             { addon = "EllesmereBarGlows",        label = "Ellesmere's CDM Bar Glows",  targets = "all" },
             { addon = "EllesmereNameplates",        label = "Ellesmere's Nameplates",  targets = "all" },
             { addon = "EllesmereActionBars",        label = "Ellesmere's Action Bars",  targets = "all" },
@@ -6596,7 +6610,12 @@ EllesmereUI._RunConflictCheck = function()
         local pending = {}
         for _, entry in ipairs(conflicts) do
             local moduleActive = not entry.moduleCheck or entry.moduleCheck()
-            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon) and moduleActive then
+            -- Suppress Ayije_CDM here if the CDM module's crash-prevention
+            -- early-bail already fired -- its own popup supersedes this one.
+            local suppressedBySpecific =
+                (entry.addon == "Ayije_CDM" and _G._EUI_ECME_HandledAyijeCDM)
+            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon)
+               and moduleActive and not suppressedBySpecific then
                 local affected = {}
                 if entry.targets == "all" then
                     local allTargets = {
@@ -6643,10 +6662,14 @@ EllesmereUI._RunConflictCheck = function()
             end
             local names = {}
             for _, a in ipairs(affected) do
-                names[#names + 1] = a:gsub("^EllesmereUI", "")
+                -- Prefer the module's registered display title; fall back
+                -- to stripping the EllesmereUI prefix from the folder name.
+                local displayName = (modules[a] and modules[a].title)
+                    or a:gsub("^EllesmereUI", "")
+                names[#names + 1] = displayName
             end
             local msg = entry.message or (
-                entry.label .. " is not compatible with EllesmereUI " .. table.concat(names, ", ")
+                entry.label .. " is not compatible with EllesmereUI's " .. table.concat(names, ", ")
                 .. ". Running both at the same time may cause errors or unexpected behavior."
                 .. "\n\nPlease disable one of them."
             )

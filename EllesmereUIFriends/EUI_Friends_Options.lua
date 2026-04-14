@@ -219,28 +219,9 @@ initFrame:SetScript("OnEvent", function(self)
         -- DISPLAY
         _, h = W:SectionHeader(parent, "DISPLAY", y);  y = y - h
 
-        -- Enable Friends List | Icon Style
+        -- Class Icon Theme (left) | blank (right)
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Friends List",
-              getValue=function() local f = FriendsDB(); return f and f.enabled end,
-              setValue=function(v)
-                local f = FriendsDB(); if not f then return end
-                f.enabled = v
-                if not v and EllesmereUI.ShowConfirmPopup then
-                    EllesmereUI:ShowConfirmPopup({
-                        title       = "Reload Required",
-                        message     = "This module requires a UI reload to fully disable.",
-                        confirmText = "Reload Now",
-                        cancelText  = "Later",
-                        onConfirm   = function() ReloadUI() end,
-                    })
-                end
-                RefreshFriends()
-                EllesmereUI:RefreshPage()
-              end },
             { type="dropdown", text="Class Icon Theme",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               values = ICON_STYLE_VALUES,
               order  = ICON_STYLE_ORDER,
               getValue=function()
@@ -250,14 +231,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local f = FriendsDB(); if not f then return end
                 f.iconStyle = v
                 if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
-              end }
+              end },
+            { type="label", text="" }
         );  y = y - h
 
         -- Border Size | Border Color
         _, h = W:DualRow(parent, y,
             { type="slider", text="Border Size", min=0, max=4, step=1,
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local f = FriendsDB(); return f and f.borderSize or 0 end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
@@ -268,7 +248,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="multiSwatch", text="Border Color",
               disabled=function()
                 local f = FriendsDB()
-                return not f or not f.enabled or (f.borderSize or 0) == 0
+                return not f or (f.borderSize or 0) == 0
               end,
               disabledTooltip="Set Border Size above 0",
               swatches = {
@@ -321,8 +301,6 @@ initFrame:SetScript("OnEvent", function(self)
         -- Class Color Names (with inline swatch) | Window Scale
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Class Color Names",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local f = FriendsDB(); return f and f.classColorNames end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
@@ -330,8 +308,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
               end },
             { type="slider", text="Window Scale", min=0.5, max=1.5, step=0.05,
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local f = FriendsDB(); return f and f.scale or 1 end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
@@ -344,8 +320,6 @@ initFrame:SetScript("OnEvent", function(self)
         -- Enable Accent Colors | Enable Faction Banners
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Enable Accent Colors",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local f = FriendsDB(); return f and (f.accentColors ~= false) end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
@@ -353,8 +327,6 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshFriends()
               end },
             { type="toggle", text="Enable Faction Banners",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local f = FriendsDB(); return f and (f.factionBanners ~= false) end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
@@ -366,8 +338,6 @@ initFrame:SetScript("OnEvent", function(self)
         -- Show Region Icons | Auto-Accept Friend Invites
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Region Icons",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               tooltip="Shows a map icon of the friend's region if they are not playing within your region",
               getValue=function() local f = FriendsDB(); return f and (f.showRegionIcons ~= false) end,
               setValue=function(v)
@@ -376,8 +346,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
               end },
             { type="toggle", text="Auto-Accept Friend Invites",
-              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
-              disabledTooltip="Module is disabled",
               tooltip="Auto-accepts all group invites from people on your friends list",
               getValue=function() local f = FriendsDB(); return f and f.autoAcceptFriendInvites end,
               setValue=function(v)

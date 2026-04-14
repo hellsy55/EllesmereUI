@@ -6,6 +6,111 @@
 --  Does NOT parse secret values works around restricted APIs.
 -------------------------------------------------------------------------------
 local _, ns = ...
+
+-- EMERGENCY CONFLICT GUARD: Ayije_CDM hooks the exact same Blizzard frames we do.
+-- Running both together crashes the client on the loading screen. Detect Ayije_CDM
+-- and no-op our entire module so the user can at least log in.
+do
+    local isLoaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+    if isLoaded and isLoaded("Ayije_CDM") then
+        -- Flag the generic conflict checker to skip its Ayije_CDM entry so
+        -- our crash-specific popup (with Disable & Reload) takes priority.
+        _G._EUI_ECME_HandledAyijeCDM = true
+        local function ShowCrashPopup()
+            if not EllesmereUI then return end
+            local POPUP_W, POPUP_H = 420, 180
+            local EG   = EllesmereUI.ELLESMERE_GREEN or { r = 0.047, g = 0.824, b = 0.624 }
+            local FONT = EllesmereUI.EXPRESSWAY or STANDARD_TEXT_FONT
+
+            local dimmer = CreateFrame("Frame", nil, UIParent)
+            dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+            dimmer:SetFrameLevel(150)
+            dimmer:SetAllPoints(UIParent)
+            dimmer:EnableMouse(true)        -- swallow all clicks
+            dimmer:EnableMouseWheel(true)
+            dimmer:SetScript("OnMouseWheel", function() end)
+            dimmer:SetScript("OnMouseDown", function() end) -- no click-outside dismiss
+            local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+            dimTex:SetAllPoints()
+            dimTex:SetColorTexture(0, 0, 0, 0.45)
+
+            local popup = CreateFrame("Frame", nil, dimmer)
+            popup:SetSize(POPUP_W, POPUP_H)
+            popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+            popup:EnableMouse(true)
+            popup:EnableKeyboard(true)
+            -- Swallow Escape so the user can't dismiss without clicking the button.
+            popup:SetScript("OnKeyDown", function(self) self:SetPropagateKeyboardInput(false) end)
+
+            local bg = popup:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(0.06, 0.08, 0.10, 1)
+            if EllesmereUI.MakeBorder and EllesmereUI.PanelPP then
+                EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PanelPP)
+            end
+
+            local title = popup:CreateFontString(nil, "OVERLAY")
+            title:SetFont(FONT, 16, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            title:SetTextColor(1, 1, 1)
+            title:SetPoint("TOP", popup, "TOP", 0, -20)
+            title:SetText("CDM Addon Conflict")
+
+            local msg = popup:CreateFontString(nil, "OVERLAY")
+            msg:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            msg:SetTextColor(1, 1, 1, 0.75)
+            msg:SetPoint("TOP", title, "BOTTOM", 0, -14)
+            msg:SetWidth(POPUP_W - 60)
+            msg:SetJustifyH("CENTER")
+            msg:SetWordWrap(true)
+            msg:SetSpacing(4)
+            msg:SetText("Ayije_CDM and EllesmereUI's Cooldown Manager cannot both be loaded at the same time. Disable EllesmereUI's CDM for now, you can choose to disable/enable one or the other after reloading.")
+
+            local BTN_W, BTN_H = 170, 29
+            local btn = CreateFrame("Button", nil, popup)
+            btn:SetSize(BTN_W + 2, BTN_H + 2)
+            btn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 14)
+            btn:SetFrameLevel(popup:GetFrameLevel() + 2)
+            local btnBrd = btn:CreateTexture(nil, "BACKGROUND")
+            btnBrd:SetAllPoints()
+            btnBrd:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
+            local btnBg = btn:CreateTexture(nil, "BORDER")
+            btnBg:SetPoint("TOPLEFT", 1, -1)
+            btnBg:SetPoint("BOTTOMRIGHT", -1, 1)
+            btnBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+            local btnLbl = btn:CreateFontString(nil, "OVERLAY")
+            btnLbl:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            btnLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
+            btnLbl:SetPoint("CENTER")
+            btnLbl:SetText("Disable & Reload")
+            btn:SetScript("OnEnter", function()
+                btnBrd:SetColorTexture(EG.r, EG.g, EG.b, 1)
+                btnLbl:SetTextColor(EG.r, EG.g, EG.b, 1)
+            end)
+            btn:SetScript("OnLeave", function()
+                btnBrd:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
+                btnLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
+            end)
+            btn:SetScript("OnClick", function()
+                local disable = C_AddOns and C_AddOns.DisableAddOn or DisableAddOn
+                if disable then disable("EllesmereUICooldownManager") end
+                ReloadUI()
+            end)
+        end
+
+        local warnFrame = CreateFrame("Frame")
+        warnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        warnFrame:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            C_Timer.After(1, ShowCrashPopup)
+        end)
+        -- Stub ECME so any other file that reads ns.ECME doesn't nil-error.
+        ns.ECME = setmetatable({}, { __index = function() return function() end end })
+        return
+    end
+end
+
 local ECME = EllesmereUI.Lite.NewAddon("EllesmereUICooldownManager")
 ns.ECME = ECME
 

@@ -207,7 +207,27 @@ local function BuildOverlay()
     local bg = f:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0, 0, 0, 0.7)
+    bg:Hide()  -- Stays hidden until the bar is actually live + configured.
     f.bg = bg
+
+    -- Belt-and-suspenders: any time the overlay frame is hidden, force the
+    -- bg + bar textures invisible too. Frame:Hide() should cascade, but
+    -- after long sessions in M+ users have reported black-square remnants
+    -- on caster nameplates -- this guarantees no orphan texture leak.
+    f:HookScript("OnHide", function(self)
+        if self.bg then self.bg:Hide() end
+        if self.bar and self.bar.GetStatusBarTexture then
+            local t = self.bar:GetStatusBarTexture()
+            if t and t.SetAlpha then t:SetAlpha(0) end
+        end
+    end)
+    f:HookScript("OnShow", function(self)
+        if self.bg then self.bg:Show() end
+        if self.bar and self.bar.GetStatusBarTexture then
+            local t = self.bar:GetStatusBarTexture()
+            if t and t.SetAlpha then t:SetAlpha(1) end
+        end
+    end)
 
     if PP and PP.CreateBorder then
         PP.CreateBorder(f, 0, 0, 0, 1, 1, "OVERLAY", 7)
@@ -521,8 +541,18 @@ local function ConfigureOverlay(ov, plate)
     else
         cr, cg, cb = baseTint.r, baseTint.g, baseTint.b
     end
+    -- Re-assert the StatusBar texture on every configure. After long M+
+    -- sessions with frame pool churn, the underlying texture can detach
+    -- (returns nil from GetStatusBarTexture or renders transparent),
+    -- which leaves the bg's 70% black showing as a giant black square on
+    -- the nameplate. Re-setting + re-tinting guarantees a fresh fill.
+    ov.bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     ov.bar:SetMinMaxValues(0, 1)
-    ov.bar:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
+    local sbt = ov.bar:GetStatusBarTexture()
+    if sbt then
+        sbt:SetAlpha(1)
+        sbt:SetVertexColor(cr, cg, cb)
+    end
 
     -- Drive the bar via SetTimerDuration EXACTLY the same way the on-plate
     -- cast bar in NameplateFrame:UpdateCast does. Wrapped in pcall as a
@@ -614,7 +644,18 @@ function ns.RefreshCastOverlay(plate)
         return
     end
 
-    local shouldShow = plate.unit and plate.isCasting
+    -- Verify cast info actually exists at the API level too. plate.isCasting
+    -- can lag behind UnitCastingInfo by a frame on cast-end races; without
+    -- this, RefreshCastOverlay would Show() the overlay and ConfigureOverlay
+    -- would early-bail (no name), leaving the bg-only black square visible
+    -- until the next refresh tick.
+    local hasCast = false
+    if plate.unit then
+        local n = UnitCastingInfo(plate.unit)
+        if type(n) == "nil" then n = UnitChannelInfo(plate.unit) end
+        hasCast = type(n) ~= "nil"
+    end
+    local shouldShow = plate.unit and plate.isCasting and hasCast
     dprint("RefreshCastOverlay: unit=", plate.unit, "isCasting=", plate.isCasting, "shouldShow=", tostring(shouldShow))
     if shouldShow then
         local ov = activePlates[plate]

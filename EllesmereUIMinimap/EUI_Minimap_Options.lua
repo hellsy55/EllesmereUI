@@ -187,27 +187,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, SECTION_MINIMAP, y);  y = y - h
 
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Module",
-              getValue=function() local m = MinimapDB(); return not (m and m.enabled == false) end,
-              setValue=function(v)
-                  local m = MinimapDB(); if not m then return end
-                  m.enabled = v
-                  if not v and EllesmereUI.ShowConfirmPopup then
-                      EllesmereUI:ShowConfirmPopup({
-                          title       = "Reload Required",
-                          message     = "This module requires a UI reload to fully disable.",
-                          confirmText = "Reload Now",
-                          cancelText  = "Later",
-                          onConfirm   = function() ReloadUI() end,
-                      })
-                  end
-                  RefreshMinimap()
-                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                  EllesmereUI:RefreshPage()
-              end },
             { type="slider", text="Size", min=100, max=600, step=5,
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -240,7 +220,9 @@ initFrame:SetScript("OnEvent", function(self)
                         minimap._dragOverlay:Hide()
                     end
                 end)
-              end })
+              end },
+            { type="multiSwatch", text="Accent Color",
+              swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) })
         y = y - h
 
         h = BuildVisibilityRow(W, parent, y, MinimapDB, RefreshMinimap);  y = y - h
@@ -250,8 +232,6 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Shape",
               values = { square = "Square", circle = "Circle", textured_circle = "Textured Circle" },
               order  = { "square", "circle", "textured_circle" },
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.shape or "square" end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -259,23 +239,12 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshMinimap()
               end },
             { type="slider", text="Border Thickness", min=0, max=5, step=1,
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.borderSize or 1 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.borderSize = v
                 RefreshMinimap()
               end }
-        );  y = y - h
-
-        -- Accent Color | (spacer)
-        _, h = W:DualRow(parent, y,
-            { type="multiSwatch", text="Accent Color",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
-              swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) },
-            { type="label", text="" }
         );  y = y - h
 
         y = y - 10
@@ -288,14 +257,10 @@ initFrame:SetScript("OnEvent", function(self)
         ungroupRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Ungroup Minimap Buttons",
               values = { __placeholder = "..." }, order = { "__placeholder" },
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue = function() return "__placeholder" end,
               setValue = function() end },
             { type="slider", text="In-Group Button Size", min=14, max=40, step=1,
               tooltip="Size of addon minimap buttons in the flyout grid",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 24 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -359,8 +324,6 @@ initFrame:SetScript("OnEvent", function(self)
         customBtnRow, h = W:DualRow(parent, y,
             { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
               tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -369,8 +332,6 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="toggle", text="Outer-Group MM Button Size",
               tooltip="Override the size of ungrouped minimap buttons independently from the interactable button size.",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.customBtnSizeEnabled end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -384,7 +345,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = customBtnRow._rightRegion
             local function isOff()
-                local m = MinimapDB(); return m and (not m.enabled or not m.customBtnSizeEnabled)
+                local m = MinimapDB(); return m and (not m.customBtnSizeEnabled)
             end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Ungrouped Button Size",
@@ -425,8 +386,6 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Free Move Buttons",
               tooltip="When enabled, Shift+Click any minimap button (mail, calendar, tracking, addon buttons) to drag it to a custom position.",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.freeMoveBtns end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -438,8 +397,6 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="toggle", text="Button Backgrounds",
               tooltip="Show black backgrounds behind minimap indicator buttons (tracking, calendar, mail, crafting, addon buttons, flyout toggle).",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.btnBackgrounds ~= false end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -456,8 +413,6 @@ initFrame:SetScript("OnEvent", function(self)
         -- Show Zone | Show Clock
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Zone",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return not (m and m.hideZoneText) end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -466,8 +421,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Show Clock",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.showClock end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -481,7 +434,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Zone Inside",
               tooltip="Display the zone text inside the minimap instead of below it",
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText) end,
+              disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
               disabledTooltip="Enable Show Zone first",
               getValue=function() local m = MinimapDB(); return m and m.zoneInside end,
               setValue=function(v)
@@ -491,7 +444,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="toggle", text="Clock Inside",
               tooltip="Display the clock inside the minimap instead of above it",
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showClock) end,
+              disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
               disabledTooltip="Enable Show Clock first",
               getValue=function() local m = MinimapDB(); return m and m.clockInside end,
               setValue=function(v)
@@ -505,8 +458,6 @@ initFrame:SetScript("OnEvent", function(self)
         local clockScaleRow
         clockScaleRow, h = W:DualRow(parent, y,
             { type="toggle", text="Scroll to Zoom",
-              disabled=function() local m = MinimapDB(); return m and not m.enabled end,
-              disabledTooltip="Module is disabled",
               getValue=function() local m = MinimapDB(); return m and m.scrollZoom end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -514,7 +465,7 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshMinimap()
               end },
             { type="slider", text="Clock Scale", min=0.5, max=2.0, step=0.01,
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or not m.showClock) end,
+              disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
               disabledTooltip="Enable Show Clock first",
               getValue=function() local m = MinimapDB(); return m and m.clockScale or 1.15 end,
               setValue=function(v)
@@ -529,7 +480,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = clockScaleRow._rightRegion
             local function clockOff()
-                local m = MinimapDB(); return m and (not m.enabled or not m.showClock)
+                local m = MinimapDB(); return m and (not m.showClock)
             end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Clock Position",
@@ -589,7 +540,7 @@ initFrame:SetScript("OnEvent", function(self)
         local locScaleRow
         locScaleRow, h = W:DualRow(parent, y,
             { type="slider", text="Location Scale", min=0.5, max=2.0, step=0.01,
-              disabled=function() local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText) end,
+              disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
               disabledTooltip="Enable Show Zone first",
               getValue=function() local m = MinimapDB(); return m and m.locationScale or 1.15 end,
               setValue=function(v)
@@ -605,7 +556,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = locScaleRow._leftRegion
             local function locOff()
-                local m = MinimapDB(); return m and (not m.enabled or m.hideZoneText)
+                local m = MinimapDB(); return m and (m.hideZoneText)
             end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Location Position",
