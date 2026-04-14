@@ -3822,6 +3822,47 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(SecondarySwatchRefresh)
             SecondarySwatchRefresh()
+
+            -- Inline cog: toggle raw rating vs percent display for Secondary stats.
+            local _, secCogShow = EllesmereUI.BuildCogPopup({
+                title = "Secondary Stats Settings",
+                rows = {
+                    { type="toggle", label="Show Raw Rating",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.showSecondaryRaw or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.showSecondaryRaw = v
+                          if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
+                      end },
+                },
+            })
+
+            local secCogBtn = CreateFrame("Button", nil, rightRgn)
+            secCogBtn:SetSize(26, 26)
+            secCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = secCogBtn
+            secCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local secCogTex = secCogBtn:CreateTexture(nil, "OVERLAY")
+            secCogTex:SetAllPoints()
+            secCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            secCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            secCogBtn:SetScript("OnLeave", function(self)
+                local parentEnabled = EllesmereUIDB and EllesmereUIDB.showStatCategory_SecondaryStats ~= false
+                self:SetAlpha(themedOff() and 0.15 or (parentEnabled and 0.4 or 0.15))
+            end)
+            secCogBtn:SetScript("OnClick", function(self) secCogShow(self) end)
+
+            local function SecCogRefresh()
+                local parentEnabled = EllesmereUIDB and EllesmereUIDB.showStatCategory_SecondaryStats ~= false
+                if themedOff() then
+                    secCogBtn:SetAlpha(0.15); secCogBtn:EnableMouse(false)
+                else
+                    secCogBtn:SetAlpha(parentEnabled and 0.4 or 0.15)
+                    secCogBtn:EnableMouse(parentEnabled)
+                end
+            end
+            EllesmereUI.RegisterWidgetRefresh(SecCogRefresh)
+            SecCogRefresh()
         end
 
         -- (Item Level cog + color swatch removed: it's a simple toggle now.)
@@ -4021,6 +4062,47 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(TertiarySwatchRefresh)
             TertiarySwatchRefresh()
+
+            -- Inline cog: toggle raw rating vs percent display for Tertiary stats.
+            local _, terCogShow = EllesmereUI.BuildCogPopup({
+                title = "Tertiary Stats Settings",
+                rows = {
+                    { type="toggle", label="Show Raw Rating",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.showTertiaryRaw or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.showTertiaryRaw = v
+                          if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
+                      end },
+                },
+            })
+
+            local terCogBtn = CreateFrame("Button", nil, leftRgn)
+            terCogBtn:SetSize(26, 26)
+            terCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = terCogBtn
+            terCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local terCogTex = terCogBtn:CreateTexture(nil, "OVERLAY")
+            terCogTex:SetAllPoints()
+            terCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            terCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            terCogBtn:SetScript("OnLeave", function(self)
+                local parentEnabled = EllesmereUIDB and EllesmereUIDB.showStatCategory_Tertiary ~= false
+                self:SetAlpha(themedOff() and 0.15 or (parentEnabled and 0.4 or 0.15))
+            end)
+            terCogBtn:SetScript("OnClick", function(self) terCogShow(self) end)
+
+            local function TerCogRefresh()
+                local parentEnabled = EllesmereUIDB and EllesmereUIDB.showStatCategory_Tertiary ~= false
+                if themedOff() then
+                    terCogBtn:SetAlpha(0.15); terCogBtn:EnableMouse(false)
+                else
+                    terCogBtn:SetAlpha(parentEnabled and 0.4 or 0.15)
+                    terCogBtn:EnableMouse(parentEnabled)
+                end
+            end
+            EllesmereUI.RegisterWidgetRefresh(TerCogRefresh)
+            TerCogRefresh()
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h

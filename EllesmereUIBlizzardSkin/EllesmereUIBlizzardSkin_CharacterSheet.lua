@@ -2101,7 +2101,8 @@ local function SkinCharacterSheet()
                     value = value,
                     func = stat.func,
                     rawFunc = stat.rawFunc,
-                    format = stat.format or "%d"
+                    format = stat.format or "%d",
+                    categoryKey = section.settingKey,
                 })
 
                 -- Store stat elements for collapse/expand (include showWhen for visibility checks)
@@ -2252,19 +2253,23 @@ local function SkinCharacterSheet()
 
     -- Function to update all stats
     local function UpdateAllStats()
+        local secondaryRaw = EllesmereUIDB and EllesmereUIDB.showSecondaryRaw
+        local tertiaryRaw  = EllesmereUIDB and EllesmereUIDB.showTertiaryRaw
         for _, statEntry in ipairs(frame._statsValues) do
-            local result = statEntry.func()
+            local useRaw =
+                (statEntry.categoryKey == "SecondaryStats" and secondaryRaw) or
+                (statEntry.categoryKey == "Tertiary"       and tertiaryRaw)
+            local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
+            local fmt = useRaw and "%d" or statEntry.format
+            local result = fn and fn()
             if result ~= nil then
-                if statEntry.format:find("%%") then
-                    statEntry.value:SetText(format(statEntry.format, result))
-                else
-                    statEntry.value:SetText(format(statEntry.format, result))
-                end
+                statEntry.value:SetText(format(fmt, result))
             else
                 statEntry.value:SetText("0")
             end
         end
     end
+    EllesmereUI._refreshStatFormats = UpdateAllStats
 
     -- Update stats immediately once
     UpdateAllStats()
@@ -3627,8 +3632,14 @@ local function SkinCharacterSheet()
                 if socketTextures[i] and gemFrame then
                     local entry = socketTextures[i]
                     if entry.isAtlas then
-                        icon:SetAtlas(entry.icon)
+                        -- Empty socket: solid red fill behind the border so
+                        -- the slot reads as "missing gem" even if Blizzard's
+                        -- empty-socket atlas fails to resolve in this client.
+                        icon:SetTexture(nil)
+                        if icon.SetAtlas then icon:SetAtlas(nil) end
+                        icon:SetColorTexture(0.7, 0.1, 0.1, 1)
                     else
+                        icon:SetColorTexture(0, 0, 0, 0)
                         icon:SetTexture(entry.icon)
                     end
 
@@ -3679,6 +3690,37 @@ local function SkinCharacterSheet()
     end
     EllesmereUI._refreshGemsVisibility = RefreshAllSocketIcons
 
+    -- Hard reset a slot's gem art. Called on PLAYER_EQUIPMENT_CHANGED before
+    -- the debounced refresh so stale gem icons from the previous item in
+    -- this slot can never linger (e.g. swapping a ring with a gem for one
+    -- with an empty socket previously left the old gem icon until /reload).
+    local function ClearSlotGems(slot)
+        if not slot then return end
+        slot._gemLinks = {}
+        if slot._euiCharSocketsFrames then
+            for _, gemFrame in ipairs(slot._euiCharSocketsFrames) do
+                gemFrame:Hide()
+            end
+        end
+        if slot._euiCharSocketsIcons then
+            for _, icon in ipairs(slot._euiCharSocketsIcons) do
+                icon:SetTexture(nil)
+                if icon.SetAtlas then icon:SetAtlas(nil) end
+            end
+        end
+    end
+
+    -- Map inventory slot IDs to our slot button names so we can clear the
+    -- exact slot that just changed without scanning all 18 every time.
+    local _invSlotToName = {}
+    for _, slotName in ipairs(itemSlots) do
+        local b = _G[slotName]
+        if b and b.GetID then
+            local id = b:GetID()
+            if id and id > 0 then _invSlotToName[id] = slotName end
+        end
+    end
+
     -- Hook into equipment changes. Debounced via a pending flag so rapid
     -- swaps (e.g. equipping a full gear set) coalesce into one refresh
     -- instead of stacking N 0.1s timers that each do an 18-slot scan.
@@ -3695,11 +3737,18 @@ local function SkinCharacterSheet()
     local socketWatcher = CreateFrame("Frame")
     socketWatcher:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     socketWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
-    socketWatcher:SetScript("OnEvent", function()
-        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
-            if frame:IsShown() and (frame.selectedTab or 1) == 1 then
-                QueueSocketRefresh()
-            end
+    socketWatcher:SetScript("OnEvent", function(_, event, slotID)
+        if not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet) then return end
+        -- Clear stale gem art for the slot that just changed BEFORE the
+        -- debounced refresh runs. Without this, the old item's gem icons
+        -- can remain visible until /reload if the refresh path somehow
+        -- picks up cached gem data.
+        if event == "PLAYER_EQUIPMENT_CHANGED" and slotID then
+            local slotName = _invSlotToName[slotID]
+            if slotName then ClearSlotGems(_G[slotName]) end
+        end
+        if frame:IsShown() and (frame.selectedTab or 1) == 1 then
+            QueueSocketRefresh()
         end
     end)
 
