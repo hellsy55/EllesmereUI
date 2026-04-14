@@ -234,6 +234,7 @@ do
             showStatCategory_Attack      = true,
             showStatCategory_Defense     = true,
             showStatCategory_SecondaryStats = true,
+            showStatCategory_Tertiary    = true,
             showStatCategory_Crests      = true,
         }
         for k, v in pairs(defaults) do
@@ -1643,6 +1644,7 @@ local function SkinCharacterSheet()
     local DEFAULT_CATEGORY_COLORS = {
         Attributes = { r = 0.047, g = 0.824, b = 0.616 },
         ["Secondary Stats"] = { r = 0.471, g = 0.255, b = 0.784 },
+        ["Tertiary Stats"] = { r = 0.859, g = 0.325, b = 0.855 },
         Attack = { r = 1, g = 0.353, b = 0.122 },
         Defense = { r = 0.247, g = 0.655, b = 1 },
         Crests = { r = 1, g = 0.784, b = 0.341 },
@@ -1674,6 +1676,17 @@ local function SkinCharacterSheet()
                     { name = "Haste", func = function() return UnitSpellHaste("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_HASTE_MELEE) or 0 end },
                     { name = "Mastery", func = function() return GetMasteryEffect() or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_MASTERY) or 0 end },
                     { name = "Versatility", func = function() return GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0 end },
+                }
+            },
+            {
+                title = "Tertiary",
+                colorKey = "Tertiary Stats",
+                settingKey = "Tertiary",
+                color = GetCategoryColor("Tertiary Stats"),
+                stats = {
+                    { name = "Leech",     func = function() return GetCombatRatingBonus(CR_LIFESTEAL) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_LIFESTEAL) or 0 end },
+                    { name = "Avoidance", func = function() return GetCombatRatingBonus(CR_AVOIDANCE) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_AVOIDANCE) or 0 end },
+                    { name = "Speed",     func = function() return GetCombatRatingBonus(CR_SPEED)     or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_SPEED)     or 0 end },
                 }
             },
             {
@@ -2035,6 +2048,12 @@ local function SkinCharacterSheet()
                             description = string.format("Increases the effectiveness of your Mastery by %.2f%%.", percentValue)
                         elseif stat.name == "Versatility" then
                             description = string.format("Increases damage and healing done by %.2f%% and reduces damage taken by %.2f%%.", percentValue, percentValue / 2)
+                        elseif stat.name == "Leech" then
+                            description = string.format("Heals for %.2f%% of damage and healing done.", percentValue)
+                        elseif stat.name == "Avoidance" then
+                            description = string.format("Reduces damage taken from area attacks by %.2f%%.", percentValue)
+                        elseif stat.name == "Speed" then
+                            description = string.format("Increases movement speed by %.2f%%.", percentValue)
                         end
                         GameTooltip:AddLine(description, 1, 1, 1, true)
                     -- Attributes
@@ -4309,6 +4328,7 @@ function EllesmereUI._refreshCharacterSheetColors()
     local DEFAULT_CATEGORY_COLORS = {
         Attributes = { r = 0.047, g = 0.824, b = 0.616 },
         ["Secondary Stats"] = { r = 0.471, g = 0.255, b = 0.784 },
+        ["Tertiary Stats"] = { r = 0.859, g = 0.325, b = 0.855 },
         Attack = { r = 1, g = 0.353, b = 0.122 },
         Defense = { r = 0.247, g = 0.655, b = 1 },
         Crests = { r = 1, g = 0.784, b = 0.341 },

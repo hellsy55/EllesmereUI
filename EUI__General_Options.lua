@@ -3379,6 +3379,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUIDB.showStatCategory_Attack = false
                       EllesmereUIDB.showStatCategory_Crests = false
                       EllesmereUIDB.showStatCategory_SecondaryStats = false
+                      EllesmereUIDB.showStatCategory_Tertiary = false
                       EllesmereUIDB.showStatCategory_Defense = false
                   end
                   if EllesmereUI.ShowConfirmPopup then
@@ -3924,6 +3925,91 @@ initFrame:SetScript("OnEvent", function(self)
         -- sourced atlas icon for the enchant, so there's no custom text to
         -- style. The "Enchants" toggle above still controls visibility.)
 
+        local tertiaryRow
+        tertiaryRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Tertiary",
+              tooltip="Toggle visibility of the Tertiary stat category (Leech, Avoidance, Speed).",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showStatCategory_Tertiary ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showStatCategory_Tertiary = v
+                  if EllesmereUI._updateStatCategoryVisibility then
+                      EllesmereUI._updateStatCategoryVisibility()
+                  end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        -- Disabled overlay for tertiaryRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local tertiaryBlock = CreateFrame("Frame", nil, tertiaryRow)
+            tertiaryBlock:SetAllPoints(tertiaryRow)
+            tertiaryBlock:SetFrameLevel(tertiaryRow:GetFrameLevel() + 10)
+            tertiaryBlock:EnableMouse(true)
+            local tertiaryBg = EllesmereUI.SolidTex(tertiaryBlock, "BACKGROUND", 0, 0, 0, 0)
+            tertiaryBg:SetAllPoints()
+            tertiaryBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(tertiaryBlock, EllesmereUI.DisabledTooltip("Enable Character Sheet"))
+            end)
+            tertiaryBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    tertiaryBlock:Show()
+                    tertiaryRow:SetAlpha(0.3)
+                else
+                    tertiaryBlock:Hide()
+                    tertiaryRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then tertiaryBlock:Show() tertiaryRow:SetAlpha(0.3) else tertiaryBlock:Hide() tertiaryRow:SetAlpha(1) end
+        end
+
+        -- COLOR PICKER FOR TERTIARY (inline with Show Tertiary toggle on the left)
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            end
+
+            local leftRgn = tertiaryRow._leftRegion
+
+            local tertiarySwGet = function()
+                local c = EllesmereUIDB and EllesmereUIDB.statCategoryColors and EllesmereUIDB.statCategoryColors["Tertiary Stats"]
+                if c then return c.r, c.g, c.b, 1 end
+                return 0.859, 0.325, 0.855, 1
+            end
+            local tertiarySwSet = function(r, g, b)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.statCategoryColors then EllesmereUIDB.statCategoryColors = {} end
+                if not EllesmereUIDB.statCategoryUseColor then EllesmereUIDB.statCategoryUseColor = {} end
+                EllesmereUIDB.statCategoryColors["Tertiary Stats"] = { r = r, g = g, b = b }
+                EllesmereUIDB.statCategoryUseColor["Tertiary Stats"] = true
+                if EllesmereUI._refreshCharacterSheetColors then EllesmereUI._refreshCharacterSheetColors() end
+            end
+            local tertiarySwatch, tertiaryUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, tertiarySwGet, tertiarySwSet, false, 20)
+            PP.Point(tertiarySwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = tertiarySwatch
+
+            local function TertiarySwatchRefresh()
+                local parentEnabled = EllesmereUIDB and EllesmereUIDB.showStatCategory_Tertiary ~= false
+                if themedOff() then
+                    tertiarySwatch:SetAlpha(0.15)
+                    tertiarySwatch:EnableMouse(false)
+                else
+                    tertiarySwatch:SetAlpha(parentEnabled and 1 or 0.3)
+                    tertiarySwatch:EnableMouse(parentEnabled)
+                end
+                tertiaryUpdateSwatch()
+            end
+            EllesmereUI.RegisterWidgetRefresh(TertiarySwatchRefresh)
+            TertiarySwatchRefresh()
+        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
         return math.abs(y)
