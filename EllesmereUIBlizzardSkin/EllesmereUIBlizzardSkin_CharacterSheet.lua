@@ -63,7 +63,7 @@ local function EUI_GetUpgradeTrack(itemLink)
     if not info then return "", _TRACK_WHITE end
     local trk = info.trackString or ""
     local cur, maxL = info.currentLevel, info.maxLevel
-    local text = (cur and maxL) and ("(" .. cur .. "/" .. maxL .. ")") or ""
+    local text = (cur and maxL and maxL > 0) and ("(" .. cur .. "/" .. maxL .. ")") or ""
     local color = _TRACK_WHITE
     if     trk == "Champion"     then color = _TRACK_CHAMP
     elseif trk:match("Myth")     then color = _TRACK_MYTH
@@ -1686,9 +1686,13 @@ local function SkinCharacterSheet()
                 settingKey = "Tertiary",
                 color = GetCategoryColor("Tertiary Stats"),
                 stats = {
-                    { name = "Leech",     func = function() return GetCombatRatingBonus(CR_LIFESTEAL) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_LIFESTEAL) or 0 end },
-                    { name = "Avoidance", func = function() return GetCombatRatingBonus(CR_AVOIDANCE) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_AVOIDANCE) or 0 end },
-                    { name = "Speed",     func = function() return GetCombatRatingBonus(CR_SPEED)     or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_SPEED)     or 0 end },
+                    -- GetLifesteal / GetAvoidance / GetSpeed return the TOTAL
+                    -- percent including talent / racial / innate bonuses.
+                    -- GetCombatRatingBonus only reflects rating-derived percent,
+                    -- which misses e.g. Shadow Priest's +2% innate leech talent.
+                    { name = "Leech",     func = function() return GetLifesteal() or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_LIFESTEAL) or 0 end },
+                    { name = "Avoidance", func = function() return GetAvoidance() or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_AVOIDANCE) or 0 end },
+                    { name = "Speed",     func = function() return GetSpeed()     or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_SPEED)     or 0 end },
                 }
             },
             {
@@ -3196,16 +3200,38 @@ local function SkinCharacterSheet()
 
     -- Event-driven recolor of equipment-set buttons. Only fires when gear
     -- actually changes (or a set is edited), plus once on panel open.
+    -- Also re-detects which set is currently equipped so the accent
+    -- highlight tracks gear swaps without a full tile rebuild.
     local function RefreshEquipSetColors()
         if not (CharacterFrame and CharacterFrame:IsShown() and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown()) then
             return
         end
+        local EG_EQ = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
+        local newActiveID = nil
+        local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
+        if setIDs then
+            for _, setID in ipairs(setIDs) do
+                local _, _, _, isEquipped = C_EquipmentSet.GetEquipmentSetInfo(setID)
+                if isEquipped then
+                    newActiveID = setID
+                    break
+                end
+            end
+        end
+        activeEquipmentSetID = newActiveID
         for _, tile in ipairs(setTilePool) do
             if tile:IsShown() and tile._setText and tile._setName then
                 if IsEquipmentSetComplete(tile._setName) then
                     tile._setText:SetTextColor(1, 1, 1, 1)
                 else
                     tile._setText:SetTextColor(1, 0.3, 0.3, 1)
+                end
+                if tile._bg then
+                    if tile._setID and tile._setID == newActiveID then
+                        tile._bg:SetColorTexture(EG_EQ.r, EG_EQ.g, EG_EQ.b, 0.5)
+                    else
+                        tile._bg:SetColorTexture(0.05, 0.07, 0.08, 0.8)
+                    end
                 end
             end
         end
