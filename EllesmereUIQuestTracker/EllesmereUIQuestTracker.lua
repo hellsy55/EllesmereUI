@@ -61,13 +61,84 @@ end
 -------------------------------------------------------------------------------
 -- DB
 -------------------------------------------------------------------------------
+local QT_DEFAULTS = {
+    profile = {
+        questTracker = {
+            enabled              = true,
+            pos                  = nil,
+            width                = 325,
+            bgAlpha              = 0.7,
+            bgR                  = 0,
+            bgG                  = 0,
+            bgB                  = 0,
+            height               = 500,
+            alignment            = "top",
+            titleFontSize        = 11,
+            titleColor           = { r=1.0,  g=0.91, b=0.47 },
+            objFontSize          = 11,
+            objColor             = { r=0.72, g=0.72, b=0.72 },
+            completedColor       = { r=0.25, g=1.0,  b=0.35 },
+            completedFontSize    = 11,
+            secFontSize          = 12,
+            showZoneQuests       = true,
+            showWorldQuests      = true,
+            zoneCollapsed        = false,
+            worldCollapsed       = false,
+            showQuestItems       = true,
+            questItemSize        = 22,
+            secColorUseAccent    = true,
+            delveCollapsed       = false,
+            questsCollapsed      = false,
+            achievementsCollapsed = false,
+            showPreyQuests       = true,
+            preyCollapsed        = false,
+            questItemHotkey      = nil,
+            autoAccept           = false,
+            autoTurnIn           = false,
+            autoTurnInShiftSkip  = true,
+            showTopLine          = true,
+            hideBlizzardTracker  = true,
+            visibility           = "always",
+            visOnlyInstances     = false,
+            visHideHousing       = false,
+            visHideMounted       = false,
+            visHideNoTarget      = false,
+            visHideNoEnemy       = false,
+        },
+    },
+}
+
+local _qtDB
+local function EnsureDB()
+    if _qtDB then return _qtDB end
+    if not EllesmereUI or not EllesmereUI.Lite then return nil end
+    _qtDB = EllesmereUI.Lite.NewDB("EllesmereUIQuestTrackerDB", QT_DEFAULTS)
+    _G._EQT_DB = _qtDB
+    return _qtDB
+end
+
+-- Cross-module hook: lets other EUI modules temporarily hide our tracker
+-- (e.g. M+ Timer's preview mode covers the same screen real estate).
+-- Pass true to make the tracker invisible (alpha 0, no mouse), false to
+-- restore. Multiple callers stack via the suppressors registry.
+local _qtSuppressors = {}
+local function _applySuppression()
+    if not (EQT and EQT.frame) then return end
+    local suppressed = next(_qtSuppressors) ~= nil
+    EQT.frame:SetAlpha(suppressed and 0 or 1)
+    EQT.frame:EnableMouse(not suppressed)
+end
+function _G._EQT_SetSuppressed(key, on)
+    if not key then return end
+    _qtSuppressors[key] = on and true or nil
+    _applySuppression()
+end
+
 local function DB()
-    -- Quest tracker data lives under the shared Basics Lite DB at profile.questTracker
-    local basicsDB = _G._EBS_AceDB
-    if basicsDB and basicsDB.profile and basicsDB.profile.questTracker then
-        return basicsDB.profile.questTracker
+    local d = EnsureDB()
+    if d and d.profile and d.profile.questTracker then
+        return d.profile.questTracker
     end
-    -- Fallback: Lite hasn't initialized yet, return a temporary table
     if not EQT._tmpDB then EQT._tmpDB = {} end
     return EQT._tmpDB
 end
@@ -175,6 +246,11 @@ local function ShowContextMenu(anchor, items)
         ctxMenu:HookScript("OnHide", function(self)
             self:SetScript("OnUpdate", nil)
         end)
+
+        -- Close the menu the moment combat starts -- clicking insecure UI
+        -- during combat lockdown can taint protected paths.
+        ctxMenu:RegisterEvent("PLAYER_REGEN_DISABLED")
+        ctxMenu:SetScript("OnEvent", function(self) self:Hide() end)
     end
 
     -- Hide excess pooled buttons
@@ -274,6 +350,12 @@ local function ShowContextMenu(anchor, items)
     -- Throttled to ~10 checks/sec instead of every frame
     ctxMenu._elapsed = 0
     ctxMenu:SetScript("OnUpdate", ctxMenu._pollClickOff)
+end
+
+-- Expose the canonical context menu for other modules to reuse (character
+-- sheet gear-set cog, etc.) so they all share the same visual style.
+if EllesmereUI then
+    EllesmereUI.ShowContextMenu = ShowContextMenu
 end
 
 -------------------------------------------------------------------------------
@@ -672,13 +754,34 @@ local function AcquireItemBtn()
     allItemBtns[#allItemBtns + 1] = b
     return b
 end
-local function ReleaseItemBtn(b)
+-- Buttons released while in combat are queued and finished after PLAYER_REGEN_ENABLED.
+-- Hide/ClearAllPoints/SetAttribute are all protected on SecureActionButtonTemplate.
+local _pendingRelease = {}
+local function _finishRelease(b)
     b:Hide(); b:ClearAllPoints()
     b._icon:SetTexture(nil)
-    if not InCombatLockdown() then b:SetAttribute("item", nil) end
+    b:SetAttribute("item", nil)
+end
+local function ReleaseItemBtn(b)
+    if InCombatLockdown() then
+        _pendingRelease[#_pendingRelease + 1] = b
+        return
+    end
+    _finishRelease(b)
 end
 local function ReleaseAllItems()
     for i = #EQT.itemBtns, 1, -1 do ReleaseItemBtn(EQT.itemBtns[i]); EQT.itemBtns[i] = nil end
+end
+do
+    local cf = CreateFrame("Frame")
+    cf:RegisterEvent("PLAYER_REGEN_ENABLED")
+    cf:SetScript("OnEvent", function()
+        if InCombatLockdown() then return end
+        for i = #_pendingRelease, 1, -1 do
+            _finishRelease(_pendingRelease[i])
+            _pendingRelease[i] = nil
+        end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -920,7 +1023,14 @@ local function GetScenarioSection()
     if isDelve then
         title = bannerTitle or scenarioName or "Delve"
     elseif scenarioName and stageName and stageName ~= "" then
-        title = scenarioName .. " - " .. stageName
+        -- For dungeons Blizzard sometimes returns the same string for both
+        -- (e.g. "Seat of the Triumvirate") -- show it once instead of
+        -- "Seat of the Triumvirate - Seat of the Triumvirate".
+        if scenarioName == stageName then
+            title = scenarioName
+        else
+            title = scenarioName .. " - " .. stageName
+        end
     elseif stageName and stageName ~= "" then
         title = stageName
     else
@@ -2952,43 +3062,39 @@ function EQT:Init()
         end })
     end
 
-    -- Hide Blizzard ObjectiveTrackerFrame by reparenting it to a hidden
-    -- frame. When a frame's parent is hidden, ALL its children become
-    -- invisible regardless of any SetIgnoreParentAlpha(true) overrides
-    -- they carry. This is bulletproof and leaves the original Edit Mode
-    -- anchor untouched, so unsuppressing (e.g. for the M+ timer) drops
-    -- the tracker back into its proper Blizz position automatically.
-    --
-    -- Only touches the top-level frame. No recursion into children, no
-    -- anchor manipulation, no clamping changes -- preserves the v6.3.6
-    -- M+/Delves cursor lockout protection.
-    local hiddenParent = CreateFrame("Frame")
-    hiddenParent:Hide()
-    local _eqtOriginalParent = nil
-
-    local function SuppressTracker(ot)
-        if ot:GetParent() == hiddenParent then return end
-        if not _eqtOriginalParent then
-            _eqtOriginalParent = ot:GetParent() or UIParent
-        end
-        ot:SetParent(hiddenParent)
-    end
-
-    local function UnsuppressTracker(ot)
-        if ot:GetParent() ~= hiddenParent then return end
-        ot:SetParent(_eqtOriginalParent or UIParent)
+    -- Hide Blizzard's ObjectiveTrackerFrame whenever our quest tracker is
+    -- enabled and we're NOT in an active M+ (the M+ timer addon owns it
+    -- in that context). Permanent hooksecurefunc on Show: every time
+    -- Blizzard tries to show it, we re-hide it if the gates pass. No
+    -- SetParent (avoids tainting secure tracker / Edit Mode), no child
+    -- recursion (avoids invisible click-catcher bugs).
+    local _qtTrackerHookInstalled = false
+    local function InstallTrackerHook()
+        if _qtTrackerHookInstalled then return end
+        local ot = _G.ObjectiveTrackerFrame
+        if not ot then return end
+        _qtTrackerHookInstalled = true
+        hooksecurefunc(ot, "Show", function()
+            if not (Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false) then return end
+            local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+                and C_ChallengeMode.IsChallengeModeActive()
+            if not inMPlus then ot:Hide() end
+        end)
     end
 
     local function ApplyBlizzardTrackerVisibility()
+        InstallTrackerHook()
         local ot = _G.ObjectiveTrackerFrame
         if not ot then return end
         local inMPlus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
-        local shouldHide = Cfg("hideBlizzardTracker") and Cfg("enabled") ~= false and not inMPlus
+        local shouldHide = Cfg("hideBlizzardTracker")
+            and Cfg("enabled") ~= false
+            and not inMPlus
         if shouldHide then
-            SuppressTracker(ot)
+            ot:Hide()
         else
-            UnsuppressTracker(ot)
+            ot:Show()
         end
     end
     EQT.ApplyBlizzardTrackerVisibility = ApplyBlizzardTrackerVisibility
@@ -3122,6 +3228,9 @@ function EQT:Init()
         if show then EQT.frame:Show() else EQT.frame:Hide() end
     end
     _G._EBS_UpdateQTVisibility = UpdateQTVisibility
+    if EllesmereUI and EllesmereUI.RegisterVisibilityUpdater then
+        EllesmereUI.RegisterVisibilityUpdater(UpdateQTVisibility)
+    end
 
     local QUEST_EVENTS = {
         "QUEST_LOG_UPDATE","QUEST_ACCEPTED","QUEST_REMOVED","QUEST_TURNED_IN",

@@ -300,6 +300,11 @@ local defaults = {
             raidMarkerAlign = "right",
             raidMarkerX = 0,
             raidMarkerY = 0,
+            leaderIndicatorEnabled = true,
+            leaderIndicatorSize = 16,
+            leaderIndicatorPosition = "topleft",
+            leaderIndicatorX = 0,
+            leaderIndicatorY = 0,
         },
         playerTarget = {
             frameWidth = 181,
@@ -5956,6 +5961,9 @@ local function ReloadFrames()
     if frames.player and frames.player._applyLeaderIndicator then
         frames.player._applyLeaderIndicator()
     end
+    if frames.target and frames.target._applyLeaderIndicator then
+        frames.target._applyLeaderIndicator()
+    end
 
     ---------------------------------------------------------------------------
     --  Live-update raid target marker icon (size / alignment / X / Y / enabled)
@@ -6241,75 +6249,6 @@ function InitializeFrames()
         end
     end
 
-    -- Leader indicator on player frame (shows crown icon when player is group/raid leader)
-    do
-        local pf = frames.player
-        local ps = db.profile.player
-        if pf and pf.Health then
-            -- Create holder frame ONCE
-            if not pf._leaderHolder then
-                pf._leaderHolder = CreateFrame("Frame", nil, pf)
-                pf._leaderHolder:SetAllPoints(pf)
-                local leaderTex = pf._leaderHolder:CreateTexture(nil, "OVERLAY", nil, 7)
-                leaderTex:Hide()
-                pf._leaderIndicator = leaderTex
-                -- Assign to oUF element so it auto-updates via LeaderIndicator element
-                pf.LeaderIndicator = leaderTex
-            end
-            pf._leaderHolder:SetFrameLevel(pf:GetFrameLevel() + 21)
-
-            -- Helper: apply size, position, and visibility
-            local function ApplyLeaderIndicator()
-                local enabled = ps.leaderIndicatorEnabled ~= false
-                local sz = ps.leaderIndicatorSize or 16
-                local pos = ps.leaderIndicatorPosition or "topleft"
-                local ox = ps.leaderIndicatorX or 0
-                local oy = ps.leaderIndicatorY or 0
-
-                local leader = pf._leaderIndicator
-                leader:SetSize(sz, sz)
-                leader:ClearAllPoints()
-
-                -- Anchor based on position setting
-                local anchorPoint, relPoint
-                if pos == "topleft" then
-                    anchorPoint, relPoint = "TOPLEFT", "TOPLEFT"
-                elseif pos == "topright" then
-                    anchorPoint, relPoint = "TOPRIGHT", "TOPRIGHT"
-                elseif pos == "bottomleft" then
-                    anchorPoint, relPoint = "BOTTOMLEFT", "BOTTOMLEFT"
-                elseif pos == "bottomright" then
-                    anchorPoint, relPoint = "BOTTOMRIGHT", "BOTTOMRIGHT"
-                elseif pos == "portrait" and pf.Portrait and pf.Portrait.backdrop then
-                    leader:SetPoint("CENTER", pf.Portrait.backdrop, "CENTER", ox, oy)
-                    if enabled then
-                        pf:EnableElement("LeaderIndicator")
-                        pf.LeaderIndicator:ForceUpdate()
-                    else
-                        pf:DisableElement("LeaderIndicator")
-                        leader:Hide()
-                    end
-                    return
-                else
-                    anchorPoint, relPoint = "TOPLEFT", "TOPLEFT"
-                end
-
-                leader:SetPoint(anchorPoint, pf.Health or pf, relPoint, ox, oy)
-
-                if enabled then
-                    pf:EnableElement("LeaderIndicator")
-                    pf.LeaderIndicator:ForceUpdate()
-                else
-                    pf:DisableElement("LeaderIndicator")
-                    leader:Hide()
-                end
-            end
-            pf._applyLeaderIndicator = ApplyLeaderIndicator
-
-            -- Initial application
-            ApplyLeaderIndicator()
-        end
-    end
 
     -- Castbar state is managed by ApplyBlizzCastbarState (called here and also
     -- from ReloadFrames so toggling the setting works without a /reload).
@@ -6630,6 +6569,78 @@ function InitializeFrames()
     if enabled.focus == false then
         frames.focus:Hide()
         frames.focus:SetAttribute("unit", nil)
+    end
+
+    -- Leader indicator (crown when unit is the group/raid leader). oUF doesn't
+    -- attach LeaderIndicator dynamically after Spawn(), so we drive the texture
+    -- ourselves: own events, own UnitIsGroupLeader check, own show/hide.
+    -- Must run after target frame is spawned (right above) so the texture can
+    -- be parented to it.
+    do
+        local LEADER_ATLAS = "plunderstorm-glues-icon-leader"
+        local _leaderUnits = {}
+
+        local function _leaderRefresh(uf)
+            local s = uf and uf._leaderSettings
+            if not (uf and uf._leaderIndicator and s) then return end
+            local tex = uf._leaderIndicator
+            if s.leaderIndicatorEnabled == false then tex:Hide(); return end
+            local unit = uf.unit
+            if unit and UnitExists(unit) and UnitIsGroupLeader(unit) then
+                tex:SetAtlas(LEADER_ATLAS)
+                tex:Show()
+            else
+                tex:Hide()
+            end
+        end
+
+        local function _setupLeaderIndicator(uf, settings)
+            if not (uf and uf.Health and settings) then return end
+            if not uf._leaderIndicator then
+                local leaderTex = uf:CreateTexture(nil, "OVERLAY", nil, 7)
+                leaderTex:Hide()
+                uf._leaderIndicator = leaderTex
+                _leaderUnits[#_leaderUnits + 1] = uf
+            end
+            uf._leaderSettings = settings
+
+            local function ApplyLeaderIndicator()
+                local sz  = settings.leaderIndicatorSize or 16
+                local pos = settings.leaderIndicatorPosition or "topleft"
+                local ox  = settings.leaderIndicatorX or 0
+                local oy  = settings.leaderIndicatorY or 0
+                local leader = uf._leaderIndicator
+                leader:SetSize(sz, sz)
+                leader:ClearAllPoints()
+                if pos == "portrait" and uf.Portrait and uf.Portrait.backdrop then
+                    leader:SetPoint("CENTER", uf.Portrait.backdrop, "CENTER", ox, oy)
+                else
+                    local anchor =
+                        (pos == "topright"    and "TOPRIGHT")    or
+                        (pos == "bottomleft"  and "BOTTOMLEFT")  or
+                        (pos == "bottomright" and "BOTTOMRIGHT") or
+                        "TOPLEFT"
+                    leader:SetPoint(anchor, uf.Health or uf, anchor, ox, oy)
+                end
+                _leaderRefresh(uf)
+            end
+            uf._applyLeaderIndicator = ApplyLeaderIndicator
+            ApplyLeaderIndicator()
+        end
+
+        _setupLeaderIndicator(frames.player, db.profile.player)
+        _setupLeaderIndicator(frames.target, db.profile.target)
+
+        if #_leaderUnits > 0 then
+            local leaderEvents = CreateFrame("Frame")
+            leaderEvents:RegisterEvent("PARTY_LEADER_CHANGED")
+            leaderEvents:RegisterEvent("GROUP_ROSTER_UPDATE")
+            leaderEvents:RegisterEvent("PLAYER_TARGET_CHANGED")
+            leaderEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+            leaderEvents:SetScript("OnEvent", function()
+                for i = 1, #_leaderUnits do _leaderRefresh(_leaderUnits[i]) end
+            end)
+        end
     end
 
     oUF:SetActiveStyle("EllesmerePet")

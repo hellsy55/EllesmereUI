@@ -1,5 +1,5 @@
 -------------------------------------------------------------------------------
---  EllesmereUIBasics_Realms.lua
+--  EllesmereUIFriends_RealmGroups.lua
 --  Realm -> mini-region lookup tables for friend region detection.
 --  Mini regions: namerica, samerica, australia, europe, russia, korea, taiwan, china
 --  Full regions: NA (namerica+samerica+australia), EU (europe+russia), KR, TW, CN
@@ -639,7 +639,7 @@ local REALMS_ASIA = {
 ["ZealotBlade"] = "taiwan",
 }
 
-local REGION_ICON_PATH = "Interface\\AddOns\\EllesmereUIBasics\\Media\\regions\\"
+local REGION_ICON_PATH = "Interface\\AddOns\\EllesmereUIFriends\\Media\\regions\\"
 
 -- Lookup a realm name -> mini region
 -- realmName should have spaces removed

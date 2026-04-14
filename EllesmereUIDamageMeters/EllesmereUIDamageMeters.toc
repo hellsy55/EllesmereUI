@@ -1,0 +1,16 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Damage Meters
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Damage Meters (Coming Soon)
+## Author: Ellesmere
+## Version: 6.5.2
+## Dependencies: EllesmereUI
+## SavedVariables: EllesmereUIDamageMetersDB
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+# Main Luas
+EllesmereUIDamageMeters.lua
+
+# Options
+EUI_DamageMeters_Options.lua

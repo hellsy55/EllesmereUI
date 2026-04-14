@@ -2777,11 +2777,11 @@ initFrame:SetScript("OnEvent", function(self)
         combatIndicatorSize    = { player=true },
         combatIndicatorX       = { player=true },
         combatIndicatorY       = { player=true },
-        leaderIndicatorEnabled = { player=true },
-        leaderIndicatorSize    = { player=true },
-        leaderIndicatorPosition= { player=true },
-        leaderIndicatorX       = { player=true },
-        leaderIndicatorY       = { player=true },
+        leaderIndicatorEnabled = { player=true, target=true },
+        leaderIndicatorSize    = { player=true, target=true },
+        leaderIndicatorPosition= { player=true, target=true },
+        leaderIndicatorX       = { player=true, target=true },
+        leaderIndicatorY       = { player=true, target=true },
         buffAnchor           = { player=true, target=true, focus=true },
         buffGrowth           = { player=true, target=true, focus=true },
         maxBuffs             = { player=true, target=true, focus=true },
@@ -6661,15 +6661,15 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Row 5: Leader Indicator toggle | Icon Size slider + inline directions cog (X/Y)
-        -- Only visible for player unit
+        -- Visible for player and target.
         local sharedAddRow5
         local function leaderIndOff()
             return SValSupported("leaderIndicatorEnabled", true) == false
         end
-        local function isPlayerUnit()
-            return selectedUnit == "player"
+        local function leaderIndSupported()
+            return selectedUnit == "player" or selectedUnit == "target"
         end
-        if isPlayerUnit() then
+        if leaderIndSupported() then
             sharedAddRow5, h = W:DualRow(parent, y,
                 { type="toggle", text="Leader Indicator",
                   getValue=function() return SValSupported("leaderIndicatorEnabled", true) end,

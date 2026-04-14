@@ -1,23 +1,12 @@
 ## Interface: 120000, 120001
-## Title: |cff0cd29fEllesmereUI|r Basics
+## Title: |cff0cd29fEllesmereUI|r Basics (legacy)
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Chat, Minimap, Friends List, Quest Tracker, and Cursor skinning
+## Notes: Legacy shim -- functionality has moved to the new per-module addons. Keep enabled for one release so your disabled state migrates correctly.
 ## Author: Ellesmere
-## Version: 6.5
+## Version: 6.5.2
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBasicsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 
-# Main Lua
-EllesmereUIBasics_RealmGroups.lua
 EllesmereUIBasics.lua
-EllesmereUIBasics_Chat.lua
-EllesmereUIBasics_QuestTracker.lua
-EllesmereUIBasics_Cursor.lua
-
-# Options
-EUI_Basics_Chat_Options.lua
-EUI_Basics_QuestTracker_Options.lua
-EUI_Basics_Cursor_Options.lua
-EUI_Basics_Options.lua

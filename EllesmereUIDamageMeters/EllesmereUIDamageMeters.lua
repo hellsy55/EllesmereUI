@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
---  EllesmereUIBasics_Chat.lua
---  Placeholder -- chat module stripped for fresh rebuild.
+--  EllesmereUIDamageMeters.lua
+--  Damage meter (Coming Soon). Placeholder; no runtime behavior yet.
 -------------------------------------------------------------------------------

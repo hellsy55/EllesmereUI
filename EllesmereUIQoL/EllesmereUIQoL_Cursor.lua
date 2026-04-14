@@ -2,14 +2,14 @@ local ADDON_NAME = ...
 
 local ECL = EllesmereUI.Lite.NewAddon("EllesmereUICursor")
 
-local TEX_CUSTOM = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ellesmere_cursor.tga"
+local TEX_CUSTOM = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ellesmere_cursor.tga"
 
 local RING_TEXTURES = {
-    thin   = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_thin.tga",
-    light  = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_light.tga",
-    normal = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_normal.tga",
-    heavy  = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_heavy.tga",
-    thick  = "Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_thick.tga",
+    thin   = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_thin.tga",
+    light  = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_light.tga",
+    normal = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_normal.tga",
+    heavy  = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_heavy.tga",
+    thick  = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_thick.tga",
 }
 
 local DEF_BASESIZE = 28
@@ -154,7 +154,7 @@ local function InitTrailDotPool()
     end
     for i = 1, TRAIL_POOL_SIZE do
         local dot = trailContainer:CreateTexture(nil, "ARTWORK")
-        dot:SetTexture("Interface\\AddOns\\EllesmereUIBasics\\Media\\ring_normal.tga")
+        dot:SetTexture("Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_normal.tga")
         dot:SetBlendMode("ADD")
         dot:Hide()
         trailDots[i] = dot
@@ -1046,31 +1046,77 @@ end
 --  Initialization
 -------------------------------------------------------------------------------
 function ECL:OnInitialize()
-    -- Cursor data lives under the shared Basics Lite DB at profile.cursor
-    local basicsDB = _G._EBS_AceDB
-    if basicsDB then
-        self.db = { profile = basicsDB.profile.cursor }
-        -- Provide ResetProfile for options reset button
-        self.db.ResetProfile = function(dbSelf)
-            local defaults = basicsDB._profileDefaults and basicsDB._profileDefaults.cursor
-            if defaults then
-                wipe(dbSelf.profile)
-                for k, v in pairs(defaults) do
-                    if type(v) == "table" then
-                        dbSelf.profile[k] = {}
-                        for k2, v2 in pairs(v) do dbSelf.profile[k][k2] = v2 end
-                    else
-                        dbSelf.profile[k] = v
-                    end
-                end
+    -- Cursor owns its own slice of EllesmereUIQoLDB at profile.cursor
+    local cursorDefaults = {
+        profile = {
+            cursor = {
+                enabled = true,
+                instanceOnly = false,
+                useClassColor = true,
+                hex = "0CD29D",
+                texture = "ring_normal",
+                scale = 1,
+                gcd = {
+                    enabled = false,
+                    attached = true,
+                    radius = 21,
+                    ringTex = "light",
+                    scale = 100,
+                    hex = "FFFFFF",
+                    alpha = 80,
+                    useClassColor = false,
+                    instanceOnly = false,
+                },
+                castCircle = {
+                    enabled = false,
+                    attached = true,
+                    radius = 30,
+                    ringTex = "normal",
+                    scale = 100,
+                    hex = "3FA7FF",
+                    alpha = 80,
+                    sparkEnabled = true,
+                    sparkHex = nil,
+                    useClassColor = true,
+                    instanceOnly = false,
+                },
+                trail = false,
+                visibility       = "always",
+                visOnlyInstances = false,
+                visHideHousing   = false,
+                visHideMounted   = false,
+                visHideNoTarget  = false,
+                visHideNoEnemy   = false,
+            },
+        },
+    }
+    local sharedDB = EllesmereUI.Lite.NewDB("EllesmereUIQoLDB", cursorDefaults)
+    -- Narrow view onto the cursor sub-table so legacy code using
+    -- self.db.profile.<key> keeps working without rewrites.
+    self.db = {
+        _shared  = sharedDB,
+        profile  = sharedDB.profile.cursor,
+    }
+    self.db.ResetProfile = function(dbSelf)
+        local defaults = cursorDefaults.profile.cursor
+        wipe(dbSelf.profile)
+        for k, v in pairs(defaults) do
+            if type(v) == "table" then
+                dbSelf.profile[k] = {}
+                for k2, v2 in pairs(v) do dbSelf.profile[k][k2] = v2 end
+            else
+                dbSelf.profile[k] = v
             end
         end
     end
 
-    -- Expose for EUI_Basics_Cursor_Options.lua
+    -- Expose for EUI_QoL_Cursor_Options.lua
     _G._ECL_AceDB = self.db
     _G._ECL_Apply = Apply
     _G._ECL_UpdateVisibility = UpdateVisibility
+    if EllesmereUI and EllesmereUI.RegisterVisibilityUpdater then
+        EllesmereUI.RegisterVisibilityUpdater(UpdateVisibility)
+    end
     _G._ECL_ApplyGCDCircle = ApplyGCDCircle
     _G._ECL_ApplyCastCircle = ApplyCastCircle
     _G._ECL_RegisterUnlock = RegisterUnlockElements

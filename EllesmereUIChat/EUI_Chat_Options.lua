@@ -1,0 +1,5 @@
+-------------------------------------------------------------------------------
+--  EUI_Chat_Options.lua
+--  Placeholder -- Chat module is Coming Soon at the sidebar level, so the
+--  options panel for it never opens. Fresh options will land with the rebuild.
+-------------------------------------------------------------------------------

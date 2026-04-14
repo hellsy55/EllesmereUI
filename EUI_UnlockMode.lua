@@ -2381,7 +2381,10 @@ if not EAB then
     local _posFrame = CreateFrame("Frame")
     _posFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     _posFrame:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        -- IMPORTANT: do NOT unregister. PLAYER_ENTERING_WORLD also fires on
+        -- every zone change (city -> instance, M+ portal, phasing, etc.),
+        -- and width-match drift was observed after zoning. Keeping the
+        -- listener live re-runs the rematch sequence after every zone.
         -- Delay so child addons have time to register their unlock elements
         C_Timer.After(1, function()
             ApplySavedPositions()
@@ -2397,7 +2400,7 @@ if not EAB then
                 EllesmereUI.ReapplyAllUnlockAnchors()
             end
         end)
-        -- Force a fresh width/height match propagation ~3s after login.
+        -- Force a fresh width/height match propagation ~3s after login/zone.
         -- By this point CDM has finished its initial rebuild, all unlock
         -- elements have registered, and frames are at their final sizes.
         -- This guarantees that any element with a stale stored width
@@ -2405,17 +2408,22 @@ if not EAB then
         -- propagation that was gated off by _cdmRebuilding / zone-transition
         -- guards) is corrected to its target's current width without the
         -- user having to manually un-match / re-match.
-        C_Timer.After(3, function()
-            if EllesmereUI._cdmRebuilding then
-                -- CDM still rebuilding -- retry a bit later
-                C_Timer.After(1.5, function()
-                    if EllesmereUI.ApplyAllWidthHeightMatches then
-                        EllesmereUI.ApplyAllWidthHeightMatches()
-                    end
-                end)
-            elseif EllesmereUI.ApplyAllWidthHeightMatches then
+        --
+        -- Bounded retry chain: 3s -> 4.5s -> 8s. At each step, if CDM is
+        -- still rebuilding (heavy talent build, slow load) we defer to the
+        -- next attempt rather than propagating against half-built CDM.
+        -- The 8s attempt fires unconditionally as a best-effort fallback.
+        local function _runMatch()
+            if EllesmereUI.ApplyAllWidthHeightMatches then
                 EllesmereUI.ApplyAllWidthHeightMatches()
             end
+        end
+        C_Timer.After(3, function()
+            if not EllesmereUI._cdmRebuilding then _runMatch(); return end
+            C_Timer.After(1.5, function()
+                if not EllesmereUI._cdmRebuilding then _runMatch(); return end
+                C_Timer.After(3.5, _runMatch)  -- 8s total, last attempt
+            end)
         end)
     end)
 end

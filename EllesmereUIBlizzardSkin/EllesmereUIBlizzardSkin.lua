@@ -1,0 +1,11 @@
+-------------------------------------------------------------------------------
+--  EllesmereUIBlizzardSkin.lua
+--  Umbrella addon for themed Blizzard UI frames. Currently hosts the
+--  Character Sheet rework (loaded from EllesmereUIBlizzardSkin_CharacterSheet.lua)
+--  and the Tooltips/Menus/Popups reskin options (toggled from the options tab).
+--  Actual tooltip/menu/popup reskinning runs from the parent EllesmereUI addon;
+--  this file is a placeholder for future umbrella logic.
+-------------------------------------------------------------------------------
+local ADDON_NAME = ...
+-- No runtime setup needed -- the character sheet file self-registers, and the
+-- Blizzard element skins are applied by the parent based on EllesmereUIDB flags.

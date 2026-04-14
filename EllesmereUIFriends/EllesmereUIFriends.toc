@@ -1,0 +1,17 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Friends
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Custom Friends List with groups, notes, and realm grouping
+## Author: Ellesmere
+## Version: 6.5.2
+## Dependencies: EllesmereUI
+## SavedVariables: EllesmereUIFriendsDB
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+# Main Luas
+EllesmereUIFriends_RealmGroups.lua
+EllesmereUIFriends.lua
+
+# Options
+EUI_Friends_Options.lua

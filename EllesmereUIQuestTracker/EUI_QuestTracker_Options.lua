@@ -12,7 +12,7 @@ initFrame:SetScript("OnEvent", function(self)
     if not EQT then return end
 
     local function DB()
-        local basicsDB = _G._EBS_AceDB
+        local basicsDB = _G._EQT_DB
         if basicsDB and basicsDB.profile and basicsDB.profile.questTracker then
             return basicsDB.profile.questTracker
         end
@@ -580,5 +580,27 @@ initFrame:SetScript("OnEvent", function(self)
     _G._EBS_BuildQuestTrackerPage = BuildPage
     _G._EBS_ResetQuestTracker = function()
         if EQT and EQT.Refresh then EQT:Refresh() end
+    end
+
+    -- Register Quest Tracker as its own sidebar module
+    EllesmereUI:RegisterModule("EllesmereUIQuestTracker", {
+        title       = "Quest Tracker",
+        description = "Custom quest tracker with grouping, auto-accept, and themed visuals.",
+        pages       = { "Quest Tracker" },
+        buildPage   = function(pageName, parent, yOffset)
+            return BuildPage(pageName, parent, yOffset)
+        end,
+        onReset = function()
+            local d = _G._EQT_DB
+            if d and d.ResetProfile then d:ResetProfile() end
+            if EQT and EQT.Refresh then EQT:Refresh() end
+            EllesmereUI:InvalidatePageCache()
+        end,
+    })
+
+    SLASH_EQT1 = "/eqt"
+    SlashCmdList.EQT = function()
+        if InCombatLockdown and InCombatLockdown() then return end
+        EllesmereUI:ShowModule("EllesmereUIQuestTracker")
     end
 end)

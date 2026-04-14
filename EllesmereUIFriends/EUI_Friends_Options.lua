@@ -1,0 +1,417 @@
+-------------------------------------------------------------------------------
+--  EUI_Basics_Options.lua
+--  Registers the Basics module with EllesmereUI.
+--  All get/set calls go through the global bridge to the addon's DB profile.
+-------------------------------------------------------------------------------
+local ADDON_NAME, ns = ...
+
+local PAGE_CHAT          = "Chat"
+local PAGE_MINIMAP       = "Minimap"
+local PAGE_FRIENDS       = "Friends"
+local PAGE_QUEST_TRACKER = "Quest Tracker"
+local PAGE_CURSOR        = "Cursor"
+local PAGE_DMG_METERS    = "Damage Meters"
+
+local SECTION_CHAT    = "CHAT"
+local SECTION_MINIMAP = "DISPLAY"
+
+local initFrame = CreateFrame("Frame")
+initFrame:RegisterEvent("PLAYER_LOGIN")
+initFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+
+    if not EllesmereUI or not EllesmereUI.RegisterModule then return end
+
+    ---------------------------------------------------------------------------
+    --  DB helpers
+    ---------------------------------------------------------------------------
+    local db
+
+    C_Timer.After(0, function()
+        db = _G._EFR_DB
+    end)
+
+    local function DB()
+        if not db then db = _G._EFR_DB end
+        return db and db.profile
+    end
+
+    local function ChatDB()
+        local p = DB()
+        return p and p.chat
+    end
+
+    local function MinimapDB()
+        local p = DB()
+        return p and p.minimap
+    end
+
+    local function FriendsDB()
+        local p = DB()
+        return p and p.friends
+    end
+
+    ---------------------------------------------------------------------------
+    --  Refresh helpers
+    ---------------------------------------------------------------------------
+    local function RefreshChat()
+        if _G._EBS_ApplyChat then _G._EBS_ApplyChat() end
+    end
+
+    local function RefreshMinimap()
+        if _G._EBS_ApplyMinimap then _G._EBS_ApplyMinimap() end
+    end
+
+    local function RefreshFriends()
+        if _G._EFR_ApplyFriends then _G._EFR_ApplyFriends() end
+    end
+
+    local function RefreshAll()
+        if _G._EBS_ApplyAll then _G._EBS_ApplyAll() end
+    end
+
+    ---------------------------------------------------------------------------
+    --  Visibility row builder (reused across all pages)
+    ---------------------------------------------------------------------------
+    local PP = EllesmereUI.PP
+    local function BuildVisibilityRow(W, parent, y, getCfg, refreshFn)
+        local visRow, visH = W:DualRow(parent, y,
+            { type="dropdown", text="Visibility",
+              values = EllesmereUI.VIS_VALUES,
+              order  = EllesmereUI.VIS_ORDER,
+              getValue=function()
+                  local c = getCfg(); if not c then return "always" end
+                  return c.visibility or "always"
+              end,
+              setValue=function(v)
+                  local c = getCfg(); if not c then return end
+                  c.visibility = v
+                  if refreshFn then refreshFn() end
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="dropdown", text="Visibility Options",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end })
+        do
+            local rightRgn = visRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                EllesmereUI.VIS_OPT_ITEMS,
+                function(k) local c = getCfg(); return c and c[k] or false end,
+                function(k, v)
+                    local c = getCfg(); if not c then return end
+                    c[k] = v
+                    if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                    EllesmereUI:RefreshPage()
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
+        return visH
+    end
+
+    ---------------------------------------------------------------------------
+    --  Border color multiSwatch builder
+    ---------------------------------------------------------------------------
+    local function MakeBorderSwatch(getCfg, refreshFn)
+        return {
+            { tooltip = "Custom Color",
+              hasAlpha = false,
+              getValue = function()
+                  local c = getCfg()
+                  if not c then return 0.05, 0.05, 0.05 end
+                  return c.borderR, c.borderG, c.borderB
+              end,
+              setValue = function(r, g, b)
+                  local c = getCfg(); if not c then return end
+                  c.borderR, c.borderG, c.borderB = r, g, b
+                  refreshFn()
+              end,
+              onClick = function(self)
+                  local c = getCfg(); if not c then return end
+                  if c.useClassColor then
+                      c.useClassColor = false
+                      refreshFn(); EllesmereUI:RefreshPage()
+                      return
+                  end
+                  if self._eabOrigClick then self._eabOrigClick(self) end
+              end,
+              refreshAlpha = function()
+                  local c = getCfg()
+                  if not c or not c.enabled then return 0.15 end
+                  return c.useClassColor and 0.3 or 1
+              end },
+            { tooltip = "Accent Color",
+              hasAlpha = false,
+              getValue = function()
+                  local ar, ag, ab = EllesmereUI.GetAccentColor()
+                  return ar, ag, ab
+              end,
+              setValue = function() end,
+              -- Flag name stays `useClassColor` for backwards compat with
+              -- users who already have it stamped in their SavedVariables.
+              -- Only the color resolution changes -- the flag now means
+              -- "use live accent" rather than "use class color".
+              onClick = function()
+                  local c = getCfg(); if not c then return end
+                  c.useClassColor = true
+                  refreshFn(); EllesmereUI:RefreshPage()
+              end,
+              refreshAlpha = function()
+                  local c = getCfg()
+                  if not c or not c.enabled then return 0.15 end
+                  return c.useClassColor and 1 or 0.3
+              end },
+        }
+    end
+
+    ---------------------------------------------------------------------------
+    --  Chat Page
+    ---------------------------------------------------------------------------
+
+    ---------------------------------------------------------------------------
+    --  Minimap Page
+    ---------------------------------------------------------------------------
+
+    ---------------------------------------------------------------------------
+    --  Friends List Page
+    ---------------------------------------------------------------------------
+
+    local ICON_STYLE_VALUES = {
+        blizzard = "Blizzard",
+        modern   = "Modern",
+        pixel    = "Pixel",
+        glyph    = "Glyph",
+        arcade   = "Arcade",
+        legend   = "Legend",
+        midnight = "Midnight",
+        runic    = "Runic",
+    }
+    local ICON_STYLE_ORDER = {
+        "blizzard", "modern", "pixel", "glyph",
+        "arcade", "legend", "midnight", "runic",
+    }
+
+    local function BuildFriendsPage(pageName, parent, yOffset)
+        local W = EllesmereUI.Widgets
+        local y = yOffset
+        local _, h
+
+        EllesmereUI:ClearContentHeader()
+
+        -- Drag instructions (centered, above settings)
+        do
+            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local infoLabel = parent:CreateFontString(nil, "OVERLAY")
+            infoLabel:SetFont(fontPath, 15, "")
+            infoLabel:SetTextColor(1, 1, 1, 0.75)
+            infoLabel:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoLabel:SetJustifyH("CENTER")
+            infoLabel:SetText("Shift+Drag to reposition  |  Ctrl+Drag to temporarily move (resets on close)")
+            y = y - 40
+        end
+
+        -- DISPLAY
+        _, h = W:SectionHeader(parent, "DISPLAY", y);  y = y - h
+
+        -- Enable Friends List | Icon Style
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Friends List",
+              getValue=function() local f = FriendsDB(); return f and f.enabled end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.enabled = v
+                if not v and EllesmereUI.ShowConfirmPopup then
+                    EllesmereUI:ShowConfirmPopup({
+                        title       = "Reload Required",
+                        message     = "This module requires a UI reload to fully disable.",
+                        confirmText = "Reload Now",
+                        cancelText  = "Later",
+                        onConfirm   = function() ReloadUI() end,
+                    })
+                end
+                RefreshFriends()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="dropdown", text="Class Icon Theme",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              values = ICON_STYLE_VALUES,
+              order  = ICON_STYLE_ORDER,
+              getValue=function()
+                local f = FriendsDB(); return f and f.iconStyle or "modern"
+              end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.iconStyle = v
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
+              end }
+        );  y = y - h
+
+        -- Border Size | Border Color
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Border Size", min=0, max=4, step=1,
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local f = FriendsDB(); return f and f.borderSize or 0 end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.borderSize = v
+                RefreshFriends()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="multiSwatch", text="Border Color",
+              disabled=function()
+                local f = FriendsDB()
+                return not f or not f.enabled or (f.borderSize or 0) == 0
+              end,
+              disabledTooltip="Set Border Size above 0",
+              swatches = {
+                { tooltip = "Custom Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local c = FriendsDB()
+                      if not c then return 0.05, 0.05, 0.05 end
+                      return c.borderR, c.borderG, c.borderB
+                  end,
+                  setValue = function(r, g, b)
+                      local c = FriendsDB(); if not c then return end
+                      c.borderR, c.borderG, c.borderB = r, g, b
+                      RefreshFriends()
+                  end,
+                  onClick = function(self)
+                      local c = FriendsDB(); if not c then return end
+                      if c.useClassColor then
+                          c.useClassColor = false
+                          RefreshFriends(); EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      local c = FriendsDB()
+                      if not c or not c.enabled then return 0.15 end
+                      return c.useClassColor and 0.3 or 1
+                  end },
+                { tooltip = "Accent Colored",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.GetAccentColor()
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local c = FriendsDB(); if not c then return end
+                      c.useClassColor = true
+                      RefreshFriends(); EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local c = FriendsDB()
+                      if not c or not c.enabled then return 0.15 end
+                      return c.useClassColor and 1 or 0.3
+                  end },
+              } }
+        );  y = y - h
+
+        -- Class Color Names (with inline swatch) | Window Scale
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Class Color Names",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local f = FriendsDB(); return f and f.classColorNames end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.classColorNames = v
+                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+              end },
+            { type="slider", text="Window Scale", min=0.5, max=1.5, step=0.05,
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local f = FriendsDB(); return f and f.scale or 1 end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.scale = v
+                if FriendsFrame and FriendsFrame._ebsApplyScaleAndPosition then
+                    FriendsFrame._ebsApplyScaleAndPosition()
+                end
+              end }
+        );  y = y - h
+        -- Enable Accent Colors | Enable Faction Banners
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Accent Colors",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local f = FriendsDB(); return f and (f.accentColors ~= false) end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.accentColors = v
+                RefreshFriends()
+              end },
+            { type="toggle", text="Enable Faction Banners",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              getValue=function() local f = FriendsDB(); return f and (f.factionBanners ~= false) end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.factionBanners = v
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
+              end }
+        );  y = y - h
+
+        -- Show Region Icons | Auto-Accept Friend Invites
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Region Icons",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              tooltip="Shows a map icon of the friend's region if they are not playing within your region",
+              getValue=function() local f = FriendsDB(); return f and (f.showRegionIcons ~= false) end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.showRegionIcons = v
+                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+              end },
+            { type="toggle", text="Auto-Accept Friend Invites",
+              disabled=function() local f = FriendsDB(); return not f or not f.enabled end,
+              disabledTooltip="Module is disabled",
+              tooltip="Auto-accepts all group invites from people on your friends list",
+              getValue=function() local f = FriendsDB(); return f and f.autoAcceptFriendInvites end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.autoAcceptFriendInvites = v
+              end }
+        );  y = y - h
+
+        return math.abs(y)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Register the module
+    ---------------------------------------------------------------------------
+    EllesmereUI:RegisterModule("EllesmereUIFriends", {
+        title       = "Friends List",
+        description = "Custom friends list with groups, notes, and realm grouping.",
+        pages       = { "Friends" },
+        buildPage   = function(pageName, parent, yOffset)
+            if pageName == "Friends" then return BuildFriendsPage(pageName, parent, yOffset) end
+        end,
+        onReset = function()
+            if _G._EFR_DB and _G._EFR_DB.ResetProfile then
+                _G._EFR_DB:ResetProfile()
+            end
+            EllesmereUI:InvalidatePageCache()
+            if _G._EFR_ApplyFriends then _G._EFR_ApplyFriends() end
+            if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
+        end,
+    })
+
+    SLASH_EFR1 = "/efr"
+    SlashCmdList.EFR = function()
+        if InCombatLockdown and InCombatLockdown() then return end
+        EllesmereUI:ShowModule("EllesmereUIFriends")
+    end
+end)

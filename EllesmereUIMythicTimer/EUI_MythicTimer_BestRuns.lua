@@ -72,6 +72,22 @@ initFrame:SetScript("OnEvent", function(self)
     local detailLines = {}
     local deleteBtn = nil
 
+    -- Shared OnClick handlers. Bound once per pool instead of per rebuild --
+    -- avoids allocating a fresh closure for every button on every page paint.
+    local function _onDungeonClick(self)
+        if not self._mapID then return end
+        selectedMapID    = self._mapID
+        selectedScopeKey = nil
+        deleteConfirmKey = nil
+        RebuildPage()
+    end
+    local function _onLevelClick(self)
+        if not self._scopeKey then return end
+        selectedScopeKey = self._scopeKey
+        deleteConfirmKey = nil
+        RebuildPage()
+    end
+
     local function GetButton(pool, parent, idx)
         if pool[idx] then
             pool[idx]:SetParent(parent)
@@ -86,6 +102,11 @@ initFrame:SetScript("OnEvent", function(self)
         btn.text = btn:CreateFontString(nil, "OVERLAY")
         btn.text:SetPoint("CENTER")
         btn.text:SetWordWrap(false)
+        if pool == dungeonBtns then
+            btn:SetScript("OnClick", _onDungeonClick)
+        elseif pool == levelBtns then
+            btn:SetScript("OnClick", _onLevelClick)
+        end
         pool[idx] = btn
         return btn
     end
@@ -199,9 +220,10 @@ initFrame:SetScript("OnEvent", function(self)
             SetFS(noData, 14)
             ApplyShadow(noData)
             noData:SetTextColor(0.5, 0.5, 0.5)
-            noData:SetText("No best runs recorded yet. Complete a Mythic+ dungeon to see data here.")
+            noData:SetText("No best runs recorded yet.\nComplete a Mythic+ dungeon to see data here.")
             noData:ClearAllPoints()
-            noData:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, y - 20)
+            noData:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            noData:SetJustifyH("CENTER")
             noData:SetWidth(500)
             noData:SetWordWrap(true)
             noData:Show()
@@ -250,12 +272,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
             btn.text:SetText(displayName)
 
-            btn:SetScript("OnClick", function()
-                selectedMapID = mapID
-                selectedScopeKey = nil
-                deleteConfirmKey = nil
-                RebuildPage()
-            end)
+            -- Store data on the button so the OnClick can be a single shared
+            -- closure (set once, below) instead of a fresh closure per rebuild.
+            btn._mapID = mapID
             btn:Show()
             dungY = dungY - BTN_H - BTN_GAP
         end
@@ -273,11 +292,7 @@ initFrame:SetScript("OnEvent", function(self)
                 StyleButton(btn, 16, isSelected)
                 btn.text:SetText("+" .. entry.level)
 
-                btn:SetScript("OnClick", function()
-                    selectedScopeKey = entry.scopeKey
-                    deleteConfirmKey = nil
-                    RebuildPage()
-                end)
+                btn._scopeKey = entry.scopeKey
                 btn:Show()
                 levelY = levelY - BTN_H - BTN_GAP
             end

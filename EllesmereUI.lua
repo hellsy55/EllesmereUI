@@ -260,8 +260,17 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
     { folder = "EllesmereUIResourceBars",      display = "Resource Bars",      search_name = "EllesmereUI Resource Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
     { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\consumables-ig-on.png",    icon_off = ICONS_PATH .. "sidebar\\consumables-ig.png"  },
-    { folder = "EllesmereUIBasics",            display = "Basics",             search_name = "EllesmereUI Basics",             icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
+    -- Basics is intentionally NOT in the roster: its code has been split into
+    -- the per-module addons below. The Basics folder still exists as a shim
+    -- addon purely so the v6.6 split-migration can read its enable state.
+    { folder = "EllesmereUIQoL",               display = "Quality of Life",    search_name = "EllesmereUI Quality of Life",    icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
+    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",  search_name = "EllesmereUI Blizz UI Enhanced",  icon_on = ICONS_PATH .. "sidebar\\blizzard-ig-on.png",        icon_off = ICONS_PATH .. "sidebar\\blizzard-ig.png"      },
+    { folder = "EllesmereUIFriends",           display = "Friends List",       search_name = "EllesmereUI Friends List",       icon_on = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",         icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png"       },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\mplus-ig-on.png",           icon_off = ICONS_PATH .. "sidebar\\mplus-ig.png"         },
+    { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
+    { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
+    { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
 
@@ -3684,11 +3693,104 @@ local function CreateMainFrame()
     local ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
     _sidebarAddonNavTop = ADDON_NAV_TOP
 
+    -----------------------------------------------------------------------
+    --  Scrollable addon nav container
+    --  The roster has grown past the space between ADDON_NAV_TOP and the
+    --  class art, so addon buttons live inside a ScrollFrame with smooth
+    --  mouse-wheel scrolling and a thin thumb on the right edge.
+    -----------------------------------------------------------------------
+    local ADDON_VISIBLE_ROWS    = 10.5
+    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H
+    local ADDON_SCROLL_STEP     = NAV_ROW_H
+    local ADDON_SMOOTH_SPEED    = 14
+
+    local addonScrollFrame = CreateFrame("ScrollFrame", nil, sidebar)
+    addonScrollFrame:SetWidth(SIDEBAR_W)
+    addonScrollFrame:SetHeight(ADDON_SCROLL_H)
+    addonScrollFrame:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, ADDON_NAV_TOP)
+    addonScrollFrame:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+    addonScrollFrame:EnableMouseWheel(true)
+    addonScrollFrame:SetClipsChildren(true)
+
+    local addonScrollChild = CreateFrame("Frame", nil, addonScrollFrame)
+    addonScrollChild:SetWidth(SIDEBAR_W)
+    addonScrollChild:SetHeight(NAV_ROW_H * #ADDON_ROSTER)
+    addonScrollFrame:SetScrollChild(addonScrollChild)
+
+    EllesmereUI._addonScrollFrame = addonScrollFrame
+    EllesmereUI._addonScrollChild = addonScrollChild
+
+    -- Thin scrollbar thumb on the right edge of the scroll area
+    local addonTrack = CreateFrame("Frame", nil, addonScrollFrame)
+    addonTrack:SetWidth(3)
+    addonTrack:SetPoint("TOPRIGHT", addonScrollFrame, "TOPRIGHT", -2, -2)
+    addonTrack:SetPoint("BOTTOMRIGHT", addonScrollFrame, "BOTTOMRIGHT", -2, 2)
+    addonTrack:SetFrameLevel(addonScrollFrame:GetFrameLevel() + 3)
+    local addonTrackBg = SolidTex(addonTrack, "BACKGROUND", 1, 1, 1, 0.03)
+    addonTrackBg:SetAllPoints()
+
+    local addonThumb = SolidTex(addonTrack, "ARTWORK", 1, 1, 1, 0.25)
+    addonThumb:SetPoint("TOP", addonTrack, "TOP", 0, 0)
+    addonThumb:SetWidth(3)
+    addonThumb:SetHeight(40)
+
+    local function UpdateAddonThumb()
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        if maxScroll <= 0 then
+            addonTrack:Hide()
+            return
+        end
+        addonTrack:Show()
+        local trackH = addonTrack:GetHeight()
+        local visH = addonScrollFrame:GetHeight()
+        local ratio = visH / (visH + maxScroll)
+        local thumbH = math.max(30, trackH * ratio)
+        addonThumb:SetHeight(thumbH)
+        local scrollRatio = (tonumber(addonScrollFrame:GetVerticalScroll()) or 0) / maxScroll
+        addonThumb:ClearAllPoints()
+        addonThumb:SetPoint("TOP", addonTrack, "TOP", 0, -(scrollRatio * (trackH - thumbH)))
+    end
+
+    -- Smooth mouse-wheel scroll (lerp towards target)
+    local addonScrollTarget = 0
+    local addonIsSmoothing  = false
+    local addonSmoothFrame  = CreateFrame("Frame")
+    addonSmoothFrame:Hide()
+    addonSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+        local cur = addonScrollFrame:GetVerticalScroll()
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        addonScrollTarget = math.max(0, math.min(maxScroll, addonScrollTarget))
+        local diff = addonScrollTarget - cur
+        if math.abs(diff) < 0.3 then
+            addonScrollFrame:SetVerticalScroll(addonScrollTarget)
+            UpdateAddonThumb()
+            addonIsSmoothing = false
+            addonSmoothFrame:Hide()
+            return
+        end
+        local newScroll = cur + diff * math.min(1, ADDON_SMOOTH_SPEED * elapsed)
+        addonScrollFrame:SetVerticalScroll(math.max(0, math.min(maxScroll, newScroll)))
+        UpdateAddonThumb()
+    end)
+
+    addonScrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(self) or 0
+        if maxScroll <= 0 then return end
+        local base = addonIsSmoothing and addonScrollTarget or self:GetVerticalScroll()
+        addonScrollTarget = math.max(0, math.min(maxScroll, base - delta * ADDON_SCROLL_STEP))
+        if not addonIsSmoothing then
+            addonIsSmoothing = true
+            addonSmoothFrame:Show()
+        end
+    end)
+    addonScrollFrame:SetScript("OnScrollRangeChanged", UpdateAddonThumb)
+    addonScrollFrame:HookScript("OnSizeChanged", UpdateAddonThumb)
+
     for i, info in ipairs(ADDON_ROSTER) do
-        local btn = CreateFrame("Button", nil, sidebar)
+        local btn = CreateFrame("Button", nil, addonScrollChild)
         btn:SetSize(SIDEBAR_W, NAV_ROW_H)
-        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, ADDON_NAV_TOP - (i - 1) * NAV_ROW_H)
-        btn:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+        btn:SetPoint("TOPLEFT", addonScrollChild, "TOPLEFT", 0, -(i - 1) * NAV_ROW_H)
+        btn:SetFrameLevel(addonScrollChild:GetFrameLevel() + 1)
 
         DecorateSidebarButton(btn)
 
@@ -5567,13 +5669,20 @@ function EllesmereUI:RegisterModule(folderName, config)
             EllesmereUIAuraBuffReminders = true,
             EllesmereUIBasics = true,
             EllesmereUICooldownManager = true,
-            EllesmereUICursor = true,
             EllesmereUINameplates = true,
             EllesmereUIPartyMode = true,
             EllesmereUIRaidFrames = true,
             EllesmereUIResourceBars = true,
             EllesmereUIUnitFrames = true,
             EllesmereUIMythicTimer = true,
+            -- v6.6 split
+            EllesmereUIQoL = true,
+            EllesmereUIBlizzardSkin = true,
+            EllesmereUIQuestTracker = true,
+            EllesmereUIMinimap = true,
+            EllesmereUIFriends = true,
+            EllesmereUIChat = true,
+            EllesmereUIDamageMeters = true,
         }
         if not ALLOWED[callerFolder] then return end
     end
@@ -5966,6 +6075,8 @@ local function RefreshSidebarStates()
     for _, info in ipairs(maintenanceList) do disabledList[#disabledList + 1] = info end
     for _, info in ipairs(comingSoonList) do disabledList[#disabledList + 1] = info end
 
+    local scrollChild = EllesmereUI._addonScrollChild or sidebar
+    local scrollIsChild = scrollChild ~= sidebar
     local rowIndex = 0
     for _, info in ipairs(enabledList) do
         rowIndex = rowIndex + 1
@@ -5973,7 +6084,11 @@ local function RefreshSidebarStates()
         local btn = sidebarButtons[folder]
         if not btn then break end
         btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        if scrollIsChild then
+            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(rowIndex - 1) * _sidebarNavRowH)
+        else
+            btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        end
         btn._loaded = true
         btn._notEnabled = false
         btn._dlIcon:Hide()
@@ -5999,7 +6114,11 @@ local function RefreshSidebarStates()
         local btn = sidebarButtons[folder]
         if not btn then break end
         btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        if scrollIsChild then
+            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(rowIndex - 1) * _sidebarNavRowH)
+        else
+            btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        end
         btn._loaded = false
         btn._notEnabled = true
         btn._dlIcon:Hide()
@@ -6014,6 +6133,11 @@ local function RefreshSidebarStates()
         btn._glowTop:Hide()
         btn._glowBot:Hide()
     end
+    -- Size the scroll child to the actual row count so the range is accurate
+    if scrollIsChild and scrollChild.SetHeight then
+        scrollChild:SetHeight(rowIndex * _sidebarNavRowH)
+    end
+
     -- Default to Global Settings if no module is active
     if not activeModule then
         activeModule = nil
@@ -6198,7 +6322,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.5"
+EllesmereUI.VERSION = "6.5.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6338,9 +6462,15 @@ end
 --  suppressed forever. If other conflicts are also present, ElvUI shows too
 --  and the one-off flag is not consumed.
 --------------------------------------------------------------------------------
-if not _G._EUI_ConflictChecked then
-    _G._EUI_ConflictChecked = true
-    C_Timer.After(2, function()
+-- Conflict check is wrapped in a function so the first-install popup
+-- (EllesmereUI_FirstInstall.lua) can defer it until after the user picks
+-- their initial addon list. The inline scheduler at the bottom of this
+-- block only runs it automatically if the first-install popup has already
+-- been shown in a prior session.
+EllesmereUI._RunConflictCheck = function()
+    if _G._EUI_ConflictCheckRan then return end
+    _G._EUI_ConflictCheckRan = true
+    do
         local IsLoaded = C_AddOns and C_AddOns.IsAddOnLoaded
         if not IsLoaded then return end
 
@@ -6349,8 +6479,16 @@ if not _G._EUI_ConflictChecked then
         -- message = optional custom popup message override
         -- moduleCheck = optional function returning true if the specific sub-module is active
         --              (used for Basics sub-modules: minimap, friends, chat, etc.)
+        -- Post-split: each former Basics sub-module now lives in its own
+        -- addon with its own DB global. Map old keys to new DB globals.
         local function BasicsModuleEnabled(key)
-            local db = _G._EBS_AceDB
+            local dbMap = {
+                minimap      = _G._EMM_DB,
+                friends      = _G._EFR_DB,
+                questTracker = _G._EQT_DB,
+                cursor       = _G._ECL_AceDB,
+            }
+            local db = dbMap[key]
             if db and db.profile and db.profile[key] then
                 return db.profile[key].enabled ~= false
             end
@@ -6369,28 +6507,34 @@ if not _G._EUI_ConflictChecked then
             { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
-            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("friends") end },
-            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("questTracker") end,
-              message = "Account Wide Interface Settings interferes with the EllesmereUI Quest Tracker. Disable either Account Wide Interface Settings or the EUI Quest Tracker module in Basics settings." },
-            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
-            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
-            -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIBasics" } },
-            -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIBasics" } },
-            -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIBasics" } },
-            -- { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIBasics" } },
-            -- { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBasics" } },
-            -- { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBasics" } },
-            -- { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBasics" } },
-            -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBasics" } },
-            -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBasics" } },
-            -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBasics" } },
-            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIBasics" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end,
-              message = "FarmHud controls the Minimap frame directly and is incompatible with the EllesmereUI Minimap module. Disable either FarmHud or the EUI Minimap module in Basics settings." },
-            { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUICursor" } },
+            { addon = "FriendGroups",             label = "FriendGroups",               targets = { "EllesmereUIFriends" }, moduleCheck = function() return BasicsModuleEnabled("friends") end },
+            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, moduleCheck = function() return BasicsModuleEnabled("questTracker") end,
+              message = "Account Wide Interface Settings interferes with the EllesmereUI Quest Tracker. Disable either Account Wide Interface Settings or the EUI Quest Tracker." },
+            { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
+            { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end },
+            -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIChat" } },
+            -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIChat" } },
+            -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIChat" } },
+            -- { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIChat" } },
+            -- { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBags" } },
+            -- { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBags" } },
+            -- { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBags" } },
+            -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBags" } },
+            -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBags" } },
+            -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBags" } },
+            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIMinimap" }, moduleCheck = function() return BasicsModuleEnabled("minimap") end,
+              message = "FarmHud controls the Minimap frame directly and is incompatible with the EllesmereUI Minimap module. Disable either FarmHud or the EUI Minimap addon." },
+            { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUIQoL" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
             { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager", } },
             { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
+            { addon = "MythicPlusTimer",          label = "Mythic Plus Timer",          targets = { "EllesmereUIMythicTimer" } },
+            { addon = "WarpDeplete",              label = "WarpDeplete",                targets = { "EllesmereUIMythicTimer" } },
+            { addon = "MPlusTimer",               label = "MPlusTimer",                 targets = { "EllesmereUIMythicTimer" } },
+            { addon = "ChonkyCharacterSheet",     label = "Chonky Character Sheet",     targets = { "EllesmereUIBlizzardSkin" } },
+            { addon = "DejaCharacterStats",       label = "Deja Character Stats",       targets = { "EllesmereUIBlizzardSkin" } },
+            { addon = "BetterCharacterPanel",     label = "Better Character Panel",     targets = { "EllesmereUIBlizzardSkin" } },
             { addon = "EllesmereBarGlows",        label = "Ellesmere's CDM Bar Glows",  targets = "all" },
             { addon = "EllesmereNameplates",        label = "Ellesmere's Nameplates",  targets = "all" },
             { addon = "EllesmereActionBars",        label = "Ellesmere's Action Bars",  targets = "all" },
@@ -6415,7 +6559,7 @@ if not _G._EUI_ConflictChecked then
                     local allTargets = {
                         "EllesmereUIActionBars", "EllesmereUIUnitFrames", "EllesmereUINameplates",
                         "EllesmereUIResourceBars", "EllesmereUIAuraBuffReminders", "EllesmereUICooldownManager",
-                        "EllesmereUICursor", "EllesmereUIBasics", "EllesmereUIRaidFrames",
+                        "EllesmereUIBasics", "EllesmereUIRaidFrames",
                     }
                     for _, name in ipairs(allTargets) do
                         if not exempt[name] and IsLoaded(name) then
@@ -6480,8 +6624,17 @@ if not _G._EUI_ConflictChecked then
             end
         end
         ShowNextConflict()
-    end)
+    end
 end
+
+-- Auto-run the conflict check only if first-install has already been shown.
+-- On first install, the first-install popup will call RunConflictCheck when
+-- the user closes it (with no reload needed).
+C_Timer.After(2, function()
+    if EllesmereUIDB and EllesmereUIDB.firstInstallPopupShown then
+        if EllesmereUI._RunConflictCheck then EllesmereUI._RunConflictCheck() end
+    end
+end)
 
 SLASH_EUIOPTIONS1 = "/eui"
 SLASH_EUIOPTIONS2 = "/ellesmere"
@@ -7343,20 +7496,6 @@ EllesmereUI.VIS_VALUES_CDM = {
     solo           = "Solo",
 }
 EllesmereUI.VIS_ORDER_CDM = { "never", "always", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
-
--- Basics-only variant (includes Disable Module)
-EllesmereUI.VIS_VALUES_BASICS = {
-    disabled   = "Disable Module",
-    never      = "Never",
-    always     = "Always",
-    mouseover  = "Mouseover",
-    in_combat      = "In Combat",
-    out_of_combat  = "Out of Combat",
-    in_raid        = "In Raid Group",
-    in_party   = "In Party",
-    solo       = "Solo",
-}
-EllesmereUI.VIS_ORDER_BASICS = { "disabled", "---", "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
 -- Checkbox dropdown 2: Visibility Options (keys match DB fields)
 EllesmereUI.VIS_OPT_ITEMS = {

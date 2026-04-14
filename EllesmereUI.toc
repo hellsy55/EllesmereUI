@@ -2,7 +2,7 @@
 ## Title: |cff0cd29fEllesmereUI|r
 ## Notes: Shared framework for the EllesmereUI addon suite
 ## Author: Ellesmere
-## Version: 6.5
+## Version: 6.5.2
 ## SavedVariables: EllesmereUIDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 ## X-Curse-Project-ID: 1477613
@@ -26,13 +26,13 @@ EllesmereUI_Startup.lua
 # Shared EllesmereUI Files
 EllesmereUI.lua
 EllesmereUI_Widgets.lua
+EllesmereUI_Visibility.lua
 EllesmereUI_Presets.lua
 EllesmereUI_Profiles.lua
 EllesmereUI_PartyMode.lua
-EUI_QoL.lua
 EUI_MacroFactory.lua
 EUI__General_Options.lua
 EUI_UnlockMode.lua
 EUI_PartyMode_Options.lua
 EllesmereUI_Glows.lua
-charactersheet.lua
+EllesmereUI_FirstInstall.lua

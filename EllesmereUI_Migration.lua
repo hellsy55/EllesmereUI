@@ -1244,6 +1244,118 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+--------------------------------------------------------------------------------
+--  v6.6 addon split: copy per-module saved data out of EllesmereUIBasics
+--  into the new per-addon folders. Lite stores everything under
+--  EllesmereUIDB.profiles[p].addons[folder], so this is a straight copy
+--  from addons.EllesmereUIBasics.<key> to addons.EllesmereUI<Name>.<key>.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "v66_basics_split_data",
+    scope       = "profile",
+    description = "Move Basics per-module data into new per-addon folders (Minimap/Friends/Chat/QuestTracker/QoL cursor).",
+    body = function(ctx)
+        local addons = ctx.profile.addons
+        if type(addons) ~= "table" then return end
+        local basics = addons.EllesmereUIBasics
+        if type(basics) ~= "table" then return end
+
+        local function ensureFolder(name)
+            if type(addons[name]) ~= "table" then addons[name] = {} end
+            return addons[name]
+        end
+
+        -- minimap -> EllesmereUIMinimap.minimap
+        if type(basics.minimap) == "table" then
+            local dst = ensureFolder("EllesmereUIMinimap")
+            if dst.minimap == nil then
+                dst.minimap = basics.minimap
+            end
+        end
+
+        -- friends -> EllesmereUIFriends.friends
+        if type(basics.friends) == "table" then
+            local dst = ensureFolder("EllesmereUIFriends")
+            if dst.friends == nil then
+                dst.friends = basics.friends
+            end
+        end
+
+        -- chat -> EllesmereUIChat.chat (kept for future rebuild even though UI is coming-soon)
+        if type(basics.chat) == "table" then
+            local dst = ensureFolder("EllesmereUIChat")
+            if dst.chat == nil then
+                dst.chat = basics.chat
+            end
+        end
+
+        -- questTracker -> EllesmereUIQuestTracker.questTracker
+        if type(basics.questTracker) == "table" then
+            local dst = ensureFolder("EllesmereUIQuestTracker")
+            if dst.questTracker == nil then
+                dst.questTracker = basics.questTracker
+            end
+        end
+
+        -- cursor -> EllesmereUIQoL.cursor
+        if type(basics.cursor) == "table" then
+            local dst = ensureFolder("EllesmereUIQoL")
+            if dst.cursor == nil then
+                dst.cursor = basics.cursor
+            end
+        end
+    end,
+})
+
+--------------------------------------------------------------------------------
+--  v6.6 addon split: if the user had EllesmereUIBasics disabled for this
+--  character, disable the new Minimap/Friends/QuestTracker addons to match
+--  (since those now host what Basics used to host). Prompt a reload so the
+--  change takes effect.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "v66_basics_split_disabled_state",
+    scope       = "global",
+    description = "Carry EllesmereUIBasics disabled state onto Minimap/Friends/QuestTracker addons.",
+    body = function(ctx)
+        if not C_AddOns or not C_AddOns.GetAddOnEnableState then return end
+        local char = UnitName("player")
+        if not char then return end
+
+        -- GetAddOnEnableState: 0 = disabled, 1 = enabled-for-char, 2 = enabled-for-all
+        local basicsState = C_AddOns.GetAddOnEnableState("EllesmereUIBasics", char)
+        if basicsState == nil or basicsState ~= 0 then return end
+
+        -- Basics is disabled for this character. Mirror that onto the new addons.
+        local targets = { "EllesmereUIMinimap", "EllesmereUIFriends", "EllesmereUIQuestTracker" }
+        local disabled = {}
+        for _, name in ipairs(targets) do
+            local state = C_AddOns.GetAddOnEnableState(name, char)
+            if state ~= 0 then
+                if C_AddOns.DisableAddOn then
+                    C_AddOns.DisableAddOn(name, char)
+                    disabled[#disabled + 1] = name
+                end
+            end
+        end
+
+        if #disabled > 0 then
+            -- Defer the popup: UI systems aren't ready at this phase.
+            C_Timer.After(3, function()
+                if EllesmereUI and EllesmereUI.ShowConfirmPopup then
+                    EllesmereUI:ShowConfirmPopup({
+                        title       = "EllesmereUI Addon Split",
+                        message     = "EllesmereUI Basics has been split into separate addons. Since you had Basics disabled, Minimap, Friends, and Quest Tracker have been disabled to match. A reload is required to apply this change.",
+                        confirmText = "Reload Now",
+                        cancelText  = "Later",
+                        onConfirm   = function() ReloadUI() end,
+                    })
+                end
+            end)
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

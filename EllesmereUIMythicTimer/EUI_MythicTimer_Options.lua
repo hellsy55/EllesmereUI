@@ -28,33 +28,13 @@ initFrame:SetScript("OnEvent", function(self)
 
     local function Set(key, val)
         local p = DB()
-        if p then
-            p[key] = val
-            if key ~= "selectedPreset" and key ~= "advancedMode" and key ~= "fontPath" then
-                p.selectedPreset = "CUSTOM"
-            end
-        end
+        if p then p[key] = val end
     end
 
-    local function SetPreset(presetID)
-        local p = DB()
-        if not p then return end
-
-        if presetID == "CUSTOM" then
-            p.selectedPreset = "CUSTOM"
-            return
-        end
-
-        if _G._EMT_ApplyPreset and _G._EMT_ApplyPreset(presetID) then
-            return
-        end
-
-        p.selectedPreset = presetID
-    end
-
-    local function IsAdvanced()
-        return Cfg("advancedMode") == true
-    end
+    -- Advanced-mode toggle removed: every option is always shown so the
+    -- page can be trimmed deliberately. Guard kept as a stub so existing
+    -- "if IsAdvanced() then ... end" blocks render unconditionally.
+    local function IsAdvanced() return true end
 
     local function Refresh()
         if _G._EMT_Apply then _G._EMT_Apply() end
@@ -67,7 +47,35 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     -- Build Page
+    -- Toggle preview + sync the Quest Tracker suppression so it doesn't sit
+    -- on top of the M+ Timer preview frame.
+    local function _setPreview(v)
+        Set("showPreview", v)
+        Refresh()
+        if _G._EQT_SetSuppressed then
+            _G._EQT_SetSuppressed("MTimerPreview", v == true)
+        end
+    end
+
+    -- Auto-disable Show Preview when the EUI options window closes, so the
+    -- preview frame doesn't linger after the user is done configuring.
+    -- Installed once, the first time the M+ Timer page is built (which
+    -- guarantees EllesmereUIFrame exists).
+    local function _installPreviewAutoOff()
+        local mf = _G.EllesmereUIFrame
+        if not mf or mf._eMTPreviewHook then return end
+        mf._eMTPreviewHook = true
+        mf:HookScript("OnHide", function()
+            if Cfg("showPreview") == true then
+                _setPreview(false)
+                EllesmereUI:RefreshPage()  -- update toggle visual immediately
+            end
+        end)
+    end
+
     local function BuildPage(pageName, parent, yOffset)
+        _installPreviewAutoOff()
+
         if pageName == PAGE_BEST_RUNS then
             if _G._EMT_BuildBestRunsPage then
                 _G._EMT_BuildBestRunsPage(parent, yOffset)
@@ -82,23 +90,9 @@ initFrame:SetScript("OnEvent", function(self)
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
-        local presetValues = {
-          CUSTOM = "Custom",
-          ELLESMERE = "EllesmereUI",
-          WARP_DEPLETE = "Warp Deplete",
-          MYTHIC_PLUS_TIMER = "MythicPlusTimer",
-        }
-        local presetOrder = { "CUSTOM", "ELLESMERE", "WARP_DEPLETE", "MYTHIC_PLUS_TIMER" }
-        if _G._EMT_GetPresets then
-          local values, order = _G._EMT_GetPresets()
-          if values then presetValues = values end
-          if order then presetOrder = order end
-        end
 
         local alignValues = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
         local alignOrder  = { "LEFT", "CENTER", "RIGHT" }
-        local affixDisplayValues = { TEXT = "Text", ICONS = "Icons", BOTH = "Text + Icons" }
-        local affixDisplayOrder = { "TEXT", "ICONS", "BOTH" }
         local compareModeValues = {
           NONE = "None",
           DUNGEON = "Per Dungeon",
@@ -114,594 +108,453 @@ initFrame:SetScript("OnEvent", function(self)
           REMAINING = "Remaining Count",
         }
         local forcesTextOrder = { "PERCENT", "COUNT", "COUNT_PERCENT", "REMAINING" }
-        local objectiveTimePositionValues = { END = "After Boss Name", START = "Before Boss Name" }
-        local objectiveTimePositionOrder = { "END", "START" }
 
         -- ── DISPLAY ──────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
+        local alignAllValues = { LEFT = "Left", RIGHT = "Right" }
+        local alignAllOrder  = { "LEFT", "RIGHT" }
+
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Module",
-              getValue=function() return Cfg("enabled") ~= false end,
-              setValue=function(v) Set("enabled", v); Refresh() end },
             { type="toggle", text="Show Preview",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
               getValue=function() return Cfg("showPreview") == true end,
-              setValue=function(v) Set("showPreview", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="dropdown", text="Preset",
+              setValue=function(v) _setPreview(v) end },
+            { type="dropdown", text="Text Align",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              values=presetValues,
-              order=presetOrder,
-              getValue=function() return Cfg("selectedPreset") or "ELLESMERE" end,
-              setValue=function(v) SetPreset(v); Refresh() end },
-            { type="toggle", text="Advanced Mode",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("advancedMode") == true end,
-              setValue=function(v)
-                  local p = DB()
-                  if p then p.advancedMode = v end
-                  RebuildPage()
-              end })
+              values=alignAllValues,
+              order=alignAllOrder,
+              getValue=function() return Cfg("alignAllText") or "RIGHT" end,
+              setValue=function(v) Set("alignAllText", v); Refresh() end })
         y = y - h
 
-        local fontValues, fontOrder = {}, {}
-        if _G._EMT_GetFontOptions then
-            fontValues, fontOrder = _G._EMT_GetFontOptions()
-        end
-
-        row, h = W:DualRow(parent, y,
+        -- Scale + Background Opacity: side-by-side dual row.
+        local scaleRow
+        scaleRow, h = W:DualRow(parent, y,
             { type="slider", text="Scale",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              min=0.5, max=2.0, step=0.05, isPercent=false,
+              min=0.5, max=2.0, step=0.01, isPercent=false,
               getValue=function() return Cfg("scale") or 1.0 end,
               setValue=function(v) Set("scale", v); Refresh() end },
-            { type="slider", text="Opacity",
+            { type="slider", text="Background Opacity",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              min=0.1, max=1.0, step=0.05, isPercent=false,
-              getValue=function() return Cfg("standaloneAlpha") or 0.85 end,
-              setValue=function(v) Set("standaloneAlpha", v); Refresh() end })
+              min=0, max=100, step=5, isPercent=false,
+              -- Stored 0..1 internally; displayed 0..100 to the user.
+              getValue=function() return (Cfg("standaloneAlpha") or 0) * 100 end,
+              setValue=function(v) Set("standaloneAlpha", v / 100); Refresh() end })
         y = y - h
+
+        -- Inline RESIZE cog on Scale: Frame Width slider
+        do
+            local PP = EllesmereUI.PP
+            local leftRgn = scaleRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Frame Width",
+                rows = {
+                    { type="slider", label="Width", min=180, max=420, step=1,
+                      get=function() return Cfg("frameWidth") or 260 end,
+                      set=function(v) Set("frameWidth", v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, leftRgn)
+            cogBtn:SetSize(26, 26)
+            PP.Point(cogBtn, "RIGHT", leftRgn._control or leftRgn, "LEFT", -6, 0)
+            cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function isDisabled() return Cfg("enabled") == false end
+            local function UpdateAlpha() cogBtn:SetAlpha(isDisabled() and 0.15 or 0.4) end
+            EllesmereUI.RegisterWidgetRefresh(UpdateAlpha)
+            UpdateAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not isDisabled() then cogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not isDisabled() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateAlpha() end)
+        end
+
+        local function _MakeAccentSwatches(useAccentKey, colorKey, defR, defG, defB)
+            return {
+                { tooltip = "Custom Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local c = Cfg(colorKey)
+                      if c then return c.r or defR, c.g or defG, c.b or defB end
+                      return defR, defG, defB
+                  end,
+                  setValue = function(r, g, b)
+                      Set(colorKey, { r = r, g = g, b = b })
+                      Refresh()
+                  end,
+                  onClick = function(self)
+                      if Cfg(useAccentKey) ~= false then
+                          Set(useAccentKey, false)
+                          Refresh(); EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      if Cfg("enabled") == false then return 0.15 end
+                      return Cfg(useAccentKey) ~= false and 0.3 or 1
+                  end },
+                { tooltip = "Accent Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      Set(useAccentKey, true)
+                      Refresh(); EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      if Cfg("enabled") == false then return 0.15 end
+                      return Cfg(useAccentKey) ~= false and 1 or 0.3
+                  end },
+            }
+        end
 
         row, h = W:DualRow(parent, y,
-            { type="dropdown", text="Font",
+            { type="multiSwatch", text="Title Color",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              values=fontValues,
-              order=fontOrder,
-              getValue=function() return Cfg("fontPath") or "DEFAULT" end,
-              setValue=function(v)
-                  Set("fontPath", v ~= "DEFAULT" and v or nil)
-                  Refresh()
-              end },
-            { type="label", text="" })
+              swatches = _MakeAccentSwatches("titleUseAccent", "titleColor", 1, 1, 1) },
+            { type="toggle", text="Show Affix",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              getValue=function() return Cfg("showAffixes") ~= false end,
+              setValue=function(v) Set("showAffixes", v); Refresh() end })
         y = y - h
 
-        if IsAdvanced() then
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Accent Stripe",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showAccent") == true end,
-                  setValue=function(v) Set("showAccent", v); Refresh() end },
-                { type="toggle", text="Show MS On Completion",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showCompletedMilliseconds") ~= false end,
-                  setValue=function(v) Set("showCompletedMilliseconds", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="dropdown", text="Title / Affix Align",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  values=alignValues,
-                  order=alignOrder,
-                  getValue=function() return Cfg("titleAlign") or "CENTER" end,
-                  setValue=function(v) Set("titleAlign", v); Refresh() end },
-                { type="dropdown", text="Timer Align",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  values=alignValues,
-                  order=alignOrder,
-                  getValue=function() return Cfg("timerAlign") or "CENTER" end,
-                  setValue=function(v) Set("timerAlign", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="dropdown", text="Objective Align",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  values=alignValues,
-                  order=alignOrder,
-                  getValue=function() return Cfg("objectiveAlign") or "LEFT" end,
-                  setValue=function(v) Set("objectiveAlign", v); Refresh() end },
-                { type="dropdown", text="Affix Display",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showAffixes") == false end,
-                  disabledTooltip=function()
-                    if Cfg("enabled") == false then return "the module" end
-                    return "Show Affixes"
-                  end,
-                  values=affixDisplayValues,
-                  order=affixDisplayOrder,
-                  getValue=function() return Cfg("affixDisplayMode") or "TEXT" end,
-                  setValue=function(v) Set("affixDisplayMode", v); Refresh() end })
-            y = y - h
+        -- Inline RESIZE cog: Title Size on Title Color (left), Affix Size on Show Affix (right)
+        do
+            local PP = EllesmereUI.PP
+            local function _attachCog(rgn, popupTitle, sliderLabel, sliderMin, sliderMax, getKey, defaultV, isDisabled)
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = popupTitle,
+                    rows = {
+                        { type="slider", label=sliderLabel, min=sliderMin, max=sliderMax, step=1,
+                          get=function() return Cfg(getKey) or defaultV end,
+                          set=function(v) Set(getKey, v); Refresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                PP.Point(cogBtn, "RIGHT", rgn._control or rgn, "LEFT", -6, 0)
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+                local function UpdateCogAlpha()
+                    cogBtn:SetAlpha(isDisabled() and 0.15 or 0.4)
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+                UpdateCogAlpha()
+                cogBtn:SetScript("OnClick", function(self)
+                    if not isDisabled() then cogShow(self) end
+                end)
+                cogBtn:SetScript("OnEnter", function(self)
+                    if not isDisabled() then self:SetAlpha(0.75) end
+                end)
+                cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+            end
+            _attachCog(row._leftRegion,  "Title Size", "Size", 8, 24, "titleSize", 16,
+                function() return Cfg("enabled") == false end)
+            _attachCog(row._rightRegion, "Affix Size", "Size", 6, 20, "affixSize", 12,
+                function() return Cfg("enabled") == false or Cfg("showAffixes") == false end)
         end
+
+        row, h = W:DualRow(parent, y,
+            { type="slider", text="Bar Width",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              min=120, max=420, step=1, isPercent=false,
+              getValue=function() return Cfg("barWidth") or 210 end,
+              setValue=function(v) Set("barWidth", v); Refresh() end },
+            { type="slider", text="Bar Height",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="Module is disabled",
+              min=4, max=30, step=1, isPercent=false,
+              getValue=function() return Cfg("barHeight") or 8 end,
+              setValue=function(v) Set("barHeight", v); Refresh() end })
+        y = y - h
 
         -- ── TIMER ────────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "TIMER", y); y = y - h
+
+        local timerDisplayValues = {
+            REMAINING       = "11:37",
+            REMAINING_TOTAL = "11:37 / 33:00",
+            ELAPSED         = "21:23",
+            ELAPSED_DETAIL  = "21:23 (11:37 / 33:00)",
+        }
+        local timerDisplayOrder = { "REMAINING", "REMAINING_TOTAL", "ELAPSED", "ELAPSED_DETAIL" }
 
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Show Timer Bar",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
               getValue=function() return Cfg("showTimerBar") ~= false end,
-              setValue=function(v) Set("showTimerBar", v); Refresh() end },
-            { type="toggle", text="Show Timer Details",
+              setValue=function(v) Set("showTimerBar", v); Refresh(); EllesmereUI:RefreshPage() end },
+            { type="dropdown", text="Timer Format",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showTimerBreakdown") == true end,
-              setValue=function(v) Set("showTimerBreakdown", v); Refresh() end })
+              values=timerDisplayValues,
+              order=timerDisplayOrder,
+              getValue=function() return Cfg("timerDisplayMode") or "REMAINING" end,
+              setValue=function(v) Set("timerDisplayMode", v); Refresh() end })
         y = y - h
 
         if IsAdvanced() then
+            local PP = EllesmereUI.PP
             row, h = W:DualRow(parent, y,
                 { type="toggle", text="Timer Inside Bar",
                   disabled=function() return Cfg("enabled") == false end,
                   disabledTooltip="Module is disabled",
                   getValue=function() return Cfg("timerInBar") == true end,
-                  setValue=function(v) Set("timerInBar", v); Refresh() end },
-                { type="colorpicker", text="In-Bar Text Color",
-                  disabled=function() return Cfg("enabled") == false or Cfg("timerInBar") ~= true end,
-                  disabledTooltip="Requires Timer Inside Bar",
+                  setValue=function(v) Set("timerInBar", v); Refresh(); EllesmereUI:RefreshPage() end },
+                { type="toggle", text="+2 / +3 Threshold Text",
+                  disabled=function() return Cfg("enabled") == false end,
+                  disabledTooltip="Module is disabled",
                   getValue=function()
-                      local c = Cfg("timerBarTextColor")
-                      if c then return c.r or 1, c.g or 1, c.b or 1 end
-                      return 1, 1, 1
+                      return Cfg("showPlusTwoTimer") ~= false or Cfg("showPlusThreeTimer") ~= false
                   end,
-                  setValue=function(r, g, b)
-                      Set("timerBarTextColor", { r = r, g = g, b = b })
+                  setValue=function(v)
+                      Set("showPlusTwoTimer", v)
+                      Set("showPlusThreeTimer", v)
                       Refresh()
                   end })
             y = y - h
 
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="+3 Threshold Text",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showPlusThreeTimer") ~= false end,
-                  setValue=function(v) Set("showPlusThreeTimer", v); Refresh() end },
-                { type="toggle", text="+3 Bar Marker",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showPlusThreeBar") ~= false end,
-                  setValue=function(v) Set("showPlusThreeBar", v); Refresh() end })
-            y = y - h
+            -- Inline color swatch on Timer Inside Bar (left)
+            do
+                local rgn = row._leftRegion
+                local ctrl = rgn._control
+                local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, row:GetFrameLevel() + 3,
+                    function()
+                        local c = Cfg("timerBarTextColor")
+                        if c then return c.r or 1, c.g or 1, c.b or 1, 1 end
+                        return 1, 1, 1, 1
+                    end,
+                    function(r, g, b)
+                        Set("timerBarTextColor", { r = r, g = g, b = b })
+                        Refresh()
+                    end,
+                    false, 20)
+                PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                local block = CreateFrame("Frame", nil, swatch)
+                block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Timer Inside Bar"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdateSwatchState()
+                    local off = Cfg("enabled") == false or Cfg("timerInBar") ~= true
+                    if off then swatch:SetAlpha(0.3); block:Show()
+                    else swatch:SetAlpha(1); block:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); UpdateSwatchState() end)
+                UpdateSwatchState()
+            end
 
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="+2 Threshold Text",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showPlusTwoTimer") ~= false end,
-                  setValue=function(v) Set("showPlusTwoTimer", v); Refresh() end },
-                { type="toggle", text="+2 Bar Marker",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function() return Cfg("showPlusTwoBar") ~= false end,
-                  setValue=function(v) Set("showPlusTwoBar", v); Refresh() end })
-            y = y - h
+            -- Inline RESIZE cog: threshold text size, anchored to the toggle on the RIGHT side
+            do
+                local rightRgn = row._rightRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "+2 / +3 Threshold Size",
+                    rows = {
+                        { type="slider", label="Size", min=6, max=20, step=1,
+                          get=function() return Cfg("thresholdSize") or 12 end,
+                          set=function(v) Set("thresholdSize", v); Refresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rightRgn)
+                cogBtn:SetSize(26, 26)
+                PP.Point(cogBtn, "RIGHT", rightRgn._control or rightRgn, "LEFT", -6, 0)
+                cogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+                local function UpdateCogAlpha()
+                    cogBtn:SetAlpha(Cfg("enabled") == false and 0.15 or 0.4)
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+                UpdateCogAlpha()
+                cogBtn:SetScript("OnClick", function(self)
+                    if Cfg("enabled") ~= false then cogShow(self) end
+                end)
+                cogBtn:SetScript("OnEnter", function(self)
+                    if Cfg("enabled") ~= false then self:SetAlpha(0.75) end
+                end)
+                cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+            end
         end
 
         -- ── OBJECTIVES ───────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "OBJECTIVES", y); y = y - h
 
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Affixes",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showAffixes") ~= false end,
-              setValue=function(v) Set("showAffixes", v); Refresh() end },
-            { type="toggle", text="Show Boss Objectives",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showObjectives") ~= false end,
-              setValue=function(v) Set("showObjectives", v); Refresh() end })
-        y = y - h
-
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Objective Times",
+            { type="slider", text="Objectives Size",
               disabled=function() return Cfg("enabled") == false or Cfg("showObjectives") == false end,
               disabledTooltip=function()
                   if Cfg("enabled") == false then return "the module" end
                   return "Show Boss Objectives"
               end,
-              getValue=function() return Cfg("showObjectiveTimes") ~= false end,
-              setValue=function(v) Set("showObjectiveTimes", v); Refresh() end },
-            { type="toggle", text="Show Enemy Forces",
+              min=8, max=20, step=1, isPercent=false,
+              getValue=function() return Cfg("objectivesSize") or 12 end,
+              setValue=function(v) Set("objectivesSize", v); Refresh() end },
+            { type="toggle", text="Show Boss Objectives",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showEnemyBar") ~= false end,
-              setValue=function(v) Set("showEnemyBar", v); Refresh() end })
+              getValue=function() return Cfg("showObjectives") ~= false end,
+              setValue=function(v) Set("showObjectives", v); Refresh(); EllesmereUI:RefreshPage() end })
         y = y - h
 
-        row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Deaths",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="Module is disabled",
-              getValue=function() return Cfg("showDeaths") ~= false end,
-              setValue=function(v) Set("showDeaths", v); Refresh() end },
-            { type="dropdown", text="Death Align",
-              disabled=function() return Cfg("enabled") == false or Cfg("showDeaths") == false end,
-              disabledTooltip=function()
-                  if Cfg("enabled") == false then return "the module" end
-                  return "Show Deaths"
-              end,
-              values=alignValues,
-              order=alignOrder,
-              getValue=function() return Cfg("deathAlign") or "LEFT" end,
-              setValue=function(v) Set("deathAlign", v); Refresh() end })
-        y = y - h
+        -- Inline COGS cog: Show Objective Times toggle, anchored to Show Boss Objectives toggle
+        do
+            local PP = EllesmereUI.PP
+            local rightRgn = row._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Boss Objectives",
+                rows = {
+                    { type="toggle", label="Show Objective Times",
+                      get=function() return Cfg("showObjectiveTimes") ~= false end,
+                      set=function(v) Set("showObjectiveTimes", v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rightRgn)
+            cogBtn:SetSize(26, 26)
+            PP.Point(cogBtn, "RIGHT", rightRgn._control or rightRgn, "LEFT", -6, 0)
+            cogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local function isDisabled()
+                return Cfg("enabled") == false or Cfg("showObjectives") == false
+            end
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(isDisabled() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not isDisabled() then cogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not isDisabled() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+        end
 
         if IsAdvanced() then
             row, h = W:DualRow(parent, y,
-                { type="dropdown", text="Boss Time Position",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showObjectives") == false or Cfg("showObjectiveTimes") == false end,
-                  disabledTooltip=function()
-                      if Cfg("enabled") == false then return "the module" end
-                      if Cfg("showObjectives") == false then return "Show Boss Objectives" end
-                      return "Show Objective Times"
-                  end,
-                  values=objectiveTimePositionValues,
-                  order=objectiveTimePositionOrder,
-                  getValue=function() return Cfg("objectiveTimePosition") or "END" end,
-                  setValue=function(v) Set("objectiveTimePosition", v); Refresh() end },
                 { type="dropdown", text="Enemy Text Format",
                   disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
                   disabledTooltip="Requires Show Enemy Forces",
                   values=forcesTextValues,
                   order=forcesTextOrder,
                   getValue=function() return Cfg("enemyForcesTextFormat") or "PERCENT" end,
-                  setValue=function(v) Set("enemyForcesTextFormat", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="dropdown", text="Split Compare",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  values=compareModeValues,
-                  order=compareModeOrder,
-                  getValue=function() return Cfg("objectiveCompareMode") or "NONE" end,
-                  setValue=function(v) Set("objectiveCompareMode", v); Refresh() end },
-                { type="toggle", text="Delta Only",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("objectiveCompareMode") or "NONE") == "NONE" end,
-                  disabledTooltip="Requires Split Compare",
-                  getValue=function() return Cfg("objectiveCompareDeltaOnly") == true end,
-                  setValue=function(v) Set("objectiveCompareDeltaOnly", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Upcoming Split Targets",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("objectiveCompareMode") or "NONE") == "NONE" end,
-                  disabledTooltip="Requires Split Compare",
-                  getValue=function() return Cfg("showUpcomingSplitTargets") == true end,
-                  setValue=function(v) Set("showUpcomingSplitTargets", v); Refresh() end },
-                { type="button", text="Clear Best Times",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  onClick=function()
-                      local p = DB()
-                      if p then
-                          p.bestObjectiveSplits = {}
-                          p.bestRuns = {}
-                      end
-                      Refresh()
-                  end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="Deaths in Title",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showDeaths") == false end,
-                  disabledTooltip=function()
-                      if Cfg("enabled") == false then return "the module" end
-                      return "Show Deaths"
-                  end,
-                  getValue=function() return Cfg("deathsInTitle") == true end,
-                  setValue=function(v) Set("deathsInTitle", v); Refresh() end },
-                { type="toggle", text="Time Lost in Title",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showDeaths") == false or Cfg("deathsInTitle") ~= true end,
-                  disabledTooltip=function()
-                      if Cfg("enabled") == false then return "the module" end
-                      if Cfg("showDeaths") == false then return "Show Deaths" end
-                      return "Deaths in Title"
-                  end,
-                  getValue=function() return Cfg("deathTimeInTitle") == true end,
-                  setValue=function(v) Set("deathTimeInTitle", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Enemy Forces Text",
+                  setValue=function(v) Set("enemyForcesTextFormat", v); Refresh() end },
+                { type="multiSwatch", text="Enemy Bar Color",
                   disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
                   disabledTooltip="Requires Show Enemy Forces",
-                  getValue=function() return Cfg("showEnemyText") ~= false end,
-                  setValue=function(v) Set("showEnemyText", v); Refresh() end },
-                { type="dropdown", text="Enemy Forces Position",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
-                  disabledTooltip="Requires Show Enemy Forces",
-                  values={ BOTTOM = "Bottom (default)", UNDER_BAR = "Under Timer Bar" },
-                  order={ "BOTTOM", "UNDER_BAR" },
-                  getValue=function() return Cfg("enemyForcesPos") or "BOTTOM" end,
-                  setValue=function(v) Set("enemyForcesPos", v); Refresh() end })
+                  swatches = {
+                      { tooltip = "Custom Color",
+                        hasAlpha = false,
+                        getValue = function()
+                            local c = Cfg("enemyBarColor")
+                            if c then return c.r or 0.35, c.g or 0.55, c.b or 0.8 end
+                            return 0.35, 0.55, 0.8
+                        end,
+                        setValue = function(r, g, b)
+                            Set("enemyBarColor", { r = r, g = g, b = b })
+                            Refresh()
+                        end,
+                        onClick = function(self)
+                            if Cfg("enemyBarUseAccent") ~= false then
+                                Set("enemyBarUseAccent", false)
+                                Refresh(); EllesmereUI:RefreshPage()
+                                return
+                            end
+                            if self._eabOrigClick then self._eabOrigClick(self) end
+                        end,
+                        refreshAlpha = function()
+                            if Cfg("enabled") == false or Cfg("showEnemyBar") == false then return 0.15 end
+                            return Cfg("enemyBarUseAccent") ~= false and 0.3 or 1
+                        end },
+                      { tooltip = "Accent Color",
+                        hasAlpha = false,
+                        getValue = function()
+                            local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                            return ar, ag, ab
+                        end,
+                        setValue = function() end,
+                        onClick = function()
+                            Set("enemyBarUseAccent", true)
+                            Refresh(); EllesmereUI:RefreshPage()
+                        end,
+                        refreshAlpha = function()
+                            if Cfg("enabled") == false or Cfg("showEnemyBar") == false then return 0.15 end
+                            return Cfg("enemyBarUseAccent") ~= false and 1 or 0.3
+                        end },
+                  } })
             y = y - h
 
             row, h = W:DualRow(parent, y,
-                { type="dropdown", text="Enemy Bar Color",
-                  disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
-                  disabledTooltip="Requires Show Enemy Forces",
-                  values={ PROGRESS = "Progress (% Breakpoints)", SOLID = "Solid" },
-                  order={ "PROGRESS", "SOLID" },
-                  getValue=function() return Cfg("enemyBarColorMode") or "PROGRESS" end,
-                  setValue=function(v) Set("enemyBarColorMode", v); Refresh() end },
                 { type="dropdown", text="Enemy Forces %",
                   disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
                   disabledTooltip="Requires Show Enemy Forces",
                   values={ LABEL = "In Label Text", BAR = "In Bar", BESIDE = "Beside Bar" },
                   order={ "LABEL", "BAR", "BESIDE" },
                   getValue=function() return Cfg("enemyForcesPctPos") or "LABEL" end,
-                  setValue=function(v) Set("enemyForcesPctPos", v); Refresh() end })
-            y = y - h
-
-        end
-
-        if IsAdvanced() then
-            -- ── LAYOUT ────────────────────────────────────────────────────
-            _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="slider", text="Frame Width",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  min=220, max=420, step=10, isPercent=false,
-                  getValue=function() return Cfg("frameWidth") or 260 end,
-                  setValue=function(v) Set("frameWidth", v); Refresh() end },
-                { type="slider", text="Bar Width",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  min=120, max=360, step=10, isPercent=false,
-                  getValue=function() return Cfg("barWidth") or 220 end,
-                  setValue=function(v) Set("barWidth", v); Refresh() end })
+                  setValue=function(v) Set("enemyForcesPctPos", v); Refresh() end },
+                { type="dropdown", text="Enemy Forces Position",
+                  disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
+                  disabledTooltip="Requires Show Enemy Forces",
+                  values={ BOTTOM = "Bottom", UNDER_BAR = "Under Timer Bar" },
+                  order={ "BOTTOM", "UNDER_BAR" },
+                  getValue=function() return Cfg("enemyForcesPos") or "BOTTOM" end,
+                  setValue=function(v) Set("enemyForcesPos", v); Refresh() end })
             y = y - h
 
             row, h = W:DualRow(parent, y,
-                { type="slider", text="Timer Bar Height",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  min=6, max=30, step=1, isPercent=false,
-                  getValue=function() return Cfg("timerBarHeight") or 10 end,
-                  setValue=function(v) Set("timerBarHeight", v); Refresh() end },
-                { type="slider", text="Enemy Bar Height",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  min=4, max=20, step=1, isPercent=false,
-                  getValue=function() return Cfg("enemyBarHeight") or 6 end,
-                  setValue=function(v) Set("enemyBarHeight", v); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="slider", text="Element Spacing",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  min=0, max=16, step=1, isPercent=false,
-                  getValue=function() return Cfg("rowGap") or 6 end,
-                  setValue=function(v) Set("rowGap", v); Refresh() end },
                 { type="slider", text="Objective Spacing",
                   disabled=function() return Cfg("enabled") == false end,
                   disabledTooltip="Module is disabled",
                   min=0, max=12, step=1, isPercent=false,
-                  getValue=function() return Cfg("objectiveGap") or 3 end,
-                  setValue=function(v) Set("objectiveGap", v); Refresh() end })
+                  getValue=function() return Cfg("objectiveGap") or 4 end,
+                  setValue=function(v) Set("objectiveGap", v); Refresh() end },
+                { type="dropdown", text="Split Compare",
+                  disabled=function() return Cfg("enabled") == false end,
+                  disabledTooltip="Module is disabled",
+                  values=compareModeValues,
+                  order=compareModeOrder,
+                  getValue=function() return Cfg("objectiveCompareMode") or "NONE" end,
+                  setValue=function(v) Set("objectiveCompareMode", v); Refresh() end })
             y = y - h
 
-            -- ── COLORS ────────────────────────────────────────────────────
-            _, h = W:SectionHeader(parent, "COLORS", y); y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Timer Running",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerRunningColor")
-                      if c then return c.r or 1, c.g or 1, c.b or 1 end
-                      return 1, 1, 1
-                  end,
-                  setValue=function(r, g, b) Set("timerRunningColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Timer Warning",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerWarningColor")
-                      if c then return c.r or 0.9, c.g or 0.7, c.b or 0.2 end
-                      return 0.9, 0.7, 0.2
-                  end,
-                  setValue=function(r, g, b) Set("timerWarningColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Timer Expired",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerExpiredColor")
-                      if c then return c.r or 0.9, c.g or 0.2, c.b or 0.2 end
-                      return 0.9, 0.2, 0.2
-                  end,
-                  setValue=function(r, g, b) Set("timerExpiredColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="+3 Text",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerPlusThreeColor")
-                      if c then return c.r or 0.3, c.g or 0.8, c.b or 1 end
-                      return 0.3, 0.8, 1
-                  end,
-                  setValue=function(r, g, b) Set("timerPlusThreeColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="+2 Text",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerPlusTwoColor")
-                      if c then return c.r or 0.4, c.g or 1, c.b or 0.4 end
-                      return 0.4, 1, 0.4
-                  end,
-                  setValue=function(r, g, b) Set("timerPlusTwoColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Bar Past +3",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerBarPastPlusThreeColor")
-                      if c then return c.r or 0.3, c.g or 0.8, c.b or 1 end
-                      return 0.3, 0.8, 1
-                  end,
-                  setValue=function(r, g, b) Set("timerBarPastPlusThreeColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Bar Past +2",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("timerBarPastPlusTwoColor")
-                      if c then return c.r or 0.4, c.g or 1, c.b or 0.4 end
-                      return 0.4, 1, 0.4
-                  end,
-                  setValue=function(r, g, b) Set("timerBarPastPlusTwoColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Objective Active",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("objectiveTextColor")
-                      if c then return c.r or 0.9, c.g or 0.9, c.b or 0.9 end
-                      return 0.9, 0.9, 0.9
-                  end,
-                  setValue=function(r, g, b) Set("objectiveTextColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Objective Complete",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("objectiveCompletedColor")
-                      if c then return c.r or 0.3, c.g or 0.8, c.b or 0.3 end
-                      return 0.3, 0.8, 0.3
-                  end,
-                  setValue=function(r, g, b) Set("objectiveCompletedColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Deaths",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("deathTextColor")
-                      if c then return c.r or 0.93, c.g or 0.33, c.b or 0.33 end
-                      return 0.93, 0.33, 0.33
-                  end,
-                  setValue=function(r, g, b) Set("deathTextColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Split Faster",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("splitFasterColor")
-                      if c then return c.r or 0.4, c.g or 1, c.b or 0.4 end
-                      return 0.4, 1, 0.4
-                  end,
-                  setValue=function(r, g, b) Set("splitFasterColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Split Slower",
-                  disabled=function() return Cfg("enabled") == false end,
-                  disabledTooltip="Module is disabled",
-                  getValue=function()
-                      local c = Cfg("splitSlowerColor")
-                      if c then return c.r or 1, c.g or 0.45, c.b or 0.45 end
-                      return 1, 0.45, 0.45
-                  end,
-                  setValue=function(r, g, b) Set("splitSlowerColor", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Enemy Bar Solid",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("enemyBarColorMode") or "PROGRESS") ~= "SOLID" end,
-                  disabledTooltip="Requires Enemy Bar Color: Solid",
-                  getValue=function()
-                      local c = Cfg("enemyBarSolidColor")
-                      if c then return c.r or 0.35, c.g or 0.55, c.b or 0.8 end
-                      return 0.35, 0.55, 0.8
-                  end,
-                  setValue=function(r, g, b) Set("enemyBarSolidColor", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Enemy 0-25%",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("enemyBarColorMode") or "PROGRESS") ~= "PROGRESS" end,
-                  disabledTooltip="Requires Enemy Bar Color: Progress",
-                  getValue=function()
-                      local c = Cfg("enemy0to25Color")
-                      if c then return c.r or 0.9, c.g or 0.25, c.b or 0.25 end
-                      return 0.9, 0.25, 0.25
-                  end,
-                  setValue=function(r, g, b) Set("enemy0to25Color", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Enemy 25-50%",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("enemyBarColorMode") or "PROGRESS") ~= "PROGRESS" end,
-                  disabledTooltip="Requires Enemy Bar Color: Progress",
-                  getValue=function()
-                      local c = Cfg("enemy25to50Color")
-                      if c then return c.r or 0.95, c.g or 0.6, c.b or 0.2 end
-                      return 0.95, 0.6, 0.2
-                  end,
-                  setValue=function(r, g, b) Set("enemy25to50Color", { r = r, g = g, b = b }); Refresh() end },
-                { type="colorpicker", text="Enemy 50-75%",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("enemyBarColorMode") or "PROGRESS") ~= "PROGRESS" end,
-                  disabledTooltip="Requires Enemy Bar Color: Progress",
-                  getValue=function()
-                      local c = Cfg("enemy50to75Color")
-                      if c then return c.r or 0.95, c.g or 0.85, c.b or 0.2 end
-                      return 0.95, 0.85, 0.2
-                  end,
-                  setValue=function(r, g, b) Set("enemy50to75Color", { r = r, g = g, b = b }); Refresh() end })
-            y = y - h
-
-            row, h = W:DualRow(parent, y,
-                { type="colorpicker", text="Enemy 75-100%",
-                  disabled=function() return Cfg("enabled") == false or (Cfg("enemyBarColorMode") or "PROGRESS") ~= "PROGRESS" end,
-                  disabledTooltip="Requires Enemy Bar Color: Progress",
-                  getValue=function()
-                      local c = Cfg("enemy75to100Color")
-                      if c then return c.r or 0.3, c.g or 0.8, c.b or 0.3 end
-                      return 0.3, 0.8, 0.3
-                  end,
-                  setValue=function(r, g, b) Set("enemy75to100Color", { r = r, g = g, b = b }); Refresh() end },
-                { type="label", text="" })
-            y = y - h
         end
+
+        _, h = W:Spacer(parent, y, 20); y = y - h
 
         parent:SetHeight(math.abs(y - yOffset))
     end
 
     -- RegisterModule
     EllesmereUI:RegisterModule("EllesmereUIMythicTimer", {
-        title    = "Mythic+ Timer",
-        icon_on  = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\consumables-ig.tga",
-        icon_off = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\consumables-g.tga",
+        title       = "Mythic+ Timer",
+        description = "Track Mythic+ run time, key thresholds, and dungeon objectives.",
+        icon_on  = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\mplus-ig-on.png",
+        icon_off = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\mplus-ig.png",
         pages    = { PAGE_DISPLAY, PAGE_BEST_RUNS },
         buildPage = BuildPage,
         onReset  = function()

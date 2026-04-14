@@ -31,178 +31,6 @@ local function CopyTable(src)
     return out
 end
 
-local PRESET_ORDER = {
-    "CUSTOM",
-    "ELLESMERE",
-    "WARP_DEPLETE",
-    "MYTHIC_PLUS_TIMER",
-}
-
-local PRESET_LABELS = {
-    CUSTOM = "Custom",
-    ELLESMERE = "EllesmereUI",
-    WARP_DEPLETE = "Warp Deplete",
-    MYTHIC_PLUS_TIMER = "MythicPlusTimer",
-}
-
-local PRESET_VALUES = {
-    ELLESMERE = {
-        showAffixes = true,
-        showPlusTwoTimer = true,
-        showPlusThreeTimer = true,
-        showPlusTwoBar = true,
-        showPlusThreeBar = true,
-        showDeaths = true,
-        showObjectives = true,
-        showObjectiveTimes = true,
-        showEnemyBar = true,
-        showEnemyText = true,
-        objectiveAlign = "LEFT",
-        timerAlign = "CENTER",
-        titleAlign = "CENTER",
-        standaloneAlpha = 0.85,
-        showAccent = false,
-        enemyForcesPos = "BOTTOM",
-        enemyForcesPctPos = "LABEL",
-        deathsInTitle = false,
-        deathTimeInTitle = false,
-        deathAlign = "LEFT",
-        timerInBar = false,
-        showTimerBar = true,
-        showTimerBreakdown = false,
-        affixDisplayMode = "TEXT",
-        enemyForcesTextFormat = "PERCENT",
-        objectiveTimePosition = "END",
-        showCompletedMilliseconds = true,
-        objectiveCompareMode = COMPARE_NONE,
-        objectiveCompareDeltaOnly = false,
-        showUpcomingSplitTargets = false,
-        enemyBarColorMode = "PROGRESS",
-        enemyBarSolidColor = { r = 0.35, g = 0.55, b = 0.8 },
-        frameWidth = 260,
-        barWidth = 220,
-        timerBarHeight = 10,
-        enemyBarHeight = 6,
-        rowGap = 6,
-        objectiveGap = 3,
-        timerRunningColor = { r = 1, g = 1, b = 1 },
-        timerWarningColor = { r = 0.9, g = 0.7, b = 0.2 },
-        timerExpiredColor = { r = 0.9, g = 0.2, b = 0.2 },
-        timerPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
-        timerPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
-        objectiveTextColor = { r = 0.9, g = 0.9, b = 0.9 },
-        objectiveCompletedColor = { r = 0.3, g = 0.8, b = 0.3 },
-        splitFasterColor = { r = 0.4, g = 1, b = 0.4 },
-        splitSlowerColor = { r = 1, g = 0.45, b = 0.45 },
-        deathTextColor = { r = 0.93, g = 0.33, b = 0.33 },
-        enemy0to25Color = { r = 0.9, g = 0.25, b = 0.25 },
-        enemy25to50Color = { r = 0.95, g = 0.6, b = 0.2 },
-        enemy50to75Color = { r = 0.95, g = 0.85, b = 0.2 },
-        enemy75to100Color = { r = 0.3, g = 0.8, b = 0.3 },
-    },
-    WARP_DEPLETE = {
-        showAffixes = true,
-        showPlusTwoTimer = true,
-        showPlusThreeTimer = true,
-        showPlusTwoBar = true,
-        showPlusThreeBar = true,
-        showDeaths = true,
-        showObjectives = true,
-        showObjectiveTimes = true,
-        showEnemyBar = true,
-        showEnemyText = true,
-        objectiveAlign = "RIGHT",
-        timerAlign = "RIGHT",
-        titleAlign = "RIGHT",
-        standaloneAlpha = 0.9,
-        showAccent = false,
-        enemyForcesPos = "UNDER_BAR",
-        enemyForcesPctPos = "BAR",
-        deathsInTitle = false,
-        deathTimeInTitle = false,
-        deathAlign = "RIGHT",
-        timerInBar = false,
-        showTimerBar = true,
-        showTimerBreakdown = false,
-        affixDisplayMode = "TEXT",
-        enemyForcesTextFormat = "PERCENT",
-        objectiveTimePosition = "START",
-        showCompletedMilliseconds = true,
-        objectiveCompareMode = COMPARE_DUNGEON,
-        objectiveCompareDeltaOnly = false,
-        showUpcomingSplitTargets = true,
-        enemyBarColorMode = "SOLID",
-        enemyBarSolidColor = { r = 0.73, g = 0.62, b = 0.13 },
-        timerBarPastPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
-        enemy0to25Color = { r = 0.9, g = 0.25, b = 0.25 },
-        enemy25to50Color = { r = 0.95, g = 0.6, b = 0.2 },
-        enemy50to75Color = { r = 0.95, g = 0.85, b = 0.2 },
-        enemy75to100Color = { r = 0.3, g = 0.8, b = 0.3 },
-    },
-    MYTHIC_PLUS_TIMER = {
-        showAffixes = true,
-        showPlusTwoTimer = true,
-        showPlusThreeTimer = true,
-        showPlusTwoBar = false,
-        showPlusThreeBar = false,
-        showDeaths = true,
-        showObjectives = true,
-        showObjectiveTimes = true,
-        showEnemyBar = true,
-        showEnemyText = false,
-        objectiveAlign = "LEFT",
-        timerAlign = "LEFT",
-        titleAlign = "LEFT",
-        standaloneAlpha = 0.85,
-        showAccent = false,
-        enemyForcesPos = "BOTTOM",
-        enemyForcesPctPos = "BAR",
-        deathsInTitle = false,
-        deathTimeInTitle = false,
-        deathAlign = "LEFT",
-        timerInBar = false,
-        showTimerBar = false,
-        showTimerBreakdown = true,
-        affixDisplayMode = "TEXT",
-        enemyForcesTextFormat = "PERCENT",
-        objectiveTimePosition = "END",
-        showCompletedMilliseconds = false,
-        objectiveCompareMode = COMPARE_LEVEL_AFFIX,
-        objectiveCompareDeltaOnly = false,
-        showUpcomingSplitTargets = false,
-        enemyBarColorMode = "PROGRESS",
-        enemyBarSolidColor = { r = 0.35, g = 0.55, b = 0.8 },
-        timerBarPastPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
-        enemy0to25Color = { r = 0.8, g = 0.4, b = 0.4 },
-        enemy25to50Color = { r = 0.8, g = 0.6, b = 0.3 },
-        enemy50to75Color = { r = 0.7, g = 0.75, b = 0.3 },
-        enemy75to100Color = { r = 0.4, g = 0.8, b = 0.4 },
-    },
-}
-
-local function ApplyPresetToProfile(profile, presetID)
-    local preset = PRESET_VALUES[presetID]
-    if not profile or not preset then return false end
-
-    for key, value in pairs(preset) do
-        profile[key] = type(value) == "table" and CopyTable(value) or value
-    end
-
-    profile.selectedPreset = presetID
-    return true
-end
-
-local function GetPresetValues()
-    local values = {}
-    for _, presetID in ipairs(PRESET_ORDER) do
-        values[presetID] = PRESET_LABELS[presetID] or presetID
-    end
-    return values, PRESET_ORDER
-end
 
 local function CalculateBonusTimers(maxTime, affixes)
     local plusTwoT = (maxTime or 0) * PLUS_TWO_RATIO
@@ -235,62 +63,49 @@ local DB_DEFAULTS = {
         showAffixes       = true,
         showPlusTwoTimer  = true,
         showPlusThreeTimer = true,
-        showPlusTwoBar    = true,
-        showPlusThreeBar  = true,
         showDeaths        = true,
         showObjectives    = true,
         showObjectiveTimes = true,
         showEnemyBar      = true,
         showEnemyText     = true,
-        objectiveAlign    = "LEFT",
-        timerAlign        = "CENTER",
-        titleAlign        = "CENTER",
         scale             = 1.0,
-        standaloneAlpha   = 0.85,
+        standaloneAlpha   = 0,
         showAccent        = false,
         showPreview       = false,
         enemyForcesPos    = "BOTTOM",
         enemyForcesPctPos = "LABEL",
         deathsInTitle     = false,
         deathTimeInTitle  = false,
-        deathAlign        = "LEFT",
         timerInBar        = false,
         showTimerBar      = true,
         showTimerBreakdown = false,
-        affixDisplayMode  = "TEXT",
+        alignAllText      = "RIGHT",
+        titleUseAccent    = true,
+        titleColor        = { r = 1, g = 1, b = 1 },
+        titleSize         = 16,
+        affixSize         = 12,
+        thresholdSize     = 12,
+        objectivesSize    = 12,
+        timerExpiredColor = { r = 0.9, g = 0.2, b = 0.2 },
         enemyForcesTextFormat = "PERCENT",
-        objectiveTimePosition = "END",
         showCompletedMilliseconds = true,
         objectiveCompareMode = "NONE",
         objectiveCompareDeltaOnly = false,
         showUpcomingSplitTargets = false,
         frameWidth        = 260,
-        barWidth          = 220,
-        timerBarHeight    = 10,
-        enemyBarHeight    = 6,
+        barWidth          = 210,
+        barHeight         = 8,
         rowGap            = 6,
-        objectiveGap      = 3,
-        timerRunningColor = { r = 1, g = 1, b = 1 },
-        timerWarningColor = { r = 0.9, g = 0.7, b = 0.2 },
-        timerExpiredColor = { r = 0.9, g = 0.2, b = 0.2 },
-        timerPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
-        timerPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusThreeColor = { r = 0.3, g = 0.8, b = 1 },
-        timerBarPastPlusTwoColor = { r = 0.4, g = 1, b = 0.4 },
+        objectiveGap      = 4,
+        timerPlusTwoColor = { r = 0.3, g = 0.8, b = 1 },
+        timerPlusThreeColor = { r = 0.4, g = 1, b = 0.4 },
         objectiveTextColor = { r = 0.9, g = 0.9, b = 0.9 },
         objectiveCompletedColor = { r = 0.3, g = 0.8, b = 0.3 },
         splitFasterColor  = { r = 0.4, g = 1, b = 0.4 },
         splitSlowerColor  = { r = 1, g = 0.45, b = 0.45 },
         deathTextColor    = { r = 0.93, g = 0.33, b = 0.33 },
-        enemy0to25Color   = { r = 0.9, g = 0.25, b = 0.25 },
-        enemy25to50Color  = { r = 0.95, g = 0.6, b = 0.2 },
-        enemy50to75Color  = { r = 0.95, g = 0.85, b = 0.2 },
-        enemy75to100Color = { r = 0.3, g = 0.8, b = 0.3 },
-        enemyBarColorMode = "PROGRESS",
-        enemyBarSolidColor = { r = 0.35, g = 0.55, b = 0.8 },
-        fontPath          = nil,
-        advancedMode      = false,
-        selectedPreset    = "ELLESMERE",
+        enemyBarUseAccent = true,
+        enemyBarColor     = { r = 0.35, g = 0.55, b = 0.8 },
     },
 }
 
@@ -325,9 +140,9 @@ local function FormatTime(seconds, withMilliseconds)
             s = floor(whole % 60)
             ms = 0
         end
-        return format("%d:%02d.%03d", m, s, ms)
+        return format("%02d:%02d.%03d", m, s, ms)
     end
-    return format("%d:%02d", m, s)
+    return format("%02d:%02d", m, s)
 end
 
 local function RoundToInt(value)
@@ -342,32 +157,16 @@ local function GetColor(tbl, fallbackR, fallbackG, fallbackB)
     return fallbackR, fallbackG, fallbackB
 end
 
-local function GetEnemyForcesColor(profile, percent)
-    local pct = min(100, max(0, percent or 0))
-
-    if pct >= 75 then
-        return GetColor(profile and profile.enemy75to100Color, 0.3, 0.8, 0.3)
-    elseif pct >= 50 then
-        return GetColor(profile and profile.enemy50to75Color, 0.95, 0.85, 0.2)
-    elseif pct >= 25 then
-        return GetColor(profile and profile.enemy25to50Color, 0.95, 0.6, 0.2)
-    end
-
-    return GetColor(profile and profile.enemy0to25Color, 0.9, 0.25, 0.25)
-end
-
 local function GetTimerBarFillColor(profile, elapsed, plusThreeTime, plusTwoTime, maxTime)
-    if maxTime and maxTime > 0 then
-        if elapsed > maxTime then
-            return GetColor(profile and profile.timerExpiredColor, 0.9, 0.2, 0.2)
-        elseif elapsed > plusTwoTime then
-            return GetColor(profile and profile.timerBarPastPlusTwoColor, 0.4, 1, 0.4)
-        elseif elapsed > plusThreeTime then
-            return GetColor(profile and profile.timerBarPastPlusThreeColor, 0.3, 0.8, 1)
-        end
+    if maxTime and maxTime > 0 and elapsed > plusTwoTime then
+        -- +2 lost: solid #B059CC.
+        return 0xB0 / 255, 0x59 / 255, 0xCC / 255
+    elseif maxTime and maxTime > 0 and elapsed > plusThreeTime then
+        -- +3 lost, +2 still on: match the +2 threshold color.
+        return GetColor(profile and profile.timerPlusTwoColor, 0.3, 0.8, 1)
     end
-
-    return GetColor(profile and profile.timerRunningColor, 1, 1, 1)
+    -- On for +3: match the +3 threshold color.
+    return GetColor(profile and profile.timerPlusThreeColor, 0.4, 1, 0.4)
 end
 
 local function NormalizeAffixKey(affixes)
@@ -503,20 +302,20 @@ local function FormatEnemyForcesText(enemyObj, formatId, compact)
     local rawTotal = enemyObj.rawTotalQuantity or enemyObj.totalQuantity or 100
     local percent = enemyObj.percent or enemyObj.quantity or 0
     local remaining = max(0, rawTotal - rawCurrent)
-    local prefix = compact and "" or "Enemy Forces "
+    local suffix = compact and "" or " Enemy Forces"
 
     if formatId == "COUNT" then
-        return format("%s%d/%d", prefix, RoundToInt(rawCurrent), RoundToInt(rawTotal))
+        return format("%d/%d%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), suffix)
     elseif formatId == "COUNT_PERCENT" then
-        return format("%s%d/%d - %.2f%%", prefix, RoundToInt(rawCurrent), RoundToInt(rawTotal), percent)
+        return format("%d/%d - %.2f%%%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), percent, suffix)
     elseif formatId == "REMAINING" then
         if compact then
             return format("%d left", RoundToInt(remaining))
         end
-        return format("%s%d remaining", prefix, RoundToInt(remaining))
+        return format("%d remaining%s", RoundToInt(remaining), suffix)
     end
 
-    return format("%s%.2f%%", prefix, percent)
+    return format("%.2f%%%s", percent, suffix)
 end
 
 -- Objective tracking
@@ -570,17 +369,24 @@ local function UpdateObjectives()
             obj.rawTotalQuantity = info.totalQuantity or 0
             if info.isWeightedProgress then
                 obj.isWeighted = true
+                currentRun._weightedObj = obj  -- cached for RenderEnemyForces
                 -- Normalize weighted progress to a 0-100 percent value.
+                -- Cache the parsed result keyed on the raw string -- skips
+                -- the gsub/tonumber chain on every tick where quantityString
+                -- hasn't actually changed (the common case).
                 local rawQuantity = info.quantity or 0
                 local quantityString = info.quantityString
                 if quantityString and quantityString ~= "" then
-                    local normalized = quantityString:gsub("%%", "")
-                    if normalized:find(",") and not normalized:find("%.") then
-                        normalized = normalized:gsub(",", ".")
-                    end
-                    local parsed = tonumber(normalized)
-                    if parsed then
-                        rawQuantity = parsed
+                    if obj._lastQS == quantityString then
+                        rawQuantity = obj._lastQSParsed or rawQuantity
+                    else
+                        local normalized = quantityString:gsub("%%", "")
+                        if normalized:find(",") and not normalized:find("%.") then
+                            normalized = normalized:gsub(",", ".")
+                        end
+                        local parsed = tonumber(normalized)
+                        if parsed then rawQuantity = parsed end
+                        obj._lastQS, obj._lastQSParsed = quantityString, parsed
                     end
                 end
 
@@ -625,12 +431,49 @@ local function NotifyRefresh()
     end)
 end
 
--- Timer tick (1 Hz)
+-- Authoritative elapsed value: hook Blizzard's own ChallengeModeBlock
+-- UpdateTime callback. Blizzard pushes us the correct elapsed every
+-- second; this is the only source that's drift-immune across /reload
+-- (GetWorldElapsedTime can latch a stale value right after PEW because
+-- WORLD_STATE_TIMER_START fires asynchronously).
+local _blizzElapsed = nil
+local function GetChallengeModeElapsed()
+    if _blizzElapsed then return _blizzElapsed end
+    -- Fallback while Blizzard hasn't pushed yet (e.g. fresh login)
+    return select(2, GetWorldElapsedTime(1))
+end
+
+-- Forward-declared so the hook below can call it; OnTimerTick is defined later.
+local _onTimerTick_fwd  -- assigned to OnTimerTick once that local exists
+
+do
+    local _lastTickedSec = -1
+    local function _onUpdateTime(_, elapsedTime)
+        if not (elapsedTime and elapsedTime >= 0) then return end
+        _blizzElapsed = elapsedTime
+        if not currentRun.active then return end
+        -- Blizzard fires UpdateTime several times per second but elapsedTime
+        -- only changes once/sec -- skip duplicates.
+        local sec = math.floor(elapsedTime)
+        if sec == _lastTickedSec then return end
+        _lastTickedSec = sec
+        if _onTimerTick_fwd then _onTimerTick_fwd() end
+    end
+    local block = (ScenarioObjectiveTracker and ScenarioObjectiveTracker.ChallengeModeBlock)
+        or (ScenarioBlocksFrame and ScenarioBlocksFrame.ChallengeModeBlock)
+    if block and block.UpdateTime then
+        hooksecurefunc(block, "UpdateTime", _onUpdateTime)
+    end
+end
+
+-- No more polling driver. The single source of timer ticks is the
+-- hooksecurefunc on ChallengeModeBlock:UpdateTime above -- Blizzard pushes
+-- us the elapsed time once per second of an active key. Outside a key,
+-- zero work runs.
 local function OnTimerTick()
     if not currentRun.active then return end
 
-    local _, elapsedTime = GetWorldElapsedTime(1)
-    currentRun.elapsed = elapsedTime or 0
+    currentRun.elapsed = GetChallengeModeElapsed() or currentRun.elapsed or 0
 
     local deathCount, timeLost = C_ChallengeMode.GetDeathCount()
     currentRun.deaths = deathCount or 0
@@ -639,49 +482,53 @@ local function OnTimerTick()
     UpdateObjectives()
     NotifyRefresh()
 end
+_onTimerTick_fwd = OnTimerTick  -- wire the forward-decl so the hook can call us
 
--- Suppress / restore Blizzard M+ frames
-local _blizzHiddenParent
-local _blizzOrigScenarioParent
-local _blizzOrigObjectiveTrackerParent
+-- Stubs kept for existing callers (StartRun/CompleteRun/ResetRun reference these).
+local function StartTimerLoop() end
+local function StopTimerLoop()  end
 
-local function SuppressBlizzardMPlus()
-    if not db or not db.profile.enabled then return end
-
-    if not _blizzHiddenParent then
-        _blizzHiddenParent = CreateFrame("Frame")
-        _blizzHiddenParent:Hide()
-    end
-
-    local sbf = _G.ScenarioBlocksFrame
-    if sbf and sbf:GetParent() ~= _blizzHiddenParent then
-        _blizzOrigScenarioParent = sbf:GetParent()
-        sbf:SetParent(_blizzHiddenParent)
-    end
-
+-- Hide Blizzard's ObjectiveTrackerFrame whenever our M+ timer is enabled
+-- and we're in an active challenge mode. Permanent hooksecurefunc on Show:
+-- every time Blizzard tries to show it during M+, we re-hide it. No
+-- SetParent (avoids tainting the secure scenario tree), no recursion into
+-- children (avoids the invisible-click-catcher pattern).
+local _trackerHookInstalled = false
+local function InstallTrackerHook()
+    if _trackerHookInstalled then return end
     local otf = _G.ObjectiveTrackerFrame
-    if otf and otf:GetParent() ~= _blizzHiddenParent then
-        _blizzOrigObjectiveTrackerParent = otf:GetParent()
-        otf:SetParent(_blizzHiddenParent)
+    if not otf then return end
+    _trackerHookInstalled = true
+    hooksecurefunc(otf, "Show", function()
+        if not (db and db.profile and db.profile.enabled) then return end
+        if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+           and C_ChallengeMode.IsChallengeModeActive() then
+            otf:Hide()
+        end
+    end)
+end
+
+-- Force a re-evaluation now (used at run start / option change). If we're
+-- in M+ and the addon is enabled, tracker hides; otherwise nothing happens.
+local function ApplyTrackerVisibility()
+    InstallTrackerHook()
+    local otf = _G.ObjectiveTrackerFrame
+    if not otf then return end
+    if db and db.profile and db.profile.enabled
+       and C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+       and C_ChallengeMode.IsChallengeModeActive() then
+        otf:Hide()
     end
 end
 
-local function UnsuppressBlizzardMPlus()
-    local sbf = _G.ScenarioBlocksFrame
-    if sbf and _blizzOrigScenarioParent and sbf:GetParent() == _blizzHiddenParent then
-        sbf:SetParent(_blizzOrigScenarioParent)
-    end
-
-    local otf = _G.ObjectiveTrackerFrame
-    if otf and _blizzOrigObjectiveTrackerParent and otf:GetParent() == _blizzHiddenParent then
-        otf:SetParent(_blizzOrigObjectiveTrackerParent)
-    end
-end
+local SuppressBlizzardMPlus   = ApplyTrackerVisibility
+local UnsuppressBlizzardMPlus = function() end  -- nothing to do; the hook only fires inside M+
 
 -- Run lifecycle
 local function StartRun()
     local mapID = C_ChallengeMode.GetActiveChallengeMapID()
     if not mapID then return end
+    _blizzElapsed = nil  -- discard any stale push from the previous run
 
     local mapName, _, timeLimit = C_ChallengeMode.GetMapUIInfo(mapID)
     local level, affixes = C_ChallengeMode.GetActiveKeystoneInfo()
@@ -696,14 +543,24 @@ local function StartRun()
     currentRun.deaths        = 0
     currentRun.deathTimeLost = 0
     currentRun.affixes       = affixes or {}
+    -- Cache affix names ONCE at run start. They never change mid-run, but
+    -- RenderStandalone was previously calling C_ChallengeMode.GetAffixInfo
+    -- for every affix on every render tick.
+    currentRun.affixNames = {}
+    if affixes then
+        for i, affixID in ipairs(affixes) do
+            local name = C_ChallengeMode.GetAffixInfo(affixID)
+            currentRun.affixNames[i] = name or ""
+        end
+    end
     currentRun.preciseStart = GetTimePreciseSec and GetTimePreciseSec() or nil
     currentRun.preciseCompletedElapsed = nil
     currentRun._lastDungeonComplete = false
+    currentRun._weightedObj = nil  -- populated by UpdateObjectives
     wipe(currentRun.objectives)
 
-    if updateTicker then updateTicker:Cancel() end
-    updateTicker = C_Timer.NewTicker(1, OnTimerTick)
-    OnTimerTick()
+    StartTimerLoop()
+    OnTimerTick()  -- prime the display immediately
 
     SuppressBlizzardMPlus()
     NotifyRefresh()
@@ -713,9 +570,9 @@ local function CompleteRun()
     currentRun.completed = true
     currentRun.active = false
 
-    if updateTicker then updateTicker:Cancel(); updateTicker = nil end
+    StopTimerLoop()
 
-    local _, elapsedTime = GetWorldElapsedTime(1)
+    local elapsedTime = GetChallengeModeElapsed()
     currentRun.elapsed = elapsedTime or currentRun.elapsed
     if currentRun.preciseStart and GetTimePreciseSec then
         currentRun.preciseCompletedElapsed = max(0, GetTimePreciseSec() - currentRun.preciseStart)
@@ -727,6 +584,7 @@ local function CompleteRun()
 end
 
 local function ResetRun()
+    _blizzElapsed = nil
     currentRun.active    = false
     currentRun.completed = false
     currentRun.mapID     = nil
@@ -743,7 +601,7 @@ local function ResetRun()
     wipe(currentRun.objectives)
     if db and db.profile then db.profile._activeRunSplits = nil end
 
-    if updateTicker then updateTicker:Cancel(); updateTicker = nil end
+    StopTimerLoop()
 
     UnsuppressBlizzardMPlus()
     NotifyRefresh()
@@ -772,27 +630,26 @@ local PREVIEW_RUN = {
     objectives    = {
         { name = "Kyrioss",                 completed = true,  elapsed = 510,  quantity = 1,     totalQuantity = 1,   rawQuantity = 1, rawTotalQuantity = 1, percent = 0, isWeighted = false },
         { name = "Stormguard Gorren",       completed = true,  elapsed = 1005, quantity = 1,     totalQuantity = 1,   rawQuantity = 1, rawTotalQuantity = 1, percent = 0, isWeighted = false },
-        { name = "Code Taint Monstrosity",   completed = false, elapsed = 0,    quantity = 0,     totalQuantity = 1,   rawQuantity = 0, rawTotalQuantity = 1, percent = 0, isWeighted = false },
+        { name = "Lua Error Monstrosity",   completed = false, elapsed = 0,    quantity = 0,     totalQuantity = 1,   rawQuantity = 0, rawTotalQuantity = 1, percent = 0, isWeighted = false },
         { name = "|cffff3333Ellesmere|r",    completed = false, elapsed = 0,    quantity = 0,     totalQuantity = 1,   rawQuantity = 0, rawTotalQuantity = 1, percent = 0, isWeighted = false },
         { name = "Enemy Forces",            completed = false, elapsed = 0,    quantity = 78.42, totalQuantity = 100, rawQuantity = 188, rawTotalQuantity = 240, percent = 78.42, isWeighted = true },
     },
 }
 
 _G._EMT_Apply = function()
+    -- Re-apply scale + center-anchored position so a Scale slider drag
+    -- doesn't make the frame "fly" rightward (TOPLEFT-anchor scaling).
+    -- Use the _G hook because the local ApplyStandalonePosition isn't in
+    -- scope at this point in the file.
+    if _G._EMT_ApplyStandalonePosition then
+        _G._EMT_ApplyStandalonePosition()
+    end
     if _G._EMT_StandaloneRefresh then _G._EMT_StandaloneRefresh() end
 end
 
-_G._EMT_GetPresets = GetPresetValues
-_G._EMT_ApplyPreset = function(presetID)
-    if not db or not db.profile then return false end
-    local applied = ApplyPresetToProfile(db.profile, presetID)
-    if applied and _G._EMT_StandaloneRefresh then
-        _G._EMT_StandaloneRefresh()
-    end
-    return applied
-end
+-- Preset system removed. Users tweak settings directly.
 
--- Reset the current profile back to defaults and apply the EllesmereUI preset.
+-- Reset the current profile back to defaults.
 -- Used by the module's "Reset" button in the EllesmereUI options panel.
 _G._EMT_ResetProfile = function()
     if not db or not db.profile then return false end
@@ -806,9 +663,6 @@ _G._EMT_ResetProfile = function()
     for key, value in pairs(DB_DEFAULTS.profile) do
         db.profile[key] = type(value) == "table" and CopyTable(value) or value
     end
-
-    -- Apply the EllesmereUI preset on top (sets selectedPreset = "ELLESMERE")
-    ApplyPresetToProfile(db.profile, "ELLESMERE")
 
     if _G._EMT_StandaloneRefresh then
         _G._EMT_StandaloneRefresh()
@@ -832,24 +686,13 @@ local FONT_OPTIONS = {
     { key = "Fonts/ARHei.TTF",            label = "AR Hei (CJK)" },
 }
 local function SFont()
-    if db and db.profile and db.profile.fontPath then
-        return db.profile.fontPath
-    end
     if EllesmereUI and EllesmereUI.GetFontPath then
         local p = EllesmereUI.GetFontPath("unitFrames")
         if p and p ~= "" then return p end
     end
     return FALLBACK_FONT
 end
-_G._EMT_GetFontOptions = function()
-    local values, order = {}, {}
-    for _, entry in ipairs(FONT_OPTIONS) do
-        local k = entry.key or "DEFAULT"
-        values[k] = entry.label
-        order[#order + 1] = k
-    end
-    return values, order
-end
+-- _EMT_GetFontOptions removed: font dropdown deleted from options page.
 local function SOutline()
     if EllesmereUI.GetFontOutlineFlag then return EllesmereUI.GetFontOutlineFlag() end
     return ""
@@ -868,6 +711,16 @@ local function ApplyShadow(fs)
     else
         fs:SetShadowOffset(0, 0)
     end
+end
+
+-- SetText with skip-if-unchanged. Avoids the per-tick SetText call (and
+-- the implicit re-measure / re-layout) when the string hasn't changed.
+local function SetTextDiff(fs, text)
+    if not fs then return end
+    text = text or ""
+    if fs._lastText == text then return end
+    fs:SetText(text)
+    fs._lastText = text
 end
 
 local function SetFittedText(fs, text, maxWidth, preferredSize, minSize)
@@ -891,9 +744,8 @@ local function SetFittedText(fs, text, maxWidth, preferredSize, minSize)
 end
 
 local function GetAccentColor()
-    if EllesmereUI.ResolveThemeColor then
-        local theme = EllesmereUIDB and EllesmereUIDB.accentTheme or "Class Colored"
-        return EllesmereUI.ResolveThemeColor(theme)
+    if EllesmereUI.ResolveThemeColor and EllesmereUI.GetActiveTheme then
+        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
     end
     return 0.05, 0.83, 0.62
 end
@@ -905,31 +757,6 @@ local function GetObjRow(parent, idx)
     fs:SetWordWrap(false)
     objRows[idx] = fs
     return fs
-end
-
-local affixIcons = {}
-local function GetAffixIcon(parent, idx)
-    if affixIcons[idx] then return affixIcons[idx] end
-
-    local frame = CreateFrame("Frame", nil, parent)
-    frame:SetSize(16, 16)
-
-    local border = frame:CreateTexture(nil, "OVERLAY")
-    border:SetAllPoints()
-    border:SetAtlas("ChallengeMode-AffixRing-Sm")
-    frame.Border = border
-
-    local portrait = frame:CreateTexture(nil, "ARTWORK")
-    portrait:SetSize(16, 16)
-    portrait:SetPoint("CENTER", border)
-    frame.Portrait = portrait
-
-    frame.SetUp = ScenarioChallengeModeAffixMixin.SetUp
-    frame:SetScript("OnEnter", ScenarioChallengeModeAffixMixin.OnEnter)
-    frame:SetScript("OnLeave", GameTooltip_Hide)
-
-    affixIcons[idx] = frame
-    return frame
 end
 
 local function CreateStandaloneFrame()
@@ -962,19 +789,22 @@ local function CreateStandaloneFrame()
 
     f._affixFS = f:CreateFontString(nil, "OVERLAY")
     f._affixFS:SetWordWrap(true)
-    f._affixIconsAnchor = CreateFrame("Frame", nil, f)
-    f._affixIconsAnchor:SetSize(1, 16)
 
     f._timerFS = f:CreateFontString(nil, "OVERLAY")
     f._timerFS:SetJustifyH("CENTER")
+    f._timerFS:SetWordWrap(false)
+    f._timerFS:SetNonSpaceWrap(false)
     f._timerDetailFS = f:CreateFontString(nil, "OVERLAY")
     f._timerDetailFS:SetWordWrap(false)
+    f._timerDetailFS:SetNonSpaceWrap(false)
     f._barBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
     f._barFill = f:CreateTexture(nil, "ARTWORK")
     f._seg3 = f:CreateTexture(nil, "OVERLAY")
     f._seg2 = f:CreateTexture(nil, "OVERLAY")
     f._threshFS = f:CreateFontString(nil, "OVERLAY")
     f._threshFS:SetWordWrap(false)
+    f._threshFS2 = f:CreateFontString(nil, "OVERLAY")
+    f._threshFS2:SetWordWrap(false)
     f._deathFS = f:CreateFontString(nil, "OVERLAY")
     f._deathFS:SetWordWrap(false)
     f._enemyFS = f:CreateFontString(nil, "OVERLAY")
@@ -992,8 +822,17 @@ local function CreateStandaloneFrame()
         f:SetScale(db.profile.scale or 1.0)
         if db.profile.standalonePos then
             local pos = db.profile.standalonePos
-            f:ClearAllPoints()
-            f:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+            local cx, cy = pos.centerX, pos.centerY
+            if not cx then
+                -- Legacy TOPLEFT-stored position; will be migrated to center
+                -- on the first ApplyStandalonePosition / drag-save call.
+                f:ClearAllPoints()
+                f:SetPoint(pos.point or "TOPLEFT", UIParent, pos.relPoint or "BOTTOMLEFT",
+                    pos.x or 0, pos.y or 0)
+            else
+                f:ClearAllPoints()
+                f:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
+            end
         end
     end
 
@@ -1021,19 +860,20 @@ local function RenderStandalone()
     end
 
     local f = CreateStandaloneFrame()
-    local PAD = 10
-    local ALIGN_PAD = 6
-    local TBAR_PAD = 10
-    local configuredTimerBarH = p.timerBarHeight or 10
+    local PAD = 12
+    local ALIGN_PAD = 0
+    local TBAR_PAD = 0
+    local configuredTimerBarH = p.barHeight or 8
     local TBAR_H = p.timerInBar and max(configuredTimerBarH, 22) or configuredTimerBarH
-    local ENEMY_BAR_H = p.enemyBarHeight or 6
+    local ENEMY_BAR_H = p.barHeight or 8
     local ROW_GAP = p.rowGap or 6
-    local OBJ_GAP = p.objectiveGap or 3
+    local OBJ_GAP = p.objectiveGap or 4
 
     f:SetWidth(p.frameWidth or 260)
 
-    local scale = p.scale or 1.0
-    f:SetScale(scale)
+    -- Scale ownership lives in ApplyStandalonePosition (called from
+    -- _EMT_Apply on slider changes). Don't SetScale here -- doing so on
+    -- every render can race the anchor and visually shift the frame.
     local alpha = p.standaloneAlpha or 0.85
     f:SetBackdropColor(0.05, 0.04, 0.08, alpha)
     f:SetBackdropBorderColor(0.15, 0.15, 0.15, min(alpha, 0.6))
@@ -1055,25 +895,33 @@ local function RenderStandalone()
         return PAD
     end
 
+    local _gAlign = (p.alignAllText == "LEFT") and "LEFT" or "RIGHT"
+    local function _ra() return _gAlign end
+
     -- Title
-    local titleAlign = p.titleAlign or "CENTER"
-    local titleText = format("+%d  %s", run.level, run.mapName or "Mythic+")
-    if p.showDeaths and p.deathsInTitle and run.deaths > 0 then
-        local deathPart = format("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:0|t %d", run.deaths)
-        if p.deathTimeInTitle and run.deathTimeLost > 0 then
-            deathPart = deathPart .. format("  (-%s)", FormatTime(run.deathTimeLost))
-        end
-        titleText = titleText .. format("  |cffee5555%s|r", deathPart)
+    local titleAlign = _ra(p.titleAlign or "CENTER")
+    local tR, tG, tB
+    if p.titleUseAccent ~= false then
+        tR, tG, tB = aR, aG, aB
+    elseif p.titleColor then
+        tR, tG, tB = p.titleColor.r or 1, p.titleColor.g or 1, p.titleColor.b or 1
+    else
+        tR, tG, tB = 1, 1, 1
     end
+    local titleText = format("|cff%02x%02x%02x+%d  %s|r",
+        floor(tR * 255), floor(tG * 255), floor(tB * 255),
+        run.level, run.mapName or "Mythic+")
     f._titleFS:SetJustifyH(titleAlign)
     f._titleFS:SetTextColor(1, 1, 1)
-    SetFittedText(f._titleFS, titleText, innerW, 13, 10)
+    local titleMax = p.titleSize or 13
+    local titleMin = max(8, titleMax - 3)
+    SetFittedText(f._titleFS, titleText, innerW, titleMax, titleMin)
     f._titleFS:ClearAllPoints()
     f._titleFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
     f._titleFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, y)
-    f._titleFS:SetHeight(20)
     f._titleFS:Show()
-    y = y - 22 - ROW_GAP
+    local titleH = f._titleFS:GetStringHeight() or titleMax
+    y = y - titleH - 2 - ROW_GAP
 
     -- Affixes
     if p.showAffixes then
@@ -1089,101 +937,52 @@ local function RenderStandalone()
                 end
             end
         else
-            for _, id in ipairs(run.affixes) do
-                local name = C_ChallengeMode.GetAffixInfo(id)
+            -- Use the cached affix names snapshotted at StartRun. Falls back
+            -- to GetAffixInfo only if cache is missing (run started before
+            -- this code path was added, or preview mode).
+            for i, id in ipairs(run.affixes) do
+                local name = (run.affixNames and run.affixNames[i])
+                    or C_ChallengeMode.GetAffixInfo(id)
                 if name then
                     names[#names + 1] = name
                     affixIDs[#affixIDs + 1] = id
                 end
             end
         end
-        local affixMode = p.affixDisplayMode or "TEXT"
-        local showAffixText = (affixMode == "TEXT" or affixMode == "BOTH") and #names > 0
-        local showAffixIcons = (affixMode == "ICONS" or affixMode == "BOTH") and #affixIDs > 0
-
-        if showAffixText then
-            f._affixFS:SetTextColor(0.55, 0.55, 0.55)
+        if #names > 0 then
+            f._affixFS:SetTextColor(1, 1, 1)
             f._affixFS:SetJustifyH(titleAlign)
-            SetFittedText(f._affixFS, table.concat(names, "  \194\183  "), innerW, 10, 8)
+            local affixMax = p.affixSize or 10
+            local affixMin = max(6, affixMax - 2)
+            SetFittedText(f._affixFS, table.concat(names, "  \194\183  "), innerW, affixMax, affixMin)
             f._affixFS:ClearAllPoints()
-            f._affixFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-            f._affixFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, y)
+            f._affixFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y + 5)
+            f._affixFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, y + 5)
             f._affixFS:Show()
-            y = y - (f._affixFS:GetStringHeight() or 12) - ROW_GAP
+            y = y - (f._affixFS:GetStringHeight() or 12) - ROW_GAP + 5
         else
             f._affixFS:Hide()
         end
-
-        if showAffixIcons then
-            local iconSpacing = 4
-            local iconSize = 16
-            local totalIconW = (#affixIDs * iconSize) + ((#affixIDs - 1) * iconSpacing)
-            f._affixIconsAnchor:ClearAllPoints()
-            if titleAlign == "RIGHT" then
-                f._affixIconsAnchor:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, y)
-            elseif titleAlign == "LEFT" then
-                f._affixIconsAnchor:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-            else
-                f._affixIconsAnchor:SetPoint("TOP", f, "TOP", 0, y)
-            end
-            f._affixIconsAnchor:SetSize(totalIconW, iconSize)
-            f._affixIconsAnchor:Show()
-
-            for index, affixID in ipairs(affixIDs) do
-                local icon = GetAffixIcon(f._affixIconsAnchor, index)
-                icon:ClearAllPoints()
-                if titleAlign == "RIGHT" then
-                    if index == 1 then
-                        icon:SetPoint("TOPRIGHT", f._affixIconsAnchor, "TOPRIGHT", 0, 0)
-                    else
-                        icon:SetPoint("RIGHT", affixIcons[index - 1], "LEFT", -iconSpacing, 0)
-                    end
-                else
-                    if index == 1 then
-                        icon:SetPoint("TOPLEFT", f._affixIconsAnchor, "TOPLEFT", 0, 0)
-                    else
-                        icon:SetPoint("LEFT", affixIcons[index - 1], "RIGHT", iconSpacing, 0)
-                    end
-                end
-                icon:SetUp(affixID)
-                icon.affixID = affixID
-                icon:Show()
-            end
-            for index = #affixIDs + 1, #affixIcons do
-                affixIcons[index]:Hide()
-            end
-
-            y = y - iconSize - ROW_GAP
-        else
-            f._affixIconsAnchor:Hide()
-            for index = 1, #affixIcons do
-                affixIcons[index]:Hide()
-            end
-        end
     else
         f._affixFS:Hide()
-        f._affixIconsAnchor:Hide()
-        for index = 1, #affixIcons do
-            affixIcons[index]:Hide()
-        end
     end
 
-    -- Deaths
-    if p.showDeaths and run.deaths > 0 and not p.deathsInTitle then
-        local deathAlign = p.deathAlign or "LEFT"
+    -- Deaths (toggle removed; always on when there are deaths)
+    if run.deaths > 0 and not p.deathsInTitle then
+        local deathAlign = _ra(p.deathAlign or "LEFT")
         local dPad = ContentPad(deathAlign)
-        SetFS(f._deathFS, 10)
+        SetFS(f._deathFS, 12)
         ApplyShadow(f._deathFS)
         local dR, dG, dB = GetColor(p.deathTextColor, 0.93, 0.33, 0.33)
         f._deathFS:SetTextColor(dR, dG, dB)
         f._deathFS:SetText(format("%d Death%s  -%s",
             run.deaths, run.deaths ~= 1 and "s" or "", FormatTime(run.deathTimeLost)))
         f._deathFS:ClearAllPoints()
-        f._deathFS:SetPoint("TOPLEFT", f, "TOPLEFT", dPad, y)
-        f._deathFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -dPad, y)
+        f._deathFS:SetPoint("TOPLEFT", f, "TOPLEFT", dPad, y - 5)
+        f._deathFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -dPad, y - 5)
         f._deathFS:SetJustifyH(deathAlign)
         f._deathFS:Show()
-        y = y - (f._deathFS:GetStringHeight() or 12) - ROW_GAP
+        y = y - (f._deathFS:GetStringHeight() or 12) - ROW_GAP - 5
     else
         f._deathFS:Hide()
     end
@@ -1196,78 +995,108 @@ local function RenderStandalone()
     local completedElapsed = run.preciseCompletedElapsed or elapsed
     local timerBarR, timerBarG, timerBarB = GetTimerBarFillColor(p, run.completed and completedElapsed or elapsed, plusThreeT, plusTwoT, maxTime)
 
+    -- Build timer text per user-selected display mode.
+    --   REMAINING        -> "11:37"   (or "+OT" when overtime)
+    --   REMAINING_TOTAL  -> "11:37 / 33:00"
+    --   ELAPSED          -> "21:23"
+    --   ELAPSED_DETAIL   -> "21:23 (11:37 / 33:00)"
     local timerText
+    local timerDetailText
     if run.completed then
         timerText = FormatTime(completedElapsed, p.showCompletedMilliseconds ~= false)
-    elseif elapsed > maxTime and maxTime > 0 then
-        timerText = "+" .. FormatTime(elapsed - maxTime)
     else
-        timerText = FormatTime(timeLeft)
+        local mode = p.timerDisplayMode or "REMAINING"
+        local elaStr = FormatTime(elapsed)
+        local maxStr = FormatTime(maxTime)
+        local remStr = FormatTime(timeLeft)
+        if mode == "REMAINING_TOTAL" then
+            timerText = elaStr .. " / " .. maxStr
+        elseif mode == "ELAPSED" then
+            timerText = remStr
+        elseif mode == "ELAPSED_DETAIL" then
+            timerText = remStr
+            timerDetailText = " (" .. elaStr .. " / " .. maxStr .. ")"
+        else
+            timerText = elaStr
+        end
     end
 
-    local tR, tG, tB
-    if run.completed then
-        if completedElapsed <= plusThreeT then      tR, tG, tB = GetColor(p.timerPlusThreeColor, 0.3, 0.8, 1)
-        elseif completedElapsed <= plusTwoT then    tR, tG, tB = GetColor(p.timerPlusTwoColor, 0.4, 1, 0.4)
-        elseif completedElapsed <= maxTime then     tR, tG, tB = GetColor(p.timerWarningColor, 0.9, 0.7, 0.2)
-        else                               tR, tG, tB = GetColor(p.timerExpiredColor, 0.9, 0.2, 0.2) end
-    elseif timeLeft <= 0 then              tR, tG, tB = GetColor(p.timerExpiredColor, 0.9, 0.2, 0.2)
-    elseif timeLeft < maxTime * 0.2 then   tR, tG, tB = GetColor(p.timerWarningColor, 0.9, 0.7, 0.2)
-    else                                   tR, tG, tB = GetColor(p.timerRunningColor, 1, 1, 1) end
+    local tR, tG, tB = 1, 1, 1
+    local depleted = (run.completed and completedElapsed > maxTime)
+        or ((not run.completed) and timeLeft <= 0 and maxTime > 0)
+    if depleted then
+        tR, tG, tB = GetColor(p.timerExpiredColor, 0.9, 0.2, 0.2)
+    end
 
     local underBarMode = (p.enemyForcesPos == "UNDER_BAR")
 
     -- Threshold text
+    local _barW_for_thresh = math.min(p.barWidth or 210, innerW - TBAR_PAD * 2)
+    if _barW_for_thresh < 60 then _barW_for_thresh = 60 end
+
     local function RenderThresholdText()
         if (p.showPlusTwoTimer or p.showPlusThreeTimer) and maxTime > 0 then
-            local parts = {}
+            local function buildLabel(threshTime, color)
+                local diff = threshTime - elapsed
+                if diff >= 0 then
+                    local cR, cG, cB = GetColor(color, 0.3, 0.8, 1)
+                    return format("|cff%02x%02x%02x%s|r",
+                        floor(cR * 255), floor(cG * 255), floor(cB * 255), FormatTime(diff))
+                end
+                return format("|cff999999%s|r", FormatTime(threshTime))
+            end
+
+            -- Threshold text sits centered horizontally on its tick mark,
+            -- anchored to the timer bar so it follows the bar exactly.
+            local function place(fs, tickRatio)
+                fs:ClearAllPoints()
+                local tickX = _barW_for_thresh * tickRatio
+                if underBarMode then
+                    -- threshold rendered before the bar -> sit above the bar
+                    fs:SetPoint("BOTTOM", f._barBg, "TOPLEFT", tickX, 2)
+                else
+                    -- threshold rendered after the bar -> sit below the bar
+                    fs:SetPoint("TOP", f._barBg, "BOTTOMLEFT", tickX, -2)
+                end
+            end
+
             if p.showPlusThreeTimer then
-                local diff = plusThreeT - elapsed
-                if diff >= 0 then
-                    local cR, cG, cB = GetColor(p.timerPlusThreeColor, 0.3, 0.8, 1)
-                    parts[#parts + 1] = format("|cff%02x%02x%02x+3  %s|r", floor(cR * 255), floor(cG * 255), floor(cB * 255), FormatTime(diff))
-                else
-                    parts[#parts + 1] = format("|cff666666+3  -%s|r", FormatTime(abs(diff)))
-                end
-            end
-            if p.showPlusTwoTimer then
-                local diff = plusTwoT - elapsed
-                if diff >= 0 then
-                    local cR, cG, cB = GetColor(p.timerPlusTwoColor, 0.4, 1, 0.4)
-                    parts[#parts + 1] = format("|cff%02x%02x%02x+2  %s|r", floor(cR * 255), floor(cG * 255), floor(cB * 255), FormatTime(diff))
-                else
-                    parts[#parts + 1] = format("|cff666666+2  -%s|r", FormatTime(abs(diff)))
-                end
-            end
-            if #parts > 0 then
-                SetFS(f._threshFS, 10)
+                SetFS(f._threshFS, p.thresholdSize or 12)
                 ApplyShadow(f._threshFS)
                 f._threshFS:SetTextColor(1, 1, 1)
-                f._threshFS:SetText(table.concat(parts, "      "))
-                f._threshFS:SetJustifyH(p.timerAlign or "CENTER")
-                f._threshFS:ClearAllPoints()
-                f._threshFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-                f._threshFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, y)
+                f._threshFS:SetText(buildLabel(plusThreeT, p.timerPlusThreeColor))
+                place(f._threshFS, plusThreeT / maxTime)
                 f._threshFS:Show()
-                y = y - (f._threshFS:GetStringHeight() or 12) - ROW_GAP
             else
                 f._threshFS:Hide()
             end
+            if p.showPlusTwoTimer then
+                SetFS(f._threshFS2, p.thresholdSize or 12)
+                ApplyShadow(f._threshFS2)
+                f._threshFS2:SetTextColor(1, 1, 1)
+                f._threshFS2:SetText(buildLabel(plusTwoT, p.timerPlusTwoColor))
+                place(f._threshFS2, plusTwoT / maxTime)
+                f._threshFS2:Show()
+            else
+                f._threshFS2:Hide()
+            end
+            -- Reserve vertical space for the threshold row (height + gap).
+            y = y - (p.thresholdSize or 12) - ROW_GAP
         else
             f._threshFS:Hide()
+            f._threshFS2:Hide()
         end
     end
 
-    -- Enemy forces
+    -- Enemy forces (toggle removed; always rendered)
     local function RenderEnemyForces()
-        if not p.showEnemyBar then
-            f._enemyFS:Hide(); f._enemyBarBg:Hide(); f._enemyBarFill:Hide()
-            if f._enemyBarText then f._enemyBarText:Hide() end
-            return
-        end
-        local enemyObj = nil
-        for _, obj in ipairs(run.objectives) do
-            if obj.isWeighted then enemyObj = obj; break end
+        -- Use cached ref (set by UpdateObjectives) instead of re-finding
+        -- the weighted objective on every render.
+        local enemyObj = run._weightedObj
+        if not enemyObj then
+            for _, obj in ipairs(run.objectives) do
+                if obj.isWeighted then enemyObj = obj; break end
+            end
         end
         if not enemyObj then
             f._enemyFS:Hide(); f._enemyBarBg:Hide(); f._enemyBarFill:Hide()
@@ -1275,7 +1104,7 @@ local function RenderStandalone()
             return
         end
 
-        local objAlign = p.objectiveAlign or "LEFT"
+        local objAlign = _ra(p.objectiveAlign or "LEFT")
         local ePad = ContentPad(objAlign)
         local pctRaw = min(100, max(0, enemyObj.quantity))
         local pctPos = p.enemyForcesPctPos or "LABEL"
@@ -1286,7 +1115,7 @@ local function RenderStandalone()
             and FormatEnemyForcesText(enemyObj, enemyTextFormat, false)
             or "Enemy Forces"
 
-        SetFS(f._enemyFS, 10)
+        SetFS(f._enemyFS, p.objectivesSize or 12)
         ApplyShadow(f._enemyFS)
         if enemyObj.completed then
             f._enemyFS:SetTextColor(GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3))
@@ -1297,7 +1126,7 @@ local function RenderStandalone()
 
         local function RenderEnemyBar()
             local besideRoom = (not enemyObj.completed and pctPos == "BESIDE") and 62 or 0
-            local barW = min(p.barWidth or (innerW - TBAR_PAD * 2), innerW - TBAR_PAD * 2) - besideRoom
+            local barW = math.min(p.barWidth or 210, innerW - TBAR_PAD * 2) - besideRoom
             if barW < 60 then barW = 60 end
             f._enemyBarBg:ClearAllPoints()
             if objAlign == "RIGHT" then
@@ -1314,10 +1143,10 @@ local function RenderStandalone()
             local eR, eG, eB
             if enemyObj.completed then
                 eR, eG, eB = GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3)
-            elseif (p.enemyBarColorMode or "PROGRESS") == "SOLID" then
-                eR, eG, eB = GetColor(p.enemyBarSolidColor, 0.35, 0.55, 0.8)
+            elseif p.enemyBarUseAccent ~= false then
+                eR, eG, eB = GetAccentColor()
             else
-                eR, eG, eB = GetEnemyForcesColor(p, pctRaw)
+                eR, eG, eB = GetColor(p.enemyBarColor, 0.35, 0.55, 0.8)
             end
 
             local epct = enemyObj.completed and 1 or min(1, max(0, pctRaw / 100))
@@ -1333,7 +1162,7 @@ local function RenderStandalone()
                 f._enemyBarText:SetWordWrap(false)
             end
             if pctPos == "BAR" then
-                SetFS(f._enemyBarText, 8)
+                SetFS(f._enemyBarText, p.objectivesSize or 12)
                 ApplyShadow(f._enemyBarText)
                 if enemyObj.completed then
                     f._enemyBarText:SetTextColor(GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3))
@@ -1345,7 +1174,7 @@ local function RenderStandalone()
                 f._enemyBarText:SetPoint("CENTER", f._enemyBarBg, "CENTER", 0, 0)
                 f._enemyBarText:Show()
             elseif pctPos == "BESIDE" then
-                SetFS(f._enemyBarText, 8)
+                SetFS(f._enemyBarText, p.objectivesSize or 12)
                 ApplyShadow(f._enemyBarText)
                 if enemyObj.completed then
                     f._enemyBarText:SetTextColor(GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3))
@@ -1372,12 +1201,15 @@ local function RenderStandalone()
                 f._enemyFS:Hide()
                 return
             end
+            -- In under-bar mode, lift the enemy text up 2px to sit closer to the bar.
+            local labelY = underBarMode and (y + 2) or y
             f._enemyFS:ClearAllPoints()
-            f._enemyFS:SetPoint("TOPLEFT", f, "TOPLEFT", ePad, y)
-            f._enemyFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -ePad, y)
+            f._enemyFS:SetPoint("TOPLEFT", f, "TOPLEFT", ePad, labelY)
+            f._enemyFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -ePad, labelY)
             f._enemyFS:SetJustifyH(objAlign)
             f._enemyFS:Show()
-            y = y - (f._enemyFS:GetStringHeight() or 12) - 4
+            local trailingGap = underBarMode and (4 - 2 + 5) or 4
+            y = y - (f._enemyFS:GetStringHeight() or 12) - trailingGap
         end
 
         if underBarMode then
@@ -1389,52 +1221,85 @@ local function RenderStandalone()
         end
     end
 
-    -- Timer text
+    -- Timer text (with optional inline detail rendered as one combined block)
     if not p.timerInBar then
-        local timerAlign = p.timerAlign or "CENTER"
+        local timerAlign = _ra(p.timerAlign or "CENTER")
         SetFS(f._timerFS, 20)
         ApplyShadow(f._timerFS)
         f._timerFS:SetTextColor(tR, tG, tB)
-        f._timerFS:SetText(timerText)
-        f._timerFS:SetJustifyH(timerAlign)
-        f._timerFS:ClearAllPoints()
-        local timerBlockW = min(innerW, max(140, floor(innerW * 0.72)))
+        SetTextDiff(f._timerFS, timerText)
         if timerAlign == "RIGHT" then
-            f._timerFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
-        elseif timerAlign == "LEFT" then
-            f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
+            f._timerFS:SetJustifyH("RIGHT")
         else
-            f._timerFS:SetPoint("TOP", f, "TOP", 0, y)
+            f._timerFS:SetJustifyH("LEFT")
         end
-        f._timerFS:SetWidth(timerBlockW)
+        f._timerFS:ClearAllPoints()
+        -- Fixed-width once per format change: MM:SS is always 5 chars, so
+        -- width only re-measures when the string length changes (e.g. mode swap).
+        local _mainLen = #(timerText or "")
+        if f._timerFS._lastLen ~= _mainLen then
+            f._timerFS._lastLen = _mainLen
+            -- Measure with worst-case digits so SetWidth never clips the live text.
+            local templ = (timerText or ""):gsub("%d", "9")
+            f._timerFS:SetText(templ)
+            -- +2px safety margin: subpixel rounding at non-default UI scales
+            -- can otherwise clip the rightmost glyph and force a wrap.
+            f._timerFS:SetWidth((f._timerFS:GetStringWidth() or 0) + 2)
+            SetTextDiff(f._timerFS, timerText)
+        end
+
+        if timerDetailText then
+            SetFS(f._timerDetailFS, 12)
+            ApplyShadow(f._timerDetailFS)
+            f._timerDetailFS:SetTextColor(1, 1, 1)
+            f._timerDetailFS:SetText(timerDetailText)
+            -- Justify so the edge that touches the main timer is the stable one.
+            if timerAlign == "RIGHT" then
+                f._timerDetailFS:SetJustifyH("RIGHT")
+            else
+                f._timerDetailFS:SetJustifyH("LEFT")
+            end
+            f._timerDetailFS:ClearAllPoints()
+            local _detLen = #timerDetailText
+            if f._timerDetailFS._lastLen ~= _detLen then
+                f._timerDetailFS._lastLen = _detLen
+                local templ = timerDetailText:gsub("%d", "9")
+                f._timerDetailFS:SetText(templ)
+                f._timerDetailFS:SetWidth((f._timerDetailFS:GetStringWidth() or 0) + 2)
+                f._timerDetailFS:SetText(timerDetailText)
+            end
+
+            local gap = 4
+            local detailW = f._timerDetailFS:GetStringWidth() or 0
+            if timerAlign == "RIGHT" then
+                -- Main timer flush right; detail sits to the LEFT of main.
+                f._timerFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
+                f._timerDetailFS:SetPoint("BOTTOMRIGHT", f._timerFS, "BOTTOMLEFT", -gap, 4)
+            elseif timerAlign == "LEFT" then
+                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
+                f._timerDetailFS:SetPoint("BOTTOMLEFT", f._timerFS, "BOTTOMRIGHT", gap, 4)
+            else
+                f._timerFS:SetPoint("TOP", f, "TOP", -(detailW + gap) / 2, y)
+                f._timerDetailFS:SetPoint("BOTTOMLEFT", f._timerFS, "BOTTOMRIGHT", gap, 4)
+            end
+            f._timerDetailFS:Show()
+        else
+            if timerAlign == "RIGHT" then
+                f._timerFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
+            elseif timerAlign == "LEFT" then
+                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
+            else
+                f._timerFS:SetPoint("TOP", f, "TOP", 0, y)
+            end
+            f._timerDetailFS:Hide()
+        end
+
         f._timerFS:Show()
         local timerH = f._timerFS:GetStringHeight() or 20
         if timerH < 20 then timerH = 20 end
         y = y - timerH - ROW_GAP
     else
         f._timerFS:Hide()
-    end
-
-    if p.showTimerBreakdown and maxTime > 0 then
-        local timerAlign = p.timerAlign or "CENTER"
-        SetFS(f._timerDetailFS, 10)
-        ApplyShadow(f._timerDetailFS)
-        f._timerDetailFS:SetTextColor(0.65, 0.65, 0.65)
-        f._timerDetailFS:SetText(format("%s / %s", FormatTime(elapsed), FormatTime(maxTime)))
-        f._timerDetailFS:SetJustifyH(timerAlign)
-        f._timerDetailFS:ClearAllPoints()
-        local detailBlockW = min(innerW, max(140, floor(innerW * 0.72)))
-        if timerAlign == "RIGHT" then
-            f._timerDetailFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
-        elseif timerAlign == "LEFT" then
-            f._timerDetailFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
-        else
-            f._timerDetailFS:SetPoint("TOP", f, "TOP", 0, y)
-        end
-        f._timerDetailFS:SetWidth(detailBlockW)
-        f._timerDetailFS:Show()
-        y = y - (f._timerDetailFS:GetStringHeight() or 10) - ROW_GAP
-    else
         f._timerDetailFS:Hide()
     end
 
@@ -1444,13 +1309,14 @@ local function RenderStandalone()
 
     -- Timer bar
     if maxTime > 0 and p.showTimerBar ~= false then
-        local barW = min(p.barWidth or (innerW - TBAR_PAD * 2), innerW - TBAR_PAD * 2)
+        local barW = math.min(p.barWidth or 210, innerW - TBAR_PAD * 2)
         if barW < 60 then barW = 60 end
 
         f._barBg:ClearAllPoints()
-        if (p.timerAlign or "CENTER") == "RIGHT" then
+        local _barAlign = _ra(p.timerAlign or "CENTER")
+        if _barAlign == "RIGHT" then
             f._barBg:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + TBAR_PAD), y)
-        elseif (p.timerAlign or "CENTER") == "LEFT" then
+        elseif _barAlign == "LEFT" then
             f._barBg:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + TBAR_PAD, y)
         else
             f._barBg:SetPoint("TOP", f, "TOP", 0, y)
@@ -1467,19 +1333,31 @@ local function RenderStandalone()
         f._barFill:SetColorTexture(timerBarR, timerBarG, timerBarB, 0.85)
         f._barFill:Show()
 
-        -- +3 marker
-        f._seg3:ClearAllPoints()
-        f._seg3:SetSize(1, TBAR_H + 4)
-        f._seg3:SetPoint("TOP", f._barBg, "TOPLEFT", floor(barW * (plusThreeT / maxTime)), 2)
-        f._seg3:SetColorTexture(0.3, 0.8, 1, 0.9)
-        if p.showPlusThreeBar then f._seg3:Show() else f._seg3:Hide() end
+        -- Pixel-perfect 2-physical-pixel tick markers.
+        local _PP = EllesmereUI and EllesmereUI.PP
+        local _es = f:GetEffectiveScale()
+        local _tickW = _PP and _PP.SnapForES(2, _es) or 2
+        local function _snap(v) return _PP and _PP.SnapForES(v, _es) or v end
 
-        -- +2 marker
+        f._seg3:ClearAllPoints()
+        f._seg3:SetSize(_tickW, TBAR_H)
+        f._seg3:SetPoint("TOPLEFT", f._barBg, "TOPLEFT", _snap(barW * (plusThreeT / maxTime)) - _tickW / 2, 0)
+        if elapsed > plusThreeT then
+            f._seg3:SetColorTexture(1, 1, 1, 0.9)
+        else
+            f._seg3:SetColorTexture(0.4, 1, 0.4, 0.9)
+        end
+        f._seg3:Show()
+
         f._seg2:ClearAllPoints()
-        f._seg2:SetSize(1, TBAR_H + 4)
-        f._seg2:SetPoint("TOP", f._barBg, "TOPLEFT", floor(barW * (plusTwoT / maxTime)), 2)
-        f._seg2:SetColorTexture(0.4, 1, 0.4, 0.9)
-        if p.showPlusTwoBar then f._seg2:Show() else f._seg2:Hide() end
+        f._seg2:SetSize(_tickW, TBAR_H)
+        f._seg2:SetPoint("TOPLEFT", f._barBg, "TOPLEFT", _snap(barW * (plusTwoT / maxTime)) - _tickW / 2, 0)
+        if elapsed > plusTwoT then
+            f._seg2:SetColorTexture(1, 1, 1, 0.9)
+        else
+            f._seg2:SetColorTexture(0.3, 0.8, 1, 0.9)
+        end
+        f._seg2:Show()
 
         if p.timerInBar then
             if not f._barTimerFS then
@@ -1494,7 +1372,7 @@ local function RenderStandalone()
             else
                 f._barTimerFS:SetTextColor(tR, tG, tB)
             end
-            f._barTimerFS:SetText(timerText)
+            SetTextDiff(f._barTimerFS, timerText)
             f._barTimerFS:ClearAllPoints()
             f._barTimerFS:SetPoint("CENTER", f._barBg, "CENTER", 0, 0)
             f._barTimerFS:Show()
@@ -1520,13 +1398,13 @@ local function RenderStandalone()
     -- Objectives
     local objIdx = 0
     if p.showObjectives then
-        local objAlign = p.objectiveAlign or "LEFT"
+        local objAlign = _ra(p.objectiveAlign or "LEFT")
         local oPad = ContentPad(objAlign)
         for i, obj in ipairs(run.objectives) do
             if not obj.isWeighted then
                 objIdx = objIdx + 1
                 local row = GetObjRow(f, objIdx)
-                SetFS(row, 10)
+                SetFS(row, p.objectivesSize or 12)
                 ApplyShadow(row)
 
                 local displayName = obj.name or ("Objective " .. i)
@@ -1534,14 +1412,15 @@ local function RenderStandalone()
                     displayName = format("%d/%d %s", obj.quantity or 0, obj.totalQuantity, displayName)
                 end
                 if obj.completed then
-                    displayName = "|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0|t " .. displayName
                     row:SetTextColor(GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3))
                 else
                     row:SetTextColor(GetColor(p.objectiveTextColor, 0.9, 0.9, 0.9))
                 end
                 local timeStr = ""
                 if p.showObjectiveTimes ~= false and obj.completed and obj.elapsed and obj.elapsed > 0 then
-                    timeStr = "|cff888888" .. FormatTime(obj.elapsed) .. "|r"
+                    local cR, cG, cB = GetColor(p.objectiveCompletedColor, 0.3, 0.8, 0.3)
+                    timeStr = format("|cff%02x%02x%02x%s|r",
+                        floor(cR * 255), floor(cG * 255), floor(cB * 255), FormatTime(obj.elapsed))
                 end
                 local compareSuffix = ""
                 if obj.completed and obj.referenceElapsed then
@@ -1552,15 +1431,11 @@ local function RenderStandalone()
                         compareSuffix = "  |cff888888PB " .. FormatTime(target) .. "|r"
                     end
                 end
-                if timeStr ~= "" and (p.objectiveTimePosition or "END") == "START" then
-                    row:SetText(timeStr .. "  " .. displayName .. compareSuffix)
-                else
-                    row:SetText(displayName .. (timeStr ~= "" and ("  " .. timeStr) or "") .. compareSuffix)
-                end
+                row:SetText(displayName .. (timeStr ~= "" and ("  " .. timeStr) or "") .. compareSuffix)
                 row:SetJustifyH(objAlign)
                 row:ClearAllPoints()
                 local oInnerW = frameW - oPad * 2
-                local objBlockW = min(oInnerW, max(160, floor(oInnerW * 0.8)))
+                local objBlockW = oInnerW
                 if objAlign == "RIGHT" then
                     row:SetPoint("TOPRIGHT", f, "TOPRIGHT", -oPad, y)
                 elseif objAlign == "CENTER" then
@@ -1580,6 +1455,7 @@ local function RenderStandalone()
     end
 
     if not underBarMode then
+        if objIdx > 0 then y = y - 5 end
         RenderEnemyForces()
     end
 
@@ -1605,16 +1481,47 @@ _G._EMT_GetStandaloneFrame = function()
     return CreateStandaloneFrame()
 end
 
+-- One-time migration of legacy TOPLEFT-stored position into stable centerX/Y
+-- offsets relative to UIParent center. Must run BEFORE SetScale so the
+-- derived center reflects the unscaled frame; otherwise repeated calls
+-- after SetScale would compute a different center each time and the frame
+-- would drift.
+local function _ensureCenterPos()
+    local pos = db and db.profile and db.profile.standalonePos
+    if not pos then return end
+    if pos.centerX and pos.centerY then return end
+    local f = standaloneFrame
+    if not (f and f:GetCenter()) then return end
+    -- Force scale 1.0 momentarily so GetCenter returns un-scaled coords.
+    local prevScale = f:GetScale()
+    f:SetScale(1.0)
+    local cx, cy = f:GetCenter()
+    local upX, upY = UIParent:GetCenter()
+    pos.centerX = cx - upX
+    pos.centerY = cy - upY
+    -- Strip legacy keys so the migration only runs once.
+    pos.point, pos.relPoint, pos.x, pos.y = nil, nil, nil, nil
+    f:SetScale(prevScale)
+end
+
 local function ApplyStandalonePosition()
     if not db then return end
     if not standaloneFrame then return end
-    standaloneFrame:SetScale(db.profile.scale or 1.0)
+    _ensureCenterPos()
     local pos = db.profile.standalonePos
-    if pos then
+    local scale = db.profile.scale or 1.0
+
+    -- SetPoint offsets are in the frame's OWN scaled coord space, so the
+    -- effective on-screen offset = stored * scale. To keep the visual
+    -- center pinned regardless of scale, divide the stored offset by scale.
+    standaloneFrame:SetScale(scale)
+    if pos and pos.centerX and pos.centerY then
         standaloneFrame:ClearAllPoints()
-        standaloneFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+        standaloneFrame:SetPoint("CENTER", UIParent, "CENTER",
+            pos.centerX / scale, pos.centerY / scale)
     end
 end
+_G._EMT_ApplyStandalonePosition = ApplyStandalonePosition
 
 -- True only when every scenario objective is complete: Avoids false times being saved/missed runs due to completion on same tick
 local function IsDungeonComplete()
@@ -1635,31 +1542,28 @@ local function IsDungeonComplete()
     return seenAny
 end
 
+-- Event-driven runtime. Zero polling. Lifecycle events handle start /
+-- complete / reset; SCENARIO_CRITERIA_UPDATE handles the "all objectives
+-- done" detection (no need for a per-tick poller). Multi-event detection
+-- with GetInstanceInfo difficulty fallback (IsChallengeModeActive returns
+-- false post-completion, so map-id alone isn't reliable).
 local runtimeFrame = CreateFrame("Frame")
-local runtimePollElapsed = 0
-local runtimeInitElapsed = 0
-local runtimeInitialized = false
 
-local function RuntimeOnUpdate(_, elapsed)
-    if not db then return end
-
-    if not runtimeInitialized then
-        runtimeInitElapsed = runtimeInitElapsed + elapsed
-        if runtimeInitElapsed >= 1 then
-            runtimeInitialized = true
-            CheckForActiveRun()
-            ApplyStandalonePosition()
-        end
+local function _isInChallengeMode()
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+       and C_ChallengeMode.IsChallengeModeActive() then
+        return true
     end
+    -- Fallback: difficulty 8 = Mythic Keystone. Reliable across the brief
+    -- window where IsChallengeModeActive flips false but we're still in
+    -- the dungeon (e.g. immediately after completion).
+    local _, instanceType, difficulty = GetInstanceInfo()
+    return instanceType == "party" and difficulty == 8
+end
 
-    runtimePollElapsed = runtimePollElapsed + elapsed
-    if runtimePollElapsed < 0.25 then return end
-    runtimePollElapsed = 0
-
-    if not db.profile.enabled then
-        if currentRun.active or currentRun.completed then
-            ResetRun()
-        end
+local function HandleRuntimeEvent(event)
+    if not db or not db.profile.enabled then
+        if currentRun.active or currentRun.completed then ResetRun() end
         return
     end
 
@@ -1667,25 +1571,60 @@ local function RuntimeOnUpdate(_, elapsed)
     if activeMapID then
         if not currentRun.active and not currentRun.completed then
             StartRun()
-        elseif currentRun.active and IsDungeonComplete() then
-            -- Every objective done (bosses + Enemy Forces). Blizzard is about
-            -- to clear the M+, so save now with the accurate time.
-            CompleteRun()
         end
-        -- Cache completion state while scenario APIs still answer. Used below
-        -- to salvage a run if the M+ clears between polls.
-        if currentRun.active then
-            currentRun._lastDungeonComplete = IsDungeonComplete()
+        -- Pure event-driven completion check: criteria updates fire when
+        -- bosses die and when the weighted enemy-forces tally crosses 100.
+        if currentRun.active and event == "SCENARIO_CRITERIA_UPDATE" then
+            if IsDungeonComplete() then CompleteRun() end
         end
-    elseif currentRun.active or currentRun.completed then
-        -- M+ cleared. Salvage as completion if last poll saw it complete.
-        if currentRun.active and currentRun._lastDungeonComplete then
+    elseif (currentRun.active or currentRun.completed) and not _isInChallengeMode() then
+        -- M+ cleared and we're no longer in a M+ instance. Salvage as
+        -- completion if the last criteria update saw it complete.
+        if currentRun.active and IsDungeonComplete() then
             CompleteRun()
         else
             ResetRun()
         end
     end
 end
+
+-- Always-on (low-frequency) events: enough to detect a key starting.
+local _ALWAYS_EVENTS = {
+    "PLAYER_ENTERING_WORLD", "CHALLENGE_MODE_START", "CHALLENGE_MODE_COMPLETED",
+    "CHALLENGE_MODE_RESET", "WORLD_STATE_TIMER_START", "WORLD_STATE_TIMER_STOP",
+}
+-- High-frequency events: only needed during an active run. SCENARIO_CRITERIA_UPDATE
+-- fires constantly in any scenario (pet battles, world quest scenarios, garrisons,
+-- etc.); ZONE_CHANGED_NEW_AREA fires on every subzone crossing while questing.
+-- Registering them only during a key keeps idle CPU at zero.
+local _RUN_EVENTS = { "SCENARIO_CRITERIA_UPDATE", "ZONE_CHANGED_NEW_AREA" }
+
+local function _registerRunEvents()
+    for _, ev in ipairs(_RUN_EVENTS) do runtimeFrame:RegisterEvent(ev) end
+end
+local function _unregisterRunEvents()
+    for _, ev in ipairs(_RUN_EVENTS) do runtimeFrame:UnregisterEvent(ev) end
+end
+
+for _, ev in ipairs(_ALWAYS_EVENTS) do runtimeFrame:RegisterEvent(ev) end
+runtimeFrame:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_ENTERING_WORLD" then
+        ApplyStandalonePosition()
+        -- API data isn't fully populated at PEW; retry once after 10s
+        -- to catch a /reload mid-key.
+        C_Timer.After(10, function() HandleRuntimeEvent("PLAYER_ENTERING_WORLD_DELAYED") end)
+    end
+    HandleRuntimeEvent(event)
+
+    -- Toggle high-frequency event subscriptions based on whether we're
+    -- actually in a key. Outside M+ we don't want to wake on every quest
+    -- update or subzone change.
+    if currentRun.active then
+        _registerRunEvents()
+    else
+        _unregisterRunEvents()
+    end
+end)
 
 function EMT:OnInitialize()
     db = EllesmereUI.Lite.NewDB("EllesmereUIMythicTimerDB", DB_DEFAULTS)
@@ -1698,6 +1637,10 @@ function EMT:OnInitialize()
                 pp[key] = type(value) == "table" and CopyTable(value) or value
             end
         end
+        -- showPreview is a transient options-panel state. /reload doesn't fire
+        -- the EUI window's OnHide auto-off, so the saved value can persist
+        -- as true across reloads. Force it off at every login.
+        pp.showPreview = false
     end
 
     -- Season-based data purge: clear best runs/splits from previous seasons
@@ -1736,7 +1679,7 @@ function EMT:OnInitialize()
         end
     end)
 
-    runtimeFrame:SetScript("OnUpdate", RuntimeOnUpdate)
+    -- runtimeFrame is now event-driven (registered above); no OnUpdate needed.
 end
 
 function EMT:OnEnable()
@@ -1763,17 +1706,20 @@ function EMT:OnEnable()
                     return false
                 end,
                 savePos = function(_, point, relPoint, x, y)
-                    -- Save in frame's own coordinate space (TOPLEFT so height grows downward)
+                    -- Always save a CENTER offset so SetScale grows the
+                    -- frame symmetrically around the same on-screen point.
                     local f = standaloneFrame
-                    if f and f:GetLeft() and f:GetTop() then
-                        db.profile.standalonePos = { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = f:GetLeft(), y = f:GetTop() }
-                    else
-                        db.profile.standalonePos = { point = point, relPoint = relPoint, x = x, y = y }
+                    if f and f:GetCenter() then
+                        local cx, cy = f:GetCenter()
+                        local upX, upY = UIParent:GetCenter()
+                        db.profile.standalonePos = { centerX = cx - upX, centerY = cy - upY }
                     end
                     if f and not EllesmereUI._unlockActive then
-                        local pos = db.profile.standalonePos
-                        f:ClearAllPoints()
-                        f:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+                        local sx, sy = _centerPosFromSaved(db.profile.standalonePos)
+                        if sx then
+                            f:ClearAllPoints()
+                            f:SetPoint("CENTER", UIParent, "CENTER", sx, sy)
+                        end
                     end
                 end,
                 loadPos = function()
@@ -1783,12 +1729,7 @@ function EMT:OnEnable()
                     db.profile.standalonePos = nil
                 end,
                 applyPos = function()
-                    local pos = db.profile.standalonePos
-                    if pos and standaloneFrame then
-                        standaloneFrame:SetScale(db.profile.scale or 1.0)
-                        standaloneFrame:ClearAllPoints()
-                        standaloneFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
-                    end
+                    if standaloneFrame then ApplyStandalonePosition() end
                 end,
             }),
         })
