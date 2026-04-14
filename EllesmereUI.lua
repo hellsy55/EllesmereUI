@@ -2208,6 +2208,11 @@ local function WirePopupEscape(popup, dimmer)
     popup:EnableKeyboard(true)
     popup:SetScript("OnKeyDown", function(self, key)
         if key == "ESCAPE" then
+            if popup._modal then
+                -- Modal popups swallow Escape so the user must click a button.
+                self:SetPropagateKeyboardInput(false)
+                return
+            end
             self:SetPropagateKeyboardInput(false)
             dimmer:Hide()
             if popup._onCancel then popup._onCancel() end
@@ -2367,9 +2372,11 @@ local function CreateConfirmPopup()
     popup._cancelBtn  = cancelBtn
     popup._confirmBtn = confirmBtn
 
-    -- Close on dimmer click (only when clicking outside the popup)
+    -- Close on dimmer click (only when clicking outside the popup).
+    -- Modal popups ignore dimmer clicks entirely.
     popup:EnableMouse(true)
     dimmer:SetScript("OnMouseDown", function()
+        if popup._modal then return end
         if not popup:IsMouseOver() then
             dimmer:Hide()
             if popup._onCancel then popup._onCancel() end
@@ -2432,6 +2439,7 @@ function EllesmereUI:ShowConfirmPopup(opts)
     popup._confirmBtn._lbl:SetText(opts.confirmText or "Confirm")
     -- onDismiss: called on escape/click-outside. Falls back to onCancel if not provided.
     popup._onCancel = opts.onDismiss or opts.onCancel or nil
+    popup._modal = opts.modal and true or false
 
     -- Reset hover states
     popup._cancelBtn._resetAnim()
@@ -3785,6 +3793,41 @@ local function CreateMainFrame()
     end)
     addonScrollFrame:SetScript("OnScrollRangeChanged", UpdateAddonThumb)
     addonScrollFrame:HookScript("OnSizeChanged", UpdateAddonThumb)
+
+    -- Click / drag on the scrollbar track. Clicking anywhere on the track
+    -- jumps the scroll to that position; holding the button drags.
+    -- The visible track is 3px wide so we add a wider invisible hit frame.
+    addonTrack:EnableMouse(true)
+    addonTrack:SetHitRectInsets(-8, -2, 0, 0)
+    local function _scrollToCursor()
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        if maxScroll <= 0 then return end
+        local trackH = addonTrack:GetHeight()
+        local thumbH = addonThumb:GetHeight()
+        local travel = math.max(1, trackH - thumbH)
+        local _, cy = GetCursorPosition()
+        local scale = addonTrack:GetEffectiveScale()
+        local trackTop = addonTrack:GetTop() or 0
+        -- Center the thumb on the cursor, then clamp to travel range.
+        local offset = (trackTop - cy / scale) - thumbH / 2
+        offset = math.max(0, math.min(travel, offset))
+        local newScroll = (offset / travel) * maxScroll
+        addonScrollTarget = newScroll
+        addonScrollFrame:SetVerticalScroll(newScroll)
+        UpdateAddonThumb()
+    end
+    addonTrack:SetScript("OnMouseDown", function(self)
+        _scrollToCursor()
+        addonIsSmoothing = false
+        addonSmoothFrame:Hide()
+        self:SetScript("OnUpdate", _scrollToCursor)
+    end)
+    addonTrack:SetScript("OnMouseUp", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+    addonTrack:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
 
     for i, info in ipairs(ADDON_ROSTER) do
         local btn = CreateFrame("Button", nil, addonScrollChild)
@@ -6322,7 +6365,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.5.3"
+EllesmereUI.VERSION = "6.5.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6617,6 +6660,7 @@ EllesmereUI._RunConflictCheck = function()
                     cancelText  = "Don't show again",
                     onConfirm   = onDismiss,
                     onCancel    = onDismiss,
+                    modal       = true,
                 })
             else
                 print("|cffff6060[EllesmereUI]|r " .. msg:gsub("\n", " "))
