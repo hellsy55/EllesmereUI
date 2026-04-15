@@ -64,6 +64,9 @@ initFrame:SetScript("OnEvent", function(self)
         for _, pv in pairs(allPreviews) do
             if pv and pv.Update then pv:Update() end
         end
+        -- Keep the in-game boss preview's fake debuffs in sync with live
+        -- edits (Debuffs Location, Simple Debuff Display, debuff size, etc).
+        if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
     end
 
     local function ReloadAndUpdate()
@@ -82,6 +85,11 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterOnHide(function()
         for _, pv in pairs(allPreviews) do
             if pv and pv._disabledOverlay then pv._disabledOverlay:Hide() end
+        end
+        -- Auto-disable the in-game boss preview so live boss frames don't
+        -- linger after the user closes the options window.
+        if ns._bossPreviewActive and ns.SetBossPreview then
+            ns.SetBossPreview(false)
         end
     end)
 
@@ -706,13 +714,18 @@ initFrame:SetScript("OnEvent", function(self)
 
         side = side or "left"
 
-        -- FoT/ToT and Pet previews: no portrait, power bar, or debuffs
-        local noPortraitPreview = (unitKey == "targettarget" or unitKey == "pet")
-        local noPowerPreview = (unitKey == "targettarget" or unitKey == "pet")
-        local noDebuffPreview = (unitKey == "targettarget" or unitKey == "pet")
+        -- Mini frames (ToT/FoT/Pet) don't render power bars, debuffs, or
+        -- castbars at runtime, so the preview must match.
+        local isMiniPreview = (unitKey == "targettarget" or unitKey == "pet")
+        local noPowerPreview = isMiniPreview
+        local noDebuffPreview = isMiniPreview
+        local noCastbarPreview = isMiniPreview
 
-        local hasPortraitSupport = not noPortraitPreview and (settings.showPortrait ~= nil or settings.portraitMode ~= nil)
-        local showPortrait = hasPortraitSupport and (db.profile.portraitStyle or "attached") ~= "none"
+        local hasPortraitSupport = (settings.showPortrait ~= nil or settings.portraitMode ~= nil)
+        local portraitShownByUser = settings.showPortrait ~= false
+        local showPortrait = hasPortraitSupport
+                         and (db.profile.portraitStyle or "attached") ~= "none"
+                         and portraitShownByUser
         local frameW = settings.frameWidth or 181
         local healthH = settings.healthHeight or 46
         local powerH = noPowerPreview and 0 or (settings.powerHeight or 6)
@@ -721,8 +734,11 @@ initFrame:SetScript("OnEvent", function(self)
         local initPpExtra = initPpIsAtt and powerH or 0
         -- For player, show preview castbar when showPlayerCastbar is on (always locked to frame)
         -- For target/focus, show when showCastbar is on
+        -- Mini frames never show a castbar.
         local castbarH
-        if unitKey == "player" then
+        if noCastbarPreview then
+            castbarH = 0
+        elseif unitKey == "player" then
             local pch = settings.playerCastbarHeight
             castbarH = settings.showPlayerCastbar and (pch and pch > 0 and pch or 14) or 0
         else
@@ -885,9 +901,11 @@ initFrame:SetScript("OnEvent", function(self)
         else
             local barOpacity = (settings.healthBarOpacity or 90) / 100
             hA = barOpacity
-            -- Check for custom fill color (skipped when class colored is enabled)
+            -- Check for custom fill color (skipped when class colored is enabled).
+            -- Boss preview always renders as hostile-red since the real boss
+            -- frame never class-colors (no player class).
             local cFill = settings.customFillColor
-            local isClassColored = settings.healthClassColored
+            local isClassColored = settings.healthClassColored and unitKey ~= "boss"
             if isClassColored then
                 local _, classToken = UnitClass("player")
                 local cc = RAID_CLASS_COLORS[classToken]
@@ -1673,7 +1691,9 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Reposition name and health text based on settings
             side = s.portraitSide or unitSide[unitKey] or "left"
-            local sp = hasPortraitSupport and (db.profile.portraitStyle or "attached") ~= "none"
+            local sp = hasPortraitSupport
+                   and (db.profile.portraitStyle or "attached") ~= "none"
+                   and s.showPortrait ~= false
             local isAttached = (db.profile.portraitStyle or "attached") == "attached"
             local fw = s.frameWidth or 181
             local hh = s.healthHeight or 46
@@ -1780,9 +1800,11 @@ initFrame:SetScript("OnEvent", function(self)
                     uHR, uHG, uHB = 0x11/255, 0x11/255, 0x11/255
                     uBgR, uBgG, uBgB = 0x4f/255, 0x4f/255, 0x4f/255
                 else
-                    -- Check for custom fill color (skipped when class colored is enabled)
+                    -- Check for custom fill color (skipped when class colored is enabled).
+                    -- Boss preview always renders as hostile-red since the real
+                    -- boss frame never class-colors (no player class).
                     local cFill = s.customFillColor
-                    local isCC = s.healthClassColored
+                    local isCC = s.healthClassColored and unitKey ~= "boss"
                     if isCC then
                         local _, ct = UnitClass("player")
                         local cc = RAID_CLASS_COLORS[ct]
@@ -2329,15 +2351,25 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Debuff icons -- reposition based on anchor/growth/size/offset settings
+            -- Debuff icons -- reposition based on anchor/growth/size/offset settings.
+            -- Boss Simple Debuff Display forces Left anchor + frame-height-matched
+            -- size; this must match the live runtime override.
             local debuffExtra = 0
             if #debuffIcons > 0 and not noDebuffPreview then
                 local dAnc = s.debuffAnchor or "bottomleft"
+                local effectiveDebuffSize = s.debuffSize or 22
+                if unitKey == "boss" and s.simpleDebuffs ~= false then
+                    dAnc = "left"
+                    local pvPowerPos = s.powerPosition or "below"
+                    local pvPowerIsAtt = (pvPowerPos == "below" or pvPowerPos == "above")
+                    local pvPowerH = pvPowerIsAtt and (s.powerHeight or 0) or 0
+                    effectiveDebuffSize = (s.healthHeight or 34) + pvPowerH
+                end
                 local maxDeb = s.maxDebuffs or 10
                 local previewDebuffLimit = 5
                 local visibleDebuffCount = math.min(#debuffIcons, maxDeb, previewDebuffLimit)
                 if dAnc ~= "none" and visibleDebuffCount > 0 then
-                    local debuffSize = s.debuffSize or 22
+                    local debuffSize = effectiveDebuffSize
                     local debuffGap = 1
                     local dOffX = s.debuffOffsetX or 0
                     local dOffY = s.debuffOffsetY or 0
@@ -2376,16 +2408,30 @@ initFrame:SetScript("OnEvent", function(self)
                         justH = "BOTTOMLEFT"
                     end
 
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize
+                    -- Boss Simple Debuff Display: anchor the stack to the
+                    -- top of the health bar (not pf, which includes the cast
+                    -- bar) so the icons align with the bar area, matching
+                    -- the runtime layout.
+                    local useSimpleBossAnchor = (unitKey == "boss" and s.simpleDebuffs ~= false)
+                    local bossSimpleAnchorFrame = useSimpleBossAnchor and health or pf
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. (useSimpleBossAnchor and "S" or "N")
                     for i, df in ipairs(debuffIcons) do
                         if i <= visibleDebuffCount then
                             if df._anchorKey ~= anchorKey then
                                 PP.Size(df, debuffSize, debuffSize)
                                 df:ClearAllPoints()
                                 if i == 1 then
-                                    PP.Point(df, justH, pf, am.pt, am.ox, am.oy)
+                                    if useSimpleBossAnchor then
+                                        PP.Point(df, "TOPRIGHT", bossSimpleAnchorFrame, "TOPLEFT", -debuffGap, 0)
+                                    else
+                                        PP.Point(df, justH, pf, am.pt, am.ox, am.oy)
+                                    end
                                 else
-                                    PP.Point(df, justH, debuffIcons[1], justH, dx * (i - 1), dy * (i - 1))
+                                    if useSimpleBossAnchor then
+                                        PP.Point(df, "TOPRIGHT", debuffIcons[1], "TOPRIGHT", -(i - 1) * (debuffSize + debuffGap), 0)
+                                    else
+                                        PP.Point(df, justH, debuffIcons[1], justH, dx * (i - 1), dy * (i - 1))
+                                    end
                                 end
                                 df._anchorKey = anchorKey
                             end
@@ -2396,10 +2442,9 @@ initFrame:SetScript("OnEvent", function(self)
                     end
 
                     -- Add debuff height to header when debuffs are above or below the frame
-                    local debuffSize = s.debuffSize or 22
-                    local debuffGap = 1
+                    local debuffGap2 = 1
                     if dAnc == "topleft" or dAnc == "topright" or dAnc == "bottomleft" or dAnc == "bottomright" or dAnc == "left" or dAnc == "right" then
-                        debuffExtra = debuffSize + debuffGap + 2
+                        debuffExtra = effectiveDebuffSize + debuffGap2 + 2
                     end
                 else
                     for _, df in ipairs(debuffIcons) do if df:IsShown() then df:Hide() end end
@@ -3194,12 +3239,17 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); updateHlSwatch() end)
         end
 
-        -- Row 3: Bar Texture
+        -- Row 3: Bar Texture. Bar texture is a GLOBAL profile setting that
+        -- applies to every unit frame. Per-unit overrides were migrated to
+        -- the global key via v67_bar_texture_global_migration.
         local sharedTexDarkRow
         sharedTexDarkRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
-              getValue=function() return SVal("healthBarTexture", "none") end,
-              setValue=function(v) SSet("healthBarTexture", v); ReloadAndUpdate(); UpdatePreview() end },
+              getValue=function() return db.profile.healthBarTexture or "none" end,
+              setValue=function(v)
+                  db.profile.healthBarTexture = v
+                  ReloadAndUpdate(); UpdatePreview()
+              end },
             { type="toggle", text="Show Tooltip",
               getValue=function() return SVal("showUnitTooltip", true) end,
               setValue=function(v)
@@ -3209,43 +3259,6 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ReloadAndUpdate()
               end });  y = y - h
-        -- Sync icon: Health Bar Texture (left)
-        do
-            local rgn = sharedTexDarkRow._leftRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Bar Texture to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then
-                            UNIT_DB_MAP[key]().healthBarTexture = v
-                        end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().healthBarTexture or "none") ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().healthBarTexture or "none"
-                        for _, key in ipairs(checkedKeys) do
-                            UNIT_DB_MAP[key]().healthBarTexture = v
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -7052,8 +7065,9 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Shared mini frame settings builder
     ---------------------------------------------------------------------------
-    local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow, afterSizeRow)
+    local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow, afterSizeRow, opts)
         local _, h
+        opts = opts or {}
 
         -- DISPLAY
         local displayHeader
@@ -7066,10 +7080,23 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
         end
 
-        -- Row: Bar Height + Bar Width
+        -- Row: Bar Height + Bar Width (or Bar Height alone if the caller
+        -- relocates Bar Width into a custom slot above via opts.hideBarWidth)
         local sizeRow
         local mhDis, mhTip, mhRaw = EllesmereUI.MatchGuard(unitKey, "Height")
         local mwDis, mwTip, mwRaw = EllesmereUI.MatchGuard(unitKey, "Width")
+        local rightSlot
+        if opts.hideBarWidth then
+            rightSlot = { type="label", text="" }
+        else
+            rightSlot = { type="slider", text="Bar Width", min=60, max=300, step=1,
+                disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
+                getValue=function() return settingsTable.frameWidth end,
+                setValue=function(v)
+                    settingsTable.frameWidth = v
+                    ReloadAndUpdate()
+                end }
+        end
         sizeRow, h = W:DualRow(parent, y,
             { type="slider", text="Bar Height", min=10, max=80, step=1,
               disabled=mhDis, disabledTooltip=mhTip, rawTooltip=mhRaw,
@@ -7078,13 +7105,7 @@ initFrame:SetScript("OnEvent", function(self)
                 settingsTable.healthHeight = v
                 ReloadAndUpdate()
               end },
-            { type="slider", text="Bar Width", min=60, max=300, step=1,
-              disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
-              getValue=function() return settingsTable.frameWidth end,
-              setValue=function(v)
-                settingsTable.frameWidth = v
-                ReloadAndUpdate()
-              end });  y = y - h
+            rightSlot);  y = y - h
 
         -- Optional extra rows after size row (e.g. buff/debuff location)
         if afterSizeRow then
@@ -7134,11 +7155,42 @@ initFrame:SetScript("OnEvent", function(self)
         return y, displayHeader, sizeRow, textHeader, textRow, enableRowFrame
     end
 
+    -- Inline "Portrait on Right" cog attached to a Show Portrait toggle
+    -- region. Clicking the cog opens a popup with a single toggle that
+    -- swaps settings.portraitSide between "left" and "right" live.
+    local function AttachPortraitSideCog(rgn, settingsTable)
+        local _, cogShow = EllesmereUI.BuildCogPopup({
+            title = "Portrait Settings",
+            rows = {
+                { type="toggle", label="Portrait on Right",
+                  get=function() return (settingsTable.portraitSide or "left") == "right" end,
+                  set=function(v)
+                      settingsTable.portraitSide = v and "right" or "left"
+                      ReloadAndUpdate(); UpdatePreview()
+                  end },
+            },
+        })
+        local cogBtn = CreateFrame("Button", nil, rgn)
+        cogBtn:SetSize(26, 26)
+        cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -9, 0)
+        rgn._lastInline = cogBtn
+        cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+        cogBtn:SetAlpha(0.4)
+        local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+        cogTex:SetAllPoints()
+        cogTex:SetTexture(EllesmereUI.COGS_ICON)
+        cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+        cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+        cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+    end
+
     BuildFoTToTOptions = function(W, parent, y)
         local _, h
 
+        local portraitRow
+        local mwDis, mwTip, mwRaw = EllesmereUI.MatchGuard("totPet", "Width")
         local function enableRow(Ww, pp, yy)
-            return Ww:DualRow(pp, yy,
+            local enableR, eh = Ww:DualRow(pp, yy,
                 { type="toggle", text="Enable Target of Target",
                   getValue=function() return db.profile.enabledFrames.targettarget ~= false end,
                   setValue=function(v)
@@ -7151,10 +7203,27 @@ initFrame:SetScript("OnEvent", function(self)
                     db.profile.enabledFrames.focustarget = v
                     ReloadAndUpdate()
                   end })
+            local ph
+            portraitRow, ph = Ww:DualRow(pp, yy - eh,
+                { type="toggle", text="Show Portrait",
+                  getValue=function() return db.profile.totPet.showPortrait ~= false end,
+                  setValue=function(v)
+                    db.profile.totPet.showPortrait = v
+                    ReloadAndUpdate()
+                  end },
+                { type="slider", text="Bar Width", min=60, max=300, step=1,
+                  disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
+                  getValue=function() return db.profile.totPet.frameWidth end,
+                  setValue=function(v)
+                    db.profile.totPet.frameWidth = v
+                    ReloadAndUpdate()
+                  end })
+            AttachPortraitSideCog(portraitRow._leftRegion, db.profile.totPet)
+            return portraitRow, eh + ph
         end
 
         local displayHeader, sizeRow, textHeader, textRow
-        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.totPet, "totPet", enableRow)
+        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.totPet, "totPet", enableRow, nil, { hideBarWidth = true })
 
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
@@ -7184,6 +7253,7 @@ initFrame:SetScript("OnEvent", function(self)
                     db.profile.pet.showPortrait = v
                     ReloadAndUpdate()
                   end })
+            AttachPortraitSideCog(portraitRow._rightRegion, db.profile.pet)
             return portraitRow, h
         end
 
@@ -7204,9 +7274,38 @@ initFrame:SetScript("OnEvent", function(self)
     BuildBossOptions = function(W, parent, y)
         local _, h
 
+        -- Activate / Deactivate Boss Preview button -- matches the Party Mode
+        -- activate button: centered above the first section.
+        local activateBtnFrame, activateBtnLbl
+        local function PreviewLabel()
+            return ns._bossPreviewActive and "Deactivate Boss Preview" or "Activate Boss Preview"
+        end
+        activateBtnFrame, h = W:WideButton(parent, PreviewLabel(), y, function()
+            if not ns.SetBossPreview then return end
+            ns.SetBossPreview(not ns._bossPreviewActive)
+            if activateBtnLbl then activateBtnLbl:SetText(PreviewLabel()) end
+        end);  y = y - h
+        do
+            local btn = select(1, activateBtnFrame:GetChildren())
+            if btn then
+                for i = 1, btn:GetNumRegions() do
+                    local rgn = select(i, btn:GetRegions())
+                    if rgn and rgn.GetText and rgn:GetText() then
+                        activateBtnLbl = rgn; break
+                    end
+                end
+            end
+        end
+        if activateBtnLbl then
+            EllesmereUI.RegisterWidgetRefresh(function()
+                activateBtnLbl:SetText(PreviewLabel())
+            end)
+        end
+
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            portraitRow, h = Ww:DualRow(pp, yy,
+            local eh
+            portraitRow, eh = Ww:DualRow(pp, yy,
                 { type="toggle", text="Enable Boss Frames",
                   getValue=function() return db.profile.enabledFrames.boss ~= false end,
                   setValue=function(v)
@@ -7219,7 +7318,18 @@ initFrame:SetScript("OnEvent", function(self)
                     db.profile.boss.showPortrait = v
                     ReloadAndUpdate()
                   end })
-            return portraitRow, h
+            AttachPortraitSideCog(portraitRow._rightRegion, db.profile.boss)
+            local castRow, ch = Ww:DualRow(pp, yy - eh,
+                { type="toggle", text="Show Cast Icon",
+                  getValue=function() return db.profile.boss.showCastIcon ~= false end,
+                  setValue=function(v)
+                    db.profile.boss.showCastIcon = v
+                    ReloadAndUpdate()
+                  end },
+                { type="slider", text="Vertical Spacing", min=20, max=200, step=1,
+                  getValue=function() return db.profile.bossSpacing or 80 end,
+                  setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
+            return castRow, eh + ch
         end
 
         local function bossAfterSize(Ww, pp, yy)
@@ -7238,10 +7348,22 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
                 cogBtn:SetScript("OnClick", function(self) showFn(self) end)
             end
-            _, hh = Ww:DualRow(pp, yy,
-                { type="slider", text="Vertical Spacing", min=20, max=200, step=1,
-                  getValue=function() return db.profile.bossSpacing or 80 end,
-                  setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end },
+            -- INDICATORS section (below DISPLAY)
+            _, hh = Ww:SectionHeader(pp, "INDICATORS", yy);  yy = yy - hh
+
+            -- Simple Debuff Display: forces Left anchor + debuff height =
+            -- frame bar height so boss debuffs render as one large column.
+            local simpleRow
+            simpleRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Simple Debuff Display",
+                  tooltip = "Force debuffs to the Left of the frame and size them to match the frame height (excluding cast bar). Overrides the Debuffs Location and debuff size settings while enabled.",
+                  getValue=function() return db.profile.boss.simpleDebuffs ~= false end,
+                  setValue=function(v)
+                      db.profile.boss.simpleDebuffs = v
+                      ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                      EllesmereUI:RefreshPage()
+                  end },
                 { type="label", text="" });  yy = yy - hh
 
             local bossAuraRow
@@ -7263,7 +7385,12 @@ initFrame:SetScript("OnEvent", function(self)
                       ReloadAndUpdate()
                   end },
                 { type="dropdown", text="Debuffs Location", values=buffAnchorValues, order=buffAnchorOrder,
-                  getValue=function() return db.profile.boss.debuffAnchor or "bottomleft" end,
+                  disabled = function() return db.profile.boss.simpleDebuffs ~= false end,
+                  disabledTooltip = "Simple Debuff Display",
+                  getValue=function()
+                      if db.profile.boss.simpleDebuffs ~= false then return "left" end
+                      return db.profile.boss.debuffAnchor or "bottomleft"
+                  end,
                   setValue=function(v)
                       SwapAuraSlot(db.profile.boss, "debuffAnchor", v)
                       ReloadAndUpdate()
@@ -7301,7 +7428,7 @@ initFrame:SetScript("OnEvent", function(self)
                         ReloadAndUpdate()
                         EllesmereUI:RefreshPage()
                       end },
-                    { type="slider", text="Marker Size", min=12, max=48, step=1,
+                    { type="slider", text="Raid Marker Size", min=12, max=48, step=1,
                       disabled=bossRmOff, disabledTooltip="Raid Marker",
                       getValue=function() return db.profile.boss.raidMarkerSize or 28 end,
                       setValue=function(v) db.profile.boss.raidMarkerSize = v; ReloadAndUpdate() end });  yy = yy - hh

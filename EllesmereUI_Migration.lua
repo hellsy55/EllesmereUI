@@ -1400,6 +1400,44 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+--------------------------------------------------------------------------------
+--  v67 Bar Texture -> global setting
+--
+--  The Bar Texture dropdown now writes to db.profile.healthBarTexture instead
+--  of per-unit keys. Find the first non-"none" texture among player/target/
+--  focus (in that order) and promote it to the global key, then strip the
+--  per-unit overrides so nothing silently shadows the global.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "v67_bar_texture_global",
+    scope       = "profile",
+    description = "Promote per-unit healthBarTexture to a single global profile key.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+
+        -- Pick the first non-"none" override in the canonical order.
+        local winner
+        for _, unit in ipairs({ "player", "target", "focus" }) do
+            local s = uf[unit]
+            local v = type(s) == "table" and s.healthBarTexture
+            if type(v) == "string" and v ~= "" and v ~= "none" then
+                winner = v; break
+            end
+        end
+
+        if winner and (uf.healthBarTexture == nil or uf.healthBarTexture == "none") then
+            uf.healthBarTexture = winner
+        end
+
+        -- Strip per-unit overrides so the global value is the single source.
+        for _, unit in ipairs({ "player", "target", "focus", "pet", "totPet", "boss" }) do
+            local s = uf[unit]
+            if type(s) == "table" then s.healthBarTexture = nil end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

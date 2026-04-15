@@ -1621,6 +1621,15 @@ local function SkinCharacterSheet()
         return true
     end
 
+    -- Per-crest visibility. Each crest stat carries a showCrestKey; the
+    -- user can toggle each crest individually via the options cog. Default
+    -- is visible when the DB key is absent.
+    local function ShouldShowCrest(stat)
+        if not stat or not stat.showCrestKey then return true end
+        return not (EllesmereUIDB
+            and EllesmereUIDB["showCrest_" .. stat.showCrestKey] == false)
+    end
+
     -- Determine which stats to show based on class/spec
     local function GetFilteredAttributeStats()
         local spec = GetSpecialization()
@@ -1722,11 +1731,11 @@ local function SkinCharacterSheet()
                 colorKey = "Crests",
                 color = GetCategoryColor("Crests"),
                 stats = {
-                    { name = "Myth", func = function() return GetCrestValue(3347) end, format = "%d", currencyID = 3347 },
-                    { name = "Hero", func = function() return GetCrestValue(3345) end, format = "%d", currencyID = 3345 },
-                    { name = "Champion", func = function() return GetCrestValue(3343) end, format = "%d", currencyID = 3343 },
-                    { name = "Veteran", func = function() return GetCrestValue(3341) end, format = "%d", currencyID = 3341 },
-                    { name = "Adventurer", func = function() return GetCrestValue(3383) end, format = "%d", currencyID = 3383 },
+                    { name = "Myth", showCrestKey = "Myth", func = function() return GetCrestValue(3347) end, format = "%d", currencyID = 3347 },
+                    { name = "Hero", showCrestKey = "Hero", func = function() return GetCrestValue(3345) end, format = "%d", currencyID = 3345 },
+                    { name = "Champion", showCrestKey = "Champion", func = function() return GetCrestValue(3343) end, format = "%d", currencyID = 3343 },
+                    { name = "Veteran", showCrestKey = "Veteran", func = function() return GetCrestValue(3341) end, format = "%d", currencyID = 3341 },
+                    { name = "Adventurer", showCrestKey = "Adventurer", func = function() return GetCrestValue(3383) end, format = "%d", currencyID = 3383 },
                 }
             },
             {
@@ -1858,15 +1867,22 @@ local function SkinCharacterSheet()
         local currentSpec = GetSpecialization()
 
         for _, sectionData in ipairs(frame._statsSections) do
-            for _, stat in ipairs(sectionData.stats) do
-                if stat.label and stat.showWhen then
-                    local shouldShow = ShouldShowStat(stat.showWhen)
-                    if stat.label then stat.label:SetShown(shouldShow) end
-                    if stat.value then stat.value:SetShown(shouldShow) end
+            -- Collapsed sections keep all rows hidden regardless of
+            -- per-stat filters. Let the collapse/expand path own visibility.
+            if not sectionData.isCollapsed then
+                for _, stat in ipairs(sectionData.stats) do
+                    if stat.label and (stat.showWhen or stat.showCrestKey) then
+                        local shouldShow = ShouldShowStat(stat.showWhen)
+                                       and ShouldShowCrest(stat)
+                        stat.label:SetShown(shouldShow)
+                        if stat.value then stat.value:SetShown(shouldShow) end
+                        if stat.button then stat.button:SetShown(shouldShow) end
+                    end
                 end
             end
         end
     end
+    EllesmereUI._refreshStatsVisibility = RefreshStatsVisibility
 
     -- Event-driven primary-stat + stat-visibility refresh. Fires only on spec
     -- / talent / gear / combat-rating changes and once on panel open.
@@ -1890,6 +1906,9 @@ local function SkinCharacterSheet()
     frame:HookScript("OnShow", function()
         RefreshAttributeStats()
         RefreshStatsVisibility()
+        if EllesmereUI._updateStatCategoryVisibility then
+            EllesmereUI._updateStatCategoryVisibility()
+        end
     end)
 
     -- Function to update visibility of stat categories
@@ -2055,7 +2074,7 @@ local function SkinCharacterSheet()
         -- Stats in section
         for statIdx, stat in ipairs(section.stats) do
             -- Skip stats that don't meet the show conditions
-            if ShouldShowStat(stat.showWhen) then
+            if ShouldShowStat(stat.showWhen) and ShouldShowCrest(stat) then
                 -- Stat label
                 local label = sectionContainer:CreateFontString(nil, "OVERLAY")
                 label:SetFont(fontPath, 10, "")
@@ -2175,7 +2194,7 @@ local function SkinCharacterSheet()
                 })
 
                 -- Store stat elements for collapse/expand (include showWhen for visibility checks)
-                table.insert(sectionData.stats, {label = label, value = value, button = valueButton, showWhen = stat.showWhen})
+                table.insert(sectionData.stats, {label = label, value = value, button = valueButton, showWhen = stat.showWhen, showCrestKey = stat.showCrestKey})
 
                 -- Thin leader between label and value, vertically centered on
                 -- the row and physical-pixel-perfect.

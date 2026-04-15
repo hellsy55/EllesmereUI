@@ -86,10 +86,12 @@ local function InstallShowHook()
     -- it synchronously, so by the time OnShow fires the frame may already
     -- be hidden again -- we re-check IsShown().
     otf:HookScript("OnHide", function() if _bgFrame then _bgFrame:Hide() end end)
-    otf:HookScript("OnShow", function(self)
-        if _bgFrame then
-            if self:IsShown() then _bgFrame:Show() else _bgFrame:Hide() end
-        end
+    otf:HookScript("OnShow", function()
+        -- Defer one frame so Blizzard's post-show layout pass populates
+        -- usedBlocks before we re-measure; otherwise an empty tracker
+        -- shown on login would snap our BG to the fallback strip.
+        if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
+        if EQT.QueueResize then EQT.QueueResize() end
     end)
 end
 
@@ -102,7 +104,9 @@ local function UpdateVisibility()
         if _bgFrame then _bgFrame:Hide() end
     else
         if not otf:IsShown() then otf:Show() end
-        if _bgFrame then _bgFrame:Show() end
+        -- Let ResizeBGToContent decide BG visibility based on real content;
+        -- an unconditional Show here would resurrect the empty-state BG.
+        if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
     end
 end
 EQT.UpdateVisibility = UpdateVisibility
@@ -233,14 +237,10 @@ local function ResizeBGToContent()
     local bg = _bgFrame
     local otf = GetTracker()
     if not bg or not otf then return end
-    -- Sync BG visibility to the tracker every layout pass. Cheaper and
-    -- more reliable than hooking OnHide/OnShow, since ResizeBGToContent
-    -- is already called whenever content changes / anything re-lays out.
+    -- Tracker hidden (e.g. raid/arena auto-hide, Blizzard hide): BG follows.
     if not otf:IsShown() then
         if bg:IsShown() then bg:Hide() end
         return
-    elseif not bg:IsShown() then
-        bg:Show()
     end
     local lowest = GetLowestContentFrame()
     -- Transient "no visible content" states happen for a frame during
@@ -248,20 +248,23 @@ local function ResizeBGToContent()
     -- snapping the BG to the thin-strip fallback for one flicker.
     if not lowest and bg._lastLowest and bg._lastLowest.IsShown
        and bg._lastLowest:IsShown() then
+        if not bg:IsShown() then bg:Show() end
         return
     end
+    -- Truly no visible content (e.g. no quests in the log): hide BG + top
+    -- divider so we don't show an empty chrome panel.
+    if not lowest then
+        if bg:IsShown() then bg:Hide() end
+        bg._lastLowest = nil
+        return
+    end
+    if not bg:IsShown() then bg:Show() end
     bg:ClearAllPoints()
     bg:SetPoint("TOPLEFT",  otf, "TOPLEFT",  -6, -30)
     bg:SetPoint("TOPRIGHT", otf, "TOPRIGHT", 11, -30)
-    if lowest then
-        bg:SetPoint("BOTTOMLEFT",  lowest, "BOTTOMLEFT",   0, -15)
-        bg:SetPoint("BOTTOMRIGHT", lowest, "BOTTOMRIGHT",  0, -15)
-        bg._lastLowest = lowest
-    else
-        bg:SetPoint("BOTTOMLEFT",  otf, "TOPLEFT",  -6, -60)
-        bg:SetPoint("BOTTOMRIGHT", otf, "TOPRIGHT", 11, -60)
-        bg._lastLowest = nil
-    end
+    bg:SetPoint("BOTTOMLEFT",  lowest, "BOTTOMLEFT",   0, -15)
+    bg:SetPoint("BOTTOMRIGHT", lowest, "BOTTOMRIGHT",  0, -15)
+    bg._lastLowest = lowest
 end
 EQT.ResizeBGToContent = ResizeBGToContent
 

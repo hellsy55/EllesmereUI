@@ -1983,6 +1983,7 @@ function EllesmereUI.MakeUnlockElement(opts)
         noResize          = opts.noResize,
         linkedDimensions  = opts.linkedDimensions,
         noAnchorTarget    = opts.noAnchorTarget,
+        noAnchorTo        = opts.noAnchorTo,
     }
 end
 
@@ -6365,7 +6366,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.6.3"
+EllesmereUI.VERSION = "6.6.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

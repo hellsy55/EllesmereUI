@@ -7845,6 +7845,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Focus Reminders",
+                  tooltip = "This will display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus.",
                   getValue = function()
                       local bd = BD()
                       return bd.focusReminderEnabled == true

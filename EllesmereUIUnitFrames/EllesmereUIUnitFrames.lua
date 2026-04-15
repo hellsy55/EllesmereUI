@@ -113,7 +113,6 @@ local defaults = {
             detachedPortraitBorder = true,
             detachedPortraitBorderOpacity = 100,
             detachedPortraitBorderSize = 7,
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
             showPlayerAbsorb = false,
@@ -279,7 +278,6 @@ local defaults = {
             detachedPortraitBorder = true,
             detachedPortraitBorderOpacity = 100,
             detachedPortraitBorderSize = 7,
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
             borderSize = 1,
@@ -347,8 +345,8 @@ local defaults = {
             healthHeight = 25,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
+            portraitSide = "left",
             portraitMode = "2d",
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             textSize = 12,
             leftTextContent = "name",
@@ -364,8 +362,8 @@ local defaults = {
             healthHeight = 25,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
+            portraitSide = "left",
             portraitMode = "2d",
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             textSize = 12,
             leftTextContent = "name",
@@ -465,7 +463,6 @@ local defaults = {
             detachedPortraitBorderSize = 7,
             btbBgColor = { r = 0.2, g = 0.2, b = 0.2 },
             btbBgOpacity = 1.0,
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
             onlyPlayerDebuffs = true,
@@ -531,8 +528,8 @@ local defaults = {
             castbarClassColored = false,
             healthDisplay = "perhp",
             showPortrait = false,
+            portraitSide = "right",
             portraitMode = "2d",
-            healthBarTexture = "none",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
             onlyPlayerDebuffs = true,
@@ -549,6 +546,7 @@ local defaults = {
             debuffSize = 22,
             debuffOffsetX = 0,
             debuffOffsetY = 0,
+            simpleDebuffs = true,  -- forces Left anchor + frame-height-matched debuff size
             textSize = 12,
             leftTextContent = "name",
             rightTextContent = "perhp",
@@ -976,6 +974,22 @@ end
 -- Returns: anchorPoint (on frame), initialAnchor, growthX, growthY, offsetX, offsetY
 -- initialAnchor is ALWAYS derived from the anchor position (first icon pinned to anchor corner).
 -- Growth direction only affects where icons 2+ are placed.
+-- oUF's Aura element tiles icons in a grid using `element.maxCols` as the
+-- per-row count (falls back to element:GetWidth() / iconSize if nil).
+-- For explicit vertical growth ("up" / "down") the user expects a single
+-- column, so maxCols = 1. For explicit horizontal growth ("left" / "right")
+-- a single row is expected, so maxCols must be large enough that icons
+-- never wrap. "auto" or anything else returns nil so oUF keeps its default
+-- width-based grid.
+local function AuraMaxCols(growth, maxCount)
+    if growth == "up" or growth == "down" then
+        return 1
+    elseif growth == "left" or growth == "right" then
+        return math.max(maxCount or 1, 100)
+    end
+    return nil
+end
+
 local function ResolveBuffLayout(anchor, growth)
     anchor = anchor or "topleft"
     growth = growth or "auto"
@@ -1878,17 +1892,22 @@ local ABSORB_SHIELD_TEX = "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shie
 --   curClip  bounds: hpBar.LEFT  ->  healthTexture.RIGHT  (dynamic)
 --   missClip bounds: healthTexture.RIGHT -> hpBar.RIGHT   (dynamic)
 --
---   backfill bar: child of curClip, reverse fill, TOPRIGHT anchored to
---     healthTexture.TOPRIGHT, width = hpBar width. Its texture fills from
---     the current-HP edge leftward by (absorbAmt / maxHealth) * hpWidth.
---     curClip clips anything past hpBar.LEFT, so the visible portion is
---     exactly min(absorb, curHealth) pixels wide.
+-- The shield fills RIGHTWARD first (into the missing-health area) and only
+-- backfills into the filled portion when absorb exceeds missing-health.
 --
---   forward bar: child of missClip, forward fill, TOPLEFT anchored to
---     hpBar.TOPLEFT, width = hpBar width. Its texture fills from
---     hpBar.LEFT rightward by (absorbAmt / maxHealth) * hpWidth. missClip
---     clips anything left of healthTexture.RIGHT, so the visible portion
---     is exactly max(0, absorb - curHealth) pixels wide.
+--   forward bar (primary): child of missClip, forward fill, TOPLEFT anchored
+--     to healthTexture.TOPRIGHT (current-HP edge), width = hpBar width. Its
+--     texture fills from the current-HP edge rightward by
+--     (absorbAmt / maxHealth) * hpWidth. missClip clips anything past
+--     hpBar.RIGHT, so the visible portion is exactly min(absorb, missing)
+--     pixels wide.
+--
+--   backfill bar (overflow): child of curClip, reverse fill, TOPRIGHT
+--     anchored to hpBar.TOPRIGHT, width = hpBar width. Its texture fills
+--     from hpBar.RIGHT leftward by (absorbAmt / maxHealth) * hpWidth.
+--     curClip clips anything past healthTexture.RIGHT, so the visible
+--     portion is exactly max(0, absorb - missing) pixels wide -- only
+--     shows when shield overflows past the missing-health area.
 --
 -- Both bars receive the raw (secret-safe) absorbAmt via SetValue. No Lua
 -- arithmetic on the absorb value is ever performed. Wired into oUF via
@@ -1915,34 +1934,34 @@ local function CreateAbsorbBar(frame, unit, settings)
     missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
     missClip:SetClipsChildren(true)
 
-    -- Backfill bar: grows leftward from the current-HP edge into filled HP.
-    -- Width is full hpBar width; the right edge is pinned to the health
-    -- texture's right edge, so the left edge trails off to (curHealth -
-    -- hpWidth) which is clipped by curClip's left edge (= hpBar.LEFT).
+    -- Backfill bar (overflow): grows leftward from hpBar.RIGHT. curClip cuts
+    -- off anything right of the current-HP edge, so only the portion that
+    -- extends past the missing-health area renders (= max(0, absorb -
+    -- missing) visible). Appears only when shield > missing-health.
     local backfillBar = CreateFrame("StatusBar", nil, curClip)
     backfillBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local bfFill = backfillBar:GetStatusBarTexture()
     if bfFill then bfFill:SetDrawLayer("ARTWORK", 1) end
     backfillBar:SetStatusBarColor(1, 1, 1, 0.8)
     backfillBar:SetReverseFill(true)
-    backfillBar:SetPoint("TOPRIGHT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
-    backfillBar:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    backfillBar:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+    backfillBar:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
     backfillBar:SetWidth(hpBar:GetWidth())
     backfillBar:SetHeight(hpBar:GetHeight())
     backfillBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
     backfillBar:Hide()
 
-    -- Forward bar: grows rightward from hpBar.LEFT; the missClip cuts off
-    -- anything left of the current-HP edge, so only the portion past
-    -- curHealth actually renders (= max(0, absorb - curHealth) visible).
+    -- Forward bar (primary): grows rightward from the current-HP edge into
+    -- missing health. missClip cuts off anything right of hpBar.RIGHT, so
+    -- the visible portion is exactly min(absorb, missing) pixels wide.
     local forwardBar = CreateFrame("StatusBar", nil, missClip)
     forwardBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local fwFill = forwardBar:GetStatusBarTexture()
     if fwFill then fwFill:SetDrawLayer("ARTWORK", 1) end
     forwardBar:SetStatusBarColor(1, 1, 1, 0.8)
     forwardBar:SetReverseFill(false)
-    forwardBar:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
-    forwardBar:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+    forwardBar:SetPoint("TOPLEFT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
+    forwardBar:SetPoint("BOTTOMLEFT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
     forwardBar:SetWidth(hpBar:GetWidth())
     forwardBar:SetHeight(hpBar:GetHeight())
     forwardBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
@@ -1983,6 +2002,17 @@ local function CreateAbsorbBar(frame, unit, settings)
             local hp   = ab._hpBar
             local calc = ab._hpCalculator
             if not hp then return end
+
+            -- Respect the user's showPlayerAbsorb toggle: hide both segments
+            -- and skip the update entirely when absorbs are disabled. Without
+            -- this, every unit event would re-Show() them after ReloadFrames
+            -- hid them.
+            local s = GetSettingsForUnit(updUnit)
+            if s and s.showPlayerAbsorb == false then
+                ab:Hide()
+                if fw then fw:Hide() end
+                return
+            end
 
             local maxHealth, absorbAmt
             if calc and UnitGetDetailedHealPrediction then
@@ -2484,14 +2514,17 @@ local function CreateCastBar(frame, unit, settings)
     PP.Point(bgTex, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
     bgTex:SetColorTexture(0, 0, 0, 0.5)
 
-    -- Castbar borders (3 edges: left, right, bottom ? top is shared with the frame above)
-    PP.CreateBorder(castbarBg, 0, 0, 0, 1, 1, "OVERLAY", 0)
-
     local castbar = CreateFrame("StatusBar", nil, castbarBg)
     PP.Point(castbar, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
     PP.Point(castbar, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
     castbar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     castbar:GetStatusBarTexture():SetHorizTile(false)
+
+    -- Castbar borders drawn on the castbar itself (same frame level as the
+    -- fill texture) so the OVERLAY border sits above the ARTWORK fill.
+    -- Drawing on castbarBg would put the border behind the fill because
+    -- castbar is a child of castbarBg and draws above it.
+    PP.CreateBorder(castbar, 0, 0, 0, 1, 1, "OVERLAY", 0)
 
 
     local text = castbar:CreateFontString(nil, "OVERLAY")
@@ -2778,7 +2811,7 @@ local function CreateTargetAuras(frame, unit)
     buffs.size = auraSize
     buffs.spacing = gap
     buffs.num = 4
-    buffs["size-x"] = perRow
+    buffs.maxCols = AuraMaxCols(settings and settings.buffGrowth, settings and settings.maxBuffs or 4)
     buffs.initialAnchor = bia
     buffs.growthX = bgx
     buffs.growthY = bgy
@@ -2792,7 +2825,20 @@ local function CreateTargetAuras(frame, unit)
 
     local maxDebuffs = (settings and settings.maxDebuffs) or 28
 
+    -- Boss Simple Debuff Display: force Left anchor and frame-height-matched
+    -- debuff size when the user has it enabled (default on).
+    local unitIsBoss = unit and unit:match("^boss%d+$")
+    if unitIsBoss and settings and settings.simpleDebuffs ~= false then
+        local powerPos = settings.powerPosition or "below"
+        local powerIsAtt = (powerPos == "below" or powerPos == "above")
+        local powerH = powerIsAtt and (settings.powerHeight or 0) or 0
+        debuffAuraSize = settings.healthHeight + powerH
+    end
+
     local dAnc = settings and settings.debuffAnchor or "bottomleft"
+    if unitIsBoss and settings and settings.simpleDebuffs ~= false then
+        dAnc = "left"
+    end
     do
         local debuffs = CreateFrame("Frame", nil, frame)
         local effectiveAnc = (dAnc ~= "none") and dAnc or "bottomleft"
@@ -2806,7 +2852,7 @@ local function CreateTargetAuras(frame, unit)
         debuffs.size = debuffAuraSize
         debuffs.spacing = gap
         debuffs.num = (dAnc ~= "none") and maxDebuffs or 0
-        debuffs["size-x"] = perRow
+        debuffs.maxCols = AuraMaxCols(settings and settings.debuffGrowth, maxDebuffs)
         debuffs.initialAnchor = dia
         debuffs.growthX = dgx
         debuffs.growthY = dgy
@@ -3368,11 +3414,26 @@ end
 
 local function StyleSimpleFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
-    PP.Size(frame, settings.frameWidth, settings.healthHeight)
+    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none"
+                         and settings.showPortrait ~= false
+    local pSide = settings.portraitSide or "left"
+    local totalWidth = settings.frameWidth
+    local portraitOffset = 0  -- applied to Health TOPLEFT when portrait on left
+    local healthRightInset = 0  -- applied to Health RIGHT when portrait on right
+    if showPortrait then
+        totalWidth = settings.healthHeight + settings.frameWidth
+        if pSide == "right" then
+            healthRightInset = settings.healthHeight
+        else
+            portraitOffset = settings.healthHeight
+        end
+    end
+
+    PP.Size(frame, totalWidth, settings.healthHeight)
 
     local health = CreateFrame("StatusBar", nil, frame)
-    PP.Point(health, "TOPLEFT", frame, "TOPLEFT", 0, 0)
-    PP.Point(health, "RIGHT", frame, "RIGHT", 0, 0)
+    PP.Point(health, "TOPLEFT", frame, "TOPLEFT", portraitOffset, 0)
+    PP.Point(health, "RIGHT", frame, "RIGHT", -healthRightInset, 0)
     PP.Height(health, settings.healthHeight)
     health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     health:GetStatusBarTexture():SetHorizTile(false)
@@ -3400,6 +3461,31 @@ local function StyleSimpleFrame(frame, unit)
     ApplyDarkTheme(health)
 
     frame.Health = health
+
+    -- Always create portrait; hide backdrop when disabled. Mirrors StylePetFrame.
+    frame.Portrait = CreatePortrait(frame, pSide, settings.healthHeight, unit)
+    frame._portraitSide = pSide
+    if frame.Portrait and not showPortrait then
+        frame.Portrait.backdrop:Hide()
+    end
+    if frame.Portrait and frame.Portrait.backdrop and showPortrait then
+        local portW = math.max(settings.healthHeight, 1)
+        health:ClearAllPoints()
+        if pSide == "right" then
+            PP.Point(health, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+            PP.Point(health, "RIGHT", frame, "RIGHT", -portW, 0)
+            health._xOffset = 0
+            health._rightInset = portW
+        else
+            PP.Point(health, "TOPLEFT", frame, "TOPLEFT", portW, 0)
+            PP.Point(health, "RIGHT", frame, "RIGHT", 0, 0)
+            health._xOffset = portW
+            health._rightInset = 0
+        end
+        PP.Height(health, settings.healthHeight)
+        health._topOffset = 0
+    end
+
     CreateUnifiedBorder(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame, settings.powerPosition)
@@ -3499,19 +3585,25 @@ end
 local function StylePetFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
     local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
+    local pSide = settings.portraitSide or "left"
     local totalWidth = settings.frameWidth
     local portraitOffset = 0
+    local healthRightInset = 0
 
     if showPortrait then
         totalWidth = settings.healthHeight + settings.frameWidth
-        portraitOffset = settings.healthHeight
+        if pSide == "right" then
+            healthRightInset = settings.healthHeight
+        else
+            portraitOffset = settings.healthHeight
+        end
     end
 
     PP.Size(frame, totalWidth, settings.healthHeight)
 
     local health = CreateFrame("StatusBar", nil, frame)
     PP.Point(health, "TOPLEFT", frame, "TOPLEFT", portraitOffset, 0)
-    PP.Point(health, "RIGHT", frame, "RIGHT", 0, 0)
+    PP.Point(health, "RIGHT", frame, "RIGHT", -healthRightInset, 0)
     PP.Height(health, settings.healthHeight)
     health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     health:GetStatusBarTexture():SetHorizTile(false)
@@ -3541,8 +3633,8 @@ local function StylePetFrame(frame, unit)
     frame.Health = health
 
     -- Always create portrait; hide backdrop when disabled
-    frame.Portrait = CreatePortrait(frame, "left", settings.healthHeight, unit)
-    frame._portraitSide = "left"
+    frame.Portrait = CreatePortrait(frame, pSide, settings.healthHeight, unit)
+    frame._portraitSide = pSide
     if frame.Portrait and not showPortrait then        frame.Portrait.backdrop:Hide()
     end
     -- Re-anchor health bar using healthHeight as the portrait width to avoid
@@ -3550,11 +3642,18 @@ local function StylePetFrame(frame, unit)
     if frame.Portrait and frame.Portrait.backdrop and showPortrait then
         local portW = math.max(settings.healthHeight, 1)
         health:ClearAllPoints()
-        PP.Point(health, "TOPLEFT", frame, "TOPLEFT", portW, 0)
-        PP.Point(health, "RIGHT", frame, "RIGHT", 0, 0)
+        if pSide == "right" then
+            PP.Point(health, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+            PP.Point(health, "RIGHT", frame, "RIGHT", -portW, 0)
+            health._xOffset = 0
+            health._rightInset = portW
+        else
+            PP.Point(health, "TOPLEFT", frame, "TOPLEFT", portW, 0)
+            PP.Point(health, "RIGHT", frame, "RIGHT", 0, 0)
+            health._xOffset = portW
+            health._rightInset = 0
+        end
         PP.Height(health, settings.healthHeight)
-        health._xOffset = portW
-        health._rightInset = 0
         health._topOffset = 0
     end
 
@@ -3669,12 +3768,13 @@ local function StyleBossFrame(frame, unit)
     end
 
     PP.Size(frame, totalWidth, bossBarHeight)
-    local healthRightInset = showPortrait and bossBarHeight or 0
+    local pSide = settings.portraitSide or "right"
+    local healthRightInset = (showPortrait and pSide == "right") and bossBarHeight or 0
     frame.Health = CreateHealthBar(frame, unit, settings.healthHeight, portraitHeight, settings, healthRightInset)
     frame.Power = CreatePowerBar(frame, unit, settings)
     -- Always create portrait; hide backdrop when disabled
-    frame.Portrait = CreatePortrait(frame, "right", bossBarHeight, unit)
-    frame._portraitSide = "right"
+    frame.Portrait = CreatePortrait(frame, pSide, bossBarHeight, unit)
+    frame._portraitSide = pSide
     if frame.Portrait and not showPortrait then
         frame.Portrait.backdrop:Hide()
     end
@@ -3683,11 +3783,18 @@ local function StyleBossFrame(frame, unit)
         local snappedPortW = frame.Portrait.backdrop:GetWidth()
         local powerAboveOff = (bPpPos == "above") and (settings.powerHeight or 6) or 0
         frame.Health:ClearAllPoints()
-        PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", 0, -powerAboveOff)
-        PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -snappedPortW, 0)
+        if pSide == "left" then
+            PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", snappedPortW, -powerAboveOff)
+            PP.Point(frame.Health, "RIGHT", frame, "RIGHT", 0, 0)
+            frame.Health._xOffset = snappedPortW
+            frame.Health._rightInset = 0
+        else
+            PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", 0, -powerAboveOff)
+            PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -snappedPortW, 0)
+            frame.Health._xOffset = 0
+            frame.Health._rightInset = snappedPortW
+        end
         PP.Height(frame.Health, settings.healthHeight)
-        frame.Health._xOffset = 0
-        frame.Health._rightInset = snappedPortW
         frame.Health._topOffset = powerAboveOff
     end
 
@@ -3927,10 +4034,16 @@ end
 local CLASS_POWER_TYPES = {
     ROGUE       = Enum.PowerType.ComboPoints,
     DRUID       = Enum.PowerType.ComboPoints,
-    MAGE        = { [62]  = { Enum.PowerType.ArcaneCharges, 4 } }, -- Arcane only
+    MAGE        = {
+        [62] = { Enum.PowerType.ArcaneCharges, 4 }, -- Arcane
+        [64] = { "ICICLES", 5 },                    -- Frost: aura-based pip stacks
+    },
     WARLOCK     = Enum.PowerType.SoulShards,
     PALADIN     = Enum.PowerType.HolyPower,
-    MONK        = { [269] = { Enum.PowerType.Chi, 5 } },
+    MONK        = {
+        [269] = { Enum.PowerType.Chi, 5 },        -- Windwalker
+        [268] = { "BREWMASTER_STAGGER", 1, "bar" },  -- Brewmaster: single bar
+    },
     EVOKER      = Enum.PowerType.Essence,
     DEATHKNIGHT = Enum.PowerType.Runes,
     -- Spec-specific custom resources (resolved at creation time)
@@ -3961,7 +4074,7 @@ local function CreateCustomClassPower(playerFrame, style)
     if not entry then return nil end
 
     -- Resolve spec-specific entries (table with specID keys)
-    local powerType, customMax, isCustom
+    local powerType, customMax, isCustom, renderMode
     if type(entry) == "table" then
         local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
         local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
@@ -3971,6 +4084,7 @@ local function CreateCustomClassPower(playerFrame, style)
             -- String-keyed custom resource (e.g. "SOUL_FRAGMENTS_VENGEANCE")
             powerType = specEntry[1]
             customMax = specEntry[2]
+            renderMode = specEntry[3]  -- optional "bar" for continuous fill
             isCustom = true
         elseif type(specEntry) == "table" then
             -- Numeric powerType wrapped in a spec table (e.g. Chi for Windwalker)
@@ -3985,6 +4099,7 @@ local function CreateCustomClassPower(playerFrame, style)
         powerType = entry
         isCustom = false
     end
+    local isBarMode = (renderMode == "bar")
 
     local maxPower
     if isCustom then
@@ -3998,6 +4113,14 @@ local function CreateCustomClassPower(playerFrame, style)
             maxPower = customMax
         elseif powerType == "WHIRLWIND_STACKS" then
             maxPower = customMax
+        elseif powerType == "ICICLES" then
+            maxPower = customMax or 5
+        elseif powerType == "BREWMASTER_STAGGER" then
+            -- Bar mode: "max" is player max HP; StatusBar fills with UnitStagger.
+            local mh = UnitHealthMax("player") or 0
+            if issecretvalue and issecretvalue(mh) then mh = 0 end
+            maxPower = (mh > 0) and mh or 1
+            customMax = maxPower
         else
             maxPower = customMax or 5
         end
@@ -4019,7 +4142,12 @@ local function CreateCustomClassPower(playerFrame, style)
     pipH = PP.Scale(pipH)
     gap = PP.Scale(gap)
     pad = PP.Scale(pad)
-    local totalW = maxPower * pipSize + (maxPower - 1) * gap + pad
+    -- For bar-mode resources (stagger), "maxPower" is a raw game value
+    -- (e.g. player max HP) and doesn't drive layout width. Use a 5-pip
+    -- equivalent so the bar matches the visual footprint of Chi / Combo
+    -- Points etc.
+    local drawPipCount = isBarMode and 5 or maxPower
+    local totalW = drawPipCount * pipSize + (drawPipCount - 1) * gap + pad
     local totalH = pipH + pad
 
     local container = CreateFrame("Frame", nil, UIParent)
@@ -4110,13 +4238,57 @@ local function CreateCustomClassPower(playerFrame, style)
     end
 
     local pips = {}
-    for i = 1, maxPower do
-        pips[i] = MakePip(container, i)
+    local staggerBar  -- set only in bar mode
+    if isBarMode then
+        -- Single StatusBar filling the container; color updates per-tier.
+        local inset = pad / 2
+        staggerBar = CreateFrame("StatusBar", nil, container)
+        staggerBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        staggerBar:GetStatusBarTexture():SetHorizTile(false)
+        PP.Point(staggerBar, "TOPLEFT",     container, "TOPLEFT",     inset, 0)
+        PP.Point(staggerBar, "BOTTOMRIGHT", container, "BOTTOMRIGHT", -inset, 0)
+        staggerBar:SetMinMaxValues(0, maxPower)
+        staggerBar:SetValue(0)
+        staggerBar:GetStatusBarTexture():SetVertexColor(0.2, 0.8, 0.2, 1)
+        container._staggerBar = staggerBar
+    else
+        for i = 1, maxPower do
+            pips[i] = MakePip(container, i)
+        end
     end
 
     -- Update function
     local isSecretResource = (powerType == "SOUL_FRAGMENTS_VENGEANCE")
     local function UpdatePips()
+        -- Bar-mode resources (Brewmaster stagger) fill a single StatusBar
+        -- instead of discrete pips; color shifts by tier.
+        if isBarMode and staggerBar then
+            local stagger = UnitStagger and UnitStagger("player") or 0
+            local maxHP   = UnitHealthMax("player") or 0
+            local tainted = issecretvalue
+                         and (issecretvalue(stagger) or issecretvalue(maxHP))
+            if tainted then
+                staggerBar:Hide()
+                return
+            end
+            if maxHP <= 0 then maxHP = 1 end
+            if staggerBar._lastMax ~= maxHP then
+                staggerBar._lastMax = maxHP
+                staggerBar:SetMinMaxValues(0, maxHP)
+            end
+            staggerBar:SetValue(stagger)
+            local pct = stagger / maxHP
+            local sr, sg, sb
+            if pct >= 0.6 then      sr, sg, sb = 1.0,  0.2,  0.2
+            elseif pct >= 0.3 then  sr, sg, sb = 1.0,  0.85, 0.2
+            else                    sr, sg, sb = 0.2,  0.8,  0.2 end
+            if staggerBar._lastR ~= sr or staggerBar._lastG ~= sg or staggerBar._lastB ~= sb then
+                staggerBar._lastR, staggerBar._lastG, staggerBar._lastB = sr, sg, sb
+                staggerBar:GetStatusBarTexture():SetVertexColor(sr, sg, sb, 1)
+            end
+            if not staggerBar:IsShown() then staggerBar:Show() end
+            return
+        end
         local cur, max
         if isCustom then
             -- Custom resource: use EllesmereUI tracker functions
@@ -4129,6 +4301,17 @@ local function CreateCustomClassPower(playerFrame, style)
                 cur, max = EllesmereUI.GetTipOfTheSpear()
             elseif powerType == "WHIRLWIND_STACKS" and EllesmereUI and EllesmereUI.GetWhirlwindStacks then
                 cur, max = EllesmereUI.GetWhirlwindStacks()
+            elseif powerType == "ICICLES" then
+                -- Frost Mage Icicles: stack count from the Icicles aura (205473).
+                local count = 0
+                if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+                    local aura = C_UnitAuras.GetPlayerAuraBySpellID(205473)
+                    if aura then
+                        count = aura.applications or aura.charges or aura.points or 0
+                        if count > 5 then count = 5 end
+                    end
+                end
+                cur, max = count, 5
             else
                 cur, max = 0, maxPower
             end
@@ -4206,8 +4389,12 @@ local function CreateCustomClassPower(playerFrame, style)
     if isCustom then
         -- Per-resource event registration: only register what each resource
         -- actually needs to avoid unnecessary event traffic.
-        local needsOnUpdate = (powerType ~= "MAELSTROM_WEAPON")
-        local needsAura     = (powerType == "MAELSTROM_WEAPON")
+        -- Icicles are aura-driven; Maelstrom Weapon too. Everything else
+        -- polls via OnUpdate (either Lua API changes mid-combat or there
+        -- isn't a reliable event to hook).
+        local auraDriven    = (powerType == "MAELSTROM_WEAPON" or powerType == "ICICLES")
+        local needsOnUpdate = not auraDriven
+        local needsAura     = auraDriven
         local needsCasts    = (powerType == "TIP_OF_THE_SPEAR" or powerType == "WHIRLWIND_STACKS")
 
         if needsOnUpdate then
@@ -4427,12 +4614,25 @@ local function ReloadFrames()
                 local bossSettings = db.profile.boss or {}
                 local barHeight = (bossSettings.healthHeight or 34) + (bossSettings.powerHeight or 6) + (bossSettings.castbarHeight or 14)
                 local gap = 10
-                local bossSpacing = barHeight + gap
+                -- Prefer the user-configured Vertical Spacing slider; fall back to
+                -- the computed barHeight+gap so an uninitialized profile is sane.
+                local bossSpacing = db.profile.bossSpacing or (barHeight + gap)
                 local bossIdx = tonumber(unit:match("(%d+)$"))
                 local bossAnchored = EllesmereUI and EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("boss")
-                if bossPos and bossIdx and not (EllesmereUI and EllesmereUI._unlockActive) and (not bossAnchored or not frame:GetLeft()) then
+                local canRepoBoss1 = bossPos
+                                 and not (EllesmereUI and EllesmereUI._unlockActive)
+                                 and (not bossAnchored or not frame:GetLeft())
+                if bossIdx == 1 and canRepoBoss1 then
                     frame:ClearAllPoints()
-                    frame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y - ((bossIdx - 1) * bossSpacing))
+                    frame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y)
+                elseif bossIdx and bossIdx > 1 and not (EllesmereUI and EllesmereUI._unlockActive) then
+                    -- boss2..5 always re-chain off the previous boss with the
+                    -- current Vertical Spacing value, regardless of saved pos.
+                    local prev = frames["boss" .. (bossIdx - 1)]
+                    if prev then
+                        frame:ClearAllPoints()
+                        frame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -bossSpacing)
+                    end
                 end
             else
                 if not (EllesmereUI and EllesmereUI._unlockActive) then
@@ -4445,6 +4645,28 @@ local function ReloadFrames()
             end
             local settings = GetSettingsForUnit(unit)
             local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
+
+            -- Keep the cached portrait side in sync with user-edited settings.
+            -- Downstream re-snap code (SnapLayout, health anchor math) reads
+            -- frame._portraitSide, so without this update the side toggle
+            -- wouldn't flip until a full UI reload.
+            if settings.portraitSide then
+                frame._portraitSide = settings.portraitSide
+            end
+
+            -- Re-anchor the attached-mode portrait backdrop when the side
+            -- flips. Detached mode is re-anchored further below.
+            if frame.Portrait and frame.Portrait.backdrop
+               and (db.profile.portraitStyle or "attached") == "attached"
+               and settings.portraitSide then
+                local bd = frame.Portrait.backdrop
+                bd:ClearAllPoints()
+                if settings.portraitSide == "left" then
+                    PP.Point(bd, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+                else
+                    PP.Point(bd, "TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+                end
+            end
 
             -- Swap 2D/3D portrait mode if changed (no reload needed)
             if frame.Portrait then
@@ -4765,6 +4987,7 @@ local function ReloadFrames()
                                 frame.Buffs.initialAnchor = bia
                                 frame.Buffs.growthX = bgx
                                 frame.Buffs.growthY = bgy
+                                frame.Buffs.maxCols = AuraMaxCols(settings.buffGrowth, settings.maxBuffs or 4)
                                 if frame.Buffs.ForceUpdate then
                                     frame.Buffs:ForceUpdate()
                                 end
@@ -4809,6 +5032,7 @@ local function ReloadFrames()
                                 frame.Debuffs.initialAnchor = dia
                                 frame.Debuffs.growthX = dgx
                                 frame.Debuffs.growthY = dgy
+                                frame.Debuffs.maxCols = AuraMaxCols(settings.debuffGrowth, settings.maxDebuffs or 10)
                                 if frame.Debuffs.ForceUpdate then
                                     frame.Debuffs:ForceUpdate()
                                 end
@@ -5154,6 +5378,7 @@ local function ReloadFrames()
                                 frame.Buffs.initialAnchor = bia
                                 frame.Buffs.growthX = bgx
                                 frame.Buffs.growthY = bgy
+                                frame.Buffs.maxCols = AuraMaxCols(settings.buffGrowth, settings.maxBuffs or 4)
                                 if frame.Buffs.ForceUpdate then
                                     frame.Buffs:ForceUpdate()
                                 end
@@ -5201,6 +5426,7 @@ local function ReloadFrames()
                                 frame.Debuffs.initialAnchor = dia
                                 frame.Debuffs.growthX = dgx
                                 frame.Debuffs.growthY = dgy
+                                frame.Debuffs.maxCols = AuraMaxCols(settings.debuffGrowth, settings.maxDebuffs or 10)
                                 if frame.Debuffs.ForceUpdate then
                                     frame.Debuffs:ForceUpdate()
                                 end
@@ -5492,6 +5718,7 @@ local function ReloadFrames()
                             frame.Debuffs.initialAnchor = dia
                             frame.Debuffs.growthX = dgx
                             frame.Debuffs.growthY = dgy
+                            frame.Debuffs.maxCols = AuraMaxCols(settings.debuffGrowth, settings.maxDebuffs or 10)
                             if frame.Debuffs.ForceUpdate then
                                 frame.Debuffs:ForceUpdate()
                             end
@@ -5529,6 +5756,7 @@ local function ReloadFrames()
                             frame.Buffs.initialAnchor = bia
                             frame.Buffs.growthX = bgx
                             frame.Buffs.growthY = bgy
+                            frame.Buffs.maxCols = AuraMaxCols(settings.buffGrowth, settings.maxBuffs or 4)
                             if frame.Buffs.ForceUpdate then
                                 frame.Buffs:ForceUpdate()
                             end
@@ -5546,38 +5774,34 @@ local function ReloadFrames()
                 ReparentBarsToClip(frame, settings.powerPosition)
 
             elseif unit == "pet" or unit == "targettarget" or unit == "focustarget" then
-                if unit == "pet" then
-                    local showPetPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-                    local petW = settings.frameWidth
-                    if showPetPortrait then
-                        petW = settings.healthHeight + settings.frameWidth
+                -- Pet, ToT and FoT all share the same simple-frame layout:
+                -- optional portrait on either side, health bar filling the rest.
+                local showMiniPortrait = (db.profile.portraitStyle or "attached") ~= "none"
+                                     and settings.showPortrait ~= false
+                local miniSide = settings.portraitSide or "left"
+                local miniW = settings.frameWidth
+                local miniLeftOff = 0
+                local miniRightInset = 0
+                if showMiniPortrait then
+                    miniW = settings.healthHeight + settings.frameWidth
+                    if miniSide == "right" then
+                        miniRightInset = settings.healthHeight
+                    else
+                        miniLeftOff = settings.healthHeight
                     end
-                    PP.Size(frame, petW, settings.healthHeight)
-                    if frame.Portrait and frame.Portrait.backdrop then
-                        PP.Size(frame.Portrait.backdrop, settings.healthHeight, settings.healthHeight)
-                    end
-                    if frame.Health then
-                        frame.Health:ClearAllPoints()
-                        -- Use healthHeight directly as portrait width to avoid GetWidth() timing issues
-                        local petPortOff = 0
-                        if showPetPortrait then
-                            petPortOff = settings.healthHeight
-                        end
-                        PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", petPortOff, 0)
-                        PP.Point(frame.Health, "RIGHT", frame, "RIGHT", 0, 0)
-                        PP.Height(frame.Health, settings.healthHeight)
-                        frame.Health._xOffset = petPortOff
-                        frame.Health._rightInset = 0
-                        frame.Health._topOffset = 0
-                    end
-                else
-                    PP.Size(frame, settings.frameWidth, settings.healthHeight)
-                    if frame.Health then
-                        frame.Health:ClearAllPoints()
-                        PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", 0, 0)
-                        PP.Point(frame.Health, "RIGHT", frame, "RIGHT", 0, 0)
-                        PP.Height(frame.Health, settings.healthHeight)
-                    end
+                end
+                PP.Size(frame, miniW, settings.healthHeight)
+                if frame.Portrait and frame.Portrait.backdrop then
+                    PP.Size(frame.Portrait.backdrop, settings.healthHeight, settings.healthHeight)
+                end
+                if frame.Health then
+                    frame.Health:ClearAllPoints()
+                    PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", miniLeftOff, 0)
+                    PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -miniRightInset, 0)
+                    PP.Height(frame.Health, settings.healthHeight)
+                    frame.Health._xOffset = miniLeftOff
+                    frame.Health._rightInset = miniRightInset
+                    frame.Health._topOffset = 0
                 end
 
                 UpdateBordersForScale(frame, unit)
@@ -5604,19 +5828,22 @@ local function ReloadFrames()
                 if frame.Health then
                     frame.Health:ClearAllPoints()
                     -- Use portrait's actual snapped width for flush alignment
-                    local bossRightInset = 0
+                    local bossPortW = 0
                     if showPortrait then
                         if frame.Portrait and frame.Portrait.backdrop then
-                            bossRightInset = frame.Portrait.backdrop:GetWidth()
+                            bossPortW = frame.Portrait.backdrop:GetWidth()
                         else
-                            bossRightInset = bossBarHeight
+                            bossPortW = bossBarHeight
                         end
                     end
+                    local bossPSide = settings.portraitSide or "right"
+                    local bossLeftOff  = (showPortrait and bossPSide == "left")  and bossPortW or 0
+                    local bossRightInset = (showPortrait and bossPSide == "right") and bossPortW or 0
                     local bPowerAboveOff = (bPpPos == "above") and (settings.powerHeight or 6) or 0
-                    PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", 0, -bPowerAboveOff)
+                    PP.Point(frame.Health, "TOPLEFT", frame, "TOPLEFT", bossLeftOff, -bPowerAboveOff)
                     PP.Point(frame.Health, "RIGHT", frame, "RIGHT", -bossRightInset, 0)
                     PP.Height(frame.Health, settings.healthHeight)
-                    frame.Health._xOffset = 0
+                    frame.Health._xOffset = bossLeftOff
                     frame.Health._rightInset = bossRightInset
                     frame.Health._topOffset = bPowerAboveOff
                 end
@@ -5733,9 +5960,18 @@ local function ReloadFrames()
                     end
                 end
 
-                -- Debuffs (boss)
+                -- Debuffs (boss). Simple Debuff Display override forces Left
+                -- anchor + frame-height-matched size when enabled.
                 if frame.Debuffs then
                     local dAnc = settings.debuffAnchor or "bottomleft"
+                    local effectiveDebuffSize = settings.debuffSize or 22
+                    if settings.simpleDebuffs ~= false then
+                        dAnc = "left"
+                        local powerPos = settings.powerPosition or "below"
+                        local powerIsAtt = (powerPos == "below" or powerPos == "above")
+                        local powerH = powerIsAtt and (settings.powerHeight or 0) or 0
+                        effectiveDebuffSize = settings.healthHeight + powerH
+                    end
                     if dAnc == "none" then
                         if frame:IsElementEnabled("Debuffs") then
                             frame:DisableElement("Debuffs")
@@ -5758,15 +5994,16 @@ local function ReloadFrames()
                                 liveDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, liveDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
+                        local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, liveDbCbOff, effectiveDebuffSize, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
-                            frame.Debuffs.size = settings.debuffSize or 22
+                            frame.Debuffs.size = effectiveDebuffSize
                             frame.Debuffs:ClearAllPoints()
                             frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + liveDbCbOff + (settings.debuffOffsetY or 0))
                             frame.Debuffs.initialAnchor = dia
                             frame.Debuffs.growthX = dgx
                             frame.Debuffs.growthY = dgy
+                            frame.Debuffs.maxCols = AuraMaxCols(settings.debuffGrowth, settings.maxDebuffs or 10)
                             if frame.Debuffs.ForceUpdate then
                                 frame.Debuffs:ForceUpdate()
                             end
@@ -5804,6 +6041,7 @@ local function ReloadFrames()
                             frame.Buffs.initialAnchor = bia
                             frame.Buffs.growthX = bgx
                             frame.Buffs.growthY = bgy
+                            frame.Buffs.maxCols = AuraMaxCols(settings.buffGrowth, settings.maxBuffs or 4)
                             if frame.Buffs.ForceUpdate then
                                 frame.Buffs:ForceUpdate()
                             end
@@ -6045,7 +6283,18 @@ local function UnitFrame_OnLeave(self)
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        (self._visWrap or self):SetAlpha(0)
+        -- Mirror UpdateFrameVisibility's mouseover logic: when a positive
+        -- "Hide if" override is configured and currently not triggering,
+        -- keep the frame shown on mouse leave instead of re-hiding it.
+        local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions
+                             and EllesmereUI.CheckVisibilityOptions(s)
+        local hasAnyHideOpt = s.visHideNoTarget
+                           or s.visHideNoEnemy
+                           or s.visHideMounted
+                           or s.visHideHousing
+                           or s.visOnlyInstances
+        local keepShown = (not hiddenByOpts) and hasAnyHideOpt
+        ;(self._visWrap or self):SetAlpha(keepShown and 1 or 0)
     end
     if GameTooltip and GameTooltip:IsOwned(self) then
         GameTooltip:Hide()
@@ -6676,15 +6925,26 @@ function InitializeFrames()
     local bossSettings = db.profile.boss or {}
     local barHeight = (bossSettings.healthHeight or 34) + (bossSettings.powerHeight or 6) + (bossSettings.castbarHeight or 14)
     local gap = 10
-    local spacing = barHeight + gap
+    local spacing = db.profile.bossSpacing or (barHeight + gap)
     for i = 1, 5 do
         local bossUnit = "boss" .. i
         local bossFrame = oUF:Spawn(bossUnit, "EllesmereUIUnitFrames_Boss" .. i)
         frames[bossUnit] = bossFrame
 
-        if bossPos then
-            bossFrame:ClearAllPoints()
-            bossFrame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y - ((i - 1) * spacing))
+        -- boss1 anchors to UIParent; boss2..5 chain off boss1 with spacing.
+        -- This keeps the whole stack moving together when unlock mode drags
+        -- boss1 -- the only draggable boss frame.
+        if i == 1 then
+            if bossPos then
+                bossFrame:ClearAllPoints()
+                bossFrame:SetPoint(bossPos.point, UIParent, bossPos.relPoint or bossPos.point, bossPos.x, bossPos.y)
+            end
+        else
+            local prev = frames["boss" .. (i - 1)]
+            if prev then
+                bossFrame:ClearAllPoints()
+                bossFrame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
+            end
         end
 
         SetupUnitMenu(bossFrame, bossUnit)
@@ -6820,20 +7080,46 @@ function InitializeFrames()
                 elseif vis == "out_of_combat" then
                     alphaTarget:SetAlpha((not hiddenByOpts and not _ufInCombat) and 1 or 0)
                 elseif vis == "mouseover" then
-                    -- Hidden by default; OnEnter/OnLeave toggle alpha.
-                    alphaTarget:SetAlpha(0)
+                    -- Mouseover: hidden by default; hover toggles alpha.
+                    -- But when the user has configured any positive "Hide if"
+                    -- override (no target, no enemy, mounted, etc.) and that
+                    -- override is NOT currently triggering, treat the frame
+                    -- as a positive-show so it doesn't require hover to see.
+                    -- This fixes "dismount while in combat keeps frame hidden"
+                    -- and "hide if no target behaves inverted" reports.
+                    local hasAnyHideOpt = s.visHideNoTarget
+                                       or s.visHideNoEnemy
+                                       or s.visHideMounted
+                                       or s.visHideHousing
+                                       or s.visOnlyInstances
+                    if hiddenByOpts then
+                        alphaTarget:SetAlpha(0)
+                    elseif hasAnyHideOpt then
+                        alphaTarget:SetAlpha(1)
+                    else
+                        alphaTarget:SetAlpha(0)
+                    end
                 else
                     -- Non-combat modes: restore full alpha; Show/Hide controls
                     -- visibility in the block below.
                     alphaTarget:SetAlpha(1)
                 end
 
+                -- Alpha-only hide for the "visHide*" overrides (mounted,
+                -- no target, housing, etc). Force alpha 0 now so the frame
+                -- still looks hidden, but leave the secure Show/Hide state
+                -- alone below -- otherwise a dismount that lands inside a
+                -- combat lockdown would leave the frame permanently hidden
+                -- (Show/SetAttribute are restricted in combat, so we can't
+                -- re-show it until combat ends).
+                if hiddenByOpts then
+                    alphaTarget:SetAlpha(0)
+                end
+
                 -- Show/Hide and SetAttribute are restricted during lockdown.
                 if not isLocked then
                     local shouldShow
-                    if hiddenByOpts then
-                        shouldShow = false
-                    elseif vis == "never" then
+                    if vis == "never" then
                         shouldShow = false
                     elseif vis == "in_combat" or vis == "out_of_combat" or vis == "mouseover" then
                         -- Frame is kept shown; alpha (above) drives visibility.
@@ -6845,7 +7131,8 @@ function InitializeFrames()
                     elseif vis == "solo" then
                         shouldShow = solo
                     else
-                        -- "always" and "mouseover" both show (mouseover handled separately)
+                        -- "always" is the default -- always Shown at secure
+                        -- level; alpha controls actual visibility.
                         shouldShow = true
                     end
 
@@ -7072,6 +7359,157 @@ function SetupOptionsPanel()
         end
     end
     _G._EUF_ReloadFrames = ns.ReloadFrames
+
+    -- Fake debuff icons for the boss preview. Three square icons anchored
+    -- where the real Debuffs frame would live, sized to match the Simple
+    -- Debuff Display layout (frame bar height, growing right-to-left off
+    -- the frame's left edge). Created on demand and torn down on preview
+    -- disable.
+    local FAKE_DEBUFF_SPELLS = { 122, 172, 1714 }  -- Frost Nova, Corruption, Curse of Tongues
+    local function AttachFakeDebuffs(frame)
+        -- Tear down any prior holder so size/anchor refresh on every call.
+        if frame._previewDebuffs then
+            frame._previewDebuffs:Hide()
+            frame._previewDebuffs:SetParent(nil)
+            frame._previewDebuffs = nil
+        end
+        local settings = db.profile.boss or {}
+        local simple = settings.simpleDebuffs ~= false
+        local powerPos = settings.powerPosition or "below"
+        local powerIsAtt = (powerPos == "below" or powerPos == "above")
+        local powerH = powerIsAtt and (settings.powerHeight or 0) or 0
+        local iconSize
+        if simple then
+            iconSize = (settings.healthHeight or 34) + powerH
+        else
+            iconSize = settings.debuffSize or 22
+        end
+        local count = #FAKE_DEBUFF_SPELLS
+        local gap = 1
+        local holder = CreateFrame("Frame", nil, frame)
+        holder:SetSize(iconSize * count + gap * (count - 1), iconSize)
+        holder:SetFrameLevel(frame:GetFrameLevel() + 5)
+        holder:ClearAllPoints()
+        -- The boss cast bar lives as a sibling parented to the frame but
+        -- anchored BELOW frame bottom, so frame:GetHeight() excludes it.
+        -- Mirror the live runtime behavior where bottom-anchored debuffs
+        -- push down by the cast bar height to avoid overlap.
+        local castBg = frame.Castbar and frame.Castbar:GetParent()
+        local castbarH = (settings.showCastbar ~= false and castBg)
+                         and castBg:GetHeight() or 0
+        if simple then
+            -- Simple mode: align debuff stack with the health bar top so
+            -- they never encroach on the cast bar area.
+            holder:SetPoint("TOPRIGHT", frame.Health or frame, "TOPLEFT", -1, 0)
+        else
+            local dAnc = settings.debuffAnchor or "bottomleft"
+            if dAnc == "topleft" then
+                holder:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
+            elseif dAnc == "topright" then
+                holder:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, gap)
+            elseif dAnc == "bottomleft" then
+                holder:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -gap - castbarH)
+            elseif dAnc == "bottomright" then
+                holder:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, -gap - castbarH)
+            elseif dAnc == "right" then
+                holder:SetPoint("LEFT", frame, "RIGHT", gap, 0)
+            else  -- "left" or fallback
+                holder:SetPoint("RIGHT", frame, "LEFT", -gap, 0)
+            end
+        end
+        for idx, spellID in ipairs(FAKE_DEBUFF_SPELLS) do
+            local icon = holder:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(iconSize, iconSize)
+            icon:SetPoint("RIGHT", holder, "RIGHT", -(idx - 1) * (iconSize + gap), 0)
+            local tex = GetSpellTexture and GetSpellTexture(spellID)
+                     or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
+            if tex then icon:SetTexture(tex) end
+            icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            local border = CreateFrame("Frame", nil, holder)
+            border:SetAllPoints(icon)
+            border:SetFrameLevel(holder:GetFrameLevel() + 1)
+            if PP and PP.CreateBorder then PP.CreateBorder(border, 0, 0, 0, 1) end
+        end
+        frame._previewDebuffs = holder
+    end
+    local function DetachFakeDebuffs(frame)
+        if frame._previewDebuffs then frame._previewDebuffs:Hide() end
+    end
+
+    -- Refresh the in-game boss preview's fake debuffs when boss settings that
+    -- affect them (simpleDebuffs, debuffAnchor, debuffSize) change.
+    ns.RefreshBossPreviewDebuffs = function()
+        if not ns._bossPreviewActive then return end
+        for i = 1, 3 do
+            local f = frames["boss" .. i]
+            if f then AttachFakeDebuffs(f) end
+        end
+    end
+
+    -- Apply / clear a hostile-red health bar override on a boss frame while
+    -- preview is active. Real boss frames never class-color (no player class),
+    -- so piggybacking on unit="player" would otherwise paint the bar in the
+    -- user's class color -- wrong for a preview.
+    local PREVIEW_HEALTH_RED_R, PREVIEW_HEALTH_RED_G, PREVIEW_HEALTH_RED_B = 0.8, 0.2, 0.2
+    local function ApplyBossPreviewColor(f)
+        local h = f.Health
+        if not h then return end
+        f._previewColorSaved = f._previewColorSaved or {
+            colorClass       = h.colorClass,
+            colorReaction    = h.colorReaction,
+            colorTapped      = h.colorTapped,
+            colorDisconnected= h.colorDisconnected,
+        }
+        h.colorClass = false
+        h.colorReaction = false
+        h.colorTapped = false
+        h.colorDisconnected = false
+        h:SetStatusBarColor(PREVIEW_HEALTH_RED_R, PREVIEW_HEALTH_RED_G, PREVIEW_HEALTH_RED_B)
+        -- oUF's own update may re-color on the next tick; this PostUpdate
+        -- keeps our override sticky for the duration of the preview.
+        h.PostUpdateColor = function(self) self:SetStatusBarColor(PREVIEW_HEALTH_RED_R, PREVIEW_HEALTH_RED_G, PREVIEW_HEALTH_RED_B) end
+    end
+    local function ClearBossPreviewColor(f)
+        local h = f.Health
+        if not h then return end
+        local s = f._previewColorSaved
+        if s then
+            h.colorClass = s.colorClass
+            h.colorReaction = s.colorReaction
+            h.colorTapped = s.colorTapped
+            h.colorDisconnected = s.colorDisconnected
+            f._previewColorSaved = nil
+        end
+        h.PostUpdateColor = nil
+    end
+
+    -- Boss preview: force boss1/2/3 to render with the player's unit data so
+    -- the user can see the boss frame styling live in-game without a real
+    -- encounter. Gated out of combat to avoid taint; caller is responsible
+    -- for auto-clearing on EUI options window close.
+    ns.SetBossPreview = function(enabled)
+        if InCombatLockdown() then return false end
+        ns._bossPreviewActive = enabled and true or false
+        for i = 1, 3 do
+            local f = frames["boss" .. i]
+            if f then
+                if enabled then
+                    f:SetAttribute("unit", "player")
+                    f:Show()
+                    ApplyBossPreviewColor(f)
+                    if f.UpdateAllElements then f:UpdateAllElements("BossPreview") end
+                    AttachFakeDebuffs(f)
+                else
+                    ClearBossPreviewColor(f)
+                    f:SetAttribute("unit", "boss" .. i)
+                    if not UnitExists("boss" .. i) then f:Hide() end
+                    if f.UpdateAllElements then f:UpdateAllElements("BossPreview") end
+                    DetachFakeDebuffs(f)
+                end
+            end
+        end
+        return true
+    end
     ns.ResolveFontPath = ResolveFontPath
 
     -- Trigger the EllesmereUI options module registration now that ns.db is ready
@@ -7236,10 +7674,17 @@ function SetupOptionsPanel()
                         end
                     elseif k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
-                        for i = 1, 5 do
-                            if frames["boss" .. i] then
-                                frames["boss" .. i]:ClearAllPoints()
-                                frames["boss" .. i]:SetPoint(point, UIParent, relPoint, x, y - ((i - 1) * spacing))
+                        -- boss1 to UIParent; chain 2..5 from the previous boss.
+                        if frames.boss1 then
+                            frames.boss1:ClearAllPoints()
+                            frames.boss1:SetPoint(point, UIParent, relPoint, x, y)
+                        end
+                        for i = 2, 5 do
+                            local bf = frames["boss" .. i]
+                            local prev = frames["boss" .. (i - 1)]
+                            if bf and prev then
+                                bf:ClearAllPoints()
+                                bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
                             end
                         end
                     elseif k == "classPower" then
@@ -7295,13 +7740,17 @@ function SetupOptionsPanel()
                         end
                     elseif k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
-                        for i = 1, 5 do
+                        if frames.boss1 then
+                            local bx, by = SnapForFrame(frames.boss1, pos.x, pos.y)
+                            frames.boss1:ClearAllPoints()
+                            frames.boss1:SetPoint(pt, UIParent, rpt, bx, by)
+                        end
+                        for i = 2, 5 do
                             local bf = frames["boss" .. i]
-                            if bf then
-                                local bx, by = pos.x, pos.y - ((i - 1) * spacing)
-                                bx, by = SnapForFrame(bf, bx, by)
+                            local prev = frames["boss" .. (i - 1)]
+                            if bf and prev then
                                 bf:ClearAllPoints()
-                                bf:SetPoint(pt, UIParent, rpt, bx, by)
+                                bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
                             end
                         end
                     elseif k == "classPower" then
@@ -7329,7 +7778,16 @@ function SetupOptionsPanel()
         elements[#elements + 1] = MakeUFElement("pet", 4)
         elements[#elements + 1] = MakeUFElement("targettarget", 5)
         elements[#elements + 1] = MakeUFElement("focustarget", 6)
-        elements[#elements + 1] = MakeUFElement("boss", 7)
+        do
+            local bossElem = MakeUFElement("boss", 7)
+            -- Boss is a stack of 5 chained frames; resize / match actions
+            -- don't make sense on the aggregate element. Boss can still
+            -- anchor to other elements; it just can't be used as an anchor
+            -- target.
+            bossElem.noResize       = true   -- removes Width/Height Match + resize handles
+            bossElem.noAnchorTarget = true   -- others cannot anchor to boss
+            elements[#elements + 1] = bossElem
+        end
 
         -- Conditional elements
         if db.profile.player.showClassPowerBar and not db.profile.player.lockClassPowerToFrame then

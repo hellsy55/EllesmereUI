@@ -73,7 +73,6 @@ local _hookedBlocks      = setmetatable({}, { __mode = "k" })
 local _skinnedBars       = setmetatable({}, { __mode = "k" })
 local _skinnedTimerBars  = setmetatable({}, { __mode = "k" })
 local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our icon texture
-local _hookedPOIButtons  = setmetatable({}, { __mode = "k" })  -- poiButton -> true
 
 -- External weak-keyed flag tables. Every "am I in a state?" bool / number
 -- we used to write directly onto Blizzard-owned frames (block, tracker,
@@ -83,43 +82,13 @@ local _hookedPOIButtons  = setmetatable({}, { __mode = "k" })  -- poiButton -> t
 local function _wk() return setmetatable({}, { __mode = "k" }) end
 local F = {
     heightHooked         = _wk(),
-    dungeonHeightHooked  = _wk(),
     ignoreHeight         = _wk(),
-    ignoreDungeonHeight  = _wk(),
-    ignoreColor          = _wk(),
-    colorHooked          = _wk(),
-    lastX                = _wk(),
-    ignorePoint          = _wk(),
-    shiftPending         = _wk(),
-    shiftHooked          = _wk(),
-    dungeonShifted       = _wk(),
-    shiftApplied         = _wk(),
     fillHooked           = _wk(),
-    underScenarioTracker = _wk(),
     ownerBlockResolved   = _wk(),
     blockShrunk          = _wk(),
     skinPending          = _wk(),
     ghost                = _wk(),  -- bar -> our standalone ghost Frame
 }
-local _delveTitleFS      = setmetatable({}, { __mode = "k" })  -- block -> innerTitleFS
-EQT._getInnerTitleFS = function(block) return _delveTitleFS[block] end
-local _delveFlagFrame    = setmetatable({}, { __mode = "k" })  -- block -> flag frame
-local _delveLevelNumFS   = setmetatable({}, { __mode = "k" })  -- block -> level number FontString
-EQT._getDelveLevelNumFS  = function(block) return _delveLevelNumFS[block] end
--- Hide any cached delve-flag regions (level number + flag frame) so they
--- don't linger on screen after leaving a delve. Blizzard's pool can keep
--- StageBlock children visible after the scenario ends because our re-
--- anchored FontString points at the block itself rather than the flag.
-EQT._hideDelveLeftovers = function()
-    for _, fs in pairs(_delveLevelNumFS) do
-        if fs and fs.Hide then fs:Hide() end
-    end
-    for _, f in pairs(_delveFlagFrame) do
-        if f and f.Hide then f:Hide() end
-    end
-end
-local _delveInnerFrame   = setmetatable({}, { __mode = "k" })  -- block -> inner frame
-local _poiHiddenParent  -- shared hidden container POI buttons get reparented to
 local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
 local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
 
@@ -175,12 +144,9 @@ local function StyleFontStringSized(fs, size)
 end
 
 -- Convenience wrappers so every title / objective uses the shared sizes.
--- Scenario titles (delve / event banner titles) render 2px larger to
--- match their prominent visual role in the tracker.
-local function StyleFontString(fs)     StyleFontStringSized(fs, nil)                end
-local function StyleTitleFS(fs)        StyleFontStringSized(fs, GetTitleSize())     end
-local function StyleScenarioTitleFS(fs) StyleFontStringSized(fs, GetTitleSize() + 1) end
-local function StyleObjectiveFS(fs)    StyleFontStringSized(fs, GetObjSize())       end
+local function StyleFontString(fs)     StyleFontStringSized(fs, nil)            end
+local function StyleTitleFS(fs)        StyleFontStringSized(fs, GetTitleSize()) end
+local function StyleObjectiveFS(fs)    StyleFontStringSized(fs, GetObjSize())   end
 
 -- Walk every FontString region on a frame (top-level only) and restyle it.
 -- No recursion: child frames each go through their own skin call.
@@ -548,33 +514,16 @@ local function ApplyQuestTypeIcon(block)
     if not block then return end
 
     -- Blizzard's POI button (block.poiButton) is the left-side circular
-    -- icon. The drain-textures approach loses every time Blizzard
-    -- re-applies textures via SetNormalAtlas. Reparent to a hidden
-    -- container is the only bulletproof path. Non-secure frame, we
-    -- explicitly own its suppression -- standard CLAUDE.md pattern.
+    -- quest-type icon. Suppress via alpha + disabled mouse on the
+    -- top-level frame only. Alpha 0 inherits to every child texture so
+    -- we never touch Blizzard-owned textures or reparent the button.
+    -- Re-applied on every skin pass because Blizzard's block pool
+    -- resets alpha on acquire.
     if block.poiButton then
         local pb = block.poiButton
-        if not _poiHiddenParent then
-            _poiHiddenParent = CreateFrame("Frame", nil, UIParent)
-            _poiHiddenParent:Hide()
-        end
-        -- Reparent every single skin pass (not just once). Blizzard's
-        -- block pool re-parents poiButton back onto the block during
-        -- acquisition / animation entry, so a one-time reparent gets
-        -- silently undone on world quest entry / block recycle.
-        if pb:GetParent() ~= _poiHiddenParent then
-            pb:SetParent(_poiHiddenParent)
-        end
-        -- Hook SetParent so if Blizzard re-parents to block mid-frame,
-        -- we snap it back immediately.
-        if not _hookedPOIButtons[pb] then
-            _hookedPOIButtons[pb] = true
-            hooksecurefunc(pb, "SetParent", function(self, newParent)
-                if newParent ~= _poiHiddenParent then
-                    self:SetParent(_poiHiddenParent)
-                end
-            end)
-        end
+        pb:SetAlpha(0)
+        if pb.EnableMouse then pb:EnableMouse(false) end
+        if pb.EnableMouseMotion then pb:EnableMouseMotion(false) end
     end
 
     -- Hide Blizzard's quest-type icon by scanning for atlas-backed textures
@@ -650,6 +599,8 @@ local function ApplyQuestTypeIcon(block)
                      and block.groupFinderButton:IsShown())
                  or (block.GroupFinderButton and block.GroupFinderButton.IsShown
                      and block.GroupFinderButton:IsShown())
+                 or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
+                     and block.rightEdgeFrame:IsShown())
     if hasItem or hasLFG then
         if _blockIcons[block] then _blockIcons[block]:Hide() end
         return
@@ -893,38 +844,24 @@ local function SkinBlock(block)
     -- Focus highlight for super-tracked quest.
     ApplyFocusHighlight(block)
 
-    -- Strip + style direct children. Scenario StageBlock holds all its
-    -- visual content on a single child Frame (Act title / objectives /
-    -- timer bar), and we'd otherwise leave all its textures and
-    -- FontStrings untouched. Read-only walk on child types; texture
-    -- ops only, no mouse state changes.
-    -- Atlas patterns we consider "ornamental" and safe to strip.
+    -- Strip + style direct children. Quest blocks hold their progress
+    -- bars, objective FontStrings and ornamental textures on child frames.
+    -- Read-only walk on child types; texture ops only, no mouse state
+    -- changes. Scenario blocks never reach this code because SkinBlock
+    -- bails for them above.
     local function isOrnamentalAtlas(atlas)
         if type(atlas) ~= "string" then return false end
         local l = atlas:lower()
-        return l:find("scenario", 1, true)
-            or l:find("evergreen", 1, true)
+        return l:find("evergreen", 1, true)
             or l:find("toast", 1, true)
             or l:find("filigree", 1, true)
             or l:find("parchment", 1, true)
-            or l:find("delves-", 1, true)
             or l:find("bountiful", 1, true)
             or l:find("shimmer", 1, true)
             or l:find("sparkle", 1, true)
             or l:find("trackerheader", 1, true)
             or l:find("jailerstower", 1, true)
     end
-
-    -- Track:
-    --   levelFlagFrame  - the "flag" frame that holds the delve level number
-    --   innerTitleFS    - the visible delve title FontString
-    --   delveInnerFrame - the frame hosting delves-scenario-frame texture
-    --                     (we shrink its height to close the dead space)
-    -- Prime from cache so subsequent skin passes (after we've stripped the
-    -- identifying atlases) still find these references.
-    local levelFlagFrame  = _delveFlagFrame[block]
-    local innerTitleFS    = _delveTitleFS[block]
-    local delveInnerFrame = _delveInnerFrame[block]
     local function processFrame(frame, depth)
         if not frame or depth > 3 or not frame.GetChildren then return end
         for _, child in ipairs({ frame:GetChildren() }) do
@@ -934,48 +871,19 @@ local function SkinBlock(block)
                     if otype == "StatusBar" and EQT._SkinWidgetBar then
                         EQT._SkinWidgetBar(child)
                     elseif otype == "Frame" or otype == "Button" then
-                        local isLevelFlag = false
-                        local hasDelvesFrame = false
                         if child.GetRegions then
                             for _, rg in ipairs({ child:GetRegions() }) do
                                 local ot = rg.GetObjectType and rg:GetObjectType()
                                 if ot == "Texture" then
                                     local atlas = rg.GetAtlas and rg:GetAtlas()
-                                    if type(atlas) == "string" then
-                                        local la = atlas:lower()
-                                        if la:find("flag", 1, true) then
-                                            isLevelFlag = true
-                                        end
-                                        if la:find("delves-scenario-frame", 1, true) then
-                                            hasDelvesFrame = true
-                                        end
-                                    end
-                                    if isOrnamentalAtlas(atlas) and not rg._eqtKeep then
-                                        -- SetTexture("") only -- anti-taint
-                                        -- pattern. Leaving the atlas in place
-                                        -- is fine; "" texture renders nothing.
+                                    if atlas and isOrnamentalAtlas(atlas) then
+                                        -- SetTexture("") only -- anti-taint pattern.
                                         rg:SetTexture("")
                                     end
                                 elseif ot == "FontString" then
                                     StyleObjectiveFS(rg)
                                 end
                             end
-                            if hasDelvesFrame then
-                                delveInnerFrame = child
-                                _delveInnerFrame[block] = child
-                                for _, rg in ipairs({ child:GetRegions() }) do
-                                    if rg.GetObjectType
-                                       and rg:GetObjectType() == "FontString" then
-                                        innerTitleFS = rg
-                                        _delveTitleFS[block] = rg
-                                        break
-                                    end
-                                end
-                            end
-                        end
-                        if isLevelFlag then
-                            levelFlagFrame = child
-                            _delveFlagFrame[block] = child
                         end
                         processFrame(child, depth + 1)
                     end
@@ -984,193 +892,6 @@ local function SkinBlock(block)
         end
     end
     processFrame(block, 0)
-
-    -- Force title to scenario-title size + color, and nudge 4px to the left.
-    -- Blizzard re-anchors this FontString on objective updates / stage
-    -- transitions. Hook SetPoint and only shift if the current X doesn't
-    -- already match the value we last applied -- that way Blizzard
-    -- re-applying our already-shifted X doesn't re-shift again.
-    if innerTitleFS then
-        StyleScenarioTitleFS(innerTitleFS)
-        local function applyColor()
-            if F.ignoreColor[innerTitleFS] then return end
-            local r, g, b = GetTitleRGB()
-            local cr, cg, cb = innerTitleFS:GetTextColor()
-            if cr == r and cg == g and cb == b then return end
-            F.ignoreColor[innerTitleFS] = true
-            innerTitleFS:SetTextColor(r, g, b)
-            F.ignoreColor[innerTitleFS] = nil
-        end
-        applyColor()
-        if not F.colorHooked[innerTitleFS] then
-            F.colorHooked[innerTitleFS] = true
-            hooksecurefunc(innerTitleFS, "SetTextColor", applyColor)
-        end
-        local function applyShift()
-            if F.ignorePoint[innerTitleFS] then return end
-            local point, relTo, relPoint, x, y = innerTitleFS:GetPoint(1)
-            if not point then return end
-            if F.lastX[innerTitleFS] and x == F.lastX[innerTitleFS] then return end
-            local shiftedX = (x or 0) - 16
-            F.lastX[innerTitleFS] = shiftedX
-            F.ignorePoint[innerTitleFS] = true
-            innerTitleFS:ClearAllPoints()
-            innerTitleFS:SetPoint(point, relTo, relPoint, shiftedX, y or 0)
-            F.ignorePoint[innerTitleFS] = nil
-        end
-        local function queueShift()
-            if F.shiftPending[innerTitleFS] then return end
-            F.shiftPending[innerTitleFS] = true
-            C_Timer.After(0, function()
-                F.shiftPending[innerTitleFS] = nil
-                applyShift()
-            end)
-        end
-        applyShift()
-        if not F.shiftHooked[innerTitleFS] then
-            F.shiftHooked[innerTitleFS] = true
-            hooksecurefunc(innerTitleFS, "SetPoint", queueShift)
-        end
-    end
-
-    -- Pull the level number FontString out of the flag frame and anchor
-    -- it directly so its baseline lines up with the title's baseline.
-    if levelFlagFrame then
-        local numFS = _delveLevelNumFS[block]
-        if not numFS and levelFlagFrame.GetRegions then
-            for _, rg in ipairs({ levelFlagFrame:GetRegions() }) do
-                if rg.GetObjectType and rg:GetObjectType() == "FontString" then
-                    numFS = rg
-                    _delveLevelNumFS[block] = rg
-                    break
-                end
-            end
-        end
-        if numFS and innerTitleFS then
-            local font, _, flags = numFS:GetFont()
-            numFS:SetFont(font, 17, flags or "")
-            numFS:SetTextColor(GetAccent())
-            numFS:ClearAllPoints()
-            numFS:SetPoint("BOTTOMRIGHT", block, "RIGHT", -4, 0)
-            numFS:SetPoint("BOTTOM",      innerTitleFS, "BOTTOM", 0, 3)
-            numFS:Show()
-            if levelFlagFrame.Show then levelFlagFrame:Show() end
-        end
-    end
-
-    -- Close the dead space: shrink the delve inner frame AND force the
-    -- owning StageBlock itself to a compact height. Blizzard's layout
-    -- stacks ObjectivesBlock based on StageBlock's height -- if we only
-    -- shrink the inner frame, the block still reserves the full banner
-    -- space. hooksecurefunc on SetHeight catches Blizzard's layout pass
-    -- and immediately overrides with our value. Reentry-guarded to
-    -- prevent recursion on our own SetHeight calls.
-    if delveInnerFrame then
-        if delveInnerFrame.SetHeight then delveInnerFrame:SetHeight(22) end
-        if block.SetHeight and not F.heightHooked[block] then
-            F.heightHooked[block] = true
-            hooksecurefunc(block, "SetHeight", function(self)
-                if F.ignoreHeight[self] then return end
-                F.ignoreHeight[self] = true
-                self:SetHeight(26)
-                F.ignoreHeight[self] = nil
-            end)
-            block:SetHeight(26)
-        end
-    else
-        -- Non-delve StageBlock. Covers 5-player dungeons AND outdoor /
-        -- scenario-style events (Abundance, public events, etc.) -- every
-        -- context EXCEPT delves (handled above) reserves the same ~80px
-        -- banner that we want to reclaim. The hook is installed once per
-        -- block and gated only on "not a delve right now" at fire time so
-        -- zoning in/out after login still behaves correctly without a
-        -- reload. Isolated from the delve branch via its own flag.
-        local bp = block:GetParent()
-        if bp and bp.StageBlock == block then
-            if block.SetHeight and not F.dungeonHeightHooked[block] then
-                F.dungeonHeightHooked[block] = true
-                local function inDelve()
-                    return C_PartyInfo and C_PartyInfo.IsDelveInProgress
-                        and C_PartyInfo.IsDelveInProgress()
-                end
-                hooksecurefunc(block, "SetHeight", function(self)
-                    if F.ignoreDungeonHeight[self] then return end
-                    if inDelve() then return end
-                    F.ignoreDungeonHeight[self] = true
-                    self:SetHeight(16)
-                    F.ignoreDungeonHeight[self] = nil
-                end)
-                if not inDelve() then block:SetHeight(16) end
-            end
-            -- Shift the dungeon stage title up 20px. Find the first
-            -- FontString region on the block (or within its child frames)
-            -- and nudge its Y offset. Reentry-guarded so Blizzard's own
-            -- SetPoint calls re-apply our offset, not double-nudge.
-            local titleFS
-            if block.GetRegions then
-                for _, rg in ipairs({ block:GetRegions() }) do
-                    if rg.GetObjectType and rg:GetObjectType() == "FontString" then
-                        titleFS = rg
-                        break
-                    end
-                end
-            end
-            if not titleFS and block.GetChildren then
-                for _, c in ipairs({ block:GetChildren() }) do
-                    if c.GetRegions then
-                        for _, rg in ipairs({ c:GetRegions() }) do
-                            if rg.GetObjectType and rg:GetObjectType() == "FontString" then
-                                titleFS = rg
-                                break
-                            end
-                        end
-                    end
-                    if titleFS then break end
-                end
-            end
-            if titleFS and not F.dungeonShifted[titleFS] then
-                F.dungeonShifted[titleFS] = true
-                local function applyShift()
-                    if F.ignorePoint[titleFS] then return end
-                    if C_PartyInfo and C_PartyInfo.IsDelveInProgress
-                       and C_PartyInfo.IsDelveInProgress() then
-                        return
-                    end
-                    local n = titleFS:GetNumPoints() or 0
-                    if n == 0 then return end
-                    if F.shiftApplied[titleFS] then return end
-                    local points = {}
-                    for i = 1, n do
-                        local point, relTo, relPoint, x, y = titleFS:GetPoint(i)
-                        points[i] = { point, relTo, relPoint, x or 0, (y or 0) + 20 }
-                    end
-                    F.shiftApplied[titleFS] = true
-                    F.ignorePoint[titleFS] = true
-                    titleFS:ClearAllPoints()
-                    for _, pt in ipairs(points) do
-                        titleFS:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
-                    end
-                    F.ignorePoint[titleFS] = nil
-                end
-                applyShift()
-                hooksecurefunc(titleFS, "SetPoint", function()
-                    if F.ignorePoint[titleFS] then return end
-                    F.shiftApplied[titleFS] = nil
-                    if F.shiftPending[titleFS] then return end
-                    F.shiftPending[titleFS] = true
-                    C_Timer.After(0, function()
-                        F.shiftPending[titleFS] = nil
-                        applyShift()
-                    end)
-                end)
-            end
-        end
-    end
-
-    -- Render our own affix icons inline after the title, hiding Blizzard's.
-    if innerTitleFS and EQT.UpdateDelveAffixIcons then
-        EQT.UpdateDelveAffixIcons(block, innerTitleFS)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -1259,42 +980,15 @@ local function CreateGhostBar(bar)
 
     -- Pin the ghost to the native bar's rect (the native bar is alpha 0
     -- but still in Blizzard's layout under the last objective line). Inset
-    -- 20px from the left to clear the objective bullet / indent. Deferred
+    -- 48px from the right to clear the objective bullet / indent. Deferred
     -- one frame so Blizzard's post-Show re-parent lands before we anchor.
-    -- Cache whether this bar lives under ScenarioObjectiveTracker so the
-    -- reanchor fast-path doesn't walk parents on every call.
-    local function isUnderScenarioTracker()
-        local f = bar
-        for _ = 1, 10 do
-            if not f then return false end
-            if f == _G.ScenarioObjectiveTracker then return true end
-            f = f.GetParent and f:GetParent()
-        end
-        return false
-    end
-    F.underScenarioTracker[bar] = isUnderScenarioTracker()
-
     local function reanchor()
         local p = bar:GetParent()
         if not p then return end
         if ghost:GetParent() ~= p then ghost:SetParent(p) end
-        -- Delve progress bars need a +6 / -5 nudge so they sit clear of the
-        -- delve scenario title/flag. Detect via C_PartyInfo.IsDelveInProgress.
-        local dx, dy = 0, 0
-        local rightPad = 48
-        local isDelve = C_PartyInfo and C_PartyInfo.IsDelveInProgress
-                        and C_PartyInfo.IsDelveInProgress()
-        if isDelve then
-            dx, dy = 6, -5
-        elseif F.underScenarioTracker[bar] then
-            -- Non-delve scenario bars (Abundance / outdoor events / dungeon
-            -- scenario steps): shrink the ghost width by 30px so it fits
-            -- the narrower banner these contexts use. 48 - 30 = 18.
-            rightPad = 18
-        end
         ghost:ClearAllPoints()
-        ghost:SetPoint("TOPLEFT",  bar, "TOPLEFT",   dx,              dy)
-        ghost:SetPoint("TOPRIGHT", bar, "TOPRIGHT",  rightPad + dx,   dy)
+        ghost:SetPoint("TOPLEFT",  bar, "TOPLEFT",  0,  0)
+        ghost:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 48, 0)
         ghost:SetHeight(8)
     end
     reanchor()

@@ -273,10 +273,11 @@ local function RepointAllDBs(profileName)
         EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
         EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
     end
-    -- Seed castbar anchor defaults if the profile predates them.
-    -- These follow the same per-profile unlockLayout system as all
-    -- other elements — this just ensures old profiles get the defaults.
-    do
+    -- Seed castbar anchor defaults ONLY on brand-new profiles (no unlockLayout
+    -- yet). Re-seeding every load would clobber a user's deliberate un-anchor
+    -- or manual position with the default "target BOTTOM" anchor the next
+    -- time the profile is applied (e.g. via spec profile assignment).
+    if not ul then
         local anchors = EllesmereUIDB.unlockAnchors
         local wMatch  = EllesmereUIDB.unlockWidthMatch
         if anchors and wMatch then

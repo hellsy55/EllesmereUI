@@ -3339,6 +3339,7 @@ function NameplateFrame:ClearUnit()
         if slot.cd then
             if slot.cd.SetDrawSwipe then slot.cd:SetDrawSwipe(false) end
             if slot.cd.Clear then slot.cd:Clear() else slot.cd:SetCooldown(0, 0) end
+            slot.cd:Hide()
         end
         slot.icon:SetTexture(nil)
         slot:Hide()
@@ -3348,6 +3349,7 @@ function NameplateFrame:ClearUnit()
         if dSlot.cd then
             if dSlot.cd.SetDrawSwipe then dSlot.cd:SetDrawSwipe(false) end
             if dSlot.cd.Clear then dSlot.cd:Clear() else dSlot.cd:SetCooldown(0, 0) end
+            dSlot.cd:Hide()
         end
         dSlot.icon:SetTexture(nil)
         dSlot:Hide()
@@ -3357,6 +3359,7 @@ function NameplateFrame:ClearUnit()
         if bSlot.cd then
             if bSlot.cd.SetDrawSwipe then bSlot.cd:SetDrawSwipe(false) end
             if bSlot.cd.Clear then bSlot.cd:Clear() else bSlot.cd:SetCooldown(0, 0) end
+            bSlot.cd:Hide()
         end
         bSlot.icon:SetTexture(nil)
         bSlot:Hide()
@@ -3995,6 +3998,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if dCd.Clear then dCd:Clear()
             elseif CooldownFrame_Clear then CooldownFrame_Clear(dCd)
             else dCd:SetCooldown(0, 0) end
+            dCd:Hide()  -- prevent stale-swipe black-box render on pool reuse
         end
         local bCd = bSlot.cd
         if bCd then
@@ -4002,6 +4006,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if bCd.Clear then bCd:Clear()
             elseif CooldownFrame_Clear then CooldownFrame_Clear(bCd)
             else bCd:SetCooldown(0, 0) end
+            bCd:Hide()
         end
     end
     for i = 1, 2 do
@@ -4014,6 +4019,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if cCd.Clear then cCd:Clear()
             elseif CooldownFrame_Clear then CooldownFrame_Clear(cCd)
             else cCd:SetCooldown(0, 0) end
+            cCd:Hide()
         end
     end
     -- Get slot assignments; skip processing for any slot set to "none"
