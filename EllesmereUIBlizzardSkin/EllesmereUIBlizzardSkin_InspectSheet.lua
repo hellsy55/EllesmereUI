@@ -195,7 +195,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             if not ilvlText then
                 return
             end
-            ilvlText:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+            ilvlText:SetFont(STANDARD_TEXT_FONT, 13, "OUTLINE")
             ilvlText:SetJustifyH("CENTER")
 
             -- Position based on slot type (match CharacterSheet logic)
@@ -232,7 +232,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
 
             if iconOnly and iconOnly ~= "" then
                 local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
-                enchantLabel:SetFont(STANDARD_TEXT_FONT, 9, "OUTLINE")
+                enchantLabel:SetFont(STANDARD_TEXT_FONT, 11, "OUTLINE")
                 enchantLabel:SetTextColor(1, 1, 1, 0.8)
 
                 -- Position based on slot type (match CharacterSheet logic)
@@ -292,7 +292,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local upgradeText, upgradeColor = EUI_GetUpgradeTrack(itemLink)
         if upgradeText and upgradeText ~= "" then
             local upgradeLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
-            upgradeLabel:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+            upgradeLabel:SetFont(STANDARD_TEXT_FONT, 13, "OUTLINE")
             upgradeLabel:SetTextColor(upgradeColor.r, upgradeColor.g, upgradeColor.b, 1)
             upgradeLabel:SetJustifyH("CENTER")
 
@@ -443,6 +443,34 @@ local function SkinInspectSheet()
     if frame.TopTileStreaks then
         frame.TopTileStreaks:Hide()
         frame.TopTileStreaks:SetAlpha(0)
+    end
+
+    -- Hide InspectModelScene ControlFrame (similar to CharacterModelScene in CharacterSheet)
+    if InspectModelScene then
+        if InspectModelScene.ControlFrame then
+            InspectModelScene.ControlFrame:SetAlpha(0)
+            InspectModelScene.ControlFrame:EnableMouse(false)
+        end
+    end
+
+    -- Hide individual control buttons and textures
+    local controlButtons = {
+        "InspectModelFrameControlFrameZoomInButton",
+        "InspectModelFrameControlFrameZoomOutButton",
+        "InspectModelFrameControlFramePanButton",
+        "InspectModelFrameControlFrameRotateLeftButton",
+        "InspectModelFrameControlFrameRotateRightButton",
+        "InspectModelFrameControlFrameRotateResetButton",
+        "InspectModelFrameControlFrameLeft",
+        "InspectModelFrameControlFrameMiddle",
+        "InspectModelFrameControlFrameRight",
+    }
+    for _, buttonName in ipairs(controlButtons) do
+        local btn = _G[buttonName]
+        if btn then
+            btn:SetAlpha(0)
+            btn:EnableMouse(false)
+        end
     end
 
     -- Hide InspectModelFrameBorder edges and corners explicitly
@@ -1097,6 +1125,12 @@ if EllesmereUI then
                 local pos = _ebsTempPos
                     or (EllesmereUIDB and EllesmereUIDB.inspectFramePos)
                 if not (pos and pos.point) then return end
+
+                -- Prevent UIParentPanelManager from interfering
+                if InspectFrame:GetAttribute("UIPanelLayout-area") then
+                    InspectFrame:SetAttribute("UIPanelLayout-area", nil)
+                end
+
                 _ebsIgnoreSetPoint = true
                 InspectFrame:ClearAllPoints()
                 InspectFrame:SetPoint(
