@@ -9,6 +9,7 @@ local ADDON_NAME = ...
 -- AceDB replaced by EllesmereUI.Lite.NewDB
 local EABR = EllesmereUI.Lite.NewAddon("EllesmereUIAuraBuffReminders")
 
+
 local _B = {}  -- beacon state table, populated later
 local Known = function(id) return id and (IsPlayerSpell(id) or IsSpellKnown(id)) end
 local _eabrInCombat = false
@@ -2602,7 +2603,7 @@ local function Refresh()
     end
 end
 
-local REFRESH_THROTTLE_COMBAT = 0.2
+local REFRESH_THROTTLE_COMBAT = 0.5
 local REFRESH_THROTTLE_OOC    = 0.25
 local _lastRefreshTime = 0
 local _refreshTimerActive = false

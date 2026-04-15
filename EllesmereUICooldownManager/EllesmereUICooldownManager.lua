@@ -2808,8 +2808,12 @@ local _tooltipBars = {}  -- [barKey] = true for bars with tooltips enabled
 local _tooltipFrame = CreateFrame("Frame")
 _tooltipFrame:Hide()
 local _tooltipCurrentIcon = nil
+local _tooltipAccum = 0
 
-_tooltipFrame:SetScript("OnUpdate", function()
+_tooltipFrame:SetScript("OnUpdate", function(_, elapsed)
+    _tooltipAccum = _tooltipAccum + elapsed
+    if _tooltipAccum < 0.05 then return end
+    _tooltipAccum = 0
     if EllesmereUI and EllesmereUI._unlockActive then
         if _tooltipCurrentIcon then
             GameTooltip:Hide()
@@ -3139,7 +3143,9 @@ local function RefreshCDMIconAppearance(barKey)
         local showItemCount = barData.showItemCount ~= false
         local borderLvl = icon:GetFrameLevel() + 5
         local textLvl = 25
-        -- Applications (buff stacks / aura applications)
+        -- Applications (buff stacks / aura applications) -- not an item count.
+        -- Blizzard manages show/hide based on whether stacks exist; we only
+        -- restyle position/font and never gate visibility on showItemCount.
         if icon.Applications then
             pcall(icon.Applications.SetFrameLevel, icon.Applications, textLvl)
             if icon.Applications.Applications then
@@ -3147,10 +3153,10 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
                 appsFS:ClearAllPoints()
                 appsFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
-                if showItemCount then appsFS:Show() else appsFS:Hide() end
             end
         end
-        -- ChargeCount (spell charges like Holy Power spenders)
+        -- ChargeCount (spell charges like Sigil/Roll) -- not an item count.
+        -- Blizzard manages show/hide based on charge state.
         if icon.ChargeCount then
             pcall(icon.ChargeCount.SetFrameLevel, icon.ChargeCount, textLvl)
             if icon.ChargeCount.Current then
@@ -3158,7 +3164,6 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
                 chargeFS:ClearAllPoints()
                 chargeFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", scX, scY)
-                if showItemCount then chargeFS:Show() else chargeFS:Hide() end
             end
         end
         -- Item count text (potions/healthstones) -- our own frame, safe to reparent
@@ -5188,7 +5193,6 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
-eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
@@ -5434,7 +5438,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end
         ns.OnSpecChanged()
     end
-    if event == "UNIT_AURA" then return end
     RequestUpdate()
 end)
 

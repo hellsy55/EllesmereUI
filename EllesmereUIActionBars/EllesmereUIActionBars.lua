@@ -15,6 +15,7 @@ local ADDON_NAME, ns = ...
 local EAB = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 ns.EAB = EAB
 
+
 local PP = EllesmereUI.PP
 
 -- Cold-path helper table for module-level behavior that benefits from a
@@ -1450,6 +1451,10 @@ local BUTTON_EVENT_LISTS = {
         "PLAYER_EQUIPMENT_CHANGED",
         "LOSS_OF_CONTROL_ADDED",
         "LOSS_OF_CONTROL_UPDATE",
+        -- Native per-button usability updates: each button reacts via
+        -- Blizzard's C-side ActionButton OnEvent dispatcher, replacing
+        -- the old global usableFrame polling.
+        "PLAYER_TARGET_CHANGED",
     },
     stance = {
         "UPDATE_SHAPESHIFT_FORMS",
@@ -1477,6 +1482,10 @@ local function ReRegisterButtonEvents(btn, listKey)
     end
     if listKey == "action" then
         btn:RegisterUnitEvent("UNIT_AURA", "player")
+        -- Player-only power filter so this fires once per power tick, not
+        -- per group member. Per-button registration replaces the old
+        -- usableFrame polling; Blizzard's native OnEvent calls UpdateUsable.
+        btn:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     elseif listKey == "pet" then
         btn:RegisterUnitEvent("UNIT_PET", "player")
         btn:RegisterUnitEvent("UNIT_FLAGS", "pet")
@@ -5322,32 +5331,11 @@ function EAB:HookProcGlow()
     end
 end
 
--- Throttled usability refresh: UNIT_POWER_FREQUENT fires every resource
--- tick, so we throttle to max once per 0.15s. Calls Blizzard's own
--- UpdateUsable() which is what ACTIONBAR_UPDATE_USABLE would trigger.
-do
-    local USABLE_THROTTLE = 0.15
-    local lastUsableTime = 0
-    local usableFrame = CreateFrame("Frame")
-    usableFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
-    usableFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-    usableFrame:SetScript("OnEvent", function()
-        local now = GetTime()
-        if now - lastUsableTime < USABLE_THROTTLE then return end
-        lastUsableTime = now
-        for _, info in ipairs(BAR_CONFIG) do
-            local buttons = barButtons[info.key]
-            if buttons then
-                for i = 1, #buttons do
-                    local btn = buttons[i]
-                    if btn and btn.UpdateUsable then
-                        btn:UpdateUsable()
-                    end
-                end
-            end
-        end
-    end)
-end
+-- Per-button usability updates are handled natively by Blizzard's
+-- ActionButton OnEvent: UNIT_POWER_FREQUENT and PLAYER_TARGET_CHANGED
+-- are now in BUTTON_EVENT_LISTS.action so each button reacts on its own
+-- via Blizzard's C-side dispatcher. The old global usableFrame polling
+-- pass that iterated all 144 buttons on every fire was removed.
 
 -- Hook AssistedCombatManager to scale the highlight frame when Blizzard
 -- creates it lazily on first use. Uses UpdateAllAssistedHighlightFramesForSpell

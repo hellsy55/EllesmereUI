@@ -1676,11 +1676,45 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     end
     plate:SetScript("OnEvent", function(self, event, ...)
         local handler = self[event]
-        if handler then
-            handler(self, ...)
-        end
+        if handler then handler(self, ...) end
     end)
 end)
+
+-- Pre-warm the plate frame pool so AoE pulls don't pay the 2 ms+
+-- per-frame creation cost (CreateFrame + child textures + cooldowns)
+-- on every plate Acquire when many plates appear in the same engine
+-- frame. Without prewarm, a 5-mob pack can stack 10+ ms of synchronous
+-- frame setup into a single render frame -> visible stutter.
+--
+-- Spread the work over 2 seconds (1 plate / 100 ms) starting shortly
+-- after PLAYER_LOGIN so login itself stays smooth. Each Acquire
+-- runs the pool's creation function; Release returns the now-built
+-- frame to the inactive list, ready for instant reuse.
+do
+    local prewarmFrame = CreateFrame("Frame")
+    prewarmFrame:RegisterEvent("PLAYER_LOGIN")
+    prewarmFrame:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        C_Timer.After(2, function()
+            -- Hold acquires until end so each one actually creates a new
+            -- pool frame instead of recycling the same one.
+            local held = {}
+            local made = 0
+            local target = 20
+            local ticker
+            ticker = C_Timer.NewTicker(0.1, function()
+                made = made + 1
+                if made > target then
+                    for i = 1, #held do frameCache:Release(held[i]) end
+                    ticker:Cancel()
+                    return
+                end
+                held[made] = frameCache:Acquire()
+            end)
+        end)
+    end)
+end
+
 local function InitDB()
     -- Legacy stub: NewDB + DeepMergeDefaults handles defaults now.
     -- Kept as a no-op so any stray call sites don't error.
@@ -1817,6 +1851,10 @@ end
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
 function ns.RefreshAllSettings()
+    -- Bump the appearance generation so SetUnit re-runs ApplyAppearance
+    -- on each plate. Without this bump, cache-hit re-spawns would skip
+    -- the static appearance work and the new settings wouldn't apply.
+    ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
     for _, plate in pairs(ns.plates) do
         if plate.unit and plate.nameplate then
             plate:SetUnit(plate.unit, plate.nameplate)
@@ -3019,25 +3057,169 @@ pandemicTickFrame:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local NameplateFrame = {}
+
+-- Appearance generation: bumped by RefreshAllSettings so plates re-apply
+-- static appearance on next SetUnit. Plates stamp _appearanceGen after
+-- applying so cache-hit re-spawns skip the work entirely.
+ns._npAppearanceGen = ns._npAppearanceGen or 1
+
+-- Static appearance: anchors, sizes, fonts, colors, and aura layout that
+-- only depend on settings (not on the bound unit). Runs once per plate
+-- after creation, then again only when RefreshAllSettings bumps the
+-- generation counter. Cuts ~0.7 ms off every plate spawn.
+function NameplateFrame:ApplyAppearance()
+    self:SetSize(1, 1)
+    local castH = GetCastBarHeight()
+    local gap = GetAuraSpacing()
+    self.health:ClearAllPoints()
+    self.health:SetPoint("CENTER", self, "CENTER", 0, GetNameplateYOffset())
+    self.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
+    self.absorb:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
+    self.cast:SetSize(GetHealthBarWidth(), castH)
+    self.cast:ClearAllPoints()
+    self.cast:SetPoint("TOPLEFT", self.health, "BOTTOMLEFT", 0, 0)
+    self.castIconFrame:SetSize(castH, castH)
+    self.castIconFrame:ClearAllPoints()
+    self.castIconFrame:SetPoint("TOPRIGHT", self.cast, "TOPLEFT", 0, 0)
+    local showIcon = GetShowCastIcon()
+    if showIcon then
+        self.castIconFrame:SetScale(GetCastIconScale())
+        self.castIconFrame:Show()
+    else
+        self.castIconFrame:Hide()
+    end
+    self.castLeftBorder:SetWidth(1)
+    self.castSpark:SetHeight(castH)
+    self.kickMarker:SetSize(GetHealthBarWidth(), castH)
+    -- Enemy name color (per-slot)
+    local nameSlotKey = FindSlotForElement("enemyName")
+    if nameSlotKey then
+        local nr, ng, nb = GetTextSlotColor(nameSlotKey)
+        self.name:SetTextColor(nr, ng, nb, 1)
+    end
+    self:RefreshNamePosition()
+    -- Cast text sizes and colors
+    local cns = (p and p.castNameSize) or defaults.castNameSize
+    local cts = (p and p.castTargetSize) or defaults.castTargetSize
+    local cnc = (p and p.castNameColor) or defaults.castNameColor
+    local ctmSz = (p and p.castTimerSize) or defaults.castTimerSize
+    local ctmC = (p and p.castTimerColor) or defaults.castTimerColor
+    SetFSFont(self.castName, cns, GetNPOutline())
+    SetFSFont(self.castTarget, cts, GetNPOutline())
+    SetFSFont(self.castTimer, ctmSz, GetNPOutline())
+    self.castName:SetJustifyH("LEFT")
+    self.castTarget:SetJustifyH("RIGHT")
+    self.castTimer:SetJustifyH("RIGHT")
+    self.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
+    local showTimer = defaults.showCastTimer
+    if p and p.showCastTimer ~= nil then showTimer = p.showCastTimer end
+    self._showCastTimer = showTimer
+    local castW = self.cast:GetWidth()
+    local timerW = ctmSz * 2.2
+    if castW and castW > 0 then
+        self.castName:SetWidth(castW * 0.42)
+        self.castTimer:SetWidth(timerW)
+        self.castTarget:SetWidth(castW * 0.42)
+        self.castTarget:ClearAllPoints()
+        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW, 0)
+    end
+    self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
+    -- Aura duration/stack text settings (unified across debuffs, buffs, CCs)
+    local auraDurSize = (p and p.auraDurationTextSize) or defaults.auraDurationTextSize
+    local auraDurColor = (p and p.auraDurationTextColor) or defaults.auraDurationTextColor
+    local auraStackSize = (p and p.auraStackTextSize) or defaults.auraStackTextSize
+    local auraStackColor = (p and p.auraStackTextColor) or defaults.auraStackTextColor
+    local debuffTPos = (p and p.debuffTimerPosition) or (p and p.auraTextPosition) or defaults.debuffTimerPosition
+    local buffTPos   = (p and p.buffTimerPosition)   or (p and p.auraTextPosition) or defaults.buffTimerPosition
+    local ccTPos     = (p and p.ccTimerPosition)     or (p and p.auraTextPosition) or defaults.ccTimerPosition
+    local function ApplyTimerPosition(durText, auraFrame, pos)
+        local cd = auraFrame.cd
+        if pos == "none" then
+            if cd and cd.SetHideCountdownNumbers then
+                cd:SetHideCountdownNumbers(true)
+            end
+            return
+        end
+        if cd and cd.SetHideCountdownNumbers then
+            cd:SetHideCountdownNumbers(false)
+        end
+        SetFSFont(durText, auraDurSize, "OUTLINE")
+        durText:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
+        durText:ClearAllPoints()
+        if pos == "center" then
+            durText:SetPoint("CENTER", auraFrame, "CENTER", 0, 0)
+            durText:SetJustifyH("CENTER")
+        elseif pos == "topright" then
+            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3, 4)
+            durText:SetJustifyH("RIGHT")
+        else
+            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3, 4)
+            durText:SetJustifyH("LEFT")
+        end
+    end
+    for i = 1, 4 do
+        if self.debuffs[i] and self.debuffs[i].cd and self.debuffs[i].cd.text then
+            SetFSFont(self.debuffs[i].cd.text, auraDurSize, "OUTLINE")
+            self.debuffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
+            ApplyTimerPosition(self.debuffs[i].cd.text, self.debuffs[i], debuffTPos)
+        end
+        if self.debuffs[i] and self.debuffs[i].count then
+            SetFSFont(self.debuffs[i].count, auraStackSize, "OUTLINE")
+            self.debuffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
+        end
+    end
+    local debuffSz = GetDebuffIconSize()
+    local buffSz = GetBuffIconSize()
+    local ccSz = GetCCIconSize()
+    local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
+    for i = 1, 4 do
+        PP.Size(self.debuffs[i], debuffSz, debuffSz)
+    end
+    for i = 1, 4 do
+        PP.Size(self.buffs[i], buffSz, buffSz)
+        if self.buffs[i].cd and self.buffs[i].cd.text then
+            SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE")
+            self.buffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
+            ApplyTimerPosition(self.buffs[i].cd.text, self.buffs[i], buffTPos)
+        end
+        if self.buffs[i].count then
+            SetFSFont(self.buffs[i].count, auraStackSize, "OUTLINE")
+            self.buffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
+        end
+    end
+    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffSz, gap, GetAuraSlotOffsets("buffSlot"))
+    for i = 1, 2 do
+        PP.Size(self.cc[i], ccSz, ccSz)
+        if self.cc[i].cd and self.cc[i].cd.text then
+            SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE")
+            self.cc[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
+            ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos)
+        end
+    end
+    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, gap, GetAuraSlotOffsets("ccSlot"))
+    if self.absorbForward then
+        self.absorbForward:SetHeight(GetHealthBarHeight())
+    end
+    if self.absorbOverflow then
+        self.absorbOverflow:SetHeight(GetHealthBarHeight())
+    end
+    ApplyHealthBarTexture(self)
+end
+
 function NameplateFrame:SetUnit(unit, nameplate)
     self.unit = unit
     self.nameplate = nameplate
     self:SetParent(nameplate)
     self:ClearAllPoints()
     -- Single center anchor: the entire plate moves as one unit when the
-    -- nameplate bounces by 1px, preventing individual edges from rounding
-    -- independently (the "pixel shimmer" / bouncing-sides issue).
+    -- nameplate bounces by 1px, preventing edge-rounding shimmer.
     self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
-    self:SetSize(1, 1)
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
-    -- Stacking bounds: tell WoW to use our visual footprint for stacking,
-    -- not the Blizzard UnitFrame's layout bounds (which include AurasFrame).
-    -- Height covers name text above + health bar + cast bar below.
+    -- Stacking bounds frame (must reparent to this nameplate every spawn)
     if nameplate.SetStackingBoundsFrame then
         if not self._stackBounds then
             self._stackBounds = CreateFrame("Frame", nil, nameplate)
-            -- WoW needs renderable content to measure frame bounds
             local tex = self._stackBounds:CreateTexture(nil, "BACKGROUND")
             tex:SetColorTexture(1, 0, 0, 0)
             tex:SetAllPoints(self._stackBounds)
@@ -3049,82 +3231,30 @@ function NameplateFrame:SetUnit(unit, nameplate)
         local nameGap = 4 + GetEnemyNameTextSize()
         local totalH = nameGap + barH + castH2
         local scale = GetStackSpacingScale() / 100
-        -- Anchor directly to nameplate to avoid any influence from our
-        -- plate frame's scale changes (ApplyScale).
         self._stackBounds:SetPoint("CENTER", nameplate, "CENTER", 0, GetNameplateYOffset())
         self._stackBounds:SetSize(GetHealthBarWidth(), totalH * scale)
         self._stackBounds:Show()
         nameplate:SetStackingBoundsFrame(self._stackBounds)
     end
-    local castH = GetCastBarHeight()
-    -- Focus cast height multiplier
+    -- Apply static appearance only when stale (settings changed or fresh
+    -- pool plate). Cache-hit re-spawns skip this entirely.
+    if self._appearanceGen ~= ns._npAppearanceGen then
+        self:ApplyAppearance()
+        self._appearanceGen = ns._npAppearanceGen
+    end
+    -- Focus cast height override (per-unit). ApplyAppearance set the base
+    -- cast height; if this plate is the focus, override the cast bar /
+    -- icon / spark / kick marker to the focus-specific size.
     if unit and UnitIsUnit(unit, "focus") then
         local pct = GetFocusCastHeight()
         if pct ~= 100 then
-            castH = math.floor(castH * pct / 100 + 0.5)
+            local castH = math.floor(GetCastBarHeight() * pct / 100 + 0.5)
+            self.cast:SetSize(GetHealthBarWidth(), castH)
+            self.castIconFrame:SetSize(castH, castH)
+            self.castSpark:SetHeight(castH)
+            self.kickMarker:SetSize(GetHealthBarWidth(), castH)
         end
     end
-    local gap = GetAuraSpacing()
-    local debuffY = GetDebuffYOffset()
-    self.health:ClearAllPoints()
-    self.health:SetPoint("CENTER", self, "CENTER", 0, GetNameplateYOffset())
-    self.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
-    self.absorb:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
-    self.cast:SetSize(GetHealthBarWidth(), castH)
-    self.cast:ClearAllPoints()
-    self.cast:SetPoint("TOPLEFT", self.health, "BOTTOMLEFT", 0, 0)
-    self.castIconFrame:SetSize(castH, castH)
-    self.castIconFrame:ClearAllPoints()
-    self.castIconFrame:SetPoint("TOPRIGHT", self.cast, "TOPLEFT", 0, 0)
-    -- Apply cast icon visibility and scale
-    local showIcon = GetShowCastIcon()
-    if showIcon then
-        local iconScale = GetCastIconScale()
-        self.castIconFrame:SetScale(iconScale)
-        self.castIconFrame:Show()
-    else
-        self.castIconFrame:Hide()
-    end
-    self.castLeftBorder:SetWidth(1)
-    self.castSpark:SetHeight(castH)
-    -- Kick tick marker sizing
-    self.kickMarker:SetSize(GetHealthBarWidth(), castH)
-    -- Enemy name color (per-slot)
-    local nameSlotKey = FindSlotForElement("enemyName")
-    if nameSlotKey then
-        local nr, ng, nb = GetTextSlotColor(nameSlotKey)
-        self.name:SetTextColor(nr, ng, nb, 1)
-    end
-    -- Name position (top = above bar, left/center/right = inside bar)
-    self:RefreshNamePosition()
-    -- Cast text sizes and colors
-    local cns = (p and p.castNameSize) or defaults.castNameSize
-    local cts = (p and p.castTargetSize) or defaults.castTargetSize
-    local cnc = (p and p.castNameColor) or defaults.castNameColor
-    local ctmSz = (p and p.castTimerSize) or defaults.castTimerSize
-    local ctmC = (p and p.castTimerColor) or defaults.castTimerColor
-    SetFSFont(self.castName, cns, GetNPOutline())
-    SetFSFont(self.castTarget, cts, GetNPOutline())
-    SetFSFont(self.castTimer, ctmSz, GetNPOutline())
-    -- Reapply justify after SetFont (SetFont can reset it)
-    self.castName:SetJustifyH("LEFT")
-    self.castTarget:SetJustifyH("RIGHT")
-    self.castTimer:SetJustifyH("RIGHT")
-    self.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
-    local showTimer = defaults.showCastTimer
-    if p and p.showCastTimer ~= nil then showTimer = p.showCastTimer end
-    self._showCastTimer = showTimer
-    -- Fixed widths for three independent zones
-    local castW = self.cast:GetWidth()
-    local timerW = ctmSz * 2.2
-    if castW and castW > 0 then
-        self.castName:SetWidth(castW * 0.42)
-        self.castTimer:SetWidth(timerW)
-        self.castTarget:SetWidth(castW * 0.42)
-        self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW, 0)
-    end
-    self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     -- Cast target color: class-colored if enabled and target is a player, otherwise use castTargetColor
     local useClassColor = defaults.castTargetClassColor
     if p and p.castTargetClassColor ~= nil then useClassColor = p.castTargetClassColor end
@@ -3156,98 +3286,6 @@ function NameplateFrame:SetUnit(unit, nameplate)
         local ctc = (p and p.castTargetColor) or defaults.castTargetColor
         self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
     end
-    -- Aura duration text settings (unified across debuffs, buffs, CCs)
-    local auraDurSize = (p and p.auraDurationTextSize) or defaults.auraDurationTextSize
-    local auraDurColor = (p and p.auraDurationTextColor) or defaults.auraDurationTextColor
-    local auraStackSize = (p and p.auraStackTextSize) or defaults.auraStackTextSize
-    local auraStackColor = (p and p.auraStackTextColor) or defaults.auraStackTextColor
-    -- Aura timer positions (per-type: debuffs, buffs, CCs with "none" to hide)
-    local debuffTPos = (p and p.debuffTimerPosition) or (p and p.auraTextPosition) or defaults.debuffTimerPosition
-    local buffTPos   = (p and p.buffTimerPosition)   or (p and p.auraTextPosition) or defaults.buffTimerPosition
-    local ccTPos     = (p and p.ccTimerPosition)     or (p and p.auraTextPosition) or defaults.ccTimerPosition
-
-    -- Helper: apply timer position to a duration text fontstring
-    -- For "none", uses SetHideCountdownNumbers(true) to tell the Blizzard cooldown
-    -- system to suppress the text entirely, which is more reliable than hiding the
-    -- FontString directly (Blizzard re-shows it) or zeroing alpha/font size (gets
-    -- overridden by the cooldown system).
-    local function ApplyTimerPosition(durText, auraFrame, pos)
-        local cd = auraFrame.cd
-        if pos == "none" then
-            if cd and cd.SetHideCountdownNumbers then
-                cd:SetHideCountdownNumbers(true)
-            end
-            return
-        end
-        if cd and cd.SetHideCountdownNumbers then
-            cd:SetHideCountdownNumbers(false)
-        end
-        SetFSFont(durText, auraDurSize, "OUTLINE")
-        durText:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-        durText:ClearAllPoints()
-        if pos == "center" then
-            durText:SetPoint("CENTER", auraFrame, "CENTER", 0, 0)
-            durText:SetJustifyH("CENTER")
-        elseif pos == "topright" then
-            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3, 4)
-            durText:SetJustifyH("RIGHT")
-        else -- topleft (default)
-            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3, 4)
-            durText:SetJustifyH("LEFT")
-        end
-    end
-
-    -- Debuff duration text + position + stack count styling
-    for i = 1, 4 do
-        if self.debuffs[i] and self.debuffs[i].cd and self.debuffs[i].cd.text then
-            SetFSFont(self.debuffs[i].cd.text, auraDurSize, "OUTLINE")
-            self.debuffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.debuffs[i].cd.text, self.debuffs[i], debuffTPos)
-        end
-        if self.debuffs[i] and self.debuffs[i].count then
-            SetFSFont(self.debuffs[i].count, auraStackSize, "OUTLINE")
-            self.debuffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
-        end
-    end
-    -- Icon sizes from DB
-    local debuffSz = GetDebuffIconSize()
-    local buffSz = GetBuffIconSize()
-    local ccSz = GetCCIconSize()
-    local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
-    -- Debuff icon sizes (positions handled in UpdateAuras via PositionAuraSlot)
-    for i = 1, 4 do
-        PP.Size(self.debuffs[i], debuffSz, debuffSz)
-    end
-    -- Buff spacing + size + duration/stack text styling + timer position
-    for i = 1, 4 do
-        PP.Size(self.buffs[i], buffSz, buffSz)
-        if self.buffs[i].cd and self.buffs[i].cd.text then
-            SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE")
-            self.buffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.buffs[i].cd.text, self.buffs[i], buffTPos)
-        end
-        if self.buffs[i].count then
-            SetFSFont(self.buffs[i].count, auraStackSize, "OUTLINE")
-            self.buffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
-        end
-    end
-    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffSz, gap, GetAuraSlotOffsets("buffSlot"))
-    -- CC spacing + size + duration/stack text styling + timer position
-    for i = 1, 2 do
-        PP.Size(self.cc[i], ccSz, ccSz)
-        if self.cc[i].cd and self.cc[i].cd.text then
-            SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE")
-            self.cc[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos)
-        end
-    end
-    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, gap, GetAuraSlotOffsets("ccSlot"))
-if self.absorbForward then
-    self.absorbForward:SetHeight(GetHealthBarHeight())
-end
-if self.absorbOverflow then
-    self.absorbOverflow:SetHeight(GetHealthBarHeight())
-end
     HideBlizzardFrame(nameplate, unit)
     self:RegisterUnitEvent("UNIT_HEALTH", unit)
     self:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", unit)
@@ -3270,7 +3308,6 @@ end
     self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE", unit)
     self:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", unit)
-    ApplyHealthBarTexture(self)
     self:UpdateHealth()
     self:UpdateName()
     self:UpdateClassification()

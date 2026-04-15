@@ -649,8 +649,14 @@ end
 -- Returns a table of {x0, x1} pairs (in logical units, snapped to physical
 -- pixels) for each pip index 1..numPips. Spacing between every adjacent pair
 -- is guaranteed to be exactly pipSp physical pixels at any UI scale.
-local function CalcPipGeometry(totalW, numPips, pipSp, frame)
-    local es = frame:GetEffectiveScale()
+local function CalcPipGeometry(totalW, numPips, pipSp, frame, esOverride)
+    -- esOverride lets the caller pass the same effective scale used to
+    -- snap the frame's outer dimensions. When omitted, falls back to the
+    -- frame's live es. Passing an override eliminates the 1-px mismatch
+    -- that arises when the frame's effective scale changes between the
+    -- outer SetSize and this layout pass (parent reparent, scale chain
+    -- update, etc.). The caller always owns the source of truth.
+    local es = esOverride or frame:GetEffectiveScale()
     if es <= 0 then es = 1 end
     -- 1 physical pixel in this frame's coordinate space
     local onePixel = PP.perfect / es
@@ -1726,7 +1732,13 @@ local function BuildBars()
                 maxPts = 5
             end
         end
-        local pipH = PP.Scale(sp.pipHeight or 20)
+        -- Single source of truth for effective scale: capture once, pass
+        -- to every snap and to CalcPipGeometry so frame outer dimensions
+        -- and pip layout cannot disagree by 1 physical pixel due to
+        -- effective-scale changes mid-build (parent reparent, etc.).
+        local _crEs = (secondaryFrame and secondaryFrame:GetEffectiveScale())
+                      or (UIParent and UIParent:GetEffectiveScale()) or 1
+        local pipH = PP.SnapForES(sp.pipHeight or 20, _crEs)
         local pipSp = sp.pipSpacing or 1
         local pipOri = sp.pipOrientation or "HORIZONTAL"
         local isVertical = (pipOri ~= "HORIZONTAL")
@@ -1740,11 +1752,15 @@ local function BuildBars()
             totalW = sp.pipWidth or 214
         end
 
-        -- Frame dimensions: vertical flips width/height axes.
-        -- Initial size set here; pip layout may refine width to match
-        -- the exact physical pixel span from CalcPipGeometry.
-        local frameW = isVertical and PP.Scale(pipH) or PP.Scale(totalW)
-        local frameH = isVertical and PP.Scale(totalW) or PP.Scale(pipH)
+        -- Frame dimensions: snapped ONCE to the physical pixel grid using
+        -- the captured _crEs. Pip layout below uses the SAME _crEs and the
+        -- SAME totalW, so its slot positions align with the frame edges
+        -- exactly. NO post-layout frame resize is needed (and in fact one
+        -- would re-introduce the 1px shift this design eliminates).
+        local widthSnapped  = PP.SnapForES(totalW, _crEs)
+        local heightSnapped = PP.SnapForES(pipH,   _crEs)
+        local frameW = isVertical and heightSnapped or widthSnapped
+        local frameH = isVertical and widthSnapped  or heightSnapped
 
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
         local secondaryUnlockAnchored = EllesmereUI.IsUnlockAnchored("ERB_ClassResource")
@@ -1856,11 +1872,9 @@ local function BuildBars()
             secondaryBar:Show()
         elseif cachedSecondary.type == "runes" then
             local numPips = 6
-            local slots, _, _, actualW = CalcPipGeometry(totalW, numPips, pipSp, secondaryFrame)
-            if actualW then
-                if isVertical then secondaryFrame:SetHeight(actualW)
-                else secondaryFrame:SetWidth(actualW) end
-            end
+            -- Frame size already set above with the SAME _crEs. Slot
+            -- positions are computed within that fixed frame; no resize.
+            local slots = CalcPipGeometry(totalW, numPips, pipSp, secondaryFrame, _crEs)
             for i = 1, 6 do
                 if not runeFrames[i] then
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
@@ -1919,11 +1933,9 @@ local function BuildBars()
             if secondaryBar then secondaryBar:Hide() end
             for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
         else
-            local slots, _, _, actualW = CalcPipGeometry(totalW, maxPts, pipSp, secondaryFrame)
-            if actualW then
-                if isVertical then secondaryFrame:SetHeight(actualW)
-                else secondaryFrame:SetWidth(actualW) end
-            end
+            -- Frame size already set above with the SAME _crEs. Slot
+            -- positions are computed within that fixed frame; no resize.
+            local slots = CalcPipGeometry(totalW, maxPts, pipSp, secondaryFrame, _crEs)
             for i = 1, maxPts do
                 if not pips[i] then
                     pips[i] = CreatePip(secondaryFrame, 20, pipH, i,

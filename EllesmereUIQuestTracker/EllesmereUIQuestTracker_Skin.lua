@@ -288,11 +288,15 @@ end
 local function StripTextures(frame, keep)
     if not frame or not frame.GetRegions then return end
     keep = keep or {}
+    -- IMPORTANT: hide via SetTexture("") only. SetTexture(nil) and
+    -- SetAlpha(0) both taint Blizzard-owned textures. Tainted widget-pool
+    -- textures cause arithmetic errors when the pool reuses them for
+    -- tooltip/POI widgets later (Blizzard_UIWidgetTemplateTextWithState
+    -- textHeight crashes).
     for _, region in ipairs({ frame:GetRegions() }) do
-        if region and region:GetObjectType() == "Texture" and not keep[region] then
-            region:SetTexture(nil)
-            region:SetAtlas(nil)
-            region:SetAlpha(0)
+        if region and region:GetObjectType() == "Texture" and not keep[region]
+           and region.SetTexture then
+            region:SetTexture("")
         end
     end
 end
@@ -306,13 +310,13 @@ local function SkinHeader(header)
     if not EQT.Cfg("skinHeaders") then return end
 
     -- Named decorative regions we always want gone.
+    -- Hide via SetTexture("") only (anti-taint pattern -- see StripTextures).
     for _, k in ipairs({
         "Background", "Line", "LineSheen", "LineGlow", "Divider",
         "Sheen", "Glow", "Stripe",
     }) do
         local r = header[k]
-        if r and r.SetAlpha then r:SetAlpha(0) end
-        if r and r.SetTexture then r:SetTexture(nil) end
+        if r and r.SetTexture then r:SetTexture("") end
     end
 
     -- Sweep anonymous Texture regions too. Preserve the minimize button's
@@ -591,8 +595,8 @@ local function ApplyQuestTypeIcon(block)
         if not tex then return end
         local atlas = tex.GetAtlas and tex:GetAtlas()
         if looksLikeQuestIconAtlas(atlas) then
-            tex:SetAlpha(0)
-            if tex.SetTexture then tex:SetTexture(nil) end
+            -- SetTexture("") only -- anti-taint pattern.
+            if tex.SetTexture then tex:SetTexture("") end
         end
     end
 
@@ -624,8 +628,8 @@ local function ApplyQuestTypeIcon(block)
         "IconRing", "Icon", "poiTexture", "TagTexture",
     }) do
         local r = block[k]
-        if r and r.SetAlpha then r:SetAlpha(0) end
-        if r and r.SetTexture then r:SetTexture(nil) end
+        -- SetTexture("") only -- anti-taint pattern.
+        if r and r.SetTexture then r:SetTexture("") end
     end
 
     local qID = block.id
@@ -864,8 +868,8 @@ local function SkinBlock(block)
         "Highlight", "ShineTop", "ShineBottom",
     }) do
         local r = block[k]
-        if r and r.SetAlpha then r:SetAlpha(0) end
-        if r and r.SetTexture then r:SetTexture(nil) end
+        -- SetTexture("") only -- anti-taint pattern.
+        if r and r.SetTexture then r:SetTexture("") end
     end
     -- Preserve our own icon (if already stamped on a prior refresh).
     local _keep = {}
@@ -947,9 +951,10 @@ local function SkinBlock(block)
                                         end
                                     end
                                     if isOrnamentalAtlas(atlas) and not rg._eqtKeep then
-                                        rg:SetTexture(nil)
-                                        rg:SetAtlas(nil)
-                                        rg:SetAlpha(0)
+                                        -- SetTexture("") only -- anti-taint
+                                        -- pattern. Leaving the atlas in place
+                                        -- is fine; "" texture renders nothing.
+                                        rg:SetTexture("")
                                     end
                                 elseif ot == "FontString" then
                                     StyleObjectiveFS(rg)
@@ -1215,8 +1220,15 @@ local function CreateGhostBar(bar)
         -- clicks intended for the quest item button or LFG eyeball that
         -- sit in the same horizontal band.
         ghost:EnableMouse(false)
-        if ghost.SetPropagateMouseMotion then ghost:SetPropagateMouseMotion(true) end
-        if ghost.SetPropagateMouseClicks then ghost:SetPropagateMouseClicks(true) end
+        -- SetPropagateMouseMotion/Clicks are protected (combat-locked).
+        -- EnableMouse(false) already makes the frame transparent to mouse
+        -- hit testing, so the propagate calls are belt-and-suspenders.
+        -- Skip them in combat to avoid the ADDON_ACTION_BLOCKED warning
+        -- when a new ghost bar is created mid-fight (rare but possible).
+        if not InCombatLockdown() then
+            if ghost.SetPropagateMouseMotion then ghost:SetPropagateMouseMotion(true) end
+            if ghost.SetPropagateMouseClicks then ghost:SetPropagateMouseClicks(true) end
+        end
         local bg = ghost:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(C_BAR_BG.r, C_BAR_BG.g, C_BAR_BG.b, C_BAR_BG.a)

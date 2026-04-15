@@ -1615,7 +1615,8 @@ local function CollectAndReanchor()
                 end
 
                 -- Clear excess icons
-                for i = #frames + 1, #icons do
+                local newCount = #frames
+                for i = newCount + 1, #icons do
                     if icons[i] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
@@ -1628,10 +1629,35 @@ local function CollectAndReanchor()
                     icons[i] = nil
                 end
 
-                -- Always layout (no change detection -- simpler, more robust)
-                RefreshCDMIconAppearance(barKey)
-                LayoutCDMBar(barKey)
-                ApplyCDMTooltipState(barKey)
+                -- Change detection (mirrors Phase 2 buff bars): skip the
+                -- expensive Refresh/Layout/Tooltip calls when the icon set
+                -- is identical to the previous reanchor. During rotation
+                -- spam, OnCooldownIDSet fires per spell cast and queues a
+                -- reanchor at the 0.2s throttle; the vast majority of those
+                -- reanchors produce the exact same icon list and don't
+                -- need the full layout pipeline re-run.
+                local prevCount = container._prevVisibleCount or 0
+                local iconsChanged = newCount ~= prevCount
+                if not iconsChanged and container._prevIconRefs then
+                    for idx = 1, newCount do
+                        if container._prevIconRefs[idx] ~= icons[idx] then
+                            iconsChanged = true; break
+                        end
+                    end
+                else
+                    iconsChanged = true
+                end
+                if iconsChanged then
+                    RefreshCDMIconAppearance(barKey)
+                    LayoutCDMBar(barKey)
+                    ApplyCDMTooltipState(barKey)
+                    if not container._prevIconRefs then container._prevIconRefs = {} end
+                    for idx = 1, newCount do container._prevIconRefs[idx] = icons[idx] end
+                    for idx = newCount + 1, #container._prevIconRefs do
+                        container._prevIconRefs[idx] = nil
+                    end
+                end
+                container._prevVisibleCount = newCount
             end
         end
     end
@@ -1657,7 +1683,8 @@ local function CollectAndReanchor()
                 end
             end
             local container = cdmBarFrames[bd.key]
-            if container then
+            if container and (container._prevVisibleCount or 0) > 0 then
+                container._prevVisibleCount = 0
                 LayoutCDMBar(bd.key)
             end
         end
@@ -2038,9 +2065,13 @@ function ns.SetupViewerHooks()
             -- change on transforms, only the spell behind it changes).
             -- CategorizeFrame will re-resolve the spell via baseSID.
         end
-        -- Invalidate spell caches so IsSpellKnownInCDM re-reads from API
-        -- on the next reanchor (transform may have changed which IDs exist).
-        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+        -- Spell-catalog invalidation is intentionally NOT done here.
+        -- OnCooldownIDSet fires constantly during combat as Blizzard's pool
+        -- recycles frames, but the CDM category sets themselves only change
+        -- on talent/spec/login events -- which already invalidate the cache
+        -- via FullCDMRebuild and ScheduleTalentRebuild. Marking dirty here
+        -- caused a 1.67ms RebuildCDMSpellCaches spike on every reanchor
+        -- during combat for no semantic gain.
         QueueReanchor()
     end
     if CooldownViewerBuffIconItemMixin and CooldownViewerBuffIconItemMixin.OnCooldownIDSet then
@@ -2221,6 +2252,8 @@ function ns.SetupViewerHooks()
     do
         local cdmBuffTickFrame = CreateFrame("Frame")
         local cdmBuffAccum = 0
+        local _, _cachedClassToken = UnitClass("player")
+        local _pandemicTickCache = {}
         cdmBuffTickFrame:SetScript("OnUpdate", function(_, elapsed)
             cdmBuffAccum = cdmBuffAccum + elapsed
             if cdmBuffAccum < 0.1 then return end
@@ -2229,9 +2262,12 @@ function ns.SetupViewerHooks()
             local p = ECME and ECME.db and ECME.db.profile
             if not p or not p.cdmBars or not p.cdmBars.bars then return end
             local needsReanchor = false
+            wipe(_pandemicTickCache)
             for _, bd in ipairs(p.cdmBars.bars) do
                 if bd.enabled then
                     local isBuff = (bd.barType == "buffs" or bd.key == "buffs" or bd.barType == "custom_buff")
+                    local buffGlowType = isBuff and (bd.buffGlowType or 0) or 0
+                    local pandemicOn = bd.pandemicGlow
                     local icons = cdmBarIcons[bd.key]
                     if icons then
                         for fi = 1, #icons do
@@ -2242,7 +2278,6 @@ function ns.SetupViewerHooks()
                                 local fd = hookFrameData[frame]
 
                                 -- Buff glow
-                                local buffGlowType = isBuff and (bd.buffGlowType or 0) or 0
                                 if buffGlowType > 0 and fd then
                                     if not fd.buffGlowActive then
                                         if not fd.buffGlowOverlay then
@@ -2253,12 +2288,9 @@ function ns.SetupViewerHooks()
                                             fd.buffGlowOverlay = ov
                                         end
                                         local cr, cg, cb = bd.buffGlowR or 1.0, bd.buffGlowG or 0.776, bd.buffGlowB or 0.376
-                                        if bd.buffGlowClassColor then
-                                            local _, ct = UnitClass("player")
-                                            if ct then
-                                                local cc = RAID_CLASS_COLORS[ct]
-                                                if cc then cr, cg, cb = cc.r, cc.g, cc.b end
-                                            end
+                                        if bd.buffGlowClassColor and _cachedClassToken then
+                                            local cc = RAID_CLASS_COLORS[_cachedClassToken]
+                                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
                                         end
                                         fd.buffGlowOverlay:SetAlpha(1)
                                         ns.StartNativeGlow(fd.buffGlowOverlay, buffGlowType, cr, cg, cb)
@@ -2270,11 +2302,16 @@ function ns.SetupViewerHooks()
                                 end
 
                                 -- Pandemic glow
-                                if bd.pandemicGlow and sid and sid > 0 and fd then
+                                if pandemicOn and sid and sid > 0 and fd then
                                     -- Check player auras, child frame aura data
                                     -- (covers buffs on other units like Lifebloom),
                                     -- and Blizzard's native PandemicIcon
-                                    local inPandemic = ns.IsInPandemicWindow(sid)
+                                    local cached = _pandemicTickCache[sid]
+                                    if cached == nil then
+                                        cached = ns.IsInPandemicWindow(sid) and true or false
+                                        _pandemicTickCache[sid] = cached
+                                    end
+                                    local inPandemic = cached
                                         or ns.IsInPandemicFromChild(frame)
                                         or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
                                     if inPandemic then

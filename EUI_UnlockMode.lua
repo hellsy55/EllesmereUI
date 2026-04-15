@@ -1141,11 +1141,25 @@ function EllesmereUI.NotifyElementResized(key)
     -- only the position re-application below but still run width/height match
     -- propagation and anchor chains.
     local layoutBarHandled = (EllesmereUI._layoutBarResizing == key)
-    -- Suppress during spec swap / zone transitions. CDM bar icon counts
-    -- fluctuate as Blizzard recycles viewer frames, causing transient size
-    -- changes that propagate wrong widths to matched elements.
-    if EllesmereUI._specProfileSwitching then return end
-    if EllesmereUI._zoneTransitionActive then return end
+    -- Suppression scope (spec swap / zone transition):
+    --   The guard exists because CDM bar icon counts fluctuate during these
+    --   windows as Blizzard recycles viewer frames, and a transient empty
+    --   width could be propagated to a width-MATCHED sibling, corrupting it
+    --   until the user manually re-matches.
+    --
+    --   Anchor propagation has no equivalent risk: it only repositions
+    --   children to follow wherever the target currently is, which is always
+    --   visually correct -- worst case a child re-anchors twice in quick
+    --   succession (once with transient target size, once with final), and
+    --   the second pass corrects to the final position.
+    --
+    --   So we only suppress the WIDTH/HEIGHT MATCH block below, not the
+    --   anchor cascade. Without this split, spec-swap-induced resizes on
+    --   one element (e.g. Class Resource shrinking 1px on the new spec's
+    --   pip count) leave anchored children stranded at the old position
+    --   with no event ever firing to re-cascade them.
+    local suppressMatchProp = EllesmereUI._specProfileSwitching
+                           or EllesmereUI._zoneTransitionActive
     -- Throttle: skip if we just processed this key
     local now = GetTime()
     if _resizeNotifyThrottle[key] and (now - _resizeNotifyThrottle[key]) < RESIZE_THROTTLE_SEC then
@@ -1192,35 +1206,40 @@ function EllesmereUI.NotifyElementResized(key)
         end
     end
 
-    -- Propagate width/height matches to dependents
-    local wdb = MatchH.GetWidthMatchDB()
-    if wdb then
-        local hasChildren = false
-        for childKey, tKey in pairs(wdb) do
-            if tKey == key then hasChildren = true; break end
+    -- Propagate width/height matches to dependents.
+    -- Suppressed during spec-swap / zone-transition because transient CDM
+    -- icon counts can momentarily produce wrong widths that would corrupt
+    -- width-matched siblings (see suppressMatchProp comment above).
+    if not suppressMatchProp then
+        local wdb = MatchH.GetWidthMatchDB()
+        if wdb then
+            local hasChildren = false
+            for childKey, tKey in pairs(wdb) do
+                if tKey == key then hasChildren = true; break end
+            end
+            if hasChildren then
+                EllesmereUI.PropagateWidthMatch(key)
+            end
+            -- Re-pull from own target if this element is a width-match child
+            local ownTarget = wdb[key]
+            if ownTarget and widthChanged then
+                MatchH.ApplyWidthMatch(key, ownTarget)
+            end
         end
-        if hasChildren then
-            EllesmereUI.PropagateWidthMatch(key)
-        end
-        -- Re-pull from own target if this element is a width-match child
-        local ownTarget = wdb[key]
-        if ownTarget and widthChanged then
-            MatchH.ApplyWidthMatch(key, ownTarget)
-        end
-    end
-    local hdb = MatchH.GetHeightMatchDB()
-    if hdb then
-        local hasChildren = false
-        for childKey, tKey in pairs(hdb) do
-            if tKey == key then hasChildren = true; break end
-        end
-        if hasChildren then
-            EllesmereUI.PropagateHeightMatch(key)
-        end
-        -- Re-pull from own target if this element is a height-match child
-        local ownHTarget = hdb[key]
-        if ownHTarget and heightChanged then
-            MatchH.ApplyHeightMatch(key, ownHTarget)
+        local hdb = MatchH.GetHeightMatchDB()
+        if hdb then
+            local hasChildren = false
+            for childKey, tKey in pairs(hdb) do
+                if tKey == key then hasChildren = true; break end
+            end
+            if hasChildren then
+                EllesmereUI.PropagateHeightMatch(key)
+            end
+            -- Re-pull from own target if this element is a height-match child
+            local ownHTarget = hdb[key]
+            if ownHTarget and heightChanged then
+                MatchH.ApplyHeightMatch(key, ownHTarget)
+            end
         end
     end
 
@@ -1598,10 +1617,34 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
         local acRatio = uiS / cS
         local bCenterX = centerX * acRatio
         local bCenterY = centerY * acRatio
-        pcall(function()
-            childBar:ClearAllPoints()
-            childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)
-        end)
+        -- Idempotent guard: if the bar is already at this exact position
+        -- (within sub-physical-pixel tolerance), skip the SetPoint. This
+        -- eliminates visible flicker when multiple cascade passes compute
+        -- the same answer (the common case in steady state).
+        local skip = false
+        local okPt, point, relTo, relPoint, curX, curY = pcall(childBar.GetPoint, childBar, 1)
+        if okPt and point == "CENTER" and relPoint == "CENTER" and relTo == UIParent then
+            local onePx = ((PP and PP.perfect) or 1) / cS
+            local tol = onePx * 0.5
+            if curX and curY
+               and math.abs(curX - bCenterX) < tol
+               and math.abs(curY - bCenterY) < tol then
+                skip = true
+            end
+        end
+        if not skip then
+            pcall(function()
+                childBar:ClearAllPoints()
+                childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)
+            end)
+            -- Position actually changed -- queue this child for cascade so
+            -- its OWN anchor children re-position against the new edges.
+            -- (NotifyElementResized fires only on size changes, not pure
+            -- position changes -- this closes that gap so a shift in a
+            -- parent always flows through to grandchildren.)
+            _pendingAnchorKeys[childKey] = "all"
+            ScheduleAnchorBatch()
+        end
     else
         -- noMove: bar stays put, but resync ai.offsetX/offsetY from the bar's
         -- actual current screen position so future propagation uses correct offsets
@@ -1757,11 +1800,41 @@ end
 EllesmereUI.ReapplyAllUnlockAnchors = function()
     local adb = GetAnchorDB()
     if not adb then return end
-    for childKey, info in pairs(adb) do
-        if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
+
+    -- Apply in dependency order (roots first, then their children, then
+    -- grandchildren). pairs() is non-deterministic and a chain like
+    -- A -> B -> C could otherwise process C before B, leaving C reading
+    -- B's stale edges. Same fix pattern as ApplyMatchesInDependencyOrder.
+    local depth = {}
+    local function GetDepth(k, visiting)
+        if depth[k] ~= nil then return depth[k] end
+        if visiting[k] then depth[k] = 0; return 0 end  -- cycle guard
+        visiting[k] = true
+        local info = adb[k]
+        if info and info.target and adb[info.target] then
+            depth[k] = 1 + GetDepth(info.target, visiting)
+        else
+            depth[k] = 0  -- target is a root (not in adb) or missing
+        end
+        visiting[k] = nil
+        return depth[k]
+    end
+
+    local order = {}
+    for childKey in pairs(adb) do
+        GetDepth(childKey, {})
+        order[#order + 1] = childKey
+    end
+    table.sort(order, function(a, b) return depth[a] < depth[b] end)
+
+    for _, childKey in ipairs(order) do
+        local info = adb[childKey]
+        if info and info.target
+           and GetBarFrame(childKey) and GetBarFrame(info.target) then
             ApplyAnchorPosition(childKey, info.target, info.side)
         end
     end
+
     -- Flush pending positions so db.profile.positions stays in sync
     for childKey, pos in pairs(pendingPositions) do
         if type(pos) == "table" and pos.point then
@@ -2375,55 +2448,40 @@ do
     end)
 end
 
--- PLAYER_ENTERING_WORLD listener so positions, width/height matches, and
--- anchor chains are still applied for CDM, resource bars, etc.
+-- PLAYER_ENTERING_WORLD listener: applies saved positions + initial
+-- anchor pass once child addons have had time to register their unlock
+-- elements. Subsequent corrections are event-driven via NotifyElementResized
+-- (auto-fired by OnSizeChanged on every registered frame), NOT by retries.
+--
+-- Architecture: the cascade machinery (NotifyElementResized -> width-match
+-- propagation -> anchor children) handles every legitimate size change as
+-- it happens. The single safety sweep at +5s is a true safety net: every
+-- call inside it is idempotent (ApplyAnchorPosition skips SetPoint when
+-- the computed position already matches the current position), so if the
+-- event-driven path worked it produces zero visible effect. If something
+-- missed an emission, this is the only retry.
 if not EAB then
     local _posFrame = CreateFrame("Frame")
     _posFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     _posFrame:SetScript("OnEvent", function(self)
-        -- IMPORTANT: do NOT unregister. PLAYER_ENTERING_WORLD also fires on
-        -- every zone change (city -> instance, M+ portal, phasing, etc.),
-        -- and width-match drift was observed after zoning. Keeping the
-        -- listener live re-runs the rematch sequence after every zone.
-        -- Delay so child addons have time to register their unlock elements
+        -- IMPORTANT: do NOT unregister. PEW also fires on every zone change
+        -- (city -> instance, M+ portal, phasing). Keeping the listener live
+        -- re-runs the initial sequence after every zone.
+        --
+        -- 1s delay: addons need time to register their unlock elements
+        -- (RegisterUnlockElements is called from OnEnable / first PEW
+        -- handler). After 1s every element should be registered and have
+        -- valid bounds, so the initial position+anchor pass can run.
+        -- After this single pass, all further repositioning is event-driven
+        -- via NotifyElementResized -> dependency-sorted ReapplyAll cascade.
+        -- No safety sweep timer -- if a real source change is missed, we
+        -- want to find and fix the missing emission, not paper over it
+        -- with periodic re-applies that themselves cause visible shifts.
         C_Timer.After(1, function()
             ApplySavedPositions()
-            -- Reapply anchors after positions are set
             if EllesmereUI.ReapplyAllUnlockAnchors then
                 EllesmereUI.ReapplyAllUnlockAnchors()
             end
-        end)
-        -- Safety net: reapply anchors after all child addons have
-        -- registered their unlock elements and built frames.
-        C_Timer.After(2, function()
-            if EllesmereUI.ReapplyAllUnlockAnchors then
-                EllesmereUI.ReapplyAllUnlockAnchors()
-            end
-        end)
-        -- Force a fresh width/height match propagation ~3s after login/zone.
-        -- By this point CDM has finished its initial rebuild, all unlock
-        -- elements have registered, and frames are at their final sizes.
-        -- This guarantees that any element with a stale stored width
-        -- (e.g. from a previous ui scale, profile switch, or an earlier
-        -- propagation that was gated off by _cdmRebuilding / zone-transition
-        -- guards) is corrected to its target's current width without the
-        -- user having to manually un-match / re-match.
-        --
-        -- Bounded retry chain: 3s -> 4.5s -> 8s. At each step, if CDM is
-        -- still rebuilding (heavy talent build, slow load) we defer to the
-        -- next attempt rather than propagating against half-built CDM.
-        -- The 8s attempt fires unconditionally as a best-effort fallback.
-        local function _runMatch()
-            if EllesmereUI.ApplyAllWidthHeightMatches then
-                EllesmereUI.ApplyAllWidthHeightMatches()
-            end
-        end
-        C_Timer.After(3, function()
-            if not EllesmereUI._cdmRebuilding then _runMatch(); return end
-            C_Timer.After(1.5, function()
-                if not EllesmereUI._cdmRebuilding then _runMatch(); return end
-                C_Timer.After(3.5, _runMatch)  -- 8s total, last attempt
-            end)
         end)
     end)
 end
