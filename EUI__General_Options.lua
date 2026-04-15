@@ -3698,6 +3698,209 @@ initFrame:SetScript("OnEvent", function(self)
         AttachStatSwatch(statRow4._leftRegion, "PvP",
             { r = 0.671, g = 0.431, b = 0.349 }, StatCategoryEnabled("PvP"))
 
+        ---------------------------------------------------------------------------
+        --  INSPECT PANEL CUSTOMIZATIONS
+        ---------------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "INSPECT PANEL CUSTOMIZATIONS", y);  y = y - h
+
+        local themedInspectSheetRow
+        themedInspectSheetRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Inspect Sheet",
+              tooltip="Applies EllesmereUI theme styling to the inspect sheet window.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.themedInspectSheet or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.themedInspectSheet = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Inspect Sheet theme setting requires a UI reload to fully apply.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        -- Cogwheel for Inspect Sheet settings
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet)
+            end
+
+            -- THEMED COGWHEEL (LEFT)
+            local leftRgn = themedInspectSheetRow._leftRegion
+            local _, themedInspectCogShow = EllesmereUI.BuildCogPopup({
+                title = "Inspect Sheet Settings",
+                rows = {
+                    { type="slider", label="Scale",
+                      min=0.5, max=1.5, step=0.05,
+                      get=function()
+                          return EllesmereUIDB and EllesmereUIDB.themedInspectSheetScale or 1
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.themedInspectSheetScale = v
+                          if InspectFrame then
+                              InspectFrame:SetScale(v)
+                          end
+                      end },
+                },
+            })
+
+            local themedInspectCogBtn = CreateFrame("Button", nil, leftRgn)
+            themedInspectCogBtn:SetSize(26, 26)
+            themedInspectCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = themedInspectCogBtn
+            themedInspectCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            themedInspectCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
+            local themedInspectCogTex = themedInspectCogBtn:CreateTexture(nil, "OVERLAY")
+            themedInspectCogTex:SetAllPoints()
+            themedInspectCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            themedInspectCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            themedInspectCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
+            themedInspectCogBtn:SetScript("OnClick", function(self) themedInspectCogShow(self) end)
+
+            local themedInspectCogBlock = CreateFrame("Frame", nil, themedInspectCogBtn)
+            themedInspectCogBlock:SetAllPoints()
+            themedInspectCogBlock:SetFrameLevel(themedInspectCogBtn:GetFrameLevel() + 10)
+            themedInspectCogBlock:EnableMouse(true)
+            themedInspectCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(themedInspectCogBtn, EllesmereUI.DisabledTooltip("Enable Inspect Sheet"))
+            end)
+            themedInspectCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    themedInspectCogBtn:SetAlpha(0.15)
+                    themedInspectCogBlock:Show()
+                else
+                    themedInspectCogBtn:SetAlpha(0.4)
+                    themedInspectCogBlock:Hide()
+                end
+            end)
+            if themedOff() then themedInspectCogBtn:SetAlpha(0.15) themedInspectCogBlock:Show() else themedInspectCogBtn:SetAlpha(0.4) themedInspectCogBlock:Hide() end
+        end
+
+        local itemLevelInspectRow
+        itemLevelInspectRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Item Level",
+              tooltip="Toggle visibility of item level text on the inspect sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.inspectShowItemLevel ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.inspectShowItemLevel = v
+                  if EllesmereUI._refreshInspectItemLevelVisibility then
+                      EllesmereUI._refreshInspectItemLevelVisibility()
+                  end
+              end },
+            { type="toggle", text="Show Upgrade Track",
+              tooltip="Toggle visibility of upgrade track text on the inspect sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.inspectShowUpgradeTrack ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.inspectShowUpgradeTrack = v
+                  if EllesmereUI._refreshInspectUpgradeTrackVisibility then
+                      EllesmereUI._refreshInspectUpgradeTrackVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for itemLevelInspectRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet)
+            end
+
+            local itemLevelInspectBlock = CreateFrame("Frame", nil, itemLevelInspectRow)
+            itemLevelInspectBlock:SetAllPoints(itemLevelInspectRow)
+            itemLevelInspectBlock:SetFrameLevel(itemLevelInspectRow:GetFrameLevel() + 10)
+            itemLevelInspectBlock:EnableMouse(true)
+            local itemLevelInspectBg = EllesmereUI.SolidTex(itemLevelInspectBlock, "BACKGROUND", 0, 0, 0, 0)
+            itemLevelInspectBg:SetAllPoints()
+            itemLevelInspectBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(itemLevelInspectBlock, EllesmereUI.DisabledTooltip("Enable Inspect Sheet"))
+            end)
+            itemLevelInspectBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    itemLevelInspectBlock:Show()
+                    itemLevelInspectRow:SetAlpha(0.3)
+                else
+                    itemLevelInspectBlock:Hide()
+                    itemLevelInspectRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then itemLevelInspectBlock:Show() itemLevelInspectRow:SetAlpha(0.3) else itemLevelInspectBlock:Hide() itemLevelInspectRow:SetAlpha(1) end
+        end
+
+        local enchantsInspectRow
+        enchantsInspectRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Enchants",
+              tooltip="Toggle visibility of enchant text on the inspect sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.inspectShowEnchants ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.inspectShowEnchants = v
+                  if EllesmereUI._refreshInspectEnchantsVisibility then
+                      EllesmereUI._refreshInspectEnchantsVisibility()
+                  end
+              end },
+            { type="toggle", text="Show Average Item Level",
+              tooltip="Toggle visibility of average item level on the inspect sheet.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.inspectShowAverageItemLevel ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.inspectShowAverageItemLevel = v
+                  if EllesmereUI._refreshInspectAverageItemLevelVisibility then
+                      EllesmereUI._refreshInspectAverageItemLevelVisibility()
+                  end
+              end }
+        );  y = y - h
+
+        -- Disabled overlay for enchantsInspectRow when themed is off
+        do
+            local function themedOff()
+                return not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet)
+            end
+
+            local enchantsInspectBlock = CreateFrame("Frame", nil, enchantsInspectRow)
+            enchantsInspectBlock:SetAllPoints(enchantsInspectRow)
+            enchantsInspectBlock:SetFrameLevel(enchantsInspectRow:GetFrameLevel() + 10)
+            enchantsInspectBlock:EnableMouse(true)
+            local enchantsInspectBg = EllesmereUI.SolidTex(enchantsInspectBlock, "BACKGROUND", 0, 0, 0, 0)
+            enchantsInspectBg:SetAllPoints()
+            enchantsInspectBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(enchantsInspectBlock, EllesmereUI.DisabledTooltip("Enable Inspect Sheet"))
+            end)
+            enchantsInspectBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if themedOff() then
+                    enchantsInspectBlock:Show()
+                    enchantsInspectRow:SetAlpha(0.3)
+                else
+                    enchantsInspectBlock:Hide()
+                    enchantsInspectRow:SetAlpha(1)
+                end
+            end)
+            if themedOff() then enchantsInspectBlock:Show() enchantsInspectRow:SetAlpha(0.3) else enchantsInspectBlock:Hide() enchantsInspectRow:SetAlpha(1) end
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
         return math.abs(y)
     end
