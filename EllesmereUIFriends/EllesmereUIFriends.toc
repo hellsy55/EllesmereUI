@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Custom Friends List with groups, notes, and realm grouping
 ## Author: Ellesmere
-## Version: 6.7.1
+## Version: 6.7.3
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIFriendsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

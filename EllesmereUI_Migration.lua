@@ -1450,15 +1450,21 @@ EllesmereUI.RegisterMigration({
 --  re-enable it (the option isn't exposed in the new QT settings).
 --------------------------------------------------------------------------------
 EllesmereUI.RegisterMigration({
-    id          = "qt_reset_stale_enabled_false",
+    id          = "qt_minimap_reset_stale_enabled_false",
     scope       = "profile",
-    description = "Reset quest tracker enabled=false inherited from the old Basics module.",
+    description = "Reset quest tracker / minimap enabled=false inherited from the old Basics module.",
     body = function(ctx)
-        local qt = ctx.profile.addons
-            and ctx.profile.addons.EllesmereUIQuestTracker
-            and ctx.profile.addons.EllesmereUIQuestTracker.questTracker
+        local addons = ctx.profile.addons
+        if type(addons) ~= "table" then return end
+        local qt = addons.EllesmereUIQuestTracker
+            and addons.EllesmereUIQuestTracker.questTracker
         if type(qt) == "table" and qt.enabled == false then
             qt.enabled = true
+        end
+        local mm = addons.EllesmereUIMinimap
+            and addons.EllesmereUIMinimap.minimap
+        if type(mm) == "table" and mm.enabled == false then
+            mm.enabled = true
         end
     end,
 })

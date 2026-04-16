@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Legacy shim -- functionality has moved to the new per-module addons. Keep enabled for one release so your disabled state migrates correctly.
 ## Author: Ellesmere
-## Version: 6.7.1
+## Version: 6.7.3
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBasicsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

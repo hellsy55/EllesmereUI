@@ -8523,11 +8523,23 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         return holder
     end
 
-    EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
+    local syncFn = EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
         disableLayoutFrame = true,
         recenterOnlyWhenMoved = true,
         hookUpdatePosition = true,
     })
+    -- Deferred re-layout: the patched MicroMenuContainer:Layout() bails
+    -- via `if not self:GetCenter() then return end` when the holder hasn't
+    -- resolved screen coordinates yet (same frame as SetPoint). By end of
+    -- frame the position has resolved, so a deferred Layout + SyncHolderSize
+    -- picks up the correct container width. Without this, the holder keeps
+    -- a stale size until something else triggers Layout (e.g. Edit Mode).
+    if blizzFrame.Layout then
+        C_Timer_After(0, function()
+            if blizzFrame.Layout then blizzFrame:Layout() end
+            if syncFn then syncFn() end
+        end)
+    end
     return holder
 end
 
