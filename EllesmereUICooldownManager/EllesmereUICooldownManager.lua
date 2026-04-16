@@ -3721,12 +3721,9 @@ ns.RefreshFocusReminders = RefreshFocusReminders
 -- Refresh the cached context flags (instance type + role) and trigger a
 -- visual refresh if either flag transitioned. Called on PLAYER_ENTERING_WORLD,
 -- ZONE_CHANGED_NEW_AREA, and PLAYER_SPECIALIZATION_CHANGED.
-local _focusKickEncounterActive = false
-local FOCUSKICK_RAID_ENCOUNTER_ID = 3182
 local function UpdateFocusKickContext()
     local _, instanceType = IsInInstance()
     local nowInDungeon = (instanceType == "party")
-        or (instanceType == "raid" and _focusKickEncounterActive)
     local role = GetSpecialization and GetSpecializationRole
         and GetSpecialization() and GetSpecializationRole(GetSpecialization())
     local nowIsHealer = (role == "HEALER")
@@ -3751,8 +3748,6 @@ local function EnsureFocusReminderProxy()
     _focusReminderProxy:RegisterEvent("PLAYER_ENTERING_WORLD")
     _focusReminderProxy:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     _focusReminderProxy:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    _focusReminderProxy:RegisterEvent("ENCOUNTER_START")
-    _focusReminderProxy:RegisterEvent("ENCOUNTER_END")
     _focusReminderProxy:SetScript("OnEvent", function(_, event, unit)
         if event == "PLAYER_FOCUS_CHANGED" then
             local hadFocus = _focusKickHasFocus
@@ -3760,17 +3755,9 @@ local function EnsureFocusReminderProxy()
             if hadFocus ~= _focusKickHasFocus then
                 RefreshFocusReminders()
             end
-        elseif event == "ENCOUNTER_START" then
-            local encounterID = unit
-            _focusKickEncounterActive = (encounterID == FOCUSKICK_RAID_ENCOUNTER_ID)
-            UpdateFocusKickContext()
-        elseif event == "ENCOUNTER_END" then
-            _focusKickEncounterActive = false
-            UpdateFocusKickContext()
         elseif event == "PLAYER_ENTERING_WORLD"
             or event == "ZONE_CHANGED_NEW_AREA"
             or event == "PLAYER_SPECIALIZATION_CHANGED" then
-            _focusKickEncounterActive = false
             UpdateFocusKickContext()
         elseif event == "NAME_PLATE_UNIT_ADDED" then
             if _focusKickHasFocus then return end
