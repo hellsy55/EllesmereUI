@@ -1,124 +1,25 @@
 -------------------------------------------------------------------------------
 --  Themed Inspect Sheet
---  Mirrors the Character Sheet skinning for inspected characters
+--  Mirrors the Character Sheet skinning for inspected characters.
+--  Shared helpers (EllesmereUI.GetUpgradeTrack, EllesmereUI.GetEnchantText)
+--  are exported by CharacterSheet and loaded before this file.
 -------------------------------------------------------------------------------
 local ADDON_NAME = ...
 local skinned = false
 
-
--- ============================================================================
--- Item Styling Helpers (copied from CharacterSheet, adapted for "inspect")
--- ============================================================================
-
--- Upgrade track colors (shared, immutable)
-local _TRACK_WHITE  = { r = 1.00, g = 1.00, b = 1.00 }
-local _TRACK_CHAMP  = { r = 0.00, g = 0.44, b = 0.87 }
-local _TRACK_MYTH   = { r = 1.00, g = 0.50, b = 0.00 }
-local _TRACK_HERO   = { r = 1.00, g = 0.30, b = 1.00 }
-local _TRACK_VET    = { r = 0.12, g = 1.00, b = 0.00 }
-local _TRACK_GRAY   = { r = 0.62, g = 0.62, b = 0.62 }
-
-local function EUI_GetUpgradeTrack(itemLink)
-    if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
-        return "", _TRACK_WHITE
-    end
-    local info = C_Item.GetItemUpgradeInfo(itemLink)
-    if not info then return "", _TRACK_WHITE end
-    local trk = info.trackString or ""
-    local cur, maxL = info.currentLevel, info.maxLevel
-    local text = (cur and maxL and maxL > 0) and ("(" .. cur .. "/" .. maxL .. ")") or ""
-    local color = _TRACK_WHITE
-    if     trk == "Champion"     then color = _TRACK_CHAMP
-    elseif trk:match("Myth")     then color = _TRACK_MYTH
-    elseif trk:match("Hero")     then color = _TRACK_HERO
-    elseif trk:match("Veteran")  then color = _TRACK_VET
-    elseif trk:match("Adventurer") then color = _TRACK_WHITE
-    elseif trk:match("Delve") or trk:match("Explorer") then color = _TRACK_GRAY
-    end
-    return text, color
-end
-
--- Enchant caching
-local _enchantNameCache = {}
-local _ENCHANT_LINE_TYPE = (Enum and Enum.TooltipDataLineType
-    and (Enum.TooltipDataLineType.ItemEnchantmentPermanent
-         or Enum.TooltipDataLineType.ItemEnchant))
-    or 15
-
-local _ENCHANT_PATTERN
-do
-    local fmt = ENCHANTED_TOOLTIP_LINE
-    if fmt then
-        local head, tail = fmt:match("^(.-)%%s(.*)$")
-        if head then
-            local function esc(s)
-                return (s:gsub("([%(%)%.%[%]%^%$%*%+%-%?%%])", "%%%1"))
-            end
-            _ENCHANT_PATTERN = "^" .. esc(head) .. "(.+)" .. esc(tail) .. "$"
-        end
-    end
-end
-
-local function _stripLineEscapes(s)
-    if not s then return "" end
-    s = s:gsub("|cn.-:(.-)|r", "%1")
-    s = s:gsub("|c%x%x%x%x%x%x%x%x", "")
-    s = s:gsub("|r", "")
-    s = s:gsub("^%s*[%+&]%s*", "")
-    return s
-end
-
-local function EUI_ScanInventoryItem_Inspect(slotID)
-    if not (C_TooltipInfo and C_TooltipInfo.GetInventoryItem) then return nil end
-    local inspectUnit = InspectFrame and InspectFrame.unit
-    if not inspectUnit then return nil end
-    local data = C_TooltipInfo.GetInventoryItem(inspectUnit, slotID)
-    if not data then return nil end
-    if TooltipUtil and TooltipUtil.SurfaceArgs then
-        TooltipUtil.SurfaceArgs(data)
-    end
-    return data
-end
-
-local function EUI_GetEnchantText_Inspect(slotID)
-    if not slotID then return "" end
-    local inspectUnit = InspectFrame and InspectFrame.unit
-    if not inspectUnit then return "" end
-    local link = GetInventoryItemLink(inspectUnit, slotID)
-    if not link then return "" end
-
-    local enchantID = tonumber(link:match("item:%d+:(%d+)"))
-    if not enchantID or enchantID == 0 then return "" end
-
-    local cached = _enchantNameCache[enchantID]
-    if cached ~= nil then return cached end
-
-    local data = EUI_ScanInventoryItem_Inspect(slotID)
-    if not (data and data.lines) then
-        _enchantNameCache[enchantID] = ""
-        return ""
-    end
-
-    for _, line in ipairs(data.lines) do
-        local raw = _stripLineEscapes(line.leftText or "")
-        local matched
-        if line.type == _ENCHANT_LINE_TYPE then
-            matched = raw
-        elseif _ENCHANT_PATTERN then
-            matched = raw:match(_ENCHANT_PATTERN)
-        else
-            matched = raw:match("^Enchanted:%s*(.+)$")
-        end
-        if matched and matched ~= "" then
-            matched = matched:gsub("^Enchant%s+[^-]+%s*-%s*", "")
-            _enchantNameCache[enchantID] = matched
-            return matched
-        end
-    end
-
-    _enchantNameCache[enchantID] = ""
-    return ""
-end
+local MP_COLOR_BRACKETS = {
+    { 3850, "ff8000" }, { 3695, "f9753f" }, { 3575, "f16961" },
+    { 3455, "e75e7f" }, { 3335, "db529c" }, { 3215, "cc47b9" },
+    { 3095, "b83dd6" }, { 2965, "9c3eed" }, { 2845, "715be5" },
+    { 2725, "2c6dde" }, { 2565, "3b7fcd" }, { 2445, "5292b9" },
+    { 2325, "5ca6a4" }, { 2205, "5fba8d" }, { 2085, "5cce75" },
+    { 1965, "50e258" }, { 1845, "35f72d" }, { 1725, "3eff26" },
+    { 1600, "5eff43" }, { 1475, "74ff58" }, { 1350, "88ff6b" },
+    { 1225, "98ff7d" }, { 1100, "a8ff8d" }, { 975,  "b6ff9e" },
+    { 850,  "c3ffae" }, { 725,  "cfffbd" }, { 600,  "dbffcd" },
+    { 475,  "e7ffdd" }, { 350,  "f2ffec" }, { 225,  "fdfffc" },
+    { 200,  "ffffff" },
+}
 
 -- Equipment slot lists
 local EUI_ALL_SLOTS = {
@@ -151,29 +52,34 @@ local slotGridMap = {
     InspectSecondaryHandSlot = {slot = "SecondaryHand"},
 }
 
--- Function to style a slot with colored border, ilvl, and enchant (uses external textOverlayFrame)
+-- Slots that can have enchants in current expansion (mirrors CharacterSheet)
+local INSPECT_ENCHANT_SLOTS = {
+    [INVSLOT_HEAD] = true,
+    [INVSLOT_SHOULDER] = true,
+    [INVSLOT_BACK] = false,
+    [INVSLOT_CHEST] = true,
+    [INVSLOT_WRIST] = false,
+    [INVSLOT_LEGS] = true,
+    [INVSLOT_FEET] = true,
+    [INVSLOT_FINGER1] = true,
+    [INVSLOT_FINGER2] = true,
+    [INVSLOT_MAINHAND] = true,
+}
+
 local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightColumn)
     local slot = _G[slotName]
-    if not slot or not textOverlayFrame then
-        return
-    end
+    if not slot or not textOverlayFrame then return end
 
-    -- Get the inspect unit from InspectFrame
+    local skipLabels = (slotName == "InspectShirtSlot" or slotName == "InspectTabardSlot")
+
     local inspectUnit = InspectFrame and InspectFrame.unit
-    if not inspectUnit then
-        return
-    end
+    if not inspectUnit then return end
 
-    -- Get the item link using the correct API for inspect
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
     local itemLink = GetInventoryItemLink(inspectUnit, slotID)
-
-    -- Cache the item link in the slot for later use
     slot._euiItemLink = itemLink
 
-    -- Default gray border for empty slots
     local borderR, borderG, borderB = 0.4, 0.4, 0.4
-
-    -- If item exists, get rarity color
     if itemLink then
         local rarity = C_Item.GetItemQualityByID(itemLink)
         if rarity then
@@ -181,24 +87,21 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         end
     end
 
-    -- Always update border color via SetBorderColor (works whether border exists or not)
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.SetBorderColor(slot, borderR, borderG, borderB, 1)
     end
     slot._euiBorder = true
 
-    -- Add item level label (like CharacterSheet: CENTER with 15px/10px offset)
-    if itemLink and not slot._euiILvlText then
+    -- Item level label (font size matches CharacterSheet)
+    if itemLink and not slot._euiILvlText and not skipLabels then
         local ilvl = select(4, GetItemInfo(itemLink))
         if ilvl and ilvl > 0 then
+            local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
             local ilvlText = textOverlayFrame:CreateFontString(nil, "OVERLAY")
-            if not ilvlText then
-                return
-            end
-            ilvlText:SetFont(STANDARD_TEXT_FONT, 13, "OUTLINE")
+            ilvlText:SetFont(fontPath, itemLevelSize, "")
+            ilvlText:SetTextColor(1, 1, 1, 0.8)
             ilvlText:SetJustifyH("CENTER")
 
-            -- Position based on slot type (match CharacterSheet logic)
             if slotName == "InspectMainHandSlot" then
                 ilvlText:SetPoint("CENTER", slot, "LEFT", -15, 10)
             elseif slotName == "InspectSecondaryHandSlot" then
@@ -211,108 +114,117 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
 
             ilvlText:SetText(ilvl)
 
-            -- Use upgrade track color for item level
-            local _, upgradeTrackColor = EUI_GetUpgradeTrack(itemLink)
-            ilvlText:SetTextColor(upgradeTrackColor.r, upgradeTrackColor.g, upgradeTrackColor.b, 1)
+            local upgradeTrackText, upgradeTrackColor = EllesmereUI.GetUpgradeTrack(itemLink)
+            local displayColor
+            if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
+                displayColor = EllesmereUIDB.charSheetItemLevelColor
+            elseif upgradeTrackText ~= "" and upgradeTrackColor then
+                displayColor = upgradeTrackColor
+            elseif (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) then
+                local _, _, quality = GetItemInfo(itemLink)
+                if quality then
+                    local r, g, b = GetItemQualityColor(quality)
+                    displayColor = { r = r, g = g, b = b }
+                end
+            end
+            displayColor = displayColor or { r = 1, g = 1, b = 1 }
+            ilvlText:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
 
             slot._euiILvlText = ilvlText
         end
     end
 
-    -- Add enchant icon (like CharacterSheet: LEFT/RIGHT at 5/-5, smaller font)
-    if itemLink and not slot._euiEnchantText then
-        local enchantText = EUI_GetEnchantText_Inspect(slotID)
-        if enchantText and enchantText ~= "" then
-            -- Extract only the |A:|a atlas escapes (icons), strip all text
+    -- Enchant label (font size matches CharacterSheet)
+    if itemLink and not slot._euiEnchantText and not skipLabels then
+        local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
+        local enchantText = EllesmereUI.GetEnchantText(slotID, inspectUnit)
+        local canHaveEnchant = INSPECT_ENCHANT_SLOTS[slotID]
+        local atEnchantLevel = (UnitLevel(inspectUnit) or 0) >= 90
+        local isMissing = atEnchantLevel and canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
+        local hasEnchant = enchantText and enchantText ~= ""
+
+        local iconOnly, tooltipText
+        if isMissing then
+            iconOnly    = "|A:Professions-ChatIcon-Quality-Tier5:14:14:0:0:229:73:73|a"
+            tooltipText = "Enchant missing"
+        elseif hasEnchant then
             local icons = {}
             for atlas in enchantText:gmatch("|A:[^|]+|a") do
                 icons[#icons + 1] = atlas
             end
-            local iconOnly = table.concat(icons, "")
+            iconOnly    = table.concat(icons, "")
+            tooltipText = enchantText:gsub("|A:[^|]+|a", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            tooltipText = tooltipText:gsub("^.-%s*%-%s*", "")
+        end
 
-            if iconOnly and iconOnly ~= "" then
-                local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
-                enchantLabel:SetFont(STANDARD_TEXT_FONT, 11, "OUTLINE")
-                enchantLabel:SetTextColor(1, 1, 1, 0.8)
+        local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowEnchants ~= false)
 
-                -- Position based on slot type (match CharacterSheet logic)
-                if slotName == "InspectMainHandSlot" then
-                    enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
-                elseif slotName == "InspectSecondaryHandSlot" then
-                    enchantLabel:SetPoint("LEFT", slot, "RIGHT", 15, -5)
-                elseif isRightColumn then
-                    enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
-                else
-                    enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
-                end
+        if showEnchants and iconOnly and iconOnly ~= "" then
+            local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
+            enchantLabel:SetFont(fontPath, enchantSize, "")
+            enchantLabel:SetTextColor(1, 1, 1, 0.8)
 
-                enchantLabel:SetText(iconOnly)  -- Only the icon, no text
-
-                slot._euiEnchantText = enchantLabel
-
-                -- Create hover frame for tooltip
-                local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
-                hoverFrame:SetSize(20, 20)
-                hoverFrame:SetFrameLevel(textOverlayFrame:GetFrameLevel() + 20)
-
-                -- Position based on slot type (match CharacterSheet logic)
-                if slotName == "InspectMainHandSlot" then
-                    hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
-                elseif slotName == "InspectSecondaryHandSlot" then
-                    hoverFrame:SetPoint("LEFT", slot, "RIGHT", 15, -5)
-                elseif isRightColumn then
-                    hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
-                else
-                    hoverFrame:SetPoint("LEFT", slot, "RIGHT", 5, -5)
-                end
-                hoverFrame:EnableMouse(true)
-
-                -- Strip icons and get readable enchant text for tooltip
-                local tooltipText = enchantText:gsub("|A:[^|]+|a", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                tooltipText = tooltipText:gsub("^.-%s*%-%s*", "")
-
-                hoverFrame:SetScript("OnEnter", function()
-                    if tooltipText and tooltipText ~= "" then
-                        GameTooltip:SetOwner(hoverFrame, "ANCHOR_RIGHT")
-                        GameTooltip:SetText(tooltipText, 1, 1, 1, 1, true)
-                        GameTooltip:Show()
-                    end
-                end)
-                hoverFrame:SetScript("OnLeave", function()
-                    GameTooltip:Hide()
-                end)
-
-                slot._euiEnchantHoverFrame = hoverFrame
+            if slotName == "InspectMainHandSlot" then
+                enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+            elseif slotName == "InspectSecondaryHandSlot" then
+                enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
+            elseif isRightColumn then
+                enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+            else
+                enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
             end
+
+            enchantLabel:SetText(iconOnly)
+            slot._euiEnchantText = enchantLabel
+
+            local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
+            hoverFrame:SetSize(20, 20)
+            hoverFrame:SetFrameLevel(textOverlayFrame:GetFrameLevel() + 20)
+            if slotName == "InspectMainHandSlot" then
+                hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+            elseif slotName == "InspectSecondaryHandSlot" then
+                hoverFrame:SetPoint("LEFT", slot, "RIGHT", 5, -5)
+            elseif isRightColumn then
+                hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+            else
+                hoverFrame:SetPoint("LEFT", slot, "RIGHT", 5, -5)
+            end
+            hoverFrame:EnableMouse(true)
+
+            hoverFrame:SetScript("OnEnter", function()
+                if tooltipText and tooltipText ~= "" and EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(hoverFrame, tooltipText)
+                end
+            end)
+            hoverFrame:SetScript("OnLeave", function()
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
+
+            slot._euiEnchantHoverFrame = hoverFrame
         end
     end
 
-    -- Add upgrade track info (positioned relative to itemlevel like CharacterSheet)
-    if itemLink and not slot._euiUpgradeText and slot._euiILvlText then
-        local upgradeText, upgradeColor = EUI_GetUpgradeTrack(itemLink)
+    -- Upgrade track label (font size matches CharacterSheet)
+    if itemLink and not slot._euiUpgradeText and slot._euiILvlText and not skipLabels then
+        local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
+        local upgradeText, upgradeColor = EllesmereUI.GetUpgradeTrack(itemLink)
         if upgradeText and upgradeText ~= "" then
             local upgradeLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
-            upgradeLabel:SetFont(STANDARD_TEXT_FONT, 13, "OUTLINE")
-            upgradeLabel:SetTextColor(upgradeColor.r, upgradeColor.g, upgradeColor.b, 1)
+            upgradeLabel:SetFont(fontPath, upgradeTrackSize, "")
+            upgradeLabel:SetTextColor(upgradeColor.r, upgradeColor.g, upgradeColor.b, 0.8)
             upgradeLabel:SetJustifyH("CENTER")
 
-            -- Position based on slot type (match CharacterSheet logic)
             if slotName == "InspectMainHandSlot" then
-                -- MainHand: upgradeTrack LEFT of itemLevel
                 upgradeLabel:SetPoint("RIGHT", slot._euiILvlText, "LEFT", -3, 0)
             elseif slotName == "InspectSecondaryHandSlot" then
-                -- SecondaryHand: upgradeTrack RIGHT of itemLevel
                 upgradeLabel:SetPoint("LEFT", slot._euiILvlText, "RIGHT", 3, 0)
             elseif isRightColumn then
-                -- Right column: upgradeTrack LEFT of itemLevel
                 upgradeLabel:SetPoint("RIGHT", slot._euiILvlText, "LEFT", -3, 0)
             else
-                -- Left column: upgradeTrack RIGHT of itemLevel
                 upgradeLabel:SetPoint("LEFT", slot._euiILvlText, "RIGHT", 3, 0)
             end
 
             upgradeLabel:SetText(upgradeText)
-
             slot._euiUpgradeText = upgradeLabel
         end
     end
@@ -346,10 +258,11 @@ local function ApplyTabVisibility(showLabels)
         end
     end
 
-    -- Hide/show average item level label on MainHandSlot
-    if InspectMainHandSlot and InspectMainHandSlot._avgItemLevelLabel then
-        local showAverageItemLevel = showLabels and ((not EllesmereUIDB) or (EllesmereUIDB.inspectShowAverageItemLevel ~= false))
-        InspectMainHandSlot._avgItemLevelLabel:SetShown(showAverageItemLevel)
+    -- Hide/show avg ilvl + M+ score
+    local frame = InspectFrame
+    if frame then
+        if frame._euiAvgIlvlText then frame._euiAvgIlvlText:SetShown(showLabels) end
+        if frame._euiMPlusScoreText then frame._euiMPlusScoreText:SetShown(showLabels) end
     end
 end
 
@@ -591,141 +504,76 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Style View/Talents Buttons in InspectPaperDollItemsFrame
-    local paperDollItemsFrame = InspectPaperDollItemsFrame
-    if paperDollItemsFrame then
+    -- Suppress Blizzard's Talents + View (dressing room) buttons and replace
+    -- with our own matching pair at the bottom of the frame.
+    -- Both are non-secure; alpha+mouse suppression is taint-free.
+    do
         local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local BTN_W, BTN_H = 90, 21
+        local BTN_Y = 8
 
-        local function StyleButton(btn, defaultLabel)
-            if not btn then return end
-
-            -- Remove all Blizzard textures via methods
-            if btn.SetNormalTexture then btn:SetNormalTexture("") end
-            if btn.SetPushedTexture then btn:SetPushedTexture("") end
-            if btn.SetHighlightTexture then btn:SetHighlightTexture("") end
-            if btn.SetDisabledTexture then btn:SetDisabledTexture("") end
-
-            -- Hide texture parts (Left, Middle, Right, and unnamed variants)
-            if btn.Left then btn.Left:SetTexture("") end
-            if btn.Middle then btn.Middle:SetTexture("") end
-            if btn.Right then btn.Right:SetTexture("") end
-            if btn.LeftDisabled then btn.LeftDisabled:SetTexture("") end
-            if btn.MiddleDisabled then btn.MiddleDisabled:SetTexture("") end
-            if btn.RightDisabled then btn.RightDisabled:SetTexture("") end
-
-            -- Hide ALL textures/regions (including unnamed variants like .1611990aeea0)
-            for j = 1, select("#", btn:GetRegions()) do
-                local region = select(j, btn:GetRegions())
-                if region and region:IsObjectType("Texture") then
-                    region:SetAlpha(0)
+        -- Suppress all Blizzard buttons in InspectPaperDollItemsFrame
+        local paperDollItemsFrame = InspectPaperDollItemsFrame
+        if paperDollItemsFrame then
+            if paperDollItemsFrame.InspectTalents then
+                paperDollItemsFrame.InspectTalents:SetAlpha(0)
+                paperDollItemsFrame.InspectTalents:EnableMouse(false)
+            end
+            for i = 1, paperDollItemsFrame:GetNumChildren() do
+                local child = select(i, paperDollItemsFrame:GetChildren())
+                if child and child:GetObjectType() == "Button" and not child:GetName()
+                   and child ~= paperDollItemsFrame.InspectTalents then
+                    child:SetAlpha(0)
+                    child:EnableMouse(false)
                 end
             end
-
-            -- Replace text with our own
-            if not btn._eui_styled then
-                local blizLabel = btn:GetFontString()
-                local labelText = blizLabel and blizLabel:GetText() or defaultLabel
-                if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
-
-                if not btn._label then
-                    local label = btn:CreateFontString(nil, "OVERLAY")
-                    label:SetFont(fontPath, 10, nil)
-                    label:SetPoint("CENTER", btn, "CENTER", 0, 0)
-                    label:SetJustifyH("CENTER")
-                    label:SetText(labelText)
-                    label:SetTextColor(1, 1, 1, 0.6)
-                    btn._label = label
-                end
-
-                -- Hover effects
-                btn:HookScript("OnEnter", function()
-                    if btn._label then btn._label:SetTextColor(1, 1, 1, 1) end
-                end)
-                btn:HookScript("OnLeave", function()
-                    if btn._label then btn._label:SetTextColor(1, 1, 1, 0.6) end
-                end)
-
-                -- Add pixel-perfect border
-                if EllesmereUI and EllesmereUI.PanelPP then
-                    EllesmereUI.PanelPP.CreateBorder(btn, 0.4, 0.4, 0.4, 1, 1, "OVERLAY", 7)
-                end
-
-                btn._eui_styled = true
-            end
         end
 
-        -- Style InspectTalents button explicitly if it exists
-        if paperDollItemsFrame.InspectTalents then
-            StyleButton(paperDollItemsFrame.InspectTalents, "Talents")
+        -- Suppress Blizzard ViewButton
+        local blizViewBtn = InspectPaperDollFrame and InspectPaperDollFrame.ViewButton
+        if blizViewBtn then
+            blizViewBtn:SetAlpha(0)
+            blizViewBtn:EnableMouse(false)
         end
 
-        -- Also style any unnamed buttons found
-        local numChildren = paperDollItemsFrame:GetNumChildren()
-        for i = 1, numChildren do
-            local child = select(i, paperDollItemsFrame:GetChildren())
-            if child and child:GetObjectType() == "Button" and not child:GetName() then
-                StyleButton(child, "View")
-            end
-        end
-    end
+        local function MakeBottomButton(labelText, anchor, anchorPoint, xOff, onClick)
+            local btn = CreateFrame("Button", nil, frame)
+            btn:SetSize(BTN_W, BTN_H)
+            btn:SetPoint(anchor, frame, anchorPoint, xOff, BTN_Y)
+            btn:SetFrameLevel(frame:GetFrameLevel() + 20)
 
-    -- Style ViewButton in InspectPaperDollFrame
-    if InspectPaperDollFrame and InspectPaperDollFrame.ViewButton then
-        local viewBtn = InspectPaperDollFrame.ViewButton
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local label = btn:CreateFontString(nil, "OVERLAY")
+            label:SetFont(fontPath, 10, "")
+            label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            label:SetJustifyH("CENTER")
+            label:SetText(labelText)
+            label:SetTextColor(1, 1, 1, 0.6)
+            btn._label = label
 
-        -- Remove all Blizzard textures via methods
-        if viewBtn.SetNormalTexture then viewBtn:SetNormalTexture("") end
-        if viewBtn.SetPushedTexture then viewBtn:SetPushedTexture("") end
-        if viewBtn.SetHighlightTexture then viewBtn:SetHighlightTexture("") end
-        if viewBtn.SetDisabledTexture then viewBtn:SetDisabledTexture("") end
+            btn:SetScript("OnEnter", function(self) self._label:SetTextColor(1, 1, 1, 1) end)
+            btn:SetScript("OnLeave", function(self) self._label:SetTextColor(1, 1, 1, 0.6) end)
+            btn:SetScript("OnClick", onClick)
 
-        -- Hide texture parts (Left, Middle, Right, and unnamed variants)
-        if viewBtn.Left then viewBtn.Left:SetTexture("") end
-        if viewBtn.Middle then viewBtn.Middle:SetTexture("") end
-        if viewBtn.Right then viewBtn.Right:SetTexture("") end
-        if viewBtn.LeftDisabled then viewBtn.LeftDisabled:SetTexture("") end
-        if viewBtn.MiddleDisabled then viewBtn.MiddleDisabled:SetTexture("") end
-        if viewBtn.RightDisabled then viewBtn.RightDisabled:SetTexture("") end
-
-        -- Hide ALL textures/regions (including unnamed variants like .160886a3ff0)
-        for j = 1, select("#", viewBtn:GetRegions()) do
-            local region = select(j, viewBtn:GetRegions())
-            if region and region:IsObjectType("Texture") then
-                region:SetAlpha(0)
-            end
-        end
-
-        -- Replace text with our own
-        if not viewBtn._eui_styled then
-            local blizLabel = viewBtn:GetFontString()
-            local labelText = blizLabel and blizLabel:GetText() or "View"
-            if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
-
-            if not viewBtn._label then
-                local label = viewBtn:CreateFontString(nil, "OVERLAY")
-                label:SetFont(fontPath, 10, nil)
-                label:SetPoint("CENTER", viewBtn, "CENTER", 0, 0)
-                label:SetJustifyH("CENTER")
-                label:SetText(labelText)
-                label:SetTextColor(1, 1, 1, 0.6)
-                viewBtn._label = label
-            end
-
-            -- Hover effects
-            viewBtn:HookScript("OnEnter", function()
-                if viewBtn._label then viewBtn._label:SetTextColor(1, 1, 1, 1) end
-            end)
-            viewBtn:HookScript("OnLeave", function()
-                if viewBtn._label then viewBtn._label:SetTextColor(1, 1, 1, 0.6) end
-            end)
-
-            -- Add pixel-perfect border
             if EllesmereUI and EllesmereUI.PanelPP then
-                EllesmereUI.PanelPP.CreateBorder(viewBtn, 0.4, 0.4, 0.4, 1, 1, "OVERLAY", 7)
+                EllesmereUI.PanelPP.CreateBorder(btn, 0.4, 0.4, 0.4, 1, 1, "OVERLAY", 7)
             end
 
-            viewBtn._eui_styled = true
+            return btn
+        end
+
+        -- Talents button (bottom-right, shifted 2px right from original)
+        if not frame._euiTalentsBtn then
+            local blizTalentsBtn = paperDollItemsFrame and paperDollItemsFrame.InspectTalents
+            frame._euiTalentsBtn = MakeBottomButton("Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -12, function()
+                if blizTalentsBtn then blizTalentsBtn:Click() end
+            end)
+        end
+
+        -- Transmog button (bottom-left, mirrors Talents)
+        if not frame._euiTransmogBtn then
+            frame._euiTransmogBtn = MakeBottomButton("Transmog", "BOTTOMLEFT", "BOTTOMLEFT", 10, function()
+                if blizViewBtn then blizViewBtn:Click() end
+            end)
         end
     end
 
@@ -839,38 +687,67 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Position weapon slots at bottom
+    -- Center weapon slots at bottom within the frame (406px wide).
     if InspectMainHandSlot then
+        local weaponX = math.floor((406 - 103) / 2)
         InspectMainHandSlot:ClearAllPoints()
-        InspectMainHandSlot:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 115, 10)
-    else
+        InspectMainHandSlot:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", weaponX, 10)
     end
     if InspectSecondaryHandSlot then
         InspectSecondaryHandSlot:ClearAllPoints()
         InspectSecondaryHandSlot:SetPoint("TOPLEFT", InspectMainHandSlot, "TOPRIGHT", 12, 0)
     end
 
-    -- Add average item level label above MainHandSlot
-    if not InspectMainHandSlot._avgItemLevelLabel then
-        local avgItemLevelLabel = InspectMainHandSlot:CreateFontString(nil, "OVERLAY")
-        if not avgItemLevelLabel then
-            return
+    -- Average item level + M+ score, centered below the title/level text.
+    -- Anchored to frame TOP so they sit below the character info header.
+    do
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+
+        if not frame._euiAvgIlvlText then
+            local ilvlFS = frame:CreateFontString(nil, "OVERLAY")
+            ilvlFS:SetFont(fontPath, 16, "")
+            ilvlFS:SetTextColor(0.6, 0.2, 1, 1)
+            ilvlFS:SetJustifyH("CENTER")
+            ilvlFS:SetPoint("TOP", frame, "TOP", 0, -43)
+            frame._euiAvgIlvlText = ilvlFS
         end
-        avgItemLevelLabel:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
-        avgItemLevelLabel:SetJustifyH("CENTER")
-        avgItemLevelLabel:SetPoint("TOP", InspectMainHandSlot, "TOP", 168, 335)
 
-        InspectMainHandSlot._avgItemLevelLabel = avgItemLevelLabel
-    end
+        if not frame._euiMPlusScoreText then
+            local mpFS = frame:CreateFontString(nil, "OVERLAY")
+            mpFS:SetFont(fontPath, 12, "")
+            mpFS:SetTextColor(0.8, 0.8, 0.8, 1)
+            mpFS:SetJustifyH("CENTER")
+            mpFS:SetPoint("TOP", frame._euiAvgIlvlText, "BOTTOM", 0, -2)
+            frame._euiMPlusScoreText = mpFS
+        end
 
-    -- Update average item level
-    if InspectMainHandSlot._avgItemLevelLabel then
         local avg = CalculateAverageItemLevel()
-        InspectMainHandSlot._avgItemLevelLabel:SetFormattedText("avg. ilvl: |cff9933ff%d|r", math.floor(avg))
-        if avg > 0 then
-            InspectMainHandSlot._avgItemLevelLabel:Show()
+        if avg and avg > 0 then
+            frame._euiAvgIlvlText:SetFormattedText("%.2f", avg)
+            frame._euiAvgIlvlText:Show()
         else
-            InspectMainHandSlot._avgItemLevelLabel:Hide()
+            frame._euiAvgIlvlText:Hide()
+        end
+
+        local inspectUnit = frame.unit
+        local mpScore = 0
+        if inspectUnit and C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary then
+            local summary = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(inspectUnit)
+            if summary and summary.currentSeasonScore then
+                mpScore = summary.currentSeasonScore
+            end
+        end
+        if mpScore > 0 then
+            local hex = "ffffff"
+            for i = 1, #MP_COLOR_BRACKETS do
+                if mpScore >= MP_COLOR_BRACKETS[i][1] then
+                    hex = MP_COLOR_BRACKETS[i][2]; break
+                end
+            end
+            frame._euiMPlusScoreText:SetFormattedText("M+ Score: |cff%s%d|r", hex, math.floor(mpScore))
+            frame._euiMPlusScoreText:Show()
+        else
+            frame._euiMPlusScoreText:Hide()
         end
     end
 
@@ -1026,18 +903,17 @@ local function SkinInspectSheet()
     frame:SetScale(scale)
     frame:SetFrameStrata("HIGH")
 
-    -- Show TitleContainer itself and raise its layer above background
+    -- Center the title within the frame (406px wide). Hardcoded to avoid
+    -- frame:GetWidth() which can return a secret value and cause taint.
     if frame.TitleContainer then
         frame.TitleContainer:Show()
         frame.TitleContainer:SetAlpha(1)
         frame.TitleContainer:SetFrameStrata("HIGH")
         frame.TitleContainer:SetFrameLevel(20)
+        frame.TitleContainer:ClearAllPoints()
+        frame.TitleContainer:SetWidth(406)
+        frame.TitleContainer:SetPoint("TOP", frame, "TOP", 0, 0)
 
-        -- Center the title by adjusting its size and justification
-        local width = frame:GetWidth()
-        frame.TitleContainer:SetWidth(width)
-
-        -- Make sure text is centered
         for i = 1, frame.TitleContainer:GetNumChildren() do
             local child = select(i, frame.TitleContainer:GetChildren())
             if child and child:GetObjectType() == "FontString" then
@@ -1138,15 +1014,14 @@ if EllesmereUI then
                 _ebsIgnoreSetPoint = false
             end
 
-            -- Drag handlers via SetScript (not HookScript)
-            InspectFrame:SetScript("OnMouseDown", function(self, button)
+            InspectFrame:HookScript("OnMouseDown", function(self, button)
                 if button ~= "LeftButton" then return end
                 if not IsShiftKeyDown() and not IsControlKeyDown() then return end
                 _ebsDragging = IsShiftKeyDown() and "save" or "temp"
                 self:StartMoving()
             end)
 
-            InspectFrame:SetScript("OnMouseUp", function(self, button)
+            InspectFrame:HookScript("OnMouseUp", function(self, button)
                 if button ~= "LeftButton" or not _ebsDragging then return end
                 self:StopMovingOrSizing()
                 local point, _, relPoint, x, y = self:GetPoint(1)
@@ -1174,9 +1049,6 @@ if EllesmereUI then
                     end
                     if EllesmereUI._refreshInspectEnchantsVisibility then
                         EllesmereUI._refreshInspectEnchantsVisibility()
-                    end
-                    if EllesmereUI._refreshInspectAverageItemLevelVisibility then
-                        EllesmereUI._refreshInspectAverageItemLevelVisibility()
                     end
                 end)
             end)
@@ -1259,17 +1131,7 @@ if EllesmereUI then
         -- Update label visibility after all slots have been styled
         local frame = InspectFrame
         if frame then
-            ApplyTabVisibility((frame.selectedTab or 1) == 1)
-            -- Update average item level label on MainHandSlot
-            if InspectMainHandSlot and InspectMainHandSlot._avgItemLevelLabel then
-                local avg = CalculateAverageItemLevel()
-                InspectMainHandSlot._avgItemLevelLabel:SetFormattedText("avg. ilvl: |cff9933ff%d|r", math.floor(avg))
-                if avg > 0 then
-                    InspectMainHandSlot._avgItemLevelLabel:Show()
-                else
-                    InspectMainHandSlot._avgItemLevelLabel:Hide()
-                end
-            end
+            ApplyTabVisibility(InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown())
         end
     end
 
@@ -1283,7 +1145,7 @@ if EllesmereUI then
         RefreshSlotStyles()
         local frame = InspectFrame
         if frame then
-            ApplyTabVisibility((frame.selectedTab or 1) == 1)
+            ApplyTabVisibility(InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown())
             -- Apply visibility settings after styling
             if EllesmereUI._refreshInspectItemLevelVisibility then
                 EllesmereUI._refreshInspectItemLevelVisibility()
@@ -1317,7 +1179,6 @@ do
             inspectShowItemLevel = true,
             inspectShowUpgradeTrack = true,
             inspectShowEnchants = true,
-            inspectShowAverageItemLevel = true,
         }
         for k, v in pairs(defaults) do
             if EllesmereUIDB[k] == nil then
@@ -1332,7 +1193,7 @@ function EllesmereUI._refreshInspectItemLevelVisibility()
     if not InspectFrame or not InspectPaperDollItemsFrame then return end
 
     local showItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowItemLevel ~= false)
-    local isTab1 = (InspectFrame.selectedTab or 1) == 1
+    local isTab1 = InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
@@ -1348,7 +1209,7 @@ function EllesmereUI._refreshInspectUpgradeTrackVisibility()
     if not InspectFrame or not InspectPaperDollItemsFrame then return end
 
     local showUpgradeTrack = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowUpgradeTrack ~= false)
-    local isTab1 = (InspectFrame.selectedTab or 1) == 1
+    local isTab1 = InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
@@ -1364,7 +1225,7 @@ function EllesmereUI._refreshInspectEnchantsVisibility()
     if not InspectFrame or not InspectPaperDollItemsFrame then return end
 
     local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowEnchants ~= false)
-    local isTab1 = (InspectFrame.selectedTab or 1) == 1
+    local isTab1 = InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
@@ -1375,13 +1236,3 @@ function EllesmereUI._refreshInspectEnchantsVisibility()
     end
 end
 
--- Function to refresh average item level visibility when toggle changes
-function EllesmereUI._refreshInspectAverageItemLevelVisibility()
-    if not InspectFrame or not InspectPaperDollItemsFrame then return end
-
-    local showAverageItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowAverageItemLevel ~= false)
-
-    if InspectMainHandSlot and InspectMainHandSlot._avgItemLevelLabel then
-        InspectMainHandSlot._avgItemLevelLabel:SetShown(showAverageItemLevel)
-    end
-end

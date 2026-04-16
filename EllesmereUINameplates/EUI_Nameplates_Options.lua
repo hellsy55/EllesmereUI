@@ -580,6 +580,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SHAMAN      = { 0.00, 0.44, 0.87 },
                 HUNTER      = { 0.67, 0.83, 0.45 },
                 WARRIOR     = { 0.78, 0.61, 0.43 },
+                DEATHKNIGHT = { 0.77, 0.12, 0.23 },
             },
             CLASS_MAP = {
                 ROGUE   = { Enum.PowerType.ComboPoints,   5 },
@@ -594,6 +595,9 @@ initFrame:SetScript("OnEvent", function(self)
                 SHAMAN  = { [263] = { "MAELSTROM_WEAPON", 10 } },
                 HUNTER  = { [255] = { "TIP_OF_THE_SPEAR", 3 } },
                 WARRIOR = { [72]  = { "WHIRLWIND_STACKS", 4 } },
+                DEATHKNIGHT = { [250] = { Enum.PowerType.Runes, 6 },
+                                [251] = { Enum.PowerType.Runes, 6 },
+                                [252] = { Enum.PowerType.Runes, 6 } },
             },
         }
         CP.pips = {}

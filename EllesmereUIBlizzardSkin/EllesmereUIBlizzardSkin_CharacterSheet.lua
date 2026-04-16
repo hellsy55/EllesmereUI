@@ -34,9 +34,9 @@ end
 
 -- C_TooltipInfo-based scanning. NEVER create a scanning GameTooltipTemplate
 -- from Lua -- see CLAUDE.md reference_tooltip_template_taint.
-local function EUI_ScanInventoryItem(slotID)
+local function EUI_ScanInventoryItem(slotID, unit)
     if not (C_TooltipInfo and C_TooltipInfo.GetInventoryItem) then return nil end
-    local data = C_TooltipInfo.GetInventoryItem("player", slotID)
+    local data = C_TooltipInfo.GetInventoryItem(unit or "player", slotID)
     if not data then return nil end
     if TooltipUtil and TooltipUtil.SurfaceArgs then
         TooltipUtil.SurfaceArgs(data)
@@ -112,9 +112,9 @@ local function _stripLineEscapes(s)
     return s
 end
 
-local function EUI_GetEnchantText(slotID)
+local function EUI_GetEnchantText(slotID, unit)
     if not slotID then return "" end
-    local link = GetInventoryItemLink("player", slotID)
+    local link = GetInventoryItemLink(unit or "player", slotID)
     if not link then return "" end
 
     -- Item link format: "item:<itemID>:<enchantID>:..."
@@ -124,7 +124,7 @@ local function EUI_GetEnchantText(slotID)
     local cached = _enchantNameCache[enchantID]
     if cached ~= nil then return cached end
 
-    local data = EUI_ScanInventoryItem(slotID)
+    local data = EUI_ScanInventoryItem(slotID, unit)
     if not (data and data.lines) then
         _enchantNameCache[enchantID] = ""
         return ""
@@ -150,6 +150,9 @@ local function EUI_GetEnchantText(slotID)
     _enchantNameCache[enchantID] = ""
     return ""
 end
+
+EllesmereUI.GetUpgradeTrack = EUI_GetUpgradeTrack
+EllesmereUI.GetEnchantText  = EUI_GetEnchantText
 
 -- Empty-socket atlas map (key names come from GetItemStats return keys).
 local EUI_EMPTY_SOCKET_ATLAS = {
@@ -3524,7 +3527,7 @@ local function SkinCharacterSheet()
         -- Shirt slot: skin the border but never show item level / upgrade
         -- track / enchant text. Shirts have no stats or enchants worth
         -- displaying and the labels just clutter the model area.
-        local skipLabels = (slotName == "CharacterShirtSlot")
+        local skipLabels = (slotName == "CharacterShirtSlot" or slotName == "CharacterTabardSlot")
 
         -- Create itemlevel labels
         local slot = _G[slotName]
@@ -3565,17 +3568,13 @@ local function SkinCharacterSheet()
             if tContains(leftColumnSlots, slotName) then
                 enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
             elseif tContains(rightColumnSlots, slotName) then
-                enchantLabel:SetPoint("Right", slot, "LEFT", -5, -5)
+                enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
             elseif slotName == "CharacterMainHandSlot" then
                 enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
             elseif slotName == "CharacterSecondaryHandSlot" then
-                enchantLabel:SetPoint("LEFT", slot, "RIGHT", 15, -5)
+                enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
             end
 
-            -- Mouse-enabled hover frame sitting where the icon actually
-            -- renders. Sized generously and bumped in frame level so it
-            -- wins mouse events over nearby siblings (character slot
-            -- buttons at higher frame levels can otherwise eat the hover).
             local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
             hoverFrame:SetSize(20, 20)
             hoverFrame:SetFrameLevel(textOverlayFrame:GetFrameLevel() + 20)
@@ -3586,7 +3585,7 @@ local function SkinCharacterSheet()
             elseif slotName == "CharacterMainHandSlot" then
                 hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
             elseif slotName == "CharacterSecondaryHandSlot" then
-                hoverFrame:SetPoint("LEFT", slot, "RIGHT", 15, -5)
+                hoverFrame:SetPoint("LEFT", slot, "RIGHT", 5, -5)
             end
             hoverFrame:EnableMouse(true)
             hoverFrame:Hide()

@@ -34,6 +34,7 @@ local defaults = {
             hideMail             = false,
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
+            hideGreatVault       = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
             addonBtnSize         = 24,
@@ -978,10 +979,10 @@ local function ToggleGreatVault()
     end
 end
 
-local function SizeGreatVaultBtn(btn)
+local function SizeGreatVaultBtn(btn, showBg)
     local btnSz = GetInteractableBtnSize()
     btn:SetSize(btnSz, btnSz)
-    if btn._bg then btn._bg:SetShown(true) end
+    if btn._bg then btn._bg:SetShown(showBg ~= false) end
     local inset = 3
     local avail = btnSz - inset * 2
     -- Whole is 105x108: height is the limiting dimension. Fit by height.
@@ -1034,6 +1035,8 @@ local function CreateGreatVaultBtn(parent)
 
     -- Resting tint matches OnLeave state
     whole:SetVertexColor(0.85, 0.85, 0.85, 1)
+
+    btn._indicatorKey = "_greatVault"
 
     return btn
 end
@@ -1320,25 +1323,25 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             btn:SetParent(minimap)
             btn:SetFrameLevel(minimap:GetFrameLevel() + 11)
             btn:ClearAllPoints()
-            btn:SetSize(ungroupBtnSize, ungroupBtnSize)
+            if showBg then
+                -- Strip BEFORE resize so the snapshot captures the real
+                -- native size, not our modified ungroupBtnSize.
+                StripButtonDecorations(btn)
+                btn:SetSize(ungroupBtnSize, ungroupBtnSize)
+            end
             if freeMove then
-                -- Anchor each button independently to the minimap so offsets work per-button
                 local yOff = fmBaseY + (idx - 1) * ungroupBtnSize
                 btn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
             elseif anchor then
                 btn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
             else
-                -- First ungrouped button takes the flyout toggle's position
                 btn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
             end
-            -- Lock position: disable dragging
             btn:SetMovable(false)
             btn:RegisterForDrag()
             btn:SetScript("OnDragStart", nil)
             btn:SetScript("OnDragStop", nil)
             if showBg then
-                -- Strip decorative textures and normalize icon
-                StripButtonDecorations(btn)
                 local icon = btn.icon or btn.Icon
                 if not icon then
                     for _, region in ipairs({ btn:GetRegions() }) do
@@ -1368,7 +1371,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 btn._ungroupBg:Show()
                 if btn._ungroupRing then btn._ungroupRing:Hide() end
             else
-                -- No backgrounds: restore native appearance, hide our overlays
+                -- No backgrounds: restore native appearance, hide our overlays.
+                -- Do NOT override button size — native ring textures have fixed
+                -- anchors that only look correct at the button's original size.
                 RestoreButtonDecorations(btn)
                 if btn._ungroupBg then btn._ungroupBg:Hide() end
                 if btn._ungroupRing then btn._ungroupRing:Hide() end
@@ -1381,23 +1386,27 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         end
 
         -- Great Vault button: always sits at the top of the ungrouped stack.
-        -- If no anchor (no ungrouped buttons and no flyout), it lands directly
-        -- where the flyout toggle would be.
         if _greatVaultBtn then
-            SizeGreatVaultBtn(_greatVaultBtn)
-            _greatVaultBtn:SetParent(minimap)
-            _greatVaultBtn:SetFrameLevel(minimap:GetFrameLevel() + 11)
-            _greatVaultBtn:ClearAllPoints()
-            if freeMove then
-                local idx = #ungrouped + (flyoutVisible and 1 or 0)
-                local yOff = idx * ungroupBtnSize
-                _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
-            elseif anchor then
-                _greatVaultBtn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+            if p.hideGreatVault then
+                _greatVaultBtn:Hide()
             else
-                _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
+                SizeGreatVaultBtn(_greatVaultBtn, showBg)
+                _greatVaultBtn:SetParent(minimap)
+                _greatVaultBtn:SetFrameLevel(minimap:GetFrameLevel() + 11)
+                _greatVaultBtn:ClearAllPoints()
+                _greatVaultBtn:SetSize(ungroupBtnSize, ungroupBtnSize)
+                if freeMove then
+                    local idx = #ungrouped + (flyoutVisible and 1 or 0)
+                    local yOff = idx * ungroupBtnSize
+                    _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
+                elseif anchor then
+                    _greatVaultBtn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+                else
+                    _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
+                end
+                _greatVaultBtn:Show()
+                anchor = _greatVaultBtn
             end
-            _greatVaultBtn:Show()
         end
     end
 
@@ -1409,7 +1418,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
     if flyoutToggle then fmTargets[#fmTargets + 1] = flyoutToggle end
-    if _greatVaultBtn then fmTargets[#fmTargets + 1] = _greatVaultBtn end
+    if _greatVaultBtn and not p.hideGreatVault then fmTargets[#fmTargets + 1] = _greatVaultBtn end
     -- Include ungrouped addon buttons
     for _, btn in ipairs(cachedAddonButtons) do
         if _addonVisible[btn] ~= false and IsUngrouped(btn) then
@@ -2108,9 +2117,18 @@ end
 function EBS:OnInitialize()
     EBS.db = EllesmereUI.Lite.NewDB("EllesmereUIMinimapDB", defaults)
 
+    -- Full rebuild: wipes cached button state so the next ApplyMinimap
+    -- re-snapshots native button sizes/textures from scratch (as if /reload).
+    -- Called when toggling btnBackgrounds or ungrouping a button.
+    local function FullRebuildMinimap()
+        wipe(flyoutSavedRegions)
+        ApplyMinimap()
+    end
+
     -- Global bridge for options <-> main communication
     _G._EMM_DB           = EBS.db
     _G._EMM_ApplyMinimap = ApplyMinimap
+    _G._EMM_FullRebuildMinimap = FullRebuildMinimap
 
     -- Register visibility updater + mouseover target
     if EllesmereUI.RegisterVisibilityUpdater then

@@ -62,6 +62,11 @@ initFrame:SetScript("OnEvent", function(self)
         if _G._EMM_ApplyMinimap then _G._EMM_ApplyMinimap() end
     end
 
+    local function FullRebuildMinimap()
+        if _G._EMM_FullRebuildMinimap then _G._EMM_FullRebuildMinimap()
+        else RefreshMinimap() end
+    end
+
     local function RefreshFriends()
         if _G._EBS_ApplyFriends then _G._EBS_ApplyFriends() end
     end
@@ -301,7 +306,6 @@ initFrame:SetScript("OnEvent", function(self)
                     local m = MinimapDB(); if not m then return end
                     if not m.ungroupedButtons then m.ungroupedButtons = {} end
                     if v then
-                        -- Assign next order index
                         local maxOrder = 0
                         for _, ord in pairs(m.ungroupedButtons) do
                             if type(ord) == "number" and ord > maxOrder then maxOrder = ord end
@@ -310,7 +314,7 @@ initFrame:SetScript("OnEvent", function(self)
                     else
                         m.ungroupedButtons[k] = nil
                     end
-                    RefreshMinimap()
+                    FullRebuildMinimap()
                 end)
             local PP = EllesmereUI.PP
             PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
@@ -401,8 +405,21 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.btnBackgrounds = v
-                RefreshMinimap()
+                FullRebuildMinimap()
               end }
+        );  y = y - h
+
+        -- Hide Great Vault Button
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Great Vault Button",
+              tooltip="Hides the Great Vault shortcut button from the minimap button stack.",
+              getValue=function() local m = MinimapDB(); return m and m.hideGreatVault end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.hideGreatVault = v
+                RefreshMinimap()
+              end },
+            { type="label", text="" }
         );  y = y - h
 
         y = y - 10

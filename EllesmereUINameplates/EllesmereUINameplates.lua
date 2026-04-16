@@ -2072,6 +2072,7 @@ local CP_CLASS_COLORS = {
     SHAMAN      = { 0.00, 0.44, 0.87 },
     HUNTER      = { 0.67, 0.83, 0.45 },
     WARRIOR     = { 0.78, 0.61, 0.43 },
+    DEATHKNIGHT = { 0.77, 0.12, 0.23 },
 }
 local CP_DEFAULT_COLOR = { 1.00, 0.84, 0.30 }  -- fallback gold
 

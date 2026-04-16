@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Chat frame skinning (Coming Soon)
 ## Author: Ellesmere
-## Version: 6.7.3
+## Version: 6.7.4
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIChatDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
