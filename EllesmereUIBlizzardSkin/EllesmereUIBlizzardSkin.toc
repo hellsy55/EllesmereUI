@@ -12,6 +12,7 @@
 # Main Luas
 EllesmereUIBlizzardSkin.lua
 EllesmereUIBlizzardSkin_CharacterSheet.lua
+EllesmereUIBlizzardSkin_InspectSheet.lua
 
 # Options
 EUI_BlizzardSkin_Options.lua
