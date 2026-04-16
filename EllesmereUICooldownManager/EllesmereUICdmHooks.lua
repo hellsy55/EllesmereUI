@@ -546,6 +546,18 @@ local function DecorateFrame(frame, barData)
                 local fc2 = _ecmeFC[frame]
                 local sid2 = fc2 and fc2.spellID
                 local bk2 = fc2 and fc2.barKey
+                -- Per-bar "Suppress GCD": force alpha 0 when the displayed
+                -- cooldown is just a GCD. isOnGCD is a clean bool from
+                -- C_Spell.GetSpellCooldown.
+                local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
+                if bd2 and bd2.suppressGCD and sid2 and C_Spell and C_Spell.GetSpellCooldown then
+                    local cdInfo = C_Spell.GetSpellCooldown(sid2)
+                    if cdInfo and cdInfo.isOnGCD then
+                        cd:SetSwipeColor(0, 0, 0, 0)
+                        fd._isProcessingOverride = false
+                        return
+                    end
+                end
                 -- Check per-spell settings
                 local ss2
                 if sid2 and bk2 then
@@ -1215,7 +1227,7 @@ local function CollectAndReanchor()
                     FC(frame).spellID = entry.baseSpellID or entry.spellID
                     icons[count] = frame
                     local barHidden = container and container._visHidden
-                    frame:SetAlpha(barHidden and 0 or 1)
+                    frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
                     frame:Show()
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
@@ -1577,7 +1589,7 @@ local function CollectAndReanchor()
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
                     icons[i] = frame
-                    frame:SetAlpha(barHidden and 0 or 1)
+                    frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
                     frame:Show()
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then

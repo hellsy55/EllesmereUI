@@ -3238,6 +3238,10 @@ local function EnsureFocusKickBar()
         if b.key == FOCUSKICK_BAR_KEY then existingIdx = i; break end
     end
     if existingIdx then
+        -- Backfill suppressGCD on existing FocusKick bars (default to on)
+        if bars[existingIdx].suppressGCD == nil then
+            bars[existingIdx].suppressGCD = true
+        end
         if existingIdx == targetIdx or existingIdx == targetIdx - 1 then
             -- Already in the right spot relative to "buffs"
             return
@@ -3263,6 +3267,7 @@ local function EnsureFocusKickBar()
         showCooldownText = true, showItemCount = true, cooldownFontSize = 12,
         showCharges = true, chargeFontSize = 11,
         desaturateOnCD = true, swipeAlpha = 0.7,
+        suppressGCD = true,
         activeStateAnim = "blizzard",
         anchorTo = "none", anchorPosition = "left",
         anchorOffsetX = 0, anchorOffsetY = 0,
@@ -3395,9 +3400,6 @@ local function EnsureFocusKickProxy()
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
-            -- Always re-evaluate. By the time this fires the unit is
-            -- already invalid, so UnitIsUnit(unit, "focus") returns false
-            -- and we'd never catch the focus nameplate disappearing.
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_ADDED" then
@@ -3719,9 +3721,12 @@ ns.RefreshFocusReminders = RefreshFocusReminders
 -- Refresh the cached context flags (instance type + role) and trigger a
 -- visual refresh if either flag transitioned. Called on PLAYER_ENTERING_WORLD,
 -- ZONE_CHANGED_NEW_AREA, and PLAYER_SPECIALIZATION_CHANGED.
+local _focusKickEncounterActive = false
+local FOCUSKICK_RAID_ENCOUNTER_ID = 3182
 local function UpdateFocusKickContext()
     local _, instanceType = IsInInstance()
     local nowInDungeon = (instanceType == "party")
+        or (instanceType == "raid" and _focusKickEncounterActive)
     local role = GetSpecialization and GetSpecializationRole
         and GetSpecialization() and GetSpecializationRole(GetSpecialization())
     local nowIsHealer = (role == "HEALER")
@@ -3746,22 +3751,28 @@ local function EnsureFocusReminderProxy()
     _focusReminderProxy:RegisterEvent("PLAYER_ENTERING_WORLD")
     _focusReminderProxy:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     _focusReminderProxy:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    _focusReminderProxy:RegisterEvent("ENCOUNTER_START")
+    _focusReminderProxy:RegisterEvent("ENCOUNTER_END")
     _focusReminderProxy:SetScript("OnEvent", function(_, event, unit)
         if event == "PLAYER_FOCUS_CHANGED" then
             local hadFocus = _focusKickHasFocus
             _focusKickHasFocus = UnitExists("focus") and true or false
-            -- Only refresh on actual transitions to avoid wasted iteration
             if hadFocus ~= _focusKickHasFocus then
                 RefreshFocusReminders()
             end
+        elseif event == "ENCOUNTER_START" then
+            local encounterID = unit
+            _focusKickEncounterActive = (encounterID == FOCUSKICK_RAID_ENCOUNTER_ID)
+            UpdateFocusKickContext()
+        elseif event == "ENCOUNTER_END" then
+            _focusKickEncounterActive = false
+            UpdateFocusKickContext()
         elseif event == "PLAYER_ENTERING_WORLD"
             or event == "ZONE_CHANGED_NEW_AREA"
             or event == "PLAYER_SPECIALIZATION_CHANGED" then
+            _focusKickEncounterActive = false
             UpdateFocusKickContext()
         elseif event == "NAME_PLATE_UNIT_ADDED" then
-            -- Hot path: bail before any function call when reminder
-            -- system is contextually disabled (no focus / not in dungeon
-            -- / healer) so we never enter ShowFocusReminder.
             if _focusKickHasFocus then return end
             if not _focusKickInDungeon then return end
             if _focusKickIsHealer then return end
@@ -3950,17 +3961,22 @@ _CDMApplyVisibility = function()
                 end
             else
                 local wasHidden = frame._visHidden
+                -- Bar opacity is applied to icons only, not the frame.
+                -- Custom injected icons are parented to the bar frame, so
+                -- frame alpha would double-apply with icon alpha.
                 frame:SetAlpha(1)
                 if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
                 frame._visHidden = false
-                -- Restore icon alpha and reposition
-                if wasHidden then
-                    local icons = cdmBarIcons[barData.key]
-                    if icons then
-                        for ii = 1, #icons do
-                            if icons[ii] then icons[ii]:SetAlpha(1) end
-                        end
+                -- Apply opacity to icons every pass (idempotent, handles
+                -- fresh loads where wasHidden is false).
+                local visAlpha = barData.barOpacity or 1
+                local icons = cdmBarIcons[barData.key]
+                if icons then
+                    for ii = 1, #icons do
+                        if icons[ii] then icons[ii]:SetAlpha(visAlpha) end
                     end
+                end
+                if wasHidden then
                     LayoutCDMBar(barData.key)
                 end
             end
@@ -4014,6 +4030,24 @@ _CDMApplyVisibility = function()
     end
 end
 ns.CDMApplyVisibility = _CDMApplyVisibility
+
+-- Live-apply bar opacity to a bar's frame + icons. Skips hidden bars so
+-- visibility state is never overridden (hidden stays at alpha 0).
+local function ApplyBarOpacity(barKey)
+    local frame = cdmBarFrames[barKey]
+    if not frame or frame._visHidden then return end
+    local barData = barDataByKey[barKey]
+    if not barData then return end
+    if barKey == FOCUSKICK_BAR_KEY then return end
+    local a = barData.barOpacity or 1
+    local icons = cdmBarIcons[barKey]
+    if icons then
+        for i = 1, #icons do
+            if icons[i] then icons[i]:SetAlpha(a) end
+        end
+    end
+end
+ns.ApplyBarOpacity = ApplyBarOpacity
 
 -- Helper to get barData by key
 function GetBarData(barKey)

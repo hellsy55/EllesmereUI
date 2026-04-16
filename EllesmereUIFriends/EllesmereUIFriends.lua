@@ -4882,3 +4882,95 @@ function EBS:OnEnable()
         end
     end
 end
+
+-- Secure proxy for HouseList VisitHouse button.
+-- Our ScrollBox creates FriendsListButtonTemplate buttons from addon context,
+-- so right-click menus open tainted. This taints HouseList's VisitHouse() call.
+-- Fix: overlay a SecureActionButtonTemplate on the Visit House button when
+-- the user hovers it. The secure button executes VisitHouse without taint.
+do
+    local _proxyBtn
+    local _hookedButtons = {}
+
+    local function CreateHouseProxy()
+        if _proxyBtn then return _proxyBtn end
+        if InCombatLockdown() then return nil end
+
+        local proxy = CreateFrame("Button", "EBS_SecureHouseProxy", UIParent, "SecureActionButtonTemplate")
+        proxy:SetFrameStrata("DIALOG")
+        proxy:SetFrameLevel(9999)
+        proxy:Hide()
+        proxy:RegisterForClicks("AnyUp", "AnyDown")
+        proxy:SetAttribute("type", "visithouse")
+
+        proxy:SetScript("OnEnter", function(self)
+            if self._nativeBtn then self._nativeBtn:LockHighlight() end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(HOUSING_VISIT_HOUSE or "Visit House", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+
+        proxy:SetScript("OnLeave", function(self)
+            GameTooltip:Hide()
+            self:Hide()
+            self:ClearAllPoints()
+            if self._nativeBtn then self._nativeBtn:UnlockHighlight() end
+            self._nativeBtn = nil
+        end)
+
+        proxy:SetScript("OnMouseDown", function(self)
+            if self._nativeBtn then self._nativeBtn:SetButtonState("PUSHED") end
+        end)
+
+        proxy:SetScript("OnMouseUp", function(self)
+            if self._nativeBtn then self._nativeBtn:SetButtonState("NORMAL") end
+        end)
+
+        _proxyBtn = proxy
+        return proxy
+    end
+
+    local function OnVisitHouseEnter(nativeBtn)
+        if InCombatLockdown() then return end
+        local row = nativeBtn:GetParent()
+        local houseInfo = row and row.houseInfo
+        if not houseInfo or not houseInfo.neighborhoodGUID or not houseInfo.houseGUID then return end
+
+        local proxy = CreateHouseProxy()
+        if not proxy then return end
+
+        proxy:ClearAllPoints()
+        proxy:SetAllPoints(nativeBtn)
+        proxy:SetAttribute("house-neighborhood-guid", houseInfo.neighborhoodGUID)
+        proxy:SetAttribute("house-guid", houseInfo.houseGUID)
+        proxy:SetAttribute("house-plot-id", houseInfo.plotID)
+        proxy._nativeBtn = nativeBtn
+        proxy:Show()
+        if proxy:GetScript("OnEnter") then
+            proxy:GetScript("OnEnter")(proxy)
+        end
+    end
+
+    local function InitHousingScrollBox()
+        local houseFrame = _G.HouseListFrame
+        if not houseFrame or not houseFrame.ScrollBox then return end
+        houseFrame.ScrollBox:RegisterCallback("OnInitializedFrame", function(_, frame)
+            local btn = frame.VisitHouseButton
+            if btn and not _hookedButtons[btn] then
+                btn:HookScript("OnEnter", OnVisitHouseEnter)
+                _hookedButtons[btn] = true
+            end
+        end)
+    end
+
+    local initFrame = CreateFrame("Frame")
+    initFrame:RegisterEvent("ADDON_LOADED")
+    initFrame:SetScript("OnEvent", function(_, _, addonName)
+        if addonName == "Blizzard_HouseList" then
+            InitHousingScrollBox()
+        end
+    end)
+    if C_AddOns.IsAddOnLoaded("Blizzard_HouseList") then
+        InitHousingScrollBox()
+    end
+end

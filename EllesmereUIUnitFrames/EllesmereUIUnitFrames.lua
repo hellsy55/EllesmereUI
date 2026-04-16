@@ -2847,7 +2847,18 @@ local function CreateTargetAuras(frame, unit)
         if effectiveAnc == "bottomleft" or effectiveAnc == "bottomright" then
             debuffCbOff = cbOffset
         end
-        debuffs:SetPoint(dia, frame, dfp, dox * gap + (settings and settings.debuffOffsetX or 0), doy * gap + debuffCbOff + (settings and settings.debuffOffsetY or 0))
+        -- Simple Debuff Display: anchor to the top of the health bar, not the
+        -- frame's vertical center (matches preview layout).
+        local simpleAnchorParent = frame
+        if unitIsBoss and settings and settings.simpleDebuffs ~= false then
+            dia = "TOPRIGHT"
+            dfp = "TOPLEFT"
+            dox = 0
+            doy = 0
+            debuffCbOff = 0
+            simpleAnchorParent = frame.Health or frame
+        end
+        debuffs:SetPoint(dia, simpleAnchorParent, dfp, dox * gap + (settings and settings.debuffOffsetX or 0), doy * gap + debuffCbOff + (settings and settings.debuffOffsetY or 0))
         debuffs:SetSize(containerWidth, debuffAuraSize)
         debuffs.size = debuffAuraSize
         debuffs.spacing = gap
@@ -5994,12 +6005,25 @@ local function ReloadFrames()
                                 liveDbCbOff = -cbH
                             end
                         end
+                        -- Simple Debuff Display: anchor the stack to the TOP
+                        -- of the health bar instead of the frame's vertical
+                        -- center so icons line up with the top edge. Matches
+                        -- the preview's TOPRIGHT -> health.TOPLEFT anchor.
+                        local simpleAnchorParent = frame
+                        if settings.simpleDebuffs ~= false then
+                            dia = "TOPRIGHT"
+                            dfp = "TOPLEFT"
+                            dox = 0
+                            doy = 0
+                            liveDbCbOff = 0
+                            simpleAnchorParent = frame.Health or frame
+                        end
                         local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, liveDbCbOff, effectiveDebuffSize, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0)
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
                             frame.Debuffs.size = effectiveDebuffSize
                             frame.Debuffs:ClearAllPoints()
-                            frame.Debuffs:SetPoint(dia, frame, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + liveDbCbOff + (settings.debuffOffsetY or 0))
+                            frame.Debuffs:SetPoint(dia, simpleAnchorParent, dfp, dox * 1 + (settings.debuffOffsetX or 0), doy * 1 + liveDbCbOff + (settings.debuffOffsetY or 0))
                             frame.Debuffs.initialAnchor = dia
                             frame.Debuffs.growthX = dgx
                             frame.Debuffs.growthY = dgy

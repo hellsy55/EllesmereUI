@@ -7739,7 +7739,21 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 3: Number of Rows
+        -- Row 3: Number of Rows | Bar Opacity (cd/utility only, excl. focuskick)
+        local isCDOrUtilityRow3 = (barData.barType == "cooldowns" or barData.barType == "utility") and not isFocusKick
+        local row3Right
+        if isCDOrUtilityRow3 then
+            row3Right = { type="slider", text="Bar Opacity",
+                min=0, max=100, step=1,
+                getValue=function() return math.floor((BD().barOpacity or 1) * 100 + 0.5) end,
+                setValue=function(v)
+                    BD().barOpacity = v / 100
+                    if ns.ApplyBarOpacity then ns.ApplyBarOpacity(BD().key) end
+                    UpdateCDMPreview()
+                end }
+        else
+            row3Right = { type="label", text="" }
+        end
         local numRowsRow
         numRowsRow, h = W:DualRow(parent, y,
             { type="slider", text="Number of Rows",
@@ -7759,7 +7773,7 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
+            row3Right);  y = y - h
 
         -- Inline cog on Number of Rows: Custom Top Row Count (only relevant when numRows == 2)
         do
@@ -8368,7 +8382,17 @@ initFrame:SetScript("OnEvent", function(self)
         })
         end -- isBuffBar else
 
-        -- Row 2: (Sync) Border Size (swatch) | empty (active anim is now per-icon)
+        -- Row 2: (Sync) Border Size (swatch) | Suppress GCD (cd/utility only)
+        local isCDOrUtility = (barData.barType == "cooldowns" or barData.barType == "utility")
+        local rightSlot
+        if isCDOrUtility then
+            rightSlot = { type="toggle", text="Suppress GCD",
+                tooltip="Hide the brief GCD swipe that flashes when you cast any spell. The actual ability cooldown swipe still shows.",
+                getValue=function() return BD().suppressGCD == true end,
+                setValue=function(v) BD().suppressGCD = v and true or false; Refresh() end }
+        else
+            rightSlot = { type="label", text="" }
+        end
         local borderRow
         borderRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Border Size",
@@ -8380,7 +8404,7 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
               end },
-            { type="label", text="" });  y = y - h
+            rightSlot);  y = y - h
 
         -- Sync icon on Border Size (left of row 2)
         EllesmereUI.BuildSyncIcon({
