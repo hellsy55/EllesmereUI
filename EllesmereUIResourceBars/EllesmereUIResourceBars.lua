@@ -635,13 +635,8 @@ end
 -------------------------------------------------------------------------------
 local function ApplyBarTexture(bar, texKey)
     if not bar then return end
-    local texLookup = _G._ERB_BarTextures
-    local path = texLookup and texLookup[texKey]
-    if path then
-        bar:SetStatusBarTexture(path)
-    else
-        bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    end
+    local path = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
+    bar:SetStatusBarTexture(path)
 end
 
 
@@ -811,20 +806,10 @@ local function CreatePip(parent, w, h, idx, borderSize, borderR, borderG, border
 
     function pip:ApplyTexture(texKey)
         self._texKey = texKey
-        local texLookup = _G._ERB_BarTextures
-        local path = texLookup and texLookup[texKey]
-        if path then
-            self._fill:SetTexture(path)
-        else
-            self._fill:SetTexture("Interface\\Buttons\\WHITE8x8")
-        end
-        -- Keep recharge bar texture in sync if it exists
+        local path = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
+        self._fill:SetTexture(path)
         if self._rechargeBar then
-            if path then
-                self._rechargeBar:SetStatusBarTexture(path)
-            else
-                self._rechargeBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-            end
+            self._rechargeBar:SetStatusBarTexture(path)
         end
     end
 
@@ -2360,8 +2345,7 @@ local function UpdateSecondaryResource()
                         sb:SetMinMaxValues(0, 1)
                         -- Apply the same bar texture if one is set
                         if rf._texKey then
-                            local texLookup = _G._ERB_BarTextures
-                            local path = texLookup and texLookup[rf._texKey]
+                            local path = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, rf._texKey, nil)
                             if path then sb:SetStatusBarTexture(path) end
                         end
                         rf._rechargeBar = sb
@@ -2707,8 +2691,7 @@ local function UpdateSecondaryResource()
                 sb:SetFrameLevel(nextPip:GetFrameLevel())
                 sb:SetMinMaxValues(0, 1)
                 if nextPip._texKey then
-                    local texLookup = _G._ERB_BarTextures
-                    local path = texLookup and texLookup[nextPip._texKey]
+                    local path = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, nextPip._texKey, nil)
                     if path then sb:SetStatusBarTexture(path) end
                 end
                 nextPip._rechargeBar = sb
@@ -3028,45 +3011,24 @@ _G._ERB_BarTextureOrder = BAR_TEXTURE_ORDER
 _G._ERB_BarTextureNames = BAR_TEXTURE_NAMES
 
 -------------------------------------------------------------------------------
---  Append SharedMedia statusbar textures to both texture tables
---  (deferred to OnInitialize so all addons have registered their textures)
+--  Append SharedMedia statusbar textures to both texture tables via the
+--  shared EllesmereUI helper (same entry point Unit Frames uses). Safe to
+--  call multiple times; dupes are skipped inside the helper.
 -------------------------------------------------------------------------------
 local function AppendSharedMediaTextures()
-    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
-    if not LSM then return end
-    local smTextures = LSM:HashTable("statusbar")
-    if not smTextures then return end
-
-    -- Collect and sort SharedMedia texture names alphabetically
-    local sorted = {}
-    for name in pairs(smTextures) do
-        -- Skip any that duplicate our built-in keys
-        local lk = name:lower():gsub("%s+", "-")
-        if not CAST_BAR_TEXTURES[lk] and not BAR_TEXTURES[lk] then
-            sorted[#sorted + 1] = name
-        end
-    end
-    table.sort(sorted)
-
-    if #sorted > 0 then
-        -- Add separator + SharedMedia entries to cast bar textures
-        CAST_BAR_TEXTURE_ORDER[#CAST_BAR_TEXTURE_ORDER + 1] = "---"
-        for _, name in ipairs(sorted) do
-            local key = "sm:" .. name
-            CAST_BAR_TEXTURES[key] = smTextures[name]
-            CAST_BAR_TEXTURE_ORDER[#CAST_BAR_TEXTURE_ORDER + 1] = key
-            CAST_BAR_TEXTURE_NAMES[key] = name
-        end
-
-        -- Add separator + SharedMedia entries to bar textures
-        BAR_TEXTURE_ORDER[#BAR_TEXTURE_ORDER + 1] = "---"
-        for _, name in ipairs(sorted) do
-            local key = "sm:" .. name
-            BAR_TEXTURES[key] = smTextures[name]
-            BAR_TEXTURE_ORDER[#BAR_TEXTURE_ORDER + 1] = key
-            BAR_TEXTURE_NAMES[key] = name
-        end
-    end
+    if not EllesmereUI.AppendSharedMediaTextures then return end
+    EllesmereUI.AppendSharedMediaTextures(
+        CAST_BAR_TEXTURE_NAMES,
+        CAST_BAR_TEXTURE_ORDER,
+        nil,
+        CAST_BAR_TEXTURES
+    )
+    EllesmereUI.AppendSharedMediaTextures(
+        BAR_TEXTURE_NAMES,
+        BAR_TEXTURE_ORDER,
+        nil,
+        BAR_TEXTURES
+    )
 end
 
 

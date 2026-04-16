@@ -7715,10 +7715,15 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Register the module
     ---------------------------------------------------------------------------
+    local ufSearchTerms = {}
+    for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
+    for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
+
     EllesmereUI:RegisterModule("EllesmereUIUnitFrames", {
         title       = "Unit Frames",
         description = "Configure unit frame appearance and behavior.",
         pages       = { PAGE_DISPLAY, PAGE_MINI },
+        searchTerms = ufSearchTerms,
         buildPage   = function(pageName, parent, yOffset)
             -- Randomize preview creature IDs on every tab switch
             RandomizePreviewCreatures()

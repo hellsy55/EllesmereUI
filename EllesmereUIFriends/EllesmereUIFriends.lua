@@ -2425,14 +2425,18 @@ local function SkinFriendsFrame()
                 end
             end)
             local function UpdateOrbTooltip()
-                if orbBtn:IsMouseOver() then
+                if orbBtn:IsMouseOver() and EllesmereUI.ShowWidgetTooltip then
                     EllesmereUI.ShowWidgetTooltip(orbBtn, "Status: " .. GetPlayerStatusName() .. "\nClick to change")
                 end
             end
             orbBtn:SetScript("OnEnter", function(self)
-                EllesmereUI.ShowWidgetTooltip(self, "Status: " .. GetPlayerStatusName() .. "\nClick to change")
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "Status: " .. GetPlayerStatusName() .. "\nClick to change")
+                end
             end)
-            orbBtn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            orbBtn:SetScript("OnLeave", function()
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
 
             local statusEvt = CreateFrame("Frame")
             statusEvt:RegisterEvent("PLAYER_FLAGS_CHANGED")
@@ -2553,10 +2557,12 @@ local function SkinFriendsFrame()
                     invBtn:SetPushedAtlas("friendslist-invitebutton-default-pressed")
                     invBtn:SetHighlightAtlas("friendslist-invitebutton-highlight")
                     invBtn:SetScript("OnEnter", function(self)
-                        EllesmereUI.ShowWidgetTooltip(self, PARTY_INVITE)
+                        if EllesmereUI.ShowWidgetTooltip then
+                            EllesmereUI.ShowWidgetTooltip(self, PARTY_INVITE)
+                        end
                     end)
                     invBtn:SetScript("OnLeave", function()
-                        EllesmereUI.HideWidgetTooltip()
+                        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                     end)
                     invBtn:SetScript("OnClick", function()
                         local ed = btn._ebsElementData
@@ -2628,10 +2634,12 @@ local function SkinFriendsFrame()
                                 lines[#lines + 1] = inter[1].description
                             end
                         end
-                        EllesmereUI.ShowWidgetTooltip(self, table.concat(lines, "\n"))
+                        if EllesmereUI.ShowWidgetTooltip then
+                            EllesmereUI.ShowWidgetTooltip(self, table.concat(lines, "\n"))
+                        end
                     end)
                     btn:SetScript("OnLeave", function()
-                        EllesmereUI.HideWidgetTooltip()
+                        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                     end)
                 end
 
@@ -3252,10 +3260,12 @@ local function SkinFriendsFrame()
                     rb._tex:SetAllPoints()
                     rb._tex:SetAlpha(0.25)
                     rb:SetScript("OnEnter", function(self)
-                        EllesmereUI.ShowWidgetTooltip(self, self._regionLabel or "")
+                        if EllesmereUI.ShowWidgetTooltip then
+                            EllesmereUI.ShowWidgetTooltip(self, self._regionLabel or "")
+                        end
                     end)
                     rb:SetScript("OnLeave", function()
-                        EllesmereUI.HideWidgetTooltip()
+                        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                     end)
                     local h = button:GetHeight()
                     local iconH = math.floor(h * 0.8)
@@ -3699,11 +3709,13 @@ local function SkinFriendsFrame()
             decX:SetPoint("CENTER", 0, 1)
             declineBtn:SetScript("OnEnter", function()
                 decX:SetTextColor(1, 0.3, 0.3, 0.8)
-                EllesmereUI.ShowWidgetTooltip(declineBtn, DECLINE or "Decline")
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(declineBtn, DECLINE or "Decline")
+                end
             end)
             declineBtn:SetScript("OnLeave", function()
                 decX:SetTextColor(1, 1, 1, 0.3)
-                EllesmereUI.HideWidgetTooltip()
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             end)
             declineBtn:SetScript("OnClick", function()
                 local invID = btn._ebsInviteID

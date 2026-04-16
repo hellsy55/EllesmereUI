@@ -1432,4 +1432,12 @@ function EQT.InitSkin()
             SkinExistingBlocks(t)
         end)
     end
+
+    -- Live-update headers, blocks and progress bar fills when the user
+    -- changes the UI accent color in Global Settings.
+    if EllesmereUI and EllesmereUI.RegAccent then
+        EllesmereUI.RegAccent({ type = "callback", fn = function()
+            if EQT.RestyleAll then EQT.RestyleAll() end
+        end })
+    end
 end

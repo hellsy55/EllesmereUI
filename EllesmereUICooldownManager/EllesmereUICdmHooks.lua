@@ -1839,12 +1839,17 @@ local function CollectAndReanchor()
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
 
     -- Authoritative final layout pass. Set by CDMFinishSetup (login) and
-    -- ProcessSpecChange (spec swap). Now that icons are populated and bar
-    -- sizes are correct, propagate width/height matches with valid source
-    -- sizes, then apply saved positions so anchored elements latch onto
-    -- their now-positioned targets. Cleared so subsequent reanchors don't
-    -- redundantly run the layout pass.
-    if ns._pendingApplyOnReanchor then
+    -- ProcessSpecChange (spec swap). Gated on ns._spellsReadyForApply so the
+    -- pass only runs once Blizzard's viewer pools are guaranteed populated
+    -- (same readiness signal ProcessSpecChange uses). On login the pending
+    -- flag is set synchronously in CDMFinishSetup, but the first reanchor
+    -- can fire BEFORE SPELLS_CHANGED arrives; without this gate the pass
+    -- would consume the flag against half-populated data and never re-run,
+    -- leaving width-matched children (e.g. power bar <- CDM cooldowns)
+    -- locked to a stale target width. The SPELLS_CHANGED handler forces
+    -- a QueueReanchor when it sees the pending flag still set, so the pass
+    -- always fires exactly once with correct source widths.
+    if ns._pendingApplyOnReanchor and ns._spellsReadyForApply then
         ns._pendingApplyOnReanchor = nil
         -- CDM is done populating icons; lift the rebuild gate so width
         -- matching can propagate against settled bar widths. Must happen

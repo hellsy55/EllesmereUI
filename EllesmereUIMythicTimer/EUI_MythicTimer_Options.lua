@@ -4,7 +4,6 @@
 local ADDON_NAME, ns = ...
 
 local PAGE_DISPLAY = "Mythic+ Timer"
-local PAGE_BEST_RUNS = "Best Runs"
 
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -76,13 +75,6 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildPage(pageName, parent, yOffset)
         _installPreviewAutoOff()
 
-        if pageName == PAGE_BEST_RUNS then
-            if _G._EMT_BuildBestRunsPage then
-                _G._EMT_BuildBestRunsPage(parent, yOffset)
-            end
-            return
-        end
-
         local W = EllesmereUI.Widgets
         local y = yOffset
         local row, h
@@ -98,9 +90,8 @@ initFrame:SetScript("OnEvent", function(self)
           DUNGEON = "Per Dungeon",
           LEVEL = "Per Dungeon + Level",
           LEVEL_AFFIX = "Per Dungeon + Level + Affixes",
-          RUN = "Best Full Run",
         }
-        local compareModeOrder = { "NONE", "DUNGEON", "LEVEL", "LEVEL_AFFIX", "RUN" }
+        local compareModeOrder = { "NONE", "DUNGEON", "LEVEL", "LEVEL_AFFIX" }
         local forcesTextValues = {
           PERCENT = "Percent",
           COUNT = "Count / Total",
@@ -680,7 +671,7 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Track Mythic+ run time, key thresholds, and dungeon objectives.",
         icon_on  = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\mplus-ig-on.png",
         icon_off = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\mplus-ig.png",
-        pages    = { PAGE_DISPLAY, PAGE_BEST_RUNS },
+        pages    = { PAGE_DISPLAY },
         buildPage = BuildPage,
         onReset  = function()
             if EllesmereUIMythicTimerDB then

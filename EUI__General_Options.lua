@@ -660,18 +660,53 @@ initFrame:SetScript("OnEvent", function(self)
             { type="multiSwatch", text="UI Accent Color",
               tooltip="Sets the accent color used across all EllesmereUI elements (tabs, glows, highlights, borders). Defaults to your theme color.",
               swatches = {
-                { hasAlpha = false,
+                { tooltip = "Class Color",
+                  getValue = function()
+                      local cr, cg, cb = EllesmereUI.GetPlayerClassColor()
+                      return cr, cg, cb, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.useClassAccentColor = true
+                      local cr, cg, cb = EllesmereUI.GetPlayerClassColor()
+                      EllesmereUI.ApplyAccentColorLive(cr, cg, cb)
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      return (EllesmereUIDB and EllesmereUIDB.useClassAccentColor) and 1 or 0.3
+                  end },
+                { tooltip = "Custom Color",
+                  hasAlpha = false,
                   getValue = function()
                       local ca = EllesmereUIDB and EllesmereUIDB.customAccentColor
                       if ca then return ca.r, ca.g, ca.b, 1 end
-                      local EG = EllesmereUI.ELLESMERE_GREEN
-                      return EG.r, EG.g, EG.b, 1
+                      return EllesmereUI.DEFAULT_ACCENT_R, EllesmereUI.DEFAULT_ACCENT_G, EllesmereUI.DEFAULT_ACCENT_B, 1
                   end,
                   setValue = function(r, g, b)
                       if not EllesmereUIDB then EllesmereUIDB = {} end
                       EllesmereUIDB.customAccentColor = { r = r, g = g, b = b }
-                      -- Live apply using the same optimized system as theme colors
+                      EllesmereUIDB.useClassAccentColor = false
                       EllesmereUI.SetAccentColor(r, g, b)
+                  end,
+                  onClick = function(self)
+                      if EllesmereUIDB and EllesmereUIDB.useClassAccentColor then
+                          EllesmereUIDB.useClassAccentColor = false
+                          local ca = EllesmereUIDB.customAccentColor
+                          local r, g, b
+                          if ca then
+                              r, g, b = ca.r, ca.g, ca.b
+                          else
+                              r, g, b = EllesmereUI.DEFAULT_ACCENT_R, EllesmereUI.DEFAULT_ACCENT_G, EllesmereUI.DEFAULT_ACCENT_B
+                          end
+                          EllesmereUI.ApplyAccentColorLive(r, g, b)
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      return (EllesmereUIDB and EllesmereUIDB.useClassAccentColor) and 0.3 or 1
                   end },
               } },
             { type="dropdown", text="EUI Options Theme",
@@ -3604,6 +3639,15 @@ initFrame:SetScript("OnEvent", function(self)
                   set=function(v)
                       if not EllesmereUIDB then EllesmereUIDB = {} end
                       EllesmereUIDB.showSecondaryRaw = v
+                      if v then EllesmereUIDB.showSecondaryBoth = false end
+                      if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
+                  end },
+                { type="toggle", label="Show % and Raw",
+                  get=function() return EllesmereUIDB and EllesmereUIDB.showSecondaryBoth or false end,
+                  set=function(v)
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.showSecondaryBoth = v
+                      if v then EllesmereUIDB.showSecondaryRaw = false end
                       if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
                   end },
             },
@@ -3616,6 +3660,15 @@ initFrame:SetScript("OnEvent", function(self)
                   set=function(v)
                       if not EllesmereUIDB then EllesmereUIDB = {} end
                       EllesmereUIDB.showTertiaryRaw = v
+                      if v then EllesmereUIDB.showTertiaryBoth = false end
+                      if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
+                  end },
+                { type="toggle", label="Show % and Raw",
+                  get=function() return EllesmereUIDB and EllesmereUIDB.showTertiaryBoth or false end,
+                  set=function(v)
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.showTertiaryBoth = v
+                      if v then EllesmereUIDB.showTertiaryRaw = false end
                       if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
                   end },
             },

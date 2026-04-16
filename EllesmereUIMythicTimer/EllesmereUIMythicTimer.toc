@@ -4,16 +4,13 @@
 ## Group: EllesmereUI
 ## Notes: Customizable Mythic+ dungeon timer with objective tracking
 ## Author: Ellesmere
-## Version: 6.6.8
+## Version: 6.7
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIMythicTimerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 
 # Main Lua
 EllesmereUIMythicTimer.lua
-
-# Best Runs Viewer
-EUI_MythicTimer_BestRuns.lua
 
 # Options
 EUI_MythicTimer_Options.lua

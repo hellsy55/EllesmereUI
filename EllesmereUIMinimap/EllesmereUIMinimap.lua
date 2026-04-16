@@ -426,7 +426,16 @@ local function GetInteractableBtnSize()
 end
 
 local function CreateFlyoutToggle()
-    if flyoutToggle then return flyoutToggle end
+    if flyoutToggle then
+        -- Re-apply the current accent to the existing textures so a later
+        -- ApplyAll (e.g. at PLAYER_ENTERING_WORLD, after EllesmereUI's theme
+        -- resolution has mutated ELLESMERE_GREEN) picks up the right color.
+        local EG2 = EllesmereUI.ELLESMERE_GREEN
+        if flyoutToggle._norm   then flyoutToggle._norm:SetVertexColor(EG2.r, EG2.g, EG2.b, 1)   end
+        if flyoutToggle._pushed then flyoutToggle._pushed:SetVertexColor(EG2.r, EG2.g, EG2.b, 1) end
+        if flyoutToggle._hl     then flyoutToggle._hl:SetVertexColor(EG2.r, EG2.g, EG2.b, 1)     end
+        return flyoutToggle
+    end
 
     local btn = CreateFrame("Button", nil, Minimap)
     local iconSize = GetInteractableBtnSize()
@@ -437,21 +446,27 @@ local function CreateFlyoutToggle()
     local norm = btn:CreateTexture(nil, "ARTWORK")
     norm:SetAllPoints()
     norm:SetAtlas("Map-Filter-Button")
+    norm:SetDesaturated(true)
     norm:SetVertexColor(EG.r, EG.g, EG.b, 1)
     btn:SetNormalTexture(norm)
+    btn._norm = norm
 
     local pushed = btn:CreateTexture(nil, "ARTWORK")
     pushed:SetAllPoints()
     pushed:SetAtlas("Map-Filter-Button-down")
+    pushed:SetDesaturated(true)
     pushed:SetVertexColor(EG.r, EG.g, EG.b, 1)
     btn:SetPushedTexture(pushed)
+    btn._pushed = pushed
 
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetAtlas("Map-Filter-Button")
+    hl:SetDesaturated(true)
     hl:SetVertexColor(EG.r, EG.g, EG.b, 1)
     hl:SetAlpha(0.3)
     btn:SetHighlightTexture(hl)
+    btn._hl = hl
 
     -- Keep the three textures in sync with the accent color.
     -- Vertex alpha stays at 1; the highlight's SetAlpha(0.3) still applies
@@ -985,13 +1000,13 @@ local function BuildCustomIndicators(minimap)
     local mailBaseLeave = _customIndicators.mail:GetScript("OnLeave")
     _customIndicators.mail:SetScript("OnEnter", function(self)
         if mailBaseEnter then mailBaseEnter(self) end
-        if not self._ebsFreeMoveJustDragged then
+        if not self._ebsFreeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail")
         end
     end)
     _customIndicators.mail:SetScript("OnLeave", function(self)
         if mailBaseLeave then mailBaseLeave(self) end
-        EllesmereUI.HideWidgetTooltip()
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
 
     -- Crafting Order (informational, tooltip on hover, with hover atlas)
@@ -1001,13 +1016,13 @@ local function BuildCustomIndicators(minimap)
     local craftBaseLeave = _customIndicators.crafting:GetScript("OnLeave")
     _customIndicators.crafting:SetScript("OnEnter", function(self)
         if craftBaseEnter then craftBaseEnter(self) end
-        if not self._ebsFreeMoveJustDragged then
+        if not self._ebsFreeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(self, PROFESSIONS_CRAFTING_ORDERS or "Crafting Orders")
         end
     end)
     _customIndicators.crafting:SetScript("OnLeave", function(self)
         if craftBaseLeave then craftBaseLeave(self) end
-        EllesmereUI.HideWidgetTooltip()
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
 end
 

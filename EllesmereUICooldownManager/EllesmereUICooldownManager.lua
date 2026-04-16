@@ -5451,6 +5451,20 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns._pendingSpecChange and ns.ProcessSpecChange then
             ns.ProcessSpecChange()
         end
+        -- Same readiness guarantee used on login: mark the authoritative
+        -- width-match / saved-position pass safe to run. CDMFinishSetup sets
+        -- ns._pendingApplyOnReanchor synchronously at login; the first
+        -- reanchor that happens AFTER SPELLS_CHANGED is the earliest moment
+        -- the viewer pools are guaranteed populated, so the pass should be
+        -- gated on this flag (see CollectAndReanchor consumption site).
+        -- If a reanchor already ran before SPELLS_CHANGED, the pending flag
+        -- is still set -- force one now so the deferred pass fires.
+        if not ns._spellsReadyForApply then
+            ns._spellsReadyForApply = true
+            if ns._pendingApplyOnReanchor and ns.QueueReanchor then
+                ns.QueueReanchor()
+            end
+        end
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then

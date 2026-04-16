@@ -1634,6 +1634,12 @@ EllesmereUI.SetAccentColor = function(r, g, b)
     ApplyAccentLive(r, g, b)
 end
 
+--- ApplyAccentColorLive: applies accent color live without persisting.
+--- Used when switching between custom/class accent modes.
+EllesmereUI.ApplyAccentColorLive = function(r, g, b)
+    ApplyAccentLive(r, g, b)
+end
+
 --- GetPlayerClassColor: returns the class color for the current player
 EllesmereUI.GetPlayerClassColor = function()
     local clr = EllesmereUI.CLASS_COLOR_MAP[EllesmereUI._playerClass]
@@ -5218,6 +5224,153 @@ EllesmereUI.ShowWidgetTooltip   = ShowWidgetTooltip
 EllesmereUI.HideWidgetTooltip   = HideWidgetTooltip
 EllesmereUI.DisabledTooltip     = DisabledTooltip
 EllesmereUI.BuildSegmentedControl = BuildSegmentedControl
+
+-------------------------------------------------------------------------------
+--  ShowContextMenu(anchor, items)
+--
+--  Shared pooled context menu used by Blizz UI Enhanced (character sheet gear-
+--  set cog, etc.). Pops up at the cursor.
+--
+--  items = { { text = "Foo", onClick = fn, isDisabled = fn? }, ... }
+--
+--  Behavior:
+--    - Click-outside-to-dismiss (polled ~10hz)
+--    - Auto-closes on combat enter so insecure clicks can't taint protected
+--      paths while lockdown is active
+-------------------------------------------------------------------------------
+local _ctxMenu
+local function ShowContextMenu(anchor, items)
+    local PP_L = EllesmereUI.PP
+    if not _ctxMenu then
+        _ctxMenu = CreateFrame("Frame", nil, UIParent)
+        _ctxMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+        _ctxMenu:SetFrameLevel(200)
+        _ctxMenu:SetClampedToScreen(true)
+        _ctxMenu:EnableMouse(true)
+
+        local RS = EllesmereUI.RESKIN or {}
+        local bg = _ctxMenu:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(RS.BG_R or 0.067, RS.BG_G or 0.067, RS.BG_B or 0.067, RS.QT_ALPHA or 0.97)
+        _ctxMenu._bg = bg
+
+        if PP_L and PP_L.CreateBorder then
+            PP_L.CreateBorder(_ctxMenu, 1, 1, 1, RS.BRD_ALPHA or 0.18, 1)
+        end
+
+        _ctxMenu._items = {}
+        _ctxMenu._elapsed = 0
+
+        -- Throttled click-outside poll (~10hz)
+        _ctxMenu._pollClickOff = function(self, dt)
+            self._elapsed = self._elapsed + dt
+            if self._elapsed < 0.1 then return end
+            self._elapsed = 0
+            if not self:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                self:Hide()
+            end
+        end
+
+        _ctxMenu:HookScript("OnHide", function(self)
+            self:SetScript("OnUpdate", nil)
+        end)
+
+        -- Combat entry closes the menu to avoid tainting protected paths.
+        _ctxMenu:RegisterEvent("PLAYER_REGEN_DISABLED")
+        _ctxMenu:SetScript("OnEvent", function(self) self:Hide() end)
+    end
+
+    -- Hide pooled rows past the current item count
+    for _, btn in ipairs(_ctxMenu._items) do btn:Hide() end
+
+    local ITEM_H = 26
+    local MENU_PAD = 4
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local outline  = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+
+    if not _ctxMenu._measureFS then
+        _ctxMenu._measureFS = _ctxMenu:CreateFontString(nil, "OVERLAY")
+    end
+    local mfs = _ctxMenu._measureFS
+    mfs:SetFont(fontPath, 12, outline)
+    local maxTextW = 0
+    for _, item in ipairs(items) do
+        mfs:SetText(item.text or "")
+        local w = mfs:GetStringWidth() or 0
+        if w > maxTextW then maxTextW = w end
+    end
+    mfs:SetText("")
+    mfs:Hide()
+
+    local MENU_W = math.max(140, maxTextW + 40)
+    local EG = EllesmereUI.ELLESMERE_GREEN
+    local hlAlpha = EllesmereUI.DD_ITEM_HL_A or 0.08
+
+    for i, item in ipairs(items) do
+        local btn = _ctxMenu._items[i]
+        if not btn then
+            btn = CreateFrame("Button", nil, _ctxMenu)
+            local hl = btn:CreateTexture(nil, "BACKGROUND", nil, 1)
+            hl:SetAllPoints()
+            btn._hl = hl
+            local lbl = btn:CreateFontString(nil, "OVERLAY")
+            lbl:SetPoint("LEFT", btn, "LEFT", 10, 0)
+            lbl:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
+            lbl:SetJustifyH("LEFT")
+            btn._lbl = lbl
+            _ctxMenu._items[i] = btn
+        end
+        btn:SetSize(MENU_W - MENU_PAD * 2, ITEM_H)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", _ctxMenu, "TOPLEFT", MENU_PAD, -(MENU_PAD + (i - 1) * ITEM_H))
+        btn._hl:SetColorTexture(1, 1, 1, 0)
+        btn._lbl:SetFont(fontPath, 12, outline)
+        btn._lbl:SetText(item.text or "")
+
+        local disabled = item.isDisabled and item.isDisabled()
+        if disabled then
+            btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
+            btn._onClick = nil
+            btn:SetScript("OnClick", nil)
+            btn:SetScript("OnEnter", function() btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5) end)
+            btn:SetScript("OnLeave", function() btn._lbl:SetTextColor(0.4, 0.4, 0.4, 0.5) end)
+        else
+            btn._lbl:SetTextColor(1, 1, 1, 1)
+            btn._onClick = item.onClick
+            btn:SetScript("OnClick", function()
+                _ctxMenu:Hide()
+                if btn._onClick then btn._onClick() end
+            end)
+            btn:SetScript("OnEnter", function()
+                btn._hl:SetColorTexture(1, 1, 1, hlAlpha)
+                if EG then
+                    btn._lbl:SetTextColor(EG.r, EG.g, EG.b, 1)
+                else
+                    btn._lbl:SetTextColor(1, 1, 1, 1)
+                end
+            end)
+            btn:SetScript("OnLeave", function()
+                btn._hl:SetColorTexture(1, 1, 1, 0)
+                btn._lbl:SetTextColor(1, 1, 1, 1)
+            end)
+        end
+        btn:Show()
+    end
+
+    _ctxMenu:SetSize(MENU_W, MENU_PAD * 2 + #items * ITEM_H)
+
+    -- Position at cursor
+    local scale = _ctxMenu:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    _ctxMenu:ClearAllPoints()
+    _ctxMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
+    _ctxMenu:Show()
+
+    _ctxMenu._elapsed = 0
+    _ctxMenu:SetScript("OnUpdate", _ctxMenu._pollClickOff)
+end
+
+EllesmereUI.ShowContextMenu = ShowContextMenu
 
 -------------------------------------------------------------------------------
 --  BuildCursorAnchorRow

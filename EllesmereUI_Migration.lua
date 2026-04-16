@@ -1438,6 +1438,23 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "mt_bestruns_wipe_v1",
+    scope       = "global",
+    description = "Wipe obsolete Mythic+ bestRuns data (feature removed). Clears EllesmereUIDB.global.bestRuns and every profile's addons.EllesmereUIMythicTimer.bestRuns.",
+    body = function(ctx)
+        if ctx.db.global then ctx.db.global.bestRuns = nil end
+
+        local profiles = ctx.db.profiles
+        if type(profiles) == "table" then
+            for _, profData in pairs(profiles) do
+                local mt = profData and profData.addons and profData.addons.EllesmereUIMythicTimer
+                if type(mt) == "table" then mt.bestRuns = nil end
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

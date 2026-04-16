@@ -271,8 +271,71 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
     { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
+
+-------------------------------------------------------------------------------
+--  Addon Groups  --  ordered categories that drive the sidebar layout.
+--  Each group has its own parent header (icon + label, no power toggle); the
+--  listed members render as child rows beneath it (label + power only, no
+--  left icon). Member order is authoritative -- coming-soon entries are
+--  placed at the end of their group.
+-------------------------------------------------------------------------------
+-- Stored on EllesmereUI (no file-level local) to stay under Lua 5.1's main-chunk
+-- 200-locals and CreateMainFrame's 60-upvalue limits -- EllesmereUI is already
+-- captured elsewhere, so every reference here adds no new local or upvalue.
+EllesmereUI.ADDON_GROUPS = {
+    {
+        key     = "core",
+        label   = "Core Addons",
+        icon_on  = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",
+        icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png",
+        members = {
+            "EllesmereUIActionBars",
+            "EllesmereUINameplates",
+            "EllesmereUIUnitFrames",
+            "EllesmereUICooldownManager",
+            "EllesmereUIResourceBars",
+            "EllesmereUIRaidFrames",     -- comingSoon
+        },
+    },
+    {
+        key     = "qol",
+        label   = "QoL Addons",
+        icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
+        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
+        members = {
+            "EllesmereUIQoL",
+            "EllesmereUIAuraBuffReminders",
+            "EllesmereUIPartyMode",
+        },
+    },
+    {
+        key     = "reskin",
+        label   = "UI Reskin Addons",
+        icon_on  = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",
+        icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png",
+        members = {
+            "EllesmereUIBlizzardSkin",
+            "EllesmereUIMythicTimer",
+            "EllesmereUIQuestTracker",
+            "EllesmereUIFriends",
+            "EllesmereUIMinimap",
+            "EllesmereUIDamageMeters",   -- comingSoon
+            "EllesmereUIChat",            -- comingSoon
+            "EllesmereUIBags",            -- comingSoon
+        },
+    },
+}
+
+-- Flat folder -> roster-info lookup used by the grouped sidebar builder.
+-- Stored on EllesmereUI (not a file-level local) to avoid adding a new
+-- upvalue to CreateMainFrame, which is up against Lua 5.1's 60-upvalue limit.
+EllesmereUI._addonInfoByFolder = {}
+for _, info in ipairs(ADDON_ROSTER) do
+    EllesmereUI._addonInfoByFolder[info.folder] = info
+end
 
 local function IsAddonLoaded(name)
     if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name)
@@ -294,6 +357,10 @@ EllesmereUI.EXPRESSWAY = LOCALE_FONT_FALLBACK or EXPRESSWAY
 local mainFrame, bgFrame, clickArea, sidebar, contentFrame
 local headerFrame, tabBar, scrollFrame, scrollChild, footerFrame, contentHeaderFrame
 local sidebarButtons = {}
+-- sidebarGroupButtons lives on EllesmereUI (not a file-level local) to avoid
+-- adding an upvalue inside CreateMainFrame. The field is referenced from
+-- CreateMainFrame, RefreshSidebarStates, and _applySidebarSearch.
+EllesmereUI._sidebarGroupButtons = {}
 local activeModule, activePage
 local _lastPagePerModule = {}
 local modules = {}
@@ -302,9 +369,6 @@ local isSmoothing = false
 local smoothFrame
 local UpdateScrollThumb
 local suppressScrollRangeChanged = false
--- Sidebar nav layout constants (set once in CreateMainFrame, used by RefreshSidebarStates)
-local _sidebarNavRowH = 50
-local _sidebarAddonNavTop = -228  -- NAV_TOP(-128) - NAV_ROW_H(50) * 2
 local lastHeaderPadded = false
 local skipScrollChildReanchor = false
 
@@ -3501,11 +3565,10 @@ local function CreateMainFrame()
 
     -- Nav buttons -- start below the logo area with proper spacing
     local NAV_TOP     = -128   -- distance from sidebar top to first nav item
-    local NAV_ROW_H   = 50    -- height per nav row (more generous spacing)
+    local NAV_ROW_H   = 50    -- height per nav row (Unlock / Global Settings)
     local NAV_ICON_W  = 52    -- exact pixel width
     local NAV_ICON_H  = 37    -- exact pixel height
     local NAV_LEFT    = 20    -- left padding for icon
-    _sidebarNavRowH = NAV_ROW_H
     local NAV_TXT_GAP = 14    -- gap between icon and label
 
     -- Helper: create a 1px horizontal glow line on a sidebar button (TOP or BOTTOM edge)
@@ -3520,11 +3583,14 @@ local function CreateMainFrame()
         return g
     end
 
-    -- Helper: create a horizontal gradient glow texture on a sidebar button
+    -- Helper: create a horizontal gradient glow texture on a sidebar button.
+    -- Anchors top+bottom to the button so the texture scales with whatever
+    -- height the row was sized to (group headers and child rows use different
+    -- heights now).
     local function MakeNavGradient(btn, r, g, b, startA)
         local tex = btn:CreateTexture(nil, "BACKGROUND")
-        tex:SetSize(SIDEBAR_W, NAV_ROW_H)
-        tex:SetPoint("LEFT", btn, "LEFT", 0, 0)
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
         tex:SetColorTexture(r, g, b, 1)
         tex:SetGradient("HORIZONTAL", CreateColor(r, g, b, startA), CreateColor(r, g, b, 0))
         tex:Hide()
@@ -3536,8 +3602,9 @@ local function CreateMainFrame()
     local function DecorateSidebarButton(btn)
         local EG = ELLESMERE_GREEN
         btn._indicator = SolidTex(btn, "ARTWORK", EG.r, EG.g, EG.b, 1)
-        btn._indicator:SetSize(3, NAV_ROW_H)
-        btn._indicator:SetPoint("LEFT", btn, "LEFT", -1, 0)
+        btn._indicator:SetWidth(3)
+        btn._indicator:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 0)
+        btn._indicator:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", -1, 0)
         btn._indicator:Hide()
         RegAccent({ type="solid", obj=btn._indicator, a=1 })
 
@@ -3549,8 +3616,9 @@ local function CreateMainFrame()
         local hR, hG, hB = 0.85, 0.95, 0.90
         btn._hoverGlow = MakeNavGradient(btn, hR, hG, hB, 0.03)
         btn._hoverIndicator = SolidTex(btn, "ARTWORK", hR, hG, hB, 0.25)
-        btn._hoverIndicator:SetSize(3, NAV_ROW_H)
-        btn._hoverIndicator:SetPoint("LEFT", btn, "LEFT", -1, 0)
+        btn._hoverIndicator:SetWidth(3)
+        btn._hoverIndicator:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 0)
+        btn._hoverIndicator:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", -1, 0)
         btn._hoverIndicator:Hide()
     end
 
@@ -3699,8 +3767,83 @@ local function CreateMainFrame()
     end
 
     -- Addon offset: first addon starts two rows below (Unlock Mode + Global Settings)
-    local ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
-    _sidebarAddonNavTop = ADDON_NAV_TOP
+    local ORIG_ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
+
+    -----------------------------------------------------------------------
+    --  Sidebar search bar (filters addon list by display name or page name)
+    -----------------------------------------------------------------------
+    local SB_TOP_PAD     = 18   -- gap between Global Settings and the search bar
+    local SB_H           = 28
+    local SB_BOT_PAD     = 6
+    local SB_SIDE_INSET  = 20
+    local SB_TOTAL       = SB_TOP_PAD + SB_H + SB_BOT_PAD
+
+    local sidebarSearchFrame = CreateFrame("Frame", nil, sidebar)
+    sidebarSearchFrame:SetSize(SIDEBAR_W - SB_SIDE_INSET * 2, SB_H)
+    sidebarSearchFrame:SetPoint("TOPLEFT", sidebar, "TOPLEFT", SB_SIDE_INSET + 2, ORIG_ADDON_NAV_TOP - SB_TOP_PAD)
+    sidebarSearchFrame:SetFrameLevel(sidebar:GetFrameLevel() + 3)
+
+    local sbBg = SolidTex(sidebarSearchFrame, "BACKGROUND",
+        EllesmereUI.SL_INPUT_R, EllesmereUI.SL_INPUT_G, EllesmereUI.SL_INPUT_B, EllesmereUI.SL_INPUT_A + 0.10)
+    sbBg:SetAllPoints()
+    local sbBrd = MakeBorder(sidebarSearchFrame,
+        EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, 0.10)
+
+    local sbEdit = CreateFrame("EditBox", nil, sidebarSearchFrame)
+    sbEdit:SetAllPoints()
+    sbEdit:SetAutoFocus(false)
+    sbEdit:SetFont(EllesmereUI.EXPRESSWAY, 13, "")
+    sbEdit:SetTextColor(1, 1, 1, 1)
+    sbEdit:SetTextInsets(10, 24, 0, 0)
+    sbEdit:SetMaxLetters(40)
+
+    local sbPlaceholder = MakeFont(sidebarSearchFrame, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.3)
+    sbPlaceholder:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 10, 0)
+    sbPlaceholder:SetText("Search Features...")
+
+    local sbClearBtn = CreateFrame("Button", nil, sidebarSearchFrame)
+    sbClearBtn:SetSize(20, 20)
+    sbClearBtn:SetPoint("RIGHT", sidebarSearchFrame, "RIGHT", -4, 0)
+    sbClearBtn:SetFrameLevel(sbEdit:GetFrameLevel() + 2)
+    sbClearBtn:Hide()
+    local sbClearLabel = MakeFont(sbClearBtn, 20, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.35)
+    sbClearLabel:SetPoint("CENTER")
+    sbClearLabel:SetText("×")
+    sbClearBtn:SetScript("OnEnter", function() sbClearLabel:SetTextColor(1, 1, 1, 1) end)
+    sbClearBtn:SetScript("OnLeave", function() sbClearLabel:SetTextColor(TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.35) end)
+    sbClearBtn:SetScript("OnClick", function()
+        sbEdit:SetText("")
+        sbEdit:ClearFocus()
+    end)
+
+    local function _sbBorderHover(a) sbBrd:SetColor(EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, a) end
+    sidebarSearchFrame:SetScript("OnEnter", function() _sbBorderHover(0.15) end)
+    sidebarSearchFrame:SetScript("OnLeave", function() _sbBorderHover(0.10) end)
+    sbEdit:SetScript("OnEditFocusGained", function() _sbBorderHover(0.15) end)
+    sbEdit:SetScript("OnEditFocusLost", function() _sbBorderHover(0.10) end)
+    sbEdit:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    sbEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
+    EllesmereUI._sidebarSearchBox = sbEdit
+    EllesmereUI._sidebarSearchText = ""
+
+    sbEdit:SetScript("OnTextChanged", function(self)
+        local text = self:GetText() or ""
+        if text == "" then
+            sbPlaceholder:Show()
+            sbClearBtn:Hide()
+        else
+            sbPlaceholder:Hide()
+            sbClearBtn:Show()
+        end
+        EllesmereUI._sidebarSearchText = text
+        if EllesmereUI._applySidebarSearch then
+            EllesmereUI._applySidebarSearch(text)
+        end
+    end)
+
+    -- Addon scroll area sits below the search bar
+    local ADDON_NAV_TOP = ORIG_ADDON_NAV_TOP - SB_TOTAL
 
     -----------------------------------------------------------------------
     --  Scrollable addon nav container
@@ -3709,9 +3852,11 @@ local function CreateMainFrame()
     --  mouse-wheel scrolling and a thin thumb on the right edge.
     -----------------------------------------------------------------------
     local ADDON_VISIBLE_ROWS    = 10.5
-    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H
-    local ADDON_SCROLL_STEP     = NAV_ROW_H
-    local ADDON_SMOOTH_SPEED    = 14
+    -- +30 = 20px viewport bonus plus 10px offsetting the SB_TOP_PAD bump above,
+    -- so growing the search-bar padding doesn't silently shrink the viewport.
+    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30
+    local ADDON_SCROLL_STEP     = 60   -- match the main content scroll
+    local ADDON_SMOOTH_SPEED    = 12   -- match the main content scroll
 
     local addonScrollFrame = CreateFrame("ScrollFrame", nil, sidebar)
     addonScrollFrame:SetWidth(SIDEBAR_W)
@@ -3723,7 +3868,10 @@ local function CreateMainFrame()
 
     local addonScrollChild = CreateFrame("Frame", nil, addonScrollFrame)
     addonScrollChild:SetWidth(SIDEBAR_W)
-    addonScrollChild:SetHeight(NAV_ROW_H * #ADDON_ROSTER)
+    -- Initial height bound (final value set in the button-build loop below using
+    -- cumulative GROUP_ROW_H / CHILD_ROW_H offsets). Starts at the scroll area
+    -- height so it's non-zero before the loop runs.
+    addonScrollChild:SetHeight(1)
     addonScrollFrame:SetScrollChild(addonScrollChild)
 
     EllesmereUI._addonScrollFrame = addonScrollFrame
@@ -3765,9 +3913,18 @@ local function CreateMainFrame()
     local addonIsSmoothing  = false
     local addonSmoothFrame  = CreateFrame("Frame")
     addonSmoothFrame:Hide()
+    -- Pixel-snap scroll offset in EFFECTIVE-PIXEL space (not raw WoW units),
+    -- matching the main content-scroll pattern. Rounding in the direction of
+    -- travel keeps the lerp monotonic so it doesn't bounce/overshoot on
+    -- settlement. Fractional scroll offsets leave font glyphs on sub-pixel
+    -- positions, and the rasterizer picks different pixels per frame -- this
+    -- is the root cause of the visible 1px horizontal jitter on scroll.
     addonSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
         local cur = addonScrollFrame:GetVerticalScroll()
         local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        local scale = addonScrollFrame:GetEffectiveScale()
+        -- Snap max down to a pixel boundary so target can't exceed it.
+        maxScroll = math.floor(maxScroll * scale) / scale
         addonScrollTarget = math.max(0, math.min(maxScroll, addonScrollTarget))
         local diff = addonScrollTarget - cur
         if math.abs(diff) < 0.3 then
@@ -3778,15 +3935,28 @@ local function CreateMainFrame()
             return
         end
         local newScroll = cur + diff * math.min(1, ADDON_SMOOTH_SPEED * elapsed)
-        addonScrollFrame:SetVerticalScroll(math.max(0, math.min(maxScroll, newScroll)))
+        newScroll = math.max(0, math.min(maxScroll, newScroll))
+        if diff > 0 then
+            newScroll = math.ceil(newScroll * scale) / scale
+        else
+            newScroll = math.floor(newScroll * scale) / scale
+        end
+        newScroll = math.max(0, math.min(maxScroll, newScroll))
+        addonScrollFrame:SetVerticalScroll(newScroll)
         UpdateAddonThumb()
     end)
 
     addonScrollFrame:SetScript("OnMouseWheel", function(self, delta)
         local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(self) or 0
         if maxScroll <= 0 then return end
+        local scale = self:GetEffectiveScale()
+        maxScroll = math.floor(maxScroll * scale) / scale
         local base = addonIsSmoothing and addonScrollTarget or self:GetVerticalScroll()
-        addonScrollTarget = math.max(0, math.min(maxScroll, base - delta * ADDON_SCROLL_STEP))
+        local target = math.max(0, math.min(maxScroll, base - delta * ADDON_SCROLL_STEP))
+        -- Snap the resting target to a pixel boundary so settlement lands on
+        -- an integer-pixel row offset (same as the main content scroll does).
+        target = math.floor(target * scale + 0.5) / scale
+        addonScrollTarget = math.min(target, maxScroll)
         if not addonIsSmoothing then
             addonIsSmoothing = true
             addonSmoothFrame:Show()
@@ -3812,7 +3982,11 @@ local function CreateMainFrame()
         -- Center the thumb on the cursor, then clamp to travel range.
         local offset = (trackTop - cy / scale) - thumbH / 2
         offset = math.max(0, math.min(travel, offset))
-        local newScroll = (offset / travel) * maxScroll
+        local rawScroll = (offset / travel) * maxScroll
+        -- Snap to an effective-pixel boundary so labels land on exact pixels.
+        local s = addonScrollFrame:GetEffectiveScale()
+        local newScroll = math.floor(rawScroll * s + 0.5) / s
+        newScroll = math.max(0, math.min(maxScroll, newScroll))
         addonScrollTarget = newScroll
         addonScrollFrame:SetVerticalScroll(newScroll)
         UpdateAddonThumb()
@@ -3830,43 +4004,59 @@ local function CreateMainFrame()
         self:SetScript("OnUpdate", nil)
     end)
 
-    for i, info in ipairs(ADDON_ROSTER) do
+    -- Condensed grouped-sidebar row heights. Groups are text-only headers;
+    -- children are indented rows with label + power. Goal: fit all addons
+    -- without scrolling. Stored on EllesmereUI so RefreshSidebarStates /
+    -- _applySidebarSearch can read the same values.
+    EllesmereUI.SIDEBAR_GROUP_ROW_H = 28
+    EllesmereUI.SIDEBAR_CHILD_ROW_H = 28   -- includes 6px air gap between addons
+    EllesmereUI.SIDEBAR_GROUP_GAP   = 10   -- extra vertical space between groups
+    local GROUP_ROW_H    = EllesmereUI.SIDEBAR_GROUP_ROW_H
+    local CHILD_ROW_H    = EllesmereUI.SIDEBAR_CHILD_ROW_H
+    local CHILD_INDENT_X = NAV_LEFT + 16   -- label indent past the group label
+
+    -- Register the addon-enable helper once (on EllesmereUI to avoid new upvalues).
+    if not EllesmereUI._addonToggleInit then
+        EllesmereUI._addonToggleInit = true
+        EllesmereUI.IsAddonEnabled = function(name)
+            if C_AddOns and C_AddOns.GetAddOnEnableState then
+                return C_AddOns.GetAddOnEnableState(name) > 0
+            end
+            return true
+        end
+    end
+
+    -- Create a group header row (accent-colored label only, no icon, no power,
+    -- not clickable). Acts as a visual category divider above its children.
+    local function CreateGroupHeader(group)
+        local row = CreateFrame("Frame", nil, addonScrollChild)
+        row:SetSize(SIDEBAR_W, GROUP_ROW_H)
+        row:SetFrameLevel(addonScrollChild:GetFrameLevel() + 1)
+
+        local EG = ELLESMERE_GREEN
+        local label = MakeFont(row, 15, nil, EG.r, EG.g, EG.b, 1)
+        label:SetPoint("LEFT", row, "LEFT", NAV_LEFT, 0)
+        label:SetText(group.label)
+        RegAccent({ type="callback", fn = function(r, g, b)
+            label:SetTextColor(r, g, b, 1)
+        end })
+
+        row._isGroup = true
+        row._group   = group
+        row._label   = label
+        return row
+    end
+
+    -- Create a child (addon) row: indented label + power on the right, no left icon.
+    local function CreateAddonChildRow(info)
         local btn = CreateFrame("Button", nil, addonScrollChild)
-        btn:SetSize(SIDEBAR_W, NAV_ROW_H)
-        btn:SetPoint("TOPLEFT", addonScrollChild, "TOPLEFT", 0, -(i - 1) * NAV_ROW_H)
+        btn:SetSize(SIDEBAR_W, CHILD_ROW_H)
         btn:SetFrameLevel(addonScrollChild:GetFrameLevel() + 1)
 
         DecorateSidebarButton(btn)
 
-        -- Glow layer (behind icon): tinted version of the -on texture
-        local iconGlow = btn:CreateTexture(nil, "ARTWORK", nil, 0)
-        iconGlow:SetTexture(info.icon_on)
-        iconGlow:SetSize(NAV_ICON_W, NAV_ICON_H)
-        iconGlow:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
-        -- Party Mode icon keeps its original colors (multi-color lights);
-        -- all other icons are desaturated + accent-tinted.
-        if info.folder == "EllesmereUIPartyMode" then
-            iconGlow:SetDesaturated(false)
-        else
-            iconGlow:SetDesaturated(true)
-            iconGlow:SetVertexColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
-            RegAccent({ type="vertex", obj=iconGlow })
-        end
-        iconGlow:Hide()
-        btn._iconGlow = iconGlow
-
-        -- Icon layer (on top of glow): always the white off texture
-        local icon = btn:CreateTexture(nil, "ARTWORK", nil, 1)
-        icon:SetTexture(info.icon_off)
-        icon:SetSize(NAV_ICON_W, NAV_ICON_H)
-        icon:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
-        btn._icon    = icon
-        btn._iconOn  = info.icon_on
-        btn._iconOff = info.icon_off
-
-        -- Label
-        local label = MakeFont(btn, 15, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
-        label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        label:SetPoint("LEFT", btn, "LEFT", CHILD_INDENT_X, 0)
         label:SetText(info.display)
         btn._label = label
 
@@ -3880,20 +4070,10 @@ local function CreateMainFrame()
         dlIcon:Hide()
         btn._dlIcon = dlIcon
 
-        -- Power toggle button (not shown for comingSoon, maintenance, or alwaysLoaded entries)
+        -- Power toggle button (hidden for comingSoon, maintenance, or alwaysLoaded entries)
         if not info.comingSoon and not info.maintenance and not info.alwaysLoaded then
-            -- Register helper once (on EllesmereUI to avoid new upvalues)
-            if not EllesmereUI._addonToggleInit then
-                EllesmereUI._addonToggleInit = true
-                EllesmereUI.IsAddonEnabled = function(name)
-                    if C_AddOns and C_AddOns.GetAddOnEnableState then
-                        return C_AddOns.GetAddOnEnableState(name) > 0
-                    end
-                    return true
-                end
-            end
             local pwrBtn = CreateFrame("Button", nil, btn)
-            pwrBtn:SetSize(16, 16)
+            pwrBtn:SetSize(13, 13)
             pwrBtn:SetPoint("RIGHT", btn, "RIGHT", -18, 0)
             pwrBtn:SetFrameLevel(btn:GetFrameLevel() + 5)
             local pwrTex = pwrBtn:CreateTexture(nil, "ARTWORK")
@@ -3942,19 +4122,15 @@ local function CreateMainFrame()
 
         -- Default to unloaded appearance (refreshed each time panel opens)
         label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
-        icon:SetDesaturated(true)
-        icon:SetAlpha(NAV_DISABLED_ICON_A)
         btn._folder = info.folder
         btn._loaded = false
         btn._alwaysLoaded = info.alwaysLoaded or false
         btn._comingSoon = info.comingSoon or false
         btn._maintenance = info.maintenance or false
 
-        -- Hover highlight
         local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
         hlTex:SetAllPoints()
         btn:SetScript("OnEnter", function(self)
-            -- Show tooltip for coming-soon addons
             if self._comingSoon then
                 if EllesmereUI.ShowWidgetTooltip then
                     EllesmereUI.ShowWidgetTooltip(self, "Coming soon")
@@ -4004,8 +4180,35 @@ local function CreateMainFrame()
             end
         end)
 
-        sidebarButtons[info.folder] = btn
+        return btn
     end
+
+    -- Build the sidebar in group order. Positions are assigned once here and
+    -- re-stacked by RefreshSidebarStates / _applySidebarSearch as needed.
+    -- All group/roster references go through EllesmereUI fields to avoid adding
+    -- upvalues inside CreateMainFrame (Lua 5.1 cap: 60). Cumulative `_y` walks
+    -- each row so group and child heights can differ.
+    local _y = 0
+    local _groupHeaders = EllesmereUI._sidebarGroupButtons
+    local _infoByFolder = EllesmereUI._addonInfoByFolder
+    local GROUP_GAP = EllesmereUI.SIDEBAR_GROUP_GAP
+    for i, group in ipairs(EllesmereUI.ADDON_GROUPS) do
+        if i > 1 then _y = _y + GROUP_GAP end
+        local header = CreateGroupHeader(group)
+        header:SetPoint("TOPLEFT", addonScrollChild, "TOPLEFT", 0, -_y)
+        _groupHeaders[group.key] = header
+        _y = _y + GROUP_ROW_H
+        for _, folder in ipairs(group.members) do
+            local info = _infoByFolder[folder]
+            if info then
+                local btn = CreateAddonChildRow(info)
+                btn:SetPoint("TOPLEFT", addonScrollChild, "TOPLEFT", 0, -_y)
+                sidebarButtons[info.folder] = btn
+                _y = _y + CHILD_ROW_H
+            end
+        end
+    end
+    addonScrollChild:SetHeight(_y)
 
     -- Class art (decorative, purely visual -- does not affect layout of any other element)
     do
@@ -5051,10 +5254,10 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
     --  Inline search EditBox  (right-aligned in tab bar, always visible)
     ---------------------------------------------------------------------------
     if not tabBar._searchBox then
-        local SEARCH_W, SEARCH_H = 180, 28
+        local SEARCH_W, SEARCH_H = 210, 28
         local searchFrame = CreateFrame("Frame", nil, tabBar)
         searchFrame:SetSize(SEARCH_W, SEARCH_H)
-        searchFrame:SetPoint("BOTTOMRIGHT", tabBar, "BOTTOMRIGHT", -CONTENT_PAD, (TAB_BAR_H - SEARCH_H) / 2)
+        searchFrame:SetPoint("BOTTOMRIGHT", tabBar, "BOTTOMRIGHT", -10, (TAB_BAR_H - SEARCH_H) / 2 + 2)
         searchFrame:SetFrameLevel(tabBar:GetFrameLevel() + 2)
 
         local searchBg = SolidTex(searchFrame, "BACKGROUND", SL_INPUT_R, SL_INPUT_G, SL_INPUT_B, SL_INPUT_A + 0.10)
@@ -5069,9 +5272,9 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         editBox:SetTextInsets(10, 24, 0, 0)
         editBox:SetMaxLetters(40)
 
-        local placeholder = MakeFont(searchFrame, 13, nil, TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A)
+        local placeholder = MakeFont(searchFrame, 12, nil, TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, 0.3)
         placeholder:SetPoint("LEFT", searchFrame, "LEFT", 10, 0)
-        placeholder:SetText("Search...")
+        placeholder:SetText("Search Feature Settings...")
 
         -- Clear button (X) on right side — frame level above editBox so clicks register
         local clearBtn = CreateFrame("Button", nil, searchFrame)
@@ -5589,34 +5792,32 @@ UpdateSidebarHighlight = function(selectedFolder)
             btn._glow:Show()
             btn._glowTop:Show()
             btn._glowBot:Show()
-            if btn._loaded then
-                btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
+            btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
+            if btn._icon then
                 btn._icon:SetTexture(btn._iconOff)
                 btn._icon:SetDesaturated(false)
                 btn._icon:SetAlpha(NAV_SELECTED_ICON_A)
-                btn._iconGlow:Show()
-            else
-                btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
-                btn._icon:SetTexture(btn._iconOff)
-                btn._icon:SetDesaturated(false)
-                btn._icon:SetAlpha(NAV_SELECTED_ICON_A)
-                btn._iconGlow:Show()
             end
+            if btn._iconGlow then btn._iconGlow:Show() end
         else
             btn._indicator:Hide()
             btn._glow:Hide()
             btn._glowTop:Hide()
             btn._glowBot:Hide()
-            btn._iconGlow:Hide()
+            if btn._iconGlow then btn._iconGlow:Hide() end
             if btn._loaded then
                 btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
-                btn._icon:SetTexture(btn._iconOff)
-                btn._icon:SetDesaturated(false)
-                btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
+                if btn._icon then
+                    btn._icon:SetTexture(btn._iconOff)
+                    btn._icon:SetDesaturated(false)
+                    btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
+                end
             else
                 btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
-                btn._icon:SetDesaturated(true)
-                btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
+                if btn._icon then
+                    btn._icon:SetDesaturated(true)
+                    btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
+                end
             end
         end
     end
@@ -5737,8 +5938,10 @@ function EllesmereUI:RegisterModule(folderName, config)
     if btn then
         btn._loaded = true
         btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
-        btn._icon:SetDesaturated(false)
-        btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
+        if btn._icon then
+            btn._icon:SetDesaturated(false)
+            btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
+        end
     end
     -- Don't auto-select here; RefreshSidebarStates handles default selection in roster order
 end
@@ -6075,10 +6278,100 @@ function EllesmereUI:SelectModule(folderName)
 end
 
 -------------------------------------------------------------------------------
+--  Sidebar search filter
+--  Iterates the last order captured by RefreshSidebarStates, hides any button
+--  whose addon display name and registered page names don't contain the query,
+--  and re-stacks the remaining ones at the top of the scroll area.
+-------------------------------------------------------------------------------
+function EllesmereUI._applySidebarSearch(text)
+    text = text and text:lower() or ""
+    local scrollChild = EllesmereUI._addonScrollChild
+    if not scrollChild then return end
+
+    -- Split the query into whitespace-delimited words. An entry matches only
+    -- if EVERY word is found somewhere in its combined searchable text
+    -- (display name + registered page names + module searchTerms).
+    local queryWords = {}
+    if text ~= "" then
+        for word in text:gmatch("%S+") do
+            queryWords[#queryWords + 1] = word
+        end
+    end
+
+    local function childMatches(info)
+        if #queryWords == 0 then return true end
+        local parts = { (info.display or ""):lower() }
+        local mod = modules[info.folder]
+        if mod and mod.pages then
+            for _, p in ipairs(mod.pages) do
+                parts[#parts + 1] = tostring(p):lower()
+            end
+        end
+        if mod and mod.searchTerms then
+            for _, t in ipairs(mod.searchTerms) do
+                parts[#parts + 1] = tostring(t):lower()
+            end
+        end
+        local haystack = table.concat(parts, " ")
+        for _, word in ipairs(queryWords) do
+            if not haystack:find(word, 1, true) then return false end
+        end
+        return true
+    end
+
+    local y = 0
+    local groupHeaders = EllesmereUI._sidebarGroupButtons
+    local infoByFolder = EllesmereUI._addonInfoByFolder
+    local GROUP_H  = EllesmereUI.SIDEBAR_GROUP_ROW_H
+    local CHILD_H  = EllesmereUI.SIDEBAR_CHILD_ROW_H
+    local GROUP_GAP = EllesmereUI.SIDEBAR_GROUP_GAP
+    local firstVisibleGroup = true
+    for _, group in ipairs(EllesmereUI.ADDON_GROUPS) do
+        local header = groupHeaders[group.key]
+        local visibleChildren = {}
+        for _, folder in ipairs(group.members) do
+            local info = infoByFolder[folder]
+            local btn = info and sidebarButtons[folder]
+            if btn and info then
+                if childMatches(info) then
+                    visibleChildren[#visibleChildren + 1] = btn
+                else
+                    btn:Hide()
+                end
+            end
+        end
+        if header then
+            if #visibleChildren == 0 then
+                header:Hide()
+            else
+                if not firstVisibleGroup then y = y + GROUP_GAP end
+                firstVisibleGroup = false
+                header:ClearAllPoints()
+                header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -y)
+                header:Show()
+                y = y + GROUP_H
+            end
+        end
+        for _, btn in ipairs(visibleChildren) do
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -y)
+            btn:Show()
+            y = y + CHILD_H
+        end
+    end
+
+    scrollChild:SetHeight(math.max(CHILD_H, y))
+    if text ~= "" and EllesmereUI._addonScrollFrame then
+        EllesmereUI._addonScrollFrame:SetVerticalScroll(0)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Show / Hide / Toggle
 -------------------------------------------------------------------------------
 local function RefreshSidebarStates()
-    -- Refresh global settings button state
+    -- Refresh global settings button state (unchanged -- still a dedicated
+    -- always-visible row above the grouped scroll area).
     local globalBtn = sidebarButtons["_EUIGlobal"]
     if globalBtn then
         if "_EUIGlobal" == activeModule then
@@ -6096,90 +6389,65 @@ local function RefreshSidebarStates()
         end
     end
 
+    local scrollChild = EllesmereUI._addonScrollChild
+    if not scrollChild then return end
+
     local firstLoaded = nil
+    local groupHeaders = EllesmereUI._sidebarGroupButtons
+    local infoByFolder = EllesmereUI._addonInfoByFolder
 
-    -- Two-pass: enabled addons first (roster order), disabled addons after
-    local enabledList = {}
-    local disabledList = {}
-    local maintenanceList = {}
-    local comingSoonList = {}
-    for _, info in ipairs(ADDON_ROSTER) do
-        local loaded = info.alwaysLoaded or IsAddonLoaded(info.folder)
-        if info.maintenance then
-            maintenanceList[#maintenanceList + 1] = info
-        elseif info.comingSoon then
-            comingSoonList[#comingSoonList + 1] = info
-        elseif loaded then
-            enabledList[#enabledList + 1] = info
-        else
-            disabledList[#disabledList + 1] = info
+    local GROUP_H   = EllesmereUI.SIDEBAR_GROUP_ROW_H
+    local CHILD_H   = EllesmereUI.SIDEBAR_CHILD_ROW_H
+    local GROUP_GAP = EllesmereUI.SIDEBAR_GROUP_GAP
+    local y = 0
+    for i, group in ipairs(EllesmereUI.ADDON_GROUPS) do
+        if i > 1 then y = y + GROUP_GAP end
+        local header = groupHeaders[group.key]
+        if header then
+            header:ClearAllPoints()
+            header:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -y)
+            header:Show()
+            y = y + GROUP_H
         end
-    end
-    -- Order: enabled, disabled, maintenance, coming soon
-    for _, info in ipairs(maintenanceList) do disabledList[#disabledList + 1] = info end
-    for _, info in ipairs(comingSoonList) do disabledList[#disabledList + 1] = info end
+        for _, folder in ipairs(group.members) do
+            local info = infoByFolder[folder]
+            local btn = info and sidebarButtons[folder]
+            if btn then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -y)
+                btn:Show()
+                y = y + CHILD_H
 
-    local scrollChild = EllesmereUI._addonScrollChild or sidebar
-    local scrollIsChild = scrollChild ~= sidebar
-    local rowIndex = 0
-    for _, info in ipairs(enabledList) do
-        rowIndex = rowIndex + 1
-        local folder = info.folder
-        local btn = sidebarButtons[folder]
-        if not btn then break end
-        btn:ClearAllPoints()
-        if scrollIsChild then
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(rowIndex - 1) * _sidebarNavRowH)
-        else
-            btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+                local loaded = info.alwaysLoaded or IsAddonLoaded(info.folder)
+                local isSpecial = info.comingSoon or info.maintenance
+                -- Coming-soon / maintenance rows render as disabled regardless
+                -- of whether their placeholder folder happens to be loaded.
+                local effectiveLoaded = loaded and not isSpecial
+                btn._loaded = effectiveLoaded
+                btn._notEnabled = (not loaded) and (not isSpecial)
+                btn._dlIcon:Hide()
+
+                if effectiveLoaded and folder == activeModule then
+                    btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
+                    if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(1) end
+                elseif effectiveLoaded then
+                    btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+                    if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(1) end
+                    if not firstLoaded then firstLoaded = folder end
+                else
+                    btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
+                    if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(0.5) end
+                    btn._indicator:Hide()
+                    btn._glow:Hide()
+                    btn._glowTop:Hide()
+                    btn._glowBot:Hide()
+                end
+            end
         end
-        btn._loaded = true
-        btn._notEnabled = false
-        btn._dlIcon:Hide()
-        if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(1) end
-        if folder == activeModule then
-            btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
-            btn._icon:SetTexture(btn._iconOff)
-            btn._icon:SetDesaturated(false)
-            btn._icon:SetAlpha(NAV_SELECTED_ICON_A)
-            btn._iconGlow:Show()
-        else
-            btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
-            btn._icon:SetTexture(btn._iconOff)
-            btn._icon:SetDesaturated(false)
-            btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
-            btn._iconGlow:Hide()
-        end
-        if not firstLoaded then firstLoaded = folder end
     end
-    for _, info in ipairs(disabledList) do
-        rowIndex = rowIndex + 1
-        local folder = info.folder
-        local btn = sidebarButtons[folder]
-        if not btn then break end
-        btn:ClearAllPoints()
-        if scrollIsChild then
-            btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(rowIndex - 1) * _sidebarNavRowH)
-        else
-            btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
-        end
-        btn._loaded = false
-        btn._notEnabled = true
-        btn._dlIcon:Hide()
-        if btn._pwrBtn then btn._pwrBtn._tex:SetAlpha(0.5) end
-        btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
-        btn._icon:SetTexture(btn._iconOff)
-        btn._icon:SetDesaturated(true)
-        btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
-        btn._iconGlow:Hide()
-        btn._indicator:Hide()
-        btn._glow:Hide()
-        btn._glowTop:Hide()
-        btn._glowBot:Hide()
-    end
-    -- Size the scroll child to the actual row count so the range is accurate
-    if scrollIsChild and scrollChild.SetHeight then
-        scrollChild:SetHeight(rowIndex * _sidebarNavRowH)
+
+    if scrollChild.SetHeight then
+        scrollChild:SetHeight(math.max(CHILD_H, y))
     end
 
     -- Default to Global Settings if no module is active
@@ -6190,6 +6458,12 @@ local function RefreshSidebarStates()
         elseif firstLoaded and modules[firstLoaded] then
             EllesmereUI:SelectModule(firstLoaded)
         end
+    end
+
+    -- Re-apply the active sidebar search filter so it survives refreshes.
+    local sbText = EllesmereUI._sidebarSearchText
+    if sbText and sbText ~= "" and EllesmereUI._applySidebarSearch then
+        EllesmereUI._applySidebarSearch(sbText)
     end
 end
 
@@ -6366,7 +6640,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.6.8"
+EllesmereUI.VERSION = "6.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7344,12 +7618,17 @@ initFrame:SetScript("OnEvent", function(self, event)
         if EllesmereUI._applyBgTint then
             EllesmereUI._applyBgTint(themeR, themeG, themeB)
         end
-        -- Accent color: custom override or fall back to theme color
-        local ca = EllesmereUIDB.customAccentColor
-        if ca then
-            ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = ca.r or themeR, ca.g or themeG, ca.b or themeB
+        -- Accent color priority: class color (if enabled) > custom override > theme
+        if EllesmereUIDB.useClassAccentColor and EllesmereUI.GetPlayerClassColor then
+            local cr, cg, cb = EllesmereUI.GetPlayerClassColor()
+            ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = cr, cg, cb
         else
-            ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = themeR, themeG, themeB
+            local ca = EllesmereUIDB.customAccentColor
+            if ca then
+                ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = ca.r or themeR, ca.g or themeG, ca.b or themeB
+            else
+                ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = themeR, themeG, themeB
+            end
         end
     end
 
@@ -8052,6 +8331,7 @@ end
                 btnBg:SetAllPoints()
                 btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
                 btnBg._euiOwned = true
+                btn._euiBg = btnBg
                 if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
                 if _PP and _PP.CreateBorder then
                     if useAccent then
@@ -8060,11 +8340,57 @@ end
                         _PP.CreateBorder(btn, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
                     end
                 end
-                if useAccent then
-                    local fs = btn:GetFontString()
-                    if fs then fs:SetTextColor(EG.r, EG.g, EG.b) end
+
+                -- Blizzard toggles button:Enable()/Disable() for things like the
+                -- Release button in boss combat (UpdateRecapButton path). Since
+                -- we hardcode the text color instead of relying on font objects
+                -- with disabled variants, mirror Blizzard's enabled/disabled
+                -- state ourselves so the button visibly dims when locked out.
+                local function _euiRefreshEnabled(self)
+                    local fs = self:GetFontString()
+                    local enabled = (self.IsEnabled and self:IsEnabled()) and true or false
+                    if fs then
+                        if enabled then
+                            local EG2 = EllesmereUI.ELLESMERE_GREEN
+                            if _accentEnabled() and EG2 then
+                                fs:SetTextColor(EG2.r, EG2.g, EG2.b, 1)
+                            else
+                                fs:SetTextColor(1, 1, 1, 1)
+                            end
+                        else
+                            fs:SetTextColor(0.4, 0.4, 0.4, 1)
+                        end
+                    end
+                    if self._euiBg then
+                        self._euiBg:SetAlpha(enabled and 1 or 0.5)
+                    end
                 end
+                btn._euiRefreshEnabled = _euiRefreshEnabled
+                btn:HookScript("OnEnable",  _euiRefreshEnabled)
+                btn:HookScript("OnDisable", _euiRefreshEnabled)
+                _euiRefreshEnabled(btn)
             end
+        end
+
+        -- Boss-combat release lockout: Blizzard re-runs UpdateRecapButton on
+        -- every popup Show + at intervals while it's up. Hook it once per
+        -- popup so our per-button enabled visual stays in sync with Blizzard's
+        -- enable/disable state swaps.
+        if popup.UpdateRecapButton and not popup._euiRecapHooked then
+            popup._euiRecapHooked = true
+            hooksecurefunc(popup, "UpdateRecapButton", function(self)
+                for i = 1, 4 do
+                    local b = self["button" .. i]
+                    if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
+                end
+            end)
+        end
+
+        -- In case the popup was shown already-disabled (no OnEnable/OnDisable
+        -- fires in that case), re-sync the state right now.
+        for i = 1, 4 do
+            local b = popup["button" .. i]
+            if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
         end
         -- Skin edit box if present
         local eb = popup.editBox or (popup.GetName and _G[popup:GetName() .. "EditBox"])

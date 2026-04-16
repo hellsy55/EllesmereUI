@@ -20,7 +20,6 @@ local COMPARE_NONE = "NONE"
 local COMPARE_DUNGEON = "DUNGEON"
 local COMPARE_LEVEL = "LEVEL"
 local COMPARE_LEVEL_AFFIX = "LEVEL_AFFIX"
-local COMPARE_RUN = "RUN"
 
 local function CopyTable(src)
     if type(src) ~= "table" then return src end
@@ -187,7 +186,7 @@ local function GetScopeKey(run, mode)
         return tostring(run.mapID)
     elseif mode == COMPARE_LEVEL then
         return format("%s:%d", run.mapID, run.level or 0)
-    elseif mode == COMPARE_LEVEL_AFFIX or mode == COMPARE_RUN then
+    elseif mode == COMPARE_LEVEL_AFFIX then
         return format("%s:%d:%s", run.mapID, run.level or 0, NormalizeAffixKey(run.affixes))
     end
 
@@ -202,12 +201,6 @@ end
 
 local function GetReferenceObjectiveTime(run, objectiveIndex, mode)
     if mode == COMPARE_NONE then return nil end
-    if mode == COMPARE_RUN then
-        local bestRuns = EnsureProfileStore("bestRuns")
-        local scopeKey = GetScopeKey(run, COMPARE_RUN)
-        local bestRun = bestRuns and bestRuns[scopeKey]
-        return bestRun and bestRun.objectiveTimes and bestRun.objectiveTimes[objectiveIndex] or nil
-    end
 
     local store = EnsureProfileStore("bestObjectiveSplits")
     local scopeKey = GetScopeKey(run, mode)
@@ -241,45 +234,6 @@ local function UpdateObjectiveCompletion(obj, objectiveIndex)
     obj.isNewBest = reference == nil or obj.elapsed < reference
 
     UpdateBestObjectiveSplits(currentRun, objectiveIndex, obj.elapsed)
-end
-
-local function UpdateBestRun(run)
-    local bestRuns = EnsureProfileStore("bestRuns")
-    if not bestRuns then return end
-
-    local scopeKey = GetScopeKey(run, COMPARE_RUN)
-    if not scopeKey then return end
-
-    local existing = bestRuns[scopeKey]
-    local objectiveTimes = {}
-    local objectiveNames = {}
-    local enemyForcesTime = nil
-    for index, objective in ipairs(run.objectives) do
-        if objective.elapsed and objective.elapsed > 0 then
-            if objective.isWeighted then
-                enemyForcesTime = objective.elapsed
-            else
-                objectiveTimes[index] = objective.elapsed
-            end
-            objectiveNames[index] = objective.name
-        end
-    end
-
-    if not existing or not existing.elapsed or run.elapsed < existing.elapsed then
-        bestRuns[scopeKey] = {
-            elapsed = run.elapsed,
-            objectiveTimes = objectiveTimes,
-            objectiveNames = objectiveNames,
-            enemyForcesTime = enemyForcesTime,
-            mapID = run.mapID,
-            mapName = run.mapName,
-            level = run.level,
-            affixes = run.affixes,
-            deaths = run.deaths,
-            deathTimeLost = run.deathTimeLost,
-            date = time(),
-        }
-    end
 end
 
 local function BuildSplitCompareText(referenceTime, currentTime, deltaOnly, fasterColor, slowerColor)
@@ -595,7 +549,6 @@ local function CompleteRun()
     if currentRun.preciseStart and GetTimePreciseSec then
         currentRun.preciseCompletedElapsed = max(0, GetTimePreciseSec() - currentRun.preciseStart)
     end
-    UpdateBestRun(currentRun)
     UpdateObjectives()
     if db and db.profile then db.profile._activeRunSplits = nil end
     NotifyRefresh()
@@ -1699,7 +1652,7 @@ function EMT:OnInitialize()
         pp.showPreview = false
     end
 
-    -- Season-based data purge: clear best runs/splits from previous seasons
+    -- Season-based data purge: clear split records from previous seasons.
     C_Timer.After(2, function()
         if not db or not db.profile then return end
         local currentMaps = C_ChallengeMode.GetMapTable()
@@ -1710,26 +1663,12 @@ function EMT:OnInitialize()
             validMapIDs[mapID] = true
         end
 
-        local purged = false
-
-        if db.profile.bestRuns then
-            for scopeKey in pairs(db.profile.bestRuns) do
-                local mapIDStr = scopeKey:match("^(%d+):")
-                local mapID = tonumber(mapIDStr)
-                if mapID and not validMapIDs[mapID] then
-                    db.profile.bestRuns[scopeKey] = nil
-                    purged = true
-                end
-            end
-        end
-
         if db.profile.bestObjectiveSplits then
             for scopeKey in pairs(db.profile.bestObjectiveSplits) do
                 local mapIDStr = scopeKey:match("^(%d+)")
                 local mapID = tonumber(mapIDStr)
                 if mapID and not validMapIDs[mapID] then
                     db.profile.bestObjectiveSplits[scopeKey] = nil
-                    purged = true
                 end
             end
         end

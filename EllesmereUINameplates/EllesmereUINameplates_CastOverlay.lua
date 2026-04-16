@@ -501,6 +501,24 @@ local function ConfigureOverlay(ov, plate)
     end
     if type(name) == "nil" then dprint("  bail: no name") return end
 
+    -- Defensive resync. ApplyOverlayLayout's _lastScale / _lastHeight cache
+    -- makes SetScale / SetHeight no-ops when the computed value hasn't
+    -- changed, which is normally correct. But if the overlay's rendered
+    -- state ever drifts from the cache (rare, but reported as an oversized
+    -- opaque backdrop that persists until /reload), the cache will suppress
+    -- the correction every subsequent frame. Cast events are infrequent, so
+    -- unconditionally re-asserting layout + bg anchors here costs almost
+    -- nothing and self-heals on the very next cast instead of requiring a
+    -- reload. Note: we clear the cache BEFORE calling ApplyOverlayLayout so
+    -- the compare-and-skip branch always lands on "apply".
+    ov._lastScale = nil
+    ov._lastHeight = nil
+    if ov.bg then
+        ov.bg:ClearAllPoints()
+        ov.bg:SetAllPoints(ov)
+    end
+    ApplyOverlayLayout(ov, plate)
+
     -- Apply all cast text settings (sizes/colors/widths/showTimer) the
     -- same way the on-plate cast bar does. Run on every config so option
     -- changes mid-session take effect on the next cast event.

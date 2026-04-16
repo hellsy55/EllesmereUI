@@ -47,14 +47,11 @@ local function Expand()
     otf:SetParent(UIParent)
 end
 
--- Suppression API (cross-module hide). Uses alpha only -- safe because alpha
--- inherits to children without touching mouse state. Combined with the
--- collapse-on-actual-hide path, this covers both use cases.
+-- Suppression API (cross-module hide). Routed through UpdateVisibility so
+-- suppression composes with the user's chosen visibility mode / options.
 function EQT.ApplySuppression(on)
     _eqtSuppressed = on and true or false
-    local otf = GetTracker()
-    if not otf then return end
-    otf:SetAlpha(on and 0 or 1)
+    if EQT.UpdateVisibility then EQT.UpdateVisibility() end
 end
 
 -------------------------------------------------------------------------------
@@ -99,15 +96,41 @@ local function UpdateVisibility()
     InstallShowHook()
     local otf = GetTracker()
     if not otf then return end
+
+    -- Raid/arena auto-hide takes precedence and uses a hard Hide(); the
+    -- Show-hook re-hides if Blizzard tries to bring it back.
     if ShouldAutoHide() then
         otf:Hide()
         if _bgFrame then _bgFrame:Hide() end
-    else
-        if not otf:IsShown() then otf:Show() end
-        -- Let ResizeBGToContent decide BG visibility based on real content;
-        -- an unconditional Show here would resurrect the empty-state BG.
-        if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
+        return
     end
+
+    if not otf:IsShown() then otf:Show() end
+
+    -- User visibility: enabled flag, visibility mode, and the visHide* opts.
+    -- EvalVisibility returns true / false / "mouseover".
+    local cfg = EQT.DB()
+    local vis = true
+    if EllesmereUI and EllesmereUI.EvalVisibility then
+        vis = EllesmereUI.EvalVisibility(cfg)
+    end
+
+    local alpha
+    if _eqtSuppressed or vis == false then
+        alpha = 0
+    elseif vis == "mouseover" then
+        -- Mouseover poll raises alpha to 1 on hover.
+        alpha = 0
+    else
+        alpha = 1
+    end
+
+    otf:SetAlpha(alpha)
+    if _bgFrame then _bgFrame:SetAlpha(alpha) end
+
+    -- Let ResizeBGToContent decide BG shown/hidden based on real content;
+    -- an unconditional Show here would resurrect the empty-state BG.
+    if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
 end
 EQT.UpdateVisibility = UpdateVisibility
 
@@ -289,6 +312,11 @@ function EQT.InitVisibility()
     EQT.ApplyBackground()
     InstallShowHook()
 
+    -- Live-update the top accent divider when the user changes UI Accent Color.
+    if EllesmereUI and EllesmereUI.RegAccent then
+        EllesmereUI.RegAccent({ type = "callback", fn = ApplyTopDivider })
+    end
+
     -- After init, sync BG to the tracker's current shown state. On /reload
     -- inside M+ (or a raid), otf may already be hidden by the time we run
     -- and OnHide won't fire again, leaving BG + divider visible alone.
@@ -307,6 +335,37 @@ function EQT.InitVisibility()
         UpdateVisibility()
         SyncBGToTracker()
     end)
+
+    -- Register with the shared visibility dispatcher so combat/group/target/
+    -- mount/shapeshift transitions re-run UpdateVisibility.
+    if EllesmereUI.RegisterVisibilityUpdater then
+        EllesmereUI.RegisterVisibilityUpdater(UpdateVisibility)
+    end
+
+    -- Mouseover mode: poll both the tracker and our BG frame as one target
+    -- so hovering either fades them in together. SetAlpha on the proxy
+    -- drives both frames in lockstep.
+    if EllesmereUI.RegisterMouseoverTarget then
+        local moProxy = {}
+        moProxy.IsShown = function()
+            return otf and otf:IsShown() and not ShouldAutoHide()
+        end
+        moProxy.IsMouseOver = function()
+            if otf and otf:IsMouseOver() then return true end
+            if _bgFrame and _bgFrame:IsShown() and _bgFrame:IsMouseOver() then return true end
+            return false
+        end
+        moProxy.SetAlpha = function(_, a)
+            if otf then otf:SetAlpha(a) end
+            if _bgFrame then _bgFrame:SetAlpha(a) end
+        end
+        EllesmereUI.RegisterMouseoverTarget(moProxy, function()
+            if ShouldAutoHide() then return false end
+            if _eqtSuppressed then return false end
+            local cfg = EQT.DB()
+            return cfg.enabled and cfg.visibility == "mouseover"
+        end)
+    end
 
     C_Timer.After(0.5, UpdateVisibility)
 end

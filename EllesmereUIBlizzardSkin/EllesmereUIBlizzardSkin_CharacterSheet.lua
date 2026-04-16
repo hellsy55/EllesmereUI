@@ -2357,19 +2357,32 @@ local function SkinCharacterSheet()
 
     -- Function to update all stats
     local function UpdateAllStats()
-        local secondaryRaw = EllesmereUIDB and EllesmereUIDB.showSecondaryRaw
-        local tertiaryRaw  = EllesmereUIDB and EllesmereUIDB.showTertiaryRaw
+        local secondaryRaw  = EllesmereUIDB and EllesmereUIDB.showSecondaryRaw
+        local tertiaryRaw   = EllesmereUIDB and EllesmereUIDB.showTertiaryRaw
+        local secondaryBoth = EllesmereUIDB and EllesmereUIDB.showSecondaryBoth
+        local tertiaryBoth  = EllesmereUIDB and EllesmereUIDB.showTertiaryBoth
         for _, statEntry in ipairs(frame._statsValues) do
-            local useRaw =
-                (statEntry.categoryKey == "SecondaryStats" and secondaryRaw) or
-                (statEntry.categoryKey == "Tertiary"       and tertiaryRaw)
-            local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
-            local fmt = useRaw and "%d" or statEntry.format
-            local result = fn and fn()
-            if result ~= nil then
-                statEntry.value:SetText(format(fmt, result))
+            local isSec = (statEntry.categoryKey == "SecondaryStats")
+            local isTer = (statEntry.categoryKey == "Tertiary")
+            local useBoth = statEntry.rawFunc and ((isSec and secondaryBoth) or (isTer and tertiaryBoth))
+            local useRaw  = (not useBoth) and ((isSec and secondaryRaw) or (isTer and tertiaryRaw))
+            if useBoth then
+                local rawResult = statEntry.rawFunc()
+                local pctResult = statEntry.func and statEntry.func()
+                if rawResult ~= nil and pctResult ~= nil then
+                    statEntry.value:SetText(format("%d (%.2f%%)", rawResult, pctResult))
+                else
+                    statEntry.value:SetText("0")
+                end
             else
-                statEntry.value:SetText("0")
+                local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
+                local fmt = useRaw and "%d" or statEntry.format
+                local result = fn and fn()
+                if result ~= nil then
+                    statEntry.value:SetText(format(fmt, result))
+                else
+                    statEntry.value:SetText("0")
+                end
             end
         end
     end
@@ -3082,6 +3095,12 @@ local function SkinCharacterSheet()
             tile._bg = tile:CreateTexture(nil, "BACKGROUND")
             tile._bg:SetAllPoints()
 
+            -- Selection highlight (accent, 40% alpha). Sits above bg, below
+            -- hover so the hover brighten still lands over a selected tile.
+            tile._selection = tile:CreateTexture(nil, "ARTWORK", nil, -1)
+            tile._selection:SetAllPoints()
+            tile._selection:Hide()
+
             tile._hover = tile:CreateTexture(nil, "ARTWORK")
             tile._hover:SetColorTexture(1, 1, 1, 0.15)
             tile._hover:SetAllPoints()
@@ -3264,11 +3283,19 @@ local function SkinCharacterSheet()
                 tile._text:SetTextColor(1, 0.3, 0.3, 1)
             end
 
-            -- Equipped set = 50% accent highlight; selection does NOT highlight.
+            -- Equipped set = 50% accent bg; selected set = 40% accent overlay.
             if activeEquipmentSetID == setData.id then
                 tile._bg:SetColorTexture(EG_EQ.r, EG_EQ.g, EG_EQ.b, 0.5)
             else
                 tile._bg:SetColorTexture(0.05, 0.07, 0.08, 0.8)
+            end
+            if tile._selection then
+                if selectedSetID == setData.id then
+                    tile._selection:SetColorTexture(EG_EQ.r, EG_EQ.g, EG_EQ.b, 0.15)
+                    tile._selection:Show()
+                else
+                    tile._selection:Hide()
+                end
             end
 
             -- Spec icon
@@ -3332,6 +3359,14 @@ local function SkinCharacterSheet()
                         tile._bg:SetColorTexture(EG_EQ.r, EG_EQ.g, EG_EQ.b, 0.5)
                     else
                         tile._bg:SetColorTexture(0.05, 0.07, 0.08, 0.8)
+                    end
+                end
+                if tile._selection then
+                    if tile._setID and tile._setID == selectedSetID then
+                        tile._selection:SetColorTexture(EG_EQ.r, EG_EQ.g, EG_EQ.b, 0.1)
+                        tile._selection:Show()
+                    else
+                        tile._selection:Hide()
                     end
                 end
             end

@@ -500,9 +500,9 @@ EllesmereUI._ELEMENT_SETTINGS_MAP = {
     -- Aura Buff Reminders
     ["EABR_Reminders"] = { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", sectionName = "DISPLAY" },
 
-    -- General
-    ["EUI_FPS"]            = { module = "_EUIGlobal", page = "General", sectionName = "EXTRAS", highlightText = "Show FPS Counter" },
-    ["EUI_SecondaryStats"] = { module = "_EUIGlobal", page = "General", sectionName = "EXTRAS", highlightText = "Secondary Stat Display" },
+    -- Quality of Life (FPS + Secondary Stats live on the QoL page's EXTRAS section)
+    ["EUI_FPS"]            = { module = "EllesmereUIQoL", page = "Quality of Life", sectionName = "EXTRAS", highlightText = "Show FPS Counter" },
+    ["EUI_SecondaryStats"] = { module = "EllesmereUIQoL", page = "Quality of Life", sectionName = "EXTRAS", highlightText = "Secondary Stat Display" },
 }
 
 -- Width Match / Height Match / Anchor To pick modes
@@ -1351,15 +1351,68 @@ end
 --  source addon needing to call anything.
 -------------------------------------------------------------------------------
 local _sizeHookedFrames = {}  -- [frame] = true
+local _pointHookedFrames = {} -- [frame] = true
+
+-- Last-seen screen position per key. NotifyElementMoved compares current
+-- GetLeft/GetTop to these to detect real position changes (SetPoint can be
+-- called many times in a frame as part of ClearAllPoints + SetPoint pairs).
+local _lastScreenPos = {}  -- [key] = { l = ..., t = ... }
+local _moveCheckScheduled = {}  -- [key] = true (dedupes same-frame checks)
+
+-- Fires the anchor cascade for `key` if its frame actually moved on screen
+-- since last check. Deferred to end-of-frame so a ClearAllPoints + SetPoint
+-- pair coalesces into a single check against the final position.
+--
+-- WHY THIS EXISTS: NotifyElementResized only fires from OnSizeChanged, and
+-- session 31's Fix 6 cascade only triggers from ApplyAnchorPosition. Pure
+-- position changes that happen through an addon's own SetPoint call (e.g.
+-- ERB re-applying sp.unlockPos on every Class Resource rebuild) hit neither
+-- emitter, so anchored children never got the "your target moved" signal.
+-- This closes that gap by detecting position changes at the SetPoint hook.
+local function NotifyElementMoved(key)
+    if isUnlocked then return end  -- unlock mode owns positioning
+    if _moveCheckScheduled[key] then return end
+    _moveCheckScheduled[key] = true
+    C_Timer.After(0, function()
+        _moveCheckScheduled[key] = nil
+        if isUnlocked then return end
+        local bar = GetBarFrame(key)
+        if not bar then return end
+        local l, t = bar:GetLeft(), bar:GetTop()
+        if not l or not t then return end
+        local prev = _lastScreenPos[key]
+        if prev and math.abs(l - prev.l) < 0.5 and math.abs(t - prev.t) < 0.5 then
+            return  -- position unchanged (within half a physical pixel)
+        end
+        _lastScreenPos[key] = { l = l, t = t }
+        -- Convergence: ApplyAnchorPosition's idempotent guard (session 31
+        -- Fix 3) skips SetPoint when the child is already within 0.5px of
+        -- its computed target, so the cascade drains in a bounded number
+        -- of passes. Each ApplyAnchorPosition call re-enters this hook on
+        -- the child, but the position check above returns early when the
+        -- frame has settled, stopping further queueing.
+        if EllesmereUI.PropagateAnchorChain then
+            EllesmereUI.PropagateAnchorChain(key, "all")
+        end
+    end)
+end
 
 local function HookFrameSizeChanged(key)
     local bar = GetBarFrame(key)
-    if not bar or _sizeHookedFrames[bar] then return end
-    _sizeHookedFrames[bar] = true
-    bar:HookScript("OnSizeChanged", function()
-        if isUnlocked then return end
-        EllesmereUI.NotifyElementResized(key)
-    end)
+    if not bar then return end
+    if not _sizeHookedFrames[bar] then
+        _sizeHookedFrames[bar] = true
+        bar:HookScript("OnSizeChanged", function()
+            if isUnlocked then return end
+            EllesmereUI.NotifyElementResized(key)
+        end)
+    end
+    if not _pointHookedFrames[bar] then
+        _pointHookedFrames[bar] = true
+        hooksecurefunc(bar, "SetPoint", function()
+            NotifyElementMoved(key)
+        end)
+    end
 end
 
 -- Wrap RegisterUnlockElements so newly registered elements get OnSizeChanged
