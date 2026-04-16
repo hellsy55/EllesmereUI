@@ -496,10 +496,12 @@ local function GetKickTickEnabled()
     if p and p.kickTickEnabled ~= nil then return p.kickTickEnabled end
     return true
 end
+ns.GetKickTickEnabled = GetKickTickEnabled
 local function GetKickTickColor()
     local c = (p and p.kickTickColor) or defaults.kickTickColor
     return c.r, c.g, c.b
 end
+ns.GetKickTickColor = GetKickTickColor
 local function GetAuraSpacing()
     return (p and p.auraSpacing) or defaults.auraSpacing
 end
@@ -1735,6 +1737,7 @@ local kickSpellsByClass = {
     DEMONHUNTER = {183752},
 }
 local activeKickSpell
+function ns.GetActiveKickSpell() return activeKickSpell end
 local function RefreshKickAbility()
     local playerClass = UnitClassBase("player")
     local classKicks = kickSpellsByClass[playerClass]
@@ -1885,6 +1888,9 @@ kickWatcher:SetScript("OnEvent", function(self, event)
                 plate:ApplyCastColor(kickProtected)
                 -- Re-snapshot kick tick position when kick CD state changes mid-cast
                 plate:UpdateKickTick(kickProtected, isChannel)
+                if ns.RefreshCastOverlayKickTick then
+                    ns.RefreshCastOverlayKickTick(plate, kickProtected, isChannel)
+                end
             end
         end
     else
@@ -2087,6 +2093,9 @@ local CLASS_POWER_MAP = {
                     [254] = { "FOCUS_BAR", 100 },
                     [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 } },    -- Fury only
+    DEATHKNIGHT = { [250] = { Enum.PowerType.Runes, 6 },
+                    [251] = { Enum.PowerType.Runes, 6 },
+                    [252] = { Enum.PowerType.Runes, 6 } },
 }
 
 -- Lazy-create pip textures on a plate (done once, then reused via show/hide)
@@ -2307,6 +2316,14 @@ local function UpdateClassPowerOnPlate(plate)
         cur = UnitPower("player", classPowerType) or 0
         maxP = UnitPowerMax("player", classPowerType) or classPowerMax
         if maxP <= 0 then maxP = classPowerMax end
+        -- Runes: UnitPower doesn't return ready-rune count; iterate cooldowns
+        if classPowerType == Enum.PowerType.Runes then
+            cur = 0
+            for i = 1, maxP do
+                local _, _, ready = GetRuneCooldown(i)
+                if ready then cur = cur + 1 end
+            end
+        end
     end
     if maxP <= 0 then
         for i = 1, #plate._cpPips do
@@ -2316,17 +2333,22 @@ local function UpdateClassPowerOnPlate(plate)
         return
     end
 
-    local scaledW = PP.Scale(CP_PIP_W * cpScale)
-    local scaledH = PP.Scale(CP_PIP_H * cpScale)
-    local scaledGap = PP.Scale(GetClassPowerGap() * cpScale)
-    -- Pre-compute each pip's left-edge X in group-local coords.
-    -- Position by BOTTOMLEFT/TOPLEFT to avoid half-pixel center offsets.
-    local pipPositions = {}
-    for idx = 1, maxP do
-        pipPositions[idx] = PP.Scale((idx - 1) * (scaledW + scaledGap))
-    end
-    local groupW = pipPositions[maxP] + scaledW
-    local halfGroup = PP.Scale(groupW / 2)
+    -- Lock pip width / height / gap to exact physical pixel multiples in the
+    -- PLATE'S local coords (pips are parented to the plate, so its effective
+    -- scale is what determines screen pixels). PP.Scale snaps to UIParent's
+    -- pixel grid, which is wrong here because nameplates have their own
+    -- scale stack (nameplate scale * cast/target scale).
+    local plateES = plate:GetEffectiveScale()
+    local onePx = (plateES and plateES > 0) and (PP.perfect / plateES) or PP.mult or 1
+    local pipWPx   = math.floor((CP_PIP_W * cpScale) / onePx + 0.5)
+    local pipHPx   = math.floor((CP_PIP_H * cpScale) / onePx + 0.5)
+    local pipGapPx = math.floor((GetClassPowerGap() * cpScale) / onePx + 0.5)
+    local scaledW   = pipWPx   * onePx
+    local scaledH   = pipHPx   * onePx
+    local scaledGap = pipGapPx * onePx
+    local stride = scaledW + scaledGap
+    local groupW = maxP * scaledW + (maxP - 1) * scaledGap
+    local halfGroup = math.floor((groupW / 2) / onePx + 0.5) * onePx
 
     local cpColor = CP_DEFAULT_COLOR
     if GetClassPowerClassColors() then
@@ -2344,10 +2366,12 @@ local function UpdateClassPowerOnPlate(plate)
         local pip = plate._cpPips[i]
         if i <= maxP then
             pip:ClearAllPoints()
-            PP.Size(pip, scaledW, scaledH)
-            local pipLeftX = PP.Scale(pipPositions[i] - halfGroup + cpXOff)
+            pip:SetSize(scaledW, scaledH)
+            -- (i-1) * stride is an exact integer multiple of physical pixels,
+            -- so every pip lands on the same pixel grid as its neighbors.
+            local pipLeftX = (i - 1) * stride - halfGroup + cpXOff
             pip:SetPoint(leftAnchor, anchorFrame, anchorRelPoint,
-                pipLeftX, PP.Scale(yDir * cpYOff))
+                pipLeftX, yDir * cpYOff)
 
             -- Background texture behind each pip
             local bg = pip._bg
@@ -2550,6 +2574,10 @@ local function EnableClassPowerWatcher()
         classPowerWatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         if classPowerFormReq then
             classPowerWatcher:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+        end
+        -- Runes need their own event for per-rune cooldown changes
+        if classPowerType == Enum.PowerType.Runes then
+            classPowerWatcher:RegisterEvent("RUNE_POWER_UPDATE")
         end
         classPowerWatcher:SetScript("OnEvent", function(_, event)
             if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then

@@ -1897,6 +1897,76 @@ EllesmereUI.ReapplyAllUnlockAnchors = function()
     wipe(pendingPositions)
 end
 
+-- Forced version of ReapplyAllUnlockAnchors: clears each child's points
+-- before re-applying so the idempotent guard inside ApplyAnchorPosition
+-- can't perma-skip a stale cached answer.
+--
+-- WHY THIS EXISTS: occasionally an anchored child (e.g. a CDM bar anchored
+-- to Class Resource) settles at a 1px-off position because some upstream
+-- emission read transient bounds. Once the cascade converges to that
+-- wrong-by-1px answer, the idempotent guard sees "current matches stored"
+-- and never corrects. Manual un-anchor + re-anchor in the UI fixes it
+-- because clearing the anchor info forces a fresh evaluation against
+-- current (settled) target bounds. This function does the same thing
+-- programmatically without disturbing the anchor DB.
+--
+-- Wired into the CDM authoritative-pass trigger (ns._spellsReadyForApply
+-- in EllesmereUICdmHooks.lua) so it fires once at the same known-good
+-- moment we already use to retrigger width matches. Same dependency-sorted
+-- order. Skips combat-protected children automatically.
+EllesmereUI.ReapplyAllUnlockAnchorsForced = function()
+    local adb = GetAnchorDB()
+    if not adb then return end
+
+    local depth = {}
+    local function GetDepth(k, visiting)
+        if depth[k] ~= nil then return depth[k] end
+        if visiting[k] then depth[k] = 0; return 0 end
+        visiting[k] = true
+        local info = adb[k]
+        if info and info.target and adb[info.target] then
+            depth[k] = 1 + GetDepth(info.target, visiting)
+        else
+            depth[k] = 0
+        end
+        visiting[k] = nil
+        return depth[k]
+    end
+
+    local order = {}
+    for childKey in pairs(adb) do
+        GetDepth(childKey, {})
+        order[#order + 1] = childKey
+    end
+    table.sort(order, function(a, b) return depth[a] < depth[b] end)
+
+    local inCombat = InCombatLockdown()
+    for _, childKey in ipairs(order) do
+        local info = adb[childKey]
+        if info and info.target then
+            local childBar = GetBarFrame(childKey)
+            local targetBar = GetBarFrame(info.target)
+            if childBar and targetBar
+               and not (inCombat and childBar:IsProtected()) then
+                -- Clear the child's current SetPoint so the idempotent
+                -- guard in ApplyAnchorPosition reads "no current point"
+                -- and re-asserts the computed position against settled
+                -- target bounds. ClearAllPoints + SetPoint in the same
+                -- frame has no visual flash (WoW coalesces).
+                pcall(childBar.ClearAllPoints, childBar)
+                ApplyAnchorPosition(childKey, info.target, info.side, true)
+            end
+        end
+    end
+
+    for childKey, pos in pairs(pendingPositions) do
+        if type(pos) == "table" and pos.point then
+            SaveBarPosition(childKey, pos.point, pos.relPoint, pos.x, pos.y)
+        end
+    end
+    wipe(pendingPositions)
+end
+
 -- Resync anchor offsets from actual frame positions. Called AFTER a profile
 -- import/switch once all frames are at their correct absolute positions
 -- (from db.profile.positions). This does NOT move any frames -- it reads

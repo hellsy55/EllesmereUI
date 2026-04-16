@@ -953,6 +953,91 @@ local function CreateIndicatorBtn(name, parent, upAtlas, overAtlas, downAtlas, o
     return btn
 end
 
+-- Great Vault button. Lives at the top of the ungrouped-button stack above
+-- the flyout toggle. Single "whole" atlas scaled to fit the button.
+local _greatVaultBtn = nil
+local GREAT_VAULT_WHOLE_ATLAS = "greatVault-whole-normal"
+
+local function RegisterVaultEscClose()
+    if not UISpecialFrames then return end
+    for _, name in ipairs(UISpecialFrames) do
+        if name == "WeeklyRewardsFrame" then return end
+    end
+    tinsert(UISpecialFrames, "WeeklyRewardsFrame")
+end
+
+local function ToggleGreatVault()
+    local IsLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
+    local Load     = (C_AddOns and C_AddOns.LoadAddOn)     or _G.LoadAddOn
+    if Load and IsLoaded and not IsLoaded("Blizzard_WeeklyRewards") then
+        Load("Blizzard_WeeklyRewards")
+    end
+    RegisterVaultEscClose()
+    if WeeklyRewardsFrame then
+        WeeklyRewardsFrame:SetShown(not WeeklyRewardsFrame:IsShown())
+    end
+end
+
+local function SizeGreatVaultBtn(btn)
+    local btnSz = GetInteractableBtnSize()
+    btn:SetSize(btnSz, btnSz)
+    if btn._bg then btn._bg:SetShown(true) end
+    local inset = 3
+    local avail = btnSz - inset * 2
+    -- Whole is 105x108: height is the limiting dimension. Fit by height.
+    local wholeH = avail
+    local wholeW = wholeH * (105 / 108)
+    btn._whole:SetSize(wholeW, wholeH)
+    btn._whole:ClearAllPoints()
+    btn._whole:SetPoint("CENTER", btn, "CENTER", 0, 0)
+end
+
+local function CreateGreatVaultBtn(parent)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(GetInteractableBtnSize(), GetInteractableBtnSize())
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:EnableMouse(true)
+
+    local bg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+    bg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+    bg:SetBackdropColor(0, 0, 0, 0.8)
+    bg:SetAllPoints(btn)
+    bg:SetFrameLevel(btn:GetFrameLevel() - 1)
+    btn._bg = bg
+
+    local whole = btn:CreateTexture(nil, "ARTWORK")
+    whole:SetAtlas(GREAT_VAULT_WHOLE_ATLAS)
+    btn._whole = whole
+
+    SizeGreatVaultBtn(btn)
+
+    btn:SetScript("OnEnter", function(self)
+        self._whole:SetVertexColor(1, 1, 1, 1)
+        EllesmereUI.ShowWidgetTooltip(self, "Great Vault")
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)
+        EllesmereUI.HideWidgetTooltip()
+    end)
+    btn:SetScript("OnMouseDown", function(self)
+        self._whole:SetVertexColor(0.7, 0.7, 0.7, 1)
+    end)
+    btn:SetScript("OnMouseUp", function(self)
+        local over = self:IsMouseOver()
+        local v = over and 1 or 0.85
+        self._whole:SetVertexColor(v, v, v, 1)
+    end)
+    btn:SetScript("OnClick", function(self)
+        if self._ebsFreeMoveJustDragged then return end
+        ToggleGreatVault()
+    end)
+
+    -- Resting tint matches OnLeave state
+    whole:SetVertexColor(0.85, 0.85, 0.85, 1)
+
+    return btn
+end
+
 local function BuildCustomIndicators(minimap)
     if _customIndicators.tracking then return end
 
@@ -1024,6 +1109,9 @@ local function BuildCustomIndicators(minimap)
         if craftBaseLeave then craftBaseLeave(self) end
         if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
+
+    -- Great Vault button (built once, anchored later in LayoutIndicatorFrames)
+    _greatVaultBtn = CreateGreatVaultBtn(minimap)
 end
 
 -- Hide the Blizzard originals so they never render or intercept clicks
@@ -1291,6 +1379,26 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             _suppressVisTrack = false
             anchor = btn
         end
+
+        -- Great Vault button: always sits at the top of the ungrouped stack.
+        -- If no anchor (no ungrouped buttons and no flyout), it lands directly
+        -- where the flyout toggle would be.
+        if _greatVaultBtn then
+            SizeGreatVaultBtn(_greatVaultBtn)
+            _greatVaultBtn:SetParent(minimap)
+            _greatVaultBtn:SetFrameLevel(minimap:GetFrameLevel() + 11)
+            _greatVaultBtn:ClearAllPoints()
+            if freeMove then
+                local idx = #ungrouped + (flyoutVisible and 1 or 0)
+                local yOff = idx * ungroupBtnSize
+                _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
+            elseif anchor then
+                _greatVaultBtn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+            else
+                _greatVaultBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
+            end
+            _greatVaultBtn:Show()
+        end
     end
 
     -- Free Move: hook shift+drag on all indicator buttons and apply saved offsets
@@ -1301,6 +1409,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
     if flyoutToggle then fmTargets[#fmTargets + 1] = flyoutToggle end
+    if _greatVaultBtn then fmTargets[#fmTargets + 1] = _greatVaultBtn end
     -- Include ungrouped addon buttons
     for _, btn in ipairs(cachedAddonButtons) do
         if _addonVisible[btn] ~= false and IsUngrouped(btn) then

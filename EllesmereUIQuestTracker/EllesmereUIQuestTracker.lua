@@ -77,7 +77,14 @@ function EQT.DB()
     if d and d.profile and d.profile.questTracker then
         return d.profile.questTracker
     end
-    if not EQT._tmpDB then EQT._tmpDB = {} end
+    -- Fallback when the persistent DB isn't ready yet (login races, profile
+    -- switch windows, spec swaps). Must contain `enabled=true` + a valid
+    -- visibility mode, otherwise EvalVisibility returns false and the shared
+    -- visibility dispatcher will alpha-0 the tracker whenever an unrelated
+    -- event (combat, target change, zone) fires during an unready window.
+    if not EQT._tmpDB then
+        EQT._tmpDB = { enabled = true, visibility = "always" }
+    end
     return EQT._tmpDB
 end
 

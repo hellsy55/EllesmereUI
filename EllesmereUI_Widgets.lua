@@ -2952,7 +2952,12 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                     end)
                     swatchBlock:SetScript("OnLeave", function() HideWidgetTooltip() end)
                     local function UpdateSwatchDisabled()
-                        local dis = type(sc.disabled) == "function" and sc.disabled() or sc.disabled
+                        local dis
+                        if type(sc.disabled) == "function" then
+                            dis = sc.disabled()
+                        else
+                            dis = sc.disabled
+                        end
                         if dis then
                             swatch:SetAlpha(0.3)
                             swatchBlock:Show()
@@ -2979,7 +2984,12 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                     local function UpdateAlpha()
                         -- Skip when disabled -- disabled handler controls alpha
                         if _sd then
-                            local dis = type(_sd) == "function" and _sd() or _sd
+                            local dis
+                            if type(_sd) == "function" then
+                                dis = _sd()
+                            else
+                                dis = _sd
+                            end
                             if dis then return end
                         end
                         _sw:SetAlpha(_ra())

@@ -250,6 +250,39 @@ local function BuildOverlay()
     barOverlay:SetAlpha(0)
     f.barOverlay = barOverlay
 
+    -- Kick tick mark (mirrors plate.kickClip / kickPositioner / kickMarker /
+    -- kickTick from the on-plate cast bar). Two invisible StatusBars whose
+    -- secret-duration values are bound at cast start; a 2px white texture
+    -- sits at the right edge of the marker's fill and animates as the
+    -- marker counts down via the engine.
+    local kickClip = CreateFrame("Frame", nil, bar)
+    kickClip:SetAllPoints(bar)
+    kickClip:SetClipsChildren(true)
+    f.kickClip = kickClip
+    local kickPositioner = CreateFrame("StatusBar", nil, kickClip)
+    kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    kickPositioner:GetStatusBarTexture():SetAlpha(0)
+    kickPositioner:SetPoint("CENTER", bar)
+    kickPositioner:SetFrameLevel(bar:GetFrameLevel() + 1)
+    kickPositioner:Hide()
+    f.kickPositioner = kickPositioner
+    local kickMarker = CreateFrame("StatusBar", nil, kickClip)
+    kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    kickMarker:GetStatusBarTexture():SetAlpha(0)
+    kickMarker:SetClipsChildren(true)
+    kickMarker:SetPoint("LEFT", kickPositioner:GetStatusBarTexture(), "RIGHT")
+    kickMarker:SetSize(1, 1)
+    kickMarker:SetFrameLevel(bar:GetFrameLevel() + 2)
+    kickMarker:Hide()
+    f.kickMarker = kickMarker
+    local kickTick = kickMarker:CreateTexture(nil, "OVERLAY", nil, 3)
+    kickTick:SetColorTexture(1, 1, 1, 1)
+    kickTick:SetWidth(2)
+    kickTick:SetPoint("TOP", kickMarker, "TOP", 0, 0)
+    kickTick:SetPoint("BOTTOM", kickMarker, "BOTTOM", 0, 0)
+    kickTick:SetPoint("LEFT", kickMarker:GetStatusBarTexture(), "RIGHT")
+    f.kickTick = kickTick
+
     -- Shield icon for uninterruptible casts (matches the on-plate
     -- castShieldFrame. Visibility is gated via SetAlphaFromBoolean so
     -- the secret-valued kickProtected flag stays safe.)
@@ -424,6 +457,108 @@ local function ConfigureImportantCastGlow(ov, spellID)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Kick tick mark: mirrors NameplateFrame:UpdateKickTick on the overlay so
+--  the tick is visible when the user has "Casts In Front of Nameplates" on
+--  (the on-plate cast bar is alpha 0 in that mode and would hide the tick).
+--  The on-plate UpdateKickTick logic stays the source of truth; this just
+--  duplicates the secret-value setup onto the overlay's own StatusBars.
+-------------------------------------------------------------------------------
+local function HideOverlayKickTick(ov)
+    if not ov.kickPositioner then return end
+    ov.kickPositioner:Hide()
+    ov.kickMarker:Hide()
+    if ov._kickTicker then
+        ov._kickTicker:Cancel()
+        ov._kickTicker = nil
+    end
+end
+
+local function ConfigureOverlayKickTick(ov, isChannel, isEmpowered, kickProtected, castDuration)
+    if not ov.kickPositioner then return end
+    local enabled = (ns.GetKickTickEnabled and ns.GetKickTickEnabled()) ~= false
+    local activeKickSpell = ns.GetActiveKickSpell and ns.GetActiveKickSpell()
+    if not enabled or not activeKickSpell then
+        HideOverlayKickTick(ov)
+        return
+    end
+    if not (C_Spell and C_Spell.GetSpellCooldownDuration) then
+        HideOverlayKickTick(ov)
+        return
+    end
+    if not castDuration then
+        HideOverlayKickTick(ov)
+        return
+    end
+    local totalDur = castDuration:GetTotalDuration()
+    local interruptCD = C_Spell.GetSpellCooldownDuration(activeKickSpell)
+    if not interruptCD then
+        HideOverlayKickTick(ov)
+        return
+    end
+
+    local castH = ov.bar:GetHeight()
+    local barW = ov.bar:GetWidth()
+    ov.kickPositioner:SetSize(barW, castH)
+    ov.kickPositioner:SetMinMaxValues(0, totalDur)
+    ov.kickMarker:SetMinMaxValues(0, totalDur)
+    ov.kickMarker:SetSize(barW, castH)
+    ov.kickPositioner:SetValue(castDuration:GetElapsedDuration())
+    ov.kickMarker:SetValue(interruptCD:GetRemainingDuration())
+
+    local kr, kg, kb = 1, 1, 1
+    if ns.GetKickTickColor then kr, kg, kb = ns.GetKickTickColor() end
+    ov.kickTick:SetColorTexture(kr, kg, kb, 1)
+
+    if isChannel and not isEmpowered then
+        ov.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
+        ov.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
+        ov.kickMarker:ClearAllPoints()
+        ov.kickTick:ClearAllPoints()
+        ov.kickMarker:SetPoint("RIGHT", ov.kickPositioner:GetStatusBarTexture(), "LEFT")
+        ov.kickTick:SetPoint("TOP", ov.kickMarker, "TOP", 0, 0)
+        ov.kickTick:SetPoint("BOTTOM", ov.kickMarker, "BOTTOM", 0, 0)
+        ov.kickTick:SetPoint("RIGHT", ov.kickMarker:GetStatusBarTexture(), "LEFT")
+    else
+        ov.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Standard)
+        ov.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Standard)
+        ov.kickMarker:ClearAllPoints()
+        ov.kickTick:ClearAllPoints()
+        ov.kickMarker:SetPoint("LEFT", ov.kickPositioner:GetStatusBarTexture(), "RIGHT")
+        ov.kickTick:SetPoint("TOP", ov.kickMarker, "TOP", 0, 0)
+        ov.kickTick:SetPoint("BOTTOM", ov.kickMarker, "BOTTOM", 0, 0)
+        ov.kickTick:SetPoint("LEFT", ov.kickMarker:GetStatusBarTexture(), "RIGHT")
+    end
+    ov.kickPositioner:Show()
+    ov.kickMarker:Show()
+
+    ov._kickProtected = kickProtected
+    if interruptCD.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(kickProtected, 0, 1)
+        local kickReady = interruptCD:IsZero()
+        local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
+        ov.kickTick:SetAlpha(alpha)
+    else
+        ov.kickTick:SetAlpha(0)
+    end
+
+    if ov._kickTicker then ov._kickTicker:Cancel() end
+    ov._kickTicker = C_Timer.NewTicker(0.1, function()
+        local plate = ov.plate
+        if not plate or not plate.unit or not plate.isCasting then
+            HideOverlayKickTick(ov)
+            return
+        end
+        local icd = C_Spell.GetSpellCooldownDuration(activeKickSpell)
+        if icd and icd.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+            local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(ov._kickProtected, 0, 1)
+            local kickReady = icd:IsZero()
+            local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
+            ov.kickTick:SetAlpha(alpha)
+        end
+    end)
+end
+
 local function ClearImportantCastGlow(ov)
     if not ov or not ov.glowHost then return end
     if ov._glowActive then
@@ -462,6 +597,8 @@ local function ReleaseOverlay(plate)
     ov.timer:SetText("")
     ov.barOverlay:SetAlpha(0)
     if ov.shieldFrame then ov.shieldFrame:Hide() end
+    -- Stop the kick tick snapshot + ticker
+    HideOverlayKickTick(ov)
     -- Stop any active important cast glow animation on the overlay
     ClearImportantCastGlow(ov)
     -- Restore the on-plate cast bar's alpha so it renders normally again
@@ -638,6 +775,10 @@ local function ConfigureOverlay(ov, plate)
         ov.shieldFrame:SetAlpha(1)
     end
 
+    -- Kick tick (mirrors NameplateFrame:UpdateKickTick). Must run after
+    -- the bar size is finalized so kickPositioner/kickMarker size correctly.
+    ConfigureOverlayKickTick(ov, isChannel, isEmpowered, kickProtected, castDuration)
+
     -- Important cast glow (mirrors NameplateFrame:UpdateImportantCastGlow)
     ConfigureImportantCastGlow(ov, castSpellID)
 end
@@ -726,6 +867,34 @@ end
 --  So by hooking into ApplyCastColor we inherit all those refresh paths
 --  without duplicating any event wiring here.
 -------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+--  Re-snapshot the overlay's kick tick. Called from the main file's
+--  kickWatcher on SPELL_UPDATE_COOLDOWN / SPELL_UPDATE_USABLE so the
+--  overlay's tick tracks mid-cast CD changes the same way the on-plate
+--  one does (parallel to the plate:UpdateKickTick call there).
+-------------------------------------------------------------------------------
+function ns.RefreshCastOverlayKickTick(plate, kickProtected, isChannel)
+    if not plate then return end
+    local ov = activePlates[plate]
+    if not ov or not ov.kickPositioner then return end
+    local unit = plate.unit
+    if not unit then return end
+    local castDuration
+    local isEmpowered = false
+    if isChannel then
+        if UnitEmpoweredChannelDuration then
+            castDuration = UnitEmpoweredChannelDuration(unit, true)
+            if castDuration then isEmpowered = true end
+        end
+        if not castDuration and UnitChannelDuration then
+            castDuration = UnitChannelDuration(unit)
+        end
+    elseif UnitCastingDuration then
+        castDuration = UnitCastingDuration(unit)
+    end
+    ConfigureOverlayKickTick(ov, isChannel, isEmpowered, kickProtected, castDuration)
+end
+
 function ns.RefreshCastOverlayColor(plate, uninterruptible)
     if not plate then return end
     local ov = activePlates[plate]

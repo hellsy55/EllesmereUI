@@ -1367,15 +1367,18 @@ local function SkinCharacterSheet()
             iLvlText:SetText(avgEquippedFormatted)
         end
 
-        -- Update M+ Score if option is enabled
+        -- Update M+ Score if option is enabled. Tab guard mirrors the slot-
+        -- label fix: PaperDollFrame:IsShown() is the truth-source for whether
+        -- the Character sub-pane is active (selectedTab is unreliable on the
+        -- initial open path).
+        local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
         if EllesmereUIDB and EllesmereUIDB.showMythicRating and frame._mythicRatingLabel then
             local mythicRating = C_ChallengeMode.GetOverallDungeonScore()
             if mythicRating and mythicRating > 0 then
                 local score = math.floor(mythicRating)
                 local hex = GetMPScoreHex(score)
                 frame._mythicRatingLabel:SetText(string.format("M+ Score: |cff%s%d|r", hex, score))
-                frame._mythicRatingLabel:Show()
-
+                frame._mythicRatingLabel:SetShown(isCharTab)
             else
                 frame._mythicRatingLabel:Hide()
             end
@@ -3971,6 +3974,15 @@ local function SkinCharacterSheet()
         local slot = _G[slotName]
         if not slot then return end
 
+        -- Tab guard: equipment events fire regardless of which CharacterFrame
+        -- sub-tab is active. PaperDollFrame is the Character sub-pane: when
+        -- the user opens directly to Reputation/Currency, it's not shown,
+        -- so our slot labels must stay hidden to avoid bleeding through the
+        -- other panes. PanelTemplates_GetSelectedTab is unreliable on the
+        -- initial open path -- it can lag and report tab 1 even when the
+        -- user is sitting on Rep. PaperDollFrame:IsShown() is the truth.
+        local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
+
         local itemLink = GetInventoryItemLink("player", slot:GetID())
         local itemLevel = ""
         local enchantText = ""
@@ -3997,7 +4009,7 @@ local function SkinCharacterSheet()
 
             if showItemLevel then
                 slot._itemLevelLabel:SetText(tostring(itemLevel) or "")
-                slot._itemLevelLabel:Show()
+                slot._itemLevelLabel:SetShown(isCharTab)
 
                 -- Color resolution order:
                 --   1. User custom color (if enabled)
@@ -4056,10 +4068,10 @@ local function SkinCharacterSheet()
 
             if showEnchants and iconOnly and iconOnly ~= "" then
                 slot._enchantLabel:SetText(iconOnly)
-                slot._enchantLabel:Show()
+                slot._enchantLabel:SetShown(isCharTab)
 
                 if slot._enchantHoverFrame then
-                    slot._enchantHoverFrame:Show()
+                    slot._enchantHoverFrame:SetShown(isCharTab)
                     slot._enchantHoverFrame:SetScript("OnEnter", function(self)
                         if not tooltipText or tooltipText == "" then return end
                         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -4089,7 +4101,7 @@ local function SkinCharacterSheet()
 
             if showUpgradeTrack then
                 slot._upgradeTrackLabel:SetText(upgradeTrackText or "")
-                slot._upgradeTrackLabel:Show()
+                slot._upgradeTrackLabel:SetShown(isCharTab)
 
                 -- Determine color to use
                 local displayColor

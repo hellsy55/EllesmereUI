@@ -1861,6 +1861,15 @@ local function CollectAndReanchor()
         if EllesmereUI._applySavedPositions then
             EllesmereUI._applySavedPositions()
         end
+        -- Forced anchor reapply: simulates a user un-anchor + re-anchor on
+        -- every anchored element so any 1px-off cached answer (idempotent
+        -- guard skipping a stale converged state) gets corrected against
+        -- now-settled target bounds. Same trigger moment as the width-match
+        -- retrigger above; idempotent for correct answers, only "moves"
+        -- bars that were actually wrong. See EUI_UnlockMode.lua for why.
+        if EllesmereUI.ReapplyAllUnlockAnchorsForced then
+            EllesmereUI.ReapplyAllUnlockAnchorsForced()
+        end
     else
         -- Routine reanchor (icon churn, mob death, etc.) -- still clear
         -- the gate so subsequent layout calls don't get stuck.

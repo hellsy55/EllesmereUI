@@ -6640,7 +6640,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.7"
+EllesmereUI.VERSION = "6.7.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -8113,8 +8113,13 @@ end
         return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
     end
 
-    local function _ttSkin(tt)
+    local function _ttSkin(tt, _, isEmbedded)
         if not tt or tt:IsForbidden() or not _enabled() then return end
+        -- Embedded tooltips (e.g. EmbeddedItemTooltip, the reward-item block
+        -- inside a world-quest tooltip) render INSIDE a parent tooltip.
+        -- Adding our bg + border to them makes the embedded block look like
+        -- a standalone framed tooltip sitting inside the parent.
+        if isEmbedded or tt.IsEmbedded then return end
         if _isSecret and _isSecret(tt:GetWidth()) then return end
         if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
         if tt.NineSlice then tt.NineSlice:SetAlpha(0) end
