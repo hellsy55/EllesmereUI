@@ -1027,19 +1027,12 @@ local function RenderStandalone()
         -- with the running timer and there's no "99:99.999" glitch.
         timerText = FormatTime(run.elapsed or completedElapsed or 0)
     else
-        local mode = p.timerDisplayMode or "REMAINING"
+        local mode = p.timerDisplayMode or "REMAINING_TOTAL"
         local elaStr = FormatTime(elapsed)
         local maxStr = FormatTime(maxTime)
         local remStr = FormatTime(timeLeft)
         if mode == "REMAINING_TOTAL" then
-            if p.timerInBar then
-                timerText = elaStr .. " / " .. maxStr
-            else
-                -- Out-of-bar uses dual FS so the static "/ maxStr" never
-                -- shifts when live mm:ss digits change pixel widths.
-                timerText = elaStr
-                timerDetailText = " / " .. maxStr
-            end
+            timerText = elaStr .. " / " .. maxStr
         elseif mode == "ELAPSED" then
             timerText = remStr
         elseif mode == "ELAPSED_DETAIL" then
@@ -1289,7 +1282,7 @@ local function RenderStandalone()
         end
 
         if timerDetailText then
-            local _mode = (not run.completed) and (p.timerDisplayMode or "REMAINING") or nil
+            local _mode = (not run.completed) and (p.timerDisplayMode or "REMAINING_TOTAL") or nil
             local detailSize = (_mode == "REMAINING_TOTAL") and 20 or 12
             SetFS(f._timerDetailFS, detailSize)
             ApplyShadow(f._timerDetailFS)
@@ -1531,6 +1524,17 @@ end
 _G._EMT_StandaloneRefresh = RenderStandalone
 _G._EMT_GetStandaloneFrame = function()
     return CreateStandaloneFrame()
+end
+
+-- Forces a full rebuild by discarding the cached frame + its FontStrings
+-- so the next RenderStandalone() re-creates them from scratch. Use when a
+-- setting (e.g. text alignment) won't take effect via re-render alone.
+_G._EMT_RebuildStandalone = function()
+    if standaloneFrame then standaloneFrame:Hide() end
+    standaloneFrame = nil
+    standaloneCreated = false
+    wipe(objRows)
+    RenderStandalone()
 end
 
 -- One-time migration of legacy TOPLEFT-stored position into stable centerX/Y

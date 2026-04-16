@@ -125,7 +125,11 @@ initFrame:SetScript("OnEvent", function(self)
               values=alignAllValues,
               order=alignAllOrder,
               getValue=function() return Cfg("alignAllText") or "RIGHT" end,
-              setValue=function(v) Set("alignAllText", v); Refresh() end })
+              setValue=function(v)
+                  Set("alignAllText", v)
+                  if _G._EMT_RebuildStandalone then _G._EMT_RebuildStandalone() end
+                  Refresh()
+              end })
         y = y - h
 
         -- Scale + Background Opacity: side-by-side dual row.
@@ -347,7 +351,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Module is disabled",
               values=timerDisplayValues,
               order=timerDisplayOrder,
-              getValue=function() return Cfg("timerDisplayMode") or "REMAINING" end,
+              getValue=function() return Cfg("timerDisplayMode") or "REMAINING_TOTAL" end,
               setValue=function(v) Set("timerDisplayMode", v); Refresh() end })
         y = y - h
 
