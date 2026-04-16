@@ -1438,6 +1438,31 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+--------------------------------------------------------------------------------
+--  v6.7.1 Quest Tracker: reset stale enabled=false inherited from Basics.
+--
+--  The v66_basics_split_data migration copied the entire old
+--  EllesmereUIBasics.questTracker table into the new QT addon's profile.
+--  The old "enabled" flag meant "disable the custom overlay" (Blizzard's
+--  tracker still showed). The new QT uses "enabled" in EvalVisibility to
+--  mean "completely hide the tracker." Users who had the old custom tracker
+--  disabled inherited enabled=false, which hid the tracker with no way to
+--  re-enable it (the option isn't exposed in the new QT settings).
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "qt_reset_stale_enabled_false",
+    scope       = "profile",
+    description = "Reset quest tracker enabled=false inherited from the old Basics module.",
+    body = function(ctx)
+        local qt = ctx.profile.addons
+            and ctx.profile.addons.EllesmereUIQuestTracker
+            and ctx.profile.addons.EllesmereUIQuestTracker.questTracker
+        if type(qt) == "table" and qt.enabled == false then
+            qt.enabled = true
+        end
+    end,
+})
+
 EllesmereUI.RegisterMigration({
     id          = "mt_bestruns_wipe_v1",
     scope       = "global",
