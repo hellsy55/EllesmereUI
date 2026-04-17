@@ -1014,11 +1014,11 @@ local function CreateGreatVaultBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._whole:SetVertexColor(1, 1, 1, 1)
-        EllesmereUI.ShowWidgetTooltip(self, "Great Vault")
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault") end
     end)
     btn:SetScript("OnLeave", function(self)
         self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)
-        EllesmereUI.HideWidgetTooltip()
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
     btn:SetScript("OnMouseDown", function(self)
         self._whole:SetVertexColor(0.7, 0.7, 0.7, 1)

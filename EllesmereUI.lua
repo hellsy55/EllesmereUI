@@ -6640,7 +6640,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.7.6"
+EllesmereUI.VERSION = "6.7.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6821,6 +6821,7 @@ EllesmereUI._RunConflictCheck = function()
         end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
+            { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. Element positioning will be highly unstable if left used at the same time." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
             { addon = "UnhaltedUnitFrames",       label = "Unhalted Unit Frames",       targets = { "EllesmereUIUnitFrames" } },
@@ -8139,15 +8140,18 @@ end
         if not tt or tt:IsForbidden() or not _enabled() then return end
         local fp = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
         local ol = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
+        local scale = EllesmereUIDB and EllesmereUIDB.tooltipFontScale or 1.0
+        local titleSize = math.floor(13 * scale + 0.5)
+        local bodySize  = math.floor(11 * scale + 0.5)
         local name = tt.GetName and tt:GetName()
         if not name then return end
         local nLines = tt.NumLines and tt:NumLines() or 30
         for i = 1, nLines do
             local left = _G[name .. "TextLeft" .. i]
             if not left then break end
-            left:SetFont(fp, (i == 1) and 13 or 11, ol)
+            left:SetFont(fp, (i == 1) and titleSize or bodySize, ol)
             local right = _G[name .. "TextRight" .. i]
-            if right then right:SetFont(fp, 11, ol) end
+            if right then right:SetFont(fp, bodySize, ol) end
         end
     end
 

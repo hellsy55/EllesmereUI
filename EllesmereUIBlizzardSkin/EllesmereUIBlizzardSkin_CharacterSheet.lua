@@ -1432,7 +1432,7 @@ local function SkinCharacterSheet()
     local HEADER_H = 75
     local scrollFrame = CreateFrame("ScrollFrame", "EUI_CharSheet_ScrollFrame", statsPanel)
     scrollFrame:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 0, -HEADER_H)
-    scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 2)
     scrollFrame:SetFrameLevel(51)
     frame._scrollFrame = scrollFrame
 
@@ -1574,7 +1574,7 @@ local function SkinCharacterSheet()
         local h = showMP and HEADER_H or (HEADER_H - 16)
         scrollFrame:ClearAllPoints()
         scrollFrame:SetPoint("TOPLEFT",     statsPanel, "TOPLEFT",     0,  -h)
-        scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 0)
+        scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 2)
         scrollTrack:ClearAllPoints()
         scrollTrack:SetPoint("TOPRIGHT",    statsPanel, "TOPRIGHT",    -2, -h)
         scrollTrack:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -2,  0)
@@ -2833,6 +2833,9 @@ local function SkinCharacterSheet()
             statsPanel:SetShown(true)
             if CharacterFrame._titlesPanel then CharacterFrame._titlesPanel:SetShown(false) end
             if CharacterFrame._equipPanel  then CharacterFrame._equipPanel:SetShown(false)  end
+            -- Deactivate equipment sidebar (hides flyout arrows).
+            local sidebarTab = _G.PaperDollSidebarTab1
+            if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
         end
     end)
 
@@ -2842,6 +2845,9 @@ local function SkinCharacterSheet()
             CharacterFrame._titlesPanel:SetShown(true)
             statsPanel:SetShown(false)
             if CharacterFrame._equipPanel then CharacterFrame._equipPanel:SetShown(false) end
+            -- Deactivate equipment sidebar (hides flyout arrows).
+            local sidebarTab = _G.PaperDollSidebarTab1
+            if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
         end
     end)
 
@@ -3398,7 +3404,11 @@ local function SkinCharacterSheet()
     local function QueueColorRefresh()
         if _colorRefreshPending then return end
         _colorRefreshPending = true
-        C_Timer.After(0.01, function()
+        -- 0.3s debounce: mass equip/unequip (birthday suit) fires
+        -- PLAYER_EQUIPMENT_CHANGED per slot. Blizzard's internal
+        -- numLost/isEquipped metadata needs time to settle across all
+        -- slots before GetEquipmentSetInfo returns accurate results.
+        C_Timer.After(0.3, function()
             _colorRefreshPending = false
             RefreshEquipSetColors()
         end)
@@ -3407,6 +3417,7 @@ local function SkinCharacterSheet()
     local equipmentColorMonitor = CreateFrame("Frame")
     equipmentColorMonitor:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     equipmentColorMonitor:RegisterEvent("EQUIPMENT_SWAP_FINISHED")
+    equipmentColorMonitor:RegisterEvent("EQUIPMENT_SETS_CHANGED")
     equipmentColorMonitor:SetScript("OnEvent", QueueColorRefresh)
     if CharacterFrame then
         CharacterFrame:HookScript("OnShow", QueueColorRefresh)
@@ -3423,11 +3434,19 @@ local function SkinCharacterSheet()
     end)
 
     -- Equipment Manager button
+    -- Activate Blizzard's equipment sidebar (PaperDollSidebarTab3) so the
+    -- per-slot flyout arrows appear. Our equipPanel overlays Blizzard's
+    -- EquipmentManagerPane with our own gear-sets UI.
     CreateEUIButton("Equipment", "Equipment", function()
         if not CharacterFrame._equipPanel:IsShown() then
             CharacterFrame._equipPanel:SetShown(true)
             statsPanel:SetShown(false)
             if CharacterFrame._titlesPanel then CharacterFrame._titlesPanel:SetShown(false) end
+            -- Activate Blizzard's equipment sidebar for flyout arrows.
+            local sidebarTab = _G.PaperDollSidebarTab3
+            if sidebarTab and sidebarTab.Click then
+                pcall(sidebarTab.Click, sidebarTab)
+            end
         end
     end)
 
@@ -3926,18 +3945,19 @@ local function SkinCharacterSheet()
         else
             globalSocketContainer:Hide()
         end
-        -- Reset to Stats panel on open. Use SetShown (not Show/Hide or
-        -- SafeShow/SafeHide) so the change applies immediately even if the
-        -- sheet was opened via a secure keybind path AND the reset fires
-        -- during combat. These are all our own insecure frames.
-        if statsPanel        then statsPanel:SetShown(true)          end
-        if frame._titlesPanel then frame._titlesPanel:SetShown(false) end
-        if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
-        if SetActiveTopButton and characterBtn then
-            SetActiveTopButton(characterBtn)
-        end
-        if PanelTemplates_SetTab and (frame.selectedTab or 1) ~= 1 then
-            PanelTemplates_SetTab(frame, 1)
+        -- Reset to Stats sub-panel on open, but ONLY when opening to the
+        -- Character tab.  When the user opens via keybind to Reputation or
+        -- Currency, forcing selectedTab = 1 here desynchronises Blizzard's
+        -- internal tab state (it thinks Character is active while the Rep/
+        -- Currency pane is actually shown), which makes the Character tab
+        -- un-clickable until the user clicks Currency to resync.
+        if isCharacterTab then
+            if statsPanel        then statsPanel:SetShown(true)          end
+            if frame._titlesPanel then frame._titlesPanel:SetShown(false) end
+            if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
+            if SetActiveTopButton and characterBtn then
+                SetActiveTopButton(characterBtn)
+            end
         end
     end)
 

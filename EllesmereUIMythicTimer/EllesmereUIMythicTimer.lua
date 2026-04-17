@@ -1237,6 +1237,12 @@ local function RenderStandalone()
             -- Measure with worst-case digits so SetWidth never clips the live text.
             local templ = (timerText or ""):gsub("%d", "9")
             f._timerFS:SetText(templ)
+            -- Keep the SetTextDiff cache in sync with what we just wrote
+            -- directly. Otherwise the cache still reflects the previous
+            -- timerText, so the restore call below short-circuits and
+            -- the "99:99" template stays visible (bug seen during the
+            -- 10-second pre-start window where elapsed stays at 0).
+            f._timerFS._lastText = templ
             -- +2px safety margin: subpixel rounding at non-default UI scales
             -- can otherwise clip the rightmost glyph and force a wrap.
             f._timerFS:SetWidth((f._timerFS:GetStringWidth() or 0) + 2)

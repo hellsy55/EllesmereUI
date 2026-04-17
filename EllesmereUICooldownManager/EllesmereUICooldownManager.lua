@@ -363,8 +363,6 @@ local DEFAULTS = {
             enabled = true,
             hideBlizzard = true,
             hideBuffsWhenInactive = true,
-            rotationHelperEnabled = false,
-            rotationHelperGlowStyle = 5,
             -- The 3 default bars (match Blizzard CDM)
             bars = {
                 {
@@ -2805,51 +2803,12 @@ ns.OpenBlizzardCDMTab = OpenBlizzardCDMTab
 --  (if any) the mouse is over, only when at least one bar has tooltips on.
 -------------------------------------------------------------------------------
 local _tooltipBars = {}  -- [barKey] = true for bars with tooltips enabled
+-- Tooltip OnUpdate removed: Blizzard viewer frames handle their own
+-- tooltips via native OnEnter. Custom injected frames (item presets,
+-- racials, custom spells) don't need OnUpdate polling -- they get
+-- OnEnter/OnLeave scripts installed in DecorateFrame / preset creation.
 local _tooltipFrame = CreateFrame("Frame")
 _tooltipFrame:Hide()
-local _tooltipCurrentIcon = nil
-local _tooltipAccum = 0
-
-_tooltipFrame:SetScript("OnUpdate", function(_, elapsed)
-    _tooltipAccum = _tooltipAccum + elapsed
-    if _tooltipAccum < 0.05 then return end
-    _tooltipAccum = 0
-    if EllesmereUI and EllesmereUI._unlockActive then
-        if _tooltipCurrentIcon then
-            GameTooltip:Hide()
-            _tooltipCurrentIcon = nil
-        end
-        return
-    end
-    -- Find the icon under the mouse
-    local found = nil
-    for barKey in pairs(_tooltipBars) do
-        local icons = cdmBarIcons[barKey]
-        if icons then
-            for i = 1, #icons do
-                local icon = icons[i]
-                if icon and icon:IsShown() and icon:IsMouseOver() then
-                    found = icon
-                    break
-                end
-            end
-            if found then break end
-        end
-    end
-    if found and found ~= _tooltipCurrentIcon then
-        local sfc = _ecmeFC[found]
-        local sid = sfc and sfc.spellID or found._spellID
-        if sid and sid > 0 then
-            GameTooltip:SetOwner(found, "ANCHOR_CURSOR")
-            GameTooltip:SetSpellByID(sid)
-            GameTooltip:Show()
-            _tooltipCurrentIcon = found
-        end
-    elseif not found and _tooltipCurrentIcon then
-        GameTooltip:Hide()
-        _tooltipCurrentIcon = nil
-    end
-end)
 
 local function ApplyCDMTooltipState(barKey)
     local bd = barDataByKey[barKey]
@@ -3180,7 +3139,11 @@ local function RefreshCDMIconAppearance(barKey)
             kbText:SetFont(GetCDMFont(), (barData.keybindSize or 10) * fontScale, "OUTLINE")
             kbText:SetShadowOffset(0, 0)
             kbText:ClearAllPoints()
-            kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", barData.keybindOffsetX or 2, barData.keybindOffsetY or -2)
+            -- Scale-compensate the offset so it's visually consistent
+            -- across icons with different Blizzard-assigned scales.
+            local kbX = (barData.keybindOffsetX or 2) * fontScale
+            local kbY = (barData.keybindOffsetY or -2) * fontScale
+            kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", kbX, kbY)
             kbText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
         end
 
@@ -3905,7 +3868,9 @@ _CDMApplyVisibility = function()
             -- Ghost bar stays hidden even in unlock mode
             elseif unlockActive and not barData.isGhostBar then
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
+                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
+                    frame:EnableMouseMotion(true)
+                end
                 frame._visHidden = false
             else
 
@@ -3952,7 +3917,13 @@ _CDMApplyVisibility = function()
                 -- Custom injected icons are parented to the bar frame, so
                 -- frame alpha would double-apply with icon alpha.
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion and not InCombatLockdown() then frame:EnableMouseMotion(true) end
+                -- Don't re-enable mouse motion on cursor-tracked bars;
+                -- SetFrameClickThrough disabled it for click-through and
+                -- re-enabling here on every visibility pass was the source
+                -- of the intermittent hover-blocking bug.
+                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
+                    frame:EnableMouseMotion(true)
+                end
                 frame._visHidden = false
                 -- Apply opacity to icons every pass (idempotent, handles
                 -- fresh loads where wasHidden is false).
@@ -4109,10 +4080,15 @@ local function RebuildKeybindCache()
                 if slotType == "spell" then
                     spellID = id
                 elseif slotType == "macro" and id then
-                    -- GetMacroSpell works for macro-index based entries.
-                    -- For direct spell macros, GetActionInfo returns the spell ID as id.
                     local macroSpell = GetMacroSpell(id)
                     spellID = macroSpell or (id > 0 and id) or nil
+                elseif slotType == "item" and id then
+                    -- Store under negated itemID (-id) to match the FC
+                    -- convention for item presets/trinkets.
+                    local formatted = FormatKeybindKey(key)
+                    if formatted and not _cdmKeybindCache[-id] then
+                        _cdmKeybindCache[-id] = formatted
+                    end
                 end
                 if spellID then
                     local formatted = FormatKeybindKey(key)
@@ -4123,7 +4099,6 @@ local function RebuildKeybindCache()
                     if name and not _cdmKeybindCache[name] then
                         _cdmKeybindCache[name] = formatted
                     end
-                    -- Also store under override/base so talent-swapped spells find the keybind
                     local ovr = C_Spell.GetOverrideSpell and C_Spell.GetOverrideSpell(spellID)
                     if ovr and ovr ~= spellID and not _cdmKeybindCache[ovr] then
                         _cdmKeybindCache[ovr] = formatted
@@ -4158,8 +4133,21 @@ local function ApplyCachedKeybinds()
                         local base = C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(sid)
                         if base and base ~= sid then key = _cdmKeybindCache[base] end
                     end
-                    local name = C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+                    local name = sid > 0 and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
                     if not key and name then key = _cdmKeybindCache[name] end
+                    -- Item presets: check alt item IDs (user may have a
+                    -- different rank of the same potion on their bar).
+                    if not key and icon._isItemPresetFrame and icon._presetData and icon._presetData.altItemIDs then
+                        for _, altID in ipairs(icon._presetData.altItemIDs) do
+                            key = _cdmKeybindCache[-altID]
+                            if key then break end
+                        end
+                    end
+                    -- Trinkets: check by equipped item's action slot
+                    if not key and icon._isTrinketFrame and icon._trinketSlot then
+                        local itemID = GetInventoryItemID("player", icon._trinketSlot)
+                        if itemID then key = _cdmKeybindCache[-itemID] end
+                    end
                     if key then
                         kbText:SetText(key)
                         kbText:Show()
@@ -5124,81 +5112,154 @@ end
 
 -------------------------------------------------------------------------------
 --  Rotation Helper Integration (Blizzard C_AssistedCombat)
---  Highlights the currently suggested spell from the rotation assistant
---  with a glow on its CDM icon.
+--  Highlights the currently suggested spell on its CDM icon using Blizzard's
+--  native ActionBarButtonAssistedCombatHighlightTemplate -- same shine as the
+--  stock action bars. Gated purely by Blizzard's "assistedCombatHighlight"
+--  CVar; we don't carry a second toggle of our own.
 -------------------------------------------------------------------------------
 ns._rotationGlowedIcons = {}
-ns._lastSuggestedSpell = nil
 ns._rotationHookInstalled = false
+ns._rotationInCombat = false
+
+local ROT_GLOW_RATIO = 0.33
+
+local function _rotCVarOn()
+    return GetCVarBool and GetCVarBool("assistedCombatHighlight")
+end
+
+local function _rotCreateHighlight(icon)
+    local ok, hf = pcall(CreateFrame, "Frame", nil, icon, "ActionBarButtonAssistedCombatHighlightTemplate")
+    if not ok or not hf then return nil end
+    hf:SetAllPoints()
+    -- Sit above everything on the icon: Blizzard's cooldown swipe, our border
+    -- frame, our glowOverlay (+6), and any proc alert frames. +15 clears them
+    -- all with margin.
+    hf:SetFrameLevel(icon:GetFrameLevel() + 15)
+    hf:Hide()
+    if hf.Flipbook and hf.Flipbook.Anim then
+        hf.Flipbook.Anim:Play()
+        hf.Flipbook.Anim:Stop()
+    end
+    return hf
+end
+
+local function _rotHide(icon)
+    local hf = icon and icon._rotationHighlight
+    if not hf then return end
+    if hf.Flipbook and hf.Flipbook.Anim then hf.Flipbook.Anim:Stop() end
+    hf:Hide()
+end
+
+local function _rotShow(icon)
+    if not icon then return end
+    local hf = icon._rotationHighlight
+    if not hf then
+        hf = _rotCreateHighlight(icon)
+        if not hf then return end
+        icon._rotationHighlight = hf
+    end
+    if hf.Flipbook then
+        local w = icon:GetWidth() or 36
+        local h = icon:GetHeight() or 36
+        local ox = w * ROT_GLOW_RATIO
+        local oy = h * ROT_GLOW_RATIO
+        hf.Flipbook:ClearAllPoints()
+        hf.Flipbook:SetPoint("TOPLEFT", icon, "TOPLEFT", -ox, oy)
+        hf.Flipbook:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", ox, -oy)
+    end
+    hf:Show()
+    if hf.Flipbook and hf.Flipbook.Anim then
+        hf.Flipbook.Anim:Play()
+        if not ns._rotationInCombat then hf.Flipbook.Anim:Stop() end
+    end
+end
 
 local function UpdateRotationHighlights()
-    local p = ECME.db and ECME.db.profile
-    if not p or not p.cdmBars or not p.cdmBars.rotationHelperEnabled then
+    if not _rotCVarOn() then
         for icon in pairs(ns._rotationGlowedIcons) do
-            local ifd = _getFD(icon)
-            local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
-            if glowOv then
-                _G_Glows.StopAllGlows(glowOv)
-                glowOv:SetAlpha(0)
-            end
+            _rotHide(icon)
             ns._rotationGlowedIcons[icon] = nil
         end
-        ns._lastSuggestedSpell = nil
         return
     end
 
     local suggestedSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell and C_AssistedCombat.GetNextCastSpell()
 
-    if suggestedSpell == ns._lastSuggestedSpell then return end
-    ns._lastSuggestedSpell = suggestedSpell
-
-    for icon in pairs(ns._rotationGlowedIcons) do
-        local ifd = _getFD(icon)
-        local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
-        if glowOv then
-            _G_Glows.StopAllGlows(glowOv)
-            glowOv:SetAlpha(0)
-        end
-    end
-    wipe(ns._rotationGlowedIcons)
-
-    if not suggestedSpell then return end
-
-    local glowStyle = p.cdmBars.rotationHelperGlowStyle or 5
-    for barKey, icons in pairs(cdmBarIcons) do
-        for _, icon in ipairs(icons) do
-            local ifc = _ecmeFC[icon]
-            local sid = ifc and ifc.spellID or icon._spellID
-            if sid and sid == suggestedSpell and icon:IsShown() then
-                local ifd = _getFD(icon)
-                local glowOv = ifd and ifd.glowOverlay or icon._glowOverlay
-                if glowOv then
-                    glowOv:SetAlpha(1)
-                    StartNativeGlow(glowOv, glowStyle, 1, 0.82, 0.1)
-                    ns._rotationGlowedIcons[icon] = true
+    local newSet = {}
+    if suggestedSpell then
+        for _, icons in pairs(cdmBarIcons) do
+            for _, icon in ipairs(icons) do
+                local ifc = _ecmeFC[icon]
+                local sid = ifc and ifc.spellID or icon._spellID
+                if sid and sid == suggestedSpell and icon:IsShown() then
+                    _rotShow(icon)
+                    newSet[icon] = true
                 end
             end
         end
     end
+
+    for icon in pairs(ns._rotationGlowedIcons) do
+        if not newSet[icon] then _rotHide(icon) end
+    end
+    ns._rotationGlowedIcons = newSet
 end
 ns.UpdateRotationHighlights = UpdateRotationHighlights
+
+-- One-frame defer after a bar rebuild: icon frames may have just been
+-- recycled or re-shown, so we want to re-run the match after the layout
+-- settles (dirty-frame pattern).
+local _rotDirty = CreateFrame("Frame")
+_rotDirty:Hide()
+_rotDirty:SetScript("OnUpdate", function(self)
+    self:Hide()
+    UpdateRotationHighlights()
+end)
+
+local function _rotSyncCombat()
+    local inCombat = InCombatLockdown() or UnitAffectingCombat("player")
+    ns._rotationInCombat = inCombat and true or false
+    for icon in pairs(ns._rotationGlowedIcons) do
+        local hf = icon and icon._rotationHighlight
+        if hf and hf:IsShown() and hf.Flipbook and hf.Flipbook.Anim then
+            if ns._rotationInCombat then
+                if not hf.Flipbook.Anim:IsPlaying() then hf.Flipbook.Anim:Play() end
+            else
+                if hf.Flipbook.Anim:IsPlaying() then hf.Flipbook.Anim:Stop() end
+            end
+        end
+    end
+end
+ns._syncRotationCombatState = _rotSyncCombat
 
 local function InstallRotationHook()
     if ns._rotationHookInstalled then return end
     ns._rotationHookInstalled = true
 
+    _rotSyncCombat()
+
     if EventRegistry and EventRegistry.RegisterCallback then
         EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
             UpdateRotationHighlights()
         end, "ECME_CDM_RotationHelper")
+        -- Clear highlights if the user flips Blizzard's CVar off at runtime.
+        EventRegistry:RegisterCallback("AssistedCombatManager.OnSetUseAssistedHighlight", function()
+            UpdateRotationHighlights()
+        end, "ECME_CDM_RotationHelper_CVar")
     end
 
-    -- Also hook the manager's update method as a fallback
     if AssistedCombatManager and AssistedCombatManager.UpdateAllAssistedHighlightFramesForSpell then
         hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedHighlightFramesForSpell", function()
             UpdateRotationHighlights()
         end)
     end
+
+    -- Re-run after bar rebuilds so the shine follows icon recycling.
+    if ns.CollectAndReanchor then
+        hooksecurefunc(ns, "CollectAndReanchor", function() _rotDirty:Show() end)
+    end
+
+    UpdateRotationHighlights()
 end
 
 -------------------------------------------------------------------------------
@@ -5223,6 +5284,10 @@ eventFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
 eventFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 eventFrame:RegisterEvent("UPDATE_BINDINGS")
 eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+eventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+eventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+eventFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
+eventFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
 -- Hero talent / loadout change events
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
@@ -5331,7 +5396,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         OnProcGlowEvent(event, unit)  -- unit = spellID (first arg after event)
         return
     end
-    if event == "UPDATE_BINDINGS" or event == "ACTIONBAR_SLOT_CHANGED" then
+    if event == "UPDATE_BINDINGS" or event == "ACTIONBAR_SLOT_CHANGED"
+       or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR"
+       or event == "UPDATE_OVERRIDE_ACTIONBAR" or event == "UPDATE_VEHICLE_ACTIONBAR" then
         C_Timer.After(0.5, UpdateCDMKeybinds)  -- defer so action slots are fully populated
         return
     end
@@ -5388,6 +5455,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "ZONE_CHANGED_NEW_AREA" then
+        if ns._syncRotationCombatState then ns._syncRotationCombatState() end
         if event == "PLAYER_REGEN_DISABLED" then
             _inCombat = true
             _CDMApplyVisibility()

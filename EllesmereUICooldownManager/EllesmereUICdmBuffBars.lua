@@ -110,10 +110,23 @@ local PANDEMIC_THRESHOLD = 0.30
 --- Only checks player auras (self-buffs).
 function ns.IsInPandemicWindow(spellID)
     if not spellID or spellID <= 0 then return false end
+    -- Check player auras first (self-buffs like HoTs, shields).
     local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    if not aura or not aura.duration or aura.duration <= 0 or not aura.expirationTime then return false end
-    local rem = aura.expirationTime - GetTime()
-    return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
+    if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
+        local rem = aura.expirationTime - GetTime()
+        return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
+    end
+    -- Fallback: check target debuffs (DoTs like Flame Shock). Uses
+    -- AuraUtil.FindAuraByName which is efficient (single scan).
+    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+    if name and UnitExists("target") then
+        local _, _, _, _, dur, exp = AuraUtil.FindAuraByName(name, "target", "HARMFUL|PLAYER")
+        if dur and dur > 0 and exp then
+            local rem = exp - GetTime()
+            return rem > 0 and (rem / dur) <= PANDEMIC_THRESHOLD
+        end
+    end
+    return false
 end
 
 --- Check pandemic via a Blizzard child frame's auraInstanceID.
@@ -1176,16 +1189,11 @@ function ns.UpdateTrackedBuffBarTimers()
 
                     -- Name + timer from Blizzard's FontStrings (passthrough)
                     local blizzNameFS, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
-                    -- Name: set once (doesn't change while active). Only lock
-                    -- _nameSet when we got real text -- otherwise the empty
-                    -- string from Blizzard's not-yet-populated FontString
-                    -- would lock us into a blank-text state until the bar
-                    -- next goes inactive. The end-of-tick deferred loop
-                    -- recovers via C_Spell.GetSpellInfo when this misses.
-                    if bar._nameText and bar._nameText:IsShown() and blizzNameFS
-                        and not bar._nameSet then
-                        local txt = blizzNameFS:GetText()
-                        if txt and txt ~= "" then
+                    -- Name: passthrough every tick so dynamic buffs (Roll the
+                    -- Bones → Broadside/True Bearing/etc.) update live.
+                    if bar._nameText and bar._nameText:IsShown() and blizzNameFS then
+                        local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
+                        if ok and txt then
                             bar._nameText:SetText(txt)
                             bar._nameSet = true
                         end
@@ -1198,14 +1206,27 @@ function ns.UpdateTrackedBuffBarTimers()
                         bar._timerText:Hide()
                     end
 
-                    -- Icon (via C_Spell, never read Blizzard textures)
+                    -- Icon: read from the live aura data so dynamic buffs
+                    -- (Roll the Bones) show the actual rolled buff icon.
+                    -- Fall back to cfg.spellID for non-dynamic buffs.
                     if bar._icon and bar._icon:IsShown() then
-                        local iconSID = cfg.spellID
-                        if iconSID and iconSID > 0 and iconSID ~= bar._lastIconSID then
-                            local spInfo = C_Spell.GetSpellInfo(iconSID)
-                            if spInfo and spInfo.iconID then
-                                bar._icon._tex:SetTexture(spInfo.iconID)
-                                bar._lastIconSID = iconSID
+                        local gotIcon = false
+                        if blzChild and blzChild.auraInstanceID and blzChild.auraDataUnit then
+                            local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID,
+                                blzChild.auraDataUnit, blzChild.auraInstanceID)
+                            if ok and ad and ad.icon then
+                                bar._icon._tex:SetTexture(ad.icon)
+                                gotIcon = true
+                            end
+                        end
+                        if not gotIcon then
+                            local iconSID = cfg.spellID
+                            if iconSID and iconSID > 0 and iconSID ~= bar._lastIconSID then
+                                local spInfo = C_Spell.GetSpellInfo(iconSID)
+                                if spInfo and spInfo.iconID then
+                                    bar._icon._tex:SetTexture(spInfo.iconID)
+                                    bar._lastIconSID = iconSID
+                                end
                             end
                         end
                     end
@@ -1327,15 +1348,9 @@ function ns.BuildTrackedBuffBars()
         local tbb = ns.GetTrackedBuffBars()
         local bars = tbb and tbb.bars
         if bars then
-            for _, cfg in ipairs(bars) do
-                local w = cfg.width or 200
-                local h = cfg.height or 24
-                if not cfg.verticalOrientation and h > w then
-                    cfg.width, cfg.height = h, w
-                elseif cfg.verticalOrientation and w > h then
-                    cfg.width, cfg.height = h, w
-                end
-            end
+            -- Width/height auto-swap removed: the Vertical Orientation
+            -- toggle already swaps dimensions on toggle (options line 2756).
+            -- The per-build swap fought slider input, making resizes erratic.
         end
     end
 

@@ -261,10 +261,12 @@ local function ShouldShow()
     if not p or not p.enabled then return false end
     local v = p.visibility or "MPLUS_AND_RAID"
     if v == "NEVER" then return false end
-    if EllesmereUI and EllesmereUI._unlockActive then return true end
 
     -- Hard gate: must be in a party or raid instance. Prevents any
     -- stuck state from showing the icon in town/open world.
+    -- Unlock mode relies on the overlay mover for positioning feedback,
+    -- so we never force-show the real icon here -- it would persist past
+    -- an "exit without saving" since DoClose doesn't re-run visibility.
     local _, instanceType = GetInstanceInfo()
     if instanceType ~= "party" and instanceType ~= "raid" then return false end
 

@@ -47,6 +47,7 @@ initFrame:SetScript("OnEvent", function(self)
         ns._skipNextApplyRebuild = true
         C_Timer.After(0.05, function()
             if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+            if ns.ApplyCachedKeybinds then ns.ApplyCachedKeybinds() end
             if EllesmereUI and EllesmereUI.RefreshPage then
                 EllesmereUI:RefreshPage(true)
             end
@@ -1872,13 +1873,11 @@ initFrame:SetScript("OnEvent", function(self)
     local function ShowTBBSpellPicker(anchorFrame, barCfg, onChanged)
         if _tbbSpellPickerMenu then _tbbSpellPickerMenu:Hide() end
 
-        -- TBB IS our display of Blizzard's "Tracked Bars" section, so the
-        -- picker must enumerate BuffBarCooldownViewer (NOT BuffIconCooldownViewer
-        -- which is the "Tracked Buffs" icon strip).
         local trackedBars = ns.GetTrackedBarSpells and ns.GetTrackedBarSpells() or {}
         local popular = ns.TBB_POPULAR_BUFFS or {}
 
-        if #trackedBars == 0 then return end
+        -- No early bail on empty trackedBars: the picker still shows
+        -- popular presets and the custom spell ID input.
 
         local mBgR  = EllesmereUI.DD_BG_R  or 0.075
         local mBgG  = EllesmereUI.DD_BG_G  or 0.113
@@ -2401,25 +2400,165 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(ddBtn, "TOP", hdr, "TOP", 0, fy)
             fy = fy - DD_H - 15
 
-            -- Bar preview: always rendered as horizontal regardless of orientation
+            -- Bar preview: matches real bar orientation and dimensions.
+            -- Wrapped in a scroll container capped at 200px so tall vertical
+            -- bars don't push the options section off-screen.
             local bd = SelectedTBB()
             local rawW = bd and bd.width or 270
             local rawH = bd and bd.height or 24
-            local PREVIEW_W = math.max(rawW, rawH)
-            local PREVIEW_H = math.min(rawW, rawH)
-            if PREVIEW_W > (hdrW - PAD * 2) then PREVIEW_W = hdrW - PAD * 2 end
+            local isVert = bd and bd.verticalOrientation
+            local PREVIEW_W = rawW
+            local PREVIEW_H = rawH
+            local maxAvailW = hdrW - PAD * 2
+            if PREVIEW_W > maxAvailW then PREVIEW_W = maxAvailW end
 
-            local pvFrame = CreateFrame("Frame", nil, hdr)
-            pvFrame:SetSize(PREVIEW_W, PREVIEW_H)
-            PP.Point(pvFrame, "TOP", hdr, "TOP", 0, fy)
+            local TBB_PREVIEW_MAX_H = 200
+
+            -- Wrapper: clips children, capped height
+            local pvWrapper = CreateFrame("Frame", nil, hdr)
+            local visH = math.min(PREVIEW_H, TBB_PREVIEW_MAX_H)
+            pvWrapper:SetSize(maxAvailW, visH)
+            PP.Point(pvWrapper, "TOP", hdr, "TOP", 0, fy)
+            pvWrapper:SetClipsChildren(true)
+
+            -- Scroll frame inside wrapper
+            local pvSF = CreateFrame("ScrollFrame", nil, pvWrapper)
+            pvSF:SetAllPoints()
+            pvSF:EnableMouseWheel(true)
+
+            -- Actual preview content frame (scroll child)
+            local pvFrame = CreateFrame("Frame", nil, pvSF)
+            pvFrame:SetSize(maxAvailW, PREVIEW_H)
+            pvSF:SetScrollChild(pvFrame)
+
+            -- Scrollbar track + thumb (same pattern as action bar preview)
+            local pvTrack, pvThumb
+            if PREVIEW_H > TBB_PREVIEW_MAX_H then
+                pvTrack = CreateFrame("Frame", nil, pvWrapper)
+                pvTrack:SetWidth(4)
+                pvTrack:SetPoint("TOPRIGHT", pvWrapper, "TOPRIGHT", -2, -2)
+                pvTrack:SetPoint("BOTTOMRIGHT", pvWrapper, "BOTTOMRIGHT", -2, 2)
+                pvTrack:SetFrameLevel(pvWrapper:GetFrameLevel() + 5)
+                local tbg = pvTrack:CreateTexture(nil, "BACKGROUND")
+                tbg:SetAllPoints(); tbg:SetColorTexture(1, 1, 1, 0.02)
+
+                pvThumb = CreateFrame("Button", nil, pvTrack)
+                pvThumb:SetWidth(4)
+                pvThumb:SetFrameLevel(pvTrack:GetFrameLevel() + 1)
+                pvThumb:EnableMouse(true)
+                pvThumb:RegisterForDrag("LeftButton")
+                local tt = pvThumb:CreateTexture(nil, "ARTWORK")
+                tt:SetAllPoints(); tt:SetColorTexture(1, 1, 1, 0.27)
+            end
+
+            local pvScrollTarget = 0
+            local pvSmoothing = false
+            local PV_SCROLL_STEP = 40
+            local PV_SMOOTH_SPEED = 12
+            local pvSmoothFrame = CreateFrame("Frame")
+            pvSmoothFrame:Hide()
+
+            local function UpdatePVThumb()
+                if not pvTrack then return end
+                local maxScroll = EllesmereUI.SafeScrollRange(pvSF)
+                if maxScroll <= 0 then pvTrack:Hide(); return end
+                pvTrack:Show()
+                local trackH = pvTrack:GetHeight()
+                local sfVisH = pvSF:GetHeight()
+                local ratio = sfVisH / (sfVisH + maxScroll)
+                local thumbH = math.max(20, trackH * ratio)
+                pvThumb:SetHeight(thumbH)
+                local curScroll = 0
+                do
+                    local ok, val = pcall(pvSF.GetVerticalScroll, pvSF)
+                    if ok and val then
+                        local ok2, n = pcall(tonumber, val)
+                        if ok2 and n then curScroll = n end
+                    end
+                end
+                local scrollRatio = curScroll / maxScroll
+                local maxTravel = trackH - thumbH
+                pvThumb:ClearAllPoints()
+                pvThumb:SetPoint("TOP", pvTrack, "TOP", 0, -(scrollRatio * maxTravel))
+            end
+
+            pvSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = pvSF:GetVerticalScroll()
+                local maxScroll = EllesmereUI.SafeScrollRange(pvSF)
+                pvScrollTarget = math.max(0, math.min(maxScroll, pvScrollTarget))
+                local diff = pvScrollTarget - cur
+                if math.abs(diff) < 0.3 then
+                    pvSF:SetVerticalScroll(pvScrollTarget)
+                    UpdatePVThumb()
+                    pvSmoothing = false
+                    pvSmoothFrame:Hide()
+                    return
+                end
+                local newScroll = cur + diff * math.min(1, PV_SMOOTH_SPEED * elapsed)
+                newScroll = math.max(0, math.min(maxScroll, newScroll))
+                pvSF:SetVerticalScroll(newScroll)
+                UpdatePVThumb()
+            end)
+
+            local function PVSmoothScrollTo(target)
+                local maxScroll = EllesmereUI.SafeScrollRange(pvSF)
+                pvScrollTarget = math.max(0, math.min(maxScroll, target))
+                if not pvSmoothing then
+                    pvSmoothing = true
+                    pvSmoothFrame:Show()
+                end
+            end
+
+            pvSF:SetScript("OnMouseWheel", function(self, delta)
+                local maxScroll = EllesmereUI.SafeScrollRange(self)
+                if maxScroll <= 0 then return end
+                local base = pvSmoothing and pvScrollTarget or self:GetVerticalScroll()
+                PVSmoothScrollTo(base - delta * PV_SCROLL_STEP)
+            end)
+            pvSF:SetScript("OnScrollRangeChanged", UpdatePVThumb)
+
+            if pvThumb then
+                pvThumb:SetScript("OnMouseDown", function(self, button)
+                    if button ~= "LeftButton" then return end
+                    pvSmoothing = false
+                    pvSmoothFrame:Hide()
+                    local _, cursorY = GetCursorPosition()
+                    local dragStartY = cursorY / self:GetEffectiveScale()
+                    local dragStartScroll = pvSF:GetVerticalScroll()
+                    self:SetScript("OnUpdate", function(self2)
+                        if not IsMouseButtonDown("LeftButton") then
+                            self2:SetScript("OnUpdate", nil); return
+                        end
+                        local _, cy = GetCursorPosition()
+                        cy = cy / self2:GetEffectiveScale()
+                        local deltaY = dragStartY - cy
+                        local trackH = pvTrack:GetHeight()
+                        local maxTravel = trackH - self2:GetHeight()
+                        if maxTravel <= 0 then return end
+                        local maxScroll = EllesmereUI.SafeScrollRange(pvSF)
+                        local newScroll = math.max(0, math.min(maxScroll,
+                            dragStartScroll + (deltaY / maxTravel) * maxScroll))
+                        pvScrollTarget = newScroll
+                        pvSF:SetVerticalScroll(newScroll)
+                        UpdatePVThumb()
+                    end)
+                end)
+                pvThumb:SetScript("OnMouseUp", function(self, button)
+                    if button ~= "LeftButton" then return end
+                    self:SetScript("OnUpdate", nil)
+                end)
+            end
+
             _tbbPvFrame = pvFrame
+            _tbbPvFrame._wrapper = pvWrapper
 
             if bd then
                 local pvBar = CreateFrame("StatusBar", nil, pvFrame)
-                pvBar:SetAllPoints()
+                pvBar:SetSize(PREVIEW_W, PREVIEW_H)
+                pvBar:SetPoint("TOP", pvFrame, "TOP", 0, 0)
                 local texPath = EllesmereUI.ResolveTexturePath(ns.TBB_TEXTURES, bd.texture or "none", "Interface\\Buttons\\WHITE8x8")
                 pvBar:SetStatusBarTexture(texPath)
-                pvBar:SetOrientation("HORIZONTAL")
+                pvBar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
                 pvBar:SetMinMaxValues(0, 1)
                 pvBar:SetValue(0.65)
                 local pvFillR, pvFillG, pvFillB, pvFillA = bd.fillR or 0.05, bd.fillG or 0.82, bd.fillB or 0.62, bd.fillA or 1
@@ -2440,8 +2579,15 @@ initFrame:SetScript("OnEvent", function(self)
                     local spark = pvBar:CreateTexture(nil, "OVERLAY", nil, 2)
                     spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
                     spark:SetBlendMode("ADD")
-                    spark:SetSize(8, PREVIEW_H)
-                    spark:SetPoint("CENTER", pvBar:GetStatusBarTexture(), "RIGHT", 0, 0)
+                    if isVert then
+                        spark:SetSize(PREVIEW_W, 8)
+                        spark:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
+                        spark:SetPoint("CENTER", pvBar:GetStatusBarTexture(), "TOP", 0, 0)
+                    else
+                        spark:SetSize(8, PREVIEW_H)
+                        spark:SetTexCoord(0, 0, 0, 1, 1, 0, 1, 1)
+                        spark:SetPoint("CENTER", pvBar:GetStatusBarTexture(), "RIGHT", 0, 0)
+                    end
                 end
 
                 -- Text overlay: sits above fill and gradient so text is never obscured
@@ -2546,8 +2692,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local pvIconFrame = nil
                 local hasIcon = (bd.spellID and bd.spellID > 0) or bd.glowBased
                 if pvIconMode ~= "none" and hasIcon then
-                    pvIconFrame = CreateFrame("Frame", nil, hdr)
-                    local iSize = PREVIEW_H
+                    pvIconFrame = CreateFrame("Frame", nil, pvFrame)
+                    local iSize = isVert and PREVIEW_W or PREVIEW_H
                     pvIconFrame:SetSize(iSize, iSize)
                     pvIconFrame:SetFrameLevel(pvFrame:GetFrameLevel() + 1)
                     local pvIconTex = pvIconFrame:CreateTexture(nil, "ARTWORK")
@@ -2596,20 +2742,20 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
-                -- Hover highlight covers bar + icon (parented to hdr for same reason)
+                -- Hover highlight covers bar + icon
                 local eg = EllesmereUI.ELLESMERE_GREEN
-                local hlContainer = CreateFrame("Frame", nil, hdr)
-                hlContainer:SetFrameLevel(pvFrame:GetFrameLevel() + 6)
+                local hlContainer = CreateFrame("Frame", nil, pvFrame)
+                hlContainer:SetFrameLevel(pvBar:GetFrameLevel() + 6)
                 if pvIconMode ~= "none" and pvIconFrame then
                     if pvIconMode == "left" then
                         hlContainer:SetPoint("TOPLEFT",     pvIconFrame, "TOPLEFT",     0, 0)
-                        hlContainer:SetPoint("BOTTOMRIGHT", pvFrame,     "BOTTOMRIGHT", 0, 0)
+                        hlContainer:SetPoint("BOTTOMRIGHT", pvBar,       "BOTTOMRIGHT", 0, 0)
                     elseif pvIconMode == "right" then
-                        hlContainer:SetPoint("TOPLEFT",     pvFrame,     "TOPLEFT",     0, 0)
+                        hlContainer:SetPoint("TOPLEFT",     pvBar,       "TOPLEFT",     0, 0)
                         hlContainer:SetPoint("BOTTOMRIGHT", pvIconFrame, "BOTTOMRIGHT", 0, 0)
                     end
                 else
-                    hlContainer:SetAllPoints(pvFrame)
+                    hlContainer:SetAllPoints(pvBar)
                 end
                 local PP2 = EllesmereUI and EllesmereUI.PP
                 local pvBrd = PP2 and PP2.CreateBorder(hlContainer, eg.r, eg.g, eg.b, 1, 2, "OVERLAY", 7)
@@ -2636,8 +2782,8 @@ initFrame:SetScript("OnEvent", function(self)
                 hint:SetText("Use the dropdown above to add a new bar")
             end
 
-            -- Preview visual height = bar height (icon is always same size as bar)
-            local pvVisH = PREVIEW_H
+            -- Preview visual height = bar height, capped at scroll container max
+            local pvVisH = math.min(PREVIEW_H, TBB_PREVIEW_MAX_H)
 
             fy = fy - pvVisH - 15
             _tbbHeaderFixedH = 20 + DD_H + 15 + 15
@@ -2715,7 +2861,7 @@ initFrame:SetScript("OnEvent", function(self)
         local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
-              min = 1, max = 60, step = 1,
+              min = 1, max = 500, step = 1,
               disabled = thDis, disabledTooltip = thTip, rawTooltip = thRaw,
               getValue = function() local bd = SelectedTBB(); return bd and bd.height or 24 end,
               setValue = function(v)
@@ -2723,13 +2869,9 @@ initFrame:SetScript("OnEvent", function(self)
                   bd.height = v
                   if _tbbPvFrame then
                       _tbbPvFrame:SetHeight(v)
-                      local pvIconMode = bd.iconDisplay or "none"
-                      local pvVisH = v
-                      if pvIconMode ~= "none" and ((bd.spellID and bd.spellID > 0) or bd.glowBased) then
-                          local iSize = bd.iconSize or v
-                          if iSize > pvVisH then pvVisH = iSize end
-                      end
-                      EllesmereUI:UpdateContentHeaderHeight(20 + 34 + 15 + pvVisH + 15)
+                      local capH = math.min(v, 200)
+                      if _tbbPvFrame._wrapper then _tbbPvFrame._wrapper:SetHeight(capH) end
+                      EllesmereUI:UpdateContentHeaderHeight(20 + 34 + 15 + capH + 15)
                   end
                   ns.BuildTrackedBuffBars()
               end },
@@ -4015,7 +4157,7 @@ initFrame:SetScript("OnEvent", function(self)
             if slotIndex and not isBuffBar and not isCustomBuff then
                 local sd = ns.GetBarSpellData(barKey)
                 local spellID = sd and sd.assignedSpells and sd.assignedSpells[slotIndex]
-                if spellID and spellID > 0 then
+                if spellID and spellID ~= 0 then
                     if not sd.spellSettings then sd.spellSettings = {} end
                     -- Read from existing settings or empty table for defaults.
                     -- EnsureSS() creates the persistent entry on first WRITE.
@@ -4228,14 +4370,30 @@ initFrame:SetScript("OnEvent", function(self)
                         return row, sub
                     end
 
+                    local isCustomInjected = spellID < 0
+                        or (ns._myRacialsSet and ns._myRacialsSet[spellID])
+                        or (sd.customSpellIDs and sd.customSpellIDs[spellID])
+                    local customDisabledTip = "Not available for custom injected spells"
+
                     -- 1. Proc Glow (default = nil)
-                    MakeSubnavRow("Proc Glow", GLOW_ITEMS,
+                    local procRow = MakeSubnavRow("Proc Glow", GLOW_ITEMS,
                         function() return ss.procGlow end,
                         function(v) EnsureSS(); ss.procGlow = v end,
                         function() return ss.procGlow == nil end)
+                    if isCustomInjected and procRow then
+                        procRow:SetAlpha(0.35)
+                        procRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(procRow, customDisabledTip)
+                            end
+                        end)
+                        procRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
 
                     -- 2. Active State (default = "custom" / CD Swipe Color #FFC660)
-                    MakeSubnavRow("Active State", ACTIVE_SWIPE_ITEMS,
+                    local activeRow = MakeSubnavRow("Active State", ACTIVE_SWIPE_ITEMS,
                         function()
                             if ss.activeSwipeMode == "none" then return "none" end
                             if ss.activeSwipeClassColor then return "class" end
@@ -4333,12 +4491,34 @@ initFrame:SetScript("OnEvent", function(self)
                                 end)
                             end
                         end)
+                    if isCustomInjected and activeRow then
+                        activeRow:SetAlpha(0.35)
+                        activeRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(activeRow, customDisabledTip)
+                            end
+                        end)
+                        activeRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
 
                     -- 3. Active State Glow (default = nil / none)
-                    MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
+                    local glowRow = MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
                         function() return ss.activeGlow end,
                         function(v) EnsureSS(); ss.activeGlow = v end,
                         function() return ss.activeGlow == nil end)
+                    if isCustomInjected and glowRow then
+                        glowRow:SetAlpha(0.35)
+                        glowRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(glowRow, customDisabledTip)
+                            end
+                        end)
+                        glowRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
 
                     -- Divider before sync toggle
                     local div2 = inner:CreateTexture(nil, "ARTWORK")
@@ -8880,50 +9060,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Rotation Helper (not for buff bars)
-        if not isAnyBuffBar then
-        do
-            local function CDM() local pp = DB(); return pp and pp.cdmBars end
-
-            local ROT_GLOW_VALUES = {}
-            local ROT_GLOW_ORDER  = {}
-            if ns.GLOW_STYLES then
-                for i, entry in ipairs(ns.GLOW_STYLES) do
-                    if not entry.shapeGlow then
-                        ROT_GLOW_VALUES[i] = entry.name
-                        ROT_GLOW_ORDER[#ROT_GLOW_ORDER + 1] = i
-                    end
-                end
-            end
-
-            local rotOff = function() local c = CDM(); return not c or not c.rotationHelperEnabled end
-
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Rotation Helper",
-                  getValue=function() local c = CDM(); return c and c.rotationHelperEnabled end,
-                  setValue=function(v)
-                      local c = CDM(); if not c then return end
-                      c.rotationHelperEnabled = v
-                      if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
-                      Refresh()
-                      EllesmereUI:RefreshPage()
-                  end,
-                  tooltip="Highlight the suggested next spell from Blizzard's rotation assistant on CDM icons" },
-                { type="dropdown", text="Rotation Glow Style",
-                  disabled=rotOff,
-                  disabledTooltip="Enable Rotation Helper",
-                  values=ROT_GLOW_VALUES, order=ROT_GLOW_ORDER,
-                  getValue=function() local c = CDM(); return c and c.rotationHelperGlowStyle or 5 end,
-                  setValue=function(v)
-                      local c = CDM(); if not c then return end
-                      c.rotationHelperGlowStyle = v
-                      if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
-                      Refresh()
-                  end,
-                  tooltip="Glow style used for the rotation helper highlight" }
-            );  y = y - h
-        end
-        end -- rotation helper buff bar guard
+        -- Rotation helper now follows Blizzard's "Show Assisted Combat Highlight"
+        -- setting directly (Game Menu -> Options -> Combat). No second toggle
+        -- here; the shine uses Blizzard's native action-bar highlight style.
         end -- custom_buff extras guard
 
         return math.abs(y)

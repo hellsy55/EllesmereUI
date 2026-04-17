@@ -5575,6 +5575,23 @@ local function CreateMover(barKey)
                         item:SetScript("OnClick", function()
                             anchorDropdownFrame:Hide()
                             anchorDropdownCatcher:Hide()
+                            -- Clear grow direction before anchoring so it
+                            -- doesn't fight the anchor's positioning.
+                            if pmKey:sub(1, 4) == "CDM_" then
+                                local rawCdmKey = pmKey:sub(5)
+                                local cdmAddon = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
+                                local cdmBars = cdmAddon and cdmAddon.db and cdmAddon.db.profile and cdmAddon.db.profile.cdmBars
+                                if cdmBars and cdmBars.bars then
+                                    for _, bar in ipairs(cdmBars.bars) do
+                                        if bar.key == rawCdmKey then bar.growDirection = nil; break end
+                                    end
+                                end
+                            else
+                                local eab = EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
+                                local abBars = eab and eab.db and eab.db.profile and eab.db.profile.bars
+                                local abCfg = abBars and abBars[pmKey]
+                                if abCfg then abCfg.growDirection = nil end
+                            end
                             -- Set anchor relationship
                             SetAnchorInfo(pmKey, targetKey, sideVal)
                             -- Apply the anchor position
@@ -6256,6 +6273,8 @@ local function CreateMover(barKey)
         end
 
         -- Width / Height input fields (only for resizable elements)
+        -- CDM bars skip width/height here; size is driven by icon count/size in the options panel
+        local isCDMBar = barKey:sub(1, 4) == "CDM_"
         if canResize and elem then
             local INPUT_W = 50
             local INPUT_H = 18
@@ -6364,8 +6383,10 @@ local function CreateMover(barKey)
                 return box
             end
 
-            wBox = MakeSizeRow("Width",  curW)
-            hBox = MakeSizeRow("Height", curH)
+            if not isCDMBar then
+                wBox = MakeSizeRow("Width",  curW)
+                hBox = MakeSizeRow("Height", curH)
+            end
 
             -- X Position / Y Position rows (screen coords from center)
             do

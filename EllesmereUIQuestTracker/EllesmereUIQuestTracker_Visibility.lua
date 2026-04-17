@@ -204,7 +204,14 @@ local function GetLowestContentFrame()
     local modules = otf.modules or otf.MODULES
     if not modules then return nil end
     local lowestFrame, lowestY
+    local _scenarioTracker = _G.ScenarioObjectiveTracker
     for _, tracker in ipairs(modules) do
+        -- Skip ScenarioObjectiveTracker: its M+ challenge mode blocks
+        -- aren't quest content. Showing our bg/top-line around them
+        -- during M+ produces visible chrome with no actual quests.
+        if tracker == _scenarioTracker then
+            -- skip
+        else
         local function consider(frame)
             if not frame or type(frame) ~= "table" then return end
             if not frame.GetBottom or not frame.GetObjectType then return end
@@ -235,6 +242,7 @@ local function GetLowestContentFrame()
         if tracker.hasContents then
             consider(tracker.Header)
         end
+        end -- else (skip scenario)
     end
     return lowestFrame
 end
@@ -262,6 +270,15 @@ local function ResizeBGToContent()
     if not bg or not otf then return end
     -- Tracker hidden (e.g. raid/arena auto-hide, Blizzard hide): BG follows.
     if not otf:IsShown() then
+        if bg:IsShown() then bg:Hide() end
+        return
+    end
+    -- During active M+ challenge mode, always hide BG. The tracker shows
+    -- Blizzard's scenario blocks (objectives/trash count) which aren't
+    -- quest content we should decorate. Prevents chrome flashing during
+    -- dungeon start/timer transitions.
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+       and C_ChallengeMode.IsChallengeModeActive() then
         if bg:IsShown() then bg:Hide() end
         return
     end

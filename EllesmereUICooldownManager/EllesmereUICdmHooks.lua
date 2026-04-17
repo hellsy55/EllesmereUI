@@ -803,6 +803,20 @@ local function GetOrCreateTrinketFrame(slotID)
     f.auraInstanceID = nil
     f.cooldownDuration = 0
 
+    f:EnableMouse(true)
+    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+    f:SetScript("OnEnter", function(self)
+        local ffc = _ecmeFC[self]
+        local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
+        if not bd2 or not bd2.showTooltip then return end
+        local itemID = GetInventoryItemID("player", self._trinketSlot)
+        if itemID then
+            GameTooltip_SetDefaultAnchor(GameTooltip, self)
+            GameTooltip:SetInventoryItem("player", self._trinketSlot)
+        end
+    end)
+    f:SetScript("OnLeave", GameTooltip_Hide)
+
     _trinketFrames[slotID] = f
     return f
 end
@@ -951,7 +965,26 @@ local _racialCdListener = CreateFrame("Frame")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
 _racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
-_racialCdListener:SetScript("OnEvent", function()
+_racialCdListener:RegisterEvent("ENCOUNTER_END")
+_racialCdListener:SetScript("OnEvent", function(_, event)
+    -- Encounter end (boss kill/wipe): Blizzard resets potion CDs, but our
+    -- cached _cdStart/_cdDur would keep the old swipe until wall-clock
+    -- expiry. Force-clear all item-preset caches. Return early so the
+    -- update loop below doesn't immediately re-cache the stale data
+    -- (Blizzard hasn't processed the reset yet at this point). A follow-up
+    -- BAG_UPDATE_COOLDOWN fires once Blizzard finishes and picks up the
+    -- fresh state.
+    if event == "ENCOUNTER_END" then
+        for _, f in pairs(_presetFrames) do
+            if f._isItemPresetFrame then
+                f._cdStart = nil; f._cdDur = nil
+                if f._cooldown then f._cooldown:Clear() end
+                if f._tex then f._tex:SetDesaturated(false) end
+                f._lastDesat = false
+            end
+        end
+        return
+    end
     -- Directly update cooldowns on existing preset frames instead of
     -- waiting for CollectAndReanchor (which only runs on viewer changes).
     for fkey, f in pairs(_presetFrames) do
@@ -1156,9 +1189,16 @@ local function CollectAndReanchor()
 
                     if isBuff then
                         -------------------------------------------------------
-                        --  BUFF PATH (unchanged): CategorizeFrame + dedup
+                        --  BUFF PATH: CategorizeFrame + dedup
                         -------------------------------------------------------
-                        if frame:IsShown() then
+                        -- When the EUI options panel is open, treat hidden
+                        -- buff frames as shown so icons populate the bar
+                        -- for preview. Blizzard's "hide when inactive"
+                        -- hides frames for buffs the player doesn't
+                        -- currently have, but we still want them visible
+                        -- while configuring.
+                        local euiOpen = EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown()
+                        if frame:IsShown() or euiOpen then
                             local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
                             if targetBar and displaySID and displaySID > 0 then
                                 local barSeen = seenSpell[targetBar]
@@ -1226,9 +1266,14 @@ local function CollectAndReanchor()
                     FC(frame).barKey = barKey
                     FC(frame).spellID = entry.baseSpellID or entry.spellID
                     icons[count] = frame
-                    local barHidden = container and container._visHidden
-                    frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
-                    frame:Show()
+                    -- Only Show/alpha frames Blizzard considers active.
+                    -- Hidden frames are collected for data (assignedSpells)
+                    -- but left visually untouched so we don't override
+                    -- Blizzard's "hide when inactive" state machine.
+                    if frame:IsShown() then
+                        local barHidden = container and container._visHidden
+                        frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                    end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
@@ -1398,7 +1443,10 @@ local function CollectAndReanchor()
                                 if icon then
                                     f = CreateFrame("Frame", nil, UIParent)
                                     f:SetSize(36, 36); f:Hide()
-                                    f:EnableMouse(false)
+                                    -- Enable mouse motion (OnEnter/OnLeave) for
+                                    -- tooltips but pass through clicks.
+                                    f:EnableMouse(true)
+                                    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
                                     local tex = f:CreateTexture(nil, "ARTWORK")
                                     tex:SetAllPoints(); tex:SetTexture(icon)
                                     tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -1419,6 +1467,16 @@ local function CollectAndReanchor()
                                     countFS:SetShadowOffset(0, 0)
                                     countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
                                     f._itemCountText = countFS
+                                    f:SetScript("OnEnter", function(self)
+                                        if not self._presetItemID then return end
+                                        local ffc = _ecmeFC[self]
+                                        local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
+                                        if not bd2 or not bd2.showTooltip then print("[CDM-DBG] tooltip disabled for bar"); return end
+                                        GameTooltip_SetDefaultAnchor(GameTooltip, self)
+                                        GameTooltip:SetItemByID(self._presetItemID)
+                                        GameTooltip:Show()
+                                    end)
+                                    f:SetScript("OnLeave", GameTooltip_Hide)
                                     _presetFrames[fkey] = f
                                 end
                             end
@@ -1510,9 +1568,14 @@ local function CollectAndReanchor()
                                 -- Dracthyr Evoker utility preset with Wing
                                 -- Buffet in assignedSpells -- Blizzard already
                                 -- tracks it in CDM, so we must not inject.
-                                local isKnownInCDM = ns.IsSpellKnownInCDM and ns.IsSpellKnownInCDM(sid)
+                                -- Only skip injection for racials that Blizzard
+                                -- already tracks. User-added custom spells are
+                                -- always injected: the user explicitly chose to
+                                -- put that spell on this bar, even if Blizzard's
+                                -- CDM has its own native frame for it elsewhere.
+                                local isKnownInCDM = isRacial and ns.IsSpellKnownInCDM and ns.IsSpellKnownInCDM(sid)
                                 if isKnownInCDM then
-                                    -- Leave it to Blizzard's native frame. Skip.
+                                    -- Racial already in CDM; Blizzard's frame handles it.
                                 elseif not isRacial and not isCustomSpell then
                                     -- Unknown spell, skip
                                 else
@@ -1521,6 +1584,8 @@ local function CollectAndReanchor()
                                     if not f then
                                         f = CreateFrame("Frame", nil, UIParent)
                                         f:SetSize(36, 36); f:Hide()
+                                        f:EnableMouse(true)
+                                        if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
                                         local tex = f:CreateTexture(nil, "ARTWORK")
                                         tex:SetAllPoints(); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                                         f.Icon = tex; f._tex = tex
@@ -1535,6 +1600,19 @@ local function CollectAndReanchor()
                                         f._isCustomSpellFrame = not isRacial or nil
                                         f.cooldownID = nil; f.cooldownInfo = nil
                                         f.layoutIndex = 99999
+                                        f:EnableMouse(true)
+                                        if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+                                        f:SetScript("OnEnter", function(self)
+                                            local ffc = _ecmeFC[self]
+                                            local spid = ffc and ffc.spellID
+                                            local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
+                                            if not bd2 or not bd2.showTooltip then return end
+                                            if spid and spid > 0 then
+                                                GameTooltip_SetDefaultAnchor(GameTooltip, self)
+                                                GameTooltip:SetSpellByID(spid)
+                                            end
+                                        end)
+                                        f:SetScript("OnLeave", GameTooltip_Hide)
                                         _presetFrames[fkey] = f
                                     end
                                     local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
@@ -1609,9 +1687,20 @@ local function CollectAndReanchor()
                         if frame:GetParent() ~= container then
                             frame:SetParent(container)
                         end
-                        frame:EnableMouse(false)
-                        if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
-                        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                        -- Enable mouse motion (OnEnter/OnLeave) for tooltips
+                        -- but keep clicks pass-through. Skip for cursor-
+                        -- anchored bars: re-enabling mouse here would undo
+                        -- the click-through set by SetFrameClickThrough and
+                        -- cause the bar to block hover interactions.
+                        local isCursorBar = container and container._mouseTrack
+                        if not isCursorBar then
+                            frame:EnableMouse(true)
+                            if frame.SetMouseClickEnabled then frame:SetMouseClickEnabled(false) end
+                            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                        else
+                            frame:EnableMouse(false)
+                            if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                        end
                         if frame.Cooldown then
                             frame.Cooldown:EnableMouse(false)
                             if frame.Cooldown.SetMouseClickEnabled then
@@ -1874,6 +1963,15 @@ local function CollectAndReanchor()
         -- Routine reanchor (icon churn, mob death, etc.) -- still clear
         -- the gate so subsequent layout calls don't get stuck.
         if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
+    end
+
+    -- Refresh the options-panel preview (if open) so the content header
+    -- reflects the icons we just populated. Without this, the preview
+    -- shows empty on login/spec swap because it builds before the first
+    -- queued CollectAndReanchor fires.
+    if EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
+        local pv = EllesmereUI._contentHeaderPreview
+        if pv and pv.Update then pv:Update() end
     end
 end
 ns.CollectAndReanchor = CollectAndReanchor

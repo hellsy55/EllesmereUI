@@ -4603,6 +4603,13 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
                 self:HideKickTick()
                 return
             end
+            -- activeKickSpell can go nil mid-cast if a spec/talent change
+            -- fires SPELLS_CHANGED and the new spec doesn't have a kick
+            -- learned. Bail rather than pass nil to C_Spell.
+            if not activeKickSpell then
+                self:HideKickTick()
+                return
+            end
             -- Compute tick visibility: show only when kick is on CD AND cast is interruptible.
             -- Both are secret booleans chain EvaluateColorValueFromBoolean calls
             -- to combine conditions into a single secret alpha.

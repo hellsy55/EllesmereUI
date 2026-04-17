@@ -4217,65 +4217,15 @@ initFrame:SetScript("OnEvent", function(self)
                                         specs       = importedSpecInfo,
                                         onConfirm   = function(sel)
                                             EllesmereUI.ApplyImportedSpecProfiles(importedCDMSnap, sel)
-                                            -- Reload current spec to restore spell assignments;
-                                            -- ApplyImportedSpecProfiles already handles overwriting
-                                            -- selected specs, and LoadSpecProfile will load the
-                                            -- (now-updated) data for the current spec.
-                                            if _G._ECME_LoadSpecProfile and _G._ECME_GetCurrentSpecKey then
-                                                local curKey = _G._ECME_GetCurrentSpecKey()
-                                                if curKey then _G._ECME_LoadSpecProfile(curKey) end
-                                            end
-                                            EllesmereUI.RefreshAllAddons()
-                                            ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                            if fontWillChange then
-                                                EllesmereUI:ShowConfirmPopup({
-                                                    title       = "Reload Required",
-                                                    message     = "Font changed. A UI reload is needed to apply the new font.",
-                                                    confirmText = "Reload Now",
-                                                    cancelText  = "Later",
-                                                    onConfirm   = function() ReloadUI() end,
-                                                })
-                                            else
-                                                EllesmereUI:RefreshPage()
-                                            end
+                                            ReloadUI()
                                         end,
                                         onCancel = function()
-                                            -- User cancelled spec picker: reload current spec profile
-                                            -- to restore spell assignments that ApplyProfileData overwrote
-                                            if _G._ECME_LoadSpecProfile and _G._ECME_GetCurrentSpecKey then
-                                                local curKey = _G._ECME_GetCurrentSpecKey()
-                                                if curKey then _G._ECME_LoadSpecProfile(curKey) end
-                                            end
-                                            EllesmereUI.RefreshAllAddons()
-                                            ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                            if fontWillChange then
-                                                EllesmereUI:ShowConfirmPopup({
-                                                    title       = "Reload Required",
-                                                    message     = "Font changed. A UI reload is needed to apply the new font.",
-                                                    confirmText = "Reload Now",
-                                                    cancelText  = "Later",
-                                                    onConfirm   = function() ReloadUI() end,
-                                                })
-                                            else
-                                                EllesmereUI:RefreshPage()
-                                            end
+                                            ReloadUI()
                                         end,
                                     })
                                 else
-                                    local fontWillChange = EllesmereUI.ProfileChangesFont(payload and payload.data)
-                                    EllesmereUI.RefreshAllAddons()
-                                    ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                    if fontWillChange then
-                                        EllesmereUI:ShowConfirmPopup({
-                                            title       = "Reload Required",
-                                            message     = "Font changed. A UI reload is needed to apply the new font.",
-                                            confirmText = "Reload Now",
-                                            cancelText  = "Later",
-                                            onConfirm   = function() ReloadUI() end,
-                                        })
-                                    else
-                                        EllesmereUI:RefreshPage()
-                                    end
+                                    -- No CDM data to pick — reload immediately
+                                    ReloadUI()
                                 end
                             else
                                 EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
@@ -4352,42 +4302,10 @@ initFrame:SetScript("OnEvent", function(self)
                                     specs       = importedSpecInfo,
                                     onConfirm   = function(sel)
                                         EllesmereUI.ApplyImportedSpecProfiles(importedCDMSnap, sel)
-                                        if _G._ECME_LoadSpecProfile and _G._ECME_GetCurrentSpecKey then
-                                            local curKey = _G._ECME_GetCurrentSpecKey()
-                                            if curKey then _G._ECME_LoadSpecProfile(curKey) end
-                                        end
-                                        EllesmereUI.RefreshAllAddons()
-                                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                        if fontWillChange then
-                                            EllesmereUI:ShowConfirmPopup({
-                                                title       = "Reload Required",
-                                                message     = "Font changed. A UI reload is needed to apply the new font.",
-                                                confirmText = "Reload Now",
-                                                cancelText  = "Later",
-                                                onConfirm   = function() ReloadUI() end,
-                                            })
-                                        else
-                                            EllesmereUI:RefreshPage()
-                                        end
+                                        ReloadUI()
                                     end,
                                     onCancel = function()
-                                        if _G._ECME_LoadSpecProfile and _G._ECME_GetCurrentSpecKey then
-                                            local curKey = _G._ECME_GetCurrentSpecKey()
-                                            if curKey then _G._ECME_LoadSpecProfile(curKey) end
-                                        end
-                                        EllesmereUI.RefreshAllAddons()
-                                        ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                        if fontWillChange then
-                                            EllesmereUI:ShowConfirmPopup({
-                                                title       = "Reload Required",
-                                                message     = "Font changed. A UI reload is needed to apply the new font.",
-                                                confirmText = "Reload Now",
-                                                cancelText  = "Later",
-                                                onConfirm   = function() ReloadUI() end,
-                                            })
-                                        else
-                                            EllesmereUI:RefreshPage()
-                                        end
+                                        ReloadUI()
                                     end,
                                 })
                             else

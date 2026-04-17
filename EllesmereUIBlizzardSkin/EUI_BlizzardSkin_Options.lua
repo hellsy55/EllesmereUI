@@ -65,7 +65,17 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipPlayerTitles = v
               end },
-            { type="label", text="" }
+            { type="slider", text="Font Size Scale",
+              tooltip="Scales the font size of reskinned Blizzard tooltips, menus, and popups.",
+              min=0.7, max=1.5, step=0.05, format="%.0f%%",
+              displayMul=100,
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.tooltipFontScale or 1.0
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipFontScale = v
+              end }
         );  y = y - h
 
         return math.abs(y)
