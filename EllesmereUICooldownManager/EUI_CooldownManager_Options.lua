@@ -8306,6 +8306,19 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
+            -- Row: Show on Target
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Show on Target",
+                  tooltip = "Show the FocusKick bar on your current target's nameplate instead of your focus target's nameplate.",
+                  getValue = function() return BD().focusKickUseTarget == true end,
+                  setValue = function(v)
+                      BD().focusKickUseTarget = v
+                      if ns.ApplyFocusKickAnchor then ns.ApplyFocusKickAnchor() end
+                      if ns.RefreshFocusCastProxyUnit then ns.RefreshFocusCastProxyUnit() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="label", text="" });  y = y - h
+
             _, h = W:Spacer(parent, y, 8);  y = y - h
         else
             _, h = W:Spacer(parent, y, 8);  y = y - h

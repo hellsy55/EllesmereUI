@@ -3249,6 +3249,8 @@ local function EnsureFocusKickBar()
         focusReminderSize = 26,
         focusReminderOffsetX = 0,
         focusReminderOffsetY = 0,
+        -- FocusKick-specific: show on target instead of focus
+        focusKickUseTarget = false,
         -- FocusKick-specific: focus-cast sound trigger
         focusCastSoundKey = "none",
         focusKickInterruptSpellID = nil,
@@ -3258,6 +3260,14 @@ local function EnsureFocusKickBar()
     if sd then sd.assignedSpells = {} end
 end
 ns.EnsureFocusKickBar = EnsureFocusKickBar
+
+-- Returns the unit token the FocusKick bar tracks: "target" when the user
+-- has enabled Show on Target, "focus" otherwise.
+local function GetFocusKickUnit()
+    local bd = barDataByKey and barDataByKey[FOCUSKICK_BAR_KEY]
+    return (bd and bd.focusKickUseTarget) and "target" or "focus"
+end
+ns.GetFocusKickUnit = GetFocusKickUnit
 
 -- Position the FocusKick bar against the focus target's nameplate.
 -- Called whenever the focus changes, a nameplate appears/disappears, or
@@ -3310,7 +3320,8 @@ local function ApplyFocusKickAnchor()
     local p = ECME.db and ECME.db.profile
     local bd = p and barDataByKey and barDataByKey[FOCUSKICK_BAR_KEY]
     if not bd then return end
-    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("focus")
+    local fkUnit = GetFocusKickUnit()
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(fkUnit)
     if not plate then
         SetFocusKickAlpha(0)
         return
@@ -3356,17 +3367,24 @@ local function EnsureFocusKickProxy()
     if _focusKickProxy then return _focusKickProxy end
     _focusKickProxy = CreateFrame("Frame")
     _focusKickProxy:RegisterEvent("PLAYER_FOCUS_CHANGED")
+    _focusKickProxy:RegisterEvent("PLAYER_TARGET_CHANGED")
     _focusKickProxy:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     _focusKickProxy:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
     _focusKickProxy:SetScript("OnEvent", function(_, event, unit)
+        local fkUnit = GetFocusKickUnit()
         if event == "PLAYER_FOCUS_CHANGED" then
+            if fkUnit ~= "focus" then return end
+            _focusKickLastPlateVisible = nil
+            ApplyFocusKickAnchor()
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            if fkUnit ~= "target" then return end
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_ADDED" then
-            if unit == "focus" or UnitIsUnit(unit or "none", "focus") then
+            if unit == fkUnit or UnitIsUnit(unit or "none", fkUnit) then
                 _focusKickLastPlateVisible = nil
                 ApplyFocusKickAnchor()
             end
@@ -3376,10 +3394,11 @@ local function EnsureFocusKickProxy()
         _focusKickTickAccum = _focusKickTickAccum + elapsed
         if _focusKickTickAccum < _FOCUSKICK_TICK_INTERVAL then return end
         _focusKickTickAccum = 0
-        -- Cheap reject: no focus -> nothing to watch.
-        if not UnitExists("focus") then return end
+        -- Cheap reject: no tracked unit -> nothing to watch.
+        local fkUnit = GetFocusKickUnit()
+        if not UnitExists(fkUnit) then return end
         local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit
-            and C_NamePlate.GetNamePlateForUnit("focus")
+            and C_NamePlate.GetNamePlateForUnit(fkUnit)
         local visibleNow
         if plate then
             local alpha = plate:GetEffectiveAlpha() or 0
@@ -3427,11 +3446,20 @@ ns.FOCUSKICK_SOUND_ORDER = FOCUSKICK_SOUND_ORDER
 -- One single proxy registered with RegisterUnitEvent on "focus" -- the
 -- token follows focus changes automatically.
 local _focusCastProxy
+local function RefreshFocusCastProxyUnit()
+    if not _focusCastProxy then return end
+    local unit = GetFocusKickUnit()
+    _focusCastProxy:UnregisterAllEvents()
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", unit)
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
+end
+ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
 local function EnsureFocusCastProxy()
     if _focusCastProxy then return _focusCastProxy end
     _focusCastProxy = CreateFrame("Frame")
-    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", "focus")
-    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "focus")
+    local unit = GetFocusKickUnit()
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", unit)
+    _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
     _focusCastProxy:SetScript("OnEvent", function()
         local bd = barDataByKey and barDataByKey[FOCUSKICK_BAR_KEY]
         if not bd then return end

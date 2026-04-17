@@ -1471,7 +1471,7 @@ local function CollectAndReanchor()
                                         if not self._presetItemID then return end
                                         local ffc = _ecmeFC[self]
                                         local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
-                                        if not bd2 or not bd2.showTooltip then print("[CDM-DBG] tooltip disabled for bar"); return end
+                                        if not bd2 or not bd2.showTooltip then return end
                                         GameTooltip_SetDefaultAnchor(GameTooltip, self)
                                         GameTooltip:SetItemByID(self._presetItemID)
                                         GameTooltip:Show()
