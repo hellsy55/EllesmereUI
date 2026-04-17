@@ -3752,9 +3752,9 @@ initFrame:SetScript("OnEvent", function(self)
             { r = 0.671, g = 0.431, b = 0.349 }, StatCategoryEnabled("PvP"))
 
         ---------------------------------------------------------------------------
-        --  INSPECT PANEL
+        --  INSPECT SHEET
         ---------------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "INSPECT PANEL", y);  y = y - h
+        _, h = W:SectionHeader(parent, "INSPECT SHEET", y);  y = y - h
 
         local themedInspectSheetRow
         themedInspectSheetRow, h = W:DualRow(parent, y,

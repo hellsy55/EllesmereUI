@@ -564,7 +564,7 @@ local function SkinInspectSheet()
         -- Talents button (bottom-right, shifted 2px right from original)
         if not frame._euiTalentsBtn then
             local blizTalentsBtn = paperDollItemsFrame and paperDollItemsFrame.InspectTalents
-            frame._euiTalentsBtn = MakeBottomButton("Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -12, function()
+            frame._euiTalentsBtn = MakeBottomButton("Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -7, function()
                 if blizTalentsBtn then blizTalentsBtn:Click() end
             end)
         end
@@ -687,13 +687,15 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Center weapon slots at bottom within the frame (406px wide).
-    if InspectMainHandSlot then
-        local weaponX = math.floor((406 - 103) / 2)
+    -- Center weapon slots at bottom. Use a container approach: anchor
+    -- MainHand so the midpoint of the pair lands on the frame center.
+    -- The pair is MainHand + 12px gap + SecondaryHand. Shift MainHand
+    -- left by half the group width so the center of the pair = frame center.
+    if InspectMainHandSlot and InspectSecondaryHandSlot then
+        local slotW = InspectMainHandSlot:GetWidth() or 45
+        local halfGroup = (slotW * 2 + 12) / 2
         InspectMainHandSlot:ClearAllPoints()
-        InspectMainHandSlot:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", weaponX, 10)
-    end
-    if InspectSecondaryHandSlot then
+        InspectMainHandSlot:SetPoint("BOTTOM", frame, "BOTTOM", -halfGroup + slotW / 2, 10)
         InspectSecondaryHandSlot:ClearAllPoints()
         InspectSecondaryHandSlot:SetPoint("TOPLEFT", InspectMainHandSlot, "TOPRIGHT", 12, 0)
     end
@@ -926,7 +928,7 @@ end
 
 -- Main function to apply themed inspect sheet
 local function ApplyThemedInspectSheet()
-    if not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet) then
+    if EllesmereUIDB and EllesmereUIDB.themedInspectSheet == false then
         return
     end
 
@@ -939,7 +941,7 @@ end
 
 -- Persistently hide NineSlice borders
 local function EnsureInspectNineSliceHidden()
-    if not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet) then return end
+    if EllesmereUIDB and EllesmereUIDB.themedInspectSheet == false then return end
     if not InspectFrame then return end
 
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05

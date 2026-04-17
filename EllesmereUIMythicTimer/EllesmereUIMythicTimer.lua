@@ -544,8 +544,17 @@ local function CompleteRun()
 
     StopTimerLoop()
 
-    local elapsedTime = GetChallengeModeElapsed()
-    currentRun.elapsed = elapsedTime or currentRun.elapsed
+    -- Use C_ChallengeMode.GetChallengeCompletionInfo() as the authoritative
+    -- completion time (milliseconds). GetWorldElapsedTime / _blizzElapsed can
+    -- return secret or stale values after depletion, producing "99:99" display.
+    local completionInfo = C_ChallengeMode and C_ChallengeMode.GetChallengeCompletionInfo
+        and C_ChallengeMode.GetChallengeCompletionInfo()
+    if completionInfo and completionInfo.time and completionInfo.time > 0 then
+        currentRun.elapsed = completionInfo.time / 1000
+    else
+        local elapsedTime = GetChallengeModeElapsed()
+        currentRun.elapsed = elapsedTime or currentRun.elapsed
+    end
     if currentRun.preciseStart and GetTimePreciseSec then
         currentRun.preciseCompletedElapsed = max(0, GetTimePreciseSec() - currentRun.preciseStart)
     end
