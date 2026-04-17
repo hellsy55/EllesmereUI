@@ -363,7 +363,7 @@ function EQT.InitVisibility()
             if ShouldAutoHide() then return false end
             if _eqtSuppressed then return false end
             local cfg = EQT.DB()
-            return cfg.enabled and cfg.visibility == "mouseover"
+            return cfg.visibility == "mouseover"
         end)
     end
 

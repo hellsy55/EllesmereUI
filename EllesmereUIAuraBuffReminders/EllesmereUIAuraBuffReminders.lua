@@ -3038,6 +3038,19 @@ _B.frame:SetScript("OnEvent", function(_, e, id)
     if e == "TRAIT_CONFIG_UPDATED" or e == "PLAYER_TALENT_UPDATE"
        or e == "SPELLS_CHANGED" or e == "PLAYER_SPECIALIZATION_CHANGED"
        or e == "PLAYER_LEVEL_CHANGED" then
+        -- Invalidate cached spell textures for beacon spells so dynamic
+        -- icon changes (e.g. BOL morphing to Virtue) pick up the new icon.
+        if texCache then
+            texCache[_B.BOL] = nil
+            texCache[_B.BOF] = nil
+        end
+        for _, sid in ipairs(_B.ALL) do
+            local f = _B.icons[sid]
+            if f and f._icon then
+                local t = Tex(sid)
+                if t then f._icon:SetTexture(t) end
+            end
+        end
         BeaconRefreshSoon()
         return
     end

@@ -4,6 +4,24 @@
 --  Called by BuildQoLPage via EllesmereUI.BuildMacroFactory(parent, y, PP)
 -------------------------------------------------------------------------------
 
+-- One-time migration: update EUI_Health macro body to the new static format
+-- (recuperate + combat health pots). Only runs once per account.
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if EllesmereUIDB._healthMacroMigrated then return end
+        local idx = GetMacroIndexByName("EUI_Health")
+        if idx == 0 then return end
+        if InCombatLockdown() then return end
+        local body = "#showtooltip item:241304\n/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305"
+        EditMacro(idx, nil, nil, body)
+        EllesmereUIDB._healthMacroMigrated = true
+    end)
+end
+
 function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local ICON_SIZE = 40
     local ICON_GAP = 40
@@ -35,11 +53,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             name = "EUI_Health",
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health Potion",
-            checkboxes = {
-                { key = "opt1", label = "Silvermoon Health Potion", items = {241304, 241305} },
-                { key = "opt2", label = "Healthstone",              items = {5512} },
-                { key = "opt3", label = "Demonic Healthstone",      items = {224464} },
-            },
+            fixedBody = "/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
+            fixedTooltip = "item:241304",
         },
         {
             name = "EUI_Food",
@@ -159,27 +174,32 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 order = {}
                 for i = 1, #cbs do order[i] = i end
             end
-            local lines = {}
+
+            -- Collect all enabled items
+            local availItems = {}
             local firstItemID
             for _, idx in ipairs(order) do
                 local cb = cbs[idx]
                 if cb and db[cb.key] ~= false then
                     for _, itemID in ipairs(cb.items) do
                         if not firstItemID then firstItemID = itemID end
-                        lines[#lines + 1] = "/use item:" .. itemID
+                        availItems[#availItems + 1] = itemID
                     end
                 end
             end
-            if #lines == 0 then return "" end
+
+            if #availItems == 0 and not firstItemID then return "" end
+
             local body = ""
             if db.showTooltip ~= false then
-                local availableItemID = GetFirstAvailableItemID(def, db)
-                if availableItemID then
-                    body = "#showtooltip item:" .. availableItemID .. "\n"
-                elseif firstItemID then
-                    body = "#showtooltip item:" .. firstItemID .. "\n"
-                end
+                local tipID = GetFirstAvailableItemID(def, db) or firstItemID
+                if tipID then body = "#showtooltip item:" .. tipID .. "\n" end
             end
+            local lines = {}
+            for _, itemID in ipairs(availItems) do
+                lines[#lines + 1] = "/use item:" .. itemID
+            end
+            if #lines == 0 then return "" end
             return body .. table.concat(lines, "\n")
         elseif def.fixedBody then
             local body = ""
@@ -714,17 +734,21 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         end
     end)
 
-    -- Update macros when bag changes (throttled), spec changes, or combat ends
+    -- Update macros when bag changes (throttled), spec changes, login, or combat ends
     local eventFrame = CreateFrame("Frame", nil, container)
     local bagUpdatePending = false
     eventFrame:RegisterEvent("BAG_UPDATE")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:SetScript("OnEvent", function(self, event)
         if event == "PLAYER_REGEN_ENABLED" then
             ProcessPendingMacroUpdates()
+            UpdateInventoryDependentMacros()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
             EllesmereUI:RefreshPage()
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            C_Timer.After(1, UpdateInventoryDependentMacros)
         elseif not bagUpdatePending then
             bagUpdatePending = true
             C_Timer.After(0.5, function()

@@ -1394,7 +1394,6 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 _greatVaultBtn:SetParent(minimap)
                 _greatVaultBtn:SetFrameLevel(minimap:GetFrameLevel() + 11)
                 _greatVaultBtn:ClearAllPoints()
-                _greatVaultBtn:SetSize(ungroupBtnSize, ungroupBtnSize)
                 if freeMove then
                     local idx = #ungrouped + (flyoutVisible and 1 or 0)
                     local yOff = idx * ungroupBtnSize

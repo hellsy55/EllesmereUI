@@ -1450,21 +1450,23 @@ EllesmereUI.RegisterMigration({
 --  re-enable it (the option isn't exposed in the new QT settings).
 --------------------------------------------------------------------------------
 EllesmereUI.RegisterMigration({
-    id          = "qt_minimap_reset_stale_enabled_false",
+    id          = "qt_minimap_ensure_enabled_v2",
     scope       = "profile",
-    description = "Reset quest tracker / minimap enabled=false inherited from the old Basics module.",
+    description = "Ensure quest tracker / minimap have enabled=true and visibility=always when missing or false.",
     body = function(ctx)
         local addons = ctx.profile.addons
         if type(addons) ~= "table" then return end
         local qt = addons.EllesmereUIQuestTracker
             and addons.EllesmereUIQuestTracker.questTracker
-        if type(qt) == "table" and qt.enabled == false then
-            qt.enabled = true
+        if type(qt) == "table" then
+            if not qt.enabled then qt.enabled = true end
+            if not qt.visibility then qt.visibility = "always" end
         end
         local mm = addons.EllesmereUIMinimap
             and addons.EllesmereUIMinimap.minimap
-        if type(mm) == "table" and mm.enabled == false then
-            mm.enabled = true
+        if type(mm) == "table" then
+            if not mm.enabled then mm.enabled = true end
+            if not mm.visibility then mm.visibility = "always" end
         end
     end,
 })

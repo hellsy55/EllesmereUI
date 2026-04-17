@@ -243,7 +243,13 @@ local _state = {
 }
 
 local function _activeKeystoneLevel()
-    if C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo then
+    -- IsChallengeModeActive only returns true when the timer is running,
+    -- not just from having a keystone in bags inside a dungeon.
+    if not C_ChallengeMode then return nil end
+    if not C_ChallengeMode.IsChallengeModeActive or not C_ChallengeMode.IsChallengeModeActive() then
+        return nil
+    end
+    if C_ChallengeMode.GetActiveKeystoneInfo then
         local lvl = C_ChallengeMode.GetActiveKeystoneInfo()
         return (lvl and lvl > 0) and lvl or nil
     end
@@ -255,7 +261,13 @@ local function ShouldShow()
     if not p or not p.enabled then return false end
     local v = p.visibility or "MPLUS_AND_RAID"
     if v == "NEVER" then return false end
-    if EllesmereUI and EllesmereUI._unlockActive then return true end  -- always visible while moving
+    if EllesmereUI and EllesmereUI._unlockActive then return true end
+
+    -- Hard gate: must be in a party or raid instance. Prevents any
+    -- stuck state from showing the icon in town/open world.
+    local _, instanceType = GetInstanceInfo()
+    if instanceType ~= "party" and instanceType ~= "raid" then return false end
+
     local wantMPlus = (v == "MPLUS_AND_RAID" or v == "MPLUS")
     local wantRaid  = (v == "MPLUS_AND_RAID" or v == "RAID")
     if wantMPlus and _state.inChallenge then return true end

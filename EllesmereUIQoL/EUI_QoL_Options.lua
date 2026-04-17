@@ -18,6 +18,7 @@ initFrame:SetScript("OnEvent", function(self)
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
         pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_BREZ },
+        searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_QOL and _G._EUI_BuildQoLPage then
                 return _G._EUI_BuildQoLPage(pageName, parent, yOffset)

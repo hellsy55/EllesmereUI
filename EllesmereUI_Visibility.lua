@@ -21,7 +21,7 @@ EUI.IsInCombat = IsInCombat
 -------------------------------------------------------------------------------
 -- Returns true = show, false = hide, "mouseover" = mouseover mode
 local function EvalVisibility(cfg)
-    if not cfg or not cfg.enabled then return false end
+    if not cfg then return true end
     if EUI.CheckVisibilityOptions and EUI.CheckVisibilityOptions(cfg) then
         return false
     end
@@ -115,14 +115,25 @@ mouseoverPoll:SetScript("OnUpdate", function(_, dt)
     for i = 1, #mouseoverTargets do
         local t = mouseoverTargets[i]
         local frame = t.frame
-        if frame and frame:IsShown() and t.isActive() then
-            local over = frame:IsMouseOver()
-            if over and not t.visible then
-                t.visible = true
-                frame:SetAlpha(1)
-            elseif not over and t.visible then
-                t.visible = false
-                frame:SetAlpha(0)
+        if frame and frame:IsShown() then
+            if t.isActive() then
+                t._wasActive = true
+                local over = frame:IsMouseOver()
+                if over and not t.visible then
+                    t.visible = true
+                    frame:SetAlpha(1)
+                elseif not over and t.visible then
+                    t.visible = false
+                    frame:SetAlpha(0)
+                end
+            elseif t._wasActive then
+                -- isActive just turned off while we had alpha at 0.
+                -- Restore alpha so non-mouseover modes aren't stuck hidden.
+                t._wasActive = false
+                if not t.visible then
+                    t.visible = nil
+                    frame:SetAlpha(1)
+                end
             end
         end
     end
