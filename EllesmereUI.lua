@@ -851,7 +851,9 @@ do
     local _pixelSnapDisabled = setmetatable({}, { __mode = "k" })
 
     function PP.DisablePixelSnap(obj)
-        if not obj or _pixelSnapDisabled[obj] then return end
+        if not obj then return end
+        if issecretvalue and issecretvalue(obj) then return end
+        if _pixelSnapDisabled[obj] then return end
         if obj.IsForbidden and obj:IsForbidden() then return end
 
         -- Textures and FontStrings expose SetSnapToPixelGrid directly
@@ -6640,7 +6642,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.7.9"
+EllesmereUI.VERSION = "6.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6821,7 +6823,7 @@ EllesmereUI._RunConflictCheck = function()
         end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
-            { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. Element positioning will be highly unstable if left used at the same time." },
+            { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. If you ONLY use for sound alerts it should be okay but may still cause issues." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
             { addon = "UnhaltedUnitFrames",       label = "Unhalted Unit Frames",       targets = { "EllesmereUIUnitFrames" } },

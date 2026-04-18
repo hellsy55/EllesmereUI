@@ -560,11 +560,9 @@ end
 function EllesmereUI.RefreshAllAddons()
     -- ResourceBars (full rebuild)
     if _G._ERB_Apply then _G._ERB_Apply() end
-    -- CDM: skip during spec-profile switch. CDM's own PLAYER_SPECIALIZATION_CHANGED
-    -- handler will update the active spec key and rebuild with the correct spec
-    -- spells via OnSpecChanged's deferred FullCDMRebuild. Running it here
-    -- would use a stale active spec key (not yet updated by CDM) and show the
-    -- wrong spec's spells until the deferred rebuild overwrites them.
+    -- CDM: skip during spec-profile switch. CDM's SPELLS_CHANGED handler
+    -- will detect the spec key mismatch and rebuild with the correct spec.
+    -- Running it here would race with that rebuild.
     if not EllesmereUI._specProfileSwitching then
         if _G._ECME_LoadSpecProfile and _G._ECME_GetCurrentSpecKey then
             local curKey = _G._ECME_GetCurrentSpecKey()
@@ -603,9 +601,9 @@ function EllesmereUI.RefreshAllAddons()
                 -- That triggers a rebuild + ApplyAllWidthHeightMatches before
                 -- CDMFinishSetup has had a chance to run, propagating
                 -- transient mid-rebuild sizes through width-match and
-                -- corrupting iconSize in saved variables. CDM's OnSpecChanged
-                -- handles the rebuild at spec_change + 0.5s; other addons'
-                -- positions don't change on spec swap so skipping is safe.
+                -- corrupting iconSize in saved variables. CDM's SPELLS_CHANGED
+                -- handler handles the rebuild; other addons' positions don't
+                -- change on spec swap so skipping is safe.
                 if EllesmereUI._specProfileSwitching then return end
                 -- Re-apply centralized positions (migrates legacy formats)
                 if EllesmereUI._applySavedPositions then
@@ -618,9 +616,9 @@ function EllesmereUI.RefreshAllAddons()
             end)
         end)
     end)
-    -- Note: _specProfileSwitching is cleared by CDM's OnSpecChanged after
-    -- its deferred rebuild settles -- not here. CDMFinishSetup runs at
-    -- spec_change + 0.5s, which is well after this triple-deferred chain
+    -- Note: _specProfileSwitching is cleared by CDM's ProcessSpecChange
+    -- after its rebuild settles -- not here. The rebuild runs from
+    -- SPELLS_CHANGED which is well after this triple-deferred chain
     -- (~3 frames = ~50ms), so clearing the flag here would let width-match
     -- propagation run against transient mid-rebuild bar sizes once CDM
     -- starts rebuilding and corrupt iconSize in saved variables.

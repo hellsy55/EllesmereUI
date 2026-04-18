@@ -1164,6 +1164,7 @@ local function CollectAndReanchor()
     local allActiveFrames = _scratch_activeFrames
     local usedFrames = _scratch_usedFrames
 
+
     -- Buff bars: existing entry-based collection (unchanged)
     local barLists = _scratch_barLists
     local seenSpell = _scratch_seenSpell

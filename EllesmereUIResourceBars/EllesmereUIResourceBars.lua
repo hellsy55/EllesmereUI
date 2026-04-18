@@ -107,36 +107,37 @@ local CHANNEL_TICK_DATA = {
 -------------------------------------------------------------------------------
 --  Class/Spec resource mapping
 -------------------------------------------------------------------------------
-local CLASS_COLORS = {
-    WARRIOR     = { 0.78, 0.61, 0.43 },
-    PALADIN     = { 0.96, 0.55, 0.73 },
-    HUNTER      = { 0.67, 0.83, 0.45 },
-    ROGUE       = { 1.00, 0.96, 0.41 },
-    PRIEST      = { 1.00, 1.00, 1.00 },
-    DEATHKNIGHT = { 0.77, 0.12, 0.23 },
-    SHAMAN      = { 0.00, 0.44, 0.87 },
-    MAGE        = { 0.25, 0.78, 0.92 },
-    WARLOCK     = { 0.53, 0.53, 0.93 },
-    MONK        = { 0.00, 1.00, 0.60 },
-    DRUID       = { 1.00, 0.49, 0.04 },
-    DEMONHUNTER = { 0.64, 0.19, 0.79 },
-    EVOKER      = { 0.20, 0.58, 0.50 },
+-- Class and power colors read from EllesmereUI's global color system
+-- (EllesmereUI.GetClassColor / GetPowerColor). These respect the user's
+-- custom color overrides from General Options. Metatable wrappers convert
+-- the {r=,g=,b=} table format to {r,g,b} arrays for existing callsites.
+local CLASS_COLORS = setmetatable({}, { __index = function(_, classFile)
+    if not EllesmereUI or not EllesmereUI.GetClassColor then return nil end
+    local c = EllesmereUI.GetClassColor(classFile)
+    if c then return { c.r, c.g, c.b } end
+    return nil
+end })
+
+-- Power type enum -> EUI power key string mapping for GetPowerColor lookup
+local POWER_ENUM_TO_KEY = {
+    [PT.MANA]        = "MANA",
+    [PT.RAGE]        = "RAGE",
+    [PT.FOCUS]       = "FOCUS",
+    [PT.ENERGY]      = "ENERGY",
+    [PT.RUNIC_POWER] = "RUNIC_POWER",
+    [PT.LUNAR_POWER] = "LUNAR_POWER",
+    [PT.MAELSTROM]   = "MAELSTROM",
+    [PT.INSANITY]    = "INSANITY",
+    [PT.FURY]        = "FURY",
+    [PT.PAIN]        = "PAIN",
 }
 
-local POWER_COLORS = {
-    [PT.MANA]        = { 0.00, 0.55, 1.00 },
-    [PT.RAGE]        = { 0.90, 0.15, 0.15 },
-    [PT.FOCUS]       = { 0.77, 0.53, 0.24 },
-    [PT.ENERGY]      = { 1.00, 0.96, 0.41 },
-    [PT.RUNIC_POWER] = { 0.00, 0.82, 1.00 },
-    [PT.LUNAR_POWER] = { 0.30, 0.52, 0.90 },
+-- Fallback defaults for power types not in EUI's global color system
+-- (point resources, aura-tracked resources).
+local POWER_COLORS_FALLBACK = {
     [PT.HOLY_POWER]  = { 0.95, 0.90, 0.60 },
-    [PT.MAELSTROM]   = { 0.00, 0.50, 1.00 },
     [PT.CHI]         = { 0.71, 1.00, 0.92 },
-    [PT.INSANITY]    = { 0.40, 0.00, 0.80 },
     [PT.ARCANE]      = { 0.10, 0.69, 0.97 },
-    [PT.FURY]        = { 0.79, 0.26, 0.99 },
-    [PT.PAIN]        = { 1.00, 0.61, 0.00 },
     [PT.ESSENCE]     = { 0.20, 0.58, 0.50 },
     [PT.SOUL_SHARDS] = { 0.58, 0.51, 0.79 },
     [PT.COMBO]       = { 1.00, 0.96, 0.41 },
@@ -155,6 +156,19 @@ local POWER_COLORS = {
     ["ICICLES"] = { 0.45, 0.85, 1.00 },
     ["BREWMASTER_STAGGER"] = { 0.52, 1.00, 0.52 },  -- green (light stagger default)
 }
+
+local POWER_COLORS = setmetatable({}, { __index = function(_, powerKey)
+    -- Try EUI's global color system first (respects user overrides)
+    if EllesmereUI and EllesmereUI.GetPowerColor then
+        local key = type(powerKey) == "number" and POWER_ENUM_TO_KEY[powerKey] or powerKey
+        if key then
+            local c = EllesmereUI.GetPowerColor(key)
+            if c then return { c.r, c.g, c.b } end
+        end
+    end
+    -- Fallback for point resources and aura-tracked types not in global system
+    return POWER_COLORS_FALLBACK[powerKey]
+end })
 
 -- Dark theme colors (matches unit frames)
 local DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A = 0x11/255, 0x11/255, 0x11/255, 0.90
@@ -1761,12 +1775,18 @@ local function BuildBars()
         elseif sp.unlockPos and sp.unlockPos.point then
             ApplyBarAnchor(secondaryFrame, "none")
             secondaryFrame:SetSize(frameW, frameH)
-            if not EllesmereUI._unlockActive then
-                if not EllesmereUI.IsUnlockAnchored("ERB_ClassResource") or not secondaryFrame:GetLeft() then
-                    local sx, sy = SnapXY(sp.unlockPos.x, sp.unlockPos.y, secondaryFrame, sp.unlockPos)
-                    secondaryFrame:ClearAllPoints()
-                    secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sx, sy)
-                end
+            -- Position is applied by ApplySavedPositions (the single
+            -- authority for unlock positions). Applying it here too
+            -- causes a double-snap: BuildBars and applyPos capture
+            -- effective scale at different times, and SnapCenterForDim
+            -- can produce coordinates that differ by 1px. Only fall
+            -- back to inline positioning when the frame has no bounds
+            -- at all (first-ever build before ApplySavedPositions has
+            -- run).
+            if not secondaryFrame:GetLeft() then
+                local sx, sy = SnapXY(sp.unlockPos.x, sp.unlockPos.y, secondaryFrame, sp.unlockPos)
+                secondaryFrame:ClearAllPoints()
+                secondaryFrame:SetPoint(sp.unlockPos.point, UIParent, sp.unlockPos.relPoint or sp.unlockPos.point, sx, sy)
             end
         else
             ApplyBarAnchor(secondaryFrame, "none")

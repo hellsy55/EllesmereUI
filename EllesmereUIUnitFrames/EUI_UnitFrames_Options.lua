@@ -210,12 +210,13 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         local pFill = pv._powerFill
                         if pFill then
+                            local pvR, pvG, pvB = pv._pR or 0, pv._pG or 0, pv._pB or 1
                             if texPath then
                                 pFill:SetTexture(texPath)
-                                pFill:SetVertexColor(0, 0, 1, 1)
+                                pFill:SetVertexColor(pvR, pvG, pvB, 1)
                             else
                                 pFill:SetVertexColor(1, 1, 1, 1)
-                                pFill:SetColorTexture(0, 0, 1, 1)
+                                pFill:SetColorTexture(pvR, pvG, pvB, 1)
                             end
                         end
                     end
@@ -1201,20 +1202,26 @@ initFrame:SetScript("OnEvent", function(self)
             if texPath then
                 healthFill:SetTexture(texPath)
                 healthFill:SetVertexColor(hR, hG, hB, 1)
-                if pf._powerFill and powerH > 0 then
+            end
+            if pf._powerFill and powerH > 0 then
+                local txR, txG, txB
+                local isPwrC = settings.powerPercentPowerColor ~= false
+                if isPwrC then
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    txR, txG, txB = info.r, info.g, info.b
+                else
+                    local cpf = settings.customPowerFillColor
+                    if cpf then txR, txG, txB = cpf.r, cpf.g, cpf.b
+                    else txR, txG, txB = 0, 0, 1 end
+                end
+                pf._pR, pf._pG, pf._pB = txR, txG, txB
+                if texPath then
                     pf._powerFill:SetTexture(texPath)
-                    local txR, txG, txB
-                    local isPwrC = settings.powerPercentPowerColor ~= false
-                    if isPwrC then
-                        local _, pToken = UnitPowerType("player")
-                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                        txR, txG, txB = info.r, info.g, info.b
-                    else
-                        local cpf = settings.customPowerFillColor
-                        if cpf then txR, txG, txB = cpf.r, cpf.g, cpf.b
-                        else txR, txG, txB = 0, 0, 1 end
-                    end
                     pf._powerFill:SetVertexColor(txR, txG, txB, 1)
+                else
+                    pf._powerFill:SetVertexColor(1, 1, 1, 1)
+                    pf._powerFill:SetColorTexture(txR, txG, txB, 1)
                 end
             end
         end
@@ -1865,6 +1872,7 @@ initFrame:SetScript("OnEvent", function(self)
                             if cpf2 then pvFR, pvFG, pvFB = cpf2.r, cpf2.g, cpf2.b
                             else pvFR, pvFG, pvFB = 0, 0, 1 end
                         end
+                        pf._pR, pf._pG, pf._pB = pvFR, pvFG, pvFB
                         if curTexPath then
                             pf._powerFill:SetTexture(curTexPath)
                             pf._powerFill:SetVertexColor(pvFR, pvFG, pvFB, 1)
@@ -1945,7 +1953,16 @@ initFrame:SetScript("OnEvent", function(self)
                 local cpBg = s.customPowerBgColor
                 if cpBg then pvPbR, pvPbG, pvPbB = cpBg.r, cpBg.g, cpBg.b
                 else pvPbR, pvPbG, pvPbB = 17/255, 17/255, 17/255 end
-                if pf._powerFill then pf._powerFill:SetColorTexture(pvPfR, pvPfG, pvPfB, 1) end
+                if pf._powerFill then
+                    local curTK = s.healthBarTexture or db.profile.healthBarTexture or "none"
+                    local curTP = (ns.healthBarTextures or {})[curTK]
+                    if curTP then
+                        pf._powerFill:SetTexture(curTP)
+                        pf._powerFill:SetVertexColor(pvPfR, pvPfG, pvPfB, 1)
+                    else
+                        pf._powerFill:SetColorTexture(pvPfR, pvPfG, pvPfB, 1)
+                    end
+                end
                 if pf._powerBg then pf._powerBg:SetColorTexture(pvPbR, pvPbG, pvPbB, 1) end
             end
 

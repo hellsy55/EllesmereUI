@@ -713,8 +713,12 @@ local function ApplyHealthBarTexture(health, unitKey)
     local hFill = health:GetStatusBarTexture()
     if hFill then UnsnapTex(hFill) end
 
-    -- Power bar: same texture
+    -- Power bar: same texture. Walk up from health to find the oUF frame
+    -- (health may be parented to a clip container, not the oUF frame directly).
     local frame = health:GetParent()
+    if frame and not frame.Power and frame:GetParent() then
+        frame = frame:GetParent()
+    end
     local power = frame and frame.Power
     if power then
         if path then
@@ -2076,7 +2080,11 @@ local function CreatePowerBar(frame, unit, settings)
         PP.Point(power, "TOPRIGHT", frame.Health, "BOTTOMRIGHT", 0, 0)
     end
 
-    power:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    -- Apply the same bar texture as health (respects user's texture selection).
+    -- Falls back to WHITE8X8 if no texture is configured.
+    local texKey = (settings and settings.healthBarTexture) or (db.profile.healthBarTexture) or "none"
+    local texPath = EllesmereUI.ResolveTexturePath(healthBarTextures, texKey, "Interface\\Buttons\\WHITE8X8")
+    power:SetStatusBarTexture(texPath)
     power:GetStatusBarTexture():SetHorizTile(false)
     do
         local pFill = power:GetStatusBarTexture()

@@ -870,7 +870,8 @@ local function SkinBlock(block)
                 if ok then
                     if otype == "StatusBar" and EQT._SkinWidgetBar then
                         EQT._SkinWidgetBar(child)
-                    elseif otype == "Frame" or otype == "Button" then
+                    elseif (otype == "Frame" or otype == "Button")
+                           and not child.Tooltip then
                         if child.GetRegions then
                             for _, rg in ipairs({ child:GetRegions() }) do
                                 local ot = rg.GetObjectType and rg:GetObjectType()

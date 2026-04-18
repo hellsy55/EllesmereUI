@@ -490,8 +490,10 @@ end
 --  Spec helpers
 --
 --  Single source of truth: the live game API. We cache the resolved spec key
---  on first read and invalidate it on PLAYER_SPECIALIZATION_CHANGED. Nothing
---  is ever stored to SavedVariables -- the live API IS the truth.
+--  on first read. The cache is never set to nil during normal operation --
+--  it transitions atomically from old key to new key inside ProcessSpecChange.
+--  InvalidateSpecKey exists only for the early-login wakeFrame (before CDM
+--  setup has completed) and is never called during spec change processing.
 --
 --  Returns nil when the spec API is not ready yet (very early login). All
 --  consumers must bail when this returns nil rather than fall back to a
@@ -509,9 +511,22 @@ function ns.GetActiveSpecKey()
     return _cachedSpecKey
 end
 
+-- Only used by the early-login wakeFrame before CDM setup has completed.
+-- Never called during spec change processing.
 function ns.InvalidateSpecKey()
     _cachedSpecKey = nil
 end
+
+-- Compute the live spec key from the game API without touching the cache.
+-- Returns nil if the API isn't ready yet.
+local function ComputeLiveSpecKey()
+    local specIndex = GetSpecialization and GetSpecialization()
+    if not specIndex or specIndex == 0 then return nil end
+    local specID = select(1, C_SpecializationInfo.GetSpecializationInfo(specIndex))
+    if not specID or specID == 0 then return nil end
+    return tostring(specID)
+end
+ns.ComputeLiveSpecKey = ComputeLiveSpecKey
 
 -- Kept for any legacy callers that need a per-character identifier.
 -- No longer used for spec storage.
@@ -781,35 +796,29 @@ end
 ---
 --- Pattern: don't use a fixed wall-clock delay -- Blizzard's viewer pools
 --- repopulate at unpredictable times after a spec swap. Instead, use
---- SPELLS_CHANGED as the readiness signal (Blizzard guarantees spell data
---- is fully refreshed when this fires), with a +0.5s safety net for the
---- rare case where SPELLS_CHANGED doesn't follow PLAYER_SPECIALIZATION_CHANGED.
+--- Spec change processing.
 ---
---- Flow:
----   1. PLAYER_SPECIALIZATION_CHANGED -> OnSpecChanged sets pending flag
----   2. SPELLS_CHANGED -> if pending, ProcessSpecChange runs immediately
----   3. (Safety) C_Timer.After(0.5) -> if still pending, ProcessSpecChange
+--- SPELLS_CHANGED is the sole trigger for spec change rebuilds. It fires
+--- for both manual spec swaps and LFG auto-swaps, and guarantees that
+--- Blizzard's spell data and viewer pools are fully populated.
 ---
---- ProcessSpecChange is idempotent via the pending flag and guarded by
---- a token so stale callbacks from a superseded swap can't fire.
-local _specChangeToken = 0
+--- On every SPELLS_CHANGED, CheckSpecChange compares the live spec key
+--- (from GetSpecialization) to the cached key. If they differ, the spec
+--- changed and ProcessSpecChange runs a full talent_reconcile rebuild.
+--- The cached key is swapped atomically BEFORE the rebuild so
+--- GetBarSpellData always has a valid key. No nil window.
+local function ProcessSpecChange(newSpecKey)
+    if not newSpecKey then return end
 
-local function ProcessSpecChange()
-    if not ns._pendingSpecChange then return end
-    -- Spec API readiness check. GetSpecialization() can briefly return 0/nil
-    -- after PLAYER_SPECIALIZATION_CHANGED while Blizzard updates internal
-    -- state. Bail without clearing pending so the next signal retries.
-    local specIdx = GetSpecialization and GetSpecialization()
-    if not specIdx or specIdx == 0 then return end
+    -- Atomic swap: write the new key BEFORE rebuilding so every
+    -- GetBarSpellData call during the rebuild reads the correct spec.
+    _cachedSpecKey = newSpecKey
 
-    ns._pendingSpecChange = false
-    ns.InvalidateSpecKey()
+    -- Suppress the _ECME_Apply rebuild that the profile system will fire
+    -- via RefreshAllAddons. We're about to do a full talent_reconcile
+    -- rebuild which is strictly stronger.
+    ns._specChangeJustRan = true
 
-    -- Same authoritative trigger pattern as login: set the flag, then run
-    -- the wipe + rebuild. The synchronous CollectAndReanchor inside
-    -- FullCDMRebuild's isFullWipe branch will pick up the flag at its end
-    -- and fire ApplyAllWidthHeightMatches + _applySavedPositions in the
-    -- right order, with correct icon counts and bar sizes.
     ns._pendingApplyOnReanchor = true
 
     -- Full wipe + rebuild path. talent_reconcile reason triggers the
@@ -817,8 +826,7 @@ local function ProcessSpecChange()
     -- _prevIconRefs / _prevVisibleCount, clears anchor state in
     -- _hookFrameData, clears all FC caches on viewer pool frames, then
     -- runs a direct synchronous CollectAndReanchor. After this returns,
-    -- cdmBarIcons is populated with the new spec's icons (provided
-    -- Blizzard's viewer pools are ready, which SPELLS_CHANGED guarantees).
+    -- cdmBarIcons is populated with the new spec's icons.
     if ns.FullCDMRebuild then
         ns.FullCDMRebuild("talent_reconcile")
     end
@@ -830,28 +838,17 @@ local function ProcessSpecChange()
 end
 ns.ProcessSpecChange = ProcessSpecChange
 
-local function OnSpecChanged()
-    ns._pendingSpecChange = true
-    _specChangeToken = _specChangeToken + 1
-    local myToken = _specChangeToken
-
-    -- Try immediately at next frame in case spec data is already ready
-    -- (zone-in spec swaps land here with everything populated).
-    C_Timer.After(0, function()
-        if myToken ~= _specChangeToken then return end
-        ProcessSpecChange()
-    end)
-
-    -- Safety net: if SPELLS_CHANGED never fires (or fired before our
-    -- pending flag was set), force the rebuild after a short delay.
-    C_Timer.After(0.5, function()
-        if myToken ~= _specChangeToken then return end
-        if ns._pendingSpecChange then
-            ProcessSpecChange()
-        end
-    end)
+-- Compare live spec to cached spec. If different, process the change.
+-- Called exclusively from SPELLS_CHANGED. Idempotent: once
+-- ProcessSpecChange runs, the cached key matches live and subsequent
+-- calls are no-ops.
+local function CheckSpecChange()
+    local liveKey = ComputeLiveSpecKey()
+    if liveKey and liveKey ~= _cachedSpecKey then
+        ProcessSpecChange(liveKey)
+    end
 end
-ns.OnSpecChanged = OnSpecChanged
+ns.CheckSpecChange = CheckSpecChange
 
 -------------------------------------------------------------------------------
 --  CDM Bar Roots
@@ -4824,12 +4821,10 @@ function ECME:OnInitialize()
     -- Expose for options
     _G._ECME_AceDB = self.db
     _G._ECME_Apply = function()
-        -- Skip FullCDMRebuild if a CD/utility spell change just happened
-        -- (AddTrackedSpell/RemoveTrackedSpell already handled routes + reanchor).
-        -- The _skipNextApplyRebuild flag prevents the double-reanchor that
-        -- causes icon 1 to disappear.
         if ns._skipNextApplyRebuild then
             ns._skipNextApplyRebuild = false
+        elseif ns._specChangeJustRan then
+            ns._specChangeJustRan = false
         else
             ns.FullCDMRebuild("apply")
         end
@@ -5301,7 +5296,7 @@ end
 -- Event frame
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -5497,14 +5492,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                 end
             end)
         else
-            -- Zone transition (e.g. BG exit): Blizzard viewer frames may have
-            -- been recycled. Re-collect and re-apply visibility after a brief
-            -- delay to let the viewer state settle.
+            -- Zone transition: re-apply visibility (mounted state etc. may
+            -- have changed). No rebuild or reanchor -- if the spec changed,
+            -- SPELLS_CHANGED handles the rebuild if the spec changed.
             _CDMApplyVisibility()
-            C_Timer.After(0.5, function()
-                if ns.QueueReanchor then ns.QueueReanchor() end
-                _CDMApplyVisibility()
-            end)
         end
         -- Flush deferred TBB rebuild that was queued during combat
         if event == "PLAYER_REGEN_ENABLED" and ns.IsTBBRebuildPending and ns.IsTBBRebuildPending() then
@@ -5518,18 +5509,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
-        -- Zone-in: invalidate the spec cache (in case the player auto-swapped
-        -- spec via LFG / dungeon role) and rebuild if the spec is known.
-        local gen = ns.GetRebuildGen()
-        C_Timer.After(0.5, function()
-            if ns.GetRebuildGen() ~= gen then return end  -- another rebuild already ran
-            ns.InvalidateSpecKey()
-            if not ns.GetActiveSpecKey() then return end -- spec API not ready
-            local p = ECME.db and ECME.db.profile
-            if p then
-                ns.FullCDMRebuild("zone_in")
-            end
-        end)
         -- Install rotation helper hook after CDM frames have been built
         C_Timer.After(1, function()
             InstallRotationHook()
@@ -5540,21 +5519,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         C_Timer.After(1.5, _CDMApplyVisibility)
     end
     if event == "SPELLS_CHANGED" then
-        -- SPELLS_CHANGED is the readiness signal for a pending spec change:
-        -- Blizzard guarantees spell/viewer data is fully refreshed when this
-        -- fires. Drive ProcessSpecChange immediately so we don't have to
-        -- rely on the +0.5s safety timer.
-        if ns._pendingSpecChange and ns.ProcessSpecChange then
-            ns.ProcessSpecChange()
-        end
-        -- Same readiness guarantee used on login: mark the authoritative
-        -- width-match / saved-position pass safe to run. CDMFinishSetup sets
-        -- ns._pendingApplyOnReanchor synchronously at login; the first
-        -- reanchor that happens AFTER SPELLS_CHANGED is the earliest moment
-        -- the viewer pools are guaranteed populated, so the pass should be
-        -- gated on this flag (see CollectAndReanchor consumption site).
-        -- If a reanchor already ran before SPELLS_CHANGED, the pending flag
-        -- is still set -- force one now so the deferred pass fires.
+        CheckSpecChange()
         if not ns._spellsReadyForApply then
             ns._spellsReadyForApply = true
             if ns._pendingApplyOnReanchor and ns.QueueReanchor then
@@ -5564,10 +5529,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
+        -- Non-rebuild work only. The actual spec change rebuild is
+        -- driven by SPELLS_CHANGED above (which fires for both manual
+        -- and auto swaps). This handler just invalidates caches that
+        -- need immediate clearing.
         if EllesmereUI and EllesmereUI.InvalidateFrameCache then
             EllesmereUI.InvalidateFrameCache()
         end
-        ns.OnSpecChanged()
     end
     RequestUpdate()
 end)
