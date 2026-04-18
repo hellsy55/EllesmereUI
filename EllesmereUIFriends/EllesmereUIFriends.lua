@@ -1596,7 +1596,10 @@ local function SkinFriendsFrame()
         local LIST_BOTTOM = 35
         local LIST_LEFT = 15
         local LIST_RIGHT = -15
+        local _sizeApplied = false
         local function ApplySize()
+            if _sizeApplied then return end
+            _sizeApplied = true
             frame:SetWidth(origW - 40)
             frame:SetHeight(origH + EXTRA_H)
             FriendsListFrame:SetHeight(origListH + EXTRA_H)
@@ -1643,15 +1646,18 @@ local function SkinFriendsFrame()
         local function ApplyScaleAndPosition()
             local fp = EBS.db.profile.friends
             local scale = fp.scale or 1
-            frame:SetScale(scale)
-            -- Match scale on our UIParent-parented ScrollBox + ScrollBar
-            if frame._ebsOurScrollBox then frame._ebsOurScrollBox:SetScale(scale) end
-            if frame._ebsOurScrollBar then frame._ebsOurScrollBar:SetScale(scale) end
-            -- Also scale scrollbar track + hit area (parented to UIParent)
-            if frame._ebsOurScrollBox and frame._ebsOurScrollBox._ebsTrack then
-                frame._ebsOurScrollBox._ebsTrack:SetScale(scale)
-                if frame._ebsOurScrollBox._ebsTrack._hitArea then
-                    frame._ebsOurScrollBox._ebsTrack._hitArea:SetScale(scale)
+            -- Only call SetScale when it actually changed -- calling it on
+            -- a visible frame forces WoW to recalculate every child's world
+            -- coordinates in one frame, causing a visible stutter.
+            if frame:GetScale() ~= scale then
+                frame:SetScale(scale)
+                if frame._ebsOurScrollBox then frame._ebsOurScrollBox:SetScale(scale) end
+                if frame._ebsOurScrollBar then frame._ebsOurScrollBar:SetScale(scale) end
+                if frame._ebsOurScrollBox and frame._ebsOurScrollBox._ebsTrack then
+                    frame._ebsOurScrollBox._ebsTrack:SetScale(scale)
+                    if frame._ebsOurScrollBox._ebsTrack._hitArea then
+                        frame._ebsOurScrollBox._ebsTrack._hitArea:SetScale(scale)
+                    end
                 end
             end
             -- Position: saved > default Blizzard
@@ -1733,7 +1739,6 @@ local function SkinFriendsFrame()
             local fp = EBS.db.profile.friends
             local pos = _ebsTempPos or fp.position
             if not pos then return end
-            _ebsIgnoreSetPoint = true
             local px, py = pos.x, pos.y
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and px and py then
@@ -1748,6 +1753,15 @@ local function SkinFriendsFrame()
                     py = PPa.SnapForES(py, es)
                 end
             end
+            -- Skip if already at the correct position (avoids ClearAllPoints
+            -- flash during Blizzard's UIPanelLayout pass on show)
+            local curPt, _, curRel, curX, curY = frame:GetPoint(1)
+            if curPt == pos.point and curRel == pos.relPoint
+               and curX and curY and math.abs(curX - px) < 0.01
+               and math.abs(curY - py) < 0.01 then
+                return
+            end
+            _ebsIgnoreSetPoint = true
             frame:ClearAllPoints()
             frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
             _ebsIgnoreSetPoint = false
@@ -3871,11 +3885,31 @@ local function SkinFriendsFrame()
     local _ebsRebuilding = false
     local _ebsRebuildPending = false
 
-    local function RebuildFriendsDataProvider()
+    local _rebuildScheduled = false
+    local _lastRebuildTime = 0
+    local RebuildFriendsDataProviderImpl  -- forward decl
+    local function RebuildFriendsDataProvider(source)
         if _ebsRebuilding then
             _ebsRebuildPending = true
             return
         end
+        if not FriendsFrame or not FriendsFrame:IsShown() then return end
+        if not EBS.db or not EBS.db.profile.friends.enabled then return end
+        -- Skip if a rebuild just completed (within 500ms). Blizzard fires
+        -- FriendsList_Update multiple times during the show sequence.
+        if debugprofilestop() - _lastRebuildTime < 500 then return end
+        if not _rebuildScheduled then
+            _rebuildScheduled = true
+            C_Timer.After(0.2, function()
+                _rebuildScheduled = false
+                if RebuildFriendsDataProviderImpl then
+                    RebuildFriendsDataProviderImpl()
+                end
+            end)
+        end
+    end
+    RebuildFriendsDataProviderImpl = function()
+        if _ebsRebuilding then return end
         if not FriendsFrame:IsShown() then return end
         if not EBS.db or not EBS.db.profile.friends.enabled then return end
         local fp = EBS.db.profile.friends
@@ -4092,6 +4126,7 @@ local function SkinFriendsFrame()
         _ebsRebuilding = true
         sb:SetDataProvider(newDP, true)  -- safe: sb is our own ScrollBox, not Blizzard's
         _ebsRebuilding = false
+        _lastRebuildTime = debugprofilestop()
 
         -- Scroll to a specific friend after rebuild (e.g. after adding to group)
         if _G._EBS_ScrollToFriend then
@@ -4139,33 +4174,23 @@ local function SkinFriendsFrame()
             end)
         end
 
-        if _ebsRebuildPending then
-            _ebsRebuildPending = false
-            C_Timer.After(0, RebuildFriendsDataProvider)
-        end
     end
 
     -- Expose for menu callbacks
-    _G._EBS_RebuildFriendsDP = RebuildFriendsDataProvider
+    _G._EBS_RebuildFriendsDP = function() RebuildFriendsDataProvider("global") end
 
     -- Hook FriendsList_Update to rebuild after Blizzard
     if FriendsList_Update then
-        hooksecurefunc("FriendsList_Update", RebuildFriendsDataProvider)
+        hooksecurefunc("FriendsList_Update", function() RebuildFriendsDataProvider("FriendsList_Update") end)
     end
 
-    -- Listen for friend list changes that require immediate rebuild
-    local friendChangeEvents = CreateFrame("Frame")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_ACCOUNT_ONLINE")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_ACCOUNT_OFFLINE")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_INFO_CHANGED")
-    friendChangeEvents:RegisterEvent("FRIENDLIST_UPDATE")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_INVITE_ADDED")
-    friendChangeEvents:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
-    friendChangeEvents:SetScript("OnEvent", function()
-        if FriendsFrame and FriendsFrame:IsShown() then
-            RebuildFriendsDataProvider()
-        end
+    -- BNet invite events don't trigger FriendsList_Update, so listen
+    -- for those separately.
+    local friendInviteEvents = CreateFrame("Frame")
+    friendInviteEvents:RegisterEvent("BN_FRIEND_INVITE_ADDED")
+    friendInviteEvents:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
+    friendInviteEvents:SetScript("OnEvent", function(_, event)
+        RebuildFriendsDataProvider("event:" .. event)
     end)
 
     -- Auto-accept group invites from friends
@@ -4216,7 +4241,9 @@ local function SkinFriendsFrame()
         end
     end)
     frame:HookScript("OnShow", function()
-        RebuildFriendsDataProvider()
+        -- RebuildFriendsDataProvider is triggered by FriendsList_Update /
+        -- FRIENDLIST_UPDATE events that fire on show. No need to call it
+        -- here -- just defer the button styling + scroll restore.
         C_Timer.After(0, _ebsOnShowDeferred)
     end)
 
