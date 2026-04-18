@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Chat
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Chat enhancements -- clickable URLs, copy chat, search
+## Notes: Chat frame skinning (Coming Soon)
 ## Author: Ellesmere
-## Version: 6.7.5
+## Version: 6.8
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIChatDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
