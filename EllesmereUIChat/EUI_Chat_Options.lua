@@ -26,6 +26,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     local function RefreshAll()
         if ECHAT.ApplyBackground  then ECHAT.ApplyBackground()  end
+        if ECHAT.ApplyFonts       then ECHAT.ApplyFonts()       end
         if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
     end
 
@@ -46,7 +47,7 @@ initFrame:SetScript("OnEvent", function(self)
             infoLabel:SetTextColor(1, 1, 1, 0.75)
             infoLabel:SetPoint("TOP", parent, "TOP", 0, y - 20)
             infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Reposition the chat frame with Shift+Drag or Ctrl+Drag")
+            infoLabel:SetText("Reposition the chat frame using Blizzard Edit Mode")
             y = y - 40
         end
 
@@ -104,6 +105,63 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(bgSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
             EllesmereUI.RegisterWidgetRefresh(function() bgSwatchRefresh() end)
         end
+        y = y - h
+
+        -- -- TEXT --------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "TEXT", y); y = y - h
+
+        -- Row 1: Font | Timestamps
+        do
+            local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
+            local tsValues = {
+                ["__blizzard"]  = { text = "Use Blizzard Setting" },
+                ["none"]        = { text = "None" },
+                ["%I:%M "]      = { text = "03:27" },
+                ["%I:%M:%S "]   = { text = "03:27:32" },
+                ["%I:%M %p "]   = { text = "03:27 PM" },
+                ["%I:%M:%S %p "] = { text = "03:27:32 PM" },
+                ["%H:%M "]      = { text = "15:27" },
+                ["%H:%M:%S "]   = { text = "15:27:32" },
+            }
+            local tsOrder = {
+                "__blizzard", "none", "---",
+                "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
+                "%H:%M ", "%H:%M:%S ",
+            }
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Font",
+                  values=fontValues, order=fontOrder,
+                  getValue=function() return Cfg("font") or "__global" end,
+                  setValue=function(v)
+                      Set("font", v)
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Font changed. A UI reload is needed to apply the new font.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end },
+                { type="dropdown", text="Timestamps",
+                  values=tsValues, order=tsOrder,
+                  getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
+                  setValue=function(v)
+                      Set("timestampFormat", v)
+                      if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
+                  end })
+        end
+        y = y - h
+
+        -- Row 2: Text Size | Tab Text Size
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Text Size",
+              min = 8, max = 24, step = 1,
+              getValue=function() return Cfg("fontSize") or 12 end,
+              setValue=function(v) Set("fontSize", v); RefreshAll() end },
+            { type="slider", text="Tab Text Size",
+              min = 8, max = 16, step = 1,
+              getValue=function() return Cfg("tabFontSize") or 10 end,
+              setValue=function(v) Set("tabFontSize", v); RefreshAll() end })
         y = y - h
 
         return math.abs(y)

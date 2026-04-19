@@ -82,8 +82,11 @@ function FlyoutSlotMixin:RefreshAll()
 end
 
 function FlyoutSlotMixin:RefreshCooldown()
-    if self.spellID then
-        ActionButton_UpdateCooldown(self)
+    if self.spellID and self.cooldown then
+        local info = C_Spell.GetSpellCooldown(self.spellID)
+        if info then
+            CooldownFrame_Set(self.cooldown, info.startTime, info.duration, info.isEnabled)
+        end
     end
 end
 

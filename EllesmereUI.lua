@@ -1497,6 +1497,29 @@ function EllesmereUI.GetFontUseShadow()
     return mode == "none" or mode == "shadow"
 end
 
+-- Build font dropdown values/order with "EUI Global Font" at the top.
+-- Returns values, order tables suitable for W:DualRow dropdown config.
+function EllesmereUI.BuildFontDropdownData()
+    local values = { ["__global"] = { text = "EUI Global Font" } }
+    local order  = { "__global", "---" }
+    local FONT_DIR = EllesmereUI.MEDIA_PATH .. "fonts\\"
+    for _, name in ipairs(EllesmereUI.FONT_ORDER) do
+        if name == "---" then
+            order[#order + 1] = "---"
+        else
+            local path = EllesmereUI.FONT_BLIZZARD[name]
+                or (FONT_DIR .. (EllesmereUI.FONT_FILES[name] or "Expressway.TTF"))
+            local displayName = (EllesmereUI.FONT_DISPLAY_NAMES and EllesmereUI.FONT_DISPLAY_NAMES[name]) or name
+            values[name] = { text = displayName, font = path }
+            order[#order + 1] = name
+        end
+    end
+    if EllesmereUI.AppendSharedMediaFonts then
+        EllesmereUI.AppendSharedMediaFonts(values, order, { keyByName = true })
+    end
+    return values, order
+end
+
 -- Get class color (custom or default)
 function EllesmereUI.GetClassColor(classToken)
     local db = EllesmereUI.GetCustomColorsDB()
@@ -6644,7 +6667,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.8.3"
+EllesmereUI.VERSION = "6.8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -6828,10 +6851,10 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, },
             { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, },
             { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, },
-            -- { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIChat" } },
-            -- { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIChat" } },
-            -- { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIChat" } },
-            -- { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIChat" } },
+            { addon = "Prat-3.0",                 label = "Prat",                       targets = { "EllesmereUIChat" } },
+            { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIChat" } },
+            { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIChat" } },
+            { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIChat" } },
             -- { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBags" } },
             -- { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBags" } },
             -- { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBags" } },

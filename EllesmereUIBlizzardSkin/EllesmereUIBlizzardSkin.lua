@@ -366,8 +366,11 @@ do
     f:RegisterEvent("PLAYER_LOGIN")
     f:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
-        if EllesmereUIDB and EllesmereUIDB.uberTooltipsManual then
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if EllesmereUIDB.uberTooltipsManual then
             SetCVar("UberTooltips", EllesmereUIDB.uberTooltips and "1" or "0")
+        else
+            SetCVar("UberTooltips", "1")
         end
     end)
 end

@@ -102,8 +102,15 @@ local function GetAccent()
 end
 
 local function GetFont()
+    local db = _G._EQT_DB
+    local fontKey = db and db.profile and db.profile.questTracker and db.profile.questTracker.font
+    if fontKey and fontKey ~= "__global" then
+        if EllesmereUI and EllesmereUI.ResolveFontName then
+            return EllesmereUI.ResolveFontName(fontKey) or "Fonts/FRIZQT__.TTF"
+        end
+    end
     if EllesmereUI and EllesmereUI.GetFontPath then
-        return EllesmereUI.GetFontPath("unitFrames") or "Fonts/FRIZQT__.TTF"
+        return EllesmereUI.GetFontPath() or "Fonts/FRIZQT__.TTF"
     end
     return "Fonts/FRIZQT__.TTF"
 end

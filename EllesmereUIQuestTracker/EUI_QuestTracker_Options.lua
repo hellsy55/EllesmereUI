@@ -141,6 +141,27 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) Set("objectiveFontSize", v); RefreshAll() end })
         y = y - h
 
+        -- Row 4: Font | (empty)
+        do
+            local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Font",
+                  values=fontValues, order=fontOrder,
+                  getValue=function() return Cfg("font") or "__global" end,
+                  setValue=function(v)
+                      Set("font", v)
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Font changed. A UI reload is needed to apply the new font.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end },
+                { type="label", text="" })
+        end
+        y = y - h
+
         y = y - 10
 
         -- -- COLORS ----------------------------------------------------------

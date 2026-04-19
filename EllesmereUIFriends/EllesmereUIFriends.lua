@@ -4763,6 +4763,7 @@ local function ApplyFriends()
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.friends
+    p.enabled = true
 
     if not p.enabled then
         -- Module requires reload to fully disable (same as minimap)

@@ -1492,6 +1492,7 @@ local function ApplyMinimap()
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.minimap
+    p.enabled = true
 
     local minimap = Minimap
     if not minimap then return end

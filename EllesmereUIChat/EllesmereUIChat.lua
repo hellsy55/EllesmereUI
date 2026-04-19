@@ -28,6 +28,10 @@ local CHAT_DEFAULTS = {
             bgR        = 0.03,
             bgG        = 0.045,
             bgB        = 0.05,
+            timestampFormat = "%I:%M ",
+            font = "__global",
+            fontSize = 12,
+            tabFontSize = 10,
         },
     },
 }
@@ -50,17 +54,29 @@ function ECHAT.DB()
 end
 
 local PP = EUI.PP
-local fontPath
 local function GetFont()
-    if not fontPath then
-        fontPath = (EUI.GetFontPath and EUI.GetFontPath()) or STANDARD_TEXT_FONT
+    local cfg = ECHAT.DB()
+    local fontKey = cfg.font or "__global"
+    if fontKey == "__global" then
+        return (EUI.GetFontPath and EUI.GetFontPath()) or STANDARD_TEXT_FONT
     end
-    return fontPath
+    return (EUI.ResolveFontName and EUI.ResolveFontName(fontKey)) or STANDARD_TEXT_FONT
 end
 
+local _hiddenParent = CreateFrame("Frame")
+_hiddenParent:Hide()
+
 local BG_R, BG_G, BG_B, BG_A = 0.03, 0.045, 0.05, 0.75
+
 local EDIT_BG_R, EDIT_BG_G, EDIT_BG_B = 0.05, 0.065, 0.08
-local TAB_FONT_SIZE = 10
+local function GetFontSize()
+    local cfg = ECHAT.DB()
+    return cfg.fontSize or 12
+end
+local function GetTabFontSize()
+    local cfg = ECHAT.DB()
+    return cfg.tabFontSize or 10
+end
 
 -- Apply background settings from DB to all skinned chat frames
 function ECHAT.ApplyBackground()
@@ -95,19 +111,53 @@ function ECHAT.ApplyBackground()
     end
 end
 
+-- Re-apply font and size to all skinned chat frames, tabs, and edit boxes
+function ECHAT.ApplyFonts()
+    local font = GetFont()
+    local size = GetFontSize()
+    local tabSize = GetTabFontSize()
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf.SetFont then
+            cf:SetFont(font, size, "")
+        end
+        local tab = _G["ChatFrame" .. i .. "Tab"]
+        if tab and tab._euiLabel then
+            tab._euiLabel:SetFont(font, tabSize, "")
+        end
+        local eb = _G["ChatFrame" .. i .. "EditBox"]
+        if eb then
+            eb:SetFont(font, size, "")
+            if eb.header then eb.header:SetFont(font, size, "") end
+            if eb.headerSuffix then eb.headerSuffix:SetFont(font, size, "") end
+        end
+    end
+end
+
+-- Set alpha on the entire chat area (frames, bgs, tabs, edit boxes, sidebar)
+function ECHAT.SetChatAlpha(alpha)
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf._euiBg then
+            cf._euiBg:SetAlpha(alpha)
+            cf:SetAlpha(alpha)
+            local tab = _G["ChatFrame" .. i .. "Tab"]
+            if tab then
+                tab:SetAlpha(alpha)
+                if tab._euiUnderline then tab._euiUnderline:SetAlpha(alpha) end
+            end
+            local eb = _G["ChatFrame" .. i .. "EditBox"]
+            if eb and not eb:HasFocus() then eb:SetAlpha(alpha) end
+            if cf._euiScrollTrack then cf._euiScrollTrack:SetAlpha(alpha) end
+        end
+    end
+    local cf1 = _G.ChatFrame1
+    if cf1 and cf1._euiSidebar then cf1._euiSidebar:SetAlpha(alpha) end
+end
+
 -- Refresh visibility based on DB settings (combat, mouseover, always, etc.)
 function ECHAT.RefreshVisibility()
     local cfg = ECHAT.DB()
-    if not cfg.enabled then
-        -- Module disabled: hide everything
-        for i = 1, 20 do
-            local cf = _G["ChatFrame" .. i]
-            if cf and cf._euiBg then cf._euiBg:SetAlpha(0) end
-        end
-        local cf1 = _G.ChatFrame1
-        if cf1 and cf1._euiSidebar then cf1._euiSidebar:SetAlpha(0) end
-        return
-    end
 
     local vis = true
     if EUI and EUI.EvalVisibility then
@@ -123,12 +173,7 @@ function ECHAT.RefreshVisibility()
         alpha = 1
     end
 
-    for i = 1, 20 do
-        local cf = _G["ChatFrame" .. i]
-        if cf and cf._euiBg then cf._euiBg:SetAlpha(alpha) end
-    end
-    local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiSidebar then cf1._euiSidebar:SetAlpha(alpha) end
+    ECHAT.SetChatAlpha(alpha)
 end
 
 -------------------------------------------------------------------------------
@@ -149,6 +194,7 @@ end
 
 local function CaptureMessage(frame, text)
     if not text then return end
+    if issecretvalue and issecretvalue(text) then return end
     chatHistory[#chatHistory + 1] = text
     if #chatHistory > MAX_HISTORY then
         table.remove(chatHistory, 1)
@@ -185,6 +231,11 @@ local function WrapURLs(text)
     return text
 end
 
+-- Hook AddMessage on ChatFrame1 only for chat history capture (post-hook).
+local function HookAddMessage()
+    hooksecurefunc(ChatFrame1, "AddMessage", CaptureMessage)
+end
+
 local copyDimmer
 
 local function HideCopyPopup()
@@ -197,8 +248,6 @@ local function ShowCopyPopup(text)
 
     if not copyDimmer then
         local POPUP_W, POPUP_H = 520, 340
-        local SCROLL_STEP = 60
-        local SMOOTH_SPEED = 12
 
         -- Dimmer
         local dimmer = CreateFrame("Frame", nil, UIParent)
@@ -223,170 +272,115 @@ local function ShowCopyPopup(text)
         bg:SetAllPoints()
         EUI.MakeBorder(popup, 1, 1, 1, 0.15, EUI.PanelPP)
 
-        -- Plain ScrollFrame
-        local sf = CreateFrame("ScrollFrame", nil, popup)
-        sf:SetPoint("TOPLEFT", popup, "TOPLEFT", 20, -20)
-        sf:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -20, 60)
-        sf:SetFrameLevel(popup:GetFrameLevel() + 1)
-        sf:EnableMouseWheel(true)
+        -- ScrollingEditBox (Blizzard template: scrolling + selection built-in)
+        local textBox = CreateFrame("Frame", nil, popup, "ScrollingEditBoxTemplate")
+        textBox:SetPoint("TOPLEFT", popup, "TOPLEFT", 20, -20)
+        textBox:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -20, 60)
 
-        local sc = CreateFrame("Frame", nil, sf)
-        sc:SetWidth(sf:GetWidth() or (POPUP_W - 40))
-        sc:SetHeight(1)
-        sf:SetScrollChild(sc)
-
-        -- EditBox inside scroll child
-        local editBox = CreateFrame("EditBox", nil, sc)
-        editBox:SetMultiLine(true)
-        editBox:SetAutoFocus(false)
+        local editBox = textBox:GetEditBox()
         editBox:SetFont(GetFont(), 12, EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag() or "")
         editBox:SetTextColor(1, 1, 1, 0.75)
-        editBox:SetAllPoints(sc)
         editBox:SetScript("OnEscapePressed", function(self)
             self:ClearFocus()
             dimmer:Hide()
         end)
         editBox:SetScript("OnChar", function(self)
             if self._readOnlyText then
-                local cursor = self:GetCursorPosition()
                 self:SetText(self._readOnlyText)
-                self:SetCursorPosition(cursor)
+                self:HighlightText()
             end
         end)
-        editBox:SetScript("OnTextChanged", function(self, userInput)
-            if userInput and self._readOnlyText and self:GetText() ~= self._readOnlyText then
-                local cursor = self:GetCursorPosition()
-                self:SetText(self._readOnlyText)
-                self:SetCursorPosition(cursor)
-            end
-        end)
-        editBox:SetScript("OnMouseDown", function(self)
-            self:SetFocus()
-        end)
-        sf:SetScript("OnMouseDown", function()
-            editBox:SetFocus()
-        end)
 
-        -- Smooth scroll state
-        local scrollTarget = 0
-        local isSmoothing = false
-        local smoothFrame = CreateFrame("Frame")
-        smoothFrame:Hide()
+        -- Thin interactive scrollbar reading from the template's ScrollBox
+        local scrollBox = textBox:GetScrollBox()
+        local track = CreateFrame("Button", nil, popup)
+        track:SetWidth(8)
+        track:SetPoint("TOPRIGHT", textBox, "TOPRIGHT", 2, -2)
+        track:SetPoint("BOTTOMRIGHT", textBox, "BOTTOMRIGHT", 2, 2)
+        track:SetFrameLevel(popup:GetFrameLevel() + 5)
+        track:EnableMouse(true)
+        track:RegisterForClicks("AnyUp")
 
-        -- Custom scrollbar track
-        local scrollTrack = CreateFrame("Frame", nil, sf)
-        scrollTrack:SetWidth(4)
-        scrollTrack:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -2, -4)
-        scrollTrack:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", -2, 4)
-        scrollTrack:SetFrameLevel(sf:GetFrameLevel() + 2)
-        scrollTrack:Hide()
+        local thumb = track:CreateTexture(nil, "ARTWORK")
+        thumb:SetColorTexture(1, 1, 1, 0.27)
+        thumb:SetWidth(4)
+        thumb:SetHeight(40)
+        thumb:SetPoint("TOP", track, "TOP", 0, 0)
 
-        local trackBg = EUI.SolidTex(scrollTrack, "BACKGROUND", 1, 1, 1, 0.02)
-        trackBg:SetAllPoints()
-
-        -- Thumb
-        local scrollThumb = CreateFrame("Button", nil, scrollTrack)
-        scrollThumb:SetWidth(4)
-        scrollThumb:SetHeight(60)
-        scrollThumb:SetPoint("TOP", scrollTrack, "TOP", 0, 0)
-        scrollThumb:SetFrameLevel(scrollTrack:GetFrameLevel() + 1)
-        scrollThumb:EnableMouse(true)
-        scrollThumb:RegisterForDrag("LeftButton")
-        scrollThumb:SetScript("OnDragStart", function() end)
-        scrollThumb:SetScript("OnDragStop", function() end)
-
-        local thumbTex = EUI.SolidTex(scrollThumb, "ARTWORK", 1, 1, 1, 0.27)
-        thumbTex:SetAllPoints()
-
-        local isDragging = false
-        local dragStartY, dragStartScroll
+        local _sbDragging = false
+        local _sbDragOffsetY = 0
 
         local function UpdateThumb()
-            local maxScroll = EUI.SafeScrollRange(sf)
-            if maxScroll <= 0 then scrollTrack:Hide(); return end
-            scrollTrack:Show()
-            local trackH = scrollTrack:GetHeight()
-            local visH = sf:GetHeight()
-            local ratio = visH / (visH + maxScroll)
-            local thumbH = math.max(30, trackH * ratio)
-            scrollThumb:SetHeight(thumbH)
-            local scrollRatio = (tonumber(sf:GetVerticalScroll()) or 0) / maxScroll
-            scrollThumb:ClearAllPoints()
-            scrollThumb:SetPoint("TOP", scrollTrack, "TOP", 0, -(scrollRatio * (trackH - thumbH)))
+            if not scrollBox then thumb:Hide(); return end
+            local ext = scrollBox:GetVisibleExtentPercentage()
+            if not ext or ext >= 1 then thumb:Hide(); return end
+            thumb:Show()
+            local trackH = track:GetHeight()
+            local thumbH = math.max(20, trackH * ext)
+            thumb:SetHeight(thumbH)
+            local pct = scrollBox:GetScrollPercentage() or 0
+            thumb:ClearAllPoints()
+            thumb:SetPoint("TOP", track, "TOP", 0, -(pct * (trackH - thumbH)))
         end
 
-        smoothFrame:SetScript("OnUpdate", function(_, elapsed)
-            local cur = sf:GetVerticalScroll()
-            local maxScroll = EUI.SafeScrollRange(sf)
-            scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
-            local diff = scrollTarget - cur
-            if math.abs(diff) < 0.3 then
-                sf:SetVerticalScroll(scrollTarget)
-                UpdateThumb()
-                isSmoothing = false
-                smoothFrame:Hide()
-                return
+        local function SetScrollFromY(cursorY)
+            local trackH = track:GetHeight()
+            local ext = scrollBox:GetVisibleExtentPercentage() or 1
+            local thumbH = math.max(20, trackH * ext)
+            local maxTravel = trackH - thumbH
+            if maxTravel <= 0 then return end
+            local trackTop = track:GetTop()
+            if not trackTop then return end
+            local scale = track:GetEffectiveScale()
+            local localY = trackTop - (cursorY / scale) - _sbDragOffsetY
+            local pct = math.max(0, math.min(1, localY / maxTravel))
+            scrollBox:SetScrollPercentage(pct)
+        end
+
+        track:SetScript("OnMouseDown", function(self, button)
+            if button ~= "LeftButton" then return end
+            local _, cursorY = GetCursorPosition()
+            local scale = self:GetEffectiveScale()
+            local trackTop = self:GetTop()
+            if not trackTop then return end
+            -- Check if click is on the thumb
+            local thumbTop = thumb:GetTop()
+            local thumbBot = thumb:GetBottom()
+            if thumbTop and thumbBot then
+                local localCursor = cursorY / scale
+                if localCursor <= thumbTop and localCursor >= thumbBot then
+                    _sbDragOffsetY = thumbTop - localCursor
+                    _sbDragging = true
+                    return
+                end
             end
-            local newScroll = cur + diff * math.min(1, SMOOTH_SPEED * elapsed)
-            newScroll = math.max(0, math.min(maxScroll, newScroll))
-            sf:SetVerticalScroll(newScroll)
+            -- Click on track: jump to position
+            _sbDragOffsetY = (thumb:GetHeight() or 20) / 2
+            _sbDragging = true
+            SetScrollFromY(cursorY)
+        end)
+        track:SetScript("OnMouseUp", function() _sbDragging = false end)
+
+        -- Poll only while popup is open
+        local pollFrame = CreateFrame("Frame")
+        pollFrame:Hide()
+        local _lastPct, _lastExt = -1, -1
+        pollFrame:SetScript("OnUpdate", function()
+            if _sbDragging then
+                local _, cursorY = GetCursorPosition()
+                SetScrollFromY(cursorY)
+            end
+            local ext = scrollBox:GetVisibleExtentPercentage() or 1
+            local pct = scrollBox:GetScrollPercentage() or 0
+            if ext == _lastExt and pct == _lastPct then return end
+            _lastExt, _lastPct = ext, pct
             UpdateThumb()
         end)
+        dimmer:HookScript("OnShow", function() _lastPct, _lastExt = -1, -1; pollFrame:Show() end)
+        dimmer:HookScript("OnHide", function() _sbDragging = false; pollFrame:Hide() end)
 
-        local function SmoothScrollTo(target)
-            local maxScroll = EUI.SafeScrollRange(sf)
-            scrollTarget = math.max(0, math.min(maxScroll, target))
-            if not isSmoothing then
-                isSmoothing = true
-                smoothFrame:Show()
-            end
-        end
-
-        sf:SetScript("OnMouseWheel", function(self, delta)
-            local maxScroll = EUI.SafeScrollRange(self)
-            if maxScroll <= 0 then return end
-            local base = isSmoothing and scrollTarget or self:GetVerticalScroll()
-            SmoothScrollTo(base - delta * SCROLL_STEP)
-        end)
-        sf:SetScript("OnScrollRangeChanged", function() UpdateThumb() end)
-
-        -- Thumb drag
-        local function StopDrag()
-            if not isDragging then return end
-            isDragging = false
-            scrollThumb:SetScript("OnUpdate", nil)
-        end
-
-        scrollThumb:SetScript("OnMouseDown", function(self, button)
-            if button ~= "LeftButton" then return end
-            isSmoothing = false; smoothFrame:Hide()
-            isDragging = true
-            local _, cy = GetCursorPosition()
-            dragStartY = cy / self:GetEffectiveScale()
-            dragStartScroll = sf:GetVerticalScroll()
-            self:SetScript("OnUpdate", function(self2)
-                if not IsMouseButtonDown("LeftButton") then StopDrag(); return end
-                isSmoothing = false; smoothFrame:Hide()
-                local _, cy2 = GetCursorPosition()
-                cy2 = cy2 / self2:GetEffectiveScale()
-                local deltaY = dragStartY - cy2
-                local trackH = scrollTrack:GetHeight()
-                local maxTravel = trackH - self2:GetHeight()
-                if maxTravel <= 0 then return end
-                local maxScroll = EUI.SafeScrollRange(sf)
-                local newScroll = math.max(0, math.min(maxScroll, dragStartScroll + (deltaY / maxTravel) * maxScroll))
-                scrollTarget = newScroll
-                sf:SetVerticalScroll(newScroll)
-                UpdateThumb()
-            end)
-        end)
-        scrollThumb:SetScript("OnMouseUp", function(_, button)
-            if button == "LeftButton" then StopDrag() end
-        end)
-
+        popup._textBox = textBox
         popup._editBox = editBox
-        popup._scrollFrame = sf
-        popup._scrollChild = sc
 
         -- Close button
         local closeBtn = CreateFrame("Button", nil, popup)
@@ -412,13 +406,6 @@ local function ShowCopyPopup(text)
             end
         end)
 
-        -- Reset scroll on hide
-        dimmer:HookScript("OnHide", function()
-            isSmoothing = false; smoothFrame:Hide()
-            scrollTarget = 0
-            sf:SetVerticalScroll(0)
-        end)
-
         popup._dimmer = dimmer
         copyDimmer = dimmer
         copyDimmer._popup = popup
@@ -426,19 +413,12 @@ local function ShowCopyPopup(text)
 
     -- Populate
     local popup = copyDimmer._popup
-    popup._editBox:SetText(text)
+    popup._textBox:SetText(text)
     popup._editBox._readOnlyText = text
-    local sfW = popup._scrollFrame:GetWidth()
-    popup._scrollChild:SetWidth(sfW)
-    popup._editBox:SetWidth(sfW - 12)
-    C_Timer.After(0.01, function()
-        local h = popup._editBox:GetHeight()
-        popup._scrollChild:SetHeight(h)
-    end)
     copyDimmer:Show()
     C_Timer.After(0.05, function()
         popup._editBox:SetFocus()
-        popup._editBox:SetCursorPosition(0)
+        popup._editBox:HighlightText()
     end)
 end
 
@@ -573,8 +553,9 @@ local function SkinChatFrame(cf)
     if name == "ChatFrame1" and not cf._euiSidebar then
         local sidebar = CreateFrame("Frame", nil, UIParent)
         sidebar:SetWidth(40)
-        sidebar:SetPoint("TOPRIGHT", cf._euiBg, "TOPLEFT", 0, 0)
-        sidebar:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMLEFT", 0, 0)
+        local onePxSB = (PP and PP.mult) or 1
+        sidebar:SetPoint("TOPRIGHT", cf._euiBg, "TOPLEFT", onePxSB, 0)
+        sidebar:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMLEFT", onePxSB, 0)
         sidebar:SetFrameLevel(cf._euiBg:GetFrameLevel() + 1)
 
         local sbBg = sidebar:CreateTexture(nil, "BACKGROUND")
@@ -693,10 +674,15 @@ local function SkinChatFrame(cf)
             ToggleChannelFrame()
         end)
 
-        -- Settings button opens EUI options directly to Chat module
+        -- Settings button toggles EUI options on Chat module
         settingsBtn:SetScript("OnClick", function()
             if InCombatLockdown() then return end
-            EUI:ShowModule("EllesmereUIChat")
+            local mf = EUI._mainFrame
+            if mf and mf:IsShown() and EUI:GetActiveModule() == "EllesmereUIChat" then
+                mf:Hide()
+            else
+                EUI:ShowModule("EllesmereUIChat")
+            end
         end)
 
         sidebar._friendsBtn = friendsBtn
@@ -734,23 +720,25 @@ local function SkinChatFrame(cf)
     end
 
     -- Set custom font on the message frame
-    local _, fontSize = cf:GetFont()
-    cf:SetFont(GetFont(), fontSize or 12, "")
+    cf:SetFont(GetFont(), GetFontSize(), "")
     if cf.SetShadowOffset then cf:SetShadowOffset(1, -1) end
     if cf.SetShadowColor then cf:SetShadowColor(0, 0, 0, 0.8) end
 
-    -- Compact 24-hour timestamps inline with message text
-    if SetCVar then
-        SetCVar("showTimestamps", "%H:%M ")
-    end
+    -- Timestamps set once in PLAYER_LOGIN, not per-frame
 
-    -- Prevent tabs and combat log filter bar from auto-fading.
-    -- Force tabs to stay visible by keeping their alpha at 1.
+    -- Prevent tabs from auto-fading (Blizzard's idle fade), but respect
+    -- our visibility system which may legitimately set alpha to 0.
     local tab = _G[name .. "Tab"]
     if tab then
         tab:SetAlpha(1)
+        local _ignoreTabAlpha = false
         hooksecurefunc(tab, "SetAlpha", function(self, a)
-            if a < 1 then self:SetAlpha(1) end
+            if _ignoreTabAlpha then return end
+            if a > 0 and a < 1 then
+                _ignoreTabAlpha = true
+                self:SetAlpha(1)
+                _ignoreTabAlpha = false
+            end
         end)
     end
 
@@ -771,12 +759,12 @@ local function SkinChatFrame(cf)
         eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
         eb:SetHeight(23)
 
-        eb:SetFont(GetFont(), 12, "")
+        eb:SetFont(GetFont(), GetFontSize(), "")
         eb:SetTextInsets(8, 8, 0, 0)
 
         -- Style the channel header (e.g. "[2. Trade - City]: ")
-        if eb.header then eb.header:SetFont(GetFont(), 12, "") end
-        if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), 12, "") end
+        if eb.header then eb.header:SetFont(GetFont(), GetFontSize(), "") end
+        if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), GetFontSize(), "") end
         -- Also hide the focus border textures (Blizzard's input chrome)
         if eb.focusLeft then eb.focusLeft:SetAlpha(0) end
         if eb.focusMid then eb.focusMid:SetAlpha(0) end
@@ -810,14 +798,14 @@ local function SkinChatFrame(cf)
         -- Hide glow frame
         if tab.glow then tab.glow:SetAlpha(0) end
 
-        -- Shrink tab height by 8px and enforce it via hook
-        local targetH = tab:GetHeight() - 8
-        if targetH > 15 then
-            tab:SetHeight(targetH)
+        -- Force consistent tab height
+        local targetH = 24
+        tab:SetHeight(targetH)
+        do
             local _ignoreH = false
             hooksecurefunc(tab, "SetHeight", function(self, h)
                 if _ignoreH then return end
-                if h ~= targetH and h > 15 then
+                if h ~= targetH then
                     _ignoreH = true
                     self:SetHeight(targetH)
                     _ignoreH = false
@@ -858,6 +846,20 @@ local function SkinChatFrame(cf)
                     _tabIgnoreSetPoint = false
                 end
             end)
+            -- Chain after the previous visible tab directly.
+            local tabIdx = tonumber(name:match("ChatFrame(%d+)"))
+            if tabIdx and tabIdx > 1 then
+                for prev = tabIdx - 1, 1, -1 do
+                    local prevTab = _G["ChatFrame" .. prev .. "Tab"]
+                    if prevTab and prevTab:IsShown() then
+                        _tabIgnoreSetPoint = true
+                        tab:ClearAllPoints()
+                        tab:SetPoint("LEFT", prevTab, "RIGHT", 1, 0)
+                        _tabIgnoreSetPoint = false
+                        break
+                    end
+                end
+            end
         end
 
         -- Dark tab background (matches chat box opacity)
@@ -868,31 +870,67 @@ local function SkinChatFrame(cf)
             tab._euiBg:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
         end
 
-        -- Active highlight overlay removed -- accent underline is sufficient.
+        -- New message pulse overlay (accent colored, pulses 25-40% opacity)
+        if not tab._euiNewMsg then
+            local pulse = tab:CreateTexture(nil, "ARTWORK")
+            pulse._euiOwned = true
+            pulse:SetAllPoints()
+            local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
+            pulse:SetColorTexture(eg.r, eg.g, eg.b, 0.40)
+            pulse:Hide()
+
+            local ag = pulse:CreateAnimationGroup()
+            ag:SetLooping("BOUNCE")
+            local fade = ag:CreateAnimation("Alpha")
+            fade:SetFromAlpha(0.4)
+            fade:SetToAlpha(0.68)
+            fade:SetDuration(0.65)
+            fade:SetSmoothing("IN_OUT")
+            pulse._euiAnim = ag
+
+            tab._euiNewMsg = pulse
+        end
+
         -- Field kept for UpdateTabColors compatibility.
         tab._euiActiveHL = nil
 
-        -- Replace Blizzard label with our own FontString (matches CharSheet)
         local blizLabel = tab:GetFontString()
-        local labelText = blizLabel and blizLabel:GetText() or ("Tab")
-        if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
+        local labelText = blizLabel and blizLabel:GetText() or "Tab"
         tab:SetPushedTextOffset(0, 0)
 
-        if not tab._euiLabel then
-            local label = tab:CreateFontString(nil, "OVERLAY")
-            label:SetFont(GetFont(), TAB_FONT_SIZE, "")
-            label:SetPoint("CENTER", tab, "CENTER", 0, 0)
-            label:SetJustifyH("CENTER")
-            label:SetWordWrap(false)
-            label:SetWidth(tab:GetWidth() * 0.8)
-            label:SetText(labelText)
-            tab._euiLabel = label
-            hooksecurefunc(tab, "SetWidth", function(self)
-                label:SetWidth(self:GetWidth() * 0.8)
-            end)
-            hooksecurefunc(tab, "SetText", function(_, newText)
-                if newText and label then label:SetText(newText) end
-            end)
+        if cf.isTemporary then
+            -- Temporary tabs: restyle Blizzard's own label (avoids width issues)
+            if blizLabel and not tab._euiLabel then
+                blizLabel:SetFont(GetFont(), GetTabFontSize(), "")
+                blizLabel:SetTextColor(1, 1, 1, 0.5)
+                blizLabel:SetJustifyH("CENTER")
+                blizLabel:ClearAllPoints()
+                blizLabel:SetPoint("CENTER", tab, "CENTER", 0, 0)
+                local _ignoreLabelPt = false
+                hooksecurefunc(blizLabel, "SetPoint", function(self)
+                    if _ignoreLabelPt then return end
+                    _ignoreLabelPt = true
+                    self:ClearAllPoints()
+                    self:SetPoint("CENTER", tab, "CENTER", 0, 0)
+                    _ignoreLabelPt = false
+                end)
+                tab._euiLabel = blizLabel
+            end
+        else
+            -- Regular tabs: our own label so Blizzard's sizing stays untouched
+            if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
+            if not tab._euiLabel then
+                local label = tab:CreateFontString(nil, "OVERLAY")
+                label:SetFont(GetFont(), GetTabFontSize(), "")
+                label:SetPoint("CENTER", tab, "CENTER", 0, 0)
+                label:SetJustifyH("CENTER")
+                label:SetWordWrap(false)
+                label:SetText(labelText)
+                tab._euiLabel = label
+                hooksecurefunc(tab, "SetText", function(_, newText)
+                    if newText and label then label:SetText(newText) end
+                end)
+            end
         end
 
         -- Accent underline (active tab indicator).
@@ -900,11 +938,10 @@ local function SkinChatFrame(cf)
         -- don't affect it. Anchored to the tab for positioning.
         if not tab._euiUnderline then
             local EG = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-            local ulFrame = CreateFrame("Frame", nil, UIParent)
-            ulFrame:SetFrameStrata("HIGH")
+            local ulFrame = CreateFrame("Frame", nil, tab)
             ulFrame:SetFrameLevel(tab:GetFrameLevel() + 5)
-            ulFrame:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
-            ulFrame:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
+            ulFrame:SetPoint("TOPLEFT", tab, "TOPLEFT", 0, -23)
+            ulFrame:SetPoint("TOPRIGHT", tab, "TOPRIGHT", 0, -23)
             if PP and PP.DisablePixelSnap then
                 ulFrame:SetHeight(PP.mult or 1)
             else
@@ -922,16 +959,10 @@ local function SkinChatFrame(cf)
         end
     end
 
-    -- Hide Blizzard button frame + its background (persistent)
+    -- Hide Blizzard button frame by reparenting to hidden container
     local btnFrame = _G[name .. "ButtonFrame"]
     if btnFrame then
-        btnFrame:SetAlpha(0)
-        btnFrame:EnableMouse(false)
-        btnFrame:SetWidth(0.1)
-        if btnFrame.Background then btnFrame.Background:SetAlpha(0) end
-        hooksecurefunc(btnFrame, "SetAlpha", function(self, a)
-            if a > 0 then self:SetAlpha(0) end
-        end)
+        btnFrame:SetParent(_hiddenParent)
     end
 
     -- Reposition resize button to align with our bg
@@ -947,18 +978,7 @@ local function SkinChatFrame(cf)
         if btn then btn:SetAlpha(0); btn:EnableMouse(false) end
     end
     if cf.ScrollToBottomButton then
-        cf.ScrollToBottomButton:SetAlpha(0)
-        cf.ScrollToBottomButton:EnableMouse(false)
-        hooksecurefunc(cf.ScrollToBottomButton, "SetAlpha", function(self, a)
-            if a > 0 then self:SetAlpha(0) end
-        end)
-        -- Walk children (arrow textures, flash frames)
-        if cf.ScrollToBottomButton.GetChildren then
-            for i = 1, select("#", cf.ScrollToBottomButton:GetChildren()) do
-                local child = select(i, cf.ScrollToBottomButton:GetChildren())
-                if child then child:SetAlpha(0); child:EnableMouse(false) end
-            end
-        end
+        cf.ScrollToBottomButton:SetParent(_hiddenParent)
     end
 
     -- Minimize button
@@ -1064,7 +1084,7 @@ local function SkinChatFrame(cf)
                         -- Restyle the text
                         local fs = btn:GetFontString()
                         if fs then
-                            fs:SetFont(GetFont(), TAB_FONT_SIZE, "")
+                            fs:SetFont(GetFont(), GetTabFontSize(), "")
                         end
                         -- Update colors on click
                         btn:HookScript("OnClick", UpdateCLFilterColors)
@@ -1078,14 +1098,31 @@ local function SkinChatFrame(cf)
 
             -- Prevent the filter bar from fading with the chat frame
             qbf:SetAlpha(1)
+            local _ignoreQbfAlpha = false
             hooksecurefunc(qbf, "SetAlpha", function(self, a)
-                if a < 1 then self:SetAlpha(1) end
+                if _ignoreQbfAlpha then return end
+
+                if a < 1 then
+                    _ignoreQbfAlpha = true
+                    self:SetAlpha(1)
+                    _ignoreQbfAlpha = false
+                end
             end)
 
             -- Don't extend bg upward -- the filter bar has its own bg (qbfBg).
             -- Keeping both chat frame bgs the same size prevents visual
             -- jumping when switching between General and Combat Log tabs.
         end
+    end
+
+    -- Skip scrollbar entirely for undocked temporary frames in M+ / raid combat
+    if cf.isTemporary and not cf.isDocked then
+        local _, instanceType = IsInInstance()
+        local inMPlus = instanceType == "party" and C_ChallengeMode
+            and C_ChallengeMode.IsChallengeModeActive
+            and C_ChallengeMode.IsChallengeModeActive()
+        local inRaidCombat = instanceType == "raid" and InCombatLockdown()
+        if inMPlus or inRaidCombat then return end
     end
 
     -- Hide Blizzard's ScrollBar + all descendants (track, thumb, arrows)
@@ -1120,16 +1157,38 @@ local function SkinChatFrame(cf)
         thumb:SetWidth(3)
         thumb:Hide()
 
-        -- Only show scrollbar when hovering the chat area
+        -- Only show scrollbar when hovering the chat area.
+        -- Scrollbar fade in/out with hover + drag awareness.
+        -- Track stays visible (for OnUpdate) but alpha controls visibility.
         local _hovered = false
-        cf._euiBg:EnableMouse(true)
-        cf._euiBg:SetScript("OnEnter", function() _hovered = true end)
-        cf._euiBg:SetScript("OnLeave", function() _hovered = false end)
-        track:HookScript("OnEnter", function() _hovered = true end)
-        track:HookScript("OnLeave", function() _hovered = false end)
-
         local _dragging = false
         local _dragOffsetY = 0
+        local _trackAlpha = 0
+        local _trackTarget = 0
+        local _lastPct, _lastExt = -1, -1
+        local FADE_SPEED = 1 / 0.25  -- full fade in 0.25s
+
+        local function ShowTrack() _trackTarget = 1; _lastPct = -1; _lastExt = -1; track:Show() end
+        local function HideTrack() _trackTarget = 0 end
+
+        local function CheckHover()
+            local ok, over = pcall(function()
+                return _dragging or cf._euiBg:IsMouseOver() or track:IsMouseOver()
+            end)
+            if ok and over then
+                _hovered = true; ShowTrack()
+            else
+                _hovered = false; HideTrack()
+            end
+        end
+
+        cf._euiBg:EnableMouse(true)
+        cf._euiBg:SetScript("OnEnter", function() _hovered = true; ShowTrack() end)
+        cf._euiBg:SetScript("OnLeave", function() C_Timer.After(0, CheckHover) end)
+        track:HookScript("OnEnter", function() _hovered = true; ShowTrack() end)
+        track:HookScript("OnLeave", function() C_Timer.After(0, CheckHover) end)
+        track:SetAlpha(0)
+        track:Hide()
 
         local function GetThumbState()
             local pct = blizSB.GetScrollPercentage and blizSB:GetScrollPercentage()
@@ -1145,8 +1204,8 @@ local function SkinChatFrame(cf)
             local pct, ext, trackH, thumbH = GetThumbState()
             if not pct or (not _hovered and not _dragging) then thumb:Hide(); return end
             local yOff = (trackH - thumbH) * pct
-            thumb:ClearAllPoints()
             thumb:SetHeight(thumbH)
+            thumb:ClearAllPoints()
             thumb:SetPoint("TOPRIGHT", track, "TOPRIGHT", 0, -yOff)
             thumb:Show()
         end
@@ -1196,13 +1255,35 @@ local function SkinChatFrame(cf)
             _dragging = true
         end)
 
-        track:SetScript("OnMouseUp", function() _dragging = false end)
+        track:SetScript("OnMouseUp", function()
+            _dragging = false
+            C_Timer.After(0, CheckHover)
+        end)
 
         track:SetScript("OnUpdate", function(self, dt)
+            -- Fade alpha toward target
+            if _trackAlpha ~= _trackTarget then
+                local step = FADE_SPEED * dt
+                if _trackTarget > _trackAlpha then
+                    _trackAlpha = math.min(_trackTarget, _trackAlpha + step)
+                else
+                    _trackAlpha = math.max(_trackTarget, _trackAlpha - step)
+                end
+                self:SetAlpha(_trackAlpha)
+                if _trackAlpha <= 0 and _trackTarget <= 0 then
+                    self:Hide()
+                    return
+                end
+            end
+
             if _dragging then
+                if not IsMouseButtonDown("LeftButton") then
+                    _dragging = false
+                    CheckHover()
+                    return
+                end
                 local _, cursorY = GetCursorPosition()
                 cursorY = cursorY / self:GetEffectiveScale()
-                -- Position thumb directly from cursor for smooth visual
                 local pct, ext, trackH, thumbH = GetThumbState()
                 if pct then
                     local trackBottom = select(2, track:GetRect())
@@ -1215,7 +1296,6 @@ local function SkinChatFrame(cf)
                         thumb:SetHeight(thumbH)
                         thumb:SetPoint("TOPRIGHT", track, "TOPRIGHT", 0, -yOff)
                         thumb:Show()
-                        -- Feed scroll position to Blizzard
                         if blizSB.SetScrollPercentage then
                             blizSB:SetScrollPercentage(visualPct)
                         end
@@ -1223,8 +1303,12 @@ local function SkinChatFrame(cf)
                 end
             else
                 self._elapsed = (self._elapsed or 0) + dt
-                if self._elapsed < 0.1 then return end
+                if self._elapsed < 0.15 then return end
                 self._elapsed = 0
+                local pct = blizSB.GetScrollPercentage and blizSB:GetScrollPercentage()
+                local ext = blizSB.GetVisibleExtentPercentage and blizSB:GetVisibleExtentPercentage()
+                if pct == _lastPct and ext == _lastExt then return end
+                _lastPct, _lastExt = pct, ext
                 UpdateThumb()
             end
         end)
@@ -1259,6 +1343,21 @@ local function UpdateTabColors()
                 if tab._euiBg then
                     tab._euiBg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
                 end
+                if tab._euiNewMsg then
+                    if isActive then
+                        tab._euiHasNew = false
+                        tab._euiNewMsg:Hide()
+                        tab._euiNewMsg._euiAnim:Stop()
+                    elseif tab._euiHasNew then
+                        if not tab._euiNewMsg:IsShown() then
+                            tab._euiNewMsg:Show()
+                            tab._euiNewMsg._euiAnim:Play()
+                        end
+                    else
+                        tab._euiNewMsg:Hide()
+                        tab._euiNewMsg._euiAnim:Stop()
+                    end
+                end
             elseif tab._euiUnderline then
                 tab._euiUnderline:Hide()
             end
@@ -1287,16 +1386,15 @@ initFrame:SetScript("OnEvent", function(self)
         local cf = _G["ChatFrame" .. i]
         if cf then
             SkinChatFrame(cf)
-            hooksecurefunc(cf, "AddMessage", CaptureMessage)
         end
     end
+    HookAddMessage()
     hooksecurefunc("FCF_OpenTemporaryWindow", function()
         C_Timer.After(0, function()
             for i = 1, 20 do
                 local cf = _G["ChatFrame" .. i]
                 if cf and not _skinned[cf] then
                     SkinChatFrame(cf)
-                    hooksecurefunc(cf, "AddMessage", CaptureMessage)
                 end
                 -- Show bg if it was hidden at login
                 if cf and cf._euiBg and not cf._euiBg:IsShown() and cf:IsShown() then
@@ -1307,11 +1405,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local cfName = cf:GetName()
                     if cfName then
                         local btnFrame = _G[cfName .. "ButtonFrame"]
-                        if btnFrame then
-                            btnFrame:SetAlpha(0)
-                            btnFrame:EnableMouse(false)
-                            btnFrame:SetWidth(0.1)
-                            if btnFrame.Background then btnFrame.Background:SetAlpha(0) end
+                        if btnFrame and btnFrame:GetParent() ~= _hiddenParent then
+                            btnFrame:SetParent(_hiddenParent)
                         end
                     end
                 end
@@ -1327,10 +1422,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 region:SetAlpha(0)
                             end
                         end
-                        -- Re-trigger SetPoint so our hooks can correct anchors
-                        if tab:GetPoint(1) then
-                            local pt, rel, relPt, x, y = tab:GetPoint(1)
-                            tab:SetPoint(pt, rel, relPt, x, y)
+                        -- Chain after previous visible tab
+                        for prev = i - 1, 1, -1 do
+                            local prevTab = _G["ChatFrame" .. prev .. "Tab"]
+                            if prevTab and prevTab:IsShown() then
+                                tab:ClearAllPoints()
+                                tab:SetPoint("LEFT", prevTab, "RIGHT", 1, 0)
+                                break
+                            end
                         end
                     end
                 end
@@ -1357,21 +1456,81 @@ initFrame:SetScript("OnEvent", function(self)
     end)
     hooksecurefunc("FCF_Close", DeferredTabColorUpdate)
 
+    -- New message highlight: hook FCF_StartAlertFlash to flag tabs with unread messages
+    if FCF_StartAlertFlash then
+        hooksecurefunc("FCF_StartAlertFlash", function(cf)
+            if not cf then return end
+            local ok, tabName = pcall(function() return cf:GetName() .. "Tab" end)
+            if not ok then return end
+            local tab = _G[tabName]
+            if tab then
+                tab._euiHasNew = true
+                DeferredTabColorUpdate()
+            end
+        end)
+    end
+    if FCF_StopAlertFlash then
+        hooksecurefunc("FCF_StopAlertFlash", function(cf)
+            if not cf then return end
+            local ok, tabName = pcall(function() return cf:GetName() .. "Tab" end)
+            if not ok then return end
+            local tab = _G[tabName]
+            if tab then
+                tab._euiHasNew = false
+                DeferredTabColorUpdate()
+            end
+        end)
+    end
+
 
     if EUI.RegAccent then
         EUI.RegAccent({ type = "callback", fn = UpdateTabColors })
     end
 
-    -- Timestamps are handled by our AddMessage hook, not Blizzard's CVar.
-
-    -- URL filter
-    local function URLFilter(self, event, msg, ...)
-        if msg and ContainsURL(msg) then
-            return false, WrapURLs(msg), ...
-        end
-        return false, msg, ...
+    -- Apply timestamp format from DB. "__blizzard" leaves the CVar alone.
+    local function ApplyTimestampCVar()
+        if not SetCVar then return end
+        local cfg = ECHAT.DB()
+        local fmt = cfg.timestampFormat or "%I:%M "
+        if fmt == "__blizzard" then return end
+        SetCVar("showTimestamps", fmt)
     end
-    for _, ev in ipairs({
+    ApplyTimestampCVar()
+    C_Timer.After(2, ApplyTimestampCVar)
+    ECHAT.ApplyTimestampCVar = ApplyTimestampCVar
+
+    -- Visibility: register with dispatcher + mouseover target system
+    ECHAT.RefreshVisibility()
+    if EUI.RegisterVisibilityUpdater then
+        EUI.RegisterVisibilityUpdater(ECHAT.RefreshVisibility)
+    end
+    if EUI.RegisterMouseoverTarget then
+        local moProxy = {}
+        moProxy.IsShown = function()
+            local cf1 = _G.ChatFrame1
+            return cf1 and cf1:IsShown()
+        end
+        moProxy.IsMouseOver = function()
+            for i = 1, 20 do
+                local cf = _G["ChatFrame" .. i]
+                if cf and cf:IsShown() and cf._euiBg and cf._euiBg:IsMouseOver() then return true end
+            end
+            local cf1 = _G.ChatFrame1
+            if cf1 and cf1._euiSidebar and cf1._euiSidebar:IsMouseOver() then return true end
+            return false
+        end
+        moProxy.SetAlpha = function(_, a)
+            ECHAT.SetChatAlpha(a)
+        end
+        EUI.RegisterMouseoverTarget(moProxy, function()
+            local cfg = ECHAT.DB()
+            return cfg.enabled ~= false and cfg.visibility == "mouseover"
+        end)
+    end
+
+    -- URL wrapping via ChatFrame_AddMessageEventFilter.
+    -- Registered only when safe (not in M+ or raid combat) to avoid taint.
+    local URL_EVENTS = {
         "CHAT_MSG_SAY", "CHAT_MSG_YELL",
         "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
         "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING",
@@ -1380,9 +1539,67 @@ initFrame:SetScript("OnEvent", function(self)
         "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM",
         "CHAT_MSG_BN_WHISPER", "CHAT_MSG_BN_WHISPER_INFORM",
         "CHAT_MSG_CHANNEL",
-    }) do
-        ChatFrame_AddMessageEventFilter(ev, URLFilter)
+    }
+    local function URLFilter(self, event, msg, ...)
+        if msg and ContainsURL(msg) then
+            return false, WrapURLs(msg)
+        end
     end
+
+    local _urlFiltersActive = false
+    local function EnableURLFilters()
+        if _urlFiltersActive then return end
+        _urlFiltersActive = true
+        for _, ev in ipairs(URL_EVENTS) do
+            ChatFrame_AddMessageEventFilter(ev, URLFilter)
+        end
+    end
+    local function DisableURLFilters()
+        if not _urlFiltersActive then return end
+        _urlFiltersActive = false
+        for _, ev in ipairs(URL_EVENTS) do
+            ChatFrame_RemoveMessageEventFilter(ev, URLFilter)
+        end
+    end
+
+    local urlGuard = CreateFrame("Frame")
+    urlGuard:RegisterEvent("CHALLENGE_MODE_START")
+    urlGuard:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    urlGuard:RegisterEvent("PLAYER_ENTERING_WORLD")
+    urlGuard:RegisterEvent("PLAYER_REGEN_DISABLED")
+    urlGuard:RegisterEvent("PLAYER_REGEN_ENABLED")
+    urlGuard:SetScript("OnEvent", function(_, event)
+        if event == "CHALLENGE_MODE_START" then
+
+            DisableURLFilters()
+        elseif event == "CHALLENGE_MODE_COMPLETED" then
+
+            EnableURLFilters()
+        elseif event == "PLAYER_REGEN_DISABLED" then
+            local _, instanceType = IsInInstance()
+            if instanceType == "raid" then
+                DisableURLFilters()
+            end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            local _, instanceType = IsInInstance()
+            if instanceType == "raid" then
+                EnableURLFilters()
+            end
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            local _, instanceType = IsInInstance()
+            local inMPlus = instanceType == "party" and C_ChallengeMode
+                and C_ChallengeMode.IsChallengeModeActive
+                and C_ChallengeMode.IsChallengeModeActive()
+
+            if inMPlus then
+                DisableURLFilters()
+            else
+                EnableURLFilters()
+            end
+        end
+    end)
+    -- Initial enable (we're in PLAYER_LOGIN, safe context)
+    EnableURLFilters()
 
     -- Hide global Blizzard social buttons
     for _, frameName in ipairs({
