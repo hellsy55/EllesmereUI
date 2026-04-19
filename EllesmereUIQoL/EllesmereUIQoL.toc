@@ -1,10 +1,10 @@
-## Interface: 120000, 120001
+## Interface: 120000, 120001, 120005
 ## Title: |cff0cd29fEllesmereUI|r Quality of Life
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
 ## Notes: Quality of Life features and Cursor skinning
 ## Author: Ellesmere
-## Version: 6.8.4
+## Version: 6.8.5
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQoLDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

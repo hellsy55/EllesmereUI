@@ -1,10 +1,10 @@
-## Interface: 120000, 120001
+## Interface: 120000, 120001, 120005
 ## Title: |cff0cd29fEllesmereUI|r Blizz UI Enhanced
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
 ## Notes: Themed Blizzard frames -- Character Sheet, Tooltips, Menus, Popups
 ## Author: Ellesmere
-## Version: 6.8.4
+## Version: 6.8.5
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBlizzardSkinDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

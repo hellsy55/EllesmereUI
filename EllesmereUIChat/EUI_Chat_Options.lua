@@ -82,13 +82,25 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         -- Row 2: Background Opacity (slider + inline color swatch) | Show Top Line
+        local sidebarVisValues = {
+            always    = { text = "Always" },
+            mouseover = { text = "Mouseover" },
+            never     = { text = "Never" },
+        }
+        local sidebarVisOrder = { "always", "mouseover", "never" }
         local bgRow
         bgRow, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity",
               min = 0, max = 1, step = 0.05,
               getValue=function() return Cfg("bgAlpha") or 0.75 end,
               setValue=function(v) Set("bgAlpha", v); RefreshAll() end },
-            { type="label", text="" })
+            { type="dropdown", text="Sidebar Visibility",
+              values=sidebarVisValues, order=sidebarVisOrder,
+              getValue=function() return Cfg("sidebarVisibility") or "always" end,
+              setValue=function(v)
+                  Set("sidebarVisibility", v)
+                  if ECHAT.ApplySidebarVisibility then ECHAT.ApplySidebarVisibility() end
+              end })
         do
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control

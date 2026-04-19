@@ -32,6 +32,7 @@ local CHAT_DEFAULTS = {
             font = "__global",
             fontSize = 12,
             tabFontSize = 10,
+            sidebarVisibility = "always",
         },
     },
 }
@@ -131,6 +132,53 @@ function ECHAT.ApplyFonts()
             if eb.header then eb.header:SetFont(font, size, "") end
             if eb.headerSuffix then eb.headerSuffix:SetFont(font, size, "") end
         end
+    end
+end
+
+-- Sidebar visibility: always, mouseover, never
+local _sidebarFadeTarget = 1
+local _sidebarFadeAlpha = 1
+local _sidebarFadeFrame
+
+function ECHAT.ApplySidebarVisibility()
+    local cfg = ECHAT.DB()
+    local mode = cfg.sidebarVisibility or "always"
+    local cf1 = _G.ChatFrame1
+    local sidebar = cf1 and cf1._euiSidebar
+    if not sidebar then return end
+
+    if mode == "never" then
+        _sidebarFadeTarget = 0
+        _sidebarFadeAlpha = 0
+        sidebar:SetAlpha(0)
+        sidebar:EnableMouse(false)
+    elseif mode == "mouseover" then
+        _sidebarFadeTarget = 0
+        _sidebarFadeAlpha = 0
+        sidebar:SetAlpha(0)
+        sidebar:EnableMouse(true)
+    else
+        _sidebarFadeTarget = 1
+        _sidebarFadeAlpha = 1
+        sidebar:SetAlpha(1)
+        sidebar:EnableMouse(true)
+    end
+
+    -- Create fade frame once, reuse
+    if not _sidebarFadeFrame then
+        _sidebarFadeFrame = CreateFrame("Frame")
+        _sidebarFadeFrame:Hide()
+        _sidebarFadeFrame:SetScript("OnUpdate", function(self, dt)
+            local step = dt * 4  -- 0.25s fade
+            if _sidebarFadeTarget > _sidebarFadeAlpha then
+                _sidebarFadeAlpha = math.min(_sidebarFadeTarget, _sidebarFadeAlpha + step)
+            else
+                _sidebarFadeAlpha = math.max(_sidebarFadeTarget, _sidebarFadeAlpha - step)
+            end
+            local sb = _G.ChatFrame1 and _G.ChatFrame1._euiSidebar
+            if sb then sb:SetAlpha(_sidebarFadeAlpha) end
+            if _sidebarFadeAlpha == _sidebarFadeTarget then self:Hide() end
+        end)
     end
 end
 
@@ -395,14 +443,14 @@ local function ShowCopyPopup(text)
             if not popup:IsMouseOver() then dimmer:Hide() end
         end)
 
-        -- Escape to close
+        -- Escape to close (combat-safe: use pcall for SetPropagateKeyboardInput)
         popup:EnableKeyboard(true)
         popup:SetScript("OnKeyDown", function(self, key)
             if key == "ESCAPE" then
-                self:SetPropagateKeyboardInput(false)
+                pcall(self.SetPropagateKeyboardInput, self, false)
                 dimmer:Hide()
             else
-                self:SetPropagateKeyboardInput(true)
+                pcall(self.SetPropagateKeyboardInput, self, true)
             end
         end)
 
@@ -565,6 +613,27 @@ local function SkinChatFrame(cf)
         if PP and PP.CreateBorder then
             PP.CreateBorder(sidebar, 1, 1, 1, 0.06, 1, "OVERLAY", 7)
         end
+
+        -- Sidebar mouseover hover (for "mouseover" visibility mode)
+        sidebar:EnableMouse(true)
+        sidebar:SetScript("OnEnter", function()
+            local cfg = ECHAT.DB()
+            if cfg.sidebarVisibility == "mouseover" then
+                _sidebarFadeTarget = 1
+                if _sidebarFadeFrame then _sidebarFadeFrame:Show() end
+            end
+        end)
+        sidebar:SetScript("OnLeave", function()
+            local cfg = ECHAT.DB()
+            if cfg.sidebarVisibility == "mouseover" then
+                C_Timer.After(0, function()
+                    if not sidebar:IsMouseOver() then
+                        _sidebarFadeTarget = 0
+                        if _sidebarFadeFrame then _sidebarFadeFrame:Show() end
+                    end
+                end)
+            end
+        end)
 
         -- 1px divider between sidebar and chat bg
         local onePx = (PP and PP.mult) or 1
@@ -1499,6 +1568,9 @@ initFrame:SetScript("OnEvent", function(self)
     C_Timer.After(2, ApplyTimestampCVar)
     ECHAT.ApplyTimestampCVar = ApplyTimestampCVar
 
+    -- Sidebar visibility
+    ECHAT.ApplySidebarVisibility()
+
     -- Visibility: register with dispatcher + mouseover target system
     ECHAT.RefreshVisibility()
     if EUI.RegisterVisibilityUpdater then
@@ -1542,7 +1614,7 @@ initFrame:SetScript("OnEvent", function(self)
     }
     local function URLFilter(self, event, msg, ...)
         if msg and ContainsURL(msg) then
-            return false, WrapURLs(msg)
+            return false, WrapURLs(msg), ...
         end
     end
 

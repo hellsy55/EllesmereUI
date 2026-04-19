@@ -1,10 +1,10 @@
-## Interface: 120000, 120001
+## Interface: 120000, 120001, 120005
 ## Title: |cff0cd29fEllesmereUI|r Quest Tracker
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
 ## Notes: Skin + QoL layer over Blizzard's ObjectiveTrackerFrame
 ## Author: Ellesmere
-## Version: 6.8.4
+## Version: 6.8.5
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQuestTrackerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
