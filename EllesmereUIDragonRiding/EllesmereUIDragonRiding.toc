@@ -1,0 +1,16 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Dragon Riding
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Skyriding HUD — speed, stacks, Second Wind, Whirling Surge
+## Author: Ellesmere
+## Version: 6.8.2
+## Dependencies: EllesmereUI
+## SavedVariables: EllesmereUIDragonRidingDB
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+# Main Lua
+EllesmereUIDragonRiding.lua
+
+# Options
+EUI_DragonRiding_Options.lua
