@@ -132,42 +132,36 @@ local POWER_ENUM_TO_KEY = {
     [PT.PAIN]        = "PAIN",
 }
 
--- Fallback defaults for power types not in EUI's global color system
--- (point resources, aura-tracked resources).
-local POWER_COLORS_FALLBACK = {
-    [PT.HOLY_POWER]  = { 0.95, 0.90, 0.60 },
-    [PT.CHI]         = { 0.71, 1.00, 0.92 },
-    [PT.ARCANE]      = { 0.10, 0.69, 0.97 },
-    [PT.ESSENCE]     = { 0.20, 0.58, 0.50 },
-    [PT.SOUL_SHARDS] = { 0.58, 0.51, 0.79 },
-    [PT.COMBO]       = { 1.00, 0.96, 0.41 },
-    [PT.RUNES]       = { 0.77, 0.12, 0.23 },
-    -- Custom aura-tracked resource colors
-    ["SOUL_FRAGMENTS"]   = { 0.64, 0.19, 0.79 },
-    ["SOUL_FRAGMENTS_VENGEANCE"] = { 0.34, 0.06, 0.46 },
-    ["SOUL_FRAGMENTS_DEVOURER"]  = { 0.64, 0.19, 0.79 },
-    ["MAELSTROM_WEAPON"] = { 0.00, 0.44, 0.87 },
-    ["MAELSTROM_BAR"]    = { 0.00, 0.50, 1.00 },
-    ["INSANITY_BAR"]     = { 0.40, 0.00, 0.80 },
-    ["FOCUS_BAR"]        = { 0.77, 0.53, 0.24 },
-    ["LUNAR_POWER_BAR"]  = { 0.30, 0.52, 0.90 },
-    ["TIP_OF_THE_SPEAR"] = { 0.67, 0.83, 0.45 },
-    ["WHIRLWIND_STACKS"] = { 0.78, 0.61, 0.43 },
-    ["ICICLES"] = { 0.45, 0.85, 1.00 },
-    ["BREWMASTER_STAGGER"] = { 0.52, 1.00, 0.52 },  -- green (light stagger default)
+-- Resolve any power key (enum number, string, or _BAR variant) to the
+-- canonical string key used by EllesmereUI.GetPowerColor.
+local POWER_KEY_ALIAS = {
+    ["FOCUS_BAR"]       = "FOCUS",
+    ["INSANITY_BAR"]    = "INSANITY",
+    ["LUNAR_POWER_BAR"] = "LUNAR_POWER",
+    ["MAELSTROM_BAR"]   = "MAELSTROM",
+    ["MAELSTROM_WEAPON"] = "MAELSTROM",
 }
 
+local function ResolvePowerKey(powerKey)
+    if type(powerKey) == "number" then return POWER_ENUM_TO_KEY[powerKey] end
+    return POWER_KEY_ALIAS[powerKey] or powerKey
+end
+
+-- Power color lookup: resolves all keys through EUI's global color system.
+-- Falls back to class color if no power color exists for the key.
 local POWER_COLORS = setmetatable({}, { __index = function(_, powerKey)
-    -- Try EUI's global color system first (respects user overrides)
-    if EllesmereUI and EllesmereUI.GetPowerColor then
-        local key = type(powerKey) == "number" and POWER_ENUM_TO_KEY[powerKey] or powerKey
-        if key then
-            local c = EllesmereUI.GetPowerColor(key)
-            if c then return { c.r, c.g, c.b } end
-        end
+    if not EllesmereUI then return nil end
+    local key = ResolvePowerKey(powerKey)
+    if key and EllesmereUI.GetPowerColor then
+        local c = EllesmereUI.GetPowerColor(key)
+        if c then return { c.r, c.g, c.b } end
     end
-    -- Fallback for point resources and aura-tracked types not in global system
-    return POWER_COLORS_FALLBACK[powerKey]
+    if EllesmereUI.GetClassColor then
+        local _, classFile = UnitClass("player")
+        local cc = classFile and EllesmereUI.GetClassColor(classFile)
+        if cc then return { cc.r, cc.g, cc.b } end
+    end
+    return nil
 end })
 
 -- Dark theme colors (matches unit frames)
@@ -1857,14 +1851,15 @@ local function BuildBars()
                 secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = 0.2, 0.8, 0.2
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             elseif sp.classColored ~= false then
-                -- classColored is true (default) -- use class color, or power color if no class color
-                -- BM/MM hunter Focus bar: always use power color (not class color)
-                local usePower = (cachedSecondary.power == "FOCUS_BAR")
-                local cc = not usePower and CLASS_COLORS[cachedClass] or nil
-                if cc then
-                    secondaryBar:GetStatusBarTexture():SetVertexColor(cc[1], cc[2], cc[3], sp.fillA or 1)
-                elseif pc then
-                    secondaryBar:GetStatusBarTexture():SetVertexColor(pc[1], pc[2], pc[3], sp.fillA or 1)
+                -- Power types in secondary slot use power color; class resources use class color
+                local pc2 = POWER_COLORS[cachedSecondary.power]
+                if pc2 then
+                    secondaryBar:GetStatusBarTexture():SetVertexColor(pc2[1], pc2[2], pc2[3], sp.fillA or 1)
+                else
+                    local cc = CLASS_COLORS[cachedClass]
+                    if cc then
+                        secondaryBar:GetStatusBarTexture():SetVertexColor(cc[1], cc[2], cc[3], sp.fillA or 1)
+                    end
                 end
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             else
@@ -2257,19 +2252,19 @@ local function UpdateSecondaryResource()
     local maxPts = cachedSecondary.max or 5
 
     local sp = ERB.db.profile.secondary
-    local pc = POWER_COLORS[powerType]
     local r, g, b, a = 1, 1, 1, 1
 
     -- Color: dark theme > class colored > custom fill color
     if sp.darkTheme then
         r, g, b = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
     elseif sp.classColored ~= false then
-        -- classColored is true (default) -- use class color
-        -- BM/MM hunter Focus bar: always use power color (not class color)
-        local usePower = (powerType == "FOCUS_BAR")
-        local cc = not usePower and CLASS_COLORS[cachedClass] or nil
-        if cc then r, g, b = cc[1], cc[2], cc[3]
-        elseif pc then r, g, b = pc[1], pc[2], pc[3] end
+        -- Power types in secondary slot use power color; class resources use class color
+        local pc = POWER_COLORS[powerType]
+        if pc then r, g, b = pc[1], pc[2], pc[3]
+        else
+            local cc = CLASS_COLORS[cachedClass]
+            if cc then r, g, b = cc[1], cc[2], cc[3] end
+        end
         a = sp.fillA or 1
     else
         -- classColored explicitly false -- custom fill
@@ -2581,11 +2576,16 @@ local function UpdateSecondaryResource()
             cur = GetIcicleCount()
             maxC = 5
         end
-        -- Use custom resource color from EllesmereUI if available
-        local _, classFile = UnitClass("player")
-        if sp.classColored and EllesmereUI and EllesmereUI.GetResourceColor then
-            local rc = EllesmereUI.GetResourceColor(classFile)
-            if rc then r, g, b = rc.r, rc.g, rc.b end
+        -- For pips using class color, prefer the per-class resource color
+        if sp.classColored ~= false and not sp.darkTheme then
+            local pc2 = POWER_COLORS[powerType]
+            if pc2 then
+                r, g, b = pc2[1], pc2[2], pc2[3]
+            elseif EllesmereUI and EllesmereUI.GetResourceColor then
+                local _, classFile = UnitClass("player")
+                local rc = EllesmereUI.GetResourceColor(classFile)
+                if rc then r, g, b = rc.r, rc.g, rc.b end
+            end
         end
 
         if isSecret then
@@ -3055,7 +3055,7 @@ end
 -------------------------------------------------------------------------------
 --  Player Cast Bar
 -------------------------------------------------------------------------------
-local SPARK_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga"
+local SPARK_TEX = "Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga"
 
 BuildCastBar = function()
     local cb = ERB.db.profile.castBar
@@ -3094,6 +3094,7 @@ BuildCastBar = function()
         local bar = CreateFrame("StatusBar", "ERB_CastBar", castBarFrame)
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(0)
+        bar:SetClipsChildren(true)
         castBarFrame._bar = bar
 
         -- Spark

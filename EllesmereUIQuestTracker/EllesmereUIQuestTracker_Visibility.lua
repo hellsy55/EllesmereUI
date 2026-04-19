@@ -284,26 +284,43 @@ local function ResizeBGToContent()
     end
     local lowest = GetLowestContentFrame()
     -- Transient "no visible content" states happen for a frame during
-    -- collapse/expand. Keep the previous anchor in that case to avoid
-    -- snapping the BG to the thin-strip fallback for one flicker.
-    if not lowest and bg._lastLowest and bg._lastLowest.IsShown
-       and bg._lastLowest:IsShown() then
-        if not bg:IsShown() then bg:Show() end
-        return
-    end
-    -- Truly no visible content (e.g. no quests in the log): hide BG + top
-    -- divider so we don't show an empty chrome panel.
+    -- track/untrack/collapse/expand while blocks are recycled. Keep the
+    -- BG at its last position to avoid a hide/show blink.
     if not lowest then
+        if bg._lastLowest then
+            -- Had content before -- keep BG visible at last known size.
+            -- A deferred check will hide if content truly went away.
+            if not bg._hideCheck then
+                bg._hideCheck = true
+                C_Timer.After(0.2, function()
+                    bg._hideCheck = nil
+                    if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
+                end)
+            end
+            return
+        end
+        -- Never had content: hide.
         if bg:IsShown() then bg:Hide() end
-        bg._lastLowest = nil
         return
     end
+    bg._hideCheck = nil
     if not bg:IsShown() then bg:Show() end
-    bg:ClearAllPoints()
-    bg:SetPoint("TOPLEFT",  otf, "TOPLEFT",  -6, -30)
-    bg:SetPoint("TOPRIGHT", otf, "TOPRIGHT", 11, -30)
-    bg:SetPoint("BOTTOMLEFT",  lowest, "BOTTOMLEFT",   0, -15)
-    bg:SetPoint("BOTTOMRIGHT", lowest, "BOTTOMRIGHT",  0, -15)
+    local otfTop = otf:GetTop()
+    local lowestBottom = lowest:GetBottom()
+    if otfTop and lowestBottom then
+        local h = otfTop - 30 - lowestBottom + 15
+        if h < 1 then h = 1 end
+        bg:ClearAllPoints()
+        bg:SetPoint("TOPLEFT",  otf, "TOPLEFT",  -6, -30)
+        bg:SetPoint("TOPRIGHT", otf, "TOPRIGHT", 11, -30)
+        bg:SetHeight(h)
+        bg._lastHeight = h
+    elseif bg._lastHeight then
+        bg:ClearAllPoints()
+        bg:SetPoint("TOPLEFT",  otf, "TOPLEFT",  -6, -30)
+        bg:SetPoint("TOPRIGHT", otf, "TOPRIGHT", 11, -30)
+        bg:SetHeight(bg._lastHeight)
+    end
     bg._lastLowest = lowest
 end
 EQT.ResizeBGToContent = ResizeBGToContent

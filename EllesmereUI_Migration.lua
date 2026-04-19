@@ -932,6 +932,24 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "cdm_ghost_strip_racials_v1",
+    scope       = "specProfile",
+    description = "Remove racial spells from ghost CD bar (racials should never be ghosted)",
+    body = function(ctx)
+        local barSpells = ctx.specProfile.barSpells
+        if type(barSpells) ~= "table" then return end
+        local ghostBS = barSpells["__ghost_cd"]
+        if not (ghostBS and ghostBS.assignedSpells) then return end
+        for i = #ghostBS.assignedSpells, 1, -1 do
+            local sid = ghostBS.assignedSpells[i]
+            if sid and CDM_ALL_RACIAL_SPELL_IDS[sid] then
+                table.remove(ghostBS.assignedSpells, i)
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "cdm_strip_legacy_spell_keys",
     scope       = "specProfile",
     description = "Strip legacy trackedSpells/customSpells keys from CDM bar data. The current shape is bs.assignedSpells; legacy keys are no longer written by any code path.",
@@ -1483,6 +1501,39 @@ EllesmereUI.RegisterMigration({
             for _, profData in pairs(profiles) do
                 local mt = profData and profData.addons and profData.addons.EllesmereUIMythicTimer
                 if type(mt) == "table" then mt.bestRuns = nil end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "power_color_defaults_v5",
+    scope       = "global",
+    description = "Migrate users on old power color defaults (Mana/Rage/Focus/Energy) to new defaults",
+    body = function(ctx)
+        local cc = ctx.db.customColors
+        if not cc or not cc.power then return end
+        -- Old defaults that shipped before this migration
+        local function near(a, b) return math.abs(a - b) < 0.01 end
+        local function matchesOld(cur, old)
+            return cur and near(cur.r, old.r) and near(cur.g, old.g) and near(cur.b, old.b)
+        end
+        local OLD = {
+            MANA   = { { r = 0x33/255, g = 0x59/255, b = 0xD9/255 } },
+            RAGE   = { { r = 1.000, g = 0.000, b = 0.000 } },
+            FOCUS  = { { r = 1.000, g = 0.500, b = 0.250 }, { r = 0.770, g = 0.530, b = 0.240 } },
+            ENERGY = { { r = 1.000, g = 1.000, b = 0.000 } },
+            RUNIC_POWER = { { r = 0.000, g = 0.820, b = 1.000 } },
+            LUNAR_POWER = { { r = 0.300, g = 0.520, b = 0.900 } },
+            MAELSTROM   = { { r = 0.000, g = 0.500, b = 1.000 } },
+        }
+        for key, oldList in pairs(OLD) do
+            local cur = cc.power[key]
+            for _, old in ipairs(oldList) do
+                if matchesOld(cur, old) then
+                    cc.power[key] = nil
+                    break
+                end
             end
         end
     end,

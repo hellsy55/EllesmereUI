@@ -4,7 +4,6 @@
 --  Meant to be shared across the entire EllesmereUI addon suite.
 -------------------------------------------------------------------------------
 local EUI_HOST_ADDON = ...
-
 -------------------------------------------------------------------------------
 --  Constants & Colours (BURNE STAY AWAY FROM THIS SECTION)
 -------------------------------------------------------------------------------
@@ -258,7 +257,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",        search_name = "EllesmereUI Unit Frames",        icon_on = ICONS_PATH .. "sidebar\\unitframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\unitframes-ig.png"      },
     { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png",      comingSoon = true },
     { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
-    { folder = "EllesmereUIResourceBars",      display = "Resource Bars",      search_name = "EllesmereUI Resource Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
+    { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
     { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
     -- Basics is intentionally NOT in the roster: its code has been split into
     -- the per-module addons below. The Basics folder still exists as a shim
@@ -269,7 +268,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\mplus-ig-on.png",           icon_off = ICONS_PATH .. "sidebar\\mplus-ig.png"         },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
-    { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
     { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
@@ -322,8 +321,8 @@ EllesmereUI.ADDON_GROUPS = {
             "EllesmereUIQuestTracker",
             "EllesmereUIFriends",
             "EllesmereUIMinimap",
+            "EllesmereUIChat",
             "EllesmereUIDamageMeters",   -- comingSoon
-            "EllesmereUIChat",            -- comingSoon
             "EllesmereUIBags",            -- comingSoon
         },
     },
@@ -890,11 +889,12 @@ do
         end
     end
 
+    local _hookedMetatables = {}
     local function HookPixelSnap(object)
         local mk = getmetatable(object)
         if not mk then return end
         mk = mk.__index
-        if not mk or mk.DisabledPixelSnap then return end
+        if not mk or _hookedMetatables[mk] then return end
 
         if mk.SetSnapToPixelGrid or mk.SetStatusBarTexture or mk.SetColorTexture
            or mk.SetVertexColor or mk.CreateTexture or mk.SetTexCoord or mk.SetTexture then
@@ -905,7 +905,7 @@ do
             if mk.CreateTexture then hooksecurefunc(mk, "CreateTexture", PP.DisablePixelSnap) end
             if mk.SetTexCoord then hooksecurefunc(mk, "SetTexCoord", PP.DisablePixelSnap) end
             if mk.SetTexture then hooksecurefunc(mk, "SetTexture", PP.DisablePixelSnap) end
-            mk.DisabledPixelSnap = true
+            _hookedMetatables[mk] = true
         end
     end
 
@@ -1172,7 +1172,6 @@ end
 
 -- File-level PP reference for code outside the do block
 PP = EllesmereUI.PP
-
 -------------------------------------------------------------------------------
 --  Panel Pixel Perfect (PanelPP)
 --  The options panel runs at effective scale = baseScale * userScale.
@@ -1274,14 +1273,15 @@ local PanelPP = EllesmereUI.PanelPP
 
 -- Default power colors (from WoW's PowerBarColor)
 EllesmereUI.DEFAULT_POWER_COLORS = {
-    MANA         = { r = 0x33/255, g = 0x59/255, b = 0xD9/255 },
-    RAGE         = { r = 1.000, g = 0.000, b = 0.000 },
-    FOCUS        = { r = 1.000, g = 0.500, b = 0.250 },
-    ENERGY       = { r = 1.000, g = 1.000, b = 0.000 },
-    RUNIC_POWER  = { r = 0.000, g = 0.820, b = 1.000 },
-    LUNAR_POWER  = { r = 0.300, g = 0.520, b = 0.900 },
+    -- Standard power types
+    MANA         = { r = 0.000, g = 0.550, b = 1.000 },
+    RAGE         = { r = 0.900, g = 0.150, b = 0.150 },
+    FOCUS        = { r = 0xDD/255, g = 0x92/255, b = 0x37/255 },
+    ENERGY       = { r = 1.000, g = 0.960, b = 0.410 },
+    RUNIC_POWER  = { r = 0xC4/255, g = 0x1F/255, b = 0x3B/255 },
+    LUNAR_POWER  = { r = 0xFF/255, g = 0x7D/255, b = 0x0A/255 },
     INSANITY     = { r = 0.400, g = 0.000, b = 0.800 },
-    MAELSTROM    = { r = 0.000, g = 0.500, b = 1.000 },
+    MAELSTROM    = { r = 0x00/255, g = 0x70/255, b = 0xDE/255 },
     FURY         = { r = 0.788, g = 0.259, b = 0.992 },
     PAIN         = { r = 1.000, g = 0.612, b = 0.000 },
 }
@@ -1508,7 +1508,7 @@ function EllesmereUI.GetClassColor(classToken)
     return { r = 1, g = 1, b = 1 }
 end
 
--- Get power color (custom or default)
+-- Get power color (custom or default). Returns nil for unknown keys.
 function EllesmereUI.GetPowerColor(powerKey)
     local db = EllesmereUI.GetCustomColorsDB()
     if db.power and db.power[powerKey] then
@@ -1516,7 +1516,7 @@ function EllesmereUI.GetPowerColor(powerKey)
     end
     local def = EllesmereUI.DEFAULT_POWER_COLORS[powerKey]
     if def then return { r = def.r, g = def.g, b = def.b } end
-    return { r = 1, g = 1, b = 1 }
+    return nil
 end
 
 -- Get resource color (custom or default)
@@ -5276,7 +5276,7 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
 
         local placeholder = MakeFont(searchFrame, 12, nil, TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, 0.3)
         placeholder:SetPoint("LEFT", searchFrame, "LEFT", 10, 0)
-        placeholder:SetText("Search Feature Settings...")
+        placeholder:SetText("Search Module Settings...")
 
         -- Clear button (X) on right side — frame level above editBox so clicks register
         local clearBtn = CreateFrame("Button", nil, searchFrame)
@@ -5983,7 +5983,9 @@ function EllesmereUI:InvalidatePageCache()
         end
         _pageCache[key] = nil
     end
-    EllesmereUI:InvalidateContentHeaderCache()
+    if EllesmereUI.InvalidateContentHeaderCache then
+        EllesmereUI:InvalidateContentHeaderCache()
+    end
 end
 
 function EllesmereUI:SelectPage(pageName)
@@ -6642,63 +6644,50 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.8.2"
+EllesmereUI.VERSION = "6.8.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
 _G._EUI_AddonVersions[EUI_HOST_ADDON] = EllesmereUI.VERSION
 
--- One-time welcome message (shared across all Ellesmere addons)
+-- Version mismatch check (shared across all Ellesmere addons)
 do
     local f = CreateFrame("Frame")
-    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    f:RegisterEvent("PLAYER_LOGIN")
     f:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        if _G._EUI_WelcomePrinted then return end
-        _G._EUI_WelcomePrinted = true
-        local v = EllesmereUI.VERSION or "1.0"
-        print("|cff0cd29fEllesmereUI|r v" .. v .. " loaded. Type |cff0cd29f/eui|r for settings, and |cff0cd29f/unlock|r for Unlock Mode.")
-
-        -- Version mismatch check across all Ellesmere addons
-        -- Uses the pre-registered _EUI_AddonVersions table (taint-free)
-        if not _G._EUI_VersionChecked then
-            _G._EUI_VersionChecked = true
-            C_Timer.After(2, function()
-                local versions = _G._EUI_AddonVersions
-                if not versions then return end
-                local loaded = {}
-                for name, ver in pairs(versions) do
-                    loaded[#loaded + 1] = { name = name, version = ver }
+        self:UnregisterEvent("PLAYER_LOGIN")
+        if _G._EUI_VersionChecked then return end
+        _G._EUI_VersionChecked = true
+        C_Timer.After(2, function()
+            local versions = _G._EUI_AddonVersions
+            if not versions then return end
+            local loaded = {}
+            for name, ver in pairs(versions) do
+                loaded[#loaded + 1] = { name = name, version = ver }
+            end
+            if #loaded < 2 then return end
+            local newest = loaded[1].version
+            for i = 2, #loaded do
+                if loaded[i].version > newest then newest = loaded[i].version end
+            end
+            local outdated = {}
+            for _, info in ipairs(loaded) do
+                if info.version ~= newest then
+                    outdated[#outdated + 1] = info.name
                 end
-                if #loaded < 2 then return end
-                -- Find the newest version
-                local newest = loaded[1].version
-                for i = 2, #loaded do
-                    if loaded[i].version > newest then newest = loaded[i].version end
-                end
-                -- Collect addons that are behind
-                local outdated = {}
-                for _, info in ipairs(loaded) do
-                    if info.version ~= newest then
-                        outdated[#outdated + 1] = info.name
-                    end
-                end
-                if #outdated == 0 then return end
-                local msg = "The following EllesmereUI addons are out of date. "
-                    .. "Please update so all addons are the same version:\n\n"
-                    .. table.concat(outdated, ", ")
-                if EllesmereUI.ShowConfirmPopup then
-                    EllesmereUI:ShowConfirmPopup({
-                        title       = "Out of Date",
-                        message     = msg,
-                        confirmText = "OK",
-                    })
-                else
-                    print("|cffff6060[EllesmereUI] WARNING:|r " .. msg:gsub("\n", " "))
-                end
-            end)
-        end
-
+            end
+            if #outdated == 0 then return end
+            local msg = "The following EllesmereUI addons are out of date. "
+                .. "Please update so all addons are the same version:\n\n"
+                .. table.concat(outdated, ", ")
+            if EllesmereUI.ShowConfirmPopup then
+                EllesmereUI:ShowConfirmPopup({
+                    title       = "Out of Date",
+                    message     = msg,
+                    confirmText = "OK",
+                })
+            end
+        end)
     end)
 end
 
@@ -7150,215 +7139,6 @@ function EllesmereUI:ShowModule(folderName)
     end
 end
 
--------------------------------------------------------------------------------
---  Streamer Settings: Guild Chat Privacy
--------------------------------------------------------------------------------
-do
-    local overlay
-    local function ShowOverlay()
-        if not overlay then return end
-        if not (EllesmereUIDB and EllesmereUIDB.guildChatPrivacy) then return end
-        local cf = CommunitiesFrame
-        if not cf or not cf.Chat or not cf.Chat.MessageFrame then return end
-        local mf = cf.Chat.MessageFrame
-        overlay:SetParent(mf)
-        overlay:SetAllPoints(mf)
-        overlay:SetFrameLevel(mf:GetFrameLevel() + 20)
-        overlay:Show()
-    end
-
-    local function ApplyGuildChatPrivacy()
-        local enabled = EllesmereUIDB and EllesmereUIDB.guildChatPrivacy
-        if not enabled then
-            if overlay then overlay:Hide() end
-            return
-        end
-
-        if not overlay then
-            overlay = CreateFrame("Button", nil, UIParent)
-            overlay:SetFrameStrata("DIALOG")
-            local bg = overlay:CreateTexture(nil, "BACKGROUND")
-            bg:SetPoint("TOPLEFT", -2, 0)
-            bg:SetPoint("BOTTOMRIGHT", 2, -4)
-            bg:SetColorTexture(0.133, 0.133, 0.133, 1) -- #222, 100%
-            local txt = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            txt:SetPoint("CENTER")
-            txt:SetText("Click to Show")
-            txt:SetTextColor(0.7, 0.7, 0.7, 1)
-            overlay:SetScript("OnClick", function(self)
-                self:Hide()
-            end)
-        end
-
-        -- CommunitiesFrame is load-on-demand; hook when it becomes available
-        if CommunitiesFrame then
-            ShowOverlay()
-            if not overlay._hooked then
-                CommunitiesFrame:HookScript("OnShow", ShowOverlay)
-                overlay._hooked = true
-            end
-        else
-            -- Wait for the addon to load
-            local loader = CreateFrame("Frame")
-            loader:RegisterEvent("ADDON_LOADED")
-            loader:SetScript("OnEvent", function(self, _, addon)
-                if addon == "Blizzard_Communities" then
-                    self:UnregisterAllEvents()
-                    if EllesmereUIDB and EllesmereUIDB.guildChatPrivacy then
-                        ShowOverlay()
-                        if not overlay._hooked then
-                            CommunitiesFrame:HookScript("OnShow", ShowOverlay)
-                            overlay._hooked = true
-                        end
-                    end
-                end
-            end)
-        end
-    end
-    EllesmereUI._applyGuildChatPrivacy = ApplyGuildChatPrivacy
-end
-
--------------------------------------------------------------------------------
---  Streamer Settings: Secondary Stats Display
--------------------------------------------------------------------------------
-do
-    local statsFrame, statsText
-    local format = string.format
-
-    local function UpdateSecondaryStats()
-        if not statsFrame or not statsFrame:IsShown() then return end
-        -- Cache class color (used as fallback for both secondary and tertiary)
-        if not statsFrame._classHex then
-            local _, cls = UnitClass("player")
-            local cc = cls and EllesmereUI.GetClassColor(cls)
-            if cc then
-                statsFrame._classR, statsFrame._classG, statsFrame._classB = cc.r, cc.g, cc.b
-                statsFrame._classHex = format("%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
-            else
-                statsFrame._classR, statsFrame._classG, statsFrame._classB = 1, 1, 1
-                statsFrame._classHex = "ffffff"
-            end
-        end
-        -- Secondary label color (defaults to class color)
-        local c = EllesmereUIDB and EllesmereUIDB.secondaryStatsColor
-        local cr, cg, cb
-        if c then
-            cr, cg, cb = c.r, c.g, c.b
-        else
-            cr, cg, cb = statsFrame._classR, statsFrame._classG, statsFrame._classB
-        end
-        local labelHex = c and format("%02x%02x%02x", cr * 255, cg * 255, cb * 255) or statsFrame._classHex
-
-        local crit = GetCritChance()
-        local haste = GetHaste()
-        local mastery = GetMasteryEffect()
-        local vers = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE)
-                    + GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)
-
-        local txt =
-            format("|cff%sCrit:|r  |cffffffff%.2f%%|r", labelHex, crit) .. "\n" ..
-            format("|cff%sHaste:|r  |cffffffff%.2f%%|r", labelHex, haste) .. "\n" ..
-            format("|cff%sMastery:|r  |cffffffff%.2f%%|r", labelHex, mastery) .. "\n" ..
-            format("|cff%sVers:|r  |cffffffff%.2f%%|r", labelHex, vers)
-
-        if EllesmereUIDB and EllesmereUIDB.showTertiaryStats then
-            -- Tertiary label color (defaults to class color)
-            local tc = EllesmereUIDB.tertiaryStatsColor
-            local tr, tg, tb
-            if tc then
-                tr, tg, tb = tc.r, tc.g, tc.b
-            else
-                tr, tg, tb = statsFrame._classR, statsFrame._classG, statsFrame._classB
-            end
-            local tertHex = tc and format("%02x%02x%02x", tr * 255, tg * 255, tb * 255) or statsFrame._classHex
-
-            local leech = GetLifesteal()
-            local avoidance = GetAvoidance()
-            local speed = GetSpeed()
-            txt = txt .. "\n" ..
-                format("|cff%sLeech:|r  |cffffffff%.2f%%|r", tertHex, leech) .. "\n" ..
-                format("|cff%sAvoidance:|r  |cffffffff%.2f%%|r", tertHex, avoidance) .. "\n" ..
-                format("|cff%sSpeed:|r  |cffffffff%.2f%%|r", tertHex, speed)
-        end
-
-        statsText:SetText(txt)
-    end
-
-    local function ApplySecondaryStats()
-        local enabled = EllesmereUIDB and EllesmereUIDB.showSecondaryStats
-        if not enabled then
-            if statsFrame then
-                statsFrame:Hide()
-                statsFrame:UnregisterAllEvents()
-            end
-            return
-        end
-        if not statsFrame then
-            statsFrame = CreateFrame("Frame", "EUI_SecondaryStats", UIParent)
-            statsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 12, -12)
-            statsFrame:SetSize(160, 60)
-            statsFrame:SetFrameStrata("LOW")
-            statsText = statsFrame:CreateFontString(nil, "OVERLAY")
-            statsText:SetPoint("TOPLEFT")
-            statsText:SetJustifyH("LEFT")
-        end
-        -- Always update font, outline and shadow in case global options changed
-        if statsText then
-            local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
-            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag())
-            if EllesmereUI.GetFontUseShadow() then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
-        end
-        -- Apply saved position and scale
-        local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
-        local scale = 1.0
-        if pos then
-            if pos.point then
-                statsFrame:ClearAllPoints()
-                statsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-            end
-            if pos.scale then
-                scale = pos.scale
-            end
-        end
-        if statsText then
-            local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
-            local fontSize = math.floor(12 * scale + 0.5)
-            statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag())
-            if EllesmereUI.GetFontUseShadow() then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
-        end
-        statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
-        statsFrame:RegisterEvent("COMBAT_RATING_UPDATE")
-        statsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        local _statsThrottled = false
-        statsFrame:SetScript("OnEvent", function()
-            if _statsThrottled then return end
-            _statsThrottled = true
-            C_Timer.After(0.5, function()
-                _statsThrottled = false
-                UpdateSecondaryStats()
-            end)
-        end)
-        statsFrame:Show()
-        UpdateSecondaryStats()
-    end
-    EllesmereUI._applySecondaryStats = ApplySecondaryStats
-
-    -- Expose frame getter for unlock mode
-    EllesmereUI._getSecondaryStatsFrame = function()
-        if not statsFrame then
-            ApplySecondaryStats()
-        end
-        return statsFrame
-    end
-end
 
 -------------------------------------------------------------------------------
 --  Native Minimap Button (no library dependencies)
@@ -7607,10 +7387,6 @@ initFrame:SetScript("OnEvent", function(self, event)
             GameMenuFrame:SetHeight(_gameMenuBaseHeight + 40)
         end)
     end
-
-    -- Apply streamer settings
-    if EllesmereUI._applyGuildChatPrivacy then EllesmereUI._applyGuildChatPrivacy() end
-    if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
 
     -- Apply theme settings from SavedVariables
     if EllesmereUIDB then
@@ -8097,351 +7873,4 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
     end
 end
 
--------------------------------------------------------------------------------
---  Custom In-Game Tooltip Skinning
---  Restyles Blizzard's GameTooltip and related frames with EUI's dark style.
---  Visual-only changes (alpha, backdrop color, font). No Hide/Show/SetParent
---  on Blizzard frames. All hooks are post-hooks via hooksecurefunc.
--------------------------------------------------------------------------------
-;(function()
-    local _ttSkinned = {}
-    local _isSecret = issecretvalue
-    local _PP  -- resolved lazily
-    local _select = select
-    local _GameTooltip = GameTooltip
-    local _RAID_CC = RAID_CLASS_COLORS
-    local _nameL1 = nil  -- cached ref to GameTooltipTextLeft1
-
-    local function _enabled()
-        return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
-    end
-
-    local function _ttSkin(tt, _, isEmbedded)
-        if not tt or tt:IsForbidden() or not _enabled() then return end
-        -- Embedded tooltips (e.g. EmbeddedItemTooltip, the reward-item block
-        -- inside a world-quest tooltip) render INSIDE a parent tooltip.
-        -- Adding our bg + border to them makes the embedded block look like
-        -- a standalone framed tooltip sitting inside the parent.
-        if isEmbedded or tt.IsEmbedded then return end
-        if _isSecret and _isSecret(tt:GetWidth()) then return end
-        if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
-        if tt.NineSlice then tt.NineSlice:SetAlpha(0) end
-        if not tt._euiBg then
-            tt._euiBg = tt:CreateTexture(nil, "BACKGROUND", nil, -8)
-            tt._euiBg:SetAllPoints()
-            local RS = EllesmereUI.RESKIN
-            tt._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.TT_ALPHA)
-            if _PP and _PP.CreateBorder then
-                _PP.CreateBorder(tt, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-            end
-        end
-        tt._euiBg:Show()
-    end
-
-    local function _ttFonts(tt)
-        if not tt or tt:IsForbidden() or not _enabled() then return end
-        local fp = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-        local ol = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
-        local scale = EllesmereUIDB and EllesmereUIDB.tooltipFontScale or 1.0
-        local titleSize = math.floor(13 * scale + 0.5)
-        local bodySize  = math.floor(11 * scale + 0.5)
-        local name = tt.GetName and tt:GetName()
-        if not name then return end
-        local nLines = tt.NumLines and tt:NumLines() or 30
-        for i = 1, nLines do
-            local left = _G[name .. "TextLeft" .. i]
-            if not left then break end
-            left:SetFont(fp, (i == 1) and titleSize or bodySize, ol)
-            local right = _G[name .. "TextRight" .. i]
-            if right then right:SetFont(fp, bodySize, ol) end
-        end
-    end
-
-    local function _ttOnShow(self) _ttSkin(self); _ttFonts(self) end
-
-    local function _ttHook(tt)
-        if not tt or tt:IsForbidden() or _ttSkinned[tt] then return end
-        _ttSkinned[tt] = true
-        tt:HookScript("OnShow", _ttOnShow)
-    end
-
-    local function _accentEnabled()
-        return EllesmereUIDB and EllesmereUIDB.accentReskinElements
-    end
-
-    local function _ttUnitColor(tt)
-        if tt ~= _GameTooltip or tt:IsForbidden() then return end
-        local _, unit = tt:GetUnit()
-        if not unit then
-            if UnitExists("mouseover") then unit = "mouseover" end
-        end
-        if not unit or (_isSecret and _isSecret(unit)) then return end
-        if not UnitIsPlayer(unit) then return end
-        local _, classFile = UnitClass(unit)
-        if not classFile or (_isSecret and _isSecret(classFile)) then return end
-        if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-        if not _nameL1 then return end
-        -- Strip player titles (default on: tooltipPlayerTitles is opt-in)
-        local db = EllesmereUIDB
-        if not (db and db.tooltipPlayerTitles) then
-            local name = UnitName(unit)
-            if name and not (_isSecret and _isSecret(name)) then
-                local realm = select(2, UnitName(unit))
-                local display = (realm and realm ~= "") and (name .. "-" .. realm) or name
-                _nameL1:SetText(display)
-            end
-        end
-        -- Class color the name line and the status bar. Always on when the
-        -- unit is a player, independent of the "Accent Colored Elements"
-        -- toggle (which only governs accent recoloring of headers, arrows,
-        -- and spell titles).
-        local cc = _RAID_CC and _RAID_CC[classFile]
-        if cc then
-            _nameL1:SetTextColor(cc.r, cc.g, cc.b)
-            if GameTooltipStatusBar then
-                GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
-            end
-        end
-    end
-
-    local function _ttInit()
-        for _, tt in ipairs({
-            _GameTooltip, ShoppingTooltip1, ShoppingTooltip2,
-            ItemRefTooltip, ItemRefShoppingTooltip1, ItemRefShoppingTooltip2,
-            FriendsTooltip, EmbeddedItemTooltip, GameSmallHeaderTooltip, QuickKeybindTooltip,
-            _G.WarCampaignTooltip, _G.ReputationParagonTooltip,
-            _G.LibDBIconTooltip, _G.SettingsTooltip,
-            QuestScrollFrame and QuestScrollFrame.StoryTooltip,
-            QuestScrollFrame and QuestScrollFrame.CampaignTooltip,
-        }) do
-            _ttHook(tt)
-        end
-        if SharedTooltip_SetBackdropStyle then
-            hooksecurefunc("SharedTooltip_SetBackdropStyle", _ttSkin)
-        end
-        if GameTooltipStatusBar then
-            GameTooltipStatusBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-            local sbBg = GameTooltipStatusBar:CreateTexture(nil, "BACKGROUND")
-            sbBg:SetAllPoints(); sbBg:SetColorTexture(0, 0, 0, 0.5)
-            GameTooltipStatusBar:ClearAllPoints()
-            GameTooltipStatusBar:SetPoint("BOTTOMLEFT", _GameTooltip, "BOTTOMLEFT", 1, 1)
-            GameTooltipStatusBar:SetPoint("BOTTOMRIGHT", _GameTooltip, "BOTTOMRIGHT", -1, 1)
-            GameTooltipStatusBar:SetHeight(3)
-        end
-        -- Accent-color the title line for spells/macros (not items or units)
-        local function _ttAccentTitle(tt)
-            if tt ~= _GameTooltip or tt:IsForbidden() or not _accentEnabled() then return end
-            if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-            if _nameL1 then
-                local EG = EllesmereUI.ELLESMERE_GREEN
-                if EG then _nameL1:SetTextColor(EG.r, EG.g, EG.b) end
-            end
-        end
-        if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
-            TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, _ttUnitColor)
-            TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, _ttAccentTitle)
-            TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Macro, _ttAccentTitle)
-        else
-            _GameTooltip:HookScript("OnTooltipSetUnit", _ttUnitColor)
-            _GameTooltip:HookScript("OnTooltipSetSpell", _ttAccentTitle)
-        end
-    end
-
-    -- Context menu skinning
-    local _menuSkinned = {}
-
-    local function _menuSkinFrame(frame)
-        if not frame or frame:IsForbidden() or not _enabled() then return end
-        for i = 1, _select("#", frame:GetRegions()) do
-            local region = _select(i, frame:GetRegions())
-            if region and region:IsObjectType("Texture") and not region._euiOwned then
-                local RS = EllesmereUI.RESKIN
-                region:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, 1)
-                region:SetAlpha(RS.CTX_ALPHA)
-                region:ClearAllPoints()
-                region:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
-                region:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
-            end
-        end
-        if not _menuSkinned[frame] then
-            _menuSkinned[frame] = true
-            if _PP and _PP.CreateBorder then
-                local RS = EllesmereUI.RESKIN
-                _PP.CreateBorder(frame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-            end
-        end
-    end
-
-    local function _menuOnOpen(manager, _, menuDescription)
-        if not _enabled() then return end
-        local menu = manager.GetOpenMenu and manager:GetOpenMenu()
-        if menu then
-            _menuSkinFrame(menu)
-        end
-        if menuDescription and menuDescription.AddMenuAcquiredCallback then
-            menuDescription:AddMenuAcquiredCallback(_menuSkinFrame)
-        end
-    end
-
-    local function _menuInit()
-        if not _G.Menu or not _G.Menu.GetManager then return end
-        local mgr = _G.Menu.GetManager()
-        if not mgr then return end
-        hooksecurefunc(mgr, "OpenMenu", function(self, ownerRegion, menuDescription)
-            _menuOnOpen(self, ownerRegion, menuDescription)
-        end)
-        hooksecurefunc(mgr, "OpenContextMenu", function(self, ownerRegion, menuDescription)
-            _menuOnOpen(self, ownerRegion, menuDescription)
-        end)
-    end
-
-    -- Static popup skinning
-    local function _popupSkin(popup)
-        if not popup or popup:IsForbidden() then return end
-        if not _enabled() then return end
-        -- Strip textures on the popup frame itself
-        for i = 1, _select("#", popup:GetRegions()) do
-            local r = _select(i, popup:GetRegions())
-            if r and r:IsObjectType("Texture") and not r._euiOwned then
-                r:SetTexture(nil)
-                if r.SetAtlas then r:SetAtlas("") end
-            end
-        end
-        -- Hide the BG border frame (StaticPopupN.BG)
-        if popup.BG then popup.BG:SetAlpha(0) end
-        if popup.NineSlice then popup.NineSlice:SetAlpha(0) end
-        -- Our dark background + border (once)
-        if not popup._euiBg then
-            local RS = EllesmereUI.RESKIN
-            popup._euiBg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
-            popup._euiBg:SetAllPoints()
-            popup._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-            popup._euiBg._euiOwned = true
-            if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
-            if _PP and _PP.CreateBorder then
-                _PP.CreateBorder(popup, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-            end
-        end
-        popup._euiBg:Show()
-        -- Skin buttons
-        for i = 1, 4 do
-            local btn = popup["button" .. i] or _G[popup:GetName() and (popup:GetName() .. "Button" .. i)]
-            if btn and not btn._euiSkinned then
-                btn._euiSkinned = true
-                for j = 1, select("#", btn:GetRegions()) do
-                    local r = select(j, btn:GetRegions())
-                    if r and r:IsObjectType("Texture") and r ~= btn:GetFontString() then
-                        r:SetTexture(nil)
-                        if r.SetAtlas then r:SetAtlas("") end
-                    end
-                end
-                local RS = EllesmereUI.RESKIN
-                local EG = EllesmereUI.ELLESMERE_GREEN
-                local useAccent = _accentEnabled() and EG
-                local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
-                btnBg:SetAllPoints()
-                btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                btnBg._euiOwned = true
-                btn._euiBg = btnBg
-                if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
-                if _PP and _PP.CreateBorder then
-                    if useAccent then
-                        _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
-                    else
-                        _PP.CreateBorder(btn, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-                    end
-                end
-
-                -- Blizzard toggles button:Enable()/Disable() for things like the
-                -- Release button in boss combat (UpdateRecapButton path). Since
-                -- we hardcode the text color instead of relying on font objects
-                -- with disabled variants, mirror Blizzard's enabled/disabled
-                -- state ourselves so the button visibly dims when locked out.
-                local function _euiRefreshEnabled(self)
-                    local fs = self:GetFontString()
-                    local enabled = (self.IsEnabled and self:IsEnabled()) and true or false
-                    if fs then
-                        if enabled then
-                            local EG2 = EllesmereUI.ELLESMERE_GREEN
-                            if _accentEnabled() and EG2 then
-                                fs:SetTextColor(EG2.r, EG2.g, EG2.b, 1)
-                            else
-                                fs:SetTextColor(1, 1, 1, 1)
-                            end
-                        else
-                            fs:SetTextColor(0.4, 0.4, 0.4, 1)
-                        end
-                    end
-                    if self._euiBg then
-                        self._euiBg:SetAlpha(enabled and 1 or 0.5)
-                    end
-                end
-                btn._euiRefreshEnabled = _euiRefreshEnabled
-                btn:HookScript("OnEnable",  _euiRefreshEnabled)
-                btn:HookScript("OnDisable", _euiRefreshEnabled)
-                _euiRefreshEnabled(btn)
-            end
-        end
-
-        -- Boss-combat release lockout: Blizzard re-runs UpdateRecapButton on
-        -- every popup Show + at intervals while it's up. Hook it once per
-        -- popup so our per-button enabled visual stays in sync with Blizzard's
-        -- enable/disable state swaps.
-        if popup.UpdateRecapButton and not popup._euiRecapHooked then
-            popup._euiRecapHooked = true
-            hooksecurefunc(popup, "UpdateRecapButton", function(self)
-                for i = 1, 4 do
-                    local b = self["button" .. i]
-                    if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
-                end
-            end)
-        end
-
-        -- In case the popup was shown already-disabled (no OnEnable/OnDisable
-        -- fires in that case), re-sync the state right now.
-        for i = 1, 4 do
-            local b = popup["button" .. i]
-            if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
-        end
-        -- Skin edit box if present
-        local eb = popup.editBox or (popup.GetName and _G[popup:GetName() .. "EditBox"])
-        if eb and not eb._euiSkinned then
-            eb._euiSkinned = true
-            for j = 1, select("#", eb:GetRegions()) do
-                local r = select(j, eb:GetRegions())
-                if r and r:IsObjectType("Texture") then
-                    r:SetTexture(nil)
-                    if r.SetAtlas then r:SetAtlas("") end
-                end
-            end
-            local ebBg = eb:CreateTexture(nil, "BACKGROUND", nil, -6)
-            ebBg:SetAllPoints()
-            ebBg:SetColorTexture(0.05, 0.05, 0.05, 0.9)
-            ebBg._euiOwned = true
-        end
-    end
-
-    local function _popupInit()
-        for i = 1, STATICPOPUP_NUMDIALOGS or 4 do
-            local popup = _G["StaticPopup" .. i]
-            if popup then
-                popup:HookScript("OnShow", function(self) _popupSkin(self) end)
-            end
-        end
-    end
-
-    do
-        local f = CreateFrame("Frame")
-        f:RegisterEvent("PLAYER_LOGIN")
-        f:SetScript("OnEvent", function(self)
-            self:UnregisterAllEvents()
-            if not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false then
-                _ttInit()
-                _menuInit()
-                _popupInit()
-            end
-        end)
-    end
-    EllesmereUI._initTooltipSkins = function() _ttInit(); _menuInit(); _popupInit() end
-end)()
 

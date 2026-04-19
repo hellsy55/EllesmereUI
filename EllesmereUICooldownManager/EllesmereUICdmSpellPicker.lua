@@ -1137,35 +1137,14 @@ function ns.RemoveCDMBar(key)
             p.cdmBarPositions[key] = nil
             table.remove(p.cdmBars.bars, i)
 
-            -- Migrate this bar's spells to the matching ghost bar across
-            -- ALL spec profiles, then delete the bar's spell data. Done
-            -- per-spec so each spec keeps its own ghost list intact and
-            -- doesn't gain spells from other specs.
+            -- Custom bar deletion: free all spells (don't ghost them).
+            -- Just delete the bar's spell data from all spec profiles.
             local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
             local sp = sa and sa.specProfiles
             if sp then
                 for _, specData in pairs(sp) do
-                    local barSpells = specData.barSpells
-                    local sd = barSpells and barSpells[key]
-                    if sd and sd.assignedSpells and ghostKey then
-                        -- Ensure ghost bar entry exists in this spec's data
-                        local ghostSd = barSpells[ghostKey]
-                        if not ghostSd then
-                            ghostSd = { assignedSpells = {} }
-                            barSpells[ghostKey] = ghostSd
-                        elseif not ghostSd.assignedSpells then
-                            ghostSd.assignedSpells = {}
-                        end
-                        -- Append, variant-deduped against the ghost bar
-                        for _, sid in ipairs(sd.assignedSpells) do
-                            if type(sid) == "number" and sid > 0
-                               and not FindVariantIndex(ghostSd.assignedSpells, sid) then
-                                ghostSd.assignedSpells[#ghostSd.assignedSpells + 1] = sid
-                            end
-                        end
-                    end
-                    if barSpells and barSpells[key] then
-                        barSpells[key] = nil
+                    if specData.barSpells and specData.barSpells[key] then
+                        specData.barSpells[key] = nil
                     end
                 end
             end

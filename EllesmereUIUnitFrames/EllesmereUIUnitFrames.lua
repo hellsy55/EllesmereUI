@@ -583,6 +583,7 @@ local defaults = {
     }
 }
 local frames = {}
+local SpecHasClassPower  -- forward declaration; defined after CLASS_POWER_TYPES
 
 local CASTBAR_COLOR = { r = 0.114, g = 0.655, b = 0.514 }
 local function GetCastbarColor()
@@ -591,8 +592,6 @@ local function GetCastbarColor()
     end
     return CASTBAR_COLOR
 end
-local MANA_COLOR = { r = 0.204, g = 0.349, b = 0.851 }
-
 local SOLID_BACKDROP = { bgFile = "Interface\\Buttons\\WHITE8X8" }
 
 -- Locale system font override: for CJK/Cyrillic clients, bypass all custom
@@ -1635,9 +1634,9 @@ local function UpdateBordersForScale(frame, unit)
     local effectiveSide = pSide
     if isAttached and pSide == "top" then effectiveSide = "right" end
 
-    -- Class power above adds height (player only)
+    -- Class power above adds height (player only, and only if spec has a resource)
     local cpAboveH = 0
-    if unit == "player" then
+    if unit == "player" and SpecHasClassPower() then
         local cpSt = settings.classPowerStyle or "none"
         local cpPo = (cpSt == "modern") and (settings.classPowerPosition or "top") or "none"
         if cpSt == "modern" and cpPo == "above" then
@@ -2582,8 +2581,8 @@ local function CreateCastBar(frame, unit, settings)
             if uSettings and uSettings.castbarClassColored and ownerUnit == "player" then
                 if ownerUnit then
                     local _, classToken = UnitClass(ownerUnit)
-                    if classToken then
-                        cc = RAID_CLASS_COLORS[classToken]
+                    if classToken and EllesmereUI.GetClassColor then
+                        cc = EllesmereUI.GetClassColor(classToken)
                     end
                 end
             end
@@ -2909,12 +2908,14 @@ local function StyleFullFrame(frame, unit)
         if isAttached and pSide == "top" then effectiveSide = "left" end
         -- Class power "above" adds height above health bar ("top" floats outside)
         local cpAboveH = 0
-        local cpSt = settings.classPowerStyle or "none"
-        local cpPo = (cpSt == "modern") and (settings.classPowerPosition or "top") or "none"
-        if cpSt == "modern" and cpPo == "above" then
-            local cpSizeAdj = settings.classPowerSize or 8
-            local cpPipH = math.max(3, math.floor(cpSizeAdj * 0.375))
-            cpAboveH = cpPipH
+        if SpecHasClassPower() then
+            local cpSt = settings.classPowerStyle or "none"
+            local cpPo = (cpSt == "modern") and (settings.classPowerPosition or "top") or "none"
+            if cpSt == "modern" and cpPo == "above" then
+                local cpSizeAdj = settings.classPowerSize or 8
+                local cpPipH = math.max(3, math.floor(cpSizeAdj * 0.375))
+                cpAboveH = cpPipH
+            end
         end
         local playerHeightWithCp = playerTargetHeight + cpAboveH
         -- Apply portrait size adjustment
@@ -4052,7 +4053,7 @@ end
 -------------------------------------------------------------------------------
 local CLASS_POWER_TYPES = {
     ROGUE       = Enum.PowerType.ComboPoints,
-    DRUID       = Enum.PowerType.ComboPoints,
+    DRUID       = { [103] = Enum.PowerType.ComboPoints },  -- Feral only
     MAGE        = {
         [62] = { Enum.PowerType.ArcaneCharges, 4 }, -- Arcane
         [64] = { "ICICLES", 5 },                    -- Frost: aura-based pip stacks
@@ -4066,11 +4067,24 @@ local CLASS_POWER_TYPES = {
     EVOKER      = Enum.PowerType.Essence,
     DEATHKNIGHT = Enum.PowerType.Runes,
     -- Spec-specific custom resources (resolved at creation time)
-    DEMONHUNTER = { [581] = { "SOUL_FRAGMENTS_VENGEANCE", 6 } },
+    DEMONHUNTER = { [581] = { "SOUL_FRAGMENTS_VENGEANCE", 6 },
+                    [1480] = { "SOUL_FRAGMENTS_DEVOURER", 50, "bar" } },
     SHAMAN      = { [263] = { "MAELSTROM_WEAPON", 10 } },
     HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 } },
 }
+
+-- Returns true if the player's current spec has a class resource in CLASS_POWER_TYPES
+SpecHasClassPower = function()
+    local _, playerClass = UnitClass("player")
+    local entry = CLASS_POWER_TYPES[playerClass]
+    if not entry then return false end
+    if type(entry) ~= "table" then return true end
+    if entry[1] ~= nil then return true end
+    local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
+    local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
+    return specID and entry[specID] ~= nil
+end
 
 local function DestroyCustomClassPower()
     if frames._customClassPower then
@@ -4134,6 +4148,14 @@ local function CreateCustomClassPower(playerFrame, style)
             maxPower = customMax
         elseif powerType == "ICICLES" then
             maxPower = customMax or 5
+        elseif powerType == "SOUL_FRAGMENTS_DEVOURER" then
+            local maxC = customMax or 50
+            if EllesmereUI and EllesmereUI.GetSoulFragments then
+                local _, m = EllesmereUI.GetSoulFragments()
+                if m and m > 0 then maxC = m end
+            end
+            maxPower = maxC
+            customMax = maxPower
         elseif powerType == "BREWMASTER_STAGGER" then
             -- Bar mode: "max" is player max HP; StatusBar fills with UnitStagger.
             local mh = UnitHealthMax("player") or 0
@@ -4203,25 +4225,20 @@ local function CreateCustomClassPower(playerFrame, style)
     container._bottomBdr = cpBottomBdr
     container._bottomBdrFrame = cpBdrOverlay
 
-    -- Per-class pip colors for modern style (matches nameplate pips)
-    local MODERN_CLASS_COLORS = {
-        ROGUE={1.00,0.96,0.41}, DRUID={1.00,0.49,0.04}, PALADIN={0.96,0.55,0.73},
-        MONK={0.00,1.00,0.60}, WARLOCK={0.58,0.51,0.79}, MAGE={0.25,0.78,0.92},
-        EVOKER={0.20,0.58,0.50}, DEATHKNIGHT={0.77,0.12,0.23},
-        DEMONHUNTER={0.34,0.06,0.46}, SHAMAN={0.00,0.44,0.87},
-        HUNTER={0.67,0.83,0.45}, WARRIOR={0.78,0.61,0.43},
-    }
     local useClassColor = db.profile.player.classPowerClassColor ~= false
     local cr, cg, cb
     if not useClassColor then
         local cc = db.profile.player.classPowerCustomColor or { r = 1, g = 0.82, b = 0 }
         cr, cg, cb = cc.r, cc.g, cc.b
-    elseif isModern then
-        local mc = MODERN_CLASS_COLORS[playerClass] or {1.00, 0.84, 0.30}
-        cr, cg, cb = mc[1], mc[2], mc[3]
     else
-        local classColor = RAID_CLASS_COLORS[playerClass] or { r = 1, g = 1, b = 1 }
-        cr, cg, cb = classColor.r, classColor.g, classColor.b
+        -- Pull from EUI global color system: resource color > class color
+        local rc = EllesmereUI.GetResourceColor and EllesmereUI.GetResourceColor(playerClass)
+        if rc then
+            cr, cg, cb = rc.r, rc.g, rc.b
+        else
+            local cc = EllesmereUI.GetClassColor and EllesmereUI.GetClassColor(playerClass)
+            if cc then cr, cg, cb = cc.r, cc.g, cc.b else cr, cg, cb = 1, 1, 1 end
+        end
     end
 
     local function MakePip(parent, index)
@@ -4279,31 +4296,52 @@ local function CreateCustomClassPower(playerFrame, style)
     -- Update function
     local isSecretResource = (powerType == "SOUL_FRAGMENTS_VENGEANCE")
     local function UpdatePips()
-        -- Bar-mode resources (Brewmaster stagger) fill a single StatusBar
-        -- instead of discrete pips; color shifts by tier.
+        -- Bar-mode resources fill a single StatusBar instead of discrete pips.
         if isBarMode and staggerBar then
-            local stagger = UnitStagger and UnitStagger("player") or 0
-            local maxHP   = UnitHealthMax("player") or 0
-            local tainted = issecretvalue
-                         and (issecretvalue(stagger) or issecretvalue(maxHP))
-            if tainted then
-                staggerBar:Hide()
-                return
-            end
-            if maxHP <= 0 then maxHP = 1 end
-            if staggerBar._lastMax ~= maxHP then
-                staggerBar._lastMax = maxHP
-                staggerBar:SetMinMaxValues(0, maxHP)
-            end
-            staggerBar:SetValue(stagger)
-            local pct = stagger / maxHP
-            local sr, sg, sb
-            if pct >= 0.6 then      sr, sg, sb = 1.0,  0.2,  0.2
-            elseif pct >= 0.3 then  sr, sg, sb = 1.0,  0.85, 0.2
-            else                    sr, sg, sb = 0.2,  0.8,  0.2 end
-            if staggerBar._lastR ~= sr or staggerBar._lastG ~= sg or staggerBar._lastB ~= sb then
-                staggerBar._lastR, staggerBar._lastG, staggerBar._lastB = sr, sg, sb
-                staggerBar:GetStatusBarTexture():SetVertexColor(sr, sg, sb, 1)
+            if powerType == "BREWMASTER_STAGGER" then
+                local stagger = UnitStagger and UnitStagger("player") or 0
+                local maxHP   = UnitHealthMax("player") or 0
+                local tainted = issecretvalue
+                             and (issecretvalue(stagger) or issecretvalue(maxHP))
+                if tainted then
+                    staggerBar:Hide()
+                    return
+                end
+                if maxHP <= 0 then maxHP = 1 end
+                if staggerBar._lastMax ~= maxHP then
+                    staggerBar._lastMax = maxHP
+                    staggerBar:SetMinMaxValues(0, maxHP)
+                end
+                staggerBar:SetValue(stagger)
+                local pct = stagger / maxHP
+                local sr, sg, sb
+                if pct >= 0.6 then      sr, sg, sb = 1.0,  0.2,  0.2
+                elseif pct >= 0.3 then  sr, sg, sb = 1.0,  0.85, 0.2
+                else                    sr, sg, sb = 0.2,  0.8,  0.2 end
+                if staggerBar._lastR ~= sr or staggerBar._lastG ~= sg or staggerBar._lastB ~= sb then
+                    staggerBar._lastR, staggerBar._lastG, staggerBar._lastB = sr, sg, sb
+                    staggerBar:GetStatusBarTexture():SetVertexColor(sr, sg, sb, 1)
+                end
+            elseif powerType == "SOUL_FRAGMENTS_DEVOURER" then
+                local cur, maxC = 0, customMax or 50
+                if EllesmereUI and EllesmereUI.GetSoulFragments then
+                    cur, maxC = EllesmereUI.GetSoulFragments()
+                    if not maxC or maxC <= 0 then maxC = customMax or 50 end
+                end
+                if staggerBar._lastMax ~= maxC then
+                    staggerBar._lastMax = maxC
+                    staggerBar:SetMinMaxValues(0, maxC)
+                end
+                staggerBar:SetValue(cur or 0)
+                -- Use class color (DH)
+                if not staggerBar._colorSet then
+                    staggerBar._colorSet = true
+                    local rc = EllesmereUI.GetResourceColor and EllesmereUI.GetResourceColor("DEMONHUNTER")
+                    local cc = rc or (EllesmereUI.GetClassColor and EllesmereUI.GetClassColor("DEMONHUNTER"))
+                    if cc then
+                        staggerBar:GetStatusBarTexture():SetVertexColor(cc.r, cc.g, cc.b, 1)
+                    end
+                end
             end
             if not staggerBar:IsShown() then staggerBar:Show() end
             return
@@ -4363,6 +4401,11 @@ local function CreateCustomClassPower(playerFrame, style)
                 PP.Point(pips[i], "TOPLEFT", container, "TOPLEFT", x, 0)
                 PP.Size(pips[i], pipSize, pipH)
                 pips[i]:Show()
+            end
+            -- Re-stretch pips if in "above" position
+            if container._repositionForWidth then
+                local fw = db and db.profile and db.profile.player and db.profile.player.frameWidth or 181
+                container._repositionForWidth(fw)
             end
         end
 
@@ -4739,7 +4782,7 @@ local function ReloadFrames()
                 local playerTargetHeight = settings.healthHeight + ppExtra
                 -- Class power "above" adds height above health bar (player only, "top" floats outside)
                 local cpAboveH = 0
-                if unit == "player" then
+                if unit == "player" and SpecHasClassPower() then
                     local cpSt = settings.classPowerStyle or "none"
                     local cpPo = (cpSt == "modern") and (settings.classPowerPosition or "top") or "none"
                     if cpSt == "modern" and cpPo == "above" then
@@ -4929,8 +4972,8 @@ local function ReloadFrames()
                             local pCbColor = castbarColor
                             if settings.castbarClassColored then
                                 local _, classToken = UnitClass("player")
-                                if classToken then
-                                    pCbColor = RAID_CLASS_COLORS[classToken] or castbarColor
+                                if classToken and EllesmereUI.GetClassColor then
+                                    pCbColor = EllesmereUI.GetClassColor(classToken) or castbarColor
                                 end
                             elseif settings.castbarFillColor then
                                 pCbColor = settings.castbarFillColor
@@ -6334,10 +6377,9 @@ local function UnitFrame_OnLeave(self)
 end
 
 function InitializeFrames()
-    if oUF and oUF.colors and oUF.colors.power then
-        local manaColor = { r = MANA_COLOR.r, g = MANA_COLOR.g, b = MANA_COLOR.b }
-        manaColor.GetRGB = function(self) return self.r, self.g, self.b end
-        oUF.colors.power[0] = manaColor
+    -- Sync EUI global power colors into oUF at init
+    if EllesmereUI and EllesmereUI.ApplyColorsToOUF then
+        EllesmereUI.ApplyColorsToOUF()
     end
 
     if oUF.Tags and oUF.Tags.SetEventUpdateTimer then
@@ -6453,7 +6495,7 @@ function InitializeFrames()
 
             -- Apply color tint
             if colorMode == "classcolor" then
-                local cc = RAID_CLASS_COLORS[classToken] or { r = 1, g = 1, b = 1 }
+                local cc = (EllesmereUI.GetClassColor and EllesmereUI.GetClassColor(classToken)) or { r = 1, g = 1, b = 1 }
                 combat:SetVertexColor(cc.r, cc.g, cc.b, 1)
             elseif colorMode == "custom" then
                 local cc = ps.combatIndicatorCustomColor or { r = 1, g = 1, b = 1 }
@@ -6771,6 +6813,9 @@ function InitializeFrames()
                 frames._customClassPower = custom
                 frames._classPowerBar = custom
                 PositionClassPowerBar(custom)
+            else
+                -- Spec has no class resource: reset frame sizing
+                ResizeFrameForClassPower(0)
             end
         end
     end
@@ -6830,9 +6875,36 @@ function InitializeFrames()
                 frames._customClassPower = custom
                 frames._classPowerBar = custom
                 PositionClassPowerBar(custom)
+            else
+                -- Spec has no class resource: reset frame sizing
+                ResizeFrameForClassPower(0)
             end
         end
     end
+
+    -- Persistent spec-change watcher for class power rebuild.
+    -- Lives outside the class power container so it survives DestroyCustomClassPower.
+    local cpSpecWatcher = CreateFrame("Frame")
+    local cpSpecInitDone = false
+    cpSpecWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+    cpSpecWatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    cpSpecWatcher:SetScript("OnEvent", function(_, event, unit)
+        if event == "PLAYER_ENTERING_WORLD" then
+            cpSpecInitDone = true
+            cpSpecWatcher:UnregisterEvent("PLAYER_ENTERING_WORLD")
+            return
+        end
+        if unit ~= "player" then return end
+        if not cpSpecInitDone then return end
+        DestroyCustomClassPower()
+        frames._classPowerBar = nil
+        C_Timer.After(0.1, function()
+            if ns.ReloadFrames then ns.ReloadFrames() end
+            if frames._toggleClassPower then
+                frames._toggleClassPower()
+            end
+        end)
+    end)
 
     oUF:SetActiveStyle("EllesmereTarget")
     frames.target = oUF:Spawn("target", "EllesmereUIUnitFrames_Target")

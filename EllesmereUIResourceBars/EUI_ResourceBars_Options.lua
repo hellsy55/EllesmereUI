@@ -1371,7 +1371,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local isClassColored = not p or (p.secondary.classColored ~= false)
                       return isClassColored and 0.3 or 1
                   end },
-                { tooltip = "Class Colored",
+                { tooltip = "Dynamic Colored",
                   getValue = function()
                       local _, classFile = UnitClass("player")
                       local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
@@ -2812,7 +2812,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Spark
         local spark = bar:CreateTexture(nil, "OVERLAY", nil, 1)
-        spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
+        spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
         spark:SetBlendMode("ADD")
         spark:SetSize(8, h)
         spark:SetPoint("CENTER", fillTex, "RIGHT", 0, 0)

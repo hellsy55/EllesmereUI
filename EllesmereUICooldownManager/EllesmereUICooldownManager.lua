@@ -5147,6 +5147,9 @@ ns._rotationInCombat = false
 local ROT_GLOW_RATIO = 0.33
 
 local function _rotCVarOn()
+    -- User can force-hide via our own toggle, overriding Blizzard's CVar
+    local p = ECME.db and ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.hideRotationHelper then return false end
     return GetCVarBool and GetCVarBool("assistedCombatHighlight")
 end
 

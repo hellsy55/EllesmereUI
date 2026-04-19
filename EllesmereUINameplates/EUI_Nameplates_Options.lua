@@ -526,7 +526,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Cast spark
         castParts.spark = cast:CreateTexture(nil, "OVERLAY", nil, 1)
-        castParts.spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
+        castParts.spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
         UnsnapTex(castParts.spark)
         castParts.spark:SetSize(8, CAST_H)
         castParts.spark:SetPoint("CENTER", cast:GetStatusBarTexture(), "RIGHT", 0, 0)
@@ -4410,7 +4410,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if v == nil then v = defaults.classPowerClassColors end
                       return v and 0.3 or 1
                   end },
-                { tooltip = "Class Colored",
+                { tooltip = "Dynamic Colored",
                   disabled = classPowerDisabled,
                   disabledTooltip = "Show Class Resource",
                   getValue = function()
@@ -6460,6 +6460,19 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Register the module
     ---------------------------------------------------------------------------
+    -- Rebuild preview when spec changes (class resource pips may appear/disappear)
+    local npOptSpecFrame = CreateFrame("Frame")
+    npOptSpecFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    npOptSpecFrame:SetScript("OnEvent", function(_, _, unit)
+        if unit ~= "player" then return end
+        if EllesmereUI.InvalidatePageCache then EllesmereUI:InvalidatePageCache() end
+        if EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
+            C_Timer.After(0.2, function()
+                if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
+            end)
+        end
+    end)
+
     EllesmereUI:RegisterModule("EllesmereUINameplates", {
         title       = "Nameplates",
         description = "Custom nameplate design and behavior.",

@@ -2577,7 +2577,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 if bd.showSpark then
                     local spark = pvBar:CreateTexture(nil, "OVERLAY", nil, 2)
-                    spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
+                    spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
                     spark:SetBlendMode("ADD")
                     if isVert then
                         spark:SetSize(PREVIEW_W, 8)
@@ -3833,10 +3833,44 @@ initFrame:SetScript("OnEvent", function(self)
     end)
     -- Ensure assignedSpells is populated from live icons if nil.
     -- Shared by spell picker, preview, and all add/remove handlers.
+    -- Normalize a spell ID to its base (undo talent overrides).
+    -- E.g. Voltaic Blaze (470057) -> Flame Shock (188389).
+    local function NormalizeToBase(sid)
+        if not sid or sid <= 0 then return sid end
+        if C_Spell and C_Spell.GetBaseSpell then
+            local base = C_Spell.GetBaseSpell(sid)
+            if base and base > 0 then return base end
+        end
+        return sid
+    end
+
+    -- Resolve a base spell ID to its current live version (talent overrides).
+    -- E.g. Flame Shock (188389) -> Voltaic Blaze (470057) when talented.
+    local function ResolveToLive(sid)
+        if not sid or sid <= 0 then return sid end
+        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+            local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+            if ovr and ovr > 0 then return ovr end
+        end
+        return sid
+    end
+
     local function EnsureAssignedSpells(barKeyE)
         local sd = ns.GetBarSpellData(barKeyE)
         if not sd then return sd end
-        if sd.assignedSpells then return sd end
+        if sd.assignedSpells then
+            -- One-time normalization: if any stored ID is an override,
+            -- replace it with the base so the preview can resolve live.
+            local dirty = false
+            for i, sid in ipairs(sd.assignedSpells) do
+                local base = NormalizeToBase(sid)
+                if base ~= sid then
+                    sd.assignedSpells[i] = base
+                    dirty = true
+                end
+            end
+            return sd
+        end
         local liveIcons = ns.cdmBarIcons[barKeyE]
         if liveIcons then
             local removed = sd.removedSpells
@@ -3844,6 +3878,7 @@ initFrame:SetScript("OnEvent", function(self)
             for _, icon in ipairs(liveIcons) do
                 local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
                 if _sid and _sid > 0 then
+                    _sid = NormalizeToBase(_sid)
                     if not (removed and removed[_sid]) then
                         spells[#spells + 1] = _sid
                     end
@@ -7008,8 +7043,9 @@ initFrame:SetScript("OnEvent", function(self)
                             local itemID = GetInventoryItemID("player", -id)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
-                            tex = C_Spell.GetSpellTexture(id)
-                            slot._previewSpellID = id
+                            local liveID = ResolveToLive(id)
+                            tex = C_Spell.GetSpellTexture(liveID)
+                            slot._previewSpellID = liveID
                         end
                         if tex then
                             slot._icon:SetTexture(tex)
@@ -9073,9 +9109,22 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Rotation helper now follows Blizzard's "Show Assisted Combat Highlight"
-        -- setting directly (Game Menu -> Options -> Combat). No second toggle
-        -- here; the shine uses Blizzard's native action-bar highlight style.
+        -- Blizzard Override: Hide Rotation Helper
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Blizzard Override: Hide Rotation Helper",
+              tooltip = "Force-hide Blizzard's Assisted Combat Highlight (rotation helper glow) on all CDM bars, even if enabled in Blizzard's Combat settings.",
+              getValue=function()
+                  local p = DB(); return p and p.cdmBars and p.cdmBars.hideRotationHelper == true
+              end,
+              setValue=function(v)
+                  local p = DB()
+                  if p and p.cdmBars then
+                      p.cdmBars.hideRotationHelper = v
+                      if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
+                  end
+              end },
+            { type="label", text="" });  y = y - h
+
         end -- custom_buff extras guard
 
         return math.abs(y)

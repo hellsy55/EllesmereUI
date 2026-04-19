@@ -2131,6 +2131,11 @@ local function SkinFriendsFrame()
             ebBg:SetPoint("TOPLEFT", -6, 4); ebBg:SetPoint("BOTTOMRIGHT", 6, -4)
             PP.CreateBorder(eb, 1, 1, 1, 0.02, 1, "OVERLAY", 7)
             eb:SetScript("OnEscapePressed", function(self) self:ClearFocus(); HideCopyPopup() end)
+            eb:SetScript("OnKeyDown", function(self, key)
+                if key == "C" and IsControlKeyDown() then
+                    C_Timer.After(0.05, HideCopyPopup)
+                end
+            end)
             eb:SetScript("OnMouseUp", function(self) self:HighlightText() end)
             copyPopup:EnableMouse(true)
             copyPopup:SetScript("OnMouseDown", function() copyPopup._eb:SetFocus(); copyPopup._eb:HighlightText() end)

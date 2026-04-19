@@ -116,14 +116,13 @@ function ns.IsInPandemicWindow(spellID)
         local rem = aura.expirationTime - GetTime()
         return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
     end
-    -- Fallback: check target debuffs (DoTs like Flame Shock). Uses
-    -- AuraUtil.FindAuraByName which is efficient (single scan).
+    -- Fallback: check target debuffs (DoTs like Flame Shock).
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
-    if name and UnitExists("target") then
-        local _, _, _, _, dur, exp = AuraUtil.FindAuraByName(name, "target", "HARMFUL|PLAYER")
-        if dur and dur > 0 and exp then
-            local rem = exp - GetTime()
-            return rem > 0 and (rem / dur) <= PANDEMIC_THRESHOLD
+    if name and UnitExists("target") and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
+        local aura = C_UnitAuras.GetAuraDataBySpellName("target", name, "HARMFUL|PLAYER")
+        if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
+            local rem = aura.expirationTime - GetTime()
+            return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
         end
     end
     return false
@@ -349,6 +348,7 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0.65)
+    bar:SetClipsChildren(true)
     wrapFrame._bar = bar
 
     local bg = bar:CreateTexture(nil, "BACKGROUND")
@@ -358,7 +358,7 @@ local function CreateTrackedBuffBarFrame(parent, idx)
 
     -- Spark
     local spark = bar:CreateTexture(nil, "OVERLAY", nil, 2)
-    spark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
+    spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
     spark:SetBlendMode("ADD")
     spark:Hide()
     wrapFrame._spark = spark

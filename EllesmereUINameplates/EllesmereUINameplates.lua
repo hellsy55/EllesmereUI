@@ -1469,7 +1469,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castIcon:SetPoint("BOTTOMRIGHT", plate.castIconFrame, "BOTTOMRIGHT", -1, 1)
     plate.castIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     plate.castSpark = plate.cast:CreateTexture(nil, "OVERLAY", nil, 1)
-    plate.castSpark:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\cast_spark.tga")
+    plate.castSpark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
     plate.castSpark:SetSize(8, CAST_H)
     plate.castSpark:SetPoint("CENTER", plate.cast:GetStatusBarTexture(), "RIGHT", 0, 0)
     plate.castSpark:SetBlendMode("ADD")
@@ -2059,40 +2059,44 @@ local classPowerMax = 0  -- max pips for the resource
 local classPowerFormReq  -- required GetShapeshiftFormID() value, or nil if no form check needed
 local CP_PIP_W, CP_PIP_H, CP_PIP_GAP = 8, 3, 2  -- pip geometry
 
--- Per-class filled pip colors (official WoW class colors)
-local CP_CLASS_COLORS = {
-    ROGUE       = { 1.00, 0.96, 0.41 },
-    DRUID       = { 1.00, 0.49, 0.04 },
-    PALADIN     = { 0.96, 0.55, 0.73 },
-    MONK        = { 0.00, 1.00, 0.60 },
-    WARLOCK     = { 0.58, 0.51, 0.79 },
-    MAGE        = { 0.25, 0.78, 0.92 },
-    EVOKER      = { 0.20, 0.58, 0.50 },
-    DEMONHUNTER = { 0.34, 0.06, 0.46 },
-    SHAMAN      = { 0.00, 0.44, 0.87 },
-    HUNTER      = { 0.67, 0.83, 0.45 },
-    WARRIOR     = { 0.78, 0.61, 0.43 },
-    DEATHKNIGHT = { 0.77, 0.12, 0.23 },
-}
-local CP_DEFAULT_COLOR = { 1.00, 0.84, 0.30 }  -- fallback gold
+-- Resolve class/power color from EUI global system.
+-- For bar-type power keys (_BAR suffix), returns power color.
+-- For class resources, returns resource color > class color.
+local CP_DEFAULT_COLOR = { 1.00, 0.84, 0.30 }
+local function GetClassPipColor(classFile, powerKey)
+    if EllesmereUI then
+        if powerKey then
+            local alias = powerKey:match("^(.+)_BAR$")
+            local key = alias or powerKey
+            local c = EllesmereUI.GetPowerColor and EllesmereUI.GetPowerColor(key)
+            if c then return { c.r, c.g, c.b } end
+        end
+        local rc = EllesmereUI.GetResourceColor and EllesmereUI.GetResourceColor(classFile)
+        if rc then return { rc.r, rc.g, rc.b } end
+        local cc = EllesmereUI.GetClassColor and EllesmereUI.GetClassColor(classFile)
+        if cc then return { cc.r, cc.g, cc.b } end
+    end
+    return CP_DEFAULT_COLOR
+end
 
 -- Map class { powerType, maxPips (fallback) }
 -- Entries can be a simple table { type, max } or a spec-keyed table { [specID] = { type, max } }
 local CLASS_POWER_MAP = {
     ROGUE       = { Enum.PowerType.ComboPoints, 5 },
-    DRUID       = { Enum.PowerType.ComboPoints, 5 },
+    DRUID       = { [103] = { Enum.PowerType.ComboPoints, 5 },    -- Feral (always)
+                    [105] = { Enum.PowerType.ComboPoints, 5 } }, -- Resto (cat form only)
     PALADIN     = { Enum.PowerType.HolyPower,   5 },
     MONK        = { [268] = { "BREWMASTER_STAGGER", 1 },
                     [269] = { Enum.PowerType.Chi, 5 } },
     WARLOCK     = { Enum.PowerType.SoulShards,   5 },
-    MAGE        = { Enum.PowerType.ArcaneCharges, 4 },
+    MAGE        = { [62]  = { Enum.PowerType.ArcaneCharges, 4 },  -- Arcane
+                    [64]  = { "ICICLES", 5 } },                 -- Frost
     EVOKER      = { Enum.PowerType.Essence,      5 },
-    DEMONHUNTER = { [581] = { "SOUL_FRAGMENTS_VENGEANCE", 6 } },  -- Vengeance only (secret value)
+    DEMONHUNTER = { [581] = { "SOUL_FRAGMENTS_VENGEANCE", 6 },
+                    [1480] = { "SOUL_FRAGMENTS_DEVOURER", 50 } },
     SHAMAN      = { [263] = { "MAELSTROM_WEAPON", 10 } },  -- Enhancement only
     PRIEST      = { [258] = { "INSANITY_BAR", 100 } },     -- Shadow only
-    HUNTER      = { [253] = { "FOCUS_BAR", 100 },
-                    [254] = { "FOCUS_BAR", 100 },
-                    [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
+    HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 } },    -- Fury only
     DEATHKNIGHT = { [250] = { Enum.PowerType.Runes, 6 },
                     [251] = { Enum.PowerType.Runes, 6 },
@@ -2135,7 +2139,8 @@ end
 -- Update pip display on a plate (or hide if plate is nil)
 local function UpdateClassPowerOnPlate(plate)
     if not plate or not plate._cpPips then return end
-    if not classPowerType then
+    if not classPowerType
+       or (classPowerFormReq and GetShapeshiftFormID() ~= classPowerFormReq) then
         for i = 1, #plate._cpPips do
             plate._cpPips[i]:Hide()
             if plate._cpPips[i]._bg then plate._cpPips[i]._bg:Hide() end
@@ -2199,7 +2204,7 @@ local function UpdateClassPowerOnPlate(plate)
         -- Stagger color thresholds: green < 30%, yellow 30-60%, red > 60%
         if isSecretVal then
             -- Secret value: can't compare, use class color
-            local cpColor = CP_CLASS_COLORS[PLAYER_CLASS] or CP_DEFAULT_COLOR
+            local cpColor = GetClassPipColor(PLAYER_CLASS)
             if not GetClassPowerClassColors() then
                 local cc = GetClassPowerCustomColor()
                 cpColor = { cc.r, cc.g, cc.b }
@@ -2244,7 +2249,7 @@ local function UpdateClassPowerOnPlate(plate)
         bar:SetMinMaxValues(0, maxI)
         bar:SetValue(cur)
 
-        local cpColor = CP_CLASS_COLORS[PLAYER_CLASS] or CP_DEFAULT_COLOR
+        local cpColor = GetClassPipColor(PLAYER_CLASS, "INSANITY_BAR")
         if not GetClassPowerClassColors() then
             local cc = GetClassPowerCustomColor()
             cpColor = { cc.r, cc.g, cc.b }
@@ -2279,7 +2284,43 @@ local function UpdateClassPowerOnPlate(plate)
         bar:SetMinMaxValues(0, maxF)
         bar:SetValue(cur)
 
-        local cpColor = CP_CLASS_COLORS[PLAYER_CLASS] or CP_DEFAULT_COLOR
+        local cpColor = GetClassPipColor(PLAYER_CLASS, "FOCUS_BAR")
+        if not GetClassPowerClassColors() then
+            local cc = GetClassPowerCustomColor()
+            cpColor = { cc.r, cc.g, cc.b }
+        end
+        bar:SetStatusBarColor(cpColor[1], cpColor[2], cpColor[3], 1)
+
+        bar._bg:SetColorTexture(bgCol.r, bgCol.g, bgCol.b, bgCol.a)
+        bar:Show()
+        return
+    end
+
+    -- Bar-type resource (Devourer soul fragments): single StatusBar
+    if classPowerType == "SOUL_FRAGMENTS_DEVOURER" then
+        for i = 1, #plate._cpPips do
+            plate._cpPips[i]:Hide()
+            if plate._cpPips[i]._bg then plate._cpPips[i]._bg:Hide() end
+            if plate._cpPips[i]._secretBar then plate._cpPips[i]._secretBar:Hide() end
+        end
+        EnsureClassPowerBar(plate)
+        local bar = plate._cpBar
+        local cur, maxC = 0, 50
+        if EllesmereUI and EllesmereUI.GetSoulFragments then
+            cur, maxC = EllesmereUI.GetSoulFragments()
+            if not maxC or maxC <= 0 then maxC = 50 end
+        end
+
+        local scaledW = CP_PIP_W * cpScale * 6
+        local scaledH = CP_PIP_H * cpScale
+        bar:ClearAllPoints()
+        bar:SetSize(scaledW, scaledH)
+        bar:SetPoint(anchorPoint, anchorFrame, anchorRelPoint,
+            cpXOff, yDir * cpYOff)
+        bar:SetMinMaxValues(0, maxC)
+        bar:SetValue(cur or 0)
+
+        local cpColor = GetClassPipColor(PLAYER_CLASS)
         if not GetClassPowerClassColors() then
             local cc = GetClassPowerCustomColor()
             cpColor = { cc.r, cc.g, cc.b }
@@ -2313,6 +2354,16 @@ local function UpdateClassPowerOnPlate(plate)
             end
             return
         end
+    elseif classPowerType == "ICICLES" then
+        local count = 0
+        if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+            local aura = C_UnitAuras.GetPlayerAuraBySpellID(205473)
+            if aura then
+                count = aura.applications or aura.charges or 0
+                if count > 5 then count = 5 end
+            end
+        end
+        cur, maxP = count, 5
     else
         cur = UnitPower("player", classPowerType) or 0
         maxP = UnitPowerMax("player", classPowerType) or classPowerMax
@@ -2353,7 +2404,7 @@ local function UpdateClassPowerOnPlate(plate)
 
     local cpColor = CP_DEFAULT_COLOR
     if GetClassPowerClassColors() then
-        cpColor = CP_CLASS_COLORS[PLAYER_CLASS] or CP_DEFAULT_COLOR
+        cpColor = GetClassPipColor(PLAYER_CLASS)
     else
         local cc = GetClassPowerCustomColor()
         cpColor = { cc.r, cc.g, cc.b }
@@ -2499,7 +2550,10 @@ local function EnableClassPowerWatcher()
 
     classPowerType = info[1]
     classPowerMax = info[2]
-    classPowerFormReq = (playerClass == "DRUID") and 1 or nil  -- Druid: cat form only
+    -- Druid Resto: cat form required. Feral always shows.
+    local specIdx = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
+    local isResto = (PLAYER_CLASS == "DRUID" and specIdx == 4)
+    classPowerFormReq = isResto and 1 or nil
     classPowerWatcher = CreateFrame("Frame")
 
     -- String-type resources (custom-tracked): use OnUpdate poll + events
@@ -2581,7 +2635,10 @@ local function EnableClassPowerWatcher()
             classPowerWatcher:RegisterEvent("RUNE_POWER_UPDATE")
         end
         classPowerWatcher:SetScript("OnEvent", function(_, event)
-            if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
+            if event == "PLAYER_SPECIALIZATION_CHANGED" then
+                DisableClassPowerWatcher()
+                ApplyClassPowerSetting()
+            elseif event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
                 RefreshClassPowerFull()
             else
                 RefreshClassPower()

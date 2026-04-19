@@ -959,3 +959,773 @@ qolFrame:SetScript("OnEvent", function(self)
     end
 
 end)
+
+-------------------------------------------------------------------------------
+--  Guild Chat Privacy
+--  Streamer feature: overlay on CommunitiesFrame guild chat, click to reveal.
+-------------------------------------------------------------------------------
+do
+    local overlay
+    local function ShowOverlay()
+        if not overlay then return end
+        if not (EllesmereUIDB and EllesmereUIDB.guildChatPrivacy) then return end
+        local cf = CommunitiesFrame
+        if not cf or not cf.Chat or not cf.Chat.MessageFrame then return end
+        local mf = cf.Chat.MessageFrame
+        overlay:SetParent(mf)
+        overlay:SetAllPoints(mf)
+        overlay:SetFrameLevel(mf:GetFrameLevel() + 20)
+        overlay:Show()
+    end
+
+    local function ApplyGuildChatPrivacy()
+        local enabled = EllesmereUIDB and EllesmereUIDB.guildChatPrivacy
+        if not enabled then
+            if overlay then overlay:Hide() end
+            return
+        end
+
+        if not overlay then
+            overlay = CreateFrame("Button", nil, UIParent)
+            overlay:SetFrameStrata("DIALOG")
+            local bg = overlay:CreateTexture(nil, "BACKGROUND")
+            bg:SetPoint("TOPLEFT", -2, 0)
+            bg:SetPoint("BOTTOMRIGHT", 2, -4)
+            bg:SetColorTexture(0.133, 0.133, 0.133, 1)
+            local txt = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+            txt:SetPoint("CENTER")
+            txt:SetText("Click to Show")
+            txt:SetTextColor(0.7, 0.7, 0.7, 1)
+            overlay:SetScript("OnClick", function(self)
+                self:Hide()
+            end)
+        end
+
+        if CommunitiesFrame then
+            ShowOverlay()
+            if not overlay._hooked then
+                CommunitiesFrame:HookScript("OnShow", ShowOverlay)
+                overlay._hooked = true
+            end
+        else
+            local loader = CreateFrame("Frame")
+            loader:RegisterEvent("ADDON_LOADED")
+            loader:SetScript("OnEvent", function(self, _, addon)
+                if addon == "Blizzard_Communities" then
+                    self:UnregisterAllEvents()
+                    if EllesmereUIDB and EllesmereUIDB.guildChatPrivacy then
+                        ShowOverlay()
+                        if not overlay._hooked then
+                            CommunitiesFrame:HookScript("OnShow", ShowOverlay)
+                            overlay._hooked = true
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    EllesmereUI._applyGuildChatPrivacy = ApplyGuildChatPrivacy
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        ApplyGuildChatPrivacy()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Secondary Stats Display
+--  On-screen overlay showing crit/haste/mastery/vers (+ optional tertiaries).
+-------------------------------------------------------------------------------
+do
+    local statsFrame, statsText
+    local format = string.format
+
+    local function UpdateSecondaryStats()
+        if not statsFrame or not statsFrame:IsShown() then return end
+        if not statsFrame._classHex then
+            local _, cls = UnitClass("player")
+            local cc = cls and EllesmereUI.GetClassColor(cls)
+            if cc then
+                statsFrame._classR, statsFrame._classG, statsFrame._classB = cc.r, cc.g, cc.b
+                statsFrame._classHex = format("%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
+            else
+                statsFrame._classR, statsFrame._classG, statsFrame._classB = 1, 1, 1
+                statsFrame._classHex = "ffffff"
+            end
+        end
+        local c = EllesmereUIDB and EllesmereUIDB.secondaryStatsColor
+        local cr, cg, cb
+        if c then
+            cr, cg, cb = c.r, c.g, c.b
+        else
+            cr, cg, cb = statsFrame._classR, statsFrame._classG, statsFrame._classB
+        end
+        local labelHex = c and format("%02x%02x%02x", cr * 255, cg * 255, cb * 255) or statsFrame._classHex
+
+        local crit = GetCritChance()
+        local haste = GetHaste()
+        local mastery = GetMasteryEffect()
+        local vers = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE)
+                    + GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)
+
+        local txt =
+            format("|cff%sCrit:|r  |cffffffff%.2f%%|r", labelHex, crit) .. "\n" ..
+            format("|cff%sHaste:|r  |cffffffff%.2f%%|r", labelHex, haste) .. "\n" ..
+            format("|cff%sMastery:|r  |cffffffff%.2f%%|r", labelHex, mastery) .. "\n" ..
+            format("|cff%sVers:|r  |cffffffff%.2f%%|r", labelHex, vers)
+
+        if EllesmereUIDB and EllesmereUIDB.showTertiaryStats then
+            local tc = EllesmereUIDB.tertiaryStatsColor
+            local tr, tg, tb
+            if tc then
+                tr, tg, tb = tc.r, tc.g, tc.b
+            else
+                tr, tg, tb = statsFrame._classR, statsFrame._classG, statsFrame._classB
+            end
+            local tertHex = tc and format("%02x%02x%02x", tr * 255, tg * 255, tb * 255) or statsFrame._classHex
+
+            local leech = GetLifesteal()
+            local avoidance = GetAvoidance()
+            local speed = GetSpeed()
+            txt = txt .. "\n" ..
+                format("|cff%sLeech:|r  |cffffffff%.2f%%|r", tertHex, leech) .. "\n" ..
+                format("|cff%sAvoidance:|r  |cffffffff%.2f%%|r", tertHex, avoidance) .. "\n" ..
+                format("|cff%sSpeed:|r  |cffffffff%.2f%%|r", tertHex, speed)
+        end
+
+        statsText:SetText(txt)
+    end
+
+    local function ApplySecondaryStats()
+        local enabled = EllesmereUIDB and EllesmereUIDB.showSecondaryStats
+        if not enabled then
+            if statsFrame then
+                statsFrame:Hide()
+                statsFrame:UnregisterAllEvents()
+            end
+            return
+        end
+        if not statsFrame then
+            statsFrame = CreateFrame("Frame", "EUI_SecondaryStats", UIParent)
+            statsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 12, -12)
+            statsFrame:SetSize(160, 60)
+            statsFrame:SetFrameStrata("LOW")
+            statsText = statsFrame:CreateFontString(nil, "OVERLAY")
+            statsText:SetPoint("TOPLEFT")
+            statsText:SetJustifyH("LEFT")
+        end
+        if statsText then
+            local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
+            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag())
+            if EllesmereUI.GetFontUseShadow() then
+                statsText:SetShadowOffset(1, -1)
+            else
+                statsText:SetShadowOffset(0, 0)
+            end
+        end
+        local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+        local scale = 1.0
+        if pos then
+            if pos.point then
+                statsFrame:ClearAllPoints()
+                statsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+            end
+            if pos.scale then
+                scale = pos.scale
+            end
+        end
+        if statsText then
+            local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
+            local fontSize = math.floor(12 * scale + 0.5)
+            statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag())
+            if EllesmereUI.GetFontUseShadow() then
+                statsText:SetShadowOffset(1, -1)
+            else
+                statsText:SetShadowOffset(0, 0)
+            end
+        end
+        statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
+        statsFrame:RegisterEvent("COMBAT_RATING_UPDATE")
+        statsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        local _statsThrottled = false
+        statsFrame:SetScript("OnEvent", function()
+            if _statsThrottled then return end
+            _statsThrottled = true
+            C_Timer.After(0.5, function()
+                _statsThrottled = false
+                UpdateSecondaryStats()
+            end)
+        end)
+        statsFrame:Show()
+        UpdateSecondaryStats()
+    end
+    EllesmereUI._applySecondaryStats = ApplySecondaryStats
+
+    EllesmereUI._getSecondaryStatsFrame = function()
+        if not statsFrame then
+            ApplySecondaryStats()
+        end
+        return statsFrame
+    end
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        ApplySecondaryStats()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  FPS Counter
+-------------------------------------------------------------------------------
+do
+    local fpsFrame
+    local floor = math.floor
+
+    local function CreateFPSCounter()
+        if fpsFrame then return end
+        local FONT = EllesmereUI.GetFontPath("extras")
+        local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+        local LABEL_SIZE = FONT_SIZE - 2
+        local SHADOW_X, SHADOW_Y = 1, -1
+        fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
+        fpsFrame:SetSize(60, 20)
+        fpsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 10, -10)
+        fpsFrame:SetFrameStrata("HIGH")
+        fpsFrame:SetFrameLevel(100)
+        fpsFrame:EnableMouse(false)
+
+        local function MakeFS(size)
+            local f = fpsFrame:CreateFontString(nil, "OVERLAY")
+            f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag())
+            if EllesmereUI.GetFontUseShadow() then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
+            f:SetTextColor(1, 1, 1, 1)
+            return f
+        end
+
+        local fsFps = MakeFS(FONT_SIZE)
+        fsFps:SetPoint("LEFT")
+        fpsFrame._text = fsFps
+
+        local DIV_W, DIV_H = 1, 10
+        local DIV_PAD = 6
+
+        local function MakeDivider()
+            local d = fpsFrame:CreateTexture(nil, "OVERLAY")
+            d:SetColorTexture(1, 1, 1, 0.25)
+            d:SetSize(DIV_W, DIV_H)
+            return d
+        end
+
+        local divWorld = MakeDivider()
+        local fsWorldVal = MakeFS(FONT_SIZE)
+        local fsWorldLbl = MakeFS(LABEL_SIZE)
+        fpsFrame._divWorld = divWorld
+        fpsFrame._textWorld = fsWorldVal
+
+        local divLocal = MakeDivider()
+        local fsLocalVal = MakeFS(FONT_SIZE)
+        local fsLocalLbl = MakeFS(LABEL_SIZE)
+        fpsFrame._divLocal = divLocal
+        fpsFrame._textLocal = fsLocalVal
+
+        local function UpdateFPS(self)
+            local db = EllesmereUIDB or {}
+            local c = db.fpsColor
+            local cr, cg, cb, ca = 1, 1, 1, 1
+            if c then cr, cg, cb, ca = c.r or 1, c.g or 1, c.b or 1, c.a or 1 end
+            fsFps:SetTextColor(cr, cg, cb, ca)
+            fsWorldVal:SetTextColor(cr, cg, cb, ca)
+            fsWorldLbl:SetTextColor(cr, cg, cb, ca * 0.6)
+            fsLocalVal:SetTextColor(cr, cg, cb, ca)
+            fsLocalLbl:SetTextColor(cr, cg, cb, ca * 0.6)
+            divWorld:SetColorTexture(cr, cg, cb, ca * 0.35)
+            divLocal:SetColorTexture(cr, cg, cb, ca * 0.35)
+
+            local fps = floor(GetFramerate() + 0.5)
+            fsFps:SetText(fps .. " fps")
+
+            local showWorld = db.fpsShowWorldMS
+            local showLocal = (db.fpsShowLocalMS == nil) and true or db.fpsShowLocalMS
+            local _, _, latHome, latWorld = GetNetStats()
+
+            fsFps:ClearAllPoints()
+            fsFps:SetPoint("LEFT", fpsFrame, "LEFT", 0, 0)
+            local anchor = fsFps
+
+            if showWorld then
+                fsWorldVal:SetText(latWorld .. " ms")
+                fsWorldLbl:SetText("(world)")
+                divWorld:ClearAllPoints()
+                divWorld:SetPoint("LEFT", anchor, "RIGHT", DIV_PAD, 0)
+                divWorld:Show()
+                fsWorldVal:ClearAllPoints()
+                fsWorldVal:SetPoint("LEFT", divWorld, "RIGHT", DIV_PAD, 0)
+                fsWorldVal:Show()
+                fsWorldLbl:ClearAllPoints()
+                fsWorldLbl:SetPoint("LEFT", fsWorldVal, "RIGHT", 3, 0)
+                fsWorldLbl:Show()
+                anchor = fsWorldLbl
+            else
+                divWorld:Hide(); fsWorldVal:Hide(); fsWorldLbl:Hide()
+            end
+
+            if showLocal then
+                fsLocalVal:SetText(latHome .. " ms")
+                fsLocalLbl:SetText("(local)")
+                divLocal:ClearAllPoints()
+                divLocal:SetPoint("LEFT", anchor, "RIGHT", DIV_PAD, 0)
+                divLocal:Show()
+                fsLocalVal:ClearAllPoints()
+                fsLocalVal:SetPoint("LEFT", divLocal, "RIGHT", DIV_PAD, 0)
+                fsLocalVal:Show()
+                fsLocalLbl:ClearAllPoints()
+                fsLocalLbl:SetPoint("LEFT", fsLocalVal, "RIGHT", 3, 0)
+                fsLocalLbl:Show()
+                anchor = fsLocalLbl
+            else
+                divLocal:Hide(); fsLocalVal:Hide(); fsLocalLbl:Hide()
+            end
+
+            local totalW = fsFps:GetStringWidth()
+            if showWorld then totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsWorldVal:GetStringWidth() + 3 + fsWorldLbl:GetStringWidth() end
+            if showLocal then totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsLocalVal:GetStringWidth() + 3 + fsLocalLbl:GetStringWidth() end
+            self:SetSize(totalW + 4, 20)
+        end
+
+        local elapsed = 0
+        fpsFrame:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed < 1 then return end
+            elapsed = 0
+            UpdateFPS(self)
+        end)
+        fpsFrame._updateNow = function() elapsed = 0; UpdateFPS(fpsFrame) end
+        fpsFrame:Hide()
+    end
+
+    EllesmereUI._applyFPSCounter = function()
+        local shouldShow = EllesmereUIDB and EllesmereUIDB.showFPS
+        if shouldShow then
+            CreateFPSCounter()
+            local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+            local lblSz = sz - 2
+            local fp = EllesmereUI.GetFontPath("extras")
+            local outF = EllesmereUI.GetFontOutlineFlag()
+            if fpsFrame._text then fpsFrame._text:SetFont(fp, sz, outF) end
+            if fpsFrame._textWorld then fpsFrame._textWorld:SetFont(fp, sz, outF) end
+            if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
+            if fpsFrame._lblWorld then fpsFrame._lblWorld:SetFont(fp, lblSz, outF) end
+            if fpsFrame._lblLocal then fpsFrame._lblLocal:SetFont(fp, lblSz, outF) end
+            local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
+            if pos and pos.point then
+                if pos.scale then pcall(function() fpsFrame:SetScale(pos.scale) end) end
+                fpsFrame:ClearAllPoints()
+                fpsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+            end
+            fpsFrame._updateNow()
+            fpsFrame:Show()
+        elseif fpsFrame then
+            fpsFrame:Hide()
+        end
+    end
+
+    C_Timer.After(1.5, function()
+        if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+        local MK = EllesmereUI.MakeUnlockElement
+        EllesmereUI:RegisterUnlockElements({
+            MK({
+                key = "EUI_FPS",
+                label = "FPS Counter",
+                group = "General",
+                order = 700,
+                getFrame = function()
+                    if not fpsFrame then CreateFPSCounter() end
+                    return fpsFrame
+                end,
+                getSize = function()
+                    if fpsFrame then return fpsFrame:GetWidth(), fpsFrame:GetHeight() end
+                    return 80, 20
+                end,
+                noResize = true,
+                savePos = function(key, point, relPoint, x, y)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    if not point then return end
+                    EllesmereUIDB.fpsPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    if fpsFrame and not EllesmereUI._unlockActive then
+                        fpsFrame:ClearAllPoints()
+                        fpsFrame:SetPoint(point, UIParent, relPoint or point, x or 0, y or 0)
+                    end
+                end,
+                loadPos = function()
+                    return EllesmereUIDB and EllesmereUIDB.fpsPos
+                end,
+                clearPos = function()
+                    if EllesmereUIDB then EllesmereUIDB.fpsPos = nil end
+                end,
+                applyPos = function()
+                    if not fpsFrame then return end
+                    local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
+                    if pos and pos.point then
+                        fpsFrame:ClearAllPoints()
+                        fpsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                    end
+                end,
+            }),
+        })
+    end)
+
+    C_Timer.After(1.5, function()
+        if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+        local MK = EllesmereUI.MakeUnlockElement
+        EllesmereUI:RegisterUnlockElements({
+            MK({
+                key = "EUI_SecondaryStats",
+                label = "Secondary Stats",
+                group = "General",
+                order = 710,
+                getFrame = function()
+                    local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
+                    return f
+                end,
+                getSize = function()
+                    local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
+                    if f then return f:GetWidth(), f:GetHeight() end
+                    return 160, 60
+                end,
+                noResize = true,
+                savePos = function(key, point, relPoint, x, y)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    if not point then return end
+                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    if not EllesmereUI._unlockActive then
+                        local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
+                        if f then
+                            f:ClearAllPoints()
+                            f:SetPoint(point, UIParent, relPoint or point, x or 0, y or 0)
+                        end
+                    end
+                end,
+                loadPos = function()
+                    return EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+                end,
+                clearPos = function()
+                    if EllesmereUIDB then EllesmereUIDB.secondaryStatsPos = nil end
+                end,
+                applyPos = function()
+                    local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
+                    if not f then return end
+                    local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+                    if pos and pos.point then
+                        f:ClearAllPoints()
+                        f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                    end
+                end,
+            }),
+        })
+    end)
+
+    local fpsBind = CreateFrame("Button", "EUI_FPSBindBtn", UIParent)
+    fpsBind:Hide()
+    fpsBind:SetScript("OnClick", function()
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        EllesmereUIDB.showFPS = not EllesmereUIDB.showFPS
+        if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
+    end)
+
+    C_Timer.After(1, function()
+        if EllesmereUIDB and EllesmereUIDB.showFPS then
+            EllesmereUI._applyFPSCounter()
+        end
+        local function ApplyFPSBind()
+            if EllesmereUIDB and EllesmereUIDB.fpsToggleKey then
+                SetOverrideBindingClick(fpsBind, true, EllesmereUIDB.fpsToggleKey, "EUI_FPSBindBtn")
+            end
+        end
+        if InCombatLockdown() then
+            local w = CreateFrame("Frame")
+            w:RegisterEvent("PLAYER_REGEN_ENABLED")
+            w:SetScript("OnEvent", function(self)
+                self:UnregisterAllEvents()
+                ApplyFPSBind()
+            end)
+        else
+            ApplyFPSBind()
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Durability Warning
+-------------------------------------------------------------------------------
+do
+    local durWarnOverlay
+    local function CreateDurabilityWarning()
+        if durWarnOverlay then return end
+
+        durWarnOverlay = CreateFrame("Frame", "EUI_DurabilityWarning", UIParent)
+        durWarnOverlay:SetSize(400, 40)
+        durWarnOverlay:SetFrameStrata("DIALOG")
+        durWarnOverlay:SetFrameLevel(500)
+        durWarnOverlay:EnableMouse(false)
+
+        local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
+        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag())
+        fs:SetPoint("CENTER")
+        fs:SetText("Low Durability")
+        durWarnOverlay._text = fs
+
+        local function ApplySettings()
+            durWarnOverlay:ClearAllPoints()
+            local pos = EllesmereUIDB and EllesmereUIDB.durWarnPos
+            if pos and pos.point then
+                durWarnOverlay:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 250)
+            else
+                local yOff = EllesmereUIDB and EllesmereUIDB.durWarnYOffset or 250
+                durWarnOverlay:SetPoint("CENTER", UIParent, "CENTER", 0, yOff)
+            end
+            durWarnOverlay:SetScale(1)
+
+            local fontPath = EllesmereUI.GetFontPath("extras")
+            local durSz = (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
+            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag())
+
+            local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
+            if c then
+                fs:SetTextColor(c.r, c.g, c.b, 1)
+            else
+                fs:SetTextColor(1, 0.27, 0.27, 1)
+            end
+        end
+        durWarnOverlay._applySettings = ApplySettings
+
+        local ag = fs:CreateAnimationGroup()
+        local fadeOut = ag:CreateAnimation("Alpha")
+        fadeOut:SetFromAlpha(1)
+        fadeOut:SetToAlpha(0.3)
+        fadeOut:SetDuration(0.4)
+        fadeOut:SetOrder(1)
+        local fadeIn = ag:CreateAnimation("Alpha")
+        fadeIn:SetFromAlpha(0.3)
+        fadeIn:SetToAlpha(1)
+        fadeIn:SetDuration(0.4)
+        fadeIn:SetOrder(2)
+        ag:SetLooping("REPEAT")
+
+        durWarnOverlay._show = function(pct)
+            ApplySettings()
+            durWarnOverlay._text:SetText("Low Durability (" .. math.floor(pct) .. "%)")
+            durWarnOverlay:Show()
+            ag:Play()
+        end
+
+        durWarnOverlay:SetScript("OnHide", function()
+            ag:Stop()
+        end)
+
+        durWarnOverlay:Hide()
+    end
+
+    EllesmereUI._applyDurWarn = function()
+        CreateDurabilityWarning()
+        durWarnOverlay._applySettings()
+    end
+    EllesmereUI._durWarnApplySettings = EllesmereUI._applyDurWarn
+
+    EllesmereUI._durWarnPreview = function()
+        CreateDurabilityWarning()
+        durWarnOverlay._show(25)
+        durWarnOverlay._text:SetText("Low Durability (Preview)")
+    end
+
+    EllesmereUI._durWarnHidePreview = function()
+        if durWarnOverlay then durWarnOverlay:Hide() end
+    end
+
+    local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)
+    repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    repairWarnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    repairWarnFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+
+    local function CheckDurabilityAndShow()
+        if not EllesmereUIDB then return end
+        if EllesmereUIDB.repairWarning == false then
+            if durWarnOverlay then durWarnOverlay:Hide() end
+            return
+        end
+        if InCombatLockdown() then return end
+
+        local lowestDur = 100
+        for slot = 1, 18 do
+            local cur, mx = GetInventoryItemDurability(slot)
+            if cur and mx and mx > 0 then
+                local pct = (cur / mx) * 100
+                if pct < lowestDur then lowestDur = pct end
+            end
+        end
+
+        if lowestDur < (EllesmereUIDB.durWarnThreshold or 40) then
+            CreateDurabilityWarning()
+            durWarnOverlay._show(lowestDur)
+        elseif durWarnOverlay then
+            durWarnOverlay:Hide()
+        end
+    end
+
+    repairWarnFrame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" then
+            if durWarnOverlay then durWarnOverlay:Hide() end
+            return
+        end
+        CheckDurabilityAndShow()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Pixel-Perfect UI Scale
+-------------------------------------------------------------------------------
+do
+    local function ApplyPPUIScale()
+        local scale = EllesmereUIDB and EllesmereUIDB.ppUIScale
+        if not scale then return end
+        local mf = EllesmereUI._mainFrame
+        local panelScaleBefore
+        if mf then panelScaleBefore = mf:GetEffectiveScale() end
+        EllesmereUI.PP.SetUIScale(scale)
+        if mf and panelScaleBefore then
+            local newEff = UIParent:GetEffectiveScale()
+            if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
+        end
+    end
+
+    EllesmereUI._applyPPUIScale = ApplyPPUIScale
+
+    local ppScaleFrame = CreateFrame("Frame")
+    ppScaleFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ppScaleFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        ApplyPPUIScale()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Disable Right Click Targeting
+-------------------------------------------------------------------------------
+do
+    local mlookBtn = CreateFrame("Button", "EUI_MouseLookBtn", UIParent)
+    mlookBtn:RegisterForClicks("AnyDown", "AnyUp")
+    mlookBtn:SetScript("OnClick", function(_, _, down)
+        if down then MouselookStart() else MouselookStop() end
+    end)
+
+    local stateFrame = CreateFrame("Frame", "EUI_NoRightClickState", UIParent, "SecureHandlerStateTemplate")
+
+    local function ApplyRightClickTarget()
+        if InCombatLockdown() then
+            local deferFrame = CreateFrame("Frame")
+            deferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            deferFrame:SetScript("OnEvent", function(self)
+                self:UnregisterAllEvents()
+                ApplyRightClickTarget()
+            end)
+            return
+        end
+        if EllesmereUIDB and EllesmereUIDB.disableRightClickTarget then
+            SecureStateDriverManager:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+            RegisterStateDriver(stateFrame, "mov", "[@mouseover,harm,nodead]1;0")
+            stateFrame:SetAttribute("_onstate-mov", [[
+                if newstate == 1 then
+                    self:SetBindingClick(1, "BUTTON2", "EUI_MouseLookBtn")
+                else
+                    self:ClearBindings()
+                end
+            ]])
+        else
+            UnregisterStateDriver(stateFrame, "mov")
+            ClearOverrideBindings(stateFrame)
+        end
+    end
+
+    EllesmereUI._applyRightClickTarget = ApplyRightClickTarget
+
+    local rcInitFrame = CreateFrame("Frame")
+    rcInitFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    rcInitFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        ApplyRightClickTarget()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Character Crosshair
+-------------------------------------------------------------------------------
+do
+    local crosshairFrame
+    local function CreateCrosshair()
+        if crosshairFrame then return end
+        crosshairFrame = CreateFrame("Frame", "EUI_CharacterCrosshair", UIParent)
+        crosshairFrame:SetFrameStrata("HIGH")
+        crosshairFrame:SetFrameLevel(100)
+        crosshairFrame:EnableMouse(false)
+        crosshairFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        crosshairFrame:SetSize(1, 1)
+
+        local function MakeArm()
+            local t = crosshairFrame:CreateTexture(nil, "OVERLAY")
+            if t.SetSnapToPixelGrid then
+                t:SetSnapToPixelGrid(false)
+                t:SetTexelSnappingBias(0)
+            end
+            return t
+        end
+        crosshairFrame._hBar = MakeArm()
+        crosshairFrame._vBar = MakeArm()
+    end
+
+    EllesmereUI._applyCrosshair = function()
+        local PP = EllesmereUI.PanelPP
+        local size = EllesmereUIDB and EllesmereUIDB.crosshairSize or "None"
+        if size == "None" then
+            if crosshairFrame then crosshairFrame:Hide() end
+            return
+        end
+
+        CreateCrosshair()
+
+        local c = EllesmereUIDB and EllesmereUIDB.crosshairColor
+        local cr = c and c.r or 1
+        local cg = c and c.g or 1
+        local cb = c and c.b or 1
+        local ca = c and c.a or 0.75
+
+        local thickness = (size == "Thin") and 1 or (size == "Thick") and 3 or 2
+        local ARM = PP.Scale(20)
+
+        local hBar = crosshairFrame._hBar
+        local vBar = crosshairFrame._vBar
+
+        hBar:SetColorTexture(cr, cg, cb, ca)
+        hBar:ClearAllPoints()
+        hBar:SetPoint("LEFT",  crosshairFrame, "CENTER", -ARM, 0)
+        hBar:SetPoint("RIGHT", crosshairFrame, "CENTER",  ARM, 0)
+        hBar:SetHeight(thickness)
+
+        vBar:SetColorTexture(cr, cg, cb, ca)
+        vBar:ClearAllPoints()
+        vBar:SetPoint("TOP",    crosshairFrame, "CENTER", 0,  ARM)
+        vBar:SetPoint("BOTTOM", crosshairFrame, "CENTER", 0, -ARM)
+        vBar:SetWidth(thickness)
+
+        crosshairFrame:Show()
+    end
+
+    C_Timer.After(1, function()
+        if EllesmereUIDB and EllesmereUIDB.crosshairSize and EllesmereUIDB.crosshairSize ~= "None" then
+            EllesmereUI._applyCrosshair()
+        end
+    end)
+end

@@ -521,65 +521,13 @@ local function ApplyQuestTypeIcon(block)
     -- resets alpha on acquire.
     if block.poiButton then
         local pb = block.poiButton
-        pb:SetAlpha(0)
-        if pb.EnableMouse then pb:EnableMouse(false) end
-        if pb.EnableMouseMotion then pb:EnableMouseMotion(false) end
-    end
-
-    -- Hide Blizzard's quest-type icon by scanning for atlas-backed textures
-    -- whose atlas name matches a known quest-icon prefix. Top-level region
-    -- sweep + a one-level pass into child Button frames (the POI button).
-    local function looksLikeQuestIconAtlas(a)
-        if type(a) ~= "string" then return false end
-        local l = a:lower()
-        return l:find("quest", 1, true)
-            or l:find("poi-", 1, true)
-            or l:find("crosshair_", 1, true)
-            or l:find("campaign", 1, true)
-            or l:find("legendary", 1, true)
-            or l:find("portrait", 1, true)
-    end
-
-    local function killAtlasTex(tex)
-        if not tex then return end
-        local atlas = tex.GetAtlas and tex:GetAtlas()
-        if looksLikeQuestIconAtlas(atlas) then
-            -- SetTexture("") only -- anti-taint pattern.
-            if tex.SetTexture then tex:SetTexture("") end
+        if not pb._euiHidden then
+            pb._euiHidden = CreateFrame("Frame")
+            pb._euiHidden:Hide()
         end
+        pb:SetParent(pb._euiHidden)
     end
 
-    if block.GetRegions then
-        for _, rg in ipairs({ block:GetRegions() }) do
-            if rg.GetObjectType and rg:GetObjectType() == "Texture" then
-                killAtlasTex(rg)
-            end
-        end
-    end
-    if block.GetChildren then
-        for _, child in ipairs({ block:GetChildren() }) do
-            if child.GetNormalTexture    then killAtlasTex(child:GetNormalTexture())    end
-            if child.GetPushedTexture    then killAtlasTex(child:GetPushedTexture())    end
-            if child.GetHighlightTexture then killAtlasTex(child:GetHighlightTexture()) end
-            if child.GetRegions then
-                for _, rg in ipairs({ child:GetRegions() }) do
-                    if rg.GetObjectType and rg:GetObjectType() == "Texture" then
-                        killAtlasTex(rg)
-                    end
-                end
-            end
-        end
-    end
-
-    -- Hide Blizzard's POI / portrait / legend ring textures. Top-level only.
-    for _, k in ipairs({
-        "QuestPortrait", "QuestTypeIcon", "poiIcon", "questIcon",
-        "IconRing", "Icon", "poiTexture", "TagTexture",
-    }) do
-        local r = block[k]
-        -- SetTexture("") only -- anti-taint pattern.
-        if r and r.SetTexture then r:SetTexture("") end
-    end
 
     local qID = block.id
     if type(qID) ~= "number" then
@@ -790,11 +738,7 @@ local function SkinBlock(block)
             depth = depth + 1
         end
     end
-    -- Bail for ALL ScenarioObjectiveTracker blocks (delves / dungeons /
-    -- scenarios / outdoor events). Blizzard renders the entire scenario
-    -- section using its own widget visualizers; those frames are pooled
-    -- and reused for AreaPOI tooltip widgets and any mutation we apply
-    -- taints them. Only the section header is skinned via SkinHeader.
+    -- Bail for Scenario tracker blocks entirely (no safe mutations possible).
     if underScenarioTracker then return end
 
     HookBlockLineMethods(block)
@@ -908,15 +852,17 @@ local function CreateGhostBar(bar)
     if not bar then return end
     if not EQT.Cfg("skinProgressBars") then return end
 
-    -- Bail if this bar belongs to ScenarioObjectiveTracker. Same widget-
-    -- pool taint rationale as SkinBlock -- delves / dungeons / scenarios
-    -- all use Blizzard's defaults now.
+    -- Bail if this bar belongs to Scenario / Bonus / WorldQuest tracker.
+    -- Same widget-pool taint rationale as SkinBlock -- their frames are
+    -- pooled into tooltip widgets.
     do
         local sot = _G.ScenarioObjectiveTracker
-        if sot then
+        local bot = _G.BonusObjectiveTracker
+        local wqt = _G.WorldQuestObjectiveTracker
+        if sot or bot or wqt then
             local f, depth = bar:GetParent(), 0
             while f and depth < 8 do
-                if f == sot then return end
+                if f == sot or f == bot or f == wqt then return end
                 f = f.GetParent and f:GetParent()
                 depth = depth + 1
             end
@@ -1109,11 +1055,12 @@ EQT._ScanBlockForWidgetBars = ScanBlockForWidgetBars
 -- itself, not on line.ProgressBar, so they miss our GetProgressBar hook.
 local function SkinTrackerProgressBars(tracker)
     if not tracker or not tracker.usedProgressBars then return end
-    -- Skip bars on the ScenarioObjectiveTracker when not in delve/dungeon.
-    -- Same rationale as the SkinBlock bail: scenario widget visualizers
-    -- are pooled into AreaPOI tooltip widgets and any ghost-bar mutation
-    -- taints them.
+    -- Skip bars on Scenario / Bonus / WorldQuest trackers. Their widget
+    -- visualizers are pooled into tooltip widgets and any ghost-bar
+    -- mutation taints MoneyFrame / reward tooltip rendering.
     if tracker == _G.ScenarioObjectiveTracker then return end
+    if tracker == _G.BonusObjectiveTracker then return end
+    if tracker == _G.WorldQuestObjectiveTracker then return end
     for _, bySomething in pairs(tracker.usedProgressBars) do
         if type(bySomething) == "table" then
             if bySomething.GetObjectType then
@@ -1305,14 +1252,11 @@ local function HookTracker(tracker)
             if EQT.QueueResize then EQT.QueueResize() end
             -- Re-skin blocks on this tracker so late-added blocks (world
             -- quest tracked from map with another active, pool reuse,
-            -- etc.) pick up POI reparent / icon hide. Debounced one frame
-            -- so burst Update calls coalesce into a single skin pass.
-            -- 100ms debounce so a burst of Update calls (Blizzard can
-            -- fire many in one layout pass) coalesces into a single
-            -- SkinExistingBlocks pass instead of one per Update.
+            -- etc.) pick up POI reparent / icon hide. Deferred one frame
+            -- so Blizzard's layout is done before we walk the blocks.
             if not F.skinPending[self] then
                 F.skinPending[self] = true
-                C_Timer.After(0.1, function()
+                C_Timer.After(0, function()
                     F.skinPending[self] = nil
                     SkinExistingBlocks(self)
                 end)
@@ -1417,13 +1361,17 @@ function EQT.InitSkin()
     local otf = _G.ObjectiveTrackerFrame
     if otf and otf.Update then
         hooksecurefunc(otf, "Update", function()
-            if EQT.QueueResize then EQT.QueueResize() else if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end end
+            C_Timer.After(0, function()
+                if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
+            end)
         end)
     end
     -- Same story for the global container that orchestrates the modules.
     if _G.ObjectiveTracker_Update then
         hooksecurefunc("ObjectiveTracker_Update", function()
-            if EQT.QueueResize then EQT.QueueResize() else if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end end
+            C_Timer.After(0, function()
+                if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
+            end)
         end)
     end
 

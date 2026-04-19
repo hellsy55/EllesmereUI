@@ -1463,37 +1463,34 @@ initFrame:SetScript("OnEvent", function(self)
         -- Class Power Pips (player only preview) -- matches nameplate pip style
         local cpPipContainer, cpPips
         if unitKey == "player" then
-            local CP_CLASS_COLORS = {
-                ROGUE={1.00,0.96,0.41}, DRUID={1.00,0.49,0.04}, PALADIN={0.96,0.55,0.73},
-                MONK={0.00,1.00,0.60}, WARLOCK={0.58,0.51,0.79}, MAGE={0.25,0.78,0.92},
-                EVOKER={0.20,0.58,0.50}, DEATHKNIGHT={0.77,0.12,0.23},
-                DEMONHUNTER={0.34,0.06,0.46}, SHAMAN={0.00,0.44,0.87},
-                HUNTER={0.67,0.83,0.45}, WARRIOR={0.78,0.61,0.43},
-            }
-            local CP_DEFAULT_COLOR = {1.00, 0.84, 0.30}
             local CLASS_POWER_MAP = {
-                ROGUE={5}, DRUID={5}, PALADIN={5}, MONK={5},
+                ROGUE={5}, DRUID={[103]=5}, PALADIN={5}, MONK={5},
                 WARLOCK={5}, MAGE={4}, EVOKER={5}, DEATHKNIGHT={6},
-                DEMONHUNTER={[581]=6}, SHAMAN={[263]=10}, HUNTER={[255]=3}, WARRIOR={[72]=4},
+                DEMONHUNTER={[581]=6, [1480]=5}, SHAMAN={[263]=10}, HUNTER={[255]=3}, WARRIOR={[72]=4},
             }
             local _, playerClass = UnitClass("player")
             local cpInfo = CLASS_POWER_MAP[playerClass]
-            local cpMax
+            local cpMax = 0
             if cpInfo then
                 if cpInfo[1] then
                     cpMax = cpInfo[1]
                 else
-                    -- Spec-keyed: resolve current spec
                     local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
                     local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
                     cpMax = specID and cpInfo[specID] or 0
                 end
-            else
-                cpMax = 0
             end
-            if cpMax <= 0 then cpMax = 5 end  -- fallback for preview
-            local cpColor = CP_CLASS_COLORS[playerClass] or CP_DEFAULT_COLOR
+            -- Resolve fill color from global system
+            local cpColor = { 1.00, 0.84, 0.30 }
+            if EllesmereUI.GetResourceColor then
+                local rc = EllesmereUI.GetResourceColor(playerClass)
+                if rc then cpColor = { rc.r, rc.g, rc.b } end
+            elseif EllesmereUI.GetClassColor then
+                local cc = EllesmereUI.GetClassColor(playerClass)
+                if cc then cpColor = { cc.r, cc.g, cc.b } end
+            end
 
+            if cpMax > 0 then
             cpPipContainer = CreateFrame("Frame", nil, pf)
             cpPipContainer:SetFrameLevel(pf:GetFrameLevel() + 4)
             -- Background texture behind all pips
@@ -1528,6 +1525,7 @@ initFrame:SetScript("OnEvent", function(self)
             cpBottomBdr:SetColorTexture(initBdrC.r, initBdrC.g, initBdrC.b, 1)
             cpBottomBdr:Hide()  -- shown only when position is "above"
             cpPipContainer._bottomBdr = cpBottomBdr
+            end -- cpMax > 0
         end
 
         -- Border -- plain frame child of barArea with 4 individual edge textures.
@@ -1714,7 +1712,7 @@ initFrame:SetScript("OnEvent", function(self)
             local cpStyle = (unitKey == "player") and (s.classPowerStyle or "none") or "none"
             local cpPos = (cpStyle == "modern") and (s.classPowerPosition or "top") or "none"
             local cpAboveH = 0
-            if cpStyle == "modern" and cpPos == "above" then
+            if cpStyle == "modern" and cpPos == "above" and cpPips then
                 local cpSizeAdj = s.classPowerSize or 8
                 local cpPipH = math.max(3, math.floor(cpSizeAdj * 0.375))
                 cpAboveH = cpPipH
@@ -2235,11 +2233,6 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                     -- Re-color pips based on class color toggle
-                    local CP_CLASS_COLORS_U = {
-                        ROGUE={1.00,0.96,0.41}, DRUID={1.00,0.49,0.04}, PALADIN={0.96,0.55,0.73},
-                        MONK={0.00,1.00,0.60}, WARLOCK={0.58,0.51,0.79}, MAGE={0.25,0.78,0.92},
-                        EVOKER={0.20,0.58,0.50}, DEATHKNIGHT={0.77,0.12,0.23},
-                    }
                     local _, cpPlayerClass = UnitClass("player")
                     local cpUseCC = s.classPowerClassColor ~= false
                     local cpCr, cpCg, cpCb
@@ -2247,8 +2240,14 @@ initFrame:SetScript("OnEvent", function(self)
                         local cc = s.classPowerCustomColor or { r = 1, g = 0.82, b = 0 }
                         cpCr, cpCg, cpCb = cc.r, cc.g, cc.b
                     else
-                        local mc = CP_CLASS_COLORS_U[cpPlayerClass] or {1.00, 0.84, 0.30}
-                        cpCr, cpCg, cpCb = mc[1], mc[2], mc[3]
+                        local rc = EllesmereUI.GetResourceColor and EllesmereUI.GetResourceColor(cpPlayerClass)
+                        if rc then
+                            cpCr, cpCg, cpCb = rc.r, rc.g, rc.b
+                        else
+                            local cc = EllesmereUI.GetClassColor and EllesmereUI.GetClassColor(cpPlayerClass)
+                            if cc then cpCr, cpCg, cpCb = cc.r, cc.g, cc.b
+                            else cpCr, cpCg, cpCb = 1, 0.84, 0.30 end
+                        end
                     end
                     local cpEmptyCol = s.classPowerEmptyColor or { r=0.2, g=0.2, b=0.2, a=1.0 }
                     local previewFilled = math.min(3, cpMax)
@@ -2919,7 +2918,13 @@ initFrame:SetScript("OnEvent", function(self)
             if not sup then return true end
             return sup[selectedUnit] == true
         end
+        -- Only show "Applies to:" tooltip for leader indicator settings
+        local SHOW_APPLIES_TO = {
+            leaderIndicatorEnabled = true, leaderIndicatorSize = true,
+            leaderIndicatorPosition = true, leaderIndicatorX = true, leaderIndicatorY = true,
+        }
         local function SSupportTooltip(key)
+            if not SHOW_APPLIES_TO[key] then return nil end
             local sup = UNIT_SUPPORTS[key]
             if not sup then return nil end
             local names = {}
@@ -5905,61 +5910,57 @@ initFrame:SetScript("OnEvent", function(self)
                   UpdatePreview()
                   C_Timer.After(0, function() local rl = EllesmereUI._widgetRefreshList; if rl then for i = 1, #rl do rl[i]() end end end)
               end },
-            { type="toggle", text="Class Colors",
+            { type="multiSwatch", text="Fill Color",
               disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
               disabledTooltip="Enable Class Resource is set to None",
-              getValue=function()
-                  return SGetSupported("classPowerClassColor")
-              end,
-              setValue=function(v)
-                  SSetSupported("classPowerClassColor", v)
-                  ReloadAndUpdate(); UpdatePreview()
-                  C_Timer.After(0, function() local rl = EllesmereUI._widgetRefreshList; if rl then for i = 1, #rl do rl[i]() end end end)
-              end });  y = y - h
+              swatches = {
+                { tooltip = "Custom Colored",
+                  hasAlpha = false,
+                  getValue = function()
+                      local c = SGetSupported("classPowerCustomColor")
+                      c = c or { r = 1, g = 0.82, b = 0 }
+                      return c.r, c.g, c.b, 1
+                  end,
+                  setValue = function(r, g, b)
+                      UNIT_DB_MAP[selectedUnit]().classPowerCustomColor = { r=r, g=g, b=b }
+                      if ns.frames and ns.frames._toggleClassPower then
+                          ns.frames._toggleClassPower()
+                      end
+                      ReloadAndUpdate(); UpdatePreview()
+                  end,
+                  onClick = function(self)
+                      if SGetSupported("classPowerClassColor") then
+                          SSetSupported("classPowerClassColor", false)
+                          ReloadAndUpdate(); UpdatePreview()
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      return SGetSupported("classPowerClassColor") and 0.3 or 1
+                  end },
+                { tooltip = "Dynamic Colored",
+                  getValue = function()
+                      local _, ct = UnitClass("player")
+                      if ct and RAID_CLASS_COLORS[ct] then
+                          local cc = RAID_CLASS_COLORS[ct]
+                          return cc.r, cc.g, cc.b, 1
+                      end
+                      return 1, 0.82, 0, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      SSetSupported("classPowerClassColor", true)
+                      ReloadAndUpdate(); UpdatePreview()
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      return SGetSupported("classPowerClassColor") and 1 or 0.3
+                  end },
+              } });  y = y - h
         SApplySupport(sharedClassResRow._leftRegion, "classPowerStyle")
         SApplySupport(sharedClassResRow._rightRegion, "classPowerClassColor")
-        -- Inline color swatch on Class Colors (disabled when class colors toggle is active)
-        do
-            local ccRgn = sharedClassResRow._rightRegion
-            local ccSwatch = EllesmereUI.BuildColorSwatch(ccRgn, ccRgn:GetFrameLevel() + 5,
-                function()
-                    local c = SGetSupported("classPowerCustomColor")
-                    c = c or { r=1, g=0.82, b=0 }
-                    return c.r, c.g, c.b, 1
-                end,
-                function(r, g, b)
-                    UNIT_DB_MAP[selectedUnit]().classPowerCustomColor = { r=r, g=g, b=b }
-                    if ns.frames and ns.frames._toggleClassPower then
-                        ns.frames._toggleClassPower()
-                    end
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            ccSwatch:SetPoint("RIGHT", ccRgn._lastInline or ccRgn._control, "LEFT", -12, 0)
-            ccRgn._lastInline = ccSwatch
-            ccRgn._classPowerSwatch = ccSwatch
-            local function UpdateCCSwatch()
-                local crOff = SValSupported("classPowerStyle", "none") == "none"
-                local useCC = SValSupported("classPowerClassColor", true)
-                if crOff then
-                    ccSwatch:SetAlpha(0.15); ccSwatch:Disable()
-                    ccSwatch._disabledTooltip = "Enable Class Resource is set to None"
-                elseif useCC then
-                    ccSwatch:SetAlpha(0.25); ccSwatch:Disable()
-                    ccSwatch._disabledTooltip = "Disabled while Class Colors is enabled"
-                else
-                    ccSwatch:SetAlpha(1); ccSwatch:Enable()
-                    ccSwatch._disabledTooltip = nil
-                end
-            end
-            UpdateCCSwatch()
-            RegisterWidgetRefresh(UpdateCCSwatch)
-            ccSwatch:HookScript("OnEnter", function(self)
-                if self._disabledTooltip then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip(self._disabledTooltip))
-                end
-            end)
-            ccSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-        end
 
         -- Inline "Empty Bar Color" swatch on Class Colors row (next to custom color swatch)
         do
@@ -6689,8 +6690,74 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateRmCogState)
             UpdateRmCogState()
         end
+        -- Sync icons: Raid Marker (left) and Marker Size (right)
+        do
+            local rgn = sharedAddRow4._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Raid Marker to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().raidMarkerEnabled
+                    if v == nil then v = false end
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().raidMarkerEnabled = v end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().raidMarkerEnabled
+                    if v == nil then v = false end
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local ov = UNIT_DB_MAP[key]().raidMarkerEnabled
+                        if ov == nil then ov = false end
+                        if ov ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().raidMarkerEnabled
+                        if v == nil then v = false end
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().raidMarkerEnabled = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+        do
+            local rgn = sharedAddRow4._rightRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Marker Size to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().raidMarkerSize or 28
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().raidMarkerSize = v end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().raidMarkerSize or 28
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().raidMarkerSize or 28) ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().raidMarkerSize or 28
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().raidMarkerSize = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
 
-        -- Row 5: Leader Indicator toggle | Icon Size slider + inline directions cog (X/Y)
+        -- Row 5: Leader Indicator toggle | Leader Icon Size slider + inline directions cog (X/Y)
         -- Visible for player and target.
         local sharedAddRow5
         local function leaderIndOff()
@@ -6700,17 +6767,22 @@ initFrame:SetScript("OnEvent", function(self)
             return selectedUnit == "player" or selectedUnit == "target"
         end
         if leaderIndSupported() then
+            local function SetLeaderBoth(key, val)
+                UNIT_DB_MAP["player"]()[key] = val
+                UNIT_DB_MAP["target"]()[key] = val
+                ReloadAndUpdate(); UpdatePreview()
+            end
             sharedAddRow5, h = W:DualRow(parent, y,
                 { type="toggle", text="Leader Indicator",
                   getValue=function() return SValSupported("leaderIndicatorEnabled", true) end,
                   setValue=function(v)
-                      SSetSupported("leaderIndicatorEnabled", v)
+                      SetLeaderBoth("leaderIndicatorEnabled", v)
                       EllesmereUI:RefreshPage()
                   end },
-                { type="slider", text="Icon Size", min=8, max=48, step=1,
+                { type="slider", text="Leader Icon Size", min=8, max=48, step=1,
                   disabled=leaderIndOff, disabledTooltip="Leader Indicator",
                   getValue=function() return SValSupported("leaderIndicatorSize", 16) end,
-                  setValue=function(v) SSetSupported("leaderIndicatorSize", v) end });  y = y - h
+                  setValue=function(v) SetLeaderBoth("leaderIndicatorSize", v) end });  y = y - h
             SApplySupport(sharedAddRow5._leftRegion, "leaderIndicatorEnabled")
             SApplySupport(sharedAddRow5._rightRegion, "leaderIndicatorSize")
             do
@@ -6722,13 +6794,13 @@ initFrame:SetScript("OnEvent", function(self)
                     rows = {
                         { type="dropdown", label="Position", values=leaderPosValues, order=leaderPosOrder,
                           get=function() return SValSupported("leaderIndicatorPosition", "topleft") end,
-                          set=function(v) SSetSupported("leaderIndicatorPosition", v) end },
+                          set=function(v) SetLeaderBoth("leaderIndicatorPosition", v) end },
                         { type="slider", label="X Offset", min=-200, max=200, step=1,
                           get=function() return SValSupported("leaderIndicatorX", 0) end,
-                          set=function(v) SSetSupported("leaderIndicatorX", v) end },
+                          set=function(v) SetLeaderBoth("leaderIndicatorX", v) end },
                         { type="slider", label="Y Offset", min=-200, max=200, step=1,
                           get=function() return SValSupported("leaderIndicatorY", 0) end,
-                          set=function(v) SSetSupported("leaderIndicatorY", v) end },
+                          set=function(v) SetLeaderBoth("leaderIndicatorY", v) end },
                     },
                 })
                 local leaderCogBtn = MakeCogBtn(rgn, leaderCogShow)
@@ -7735,6 +7807,19 @@ initFrame:SetScript("OnEvent", function(self)
     local ufSearchTerms = {}
     for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
     for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
+
+    -- Rebuild preview when spec changes (class resource pips may appear/disappear)
+    local ufOptSpecFrame = CreateFrame("Frame")
+    ufOptSpecFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    ufOptSpecFrame:SetScript("OnEvent", function(_, _, unit)
+        if unit ~= "player" then return end
+        if EllesmereUI.InvalidatePageCache then EllesmereUI:InvalidatePageCache() end
+        if EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
+            C_Timer.After(0.2, function()
+                if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
+            end)
+        end
+    end)
 
     EllesmereUI:RegisterModule("EllesmereUIUnitFrames", {
         title       = "Unit Frames",
