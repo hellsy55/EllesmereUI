@@ -3090,15 +3090,22 @@ BuildCastBar = function()
         local PP = EllesmereUI and EllesmereUI.PP
         if PP then PP.CreateBorder(bdrFrame, 0, 0, 0, 1, 1) end
 
-        -- Status bar
-        local bar = CreateFrame("StatusBar", "ERB_CastBar", castBarFrame)
+        -- Clip frame to prevent bar fill from bleeding past the border
+        local clipFrame = CreateFrame("Frame", nil, castBarFrame)
+        clipFrame:SetClipsChildren(true)
+        castBarFrame._barClip = clipFrame
+
+        -- Status bar (inside clip frame)
+        local bar = CreateFrame("StatusBar", "ERB_CastBar", clipFrame)
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(0)
-        bar:SetClipsChildren(true)
         castBarFrame._bar = bar
 
-        -- Spark
-        local spark = bar:CreateTexture(nil, "OVERLAY", nil, 1)
+        -- Spark (in its own child frame inside clip so it gets clipped)
+        local sparkFrame = CreateFrame("Frame", nil, clipFrame)
+        sparkFrame:SetAllPoints(bar)
+        sparkFrame:SetFrameLevel(bar:GetFrameLevel() + 2)
+        local spark = sparkFrame:CreateTexture(nil, "OVERLAY", nil, 1)
         spark:SetTexture(SPARK_TEX)
         spark:SetBlendMode("ADD")
         castBarFrame._spark = spark
@@ -3203,11 +3210,16 @@ BuildCastBar = function()
         iconFrame:Hide()
     end
 
-    -- Bar: right of icon (or full width), full height, no inset
+    -- Clip frame + bar: right of icon (or full width), full height
+    local clipFrame = castBarFrame._barClip
     local bar = castBarFrame._bar
+    local bdrInset = (PP and PP.mult) or 1
+    clipFrame:ClearAllPoints()
+    clipFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", (hasIcon and h or 0) + bdrInset, -bdrInset)
+    clipFrame:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -bdrInset, bdrInset)
+    clipFrame:SetFrameLevel(castBarFrame:GetFrameLevel() + 1)
     bar:ClearAllPoints()
-    bar:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", hasIcon and h or 0, 0)
-    bar:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", 0, 0)
+    bar:SetAllPoints(clipFrame)
 
     -- Bar texture
     local texKey = cb.texture

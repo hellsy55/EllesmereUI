@@ -2184,8 +2184,12 @@ local function SkinFriendsFrame()
             end
         end
         if bnetFrame.BroadcastFrame then
-            bnetFrame.BroadcastFrame:SetAlpha(1)
-            bnetFrame.BroadcastFrame:EnableMouse(true)
+            local bf = bnetFrame.BroadcastFrame
+            bf:SetParent(FriendsFrame)
+            bf:SetAlpha(1)
+            bf:EnableMouse(true)
+            bf:ClearAllPoints()
+            bf:SetPoint("TOPLEFT", FriendsFrame, "TOPRIGHT", 5, 0)
         end
         -- Collapse the bnet frame to reclaim vertical space
         bnetFrame:SetHeight(1)
@@ -2465,6 +2469,36 @@ local function SkinFriendsFrame()
             end)
 
             frame._ebsStatusOrb = orbBtn
+
+            -- Status message button (to the left of status orb)
+            local msgBtn = CreateFrame("Button", nil, frame)
+            msgBtn:SetSize(20, 20)
+            msgBtn:SetFrameLevel(orbBtn:GetFrameLevel())
+            msgBtn:SetPoint("RIGHT", orbBtn, "LEFT", -2, 0)
+            local msgIcon = msgBtn:CreateTexture(nil, "ARTWORK")
+            msgIcon:SetAllPoints()
+            msgIcon:SetAtlas("voicechat-icon-textchat-silenced")
+            msgIcon:SetDesaturated(true)
+            msgIcon:SetVertexColor(1, 1, 1)
+            msgBtn:SetAlpha(0.6)
+            msgBtn:SetScript("OnEnter", function(self)
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "Set Status Message")
+                end
+            end)
+            msgBtn:SetScript("OnLeave", function()
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
+            msgBtn:SetScript("OnClick", function()
+                if InCombatLockdown() then return end
+                local bf = FriendsFrameBattlenetFrame and FriendsFrameBattlenetFrame.BroadcastFrame
+                if not bf then return end
+                if bf:IsShown() then
+                    bf:Hide()
+                else
+                    bf:Show()
+                end
+            end)
         end
 
         -- Initial state: default first tab to active, then verify

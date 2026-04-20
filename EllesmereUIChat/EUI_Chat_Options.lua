@@ -119,6 +119,57 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row 3: Hide Combat Log Tab | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Combat Log Tab",
+              getValue=function() return Cfg("hideCombatLogTab") or false end,
+              setValue=function(v)
+                  Set("hideCombatLogTab", v)
+                  if ECHAT.ApplyHideCombatLogTab then ECHAT.ApplyHideCombatLogTab() end
+              end },
+            { type="toggle", text="Hide Tooltip on Hover",
+              getValue=function() return Cfg("hideTooltipOnHover") or false end,
+              setValue=function(v) Set("hideTooltipOnHover", v) end })
+        y = y - h
+
+        -- Row 4: Hide Borders | Sidebar Icons
+        local sidebarIconItems = {
+            { key = "showFriends",  label = "Friends" },
+            { key = "showCopy",     label = "Copy Chat" },
+            { key = "showVoice",    label = "Voice/Channels" },
+            { key = "showSettings", label = "Settings" },
+            { key = "showScroll",   label = "Scroll to Bottom" },
+        }
+        local sidebarRow
+        sidebarRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Borders",
+              getValue=function() return Cfg("hideBorders") or false end,
+              setValue=function(v)
+                  Set("hideBorders", v)
+                  if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
+              end },
+            { type="dropdown", text="Sidebar Icons",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end })
+        do
+            local rightRgn = sidebarRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                sidebarIconItems,
+                function(k) return Cfg(k) ~= false end,
+                function(k, v)
+                    Set(k, v)
+                    if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
+        y = y - h
+
         -- -- TEXT --------------------------------------------------------------
         _, h = W:SectionHeader(parent, "TEXT", y); y = y - h
 

@@ -6632,7 +6632,22 @@ function InitializeFrames()
             totalWidth = settings.frameWidth
         end
 
-        PP.Size(frame, totalWidth, totalH)
+        if not InCombatLockdown() then
+            PP.Size(frame, totalWidth, totalH)
+        else
+            frame._pendingSize = { totalWidth, totalH }
+            if not frame._pendingSizeListener then
+                frame._pendingSizeListener = CreateFrame("Frame")
+                frame._pendingSizeListener:SetScript("OnEvent", function(self)
+                    self:UnregisterAllEvents()
+                    if frame._pendingSize and not InCombatLockdown() then
+                        PP.Size(frame, frame._pendingSize[1], frame._pendingSize[2])
+                    end
+                    frame._pendingSize = nil
+                end)
+            end
+            frame._pendingSizeListener:RegisterEvent("PLAYER_REGEN_ENABLED")
+        end
 
         -- Update health bar xOffset when portrait width changes
         if frame.Health then

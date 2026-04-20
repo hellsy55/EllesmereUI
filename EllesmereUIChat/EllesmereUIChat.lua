@@ -33,6 +33,14 @@ local CHAT_DEFAULTS = {
             fontSize = 12,
             tabFontSize = 10,
             sidebarVisibility = "always",
+            hideCombatLogTab = false,
+            hideBorders = false,
+            showFriends = true,
+            showCopy = true,
+            showVoice = true,
+            showSettings = true,
+            showScroll = true,
+            hideTooltipOnHover = true,
         },
     },
 }
@@ -129,8 +137,6 @@ function ECHAT.ApplyFonts()
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
             eb:SetFont(font, size, "")
-            if eb.header then eb.header:SetFont(font, size, "") end
-            if eb.headerSuffix then eb.headerSuffix:SetFont(font, size, "") end
         end
     end
 end
@@ -180,6 +186,108 @@ function ECHAT.ApplySidebarVisibility()
             if _sidebarFadeAlpha == _sidebarFadeTarget then self:Hide() end
         end)
     end
+end
+
+-- Hide/show Combat Log tab by shrinking it to invisible (taint-safe)
+local _combatLogTabState = nil
+function ECHAT.ApplyHideCombatLogTab()
+    local cfg = ECHAT.DB()
+    if not cfg.hideCombatLogTab and not _combatLogTabState then return end
+    local tab = _G.ChatFrame2Tab
+    if not tab then return end
+
+    if cfg.hideCombatLogTab then
+        -- Save original state once
+        if not _combatLogTabState then
+            _combatLogTabState = {
+                name = ChatFrame2.name or (GetChatWindowInfo and select(1, GetChatWindowInfo(2))) or "Combat Log",
+                scale = tab:GetScale(),
+                mouseEnabled = tab:IsMouseEnabled(),
+            }
+        end
+        tab:EnableMouse(false)
+        tab:SetText(" ")
+        tab:SetScale(0.01)
+    else
+        -- Restore
+        if _combatLogTabState then
+            tab:SetScale(_combatLogTabState.scale or 1)
+            tab:EnableMouse(_combatLogTabState.mouseEnabled ~= false)
+            local restoreName = _combatLogTabState.name or "Combat Log"
+            tab:SetText(restoreName)
+            _combatLogTabState = nil
+        end
+    end
+end
+
+-- Show/hide all borders and dividers (not the active tab underline)
+function ECHAT.ApplyBorders()
+    local cfg = ECHAT.DB()
+    local hide = cfg.hideBorders
+
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf._euiBg and cf._euiBg._ppBorders then
+            cf._euiBg._ppBorders:SetShown(not hide)
+        end
+        if cf and cf._euiInputDiv then
+            cf._euiInputDiv:SetShown(not hide)
+        end
+    end
+    local cf1 = _G.ChatFrame1
+    if cf1 and cf1._euiSidebar then
+        if cf1._euiSidebar._ppBorders then
+            cf1._euiSidebar._ppBorders:SetShown(not hide)
+        end
+        if cf1._euiSidebar._euiDiv then
+            cf1._euiSidebar._euiDiv:SetShown(not hide)
+        end
+    end
+end
+
+-- Show/hide individual sidebar icons and re-anchor visible ones to close gaps
+function ECHAT.ApplySidebarIcons()
+    local cfg = ECHAT.DB()
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb then return end
+
+    local ICON_GAP = 10
+    local showFriends = cfg.showFriends ~= false
+    local showCopy = cfg.showCopy ~= false
+    local showVoice = cfg.showVoice ~= false
+    local showSettings = cfg.showSettings ~= false
+
+    -- Friends + count
+    if sb._friendsBtn then sb._friendsBtn:SetShown(showFriends) end
+    if sb._friendsCount then sb._friendsCount:SetShown(showFriends) end
+
+    -- Build ordered list of visible top-group buttons (excluding friends which is always first)
+    local topBtns = {}
+    if showCopy and sb._copyBtn then topBtns[#topBtns + 1] = sb._copyBtn end
+    if showVoice and sb._voiceBtn then topBtns[#topBtns + 1] = sb._voiceBtn end
+    if showSettings and sb._settingsBtn then topBtns[#topBtns + 1] = sb._settingsBtn end
+
+    -- Hide all first
+    if sb._copyBtn then sb._copyBtn:Hide() end
+    if sb._voiceBtn then sb._voiceBtn:Hide() end
+    if sb._settingsBtn then sb._settingsBtn:Hide() end
+
+    -- Re-anchor visible buttons in chain
+    local anchor = showFriends and sb._friendsCount or nil
+    for _, btn in ipairs(topBtns) do
+        btn:ClearAllPoints()
+        if anchor then
+            btn:SetPoint("TOP", anchor, "BOTTOM", 0, -ICON_GAP)
+        else
+            btn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
+        end
+        btn:Show()
+        anchor = btn
+    end
+
+    -- Scroll is independent
+    if sb._scrollBtn then sb._scrollBtn:SetShown(cfg.showScroll ~= false) end
 end
 
 -- Set alpha on the entire chat area (frames, bgs, tabs, edit boxes, sidebar)
@@ -554,10 +662,64 @@ local function ShowUrlPopup(url)
     urlPopup._eb:SetFocus(); urlPopup._eb:HighlightText()
 end
 
+-- Hyperlink tooltip on hover + click-to-toggle item detail popup
+local TOOLTIP_LINK_TYPES = {
+    achievement = true, apower = true, currency = true, enchant = true,
+    glyph = true, instancelock = true, item = true, keystone = true,
+    quest = true, spell = true, talent = true, unit = true,
+}
+
+local function IsInProtectedInstance()
+    local _, instanceType = IsInInstance()
+    if instanceType == "raid" and InCombatLockdown() then return true end
+    if instanceType == "party" and C_ChallengeMode
+        and C_ChallengeMode.IsChallengeModeActive
+        and C_ChallengeMode.IsChallengeModeActive() then
+        return true
+    end
+    return false
+end
+
+local _hyperlinkEntered = nil
+
+local function OnHyperlinkEnter(self, hyperlink)
+    if IsInProtectedInstance() then return end
+    local cfg = ECHAT.DB()
+    if cfg.hideTooltipOnHover then return end
+    local linkType = hyperlink:match("^([^:]+)")
+    if TOOLTIP_LINK_TYPES[linkType] then
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:SetHyperlink(hyperlink)
+        GameTooltip:Show()
+        _hyperlinkEntered = self
+    end
+end
+
+local function OnHyperlinkLeave(self)
+    if _hyperlinkEntered then
+        _hyperlinkEntered = nil
+        GameTooltip:Hide()
+    end
+end
+
+-- Toggle ItemRefTooltip on click (click once to show, click again to close)
+local _lastClickedLink = nil
 hooksecurefunc("SetItemRef", function(link)
     if not link then return end
     local url = link:match("^" .. addonName .. "url:(.+)$")
-    if url then ShowUrlPopup(url) end
+    if url then ShowUrlPopup(url); return end
+
+    if IsInProtectedInstance() then return end
+    local linkType = link:match("^([^:]+)")
+    if linkType == "item" or linkType == "spell" or linkType == "enchant"
+        or linkType == "keystone" or linkType == "currency" then
+        if _lastClickedLink == link and ItemRefTooltip and ItemRefTooltip:IsShown() then
+            ItemRefTooltip:Hide()
+            _lastClickedLink = nil
+        else
+            _lastClickedLink = link
+        end
+    end
 end)
 
 -------------------------------------------------------------------------------
@@ -594,6 +756,13 @@ local function SkinChatFrame(cf)
             cf:HookScript("OnShow", function() bg:Show() end)
         end
         cf._euiBg = bg
+    end
+
+    -- Hyperlink tooltip on hover
+    if not cf._euiHyperlinkHooked then
+        cf._euiHyperlinkHooked = true
+        cf:HookScript("OnHyperlinkEnter", OnHyperlinkEnter)
+        cf:HookScript("OnHyperlinkLeave", OnHyperlinkLeave)
     end
 
     -- Sidebar: 40px panel to the left of the main chat frame for icons.
@@ -643,6 +812,7 @@ local function SkinChatFrame(cf)
         sbDiv:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, 0)
         sbDiv:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
         if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(sbDiv) end
+        sidebar._euiDiv = sbDiv
 
         -- Sidebar icons
         local MEDIA = "Interface\\AddOns\\EllesmereUIChat\\Media\\"
@@ -831,9 +1001,48 @@ local function SkinChatFrame(cf)
         eb:SetFont(GetFont(), GetFontSize(), "")
         eb:SetTextInsets(8, 8, 0, 0)
 
-        -- Style the channel header (e.g. "[2. Trade - City]: ")
-        if eb.header then eb.header:SetFont(GetFont(), GetFontSize(), "") end
-        if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), GetFontSize(), "") end
+        -- Style the channel header only for the first 10 frames (1-10 are
+        -- never temporary). Frames 11-20 can become whisper windows in M+
+        -- where SetFont on their headers taints Blizzard's UpdateHeader math.
+        local frameIdx = tonumber(name:match("ChatFrame(%d+)"))
+        if frameIdx and frameIdx <= 10 then
+            if eb.header then eb.header:SetFont(GetFont(), GetFontSize(), "") end
+            if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), GetFontSize(), "") end
+        end
+        -- Up/Down arrow recalls message history without requiring Alt.
+        eb:SetAltArrowKeyMode(false)
+        if not eb._euiHistory then
+            eb._euiHistory = {}
+            eb._euiHistIdx = 0
+            hooksecurefunc(eb, "AddHistoryLine", function(self, text)
+                local h = self._euiHistory
+                if h[#h] ~= text then
+                    h[#h + 1] = text
+                    if #h > 50 then table.remove(h, 1) end
+                end
+            end)
+            eb:HookScript("OnKeyDown", function(self, key)
+                if key ~= "UP" and key ~= "DOWN" then return end
+                local h = self._euiHistory
+                if #h == 0 then return end
+                if key == "UP" then
+                    self._euiHistIdx = self._euiHistIdx + 1
+                    if self._euiHistIdx > #h then self._euiHistIdx = #h end
+                elseif key == "DOWN" then
+                    self._euiHistIdx = self._euiHistIdx - 1
+                    if self._euiHistIdx < 0 then self._euiHistIdx = 0 end
+                end
+                if self._euiHistIdx == 0 then
+                    self:SetText("")
+                else
+                    self:SetText(h[#h - self._euiHistIdx + 1])
+                end
+            end)
+            eb:HookScript("OnEditFocusLost", function(self)
+                self._euiHistIdx = 0
+            end)
+        end
+
         -- Also hide the focus border textures (Blizzard's input chrome)
         if eb.focusLeft then eb.focusLeft:SetAlpha(0) end
         if eb.focusMid then eb.focusMid:SetAlpha(0) end
@@ -994,11 +1203,16 @@ local function SkinChatFrame(cf)
                 label:SetPoint("CENTER", tab, "CENTER", 0, 0)
                 label:SetJustifyH("CENTER")
                 label:SetWordWrap(false)
-                label:SetText(labelText)
+                label:SetWidth(70)
+                label:SetText(name == "ChatFrame2" and "Combat" or labelText)
                 tab._euiLabel = label
+                local isCombatLog = (name == "ChatFrame2")
                 hooksecurefunc(tab, "SetText", function(_, newText)
-                    if newText and label then label:SetText(newText) end
+                    if not newText or not label then return end
+                    label:SetText(isCombatLog and "Combat" or newText)
                 end)
+                -- BISECT: SetWidth hook disabled
+                -- tab:SetWidth(80)
             end
         end
 
@@ -1568,8 +1782,10 @@ initFrame:SetScript("OnEvent", function(self)
     C_Timer.After(2, ApplyTimestampCVar)
     ECHAT.ApplyTimestampCVar = ApplyTimestampCVar
 
-    -- Sidebar visibility
     ECHAT.ApplySidebarVisibility()
+    ECHAT.ApplyHideCombatLogTab()
+    ECHAT.ApplyBorders()
+    ECHAT.ApplySidebarIcons()
 
     -- Visibility: register with dispatcher + mouseover target system
     ECHAT.RefreshVisibility()
