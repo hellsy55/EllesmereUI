@@ -1282,7 +1282,7 @@ EllesmereUI.DEFAULT_POWER_COLORS = {
     LUNAR_POWER  = { r = 0xFF/255, g = 0x7D/255, b = 0x0A/255 },
     INSANITY     = { r = 0.400, g = 0.000, b = 0.800 },
     MAELSTROM    = { r = 0x00/255, g = 0x70/255, b = 0xDE/255 },
-    FURY         = { r = 0.788, g = 0.259, b = 0.992 },
+    FURY         = { r = 0xA3/255, g = 0x30/255, b = 0xC9/255 },
     PAIN         = { r = 1.000, g = 0.612, b = 0.000 },
 }
 
@@ -6667,7 +6667,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.8.6"
+EllesmereUI.VERSION = "6.8.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

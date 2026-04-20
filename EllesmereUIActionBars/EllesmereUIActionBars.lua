@@ -6982,7 +6982,7 @@ function EAB:FinishSetup()
                         if not _dragState.strataCache[frame] then
                             _dragState.strataCache[frame] = frame:GetFrameStrata()
                         end
-                        frame:SetFrameStrata("HIGH")
+                        frame:SetFrameStrata("FULLSCREEN_DIALOG")
                     end
                     -- Show mouseover-faded bars at full opacity
                     if s.mouseoverEnabled then

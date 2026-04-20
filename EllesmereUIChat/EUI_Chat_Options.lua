@@ -52,14 +52,23 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- -- DISPLAY ---------------------------------------------------------
+        -- -- DISPLAY -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
         -- Row 1: Visibility | Visibility Options
+        local chatVisValues = {}
+        local chatVisOrder = {}
+        for _, key in ipairs(EllesmereUI.VIS_ORDER) do
+            if key ~= "mouseover" then
+                chatVisValues[key] = EllesmereUI.VIS_VALUES[key]
+                chatVisOrder[#chatVisOrder + 1] = key
+            end
+        end
         local visRow
         visRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order  = EllesmereUI.VIS_ORDER,
+              values = chatVisValues,
+              order  = chatVisOrder,
               getValue=function() return Cfg("visibility") or "always" end,
               setValue=function(v) Set("visibility", v); RefreshAll() end },
             { type="dropdown", text="Visibility Options",
@@ -81,25 +90,19 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 2: Background Opacity (slider + inline color swatch) | Show Top Line
-        local sidebarVisValues = {
-            always    = { text = "Always" },
-            mouseover = { text = "Mouseover" },
-            never     = { text = "Never" },
-        }
-        local sidebarVisOrder = { "always", "mouseover", "never" }
+        -- Row 2: Background Opacity (+ inline color swatch) | Idle Fade Delay
         local bgRow
         bgRow, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity",
               min = 0, max = 1, step = 0.05,
-              getValue=function() return Cfg("bgAlpha") or 0.75 end,
+              getValue=function() return Cfg("bgAlpha") or 0.70 end,
               setValue=function(v) Set("bgAlpha", v); RefreshAll() end },
-            { type="dropdown", text="Sidebar Visibility",
-              values=sidebarVisValues, order=sidebarVisOrder,
-              getValue=function() return Cfg("sidebarVisibility") or "always" end,
+            { type="slider", text="Idle Fade Delay",
+              min = 5, max = 30, step = 1,
+              getValue=function() return Cfg("idleFadeDelay") or 15 end,
               setValue=function(v)
-                  Set("sidebarVisibility", v)
-                  if ECHAT.ApplySidebarVisibility then ECHAT.ApplySidebarVisibility() end
+                  Set("idleFadeDelay", v)
+                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
               end })
         do
             local rgn = bgRow._leftRegion
@@ -119,20 +122,16 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 3: Hide Combat Log Tab | (empty)
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Combat Log Tab",
-              getValue=function() return Cfg("hideCombatLogTab") or false end,
-              setValue=function(v)
-                  Set("hideCombatLogTab", v)
-                  if ECHAT.ApplyHideCombatLogTab then ECHAT.ApplyHideCombatLogTab() end
-              end },
-            { type="toggle", text="Hide Tooltip on Hover",
-              getValue=function() return Cfg("hideTooltipOnHover") or false end,
-              setValue=function(v) Set("hideTooltipOnHover", v) end })
-        y = y - h
+        -- -- SIDEBAR -----------------------------------------------------------
+        _, h = W:SectionHeader(parent, "SIDEBAR", y); y = y - h
 
-        -- Row 4: Hide Borders | Sidebar Icons
+        -- Row 1: Sidebar Visibility (+ cog) | Sidebar Icons
+        local sidebarVisValues = {
+            always    = { text = "Always" },
+            mouseover = { text = "Mouseover" },
+            never     = { text = "Never" },
+        }
+        local sidebarVisOrder = { "always", "mouseover", "never" }
         local sidebarIconItems = {
             { key = "showFriends",  label = "Friends" },
             { key = "showCopy",     label = "Copy Chat" },
@@ -142,16 +141,45 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local sidebarRow
         sidebarRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Borders",
-              getValue=function() return Cfg("hideBorders") or false end,
+            { type="dropdown", text="Sidebar Visibility",
+              values=sidebarVisValues, order=sidebarVisOrder,
+              getValue=function() return Cfg("sidebarVisibility") or "always" end,
               setValue=function(v)
-                  Set("hideBorders", v)
-                  if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
+                  Set("sidebarVisibility", v)
+                  if ECHAT.ApplySidebarVisibility then ECHAT.ApplySidebarVisibility() end
               end },
             { type="dropdown", text="Sidebar Icons",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
               setValue=function() end })
+        -- Cog for Sidebar Visibility
+        do
+            local lrgn = sidebarRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Sidebar Settings",
+                rows = {
+                    { type="toggle", label="Show Sidebar on Right",
+                      get=function() return Cfg("sidebarRight") or false end,
+                      set=function(v)
+                          Set("sidebarRight", v)
+                          if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, lrgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+            lrgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
+        -- Sidebar Icons checkbox dropdown
         do
             local rightRgn = sidebarRow._rightRegion
             if rightRgn._control then rightRgn._control:Hide() end
@@ -168,6 +196,80 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
+        y = y - h
+
+        -- Row 2: Sidebar Icons Color | (empty)
+        local function MakeIconColorSwatches()
+            return {
+                { tooltip = "Custom Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      return (Cfg("iconR") or 1), (Cfg("iconG") or 1), (Cfg("iconB") or 1)
+                  end,
+                  setValue = function(r, g, b)
+                      Set("iconR", r); Set("iconG", g); Set("iconB", b)
+                      if ECHAT.ApplyIconColor then ECHAT.ApplyIconColor() end
+                  end,
+                  onClick = function(self)
+                      if Cfg("iconUseAccent") then
+                          Set("iconUseAccent", false)
+                          if ECHAT.ApplyIconColor then ECHAT.ApplyIconColor() end
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      return Cfg("iconUseAccent") and 0.3 or 1
+                  end },
+                { tooltip = "Accent Color",
+                  hasAlpha = false,
+                  getValue = function()
+                      local ar, ag, ab = EllesmereUI.GetAccentColor()
+                      return ar, ag, ab
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      Set("iconUseAccent", true)
+                      if ECHAT.ApplyIconColor then ECHAT.ApplyIconColor() end
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      return Cfg("iconUseAccent") and 1 or 0.3
+                  end },
+            }
+        end
+        _, h = W:DualRow(parent, y,
+            { type="multiSwatch", text="Sidebar Icons Color",
+              swatches = MakeIconColorSwatches() },
+            { type="label", text="" })
+        y = y - h
+
+        -- -- EXTRAS ------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
+
+        -- Row 1: Hide Tooltip on Hover | Hide Combat Log Tab
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Tooltip on Hover",
+              getValue=function() return Cfg("hideTooltipOnHover") or false end,
+              setValue=function(v) Set("hideTooltipOnHover", v) end },
+            { type="toggle", text="Hide Combat Log Tab",
+              getValue=function() return Cfg("hideCombatLogTab") or false end,
+              setValue=function(v)
+                  Set("hideCombatLogTab", v)
+                  if ECHAT.ApplyHideCombatLogTab then ECHAT.ApplyHideCombatLogTab() end
+              end })
+        y = y - h
+
+        -- Row 2: Hide Borders | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Borders",
+              getValue=function() return Cfg("hideBorders") or false end,
+              setValue=function(v)
+                  Set("hideBorders", v)
+                  if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
+              end },
+            { type="label", text="" })
         y = y - h
 
         -- -- TEXT --------------------------------------------------------------

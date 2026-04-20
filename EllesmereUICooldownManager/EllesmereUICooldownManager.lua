@@ -1735,8 +1735,10 @@ HideBlizzardCDM = function()
             local isSecondary = (frameName == BLIZZ_CDM_FRAMES_SECONDARY.buffs)
             if isSecondary then
                 frame:SetAlpha(0)
-                frame:ClearAllPoints()
-                frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+                if not InCombatLockdown() then
+                    frame:ClearAllPoints()
+                    frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+                end
             end
             if not InCombatLockdown() then
                 frame:EnableMouse(false)

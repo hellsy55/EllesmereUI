@@ -24,7 +24,7 @@ local CHAT_DEFAULTS = {
         chat = {
             enabled    = true,
             visibility = "always",
-            bgAlpha    = 0.75,
+            bgAlpha    = 0.70,
             bgR        = 0.03,
             bgG        = 0.045,
             bgB        = 0.05,
@@ -41,6 +41,12 @@ local CHAT_DEFAULTS = {
             showSettings = true,
             showScroll = true,
             hideTooltipOnHover = true,
+            sidebarRight = false,
+            iconR = 1,
+            iconG = 1,
+            iconB = 1,
+            iconUseAccent = false,
+            idleFadeDelay = 15,
         },
     },
 }
@@ -51,6 +57,11 @@ local function EnsureDB()
     if not EUI.Lite then return nil end
     _chatDB = EUI.Lite.NewDB("EllesmereUIChatDB", CHAT_DEFAULTS)
     _G._ECHAT_DB = _chatDB
+    -- One-time migration: mouseover -> always (idle fade replaces it)
+    if _chatDB.profile and _chatDB.profile.chat
+        and _chatDB.profile.chat.visibility == "mouseover" then
+        _chatDB.profile.chat.visibility = "always"
+    end
     return _chatDB
 end
 
@@ -75,7 +86,30 @@ end
 local _hiddenParent = CreateFrame("Frame")
 _hiddenParent:Hide()
 
-local BG_R, BG_G, BG_B, BG_A = 0.03, 0.045, 0.05, 0.75
+-- Unified fade system: all alpha changes go through a target + lerp.
+local _visChatVisible = true
+local IDLE_FADE_ALPHA = 0.5
+local _idleFadeActive = false
+local FADE_IN_DURATION = 0.35
+local FADE_OUT_DURATION = 1.0
+local _chatAlphaTarget = 1
+local _chatAlphaCurrent = 1
+local _chatFadeFrame = CreateFrame("Frame")
+_chatFadeFrame:Hide()
+
+-- Taint-safe mouse-over check using cursor position instead of IsMouseOver().
+-- IsMouseOver() returns secret booleans on temporary frames in M+.
+local function IsCursorOver(frame)
+    if not frame or not frame:IsVisible() then return false end
+    local left, bottom, width, height = frame:GetRect()
+    if not left then return false end
+    local cx, cy = GetCursorPosition()
+    local scale = frame:GetEffectiveScale()
+    cx, cy = cx / scale, cy / scale
+    return cx >= left and cx <= left + width and cy >= bottom and cy <= bottom + height
+end
+
+local BG_R, BG_G, BG_B, BG_A = 0.03, 0.045, 0.05, 0.70
 
 local EDIT_BG_R, EDIT_BG_G, EDIT_BG_B = 0.05, 0.065, 0.08
 local function GetFontSize()
@@ -93,7 +127,7 @@ function ECHAT.ApplyBackground()
     BG_R = p.bgR or 0.03
     BG_G = p.bgG or 0.045
     BG_B = p.bgB or 0.05
-    BG_A = p.bgAlpha or 0.75
+    BG_A = p.bgAlpha or 0.70
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
@@ -290,8 +324,75 @@ function ECHAT.ApplySidebarIcons()
     if sb._scrollBtn then sb._scrollBtn:SetShown(cfg.showScroll ~= false) end
 end
 
--- Set alpha on the entire chat area (frames, bgs, tabs, edit boxes, sidebar)
-function ECHAT.SetChatAlpha(alpha)
+-- Flip sidebar to left or right side of chat bg
+function ECHAT.ApplySidebarPosition()
+    local cfg = ECHAT.DB()
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb or not cf1._euiBg then return end
+    local PP = EllesmereUI and EllesmereUI.PP
+    local onePx = (PP and PP.mult) or 1
+    sb:ClearAllPoints()
+    if cfg.sidebarRight then
+        sb:SetPoint("TOPLEFT", cf1._euiBg, "TOPRIGHT", -onePx, 0)
+        sb:SetPoint("BOTTOMLEFT", cf1._euiBg, "BOTTOMRIGHT", -onePx, 0)
+    else
+        sb:SetPoint("TOPRIGHT", cf1._euiBg, "TOPLEFT", onePx, 0)
+        sb:SetPoint("BOTTOMRIGHT", cf1._euiBg, "BOTTOMLEFT", onePx, 0)
+    end
+    -- Move the divider to the correct edge
+    if sb._euiDiv then
+        sb._euiDiv:ClearAllPoints()
+        if cfg.sidebarRight then
+            sb._euiDiv:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, 0)
+            sb._euiDiv:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", 0, 0)
+        else
+            sb._euiDiv:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, 0)
+            sb._euiDiv:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
+        end
+    end
+end
+
+-- Apply icon color to all sidebar icons
+function ECHAT.ApplyIconColor()
+    local cfg = ECHAT.DB()
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb then return end
+    local r, g, b
+    if cfg.iconUseAccent and EllesmereUI.GetAccentColor then
+        r, g, b = EllesmereUI.GetAccentColor()
+    else
+        r, g, b = cfg.iconR or 1, cfg.iconG or 1, cfg.iconB or 1
+    end
+    local ICON_ALPHA = 0.4
+    local ICON_HOVER_ALPHA = 0.9
+    local fc = sb._friendsCount
+    for _, key in ipairs({ "_friendsBtn", "_copyBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
+        local btn = sb[key]
+        if btn and btn._icon then
+            btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+            if key == "_friendsBtn" and fc then
+                fc:SetTextColor(r, g, b, 0.5)
+                btn:SetScript("OnEnter", function()
+                    btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
+                    fc:SetTextColor(r, g, b, 0.9)
+                end)
+                btn:SetScript("OnLeave", function()
+                    btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+                    fc:SetTextColor(r, g, b, 0.5)
+                end)
+            else
+                btn:SetScript("OnEnter", function() btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA) end)
+                btn:SetScript("OnLeave", function() btn._icon:SetVertexColor(r, g, b, ICON_ALPHA) end)
+            end
+        end
+    end
+end
+
+-- Internal: immediately apply alpha to all chat elements
+local function _ApplyAlpha(alpha)
+    _chatAlphaCurrent = alpha
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf and cf._euiBg then
@@ -303,12 +404,54 @@ function ECHAT.SetChatAlpha(alpha)
                 if tab._euiUnderline then tab._euiUnderline:SetAlpha(alpha) end
             end
             local eb = _G["ChatFrame" .. i .. "EditBox"]
-            if eb and not eb:HasFocus() then eb:SetAlpha(alpha) end
+            if eb then
+                if cf.isTemporary then
+                    eb:SetAlpha(alpha)
+                elseif not eb:HasFocus() then
+                    eb:SetAlpha(alpha)
+                end
+            end
             if cf._euiScrollTrack then cf._euiScrollTrack:SetAlpha(alpha) end
         end
     end
     local cf1 = _G.ChatFrame1
     if cf1 and cf1._euiSidebar then cf1._euiSidebar:SetAlpha(alpha) end
+end
+
+-- Animate alpha toward target over FADE_DURATION
+local function _SetAlphaTarget(target)
+    _chatAlphaTarget = target
+    _chatFadeFrame:Show()
+end
+
+_chatFadeFrame:SetScript("OnUpdate", function(self, dt)
+    if _chatAlphaCurrent == _chatAlphaTarget then
+        self:Hide()
+        return
+    end
+    local fadingIn = _chatAlphaTarget > _chatAlphaCurrent
+    local duration = fadingIn and FADE_IN_DURATION or FADE_OUT_DURATION
+    local speed = dt / duration
+    if fadingIn then
+        _chatAlphaCurrent = math.min(_chatAlphaTarget, _chatAlphaCurrent + speed)
+    else
+        _chatAlphaCurrent = math.max(_chatAlphaTarget, _chatAlphaCurrent - speed)
+    end
+    _ApplyAlpha(_chatAlphaCurrent)
+    if _chatAlphaCurrent == _chatAlphaTarget then
+        self:Hide()
+    end
+end)
+
+-- Set alpha for the visibility/mouseover system (animated)
+function ECHAT.SetChatAlpha(alpha)
+    _visChatVisible = (alpha >= 1)
+    _SetAlphaTarget(alpha)
+end
+
+-- Set alpha for idle fade (animated)
+function ECHAT.SetIdleFadeAlpha(alpha)
+    _SetAlphaTarget(alpha)
 end
 
 -- Refresh visibility based on DB settings (combat, mouseover, always, etc.)
@@ -323,38 +466,68 @@ function ECHAT.RefreshVisibility()
     local alpha
     if vis == false then
         alpha = 0
-    elseif vis == "mouseover" then
-        alpha = 0
     else
         alpha = 1
     end
 
-    ECHAT.SetChatAlpha(alpha)
+    if alpha == 1 and _idleFadeActive then
+        ECHAT.SetIdleFadeAlpha(IDLE_FADE_ALPHA)
+    else
+        ECHAT.SetChatAlpha(alpha)
+    end
 end
 
 -------------------------------------------------------------------------------
---  Chat history buffer (session only)
+--  Chat history buffer (session only, per-frame)
 -------------------------------------------------------------------------------
 local MAX_HISTORY = 2500
-local chatHistory = {}
+local _frameHistory = {}  -- frame -> { text, text, ... }
 
 local function StripUIEscapes(text)
     if not text then return "" end
-    text = text:gsub("|H.-|h(.-)|h", "%1")
-    text = text:gsub("|c%x%x%x%x%x%x%x%x", "")
-    text = text:gsub("|r", "")
-    text = text:gsub("|T.-|t", "")
-    text = text:gsub("|A.-|a", "")
+    text = text:gsub("|H.-|h(.-)|h", "%1")   -- hyperlinks -> display text
+    text = text:gsub("|[cC]%x%x%x%x%x%x%x%x", "")  -- color start
+    text = text:gsub("|r", "")                -- color reset
+    text = text:gsub("|T.-|t", "")            -- textures
+    text = text:gsub("|A.-|a", "")            -- atlas
+    text = text:gsub("|K.-|k", "")            -- secret value placeholders
+    text = text:gsub("|n", "\n")              -- newlines
+    text = text:gsub("||", "|")               -- escaped pipes
     return text
+end
+
+local function IsInProtectedInstance()
+    local _, instanceType = IsInInstance()
+    if instanceType == "raid" and InCombatLockdown() then return true end
+    if instanceType == "party" and C_ChallengeMode
+        and C_ChallengeMode.IsChallengeModeActive
+        and C_ChallengeMode.IsChallengeModeActive() then
+        return true
+    end
+    return false
 end
 
 local function CaptureMessage(frame, text)
     if not text then return end
     if issecretvalue and issecretvalue(text) then return end
-    chatHistory[#chatHistory + 1] = text
-    if #chatHistory > MAX_HISTORY then
-        table.remove(chatHistory, 1)
+    if type(text) ~= "string" then return end
+    if not _frameHistory[frame] then _frameHistory[frame] = {} end
+    local h = _frameHistory[frame]
+    h[#h + 1] = text
+    if #h > MAX_HISTORY then
+        table.remove(h, 1)
     end
+end
+
+-- Get history for the currently selected dock frame
+local function GetActiveHistory()
+    local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+    if selected and _frameHistory[selected] then
+        return _frameHistory[selected]
+    end
+    -- Fallback to ChatFrame1
+    return _frameHistory[ChatFrame1] or {}
 end
 
 -------------------------------------------------------------------------------
@@ -387,10 +560,19 @@ local function WrapURLs(text)
     return text
 end
 
--- Hook AddMessage on ChatFrame1 only for chat history capture (post-hook).
+-- Hook AddMessage on all frames for per-frame chat history capture (post-hook).
+local _historyHooked = {}
 local function HookAddMessage()
-    hooksecurefunc(ChatFrame1, "AddMessage", CaptureMessage)
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and not _historyHooked[cf] then
+            _historyHooked[cf] = true
+            hooksecurefunc(cf, "AddMessage", CaptureMessage)
+        end
+    end
 end
+-- Hook immediately at load time so early messages (MOTD, system) are captured
+HookAddMessage()
 
 local copyDimmer
 
@@ -669,17 +851,6 @@ local TOOLTIP_LINK_TYPES = {
     quest = true, spell = true, talent = true, unit = true,
 }
 
-local function IsInProtectedInstance()
-    local _, instanceType = IsInInstance()
-    if instanceType == "raid" and InCombatLockdown() then return true end
-    if instanceType == "party" and C_ChallengeMode
-        and C_ChallengeMode.IsChallengeModeActive
-        and C_ChallengeMode.IsChallengeModeActive() then
-        return true
-    end
-    return false
-end
-
 local _hyperlinkEntered = nil
 
 local function OnHyperlinkEnter(self, hyperlink)
@@ -890,15 +1061,16 @@ local function SkinChatFrame(cf)
             end
         end)
 
-        -- Copy chat history
+        -- Copy chat history from the active tab
         copyBtn:SetScript("OnClick", function()
+            local history = GetActiveHistory()
             local lines = {}
-            for i = 1, #chatHistory do
-                lines[#lines + 1] = StripUIEscapes(chatHistory[i])
+            for i = 1, #history do
+                lines[#lines + 1] = StripUIEscapes(history[i])
             end
             local fullText = table.concat(lines, "\n")
             if fullText == "" then fullText = "(No chat history this session)" end
-            ShowCopyPopup(fullText, 500, 400, true)
+            ShowCopyPopup(fullText)
         end)
 
         -- Friends button toggles FriendsFrame
@@ -973,6 +1145,24 @@ local function SkinChatFrame(cf)
         local _ignoreTabAlpha = false
         hooksecurefunc(tab, "SetAlpha", function(self, a)
             if _ignoreTabAlpha then return end
+            if not _visChatVisible then
+                -- Visibility system wants hidden -- force 0
+                if a > 0 then
+                    _ignoreTabAlpha = true
+                    self:SetAlpha(0)
+                    _ignoreTabAlpha = false
+                end
+                return
+            end
+            -- Idle fade: clamp to idle alpha when faded
+            if _idleFadeActive then
+                if a > IDLE_FADE_ALPHA then
+                    _ignoreTabAlpha = true
+                    self:SetAlpha(IDLE_FADE_ALPHA)
+                    _ignoreTabAlpha = false
+                end
+                return
+            end
             if a > 0 and a < 1 then
                 _ignoreTabAlpha = true
                 self:SetAlpha(1)
@@ -1294,6 +1484,9 @@ local function SkinChatFrame(cf)
         end
     end
 
+    -- Let clicks pass through to the game world
+    cf:SetHyperlinksEnabled(true)
+
     -- Combat Log: replace Blizzard's filter tab bar with our own dark bar
     -- that matches the chat panel's width and style.
     if name == "ChatFrame2" then
@@ -1465,11 +1658,31 @@ local function SkinChatFrame(cf)
             end
         end
 
-        cf._euiBg:EnableMouse(true)
-        cf._euiBg:SetScript("OnEnter", function() _hovered = true; ShowTrack() end)
-        cf._euiBg:SetScript("OnLeave", function() C_Timer.After(0, CheckHover) end)
+        cf._euiBg:EnableMouse(false)
+        -- Hover detection via IsMouseOver poll (no EnableMouse needed)
+        -- Skip for temporary frames to avoid taint in M+
+        if not cf.isTemporary then
+            local _hoverElapsed = 0
+            cf._euiBg:SetScript("OnUpdate", function(self, dt)
+                _hoverElapsed = _hoverElapsed + dt
+                if _hoverElapsed < 0.1 then return end
+                _hoverElapsed = 0
+                local ok, over = pcall(function()
+                    return self:IsMouseOver() or track:IsMouseOver()
+                end)
+                if ok and over and not _hovered then
+                    _hovered = true; ShowTrack()
+                elseif (not ok or not over) and _hovered and not _dragging then
+                    _hovered = false; HideTrack()
+                end
+            end)
+        end
         track:HookScript("OnEnter", function() _hovered = true; ShowTrack() end)
-        track:HookScript("OnLeave", function() C_Timer.After(0, CheckHover) end)
+        track:HookScript("OnLeave", function()
+            if not _dragging then
+                _hovered = false; HideTrack()
+            end
+        end)
         track:SetAlpha(0)
         track:Hide()
 
@@ -1673,6 +1886,8 @@ initFrame:SetScript("OnEvent", function(self)
     end
     HookAddMessage()
     hooksecurefunc("FCF_OpenTemporaryWindow", function()
+        -- Hook immediately so the first message is captured
+        HookAddMessage()
         C_Timer.After(0, function()
             for i = 1, 20 do
                 local cf = _G["ChatFrame" .. i]
@@ -1717,6 +1932,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            HookAddMessage()
             UpdateTabColors()
         end)
     end)
@@ -1766,6 +1982,125 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
 
+    -- Idle fade: dim chat after N seconds of no new messages on the active
+    -- tab or new whisper windows. Disabled when visibility is "mouseover".
+    do
+        local idleTimer = nil
+
+        local function IsIdleApplicable()
+            local cfg = ECHAT.DB()
+            local vis = cfg.visibility or "always"
+            return vis ~= "never"
+        end
+
+        local function StartIdleFade()
+            if _idleFadeActive then return end
+            _idleFadeActive = true
+            ECHAT.SetIdleFadeAlpha(IDLE_FADE_ALPHA)
+        end
+
+        local function CancelIdleFade()
+            _idleFadeActive = false
+            if idleTimer then
+                idleTimer:Cancel()
+                idleTimer = nil
+            end
+            if _visChatVisible then
+                ECHAT.SetIdleFadeAlpha(1)
+            end
+        end
+
+        function ECHAT.ResetIdleTimer()
+            if not IsIdleApplicable() then return end
+            CancelIdleFade()
+            local cfg = ECHAT.DB()
+            local delay = cfg.idleFadeDelay or 15
+            idleTimer = C_Timer.NewTimer(delay, StartIdleFade)
+        end
+
+        -- Hook AddMessage on the active chat frame to detect new messages.
+        -- Use the selected dock frame to know which is active.
+        local _lastIdleReset = 0
+        local function OnActiveMessage()
+            if not IsIdleApplicable() then return end
+            local now = GetTime()
+            if now - _lastIdleReset < 1 then return end
+            _lastIdleReset = now
+            if _idleMouseOver then
+                CancelIdleFade()
+            else
+                ECHAT.ResetIdleTimer()
+            end
+        end
+
+        -- Hook chat frames for idle reset -- skip Combat Log (ChatFrame2)
+        for i = 1, 20 do
+            if i ~= 2 then
+                local cf = _G["ChatFrame" .. i]
+                if cf then
+                    hooksecurefunc(cf, "AddMessage", function(self)
+                        local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                            and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+                        if self == selected or self == ChatFrame1 then
+                            OnActiveMessage()
+                        end
+                    end)
+                end
+            end
+        end
+
+        -- Also reset on new temporary window (whisper)
+        hooksecurefunc("FCF_OpenTemporaryWindow", function()
+            OnActiveMessage()
+        end)
+
+        -- Reset idle when user types in chat (focus or any keystroke)
+        for i = 1, 20 do
+            local eb = _G["ChatFrame" .. i .. "EditBox"]
+            if eb then
+                eb:HookScript("OnEditFocusGained", OnActiveMessage)
+                eb:HookScript("OnTextChanged", OnActiveMessage)
+            end
+        end
+
+        local _idleMouseOver = false
+        local idleHoverPoll = CreateFrame("Frame")
+        local _idleHoverElapsed = 0
+        idleHoverPoll:SetScript("OnUpdate", function(_, dt)
+            _idleHoverElapsed = _idleHoverElapsed + dt
+            if _idleHoverElapsed < 0.15 then return end
+            _idleHoverElapsed = 0
+            if not IsIdleApplicable() then return end
+            local over = false
+            for i = 1, 20 do
+                if over then break end
+                local cf = _G["ChatFrame" .. i]
+                if cf and cf.isTemporary then break end
+                local tab = _G["ChatFrame" .. i .. "Tab"]
+                if IsCursorOver(tab) then over = true end
+                if not over and cf and cf:IsShown() then
+                    if IsCursorOver(cf._euiBg) or IsCursorOver(cf) then over = true end
+                end
+            end
+            if not over then
+                local cf1 = _G.ChatFrame1
+                if IsCursorOver(cf1 and cf1._euiSidebar) then over = true end
+            end
+            if over and not _idleMouseOver then
+                -- Mouse entered chat area
+                _idleMouseOver = true
+                CancelIdleFade()
+            elseif not over and _idleMouseOver then
+                -- Mouse left chat area -- start idle timer
+                _idleMouseOver = false
+                ECHAT.ResetIdleTimer()
+            end
+        end)
+
+        -- Start the initial timer
+        ECHAT.ResetIdleTimer()
+    end
+
     if EUI.RegAccent then
         EUI.RegAccent({ type = "callback", fn = UpdateTabColors })
     end
@@ -1786,34 +2121,13 @@ initFrame:SetScript("OnEvent", function(self)
     ECHAT.ApplyHideCombatLogTab()
     ECHAT.ApplyBorders()
     ECHAT.ApplySidebarIcons()
+    ECHAT.ApplySidebarPosition()
+    ECHAT.ApplyIconColor()
 
-    -- Visibility: register with dispatcher + mouseover target system
+    -- Visibility: register with dispatcher (no mouseover -- idle fade replaces it)
     ECHAT.RefreshVisibility()
     if EUI.RegisterVisibilityUpdater then
         EUI.RegisterVisibilityUpdater(ECHAT.RefreshVisibility)
-    end
-    if EUI.RegisterMouseoverTarget then
-        local moProxy = {}
-        moProxy.IsShown = function()
-            local cf1 = _G.ChatFrame1
-            return cf1 and cf1:IsShown()
-        end
-        moProxy.IsMouseOver = function()
-            for i = 1, 20 do
-                local cf = _G["ChatFrame" .. i]
-                if cf and cf:IsShown() and cf._euiBg and cf._euiBg:IsMouseOver() then return true end
-            end
-            local cf1 = _G.ChatFrame1
-            if cf1 and cf1._euiSidebar and cf1._euiSidebar:IsMouseOver() then return true end
-            return false
-        end
-        moProxy.SetAlpha = function(_, a)
-            ECHAT.SetChatAlpha(a)
-        end
-        EUI.RegisterMouseoverTarget(moProxy, function()
-            local cfg = ECHAT.DB()
-            return cfg.enabled ~= false and cfg.visibility == "mouseover"
-        end)
     end
 
     -- URL wrapping via ChatFrame_AddMessageEventFilter.

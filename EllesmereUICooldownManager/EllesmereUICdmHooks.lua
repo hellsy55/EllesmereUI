@@ -2304,14 +2304,16 @@ function ns.SetupViewerHooks()
             -- re-layouts so frames don't flash to Blizzard positions.
             -- Re-layout ALL bars (including custom bars that share this viewer).
             hooksecurefunc(viewer, "Layout", function()
-                local LCB = ns.LayoutCDMBar
-                if LCB then
-                    for bk, icons in pairs(cdmBarIcons) do
-                        if icons and #icons > 0 then
-                            LCB(bk)
+                C_Timer.After(0, function()
+                    local LCB = ns.LayoutCDMBar
+                    if LCB then
+                        for bk, icons in pairs(cdmBarIcons) do
+                            if icons and #icons > 0 then
+                                LCB(bk)
+                            end
                         end
                     end
-                end
+                end)
             end)
             local function SyncViewerToBar()
                 if InCombatLockdown() then return end

@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Themed Blizzard frames -- Character Sheet, Tooltips, Menus, Popups
 ## Author: Ellesmere
-## Version: 6.8.6
+## Version: 6.8.7
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBlizzardSkinDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

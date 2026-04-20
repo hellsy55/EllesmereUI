@@ -2597,13 +2597,17 @@ local function UpdateSecondaryResource()
                 local pip = pips[i]
                 if pip and pip:IsShown() then
                     -- Lazily create a StatusBar overlay inside the pip
+                    local texKey = ERB.db and ERB.db.profile and ERB.db.profile.general and ERB.db.profile.general.barTexture or "none"
+                    local texPath = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
                     if not pip._secretBar then
                         local sb = CreateFrame("StatusBar", nil, pip)
                         sb:SetAllPoints(pip._fill)
-                        sb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                        sb:SetStatusBarTexture(texPath)
                         sb:SetStatusBarColor(r, g, b, a)
                         sb:SetFrameLevel(pip:GetFrameLevel())
                         pip._secretBar = sb
+                    else
+                        pip._secretBar:SetStatusBarTexture(texPath)
                     end
                     pip._secretBar:SetMinMaxValues(i - 1, i)
                     pip._secretBar:SetValue(cur)
@@ -3075,7 +3079,7 @@ BuildCastBar = function()
     if not castBarFrame then
         castBarFrame = CreateFrame("Frame", "ERB_CastBarFrame", UIParent)
         castBarFrame:SetFrameStrata("MEDIUM")
-        castBarFrame:SetFrameLevel(10)
+        castBarFrame:SetFrameLevel(15)
 
         -- Background
         local bg = castBarFrame:CreateTexture(nil, "BACKGROUND")

@@ -1539,6 +1539,37 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "power_color_fury_to_classcolor_v1",
+    scope       = "global",
+    description = "Migrate Fury (DH) power color from old purple default to DH class color (A330C9).",
+    body = function(ctx)
+        local cc = ctx.db.customColors
+        if not cc or not cc.power then return end
+        local cur = cc.power.FURY
+        if not cur then return end
+        local function near(a, b) return math.abs(a - b) < 0.01 end
+        if near(cur.r, 0.788) and near(cur.g, 0.259) and near(cur.b, 0.992) then
+            cc.power.FURY = nil
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "chat_mouseover_to_always_v1",
+    scope       = "global",
+    description = "Migrate chat visibility from 'mouseover' to 'always' (mouseover removed, idle fade replaces it).",
+    body = function(ctx)
+        local chatDB = _G.EllesmereUIChatDB
+        if not chatDB or not chatDB.profiles then return end
+        for _, profile in pairs(chatDB.profiles) do
+            if profile.chat and profile.chat.visibility == "mouseover" then
+                profile.chat.visibility = "always"
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
