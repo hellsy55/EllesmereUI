@@ -391,9 +391,10 @@ local function ApplyChatPosition()
             py = PPa.SnapForES(py, es)
         end
     end
+    if not pos.point or not (px and py) then return end
     _cfIgnoreSetPoint = true
     cf1:ClearAllPoints()
-    cf1:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
+    cf1:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px or 0, py or 0)
     _cfIgnoreSetPoint = false
 end
 
@@ -1020,21 +1021,17 @@ function ECHAT.RefreshVisibility()
 end
 
 -------------------------------------------------------------------------------
---  Chat history buffer (session only, per-frame)
+--  Chat text helpers
 -------------------------------------------------------------------------------
-local MAX_HISTORY = 2500
-local _frameHistory = {}  -- frame -> { text, text, ... }
-
 local function StripUIEscapes(text)
     if not text then return "" end
     text = text:gsub("|H.-|h(.-)|h", "%1")   -- hyperlinks -> display text
-    text = text:gsub("|[cC]%x%x%x%x%x%x%x%x", "")  -- color start
-    text = text:gsub("|r", "")                -- color reset
     text = text:gsub("|T.-|t", "")            -- textures
     text = text:gsub("|A.-|a", "")            -- atlas
     text = text:gsub("|K.-|k", "")            -- secret value placeholders
     text = text:gsub("|n", "\n")              -- newlines
     text = text:gsub("||", "|")               -- escaped pipes
+    -- Keep |cXXXXXXXX and |r color codes so the copy popup preserves colors
     return text
 end
 
@@ -1049,27 +1046,27 @@ local function IsInProtectedInstance()
     return false
 end
 
-local function CaptureMessage(frame, text)
-    if not text then return end
-    if issecretvalue and issecretvalue(text) then return end
-    if type(text) ~= "string" then return end
-    if not _frameHistory[frame] then _frameHistory[frame] = {} end
-    local h = _frameHistory[frame]
-    h[#h + 1] = text
-    if #h > MAX_HISTORY then
-        table.remove(h, 1)
-    end
-end
-
--- Get history for the currently selected dock frame
-local function GetActiveHistory()
+-- Read all messages directly from the active chat frame on demand.
+-- No hooks needed: ScrollingMessageFrame:GetMessageInfo(i) returns
+-- the rendered text for each line.
+local function ReadActiveChatText()
     local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
         and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
-    if selected and _frameHistory[selected] then
-        return _frameHistory[selected]
+    local cf = selected or ChatFrame1
+    if not cf or not cf.GetNumMessages then return "" end
+    local n = cf:GetNumMessages()
+    if n == 0 then return "(No chat history)" end
+    local lines = {}
+    for i = 1, n do
+        local ok, text = pcall(cf.GetMessageInfo, cf, i)
+        if ok and text and not (issecretvalue and issecretvalue(text)) then
+            local sok, stripped = pcall(StripUIEscapes, text)
+            if sok and stripped then
+                lines[#lines + 1] = stripped
+            end
+        end
     end
-    -- Fallback to ChatFrame1
-    return _frameHistory[ChatFrame1] or {}
+    return table.concat(lines, "\n")
 end
 
 -------------------------------------------------------------------------------
@@ -1101,20 +1098,6 @@ local function WrapURLs(text)
     end
     return text
 end
-
--- Hook AddMessage on all frames for per-frame chat history capture (post-hook).
-local _historyHooked = {}
-local function HookAddMessage()
-    for i = 1, 20 do
-        local cf = _G["ChatFrame" .. i]
-        if cf and not _historyHooked[cf] then
-            _historyHooked[cf] = true
-            hooksecurefunc(cf, "AddMessage", CaptureMessage)
-        end
-    end
-end
--- Hook immediately at load time so early messages (MOTD, system) are captured
-HookAddMessage()
 
 local copyDimmer
 
@@ -1628,15 +1611,10 @@ local function SkinChatFrame(cf)
             end
         end)
 
-        -- Copy chat history from the active tab
+        -- Copy chat history from the active tab (reads directly from the frame)
         copyBtn:SetScript("OnClick", function()
-            local history = GetActiveHistory()
-            local lines = {}
-            for i = 1, #history do
-                lines[#lines + 1] = StripUIEscapes(history[i])
-            end
-            local fullText = table.concat(lines, "\n")
-            if fullText == "" then fullText = "(No chat history this session)" end
+            local fullText = ReadActiveChatText()
+            if fullText == "" then fullText = "(No chat history)" end
             ShowCopyPopup(fullText)
         end)
 
@@ -2612,10 +2590,7 @@ initFrame:SetScript("OnEvent", function(self)
             SkinChatFrame(cf)
         end
     end
-    HookAddMessage()
     hooksecurefunc("FCF_OpenTemporaryWindow", function()
-        -- Hook immediately so the first message is captured
-        HookAddMessage()
         C_Timer.After(0, function()
             for i = 1, 20 do
                 local cf = _G["ChatFrame" .. i]
@@ -2660,7 +2635,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
-            HookAddMessage()
             UpdateTabColors()
             ECHAT.ApplyInputPosition()
         end)
@@ -2862,20 +2836,30 @@ initFrame:SetScript("OnEvent", function(self)
     -- enforces our position (blocking Edit Mode), (b) unlock mode
     -- snapshots are never _fromLiveFrame, so revert works correctly,
     -- and (c) size is preserved across sessions.
+    -- Defer initial position/size capture to PLAYER_ENTERING_WORLD:
+    -- at PLAYER_LOGIN, Blizzard's Edit Mode may not have positioned
+    -- ChatFrame1 yet, so GetPoint(1) can return nil x/y.
     do
-        local cfg = ECHAT.DB()
-        if cfg and not cfg.chatPosition then
-            local pt, _, relPt, x, y = ChatFrame1:GetPoint(1)
-            if pt then
-                cfg.chatPosition = { point = pt, relPoint = relPt, x = x, y = y }
+        local captureFrame = CreateFrame("Frame")
+        captureFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        captureFrame:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            local cfg = ECHAT.DB()
+            if not cfg then return end
+            if not cfg.chatPosition then
+                local pt, _, relPt, x, y = ChatFrame1:GetPoint(1)
+                if pt and x and y then
+                    cfg.chatPosition = { point = pt, relPoint = relPt or pt, x = x, y = y }
+                    ApplyChatPosition()
+                end
             end
-        end
-        if cfg and not cfg.chatWidth then
-            cfg.chatWidth = ChatFrame1:GetWidth()
-        end
-        if cfg and not cfg.chatHeight then
-            cfg.chatHeight = ChatFrame1:GetHeight()
-        end
+            if not cfg.chatWidth then
+                cfg.chatWidth = ChatFrame1:GetWidth()
+            end
+            if not cfg.chatHeight then
+                cfg.chatHeight = ChatFrame1:GetHeight()
+            end
+        end)
     end
     -- Reparent ChatFrame1 to our own container to break it out of Blizzard's
     -- Edit Mode hierarchy. This lets us safely call SetSize/SetWidth/SetHeight
@@ -2914,7 +2898,9 @@ initFrame:SetScript("OnEvent", function(self)
             ApplyChatSize()
         end)
     end
-    ApplyChatPosition()
+    -- pcall: first apply may fail if saved position has bad data from
+    -- Edit Mode capture (e.g. nil x/y). Safe to skip — Blizzard's position stands.
+    pcall(ApplyChatPosition)
     hooksecurefunc(ChatFrame1, "SetPoint", function(self, pt, rel, relPt, x, y)
         if _cfIgnoreSetPoint then return end
         if EllesmereUI._unlockActive then return end
@@ -2933,9 +2919,10 @@ initFrame:SetScript("OnEvent", function(self)
         local cfg = ECHAT.DB()
         if not cfg or not cfg.chatPosition then return end
         local pos = cfg.chatPosition
+        if not pos.point or not pos.x or not pos.y then return end
         _cfIgnoreSetPoint = true
         self:ClearAllPoints()
-        self:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+        self:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
         _cfIgnoreSetPoint = false
     end)
 
@@ -2978,7 +2965,7 @@ initFrame:SetScript("OnEvent", function(self)
                 savePos = function(_, point, relPoint, x, y)
                     local cfg = ECHAT.DB()
                     if not cfg then return end
-                    cfg.chatPosition = { point = point, relPoint = relPoint, x = x, y = y }
+                    cfg.chatPosition = { point = point, relPoint = relPoint or point, x = x, y = y }
                     if not EllesmereUI._unlockActive then
                         ApplyChatPosition()
                     end
