@@ -1864,6 +1864,10 @@ local function SkinChatFrame(cf)
                 local minW = 60
                 if lbl and lbl.GetStringWidth then
                     local sw = lbl:GetStringWidth()
+                    -- Cap to the label's constrained width so truncated
+                    -- names don't inflate the tab to the full string width
+                    local lblW = lbl:GetWidth()
+                    if lblW and lblW > 0 and sw and sw > lblW then sw = lblW end
                     if sw and sw > 0 then minW = sw + 40 end
                 end
                 if self:GetWidth() < minW then
@@ -2002,12 +2006,11 @@ local function SkinChatFrame(cf)
                 label:SetJustifyH("CENTER")
                 label:SetWordWrap(false)
                 label:SetWidth(70)
-                label:SetText(name == "ChatFrame2" and "Combat" or labelText)
+                label:SetText(labelText)
                 tab._euiLabel = label
-                local isCombatLog = (name == "ChatFrame2")
                 hooksecurefunc(tab, "SetText", function(_, newText)
                     if not newText or not label then return end
-                    label:SetText(isCombatLog and "Combat" or newText)
+                    label:SetText(newText)
                 end)
                 -- Enforce minimum width now that the label exists
                 local sw = label:GetStringWidth()

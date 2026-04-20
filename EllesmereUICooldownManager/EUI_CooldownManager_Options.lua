@@ -2692,17 +2692,25 @@ initFrame:SetScript("OnEvent", function(self)
                 local pvIconFrame = nil
                 local hasIcon = (bd.spellID and bd.spellID > 0) or bd.glowBased
                 if pvIconMode ~= "none" and hasIcon then
-                    pvIconFrame = CreateFrame("Frame", nil, pvFrame)
+                    pvIconFrame = CreateFrame("Frame", nil, hdr)
                     local iSize = isVert and PREVIEW_W or PREVIEW_H
                     pvIconFrame:SetSize(iSize, iSize)
                     pvIconFrame:SetFrameLevel(pvFrame:GetFrameLevel() + 1)
                     local pvIconTex = pvIconFrame:CreateTexture(nil, "ARTWORK")
                     pvIconTex:SetAllPoints()
                     pvIconTex:SetTexCoord(0.06, 0.94, 0.06, 0.94)
-                    if pvIconMode == "left" then
-                        pvIconFrame:SetPoint("RIGHT", pvFrame, "LEFT", 0, 0)
-                    elseif pvIconMode == "right" then
-                        pvIconFrame:SetPoint("LEFT", pvFrame, "RIGHT", 0, 0)
+                    if isVert then
+                        if pvIconMode == "left" then
+                            pvIconFrame:SetPoint("TOP", pvBar, "BOTTOM", 0, 0)
+                        elseif pvIconMode == "right" then
+                            pvIconFrame:SetPoint("BOTTOM", pvBar, "TOP", 0, 0)
+                        end
+                    else
+                        if pvIconMode == "left" then
+                            pvIconFrame:SetPoint("RIGHT", pvBar, "LEFT", 0, 0)
+                        elseif pvIconMode == "right" then
+                            pvIconFrame:SetPoint("LEFT", pvBar, "RIGHT", 0, 0)
+                        end
                     end
                     local pvIconID = nil
                     if bd.popularKey and ns.TBB_POPULAR_BUFFS then
@@ -2744,7 +2752,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Hover highlight covers bar + icon
                 local eg = EllesmereUI.ELLESMERE_GREEN
-                local hlContainer = CreateFrame("Frame", nil, pvFrame)
+                local hlContainer = CreateFrame("Frame", nil, hdr)
                 hlContainer:SetFrameLevel(pvBar:GetFrameLevel() + 6)
                 if pvIconMode ~= "none" and pvIconFrame then
                     if pvIconMode == "left" then

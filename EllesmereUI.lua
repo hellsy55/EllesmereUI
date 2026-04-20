@@ -6478,8 +6478,12 @@ function EllesmereUI._applySidebarSearch(text)
             end
         end
         if mod and mod.searchTerms then
-            for _, t in ipairs(mod.searchTerms) do
-                parts[#parts + 1] = tostring(t):lower()
+            if type(mod.searchTerms) == "table" then
+                for _, t in ipairs(mod.searchTerms) do
+                    parts[#parts + 1] = tostring(t):lower()
+                end
+            else
+                parts[#parts + 1] = tostring(mod.searchTerms):lower()
             end
         end
         local haystack = table.concat(parts, " ")
@@ -6810,7 +6814,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.9"
+EllesmereUI.VERSION = "6.9.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
