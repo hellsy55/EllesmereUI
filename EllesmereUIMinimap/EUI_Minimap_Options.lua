@@ -502,7 +502,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Clock Position",
                 rows = {
-                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "X Offset", min = -500, max = 500, step = 1,
                       get = function() local m = MinimapDB(); return m and m.clockOffsetX or 0 end,
                       set = function(v)
                           local m = MinimapDB(); if not m then return end
@@ -515,7 +515,7 @@ initFrame:SetScript("OnEvent", function(self)
                               bg:SetPoint("TOP", _G.Minimap, "TOP", v, baseY + cy)
                           end
                       end },
-                    { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
                       get = function() local m = MinimapDB(); return m and m.clockOffsetY or 0 end,
                       set = function(v)
                           local m = MinimapDB(); if not m then return end
@@ -578,7 +578,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Location Position",
                 rows = {
-                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "X Offset", min = -500, max = 500, step = 1,
                       get = function() local m = MinimapDB(); return m and m.locationOffsetX or 0 end,
                       set = function(v)
                           local m = MinimapDB(); if not m then return end
@@ -591,7 +591,7 @@ initFrame:SetScript("OnEvent", function(self)
                               bg:SetPoint("BOTTOM", _G.Minimap, "BOTTOM", v, baseY + ly)
                           end
                       end },
-                    { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
                       get = function() local m = MinimapDB(); return m and m.locationOffsetY or 0 end,
                       set = function(v)
                           local m = MinimapDB(); if not m then return end

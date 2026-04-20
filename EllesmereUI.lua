@@ -342,6 +342,69 @@ local function IsAddonLoaded(name)
     return false
 end
 
+-------------------------------------------------------------------------------
+--  Profile Sync for UI Reskin Addons
+--  Synced modules have their settings copied to all profiles on logout.
+-------------------------------------------------------------------------------
+do
+    -- Build reskin module set from ADDON_GROUPS
+    local reskinSet = {}
+    for _, group in ipairs(EllesmereUI.ADDON_GROUPS) do
+        if group.key == "reskin" then
+            for _, m in ipairs(group.members) do reskinSet[m] = true end
+            break
+        end
+    end
+    EllesmereUI._reskinModules = reskinSet
+
+    function EllesmereUI.IsModuleSynced(folder)
+        if not EllesmereUIDB then return false end
+        local sm = EllesmereUIDB.syncedModules
+        return sm and sm[folder] or false
+    end
+
+    function EllesmereUI.SyncModuleToAllProfiles(folder)
+        if not EllesmereUIDB or not EllesmereUIDB.profiles then return end
+        local active = EllesmereUIDB.activeProfile or "Default"
+        local src = EllesmereUIDB.profiles[active]
+        if not src or not src.addons or not src.addons[folder] then return end
+        local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
+        if not DeepCopy then return end
+        local copy = DeepCopy(src.addons[folder])
+        for name, prof in pairs(EllesmereUIDB.profiles) do
+            if name ~= active and prof.addons then
+                prof.addons[folder] = DeepCopy(copy)
+            end
+        end
+    end
+
+    function EllesmereUI.SetModuleSynced(folder, synced)
+        if not EllesmereUIDB then return end
+        if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
+        EllesmereUIDB.syncedModules[folder] = synced or nil
+        if synced then
+            EllesmereUI.SyncModuleToAllProfiles(folder)
+        end
+    end
+
+    -- Pre-logout: copy synced module data to all profiles
+    local initFrame = CreateFrame("Frame")
+    initFrame:RegisterEvent("PLAYER_LOGIN")
+    initFrame:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if EllesmereUI.Lite and EllesmereUI.Lite.RegisterPreLogout then
+            EllesmereUI.Lite.RegisterPreLogout(function()
+                if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return end
+                for folder, synced in pairs(EllesmereUIDB.syncedModules) do
+                    if synced then
+                        EllesmereUI.SyncModuleToAllProfiles(folder)
+                    end
+                end
+            end)
+        end
+    end)
+end
+
 
 -------------------------------------------------------------------------------
 --  Forward declarations
@@ -6122,6 +6185,86 @@ function EllesmereUI:SelectPage(pageName)
         local totalH = 0
         if config.buildPage then
             local startY = -6
+
+            -- Inject Sync Profile Settings button for UI Reskin modules
+            if EllesmereUI._reskinModules and EllesmereUI._reskinModules[activeModule] then
+                local W = EllesmereUI.Widgets
+                if W and W.WideButton then
+                    startY = startY - 5
+                    local synced = EllesmereUI.IsModuleSynced(activeModule)
+                    local syncLabel = synced and "Apply Settings Per Profile (Desync)" or "Apply Settings to All Profiles (Sync)"
+                    local syncFolder = activeModule
+                    local syncBtnFrame, syncH
+                    local syncBtnLbl
+                    local syncBtnObj
+                    local syncLocked = false
+                    syncBtnFrame, syncH = W:WideButton(wrapper, syncLabel, startY, function()
+                        if syncLocked then return end
+                        local nowSynced = EllesmereUI.IsModuleSynced(syncFolder)
+                        EllesmereUI.SetModuleSynced(syncFolder, not nowSynced)
+                        if not nowSynced and syncBtnLbl then
+                            -- Was off, now synced: show "Synced" confirmation
+                            syncLocked = true
+                            if syncBtnObj then syncBtnObj:Disable() end
+                            local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
+                            syncBtnLbl:SetText("Synced")
+                            syncBtnLbl:SetTextColor(eg.r, eg.g, eg.b, 1)
+                            C_Timer.After(1.2, function()
+                                if syncBtnLbl then
+                                    syncBtnLbl:SetText("Apply Settings Per Profile (Desync)")
+                                    syncBtnLbl:SetTextColor(1, 1, 1, 1)
+                                end
+                                syncLocked = false
+                                if syncBtnObj then
+                                    syncBtnObj:Enable()
+                                    syncBtnObj:SetAlpha(0.5)
+                                end
+                            end)
+                        elseif syncBtnLbl then
+                            syncBtnLbl:SetText("Apply Settings to All Profiles (Sync)")
+                            if syncBtnObj then syncBtnObj:SetAlpha(1) end
+                        end
+                    end)
+                    do
+                        local btn = select(1, syncBtnFrame:GetChildren())
+                        if btn then
+                            syncBtnObj = btn
+                            for i = 1, btn:GetNumRegions() do
+                                local rgn = select(i, btn:GetRegions())
+                                if rgn and rgn.GetText and rgn:GetText() then
+                                    syncBtnLbl = rgn; break
+                                end
+                            end
+                            -- Desync state: dimmed at 50%, 75% on hover
+                            if synced then
+                                btn:SetAlpha(0.5)
+                                btn:HookScript("OnEnter", function(self)
+                                    if EllesmereUI.IsModuleSynced(syncFolder) then
+                                        self:SetAlpha(0.75)
+                                    end
+                                end)
+                                btn:HookScript("OnLeave", function(self)
+                                    if EllesmereUI.IsModuleSynced(syncFolder) then
+                                        self:SetAlpha(0.5)
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                    syncBtnFrame:SetScale(0.9)
+                    -- Re-center: scale shrinks from TOPLEFT, shift right to compensate
+                    local frameW = syncBtnFrame:GetWidth()
+                    if frameW and frameW > 0 then
+                        local offset = frameW * (1 - 0.9) / 2
+                        local pt, rel, relPt, px, py = syncBtnFrame:GetPoint(1)
+                        if pt then
+                            syncBtnFrame:SetPoint(pt, rel, relPt, (px or 0) + offset, py or 0)
+                        end
+                    end
+                    startY = startY - syncH * 0.9 + 5
+                end
+            end
+
             totalH = config.buildPage(pageName, wrapper, startY) or 600
             contentFrame:SetHeight(totalH + 30)
         end
@@ -6667,7 +6810,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "6.8.7"
+EllesmereUI.VERSION = "6.8.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7340,7 +7483,8 @@ initFrame:SetScript("OnEvent", function(self, event)
     -- Create native minimap button
     EllesmereUI.CreateMinimapButton()
 
-    -- Add button to the Game Menu (Escape / pause menu)
+    -- Add EllesmereUI + Unlock Mode buttons to the Game Menu (pause menu).
+    -- Both share a single Layout hook to avoid double-push conflicts.
     if GameMenuFrame and not GameMenuFrame.EllesmereUI then
         local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         btn:SetSize(200, 35)
@@ -7354,24 +7498,40 @@ initFrame:SetScript("OnEvent", function(self, event)
         end)
         GameMenuFrame.EllesmereUI = btn
 
+        local unlockBtn = CreateFrame("Button", "EllesmereUI_UnlockMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
+        unlockBtn:SetSize(200, 35)
+        unlockBtn:SetScript("OnClick", function()
+            if InCombatLockdown() then
+                print("|cffff6060[EllesmereUI]|r Cannot toggle Unlock Mode during combat.")
+                return
+            end
+            HideUIPanel(GameMenuFrame)
+            if EllesmereUI.ToggleUnlockMode then
+                EllesmereUI:ToggleUnlockMode()
+            end
+        end)
+        GameMenuFrame.EllesmereUIUnlock = unlockBtn
+
         local _gameMenuBaseHeight = nil
         hooksecurefunc(GameMenuFrame, "Layout", function()
-            -- Skip entirely during combat to avoid protected frame taint
             if InCombatLockdown() then
                 btn:Hide()
+                unlockBtn:Hide()
                 return
             end
-            -- Respect the hide setting
-            if EllesmereUIDB and EllesmereUIDB.hideGameMenuButton then
-                btn:Hide()
-                return
-            end
-            btn:Show()
+
+            -- Determine which buttons are visible
+            local showEUI = not (EllesmereUIDB and EllesmereUIDB.hideGameMenuButton)
+            local showUnlock = EllesmereUIDB and EllesmereUIDB.hideUnlockMenuButton == false
+
+            if not showEUI then btn:Hide() end
+            if not showUnlock then unlockBtn:Hide() end
+            if not showEUI and not showUnlock then return end
+
             local eg = ELLESMERE_GREEN
             local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
-            btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
 
-            -- Find the Shop button to anchor below it (fall back to Options)
+            -- Find the Shop button to anchor below (fall back to Options)
             local anchorBtn
             for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
                 local text = menuBtn:GetText()
@@ -7384,11 +7544,26 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             if not anchorBtn then return end
 
-            -- Anchor our button below the Shop (or Options) button
-            btn:ClearAllPoints()
-            btn:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -12)
+            -- Position our buttons in a chain below the anchor
+            local extraH = 0
+            local lastBtn = anchorBtn
+            if showEUI then
+                btn:Show()
+                btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
+                btn:ClearAllPoints()
+                btn:SetPoint("TOP", lastBtn, "BOTTOM", 0, -12)
+                lastBtn = btn
+                extraH = extraH + 40
+            end
+            if showUnlock then
+                unlockBtn:Show()
+                unlockBtn:SetText(hex .. "EUI|r |cffffffffUnlock Mode|r")
+                unlockBtn:ClearAllPoints()
+                unlockBtn:SetPoint("TOP", lastBtn, "BOTTOM", 0, showEUI and -4 or -12)
+                extraH = extraH + (showEUI and 40 or 40)
+            end
 
-            -- Push all buttons that sit below the anchor down to make room
+            -- Push all Blizzard buttons below the anchor down
             local anchorBottom = anchorBtn:GetBottom()
             if anchorBottom then
                 for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
@@ -7397,18 +7572,16 @@ initFrame:SetScript("OnEvent", function(self, event)
                         local p, rel, rp, x, y = menuBtn:GetPoint(1)
                         if p then
                             menuBtn:ClearAllPoints()
-                            menuBtn:SetPoint(p, rel, rp, x, (y or 0) - 40)
+                            menuBtn:SetPoint(p, rel, rp, x, (y or 0) - extraH)
                         end
                     end
                 end
             end
 
-            -- Store the base height once, then always set to base + 40
-            -- to prevent accumulation if Layout fires multiple times per open.
             if not _gameMenuBaseHeight then
                 _gameMenuBaseHeight = GameMenuFrame:GetHeight()
             end
-            GameMenuFrame:SetHeight(_gameMenuBaseHeight + 40)
+            GameMenuFrame:SetHeight(_gameMenuBaseHeight + extraH)
         end)
     end
 

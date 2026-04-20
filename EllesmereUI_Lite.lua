@@ -166,6 +166,8 @@ local function DeepCopy(src)
     return copy
 end
 
+EUILite.DeepCopy = DeepCopy
+
 local dbRegistry = {}  -- all db objects, for logout cleanup
 
 -- Expose so the profile system can update db.profile in-place after injection

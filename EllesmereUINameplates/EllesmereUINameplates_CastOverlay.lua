@@ -210,22 +210,15 @@ local function BuildOverlay()
     bg:Hide()  -- Stays hidden until the bar is actually live + configured.
     f.bg = bg
 
-    -- Belt-and-suspenders: any time the overlay frame is hidden, force the
-    -- bg + bar textures invisible too. Frame:Hide() should cascade, but
-    -- after long sessions in M+ users have reported black-square remnants
-    -- on caster nameplates -- this guarantees no orphan texture leak.
+    -- On hide: force bg + bar textures invisible as a safety net.
+    -- bg is only re-shown explicitly in ConfigureOverlay after the bar
+    -- texture is confirmed valid -- NOT in OnShow, which would race
+    -- ahead of ConfigureOverlay and show a bg-only black square.
     f:HookScript("OnHide", function(self)
         if self.bg then self.bg:Hide() end
         if self.bar and self.bar.GetStatusBarTexture then
             local t = self.bar:GetStatusBarTexture()
             if t and t.SetAlpha then t:SetAlpha(0) end
-        end
-    end)
-    f:HookScript("OnShow", function(self)
-        if self.bg then self.bg:Show() end
-        if self.bar and self.bar.GetStatusBarTexture then
-            local t = self.bar:GetStatusBarTexture()
-            if t and t.SetAlpha then t:SetAlpha(1) end
         end
     end)
 
@@ -375,6 +368,16 @@ local function BuildOverlay()
         local plate = self.plate
         if not plate or not plate.unit or not plate.isCasting then return end
         if plate:IsForbidden() then return end
+
+        -- Safety net: if the bar's StatusBarTexture disappeared (long session
+        -- frame churn), hide the bg to prevent a black-square remnant. The
+        -- next ConfigureOverlay call will re-assert the texture and re-show bg.
+        if self.bg and self.bg:IsShown() then
+            local sbt = self.bar and self.bar:GetStatusBarTexture()
+            if not sbt then
+                self.bg:Hide()
+            end
+        end
 
         -- Sync size and scale (cached, no-op if unchanged)
         ApplyOverlayLayout(self, plate)
@@ -707,6 +710,10 @@ local function ConfigureOverlay(ov, plate)
     if sbt then
         sbt:SetAlpha(1)
         sbt:SetVertexColor(cr, cg, cb)
+        -- Bar fill is confirmed valid: NOW show the bg. This is the sole
+        -- place bg becomes visible, preventing the black-square race where
+        -- bg:Show() ran before the bar texture was set up.
+        if ov.bg then ov.bg:Show() end
     end
 
     -- Drive the bar via SetTimerDuration EXACTLY the same way the on-plate
@@ -846,9 +853,16 @@ function ns.RefreshCastOverlay(plate)
             if plate.cast then plate.cast:SetAlpha(0) end
 
             dprint("  anchored flush to plate.health")
-            ov:Show()
+            -- Show AFTER ConfigureOverlay so bg is only visible once the
+            -- bar texture is confirmed valid. Prevents the bg-only black
+            -- square that appeared when ConfigureOverlay bailed early.
+            ov._needsShow = true
         end
         ConfigureOverlay(ov, plate)
+        if ov._needsShow then
+            ov._needsShow = nil
+            ov:Show()
+        end
     else
         if activePlates[plate] then
             ReleaseOverlay(plate)

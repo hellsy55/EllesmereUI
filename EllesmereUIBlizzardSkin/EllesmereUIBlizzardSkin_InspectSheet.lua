@@ -900,9 +900,12 @@ local function SkinInspectSheet()
 
     UpdateTabVisuals()
 
-    -- Set frame scale and strata
+    -- Set frame scale and strata (guard for the rare case where inspect
+    -- loads for the first time during combat -- SetScale is blocked then)
     local scale = EllesmereUIDB and EllesmereUIDB.themedInspectSheetScale or 1
-    frame:SetScale(scale)
+    if not InCombatLockdown() then
+        frame:SetScale(scale)
+    end
     frame:SetFrameStrata("HIGH")
 
     -- Center the title within the frame (406px wide). Hardcoded to avoid

@@ -37,7 +37,8 @@ local CHAT_DEFAULTS = {
             hideBorders = false,
             showFriends = true,
             showCopy = true,
-            showVoice = true,
+            showPortals = true,
+            showVoice = false,
             showSettings = true,
             showScroll = true,
             hideTooltipOnHover = true,
@@ -47,6 +48,19 @@ local CHAT_DEFAULTS = {
             iconB = 1,
             iconUseAccent = false,
             idleFadeDelay = 15,
+            idleFadeStrength = 50,
+            inputOnTop = false,
+            hideSidebarBg = false,
+            sidebarIconScale = 1.0,
+            sidebarIconSpacing = 10,
+            freeMoveIcons = false,
+            iconPositions = {},
+            sidebarIconOrder = {
+                showCopy = 1,
+                showPortals = 2,
+                showVoice = 3,
+                showSettings = 4,
+            },
         },
     },
 }
@@ -88,7 +102,11 @@ _hiddenParent:Hide()
 
 -- Unified fade system: all alpha changes go through a target + lerp.
 local _visChatVisible = true
-local IDLE_FADE_ALPHA = 0.5
+local function GetIdleFadeAlpha()
+    local cfg = ECHAT.DB()
+    local strength = cfg.idleFadeStrength or 50
+    return 1 - (strength / 100)
+end
 local _idleFadeActive = false
 local FADE_IN_DURATION = 0.35
 local FADE_OUT_DURATION = 1.0
@@ -216,7 +234,7 @@ function ECHAT.ApplySidebarVisibility()
                 _sidebarFadeAlpha = math.max(_sidebarFadeTarget, _sidebarFadeAlpha - step)
             end
             local sb = _G.ChatFrame1 and _G.ChatFrame1._euiSidebar
-            if sb then sb:SetAlpha(_sidebarFadeAlpha) end
+            if sb then sb:SetAlpha(math.min(_sidebarFadeAlpha, _chatAlphaCurrent)) end
             if _sidebarFadeAlpha == _sidebarFadeTarget then self:Hide() end
         end)
     end
@@ -270,8 +288,9 @@ function ECHAT.ApplyBorders()
     end
     local cf1 = _G.ChatFrame1
     if cf1 and cf1._euiSidebar then
+        local sbBgHidden = cfg.hideSidebarBg
         if cf1._euiSidebar._ppBorders then
-            cf1._euiSidebar._ppBorders:SetShown(not hide)
+            cf1._euiSidebar._ppBorders:SetShown(not hide and not sbBgHidden)
         end
         if cf1._euiSidebar._euiDiv then
             cf1._euiSidebar._euiDiv:SetShown(not hide)
@@ -286,43 +305,108 @@ function ECHAT.ApplySidebarIcons()
     local sb = cf1 and cf1._euiSidebar
     if not sb then return end
 
-    local ICON_GAP = 10
+    local ICON_GAP = cfg.sidebarIconSpacing or 10
     local showFriends = cfg.showFriends ~= false
     local showCopy = cfg.showCopy ~= false
+    local showPortals = cfg.showPortals ~= false
     local showVoice = cfg.showVoice ~= false
     local showSettings = cfg.showSettings ~= false
 
-    -- Friends + count
-    if sb._friendsBtn then sb._friendsBtn:SetShown(showFriends) end
+    -- Friends + count (re-anchor with custom spacing)
+    if sb._friendsBtn then
+        sb._friendsBtn:SetShown(showFriends)
+        if showFriends then
+            sb._friendsBtn:ClearAllPoints()
+            sb._friendsBtn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
+        end
+    end
     if sb._friendsCount then sb._friendsCount:SetShown(showFriends) end
 
-    -- Build ordered list of visible top-group buttons (excluding friends which is always first)
+    -- Build ordered list of visible top-group buttons, sorted by check order
+    local iconOrder = cfg.sidebarIconOrder or {}
+    local allMiddle = {
+        { key = "showCopy",     ref = "_copyBtn" },
+        { key = "showPortals",  ref = "_portalBtn" },
+        { key = "showVoice",    ref = "_voiceBtn" },
+        { key = "showSettings", ref = "_settingsBtn" },
+    }
     local topBtns = {}
-    if showCopy and sb._copyBtn then topBtns[#topBtns + 1] = sb._copyBtn end
-    if showVoice and sb._voiceBtn then topBtns[#topBtns + 1] = sb._voiceBtn end
-    if showSettings and sb._settingsBtn then topBtns[#topBtns + 1] = sb._settingsBtn end
+    for _, info in ipairs(allMiddle) do
+        if cfg[info.key] ~= false and sb[info.ref] then
+            local ord = iconOrder[info.key]
+            if type(ord) ~= "number" then ord = 999 end
+            topBtns[#topBtns + 1] = { btn = sb[info.ref], order = ord }
+        end
+    end
+    table.sort(topBtns, function(a, b) return a.order < b.order end)
 
     -- Hide all first
     if sb._copyBtn then sb._copyBtn:Hide() end
+    if sb._portalBtn then sb._portalBtn:Hide() end
     if sb._voiceBtn then sb._voiceBtn:Hide() end
     if sb._settingsBtn then sb._settingsBtn:Hide() end
 
-    -- Re-anchor visible buttons in chain
+    -- Re-anchor visible buttons in chain (sorted by order)
     local anchor = showFriends and sb._friendsCount or nil
-    for _, btn in ipairs(topBtns) do
-        btn:ClearAllPoints()
+    for _, entry in ipairs(topBtns) do
+        entry.btn:ClearAllPoints()
         if anchor then
-            btn:SetPoint("TOP", anchor, "BOTTOM", 0, -ICON_GAP)
+            entry.btn:SetPoint("TOP", anchor, "BOTTOM", 0, -ICON_GAP)
         else
-            btn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
+            entry.btn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
         end
-        btn:Show()
-        anchor = btn
+        entry.btn:Show()
+        anchor = entry.btn
     end
 
     -- Scroll is independent
     if sb._scrollBtn then sb._scrollBtn:SetShown(cfg.showScroll ~= false) end
+
+    -- Re-apply free move offsets after chain layout
+    if ECHAT.ApplyIconFreeMove then ECHAT.ApplyIconFreeMove() end
 end
+
+-- Chat frame position: owned by EUI unlock mode when a saved position exists.
+-- SetPoint hook enforces saved position, blocking Blizzard's Edit Mode.
+local _cfIgnoreSetPoint = false
+local _cfResizing = false
+
+local function ApplyChatPosition()
+    local cfg = ECHAT.DB()
+    if not cfg or not cfg.chatPosition then return end
+    local pos = cfg.chatPosition
+    local cf1 = _G.ChatFrame1
+    if not cf1 then return end
+    local px, py = pos.x, pos.y
+    local PPa = EllesmereUI and EllesmereUI.PP
+    if PPa and px and py then
+        local es = cf1:GetEffectiveScale()
+        local isCenterAnchor = (pos.point == "CENTER")
+            and (pos.relPoint == "CENTER" or pos.relPoint == nil)
+        if isCenterAnchor and PPa.SnapCenterForDim then
+            px = PPa.SnapCenterForDim(px, cf1:GetWidth() or 0, es)
+            py = PPa.SnapCenterForDim(py, cf1:GetHeight() or 0, es)
+        elseif PPa.SnapForES then
+            px = PPa.SnapForES(px, es)
+            py = PPa.SnapForES(py, es)
+        end
+    end
+    _cfIgnoreSetPoint = true
+    cf1:ClearAllPoints()
+    cf1:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
+    _cfIgnoreSetPoint = false
+end
+
+-- Chat frame size: apply saved width/height from DB.
+local function ApplyChatSize()
+    local cfg = ECHAT.DB()
+    if not cfg then return end
+    local cf1 = _G.ChatFrame1
+    if not cf1 then return end
+    if cfg.chatWidth then cf1:SetWidth(cfg.chatWidth) end
+    if cfg.chatHeight then cf1:SetHeight(cfg.chatHeight) end
+end
+ECHAT.ApplyChatSize = ApplyChatSize
 
 -- Flip sidebar to left or right side of chat bg
 function ECHAT.ApplySidebarPosition()
@@ -351,6 +435,7 @@ function ECHAT.ApplySidebarPosition()
             sb._euiDiv:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
         end
     end
+
 end
 
 -- Apply icon color to all sidebar icons
@@ -367,24 +452,469 @@ function ECHAT.ApplyIconColor()
     end
     local ICON_ALPHA = 0.4
     local ICON_HOVER_ALPHA = 0.9
+    local ICON_LABELS = {
+        _friendsBtn = "Friends", _copyBtn = "Copy Chat", _portalBtn = "M+ Portals",
+        _voiceBtn = "Voice/Channels", _settingsBtn = "Settings", _scrollBtn = "Scroll to Bottom",
+    }
     local fc = sb._friendsCount
-    for _, key in ipairs({ "_friendsBtn", "_copyBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
+    for _, key in ipairs({ "_friendsBtn", "_copyBtn", "_portalBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
         local btn = sb[key]
         if btn and btn._icon then
             btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+            local label = ICON_LABELS[key]
             if key == "_friendsBtn" and fc then
                 fc:SetTextColor(r, g, b, 0.5)
-                btn:SetScript("OnEnter", function()
+                btn:SetScript("OnEnter", function(self)
                     btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
                     fc:SetTextColor(r, g, b, 0.9)
+                    if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                        EUI.ShowWidgetTooltip(self, label)
+                    end
                 end)
                 btn:SetScript("OnLeave", function()
                     btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
                     fc:SetTextColor(r, g, b, 0.5)
+                    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
                 end)
             else
-                btn:SetScript("OnEnter", function() btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA) end)
-                btn:SetScript("OnLeave", function() btn._icon:SetVertexColor(r, g, b, ICON_ALPHA) end)
+                btn:SetScript("OnEnter", function(self)
+                    btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
+                    if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                        EUI.ShowWidgetTooltip(self, label)
+                    end
+                end)
+                btn:SetScript("OnLeave", function()
+                    btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+                    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+                end)
+            end
+        end
+    end
+end
+
+-- Hide/show the sidebar background texture
+function ECHAT.ApplySidebarBackground()
+    local cfg = ECHAT.DB()
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb then return end
+    local show = not cfg.hideSidebarBg
+    local sbBg = sb:GetRegions()
+    if sbBg and sbBg.SetShown then
+        sbBg:SetShown(show)
+    end
+    if sb._ppBorders then
+        sb._ppBorders:SetShown(show)
+    end
+end
+
+-- Scale sidebar icon buttons and friends count text
+function ECHAT.ApplySidebarIconScale()
+    local cfg = ECHAT.DB()
+    local scale = cfg.sidebarIconScale or 1.0
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb then return end
+
+    local BASE_FRIEND = 26
+    local BASE_ICON = 22
+    local BASE_FONT = 9
+
+    for _, key in ipairs({ "_copyBtn", "_portalBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
+        local btn = sb[key]
+        if btn then btn:SetSize(BASE_ICON * scale, BASE_ICON * scale) end
+    end
+    if sb._friendsBtn then
+        sb._friendsBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
+    end
+    if sb._friendsCount then
+        sb._friendsCount:SetFont(GetFont(), math.max(7, BASE_FONT * scale), "")
+    end
+end
+
+-- Free move: shift+drag sidebar icons to custom positions
+local _freeMoveIconHooked = {}
+
+local function GetIconOffset(key)
+    local cfg = ECHAT.DB()
+    if not cfg.freeMoveIcons or not cfg.iconPositions then return 0, 0 end
+    local pos = cfg.iconPositions[key]
+    if not pos then return 0, 0 end
+    return pos.x or 0, pos.y or 0
+end
+
+local function SaveIconOffset(key, x, y)
+    local cfg = ECHAT.DB()
+    if not cfg.iconPositions then cfg.iconPositions = {} end
+    cfg.iconPositions[key] = { x = x, y = y }
+end
+
+local function ApplyIconOffset(btn, sb)
+    if not btn or not sb or not btn:IsShown() then return end
+    local key = btn._freeMoveKey
+    if not key then return end
+    local ox, oy = GetIconOffset(key)
+    -- Break the chain for ALL icons: re-anchor directly to sidebar
+    -- using current center position so moving one doesn't drag the rest.
+    local bx, by = btn:GetCenter()
+    local sx, sy = sb:GetCenter()
+    if not bx or not sx then return end
+    btn:ClearAllPoints()
+    btn:SetPoint("CENTER", sb, "CENTER", (bx - sx) + ox, (by - sy) + oy)
+end
+
+local function EnableIconFreeMove(btn)
+    if not btn or _freeMoveIconHooked[btn] then return end
+    _freeMoveIconHooked[btn] = true
+
+    local key = btn._freeMoveKey
+    if not key then return end
+
+    btn:SetMovable(true)
+    btn:SetClampedToScreen(true)
+
+    local origClick = btn:GetScript("OnClick")
+    if origClick then
+        btn:SetScript("OnClick", function(self, ...)
+            if self._freeMoveJustDragged then return end
+            origClick(self, ...)
+        end)
+    end
+
+    local isDragging = false
+    local startX, startY, origOffX, origOffY
+    local origPoint, origRel, origRelPoint, origX, origY
+
+    local function FreeMoveOnUpdate(self)
+        if not IsMouseButtonDown("LeftButton") then
+            isDragging = false
+            self:SetScript("OnUpdate", nil)
+            C_Timer.After(0, function() self._freeMoveJustDragged = nil end)
+            local es = self:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            cx, cy = cx / es, cy / es
+            local dx, dy = cx - startX, cy - startY
+            SaveIconOffset(key, origOffX + dx, origOffY + dy)
+            return
+        end
+        local es = self:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = cx / es, cy / es
+        local dx, dy = cx - startX, cy - startY
+        if origPoint then
+            self:ClearAllPoints()
+            self:SetPoint(origPoint, origRel, origRelPoint, origX + origOffX + dx, origY + origOffY + dy)
+        end
+    end
+
+    btn:HookScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        if not IsShiftKeyDown() then return end
+        local cfg = ECHAT.DB()
+        if not cfg.freeMoveIcons then return end
+        isDragging = true
+        self._freeMoveJustDragged = true
+        local es = self:GetEffectiveScale()
+        startX, startY = GetCursorPosition()
+        startX, startY = startX / es, startY / es
+        origOffX, origOffY = GetIconOffset(key)
+        origPoint, origRel, origRelPoint, origX, origY = self:GetPoint(1)
+        origX = (origX or 0) - origOffX
+        origY = (origY or 0) - origOffY
+        self:SetScript("OnUpdate", FreeMoveOnUpdate)
+    end)
+
+    btn:HookScript("OnMouseUp", function(self, button)
+        if button ~= "LeftButton" or not isDragging then return end
+        isDragging = false
+        self:SetScript("OnUpdate", nil)
+        local es = self:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = cx / es, cy / es
+        local dx, dy = cx - startX, cy - startY
+        SaveIconOffset(key, origOffX + dx, origOffY + dy)
+        C_Timer.After(0, function() self._freeMoveJustDragged = nil end)
+    end)
+end
+
+function ECHAT.ApplyIconFreeMove()
+    local cfg = ECHAT.DB()
+    local cf1 = _G.ChatFrame1
+    local sb = cf1 and cf1._euiSidebar
+    if not sb then return end
+
+    local btns = {
+        { ref = "_friendsBtn", key = "friends" },
+        { ref = "_copyBtn",    key = "copy" },
+        { ref = "_portalBtn",  key = "portals" },
+        { ref = "_voiceBtn",   key = "voice" },
+        { ref = "_settingsBtn", key = "settings" },
+        { ref = "_scrollBtn",  key = "scroll" },
+    }
+
+    for _, info in ipairs(btns) do
+        local btn = sb[info.ref]
+        if btn then
+            btn._freeMoveKey = info.key
+            EnableIconFreeMove(btn)
+            if cfg.freeMoveIcons then
+                ApplyIconOffset(btn, sb)
+            end
+        end
+    end
+end
+
+-- Portal flyout: dungeon portal spell buttons
+local PORTAL_SPELLS = {
+    1254400, 1254572, 1254563, 1254559,
+    159898,  1254555, 1254551, 393273,
+}
+
+local _portalFlyout, _portalBtns
+
+local function RefreshPortalButtons()
+    if not _portalBtns then return end
+    for _, btn in ipairs(_portalBtns) do
+        local spellID = btn.spellID
+        local known = IsPlayerSpell(spellID)
+        if btn._lastKnown ~= known then
+            btn._lastKnown = known
+            btn.icon:SetDesaturated(not known)
+            btn.icon:SetAlpha(known and 1 or 0.4)
+        end
+        if known then
+            local cdInfo = C_Spell.GetSpellCooldown(spellID)
+            if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+                btn.cooldown:SetCooldown(cdInfo.startTime, cdInfo.duration)
+            else
+                btn.cooldown:Clear()
+            end
+        else
+            btn.cooldown:Clear()
+        end
+    end
+end
+
+local function CreatePortalFlyout()
+    if _portalFlyout then return _portalFlyout end
+
+    local BTN_SIZE = 32
+    local SPACING = 1
+    local PADDING = 2
+    local COLS = 4
+    local ROWS = math.ceil(#PORTAL_SPELLS / COLS)
+
+    local flyW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
+    local flyH = PADDING * 2 + BTN_SIZE * ROWS + SPACING * (ROWS - 1)
+
+    local flyout = CreateFrame("Frame", "EUIChatPortalFlyout", UIParent)
+    flyout:SetSize(flyW, flyH)
+    flyout:SetFrameStrata("DIALOG")
+    flyout:SetFrameLevel(100)
+    flyout:Hide()
+
+    local bg = flyout:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(BG_R, BG_G, BG_B, 0.95)
+
+    if PP and PP.CreateBorder then
+        PP.CreateBorder(flyout, 1, 1, 1, 0.06, 1, "OVERLAY", 7)
+    end
+
+    -- Close in combat
+    local guard = CreateFrame("Frame")
+    guard:RegisterEvent("PLAYER_REGEN_DISABLED")
+    guard:SetScript("OnEvent", function()
+        flyout:Hide()
+    end)
+
+    -- Spell buttons
+    _portalBtns = {}
+    for i, spellID in ipairs(PORTAL_SPELLS) do
+        local col = (i - 1) % COLS
+        local row = math.floor((i - 1) / COLS)
+
+        local btn = CreateFrame("Button", "EUIChatPortal" .. i, flyout, "SecureActionButtonTemplate")
+        btn:SetSize(BTN_SIZE, BTN_SIZE)
+        btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
+            PADDING + col * (BTN_SIZE + SPACING),
+            -(PADDING + row * (BTN_SIZE + SPACING)))
+
+        btn.spellID = spellID
+
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexCoord(6/64, 58/64, 6/64, 58/64)
+        local spellInfo = C_Spell.GetSpellInfo(spellID)
+        if spellInfo then icon:SetTexture(spellInfo.iconID) end
+        btn.icon = icon
+
+        -- 1px black border
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 7)
+        end
+
+        local cd = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        cd:SetHideCountdownNumbers(true)
+        cd:SetDrawSwipe(true)
+        cd:SetDrawBling(false)
+        cd:SetDrawEdge(false)
+        btn.cooldown = cd
+
+        -- Hover highlight (HIGHLIGHT layer auto-shows on mouseover)
+        local hover = btn:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.20)
+
+        -- Casting highlight overlay
+        local castHL = btn:CreateTexture(nil, "OVERLAY", nil, 1)
+        castHL:SetAllPoints()
+        castHL:SetColorTexture(1, 1, 1, 0.4)
+        castHL:Hide()
+        btn._castHL = castHL
+
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        btn:SetAttribute("type", "spell")
+        btn:SetAttribute("spell", spellID)
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetSpellByID(self.spellID)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+
+        _portalBtns[i] = btn
+    end
+
+    -- Cooldown + casting highlight refresh while visible
+    flyout:SetScript("OnShow", function(self)
+        self:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        self:RegisterEvent("UNIT_SPELLCAST_START")
+        self:RegisterEvent("UNIT_SPELLCAST_STOP")
+        self:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+        self:RegisterEvent("UNIT_SPELLCAST_FAILED")
+        self:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+        RefreshPortalButtons()
+    end)
+    flyout:SetScript("OnHide", function(self)
+        self:UnregisterAllEvents()
+        for _, btn in ipairs(_portalBtns) do
+            if btn._castHL then btn._castHL:Hide() end
+        end
+    end)
+    flyout:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
+        if event == "SPELL_UPDATE_COOLDOWN" then
+            RefreshPortalButtons()
+        elseif unit == "player" then
+            local casting = (event == "UNIT_SPELLCAST_START") and spellID or nil
+            for _, btn in ipairs(_portalBtns) do
+                if btn._castHL then
+                    btn._castHL:SetShown(casting and casting == btn.spellID)
+                end
+            end
+        end
+    end)
+
+    -- Escape to close
+    tinsert(UISpecialFrames, "EUIChatPortalFlyout")
+
+    _portalFlyout = flyout
+    return flyout
+end
+
+function ECHAT.TogglePortalFlyout(anchorBtn)
+    if InCombatLockdown() then return end
+    local flyout = CreatePortalFlyout()
+    if flyout:IsShown() then
+        flyout:Hide()
+    else
+        -- Compute absolute screen position (protected frame can't anchor to non-secure region)
+        local bs = anchorBtn:GetEffectiveScale()
+        local fs = flyout:GetEffectiveScale()
+        local bTop = anchorBtn:GetTop() * bs
+        local cfg = ECHAT.DB()
+        flyout:ClearAllPoints()
+        if cfg.sidebarRight then
+            local bLeft = anchorBtn:GetLeft() * bs
+            flyout:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", (bLeft - 4) / fs, (bTop + 4) / fs)
+        else
+            local bRight = anchorBtn:GetRight() * bs
+            flyout:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (bRight + 4) / fs, (bTop + 4) / fs)
+        end
+        flyout:Show()
+    end
+end
+
+-- Flip edit box between bottom (default) and top of chat panel
+function ECHAT.ApplyInputPosition()
+    local cfg = ECHAT.DB()
+    local onTop = cfg.inputOnTop
+
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf._euiBg then
+            local name = cf:GetName()
+            if not name then break end
+            local eb = _G[name .. "EditBox"]
+            local bg = cf._euiBg
+            local div = cf._euiInputDiv
+            local fsc = cf.FontStringContainer
+            local track = cf._euiScrollTrack
+
+            if eb then
+                eb:ClearAllPoints()
+                if onTop then
+                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
+                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, 3)
+                else
+                    eb:SetPoint("TOPLEFT", cf, "BOTTOMLEFT", -10, -8)
+                    eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
+                end
+            end
+
+            if div then
+                div:ClearAllPoints()
+                if onTop then
+                    div:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -20)
+                    div:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 10, -20)
+                else
+                    div:SetPoint("BOTTOMLEFT", cf, "BOTTOMLEFT", -10, -8)
+                    div:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -8)
+                end
+            end
+
+            if bg then
+                bg:ClearAllPoints()
+                bg:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
+                if onTop then
+                    bg:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -6)
+                else
+                    bg:SetPoint("BOTTOMRIGHT", eb or cf, "BOTTOMRIGHT", 5, eb and -4 or -6)
+                end
+            end
+
+            if fsc then
+                fsc:ClearAllPoints()
+                if onTop then
+                    fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -22)
+                else
+                    fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -6)
+                end
+                fsc:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 0, 0)
+            end
+
+            if track then
+                track:ClearAllPoints()
+                if onTop then
+                    track:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -22)
+                else
+                    track:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
+                end
+                track:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 5, 2)
             end
         end
     end
@@ -396,7 +926,8 @@ local function _ApplyAlpha(alpha)
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf and cf._euiBg then
-            cf._euiBg:SetAlpha(alpha)
+            -- bg is a child of cf, so it inherits cf's alpha automatically.
+            -- Don't set bg alpha explicitly or it compounds (0.5 * 0.5 = 0.25).
             cf:SetAlpha(alpha)
             local tab = _G["ChatFrame" .. i .. "Tab"]
             if tab then
@@ -412,10 +943,18 @@ local function _ApplyAlpha(alpha)
                 end
             end
             if cf._euiScrollTrack then cf._euiScrollTrack:SetAlpha(alpha) end
+            if cf._euiResizeGrip then cf._euiResizeGrip:SetAlpha(alpha * 0.2) end
         end
     end
     local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiSidebar then cf1._euiSidebar:SetAlpha(alpha) end
+    if cf1 and cf1._euiSidebar then
+        local sbMode = ECHAT.DB().sidebarVisibility or "always"
+        if sbMode == "mouseover" then
+            cf1._euiSidebar:SetAlpha(math.min(alpha, _sidebarFadeAlpha))
+        elseif sbMode ~= "never" then
+            cf1._euiSidebar:SetAlpha(alpha)
+        end
+    end
 end
 
 -- Animate alpha toward target over FADE_DURATION
@@ -444,14 +983,17 @@ _chatFadeFrame:SetScript("OnUpdate", function(self, dt)
 end)
 
 -- Set alpha for the visibility/mouseover system (animated)
+-- This is the top-level authority; idle fade cannot exceed this.
+local _visAlpha = 1
 function ECHAT.SetChatAlpha(alpha)
+    _visAlpha = alpha
     _visChatVisible = (alpha >= 1)
     _SetAlphaTarget(alpha)
 end
 
--- Set alpha for idle fade (animated)
+-- Set alpha for idle fade (animated), clamped to visibility alpha
 function ECHAT.SetIdleFadeAlpha(alpha)
-    _SetAlphaTarget(alpha)
+    _SetAlphaTarget(math.min(alpha, _visAlpha))
 end
 
 -- Refresh visibility based on DB settings (combat, mouseover, always, etc.)
@@ -471,7 +1013,7 @@ function ECHAT.RefreshVisibility()
     end
 
     if alpha == 1 and _idleFadeActive then
-        ECHAT.SetIdleFadeAlpha(IDLE_FADE_ALPHA)
+        ECHAT.SetIdleFadeAlpha(GetIdleFadeAlpha())
     else
         ECHAT.SetChatAlpha(alpha)
     end
@@ -944,7 +1486,8 @@ local function SkinChatFrame(cf)
         local onePxSB = (PP and PP.mult) or 1
         sidebar:SetPoint("TOPRIGHT", cf._euiBg, "TOPLEFT", onePxSB, 0)
         sidebar:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMLEFT", onePxSB, 0)
-        sidebar:SetFrameLevel(cf._euiBg:GetFrameLevel() + 1)
+        sidebar:SetFrameStrata(cf:GetFrameStrata())
+        sidebar:SetFrameLevel(cf:GetFrameLevel() + 1)
 
         local sbBg = sidebar:CreateTexture(nil, "BACKGROUND")
         sbBg:SetAllPoints()
@@ -1022,9 +1565,17 @@ local function SkinChatFrame(cf)
         friendsCount:SetPoint("TOP", friendsBtn, "BOTTOM", 0, 7)
         friendsCount:SetText("0")
 
-        -- Highlight count when hovering friends icon
-        friendsBtn:HookScript("OnEnter", function() friendsCount:SetTextColor(1, 1, 1, 0.9) end)
-        friendsBtn:HookScript("OnLeave", function() friendsCount:SetTextColor(1, 1, 1, 0.5) end)
+        -- Highlight count + tooltip when hovering friends icon
+        friendsBtn:HookScript("OnEnter", function(self)
+            friendsCount:SetTextColor(1, 1, 1, 0.9)
+            if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                EUI.ShowWidgetTooltip(self, "Friends")
+            end
+        end)
+        friendsBtn:HookScript("OnLeave", function()
+            friendsCount:SetTextColor(1, 1, 1, 0.5)
+            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+        end)
 
         local function UpdateFriendsCount()
             local _, numOnline = BNGetNumFriends()
@@ -1053,6 +1604,22 @@ local function SkinChatFrame(cf)
         scrollBtn:ClearAllPoints()
         scrollBtn:SetPoint("BOTTOM", sidebar, "BOTTOM", 0, ICON_SPACING)
 
+        -- Sidebar icon tooltips
+        local function HookIconTooltip(btn, label)
+            btn:HookScript("OnEnter", function(self)
+                if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                    EUI.ShowWidgetTooltip(self, label)
+                end
+            end)
+            btn:HookScript("OnLeave", function()
+                if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            end)
+        end
+        HookIconTooltip(copyBtn, "Copy Chat")
+        HookIconTooltip(voiceBtn, "Voice/Channels")
+        HookIconTooltip(settingsBtn, "Settings")
+        HookIconTooltip(scrollBtn, "Scroll to Bottom")
+
         -- Scroll to bottom
         scrollBtn:SetScript("OnClick", function()
             local cf1 = ChatFrame1
@@ -1079,6 +1646,18 @@ local function SkinChatFrame(cf)
             ToggleFriendsFrame()
         end)
 
+        -- Portals button toggles dungeon portal flyout
+        local portalBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_portal.png")
+        portalBtn:SetSize(22, 22)
+        portalBtn:ClearAllPoints()
+        portalBtn:SetPoint("TOP", friendsCount, "BOTTOM", 0, -ICON_SPACING)
+
+        portalBtn:SetScript("OnClick", function(self)
+            if InCombatLockdown() then return end
+            ECHAT.TogglePortalFlyout(self)
+        end)
+        HookIconTooltip(portalBtn, "M+ Portals")
+
         -- Voice button toggles ChannelFrame
         voiceBtn:SetScript("OnClick", function()
             if InCombatLockdown() then return end
@@ -1093,11 +1672,27 @@ local function SkinChatFrame(cf)
                 mf:Hide()
             else
                 EUI:ShowModule("EllesmereUIChat")
+                -- Scroll sidebar to bottom so Chat (in the reskin group) is visible
+                C_Timer.After(0, function()
+                    local sf = EUI._addonScrollFrame
+                    if sf then
+                        local max = sf:GetVerticalScrollRange() or 0
+                        sf:SetVerticalScroll(max)
+                        -- Poke scroll child to trigger OnScrollRangeChanged (updates thumb)
+                        local sc = sf:GetScrollChild()
+                        if sc then
+                            local h = sc:GetHeight()
+                            sc:SetHeight(h + 0.01)
+                            sc:SetHeight(h)
+                        end
+                    end
+                end)
             end
         end)
 
         sidebar._friendsBtn = friendsBtn
         sidebar._copyBtn = copyBtn
+        sidebar._portalBtn = portalBtn
         sidebar._voiceBtn = voiceBtn
         sidebar._settingsBtn = settingsBtn
         sidebar._scrollBtn = scrollBtn
@@ -1154,13 +1749,8 @@ local function SkinChatFrame(cf)
                 end
                 return
             end
-            -- Idle fade: clamp to idle alpha when faded
+            -- During idle fade, let _ApplyAlpha drive the smooth animation
             if _idleFadeActive then
-                if a > IDLE_FADE_ALPHA then
-                    _ignoreTabAlpha = true
-                    self:SetAlpha(IDLE_FADE_ALPHA)
-                    _ignoreTabAlpha = false
-                end
                 return
             end
             if a > 0 and a < 1 then
@@ -1281,8 +1871,32 @@ local function SkinChatFrame(cf)
             end)
         end
 
-        -- Raise tabs above all chat frames so they aren't occluded
-        tab:SetFrameStrata("HIGH")
+        -- Force minimum tab width: label text width + 40px padding
+        -- Only for permanent tabs (1-10); temporary tabs (11-20) can become
+        -- whisper windows in M+ where SetWidth could propagate taint.
+        local tabIdx = tonumber(name:match("ChatFrame(%d+)"))
+        if tabIdx and tabIdx <= 10 then
+            local _ignoreW = false
+            local function EnforceMinWidth(self)
+                if _ignoreW then return end
+                local lbl = self._euiLabel
+                local minW = 60
+                if lbl and lbl.GetStringWidth then
+                    local sw = lbl:GetStringWidth()
+                    if sw and sw > 0 then minW = sw + 40 end
+                end
+                if self:GetWidth() < minW then
+                    _ignoreW = true
+                    self:SetWidth(minW)
+                    _ignoreW = false
+                end
+            end
+            hooksecurefunc(tab, "SetWidth", function(self) EnforceMinWidth(self) end)
+        end
+
+        -- Match tabs to main text area strata, just +1 level
+        tab:SetFrameStrata(cf:GetFrameStrata())
+        tab:SetFrameLevel(cf:GetFrameLevel() + 1)
 
         -- Persistent SetPoint hook to correct tab anchoring.
         -- ChatFrame1: shift 10px left to align with extended bg.
@@ -1309,14 +1923,26 @@ local function SkinChatFrame(cf)
                     self:SetPoint("LEFT", rel, "RIGHT", 0, -5)
                     _tabIgnoreSetPoint = false
                 elseif point == "BOTTOMLEFT" then
-                    _tabIgnoreSetPoint = true
-                    self:SetPoint(point, rel, relPoint, (x or 0) - 10, y or 0)
-                    _tabIgnoreSetPoint = false
+                    -- Only shift for docked tabs. Undocked tabs anchor to
+                    -- their own chat frame and shouldn't be shifted.
+                    if rel ~= cf then
+                        _tabIgnoreSetPoint = true
+                        self:SetPoint(point, rel, relPoint, (x or 0) - 10, y or 0)
+                        _tabIgnoreSetPoint = false
+                    end
                 end
             end)
             -- Chain after the previous visible tab directly.
+            -- Only for frames that are in the main dock; undocked frames
+            -- have their tabs positioned by Blizzard on their own window.
             local tabIdx = tonumber(name:match("ChatFrame(%d+)"))
-            if tabIdx and tabIdx > 1 then
+            local isInDock = false
+            if GENERAL_CHAT_DOCK and GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES then
+                for _, f in ipairs(GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES) do
+                    if f == cf then isInDock = true; break end
+                end
+            end
+            if tabIdx and tabIdx > 1 and isInDock then
                 for prev = tabIdx - 1, 1, -1 do
                     local prevTab = _G["ChatFrame" .. prev .. "Tab"]
                     if prevTab and prevTab:IsShown() then
@@ -1401,8 +2027,12 @@ local function SkinChatFrame(cf)
                     if not newText or not label then return end
                     label:SetText(isCombatLog and "Combat" or newText)
                 end)
-                -- BISECT: SetWidth hook disabled
-                -- tab:SetWidth(80)
+                -- Enforce minimum width now that the label exists
+                local sw = label:GetStringWidth()
+                if sw and sw > 0 then
+                    local minW = sw + 40
+                    if tab:GetWidth() < minW then tab:SetWidth(minW) end
+                end
             end
         end
 
@@ -1438,11 +2068,108 @@ local function SkinChatFrame(cf)
         btnFrame:SetParent(_hiddenParent)
     end
 
-    -- Reposition resize button to align with our bg
+    -- Reposition Blizzard's resize button to align with our bg.
+    -- ChatFrame1: hidden (we have our own grip). Others: repositioned.
     local resizeBtn = _G[name .. "ResizeButton"]
     if resizeBtn then
-        resizeBtn:ClearAllPoints()
-        resizeBtn:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 7, -30)
+        if name == "ChatFrame1" then
+            resizeBtn:SetParent(_hiddenParent)
+        else
+            resizeBtn:ClearAllPoints()
+            resizeBtn:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 7, -30)
+        end
+    end
+
+    -- Custom resize grip on ChatFrame1's bg (bottom-right corner)
+    if name == "ChatFrame1" and cf._euiBg and not cf._euiResizeGrip then
+        local grip = CreateFrame("Button", nil, UIParent)
+        grip:SetSize(18, 18)
+        grip:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMRIGHT", -2, 2)
+        grip:SetFrameStrata("HIGH")
+        grip:SetFrameLevel(100)
+        local gripTex = grip:CreateTexture(nil, "OVERLAY")
+        gripTex:SetAllPoints()
+        gripTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
+        gripTex:SetDesaturated(true)
+        gripTex:SetVertexColor(1, 1, 1)
+        grip:SetAlpha(0.2)
+        grip:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+        grip:SetScript("OnLeave", function(self)
+            if not self._dragging then self:SetAlpha(0.2) end
+        end)
+
+        local function FinishResize(self)
+            self._dragging = false
+            _cfResizing = false
+            cf._euiResizeTarget = nil
+            self:SetAlpha(0.2)
+            -- Save size and update position to reflect new dimensions
+            local cfg = ECHAT.DB()
+            if cfg then
+                cfg.chatWidth = cf:GetWidth()
+                cfg.chatHeight = cf:GetHeight()
+                -- Update saved position from current TOPLEFT anchor
+                local cfS = cf:GetEffectiveScale()
+                local uiS = UIParent:GetEffectiveScale()
+                local cCX, cCY = cf:GetCenter()
+                local uCX, uCY = UIParent:GetCenter()
+                if cCX and uCX then
+                    cfg.chatPosition = {
+                        point = "CENTER", relPoint = "CENTER",
+                        x = (cCX * cfS - uCX * uiS) / uiS,
+                        y = (cCY * cfS - uCY * uiS) / uiS,
+                    }
+                end
+            end
+            ApplyChatPosition()
+        end
+
+        grip:SetScript("OnMouseDown", function(self, button)
+            if button ~= "LeftButton" then return end
+            if InCombatLockdown() then return end
+            self._startCX, self._startCY = GetCursorPosition()
+            self._startW = cf:GetWidth()
+            self._startH = cf:GetHeight()
+            -- Capture current anchor so we can compensate for center-based resize
+            local pt, _, relPt, px, py = cf:GetPoint(1)
+            self._anchorPt = pt
+            self._anchorRelPt = relPt
+            self._anchorX = px or 0
+            self._anchorY = py or 0
+            self._dragging = true
+            _cfResizing = true
+        end)
+        grip:SetScript("OnMouseUp", function(self)
+            if not self._dragging then return end
+            FinishResize(self)
+        end)
+        grip:SetScript("OnUpdate", function(self)
+            if not self._dragging then return end
+            if not IsMouseButtonDown("LeftButton") then
+                FinishResize(self)
+                return
+            end
+            local es = cf:GetEffectiveScale()
+            local cx, cy = GetCursorPosition()
+            local dx = (cx - self._startCX) / es
+            local dy = (cy - self._startCY) / es
+            local newW = math.max(200, self._startW + dx)
+            local newH = math.max(100, self._startH - dy)
+            -- Compensate position so top-left stays fixed (CENTER anchor
+            -- grows equally in all directions; shift center by half the delta)
+            local dW = newW - self._startW
+            local dH = newH - self._startH
+            local tgtX = self._anchorX + dW / 2
+            local tgtY = self._anchorY - dH / 2
+            -- Store target so the SetPoint hook can enforce it against Blizzard
+            cf._euiResizeTarget = { self._anchorPt, self._anchorRelPt, tgtX, tgtY }
+            _cfIgnoreSetPoint = true
+            cf:SetSize(newW, newH)
+            cf:ClearAllPoints()
+            cf:SetPoint(self._anchorPt, UIParent, self._anchorRelPt, tgtX, tgtY)
+            _cfIgnoreSetPoint = false
+        end)
+        cf._euiResizeGrip = grip
     end
 
     -- Hide scroll buttons + scroll-to-bottom
@@ -1625,6 +2352,7 @@ local function SkinChatFrame(cf)
         track:SetWidth(8)
         track:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
         track:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 5, 2)
+        track:SetClipsChildren(true)
         track:EnableMouse(true)
         track:RegisterForClicks("AnyUp")
 
@@ -1934,6 +2662,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             HookAddMessage()
             UpdateTabColors()
+            ECHAT.ApplyInputPosition()
         end)
     end)
 
@@ -1996,7 +2725,7 @@ initFrame:SetScript("OnEvent", function(self)
         local function StartIdleFade()
             if _idleFadeActive then return end
             _idleFadeActive = true
-            ECHAT.SetIdleFadeAlpha(IDLE_FADE_ALPHA)
+            ECHAT.SetIdleFadeAlpha(GetIdleFadeAlpha())
         end
 
         local function CancelIdleFade()
@@ -2123,6 +2852,153 @@ initFrame:SetScript("OnEvent", function(self)
     ECHAT.ApplySidebarIcons()
     ECHAT.ApplySidebarPosition()
     ECHAT.ApplyIconColor()
+    ECHAT.ApplyInputPosition()
+    ECHAT.ApplySidebarBackground()
+    ECHAT.ApplySidebarIconScale()
+    ECHAT.ApplyIconFreeMove()
+
+    -- Capture Blizzard's initial position and size on first login so they
+    -- always have values. This ensures: (a) the SetPoint hook always
+    -- enforces our position (blocking Edit Mode), (b) unlock mode
+    -- snapshots are never _fromLiveFrame, so revert works correctly,
+    -- and (c) size is preserved across sessions.
+    do
+        local cfg = ECHAT.DB()
+        if cfg and not cfg.chatPosition then
+            local pt, _, relPt, x, y = ChatFrame1:GetPoint(1)
+            if pt then
+                cfg.chatPosition = { point = pt, relPoint = relPt, x = x, y = y }
+            end
+        end
+        if cfg and not cfg.chatWidth then
+            cfg.chatWidth = ChatFrame1:GetWidth()
+        end
+        if cfg and not cfg.chatHeight then
+            cfg.chatHeight = ChatFrame1:GetHeight()
+        end
+    end
+    -- Reparent ChatFrame1 to our own container to break it out of Blizzard's
+    -- Edit Mode hierarchy. This lets us safely call SetSize/SetWidth/SetHeight
+    -- without tainting the frame (same approach as ElvUI).
+    local chatContainer = CreateFrame("Frame", nil, UIParent)
+    chatContainer:SetAllPoints(UIParent)
+    chatContainer:EnableMouse(false)
+    ChatFrame1:SetParent(chatContainer)
+    -- Hide the Edit Mode selection overlay and resize button so Blizzard's
+    -- Edit Mode no longer shows a clickable frame for ChatFrame1.
+    if ChatFrame1.Selection then
+        ChatFrame1.Selection:SetParent(_hiddenParent)
+    end
+    if ChatFrame1.EditModeResizeButton then
+        ChatFrame1.EditModeResizeButton:SetParent(_hiddenParent)
+    end
+    -- Prevent Blizzard from reparenting it back
+    local _ignoreSetParent = false
+    hooksecurefunc(ChatFrame1, "SetParent", function(self, parent)
+        if _ignoreSetParent then return end
+        if parent ~= chatContainer then
+            _ignoreSetParent = true
+            self:SetParent(chatContainer)
+            _ignoreSetParent = false
+        end
+    end)
+    ChatFrame1:SetClampedToScreen(false)
+    -- Defer size application to PLAYER_ENTERING_WORLD: SetSize during
+    -- PLAYER_LOGIN taints even with reparented frames, but after the
+    -- loading screen completes it's safe.
+    do
+        local sizeFrame = CreateFrame("Frame")
+        sizeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        sizeFrame:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            ApplyChatSize()
+        end)
+    end
+    ApplyChatPosition()
+    hooksecurefunc(ChatFrame1, "SetPoint", function(self, pt, rel, relPt, x, y)
+        if _cfIgnoreSetPoint then return end
+        if EllesmereUI._unlockActive then return end
+        -- During resize, override Blizzard's SetPoint back to our
+        -- compensated position (stored on the grip each OnUpdate frame)
+        if _cfResizing then
+            local rp = self._euiResizeTarget
+            if rp then
+                _cfIgnoreSetPoint = true
+                self:ClearAllPoints()
+                self:SetPoint(rp[1], UIParent, rp[2], rp[3], rp[4])
+                _cfIgnoreSetPoint = false
+            end
+            return
+        end
+        local cfg = ECHAT.DB()
+        if not cfg or not cfg.chatPosition then return end
+        local pos = cfg.chatPosition
+        _cfIgnoreSetPoint = true
+        self:ClearAllPoints()
+        self:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+        _cfIgnoreSetPoint = false
+    end)
+
+    -- Register ChatFrame1 with EUI unlock mode (1:1 with minimap pattern)
+    if EUI.RegisterUnlockElements then
+        local MK = EUI.MakeUnlockElement
+        EUI:RegisterUnlockElements({
+            MK({
+                key   = "ECHAT_ChatFrame",
+                label = "Chat",
+                group = "Chat",
+                order = 600,
+                noAnchorTo = true,
+                getFrame = function() return ChatFrame1 end,
+                getSize  = function()
+                    local cf1 = _G.ChatFrame1
+                    if not cf1 then return 400, 200 end
+                    return cf1:GetWidth(), cf1:GetHeight()
+                end,
+                setWidth = function(_, newW)
+                    if InCombatLockdown() then return end
+                    local cf1 = _G.ChatFrame1
+                    if not cf1 then return end
+                    cf1:SetWidth(math.max(200, newW))
+                    local cfg = ECHAT.DB()
+                    if cfg then cfg.chatWidth = cf1:GetWidth() end
+                end,
+                setHeight = function(_, newH)
+                    if InCombatLockdown() then return end
+                    local cf1 = _G.ChatFrame1
+                    if not cf1 then return end
+                    cf1:SetHeight(math.max(100, newH))
+                    local cfg = ECHAT.DB()
+                    if cfg then cfg.chatHeight = cf1:GetHeight() end
+                end,
+                isHidden = function()
+                    local cfg = ECHAT.DB()
+                    return cfg.visibility == "never"
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    local cfg = ECHAT.DB()
+                    if not cfg then return end
+                    cfg.chatPosition = { point = point, relPoint = relPoint, x = x, y = y }
+                    if not EllesmereUI._unlockActive then
+                        ApplyChatPosition()
+                    end
+                end,
+                loadPos = function()
+                    local cfg = ECHAT.DB()
+                    if not cfg then return nil end
+                    return cfg.chatPosition
+                end,
+                clearPos = function()
+                    local cfg = ECHAT.DB()
+                    if not cfg then return end
+                    cfg.chatPosition = nil
+                end,
+                applyPos = function()
+                    ApplyChatPosition()
+                end,
+            }),
+        })
+    end
 
     -- Visibility: register with dispatcher (no mouseover -- idle fade replaces it)
     ECHAT.RefreshVisibility()

@@ -39,18 +39,6 @@ initFrame:SetScript("OnEvent", function(self)
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
-        -- Top instruction label
-        do
-            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-            local infoLabel = parent:CreateFontString(nil, "OVERLAY")
-            infoLabel:SetFont(fontPath, 15, "")
-            infoLabel:SetTextColor(1, 1, 1, 0.75)
-            infoLabel:SetPoint("TOP", parent, "TOP", 0, y - 20)
-            infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Reposition the chat frame using Blizzard Edit Mode")
-            y = y - 40
-        end
-
         -- -- DISPLAY ---------------------------------------------------------
         -- -- DISPLAY -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
@@ -122,6 +110,91 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row 3: Idle Fade Strength | Font
+        do
+            local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
+            _, h = W:DualRow(parent, y,
+                { type="slider", text="Idle Fade Strength",
+                  min = 0, max = 100, step = 1,
+                  getValue=function() return Cfg("idleFadeStrength") or 50 end,
+                  setValue=function(v)
+                      Set("idleFadeStrength", v)
+                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+                  end },
+                { type="dropdown", text="Font",
+                  values=fontValues, order=fontOrder,
+                  getValue=function() return Cfg("font") or "__global" end,
+                  setValue=function(v)
+                      Set("font", v)
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Font changed. A UI reload is needed to apply the new font.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end })
+        end
+        y = y - h
+
+        -- Row 4: Text Size (+ cog: Tab Text Size) | Timestamps
+        do
+            local tsValues = {
+                ["__blizzard"]  = { text = "Use Blizzard Setting" },
+                ["none"]        = { text = "None" },
+                ["%I:%M "]      = { text = "03:27" },
+                ["%I:%M:%S "]   = { text = "03:27:32" },
+                ["%I:%M %p "]   = { text = "03:27 PM" },
+                ["%I:%M:%S %p "] = { text = "03:27:32 PM" },
+                ["%H:%M "]      = { text = "15:27" },
+                ["%H:%M:%S "]   = { text = "15:27:32" },
+            }
+            local tsOrder = {
+                "__blizzard", "none", "---",
+                "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
+                "%H:%M ", "%H:%M:%S ",
+            }
+            local textSizeRow
+            textSizeRow, h = W:DualRow(parent, y,
+                { type="slider", text="Text Size",
+                  min = 8, max = 24, step = 1,
+                  getValue=function() return Cfg("fontSize") or 12 end,
+                  setValue=function(v) Set("fontSize", v); RefreshAll() end },
+                { type="dropdown", text="Timestamps",
+                  values=tsValues, order=tsOrder,
+                  getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
+                  setValue=function(v)
+                      Set("timestampFormat", v)
+                      if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
+                  end })
+            -- Cog for Tab Text Size
+            do
+                local lrgn = textSizeRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Text Settings",
+                    rows = {
+                        { type="slider", label="Tab Text Size",
+                          min = 8, max = 16, step = 1,
+                          get=function() return Cfg("tabFontSize") or 10 end,
+                          set=function(v) Set("tabFontSize", v); RefreshAll() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, lrgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+                lrgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+            end
+        end
+        y = y - h
+
         -- -- SIDEBAR -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "SIDEBAR", y); y = y - h
 
@@ -135,6 +208,7 @@ initFrame:SetScript("OnEvent", function(self)
         local sidebarIconItems = {
             { key = "showFriends",  label = "Friends" },
             { key = "showCopy",     label = "Copy Chat" },
+            { key = "showPortals",  label = "M+ Portals" },
             { key = "showVoice",    label = "Voice/Channels" },
             { key = "showSettings", label = "Settings" },
             { key = "showScroll",   label = "Scroll to Bottom" },
@@ -189,6 +263,17 @@ initFrame:SetScript("OnEvent", function(self)
                 function(k) return Cfg(k) ~= false end,
                 function(k, v)
                     Set(k, v)
+                    local order = Cfg("sidebarIconOrder") or {}
+                    if v then
+                        local maxOrd = 0
+                        for _, ord in pairs(order) do
+                            if type(ord) == "number" and ord > maxOrd then maxOrd = ord end
+                        end
+                        order[k] = maxOrd + 1
+                    else
+                        order[k] = nil
+                    end
+                    Set("sidebarIconOrder", order)
                     if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
                 end)
             PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
@@ -242,7 +327,58 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Sidebar Icons Color",
               swatches = MakeIconColorSwatches() },
-            { type="label", text="" })
+            { type="toggle", text="Hide Sidebar Background",
+              getValue=function() return Cfg("hideSidebarBg") or false end,
+              setValue=function(v)
+                  Set("hideSidebarBg", v)
+                  if ECHAT.ApplySidebarBackground then ECHAT.ApplySidebarBackground() end
+              end })
+        y = y - h
+
+        -- Row 3: Sidebar Icon Size (+ cog: Icon Spacing) | Free Move Icons
+        local sizeRow
+        sizeRow, h = W:DualRow(parent, y,
+            { type="slider", text="Sidebar Icon Size",
+              min = 0.5, max = 2.0, step = 0.05,
+              getValue=function() return Cfg("sidebarIconScale") or 1.0 end,
+              setValue=function(v)
+                  Set("sidebarIconScale", v)
+                  if ECHAT.ApplySidebarIconScale then ECHAT.ApplySidebarIconScale() end
+              end },
+            { type="toggle", text="Free Move Icons",
+              tooltip="When enabled, Shift+Click any sidebar icon to drag it to a custom position.",
+              getValue=function() return Cfg("freeMoveIcons") or false end,
+              setValue=function(v)
+                  Set("freeMoveIcons", v)
+                  if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
+              end })
+        do
+            local lrgn = sizeRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Settings",
+                rows = {
+                    { type="slider", label="Icon Spacing",
+                      min = 0, max = 30, step = 1,
+                      get=function() return Cfg("sidebarIconSpacing") or 10 end,
+                      set=function(v)
+                          Set("sidebarIconSpacing", v)
+                          if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, lrgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+            lrgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
         y = y - h
 
         -- -- EXTRAS ------------------------------------------------------------
@@ -261,7 +397,7 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
-        -- Row 2: Hide Borders | (empty)
+        -- Row 2: Hide Borders | Input on Top
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Borders",
               getValue=function() return Cfg("hideBorders") or false end,
@@ -269,64 +405,12 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("hideBorders", v)
                   if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
               end },
-            { type="label", text="" })
-        y = y - h
-
-        -- -- TEXT --------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "TEXT", y); y = y - h
-
-        -- Row 1: Font | Timestamps
-        do
-            local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
-            local tsValues = {
-                ["__blizzard"]  = { text = "Use Blizzard Setting" },
-                ["none"]        = { text = "None" },
-                ["%I:%M "]      = { text = "03:27" },
-                ["%I:%M:%S "]   = { text = "03:27:32" },
-                ["%I:%M %p "]   = { text = "03:27 PM" },
-                ["%I:%M:%S %p "] = { text = "03:27:32 PM" },
-                ["%H:%M "]      = { text = "15:27" },
-                ["%H:%M:%S "]   = { text = "15:27:32" },
-            }
-            local tsOrder = {
-                "__blizzard", "none", "---",
-                "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
-                "%H:%M ", "%H:%M:%S ",
-            }
-            _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Font",
-                  values=fontValues, order=fontOrder,
-                  getValue=function() return Cfg("font") or "__global" end,
-                  setValue=function(v)
-                      Set("font", v)
-                      EllesmereUI:ShowConfirmPopup({
-                          title       = "Reload Required",
-                          message     = "Font changed. A UI reload is needed to apply the new font.",
-                          confirmText = "Reload Now",
-                          cancelText  = "Later",
-                          onConfirm   = function() ReloadUI() end,
-                      })
-                  end },
-                { type="dropdown", text="Timestamps",
-                  values=tsValues, order=tsOrder,
-                  getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
-                  setValue=function(v)
-                      Set("timestampFormat", v)
-                      if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
-                  end })
-        end
-        y = y - h
-
-        -- Row 2: Text Size | Tab Text Size
-        _, h = W:DualRow(parent, y,
-            { type="slider", text="Text Size",
-              min = 8, max = 24, step = 1,
-              getValue=function() return Cfg("fontSize") or 12 end,
-              setValue=function(v) Set("fontSize", v); RefreshAll() end },
-            { type="slider", text="Tab Text Size",
-              min = 8, max = 16, step = 1,
-              getValue=function() return Cfg("tabFontSize") or 10 end,
-              setValue=function(v) Set("tabFontSize", v); RefreshAll() end })
+            { type="toggle", text="Input on Top",
+              getValue=function() return Cfg("inputOnTop") or false end,
+              setValue=function(v)
+                  Set("inputOnTop", v)
+                  if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
+              end })
         y = y - h
 
         return math.abs(y)

@@ -254,6 +254,23 @@ local function RepointAllDBs(profileName)
     local profileData = EllesmereUIDB.profiles[profileName]
     if not profileData.addons then profileData.addons = {} end
 
+    -- Sync: copy synced module data from outgoing profile to incoming.
+    -- activeProfile is already set to the new name by callers, so read
+    -- the outgoing profile from the db registry (not yet re-pointed).
+    local sm = EllesmereUIDB.syncedModules
+    if sm then
+        local reg = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry
+        local outName = reg and reg[1] and reg[1]._profileName or "Default"
+        local outProf = EllesmereUIDB.profiles[outName]
+        if outProf and outProf.addons and outName ~= profileName then
+            for folder, synced in pairs(sm) do
+                if synced and outProf.addons[folder] then
+                    profileData.addons[folder] = DeepCopy(outProf.addons[folder])
+                end
+            end
+        end
+    end
+
     local registry = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry
     if not registry then return end
     for _, db in ipairs(registry) do

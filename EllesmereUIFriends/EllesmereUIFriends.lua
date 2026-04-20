@@ -1941,6 +1941,7 @@ local function SkinFriendsFrame()
         end
         -- Title, divider, search always visible; orb hidden on raid
         if frame._ebsStatusOrb then frame._ebsStatusOrb:SetShown(selected ~= 3) end
+        if frame._ebsBroadcastBtn then frame._ebsBroadcastBtn:SetShown(selected ~= 3) end
         if frame._ebsTitleBtn then frame._ebsTitleBtn:Show() end
         if frame._ebsTitleDiv then frame._ebsTitleDiv:Show() end
         -- Disable/enable search bar
@@ -2429,6 +2430,7 @@ local function SkinFriendsFrame()
             UpdatePlayerOrb()
 
             orbBtn:SetScript("OnClick", function()
+                if InCombatLockdown() then return end
                 local status = GetPlayerStatusName()
                 if status == (FRIENDS_LIST_ONLINE or "Online") then
                     -- Online -> Away
@@ -2470,7 +2472,7 @@ local function SkinFriendsFrame()
 
             frame._ebsStatusOrb = orbBtn
 
-            -- Status message button (to the left of status orb)
+            -- Status/broadcast message button (to the left of status orb)
             local msgBtn = CreateFrame("Button", nil, frame)
             msgBtn:SetSize(20, 20)
             msgBtn:SetFrameLevel(orbBtn:GetFrameLevel())
@@ -2499,6 +2501,7 @@ local function SkinFriendsFrame()
                     bf:Show()
                 end
             end)
+            frame._ebsBroadcastBtn = msgBtn
         end
 
         -- Initial state: default first tab to active, then verify

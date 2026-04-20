@@ -852,6 +852,20 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 4: Hide Unlock Mode Menu Button | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Unlock Mode Menu Button",
+              tooltip="Hides the Unlock Mode button from the game's Escape/pause menu. You can still toggle Unlock Mode from the EUI options panel.",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.hideUnlockMenuButton ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.hideUnlockMenuButton = v
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 

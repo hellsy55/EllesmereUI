@@ -850,12 +850,21 @@ qolFrame:SetScript("OnEvent", function(self)
             if not mgr then return end
 
             if shouldHide then
-                mgr:Hide()
+                if not InCombatLockdown() then mgr:Hide() end
                 if not hookedMgr then
                     hookedMgr = true
                     mgr:HookScript("OnShow", function(self)
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
+                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
+                            and not InCombatLockdown() then
                             self:Hide()
+                        end
+                    end)
+                    local regenFrame = CreateFrame("Frame")
+                    regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                    regenFrame:SetScript("OnEvent", function()
+                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
+                            and mgr:IsShown() then
+                            mgr:Hide()
                         end
                     end)
                 end

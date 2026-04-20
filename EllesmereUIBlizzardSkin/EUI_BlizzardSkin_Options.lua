@@ -115,8 +115,6 @@ initFrame:SetScript("OnEvent", function(self)
 
         parent._showRowDivider = true
 
-        _, h = W:Spacer(parent, y, 20);  y = y - h
-
         local function themedOff()
             return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
         end
