@@ -885,6 +885,36 @@ qolFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
+    --  Hide Talking Head Frame
+    --  The big NPC dialogue rectangle that pops up during quests/dungeons.
+    ---------------------------------------------------------------------------
+    do
+        local function HookTalkingHead()
+            local thf = _G.TalkingHeadFrame
+            if not thf or thf._euiHooked then return end
+            thf._euiHooked = true
+            hooksecurefunc(thf, "PlayCurrent", function(self)
+                if EllesmereUIDB and EllesmereUIDB.hideTalkingHead then
+                    self:Hide()
+                end
+            end)
+        end
+        -- TalkingHeadFrame is load-on-demand; hook when it becomes available
+        if _G.TalkingHeadFrame then
+            HookTalkingHead()
+        else
+            local hookFrame = CreateFrame("Frame")
+            hookFrame:RegisterEvent("ADDON_LOADED")
+            hookFrame:SetScript("OnEvent", function(self, _, addon)
+                if _G.TalkingHeadFrame then
+                    HookTalkingHead()
+                    self:UnregisterAllEvents()
+                end
+            end)
+        end
+    end
+
+    ---------------------------------------------------------------------------
     --  Instance Reset Announce
     --  After a successful /reset, posts a message to instance chat so the
     --  whole group knows the instance is ready to re-enter.

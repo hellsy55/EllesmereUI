@@ -225,7 +225,15 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.ahCurrentExpansion = v
               end },
-            { type="label", text="" }
+            { type="toggle", text="Hide Talking Head",
+              tooltip="Hides the large NPC dialogue popup that appears during quests and dungeons.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.hideTalkingHead or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.hideTalkingHead = v
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h

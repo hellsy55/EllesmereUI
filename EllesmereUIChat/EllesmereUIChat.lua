@@ -255,16 +255,19 @@ function ECHAT.ApplyHideCombatLogTab()
                 name = ChatFrame2.name or (GetChatWindowInfo and select(1, GetChatWindowInfo(2))) or "Combat Log",
                 scale = tab:GetScale(),
                 mouseEnabled = tab:IsMouseEnabled(),
+                shown = tab:IsShown(),
             }
         end
         tab:EnableMouse(false)
         tab:SetText(" ")
         tab:SetScale(0.01)
+        tab:Hide()
     else
         -- Restore
         if _combatLogTabState then
             tab:SetScale(_combatLogTabState.scale or 1)
             tab:EnableMouse(_combatLogTabState.mouseEnabled ~= false)
+            if _combatLogTabState.shown ~= false then tab:Show() end
             local restoreName = _combatLogTabState.name or "Combat Log"
             tab:SetText(restoreName)
             _combatLogTabState = nil
@@ -1875,6 +1878,7 @@ local function SkinChatFrame(cf)
         -- Match tabs to main text area strata, just +1 level
         tab:SetFrameStrata(cf:GetFrameStrata())
         tab:SetFrameLevel(cf:GetFrameLevel() + 1)
+        tab:SetClipsChildren(true)
 
         -- Persistent SetPoint hook to correct tab anchoring.
         -- ChatFrame1: shift 10px left to align with extended bg.
