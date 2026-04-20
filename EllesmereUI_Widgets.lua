@@ -1424,6 +1424,22 @@ ShowWidgetTooltip = function(label, text, opts)
     tt:SetHeight(10)
     local textH = tt.text:GetStringHeight()
     tt:SetHeight(textH + 16)
+    -- Clamp to screen edges so tooltips don't go off-screen
+    local ttScale = tt:GetEffectiveScale()
+    local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
+    local ttLeft = (tt:GetLeft() or 0) * ttScale
+    local ttRight = (tt:GetRight() or 0) * ttScale
+    if ttLeft < 0 then
+        local pt, rel, relPt, px, py = tt:GetPoint(1)
+        if pt then
+            tt:SetPoint(pt, rel, relPt, (px or 0) - ttLeft / ttScale, py or 0)
+        end
+    elseif ttRight > screenW then
+        local pt, rel, relPt, px, py = tt:GetPoint(1)
+        if pt then
+            tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+        end
+    end
     -- Cancel any in-progress fade-out so its OnFinished doesn't hide us
     if tt._fadeOutAG then tt._fadeOutAG:Stop() end
     if tt._fadeAG then tt._fadeAG:Stop() end

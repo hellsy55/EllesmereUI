@@ -7291,7 +7291,7 @@ local function CreateHUD(parent)
         local _, cy = GetCursorPosition()
         cy = cy / scale
         local screenH = UIParent:GetHeight()
-        local zoneBot = screenH - (HOVER_ZONE_H * (hudFrame:GetScale() or uiScale)) - 10
+        local zoneBot = screenH - (HOVER_ZONE_H * (hudFrame:GetScale() or uiScale))
         local inZone = (cy >= zoneBot)
 
         if inZone then

@@ -110,10 +110,11 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 3: Idle Fade Strength | Font
+        -- Row 3: Idle Fade Strength | Font (+ cog: Outline Mode)
         do
             local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
-            _, h = W:DualRow(parent, y,
+            local fontRow
+            fontRow, h = W:DualRow(parent, y,
                 { type="slider", text="Idle Fade Strength",
                   min = 0, max = 100, step = 1,
                   getValue=function() return Cfg("idleFadeStrength") or 50 end,
@@ -134,6 +135,47 @@ initFrame:SetScript("OnEvent", function(self)
                           onConfirm   = function() ReloadUI() end,
                       })
                   end })
+            -- Cog for Outline Mode
+            do
+                local rrgn = fontRow._rightRegion
+                local outlineValues = {
+                    ["__global"] = { text = "EUI Global Default" },
+                    ["none"]     = { text = "Drop Shadow" },
+                    ["outline"]  = { text = "Outline" },
+                    ["thick"]    = { text = "Thick Outline" },
+                }
+                local outlineOrder = { "__global", "none", "outline", "thick" }
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Font Settings",
+                    rows = {
+                        { type="dropdown", label="Outline Mode",
+                          values=outlineValues, order=outlineOrder,
+                          get=function() return Cfg("outlineMode") or "__global" end,
+                          set=function(v)
+                              Set("outlineMode", v)
+                              EllesmereUI:ShowConfirmPopup({
+                                  title       = "Reload Required",
+                                  message     = "Outline mode changed. A UI reload is needed to apply.",
+                                  confirmText = "Reload Now",
+                                  cancelText  = "Later",
+                                  onConfirm   = function() ReloadUI() end,
+                              })
+                          end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rrgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rrgn._lastInline or rrgn._control, "LEFT", -8, 0)
+                rrgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rrgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+            end
         end
         y = y - h
 
@@ -411,6 +453,18 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("inputOnTop", v)
                   if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
               end })
+        y = y - h
+
+        -- Row 3: Lock Main Chat Size | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Lock Main Chat Size",
+              tooltip="Hides the resize handle on the main chat frame, preventing accidental resizing.",
+              getValue=function() return Cfg("lockChatSize") or false end,
+              setValue=function(v)
+                  Set("lockChatSize", v)
+                  if ECHAT.ApplyLockChatSize then ECHAT.ApplyLockChatSize() end
+              end },
+            { type="label", text="" })
         y = y - h
 
         return math.abs(y)
