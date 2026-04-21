@@ -635,6 +635,33 @@ initFrame:SetScript("OnEvent", function(self)
     end
     local function EDR_Redraw() if ns.edrRedraw then ns.edrRedraw() end end
 
+    -------------------------------------------------------------------
+    --  Bar texture dropdown tables (shared media path, same as ERB)
+    -------------------------------------------------------------------
+    local EDR_BAR_TEXTURES = ns.EDR_BAR_TEXTURES
+    local EDR_BAR_TEXTURE_ORDER = {
+        "none", "melli", "atrocity",
+        "beautiful", "plating",
+        "divide", "glass",
+        "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
+        "matte", "sheer",
+    }
+    local EDR_BAR_TEXTURE_NAMES = {
+        ["none"]        = "None",
+        ["melli"]       = "Melli (ElvUI)",
+        ["beautiful"]   = "Beautiful",
+        ["plating"]     = "Plating",
+        ["atrocity"]    = "Atrocity",
+        ["divide"]      = "Divide",
+        ["glass"]       = "Glass",
+        ["gradient-lr"] = "Gradient Right",
+        ["gradient-rl"] = "Gradient Left",
+        ["gradient-bt"] = "Gradient Up",
+        ["gradient-tb"] = "Gradient Down",
+        ["matte"]       = "Matte",
+        ["sheer"]       = "Sheer",
+    }
+
     local function BuildDragonRidingPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -642,6 +669,28 @@ initFrame:SetScript("OnEvent", function(self)
 
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
+
+        -- Append SharedMedia textures (safe to call multiple times)
+        if EllesmereUI.AppendSharedMediaTextures then
+            EllesmereUI.AppendSharedMediaTextures(
+                EDR_BAR_TEXTURE_NAMES,
+                EDR_BAR_TEXTURE_ORDER,
+                nil,
+                EDR_BAR_TEXTURES
+            )
+        end
+        local edrTexValues = {}
+        local edrTexOrder  = {}
+        for _, key in ipairs(EDR_BAR_TEXTURE_ORDER) do
+            if key ~= "---" then
+                edrTexValues[key] = EDR_BAR_TEXTURE_NAMES[key] or key
+                edrTexOrder[#edrTexOrder + 1] = key
+            end
+        end
+        edrTexValues._menuOpts = {
+            itemHeight = 28,
+            background = function(key) return EDR_BAR_TEXTURES[key] end,
+        }
 
         local justifyValues = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
         local justifyOrder  = { "LEFT", "CENTER", "RIGHT" }
@@ -676,7 +725,10 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Border Size", min = 0, max = 4, step = 1,
               getValue = function() return EDR_Cfg("borderThickness") or 0 end,
               setValue = function(v) EDR_Set("borderThickness", v); EDR_Redraw() end },
-            { text = "" }
+            { type = "dropdown", text = "Bar Texture",
+              values = edrTexValues, order = edrTexOrder,
+              getValue = function() return EDR_Cfg("barTexture") or "none" end,
+              setValue = function(v) EDR_Set("barTexture", v); EDR_Redraw() end }
         ); y = y - h
         do
             local rgn = borderRow._leftRegion

@@ -14,6 +14,24 @@ local CreateFrame = CreateFrame
 local UnitAffectingCombat = UnitAffectingCombat
 local GetTime = GetTime
 
+-- Bar texture table (shared with options via ns)
+local EDR_TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
+ns.EDR_BAR_TEXTURES = {
+    ["none"]          = nil,
+    ["melli"]         = EDR_TEX_BASE .. "melli.tga",
+    ["beautiful"]     = EDR_TEX_BASE .. "beautiful.tga",
+    ["plating"]       = EDR_TEX_BASE .. "plating.tga",
+    ["atrocity"]      = EDR_TEX_BASE .. "atrocity.tga",
+    ["divide"]        = EDR_TEX_BASE .. "divide.tga",
+    ["glass"]         = EDR_TEX_BASE .. "glass.tga",
+    ["gradient-lr"]   = EDR_TEX_BASE .. "gradient-lr.tga",
+    ["gradient-rl"]   = EDR_TEX_BASE .. "gradient-rl.tga",
+    ["gradient-bt"]   = EDR_TEX_BASE .. "gradient-bt.tga",
+    ["gradient-tb"]   = EDR_TEX_BASE .. "gradient-tb.tga",
+    ["matte"]         = EDR_TEX_BASE .. "matte.tga",
+    ["sheer"]         = EDR_TEX_BASE .. "sheer.tga",
+}
+
 -- Constants
 local SPELL = {
     SKYWARD_ASCENT  = 372610,
@@ -143,7 +161,7 @@ end
 --  Visibility
 -------------------------------------------------------------------------------
 local function IsOnSkyridingMount()
-    if not IsMounted() then return false end
+    if not EllesmereUI.IsPlayerMountedLike() then return false end
     local _, canGlide = C_PlayerInfo.GetGlidingInfo()
     return canGlide == true
 end
@@ -466,6 +484,17 @@ end
 function Redraw()
     if not rootFrame then return end
     local p = db.profile
+
+    -- Apply bar texture to all StatusBars
+    local texPath = EllesmereUI.ResolveTexturePath(ns.EDR_BAR_TEXTURES, p.barTexture or "none",
+        "Interface\\Buttons\\WHITE8x8")
+    speedBar:SetStatusBarTexture(texPath)
+    for i = 1, SKYRIDING_PIPS do
+        stackFrame.pips[i]:SetStatusBarTexture(texPath)
+    end
+    for i = 1, SECONDWIND_PIPS do
+        swFrame.pips[i]:SetStatusBarTexture(texPath)
+    end
 
     local c = p.normalColor
     speedBar:SetStatusBarColor(c.r, c.g, c.b, c.a)

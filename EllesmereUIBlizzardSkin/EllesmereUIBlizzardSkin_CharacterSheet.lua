@@ -3,6 +3,7 @@
 --------------------------------------------------------------------------------
 local ADDON_NAME = ...
 local skinned = false
+local issecretvalue = issecretvalue or function() return false end
 local activeEquipmentSetID = nil
 
 -- "gear" = the 16 slots with ilvl/enchants/sockets.
@@ -624,7 +625,7 @@ local function SkinCharacterSheet()
 
     -- Weapons live in the bottom strip, outside the 2-column grid.
     _G.CharacterMainHandSlot:ClearAllPoints()
-    _G.CharacterMainHandSlot:SetPoint("BOTTOMLEFT", CharacterFrame, "BOTTOMLEFT", 145, 10)
+    _G.CharacterMainHandSlot:SetPoint("BOTTOMLEFT", CharacterFrame, "BOTTOMLEFT", 128, 10)
     _G.CharacterSecondaryHandSlot:ClearAllPoints()
     _G.CharacterSecondaryHandSlot:SetPoint("TOPLEFT", _G.CharacterMainHandSlot, "TOPRIGHT", 12, 0)
 
@@ -2104,6 +2105,7 @@ local function SkinCharacterSheet()
 
                 valueButton:SetScript("OnEnter", function()
                     local statValue = stat.func()
+                    if issecretvalue(statValue) then return end
                     GameTooltip:SetOwner(valueButton, "ANCHOR_RIGHT")
 
                     -- Format value according to stat's format string
@@ -2375,18 +2377,19 @@ local function SkinCharacterSheet()
             if useBoth then
                 local rawResult = statEntry.rawFunc()
                 local pctResult = statEntry.func and statEntry.func()
-                if rawResult ~= nil and pctResult ~= nil then
+                if rawResult ~= nil and pctResult ~= nil
+                   and not issecretvalue(rawResult) and not issecretvalue(pctResult) then
                     statEntry.value:SetText(format("%d (%.2f%%)", rawResult, pctResult))
-                else
+                elseif rawResult == nil and pctResult == nil then
                     statEntry.value:SetText("0")
                 end
             else
                 local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
                 local fmt = useRaw and "%d" or statEntry.format
                 local result = fn and fn()
-                if result ~= nil then
+                if result ~= nil and not issecretvalue(result) then
                     statEntry.value:SetText(format(fmt, result))
-                else
+                elseif result == nil then
                     statEntry.value:SetText("0")
                 end
             end

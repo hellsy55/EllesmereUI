@@ -687,15 +687,11 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Center weapon slots at bottom. Use a container approach: anchor
-    -- MainHand so the midpoint of the pair lands on the frame center.
-    -- The pair is MainHand + 12px gap + SecondaryHand. Shift MainHand
-    -- left by half the group width so the center of the pair = frame center.
+    -- Position weapon slots at bottom (matches CharacterSheet pattern --
+    -- hardcoded offset, no GetWidth which can return a secret value).
     if InspectMainHandSlot and InspectSecondaryHandSlot then
-        local slotW = InspectMainHandSlot:GetWidth() or 45
-        local halfGroup = (slotW * 2 + 12) / 2
         InspectMainHandSlot:ClearAllPoints()
-        InspectMainHandSlot:SetPoint("BOTTOM", frame, "BOTTOM", -halfGroup + slotW / 2, 10)
+        InspectMainHandSlot:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 128, 10)
         InspectSecondaryHandSlot:ClearAllPoints()
         InspectSecondaryHandSlot:SetPoint("TOPLEFT", InspectMainHandSlot, "TOPRIGHT", 12, 0)
     end
@@ -981,67 +977,7 @@ if EllesmereUI then
         self:UnregisterEvent("PLAYER_LOGIN")
 
         if InspectFrame then
-            -- Drag-to-move: shift = save to DB, ctrl = session-only
-            InspectFrame:SetMovable(true)
-            InspectFrame:SetClampedToScreen(true)
-
-            local _ebsDragging       = false
-            local _ebsTempPos        = nil
-            local _ebsIgnoreSetPoint = false
-
-            local function SaveInspectFramePos()
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                local point, _, relPoint, x, y = InspectFrame:GetPoint(1)
-                if point then
-                    EllesmereUIDB.inspectFramePos = {
-                        point = point, relPoint = relPoint, x = x, y = y,
-                    }
-                end
-            end
-
-            local _otherPanelActive
-            local function ApplyInspectFramePos()
-                if InCombatLockdown() then return end
-                if _otherPanelActive and _otherPanelActive() then return end
-                local pos = _ebsTempPos
-                    or (EllesmereUIDB and EllesmereUIDB.inspectFramePos)
-                if not (pos and pos.point) then return end
-
-                -- Prevent UIParentPanelManager from interfering
-                if InspectFrame:GetAttribute("UIPanelLayout-area") then
-                    InspectFrame:SetAttribute("UIPanelLayout-area", nil)
-                end
-
-                _ebsIgnoreSetPoint = true
-                InspectFrame:ClearAllPoints()
-                InspectFrame:SetPoint(
-                    pos.point, UIParent, pos.relPoint, pos.x, pos.y)
-                _ebsIgnoreSetPoint = false
-            end
-
-            InspectFrame:HookScript("OnMouseDown", function(self, button)
-                if button ~= "LeftButton" then return end
-                if not IsShiftKeyDown() and not IsControlKeyDown() then return end
-                _ebsDragging = IsShiftKeyDown() and "save" or "temp"
-                self:StartMoving()
-            end)
-
-            InspectFrame:HookScript("OnMouseUp", function(self, button)
-                if button ~= "LeftButton" or not _ebsDragging then return end
-                self:StopMovingOrSizing()
-                local point, _, relPoint, x, y = self:GetPoint(1)
-                if _ebsDragging == "save" then
-                    SaveInspectFramePos()
-                elseif _ebsDragging == "temp" then
-                    _ebsTempPos = { point = point, relPoint = relPoint, x = x, y = y }
-                end
-                _ebsDragging = false
-            end)
-
             InspectFrame:HookScript("OnShow", function()
-                _ebsTempPos = _ebsTempPos
-                ApplyInspectFramePos()
-                C_Timer.After(0, ApplyInspectFramePos)
                 skinned = false
                 ApplyThemedInspectSheet()
                 -- Apply visibility settings when frame opens
@@ -1059,29 +995,8 @@ if EllesmereUI then
             end)
 
             InspectFrame:HookScript("OnHide", function()
-                _ebsTempPos = nil
                 skinned = false
             end)
-
-            -- Re-apply on SetPoint
-            _otherPanelActive = function()
-                local slots = { "doublewide", "fullscreen", "left", "center", "right" }
-                for _, slot in ipairs(slots) do
-                    local f = GetUIPanel and GetUIPanel(slot)
-                    if f and f ~= InspectFrame then return true end
-                end
-                return false
-            end
-
-            hooksecurefunc(InspectFrame, "SetPoint", function()
-                if _ebsIgnoreSetPoint then return end
-                if InCombatLockdown() then return end
-                if _otherPanelActive() then return end
-                ApplyInspectFramePos()
-            end)
-
-            -- Apply initial position
-            ApplyInspectFramePos()
 
             -- Event listener to keep NineSlice hidden even when Blizzard events fire
             local nineSliceHiddenFrame = CreateFrame("Frame")

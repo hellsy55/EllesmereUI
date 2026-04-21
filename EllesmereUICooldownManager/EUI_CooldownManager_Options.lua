@@ -2875,13 +2875,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.height = v
-                  if _tbbPvFrame then
-                      _tbbPvFrame:SetHeight(v)
-                      local capH = math.min(v, 200)
-                      if _tbbPvFrame._wrapper then _tbbPvFrame._wrapper:SetHeight(capH) end
-                      EllesmereUI:UpdateContentHeaderHeight(20 + 34 + 15 + capH + 15)
-                  end
                   ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
               min = 50, max = 500, step = 1,
@@ -2890,8 +2885,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.width = v
-                  if _tbbPvFrame then _tbbPvFrame:SetWidth(v) end
                   ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
               end }
         );  y = y - h
 
