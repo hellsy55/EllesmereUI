@@ -1003,8 +1003,12 @@ local function _ApplyAlpha(alpha)
             if eb then
                 if cf.isTemporary then
                     eb:SetAlpha(alpha)
-                elseif not eb:HasFocus() then
-                    eb:SetAlpha(alpha)
+                else
+                    local hasFocus = eb:HasFocus()
+                    if issecretvalue and issecretvalue(hasFocus) then hasFocus = false end
+                    if not hasFocus then
+                        eb:SetAlpha(alpha)
+                    end
                 end
             end
             if cf._euiScrollTrack then cf._euiScrollTrack:SetAlpha(alpha) end
