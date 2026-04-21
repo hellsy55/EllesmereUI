@@ -83,7 +83,7 @@ initFrame:SetScript("OnEvent", function(self)
         bgRow, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity",
               min = 0, max = 1, step = 0.05,
-              getValue=function() return Cfg("bgAlpha") or 0.70 end,
+              getValue=function() return Cfg("bgAlpha") or 0.65 end,
               setValue=function(v) Set("bgAlpha", v); RefreshAll() end },
             { type="slider", text="Idle Fade Delay",
               min = 5, max = 30, step = 1,
@@ -117,7 +117,7 @@ initFrame:SetScript("OnEvent", function(self)
             fontRow, h = W:DualRow(parent, y,
                 { type="slider", text="Idle Fade Strength",
                   min = 0, max = 100, step = 1,
-                  getValue=function() return Cfg("idleFadeStrength") or 50 end,
+                  getValue=function() return Cfg("idleFadeStrength") or 40 end,
                   setValue=function(v)
                       Set("idleFadeStrength", v)
                       if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end

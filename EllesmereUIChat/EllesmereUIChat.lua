@@ -25,7 +25,7 @@ local CHAT_DEFAULTS = {
         chat = {
             enabled    = true,
             visibility = "always",
-            bgAlpha    = 0.70,
+            bgAlpha    = 0.65,
             bgR        = 0.03,
             bgG        = 0.045,
             bgB        = 0.05,
@@ -50,7 +50,7 @@ local CHAT_DEFAULTS = {
             iconB = 1,
             iconUseAccent = false,
             idleFadeDelay = 15,
-            idleFadeStrength = 50,
+            idleFadeStrength = 40,
             inputOnTop = false,
             lockChatSize = false,
             hideSidebarBg = false,
@@ -118,12 +118,13 @@ _hiddenParent:Hide()
 local _visChatVisible = true
 local function GetIdleFadeAlpha()
     local cfg = ECHAT.DB()
-    local strength = cfg.idleFadeStrength or 50
+    local strength = cfg.idleFadeStrength or 40
     return 1 - (strength / 100)
 end
 local _idleFadeActive = false
 local FADE_IN_DURATION = 0.35
 local FADE_OUT_DURATION = 1.0
+local IDLE_FADE_OUT_DURATION = 2.0
 local _chatAlphaTarget = 1
 local _chatAlphaCurrent = 1
 local _chatFadeFrame = CreateFrame("Frame")
@@ -174,7 +175,7 @@ function ECHAT.ApplyBackground()
     BG_R = p.bgR or 0.03
     BG_G = p.bgG or 0.045
     BG_B = p.bgB or 0.05
-    BG_A = p.bgAlpha or 0.70
+    BG_A = p.bgAlpha or 0.65
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
@@ -1029,7 +1030,8 @@ _chatFadeFrame:SetScript("OnUpdate", function(self, dt)
         return
     end
     local fadingIn = _chatAlphaTarget > _chatAlphaCurrent
-    local duration = fadingIn and FADE_IN_DURATION or FADE_OUT_DURATION
+    local duration = fadingIn and FADE_IN_DURATION
+        or (_idleFadeActive and IDLE_FADE_OUT_DURATION or FADE_OUT_DURATION)
     local speed = dt / duration
     if fadingIn then
         _chatAlphaCurrent = math.min(_chatAlphaTarget, _chatAlphaCurrent + speed)
@@ -1772,7 +1774,30 @@ local function SkinChatFrame(cf)
     -- Disable Blizzard's message text auto-fade (our idle fade handles it)
     cf:SetFading(false)
 
+    -- Prevent tabs from auto-fading (Blizzard's idle fade), but respect
+    -- our visibility system which may legitimately set alpha to 0.
     local tab = _G[name .. "Tab"]
+    if tab then
+        tab:SetAlpha(1)
+        local _ignoreTabAlpha = false
+        hooksecurefunc(tab, "SetAlpha", function(self, a)
+            if _ignoreTabAlpha then return end
+            if not _visChatVisible then
+                if a > 0 then
+                    _ignoreTabAlpha = true
+                    self:SetAlpha(0)
+                    _ignoreTabAlpha = false
+                end
+                return
+            end
+            if _idleFadeActive then return end
+            if a > 0 and a < 1 then
+                _ignoreTabAlpha = true
+                self:SetAlpha(1)
+                _ignoreTabAlpha = false
+            end
+        end)
+    end
 
     -- Edit box reskin
     local eb = _G[name .. "EditBox"]
@@ -2388,21 +2413,7 @@ local function SkinChatFrame(cf)
         end
 
         cf._euiBg:EnableMouse(false)
-        -- Enable mouse motion for event-driven hover detection (OnEnter/
-        -- OnLeave) without intercepting clicks. Replaces cursor polling.
-        if cf._euiBg.EnableMouseMotion then
-            cf._euiBg:EnableMouseMotion(true)
-        end
-        cf._euiBg:HookScript("OnEnter", function()
-            _hovered = true; ShowTrack()
-            cf._euiHovered = true
-        end)
-        cf._euiBg:HookScript("OnLeave", function()
-            if not _dragging then
-                _hovered = false; HideTrack()
-            end
-            cf._euiHovered = false
-        end)
+        -- bg OnEnter/OnLeave removed — hover detection moved to _euiHoverZone
         track._showTrack = ShowTrack
         track._hideTrack = HideTrack
         track._isHovered = function() return _hovered end
@@ -2677,52 +2688,17 @@ initFrame:SetScript("OnEvent", function(self)
     end)
 
     ---------------------------------------------------------------------------
-    --  4. Tab auto-fade prevention
-    --     Single hook on ChatFrame1Tab blocks Blizzard's tab fade for ALL
-    --     tabs in one pass. Three modes:
-    --       - Visibility hidden: force all tabs to alpha 0
-    --       - Idle fade active:  pass through (let _ApplyAlpha animate)
-    --       - Normal:            force all tabs to alpha 1
+    --  4. Tab auto-fade: per-tab hooks are installed in SkinChatFrame.
     --     Deferred one-shot ensures tabs are visible after login (Blizzard
-    --     may fade them before our hook is installed).
+    --     may fade them before our hooks are installed).
     ---------------------------------------------------------------------------
-    do
-        local _ignoreTabAlpha = false
-        local cf1Tab = _G.ChatFrame1Tab
-        if cf1Tab then
-            cf1Tab:SetAlpha(1)
-            C_Timer.After(1, function()
-                if not _visChatVisible then return end
-                for i = 1, 20 do
-                    local t = _G["ChatFrame" .. i .. "Tab"]
-                    if t and t:IsShown() then t:SetAlpha(1) end
-                end
-            end)
-            hooksecurefunc(cf1Tab, "SetAlpha", function(self, a)
-                if _ignoreTabAlpha then return end
-                if not _visChatVisible then
-                    if a > 0 then
-                        _ignoreTabAlpha = true
-                        for i = 1, 20 do
-                            local t = _G["ChatFrame" .. i .. "Tab"]
-                            if t and t:IsShown() then t:SetAlpha(0) end
-                        end
-                        _ignoreTabAlpha = false
-                    end
-                    return
-                end
-                if _idleFadeActive then return end
-                if a > 0 and a < 1 then
-                    _ignoreTabAlpha = true
-                    for i = 1, 20 do
-                        local t = _G["ChatFrame" .. i .. "Tab"]
-                        if t and t:IsShown() then t:SetAlpha(1) end
-                    end
-                    _ignoreTabAlpha = false
-                end
-            end)
+    C_Timer.After(1, function()
+        if not _visChatVisible then return end
+        for i = 1, 20 do
+            local t = _G["ChatFrame" .. i .. "Tab"]
+            if t and t:IsShown() then t:SetAlpha(1) end
         end
-    end
+    end)
 
     ---------------------------------------------------------------------------
     --  5. Tab color management
@@ -2820,20 +2796,23 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Hook chat frames for idle reset -- skip Combat Log (ChatFrame2)
-        for i = 1, 20 do
-            if i ~= 2 then
-                local cf = _G["ChatFrame" .. i]
-                if cf then
-                    hooksecurefunc(cf, "AddMessage", function(self)
-                        local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
-                            and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
-                        if self == selected or self == ChatFrame1 then
-                            OnActiveMessage()
-                        end
-                    end)
-                end
-            end
+        -- Single message filter to reset idle on any chat message.
+        -- Replaces 18 per-frame AddMessage hooks with one filter that
+        -- fires once per message event (not per frame).
+        local function IdleMessageFilter(self, event, msg, ...)
+            OnActiveMessage()
+        end
+        for _, ev in ipairs({
+            "CHAT_MSG_SAY", "CHAT_MSG_YELL",
+            "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
+            "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+            "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
+            "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_RAID_WARNING",
+            "CHAT_MSG_WHISPER", "CHAT_MSG_BN_WHISPER",
+            "CHAT_MSG_CHANNEL", "CHAT_MSG_SYSTEM",
+            "CHAT_MSG_LOOT",
+        }) do
+            ChatFrame_AddMessageEventFilter(ev, IdleMessageFilter)
         end
 
         -- Also reset on new temporary window (whisper)
@@ -2850,40 +2829,70 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Hover detection: event-driven via EnableMouseMotion on bg frames
-        -- (set up in SkinChatFrame). No polling needed.
+        -- Hover detection: lightweight ticker checks cursor position for
+        -- idle fade + scrollbar. Fires 4x/sec. Tabs and sidebar use
+        -- OnEnter/OnLeave (they have EnableMouse for click handling).
         local _idleMouseOver = false
-        local function OnChatAreaEnter()
-            if not IsIdleApplicable() then return end
-            if _idleMouseOver then return end
-            _idleMouseOver = true
-            CancelIdleFade()
-        end
-        local function OnChatAreaLeave()
-            if not IsIdleApplicable() then return end
-            if not _idleMouseOver then return end
-            _idleMouseOver = false
-            ECHAT.ResetIdleTimer()
-        end
-        -- Wire OnEnter/OnLeave on bg frames, tabs, and sidebar
+        local _pollFrames = {}
         for i = 1, 20 do
             local cf = _G["ChatFrame" .. i]
             if cf and cf.isTemporary then break end
-            if cf and cf._euiBg then
-                cf._euiBg:HookScript("OnEnter", OnChatAreaEnter)
-                cf._euiBg:HookScript("OnLeave", OnChatAreaLeave)
-            end
-            local tab = _G["ChatFrame" .. i .. "Tab"]
-            if tab then
-                tab:HookScript("OnEnter", OnChatAreaEnter)
-                tab:HookScript("OnLeave", OnChatAreaLeave)
+            if cf then
+                _pollFrames[#_pollFrames + 1] = {
+                    cf    = cf,
+                    tab   = _G["ChatFrame" .. i .. "Tab"],
+                    bg    = cf._euiBg,
+                    track = cf._euiScrollTrack,
+                }
             end
         end
-        local sb = ChatFrame1._euiSidebar
-        if sb then
-            sb:HookScript("OnEnter", OnChatAreaEnter)
-            sb:HookScript("OnLeave", OnChatAreaLeave)
-        end
+        local _pollSidebar = ChatFrame1._euiSidebar
+
+        C_Timer.NewTicker(0.15, function()
+            RefreshCursorPos()
+            local over = false
+            local hoverCF = nil
+            local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+            for pi = 1, #_pollFrames do
+                local pf = _pollFrames[pi]
+                local cf = pf.cf
+                if cf:IsShown() or cf == selected then
+                    if not over then
+                        if IsCursorOverCached(pf.tab) then
+                            over = true; hoverCF = cf
+                        elseif cf:IsShown() then
+                            if IsCursorOverCached(pf.bg) or IsCursorOverCached(cf) then
+                                over = true; hoverCF = cf
+                            end
+                        end
+                    end
+                    local track = pf.track
+                    if track then
+                        local isOverThis = (hoverCF == cf)
+                        if isOverThis and not track._isHovered() then
+                            track._setHovered(true)
+                            track._showTrack()
+                        elseif not isOverThis and track._isHovered() and not track._isDragging() then
+                            track._setHovered(false)
+                            track._hideTrack()
+                        end
+                    end
+                end
+            end
+            if not over and IsCursorOverCached(_pollSidebar) then
+                over = true
+            end
+            if IsIdleApplicable() then
+                if over and not _idleMouseOver then
+                    _idleMouseOver = true
+                    CancelIdleFade()
+                elseif not over and _idleMouseOver then
+                    _idleMouseOver = false
+                    ECHAT.ResetIdleTimer()
+                end
+            end
+        end)
 
         -- Start the initial timer
         ECHAT.ResetIdleTimer()
@@ -2895,6 +2904,33 @@ initFrame:SetScript("OnEvent", function(self)
     if EUI.RegAccent then
         EUI.RegAccent({ type = "callback", fn = UpdateTabColors })
     end
+
+    -- Debug: print what frame is under the cursor on right-click
+    SLASH_ECHATCLICK1 = "/echat_click"
+    SlashCmdList.ECHATCLICK = function()
+        local foci = GetMouseFoci and GetMouseFoci() or {}
+        local f = foci[1]
+        if f then
+            local name = f:GetName() or tostring(f)
+            local parent = f:GetParent()
+            local parentName = parent and (parent:GetName() or tostring(parent)) or "nil"
+            local mouse = f:IsMouseEnabled() and "mouse=ON" or "mouse=OFF"
+            local click = (f.IsMouseClickEnabled and f:IsMouseClickEnabled()) and "click=ON" or "click=OFF"
+            local motion = (f.IsMouseMotionEnabled and f:IsMouseMotionEnabled()) and "motion=ON" or "motion=OFF"
+            local objType = f.GetObjectType and f:GetObjectType() or "?"
+            local strata = f.GetFrameStrata and f:GetFrameStrata() or "?"
+            local level = f.GetFrameLevel and f:GetFrameLevel() or "?"
+            -- Check if it's the clickAnywhereButton
+            local isCab = (f == _G.ChatFrame1ClickAnywhereButton) and " [ClickAnywhereButton]" or ""
+            local isBg = (ChatFrame1._euiBg and f == ChatFrame1._euiBg) and " [euiBg]" or ""
+            print("|cffff6060[CLICK DEBUG]|r " .. name .. " | parent=" .. parentName .. " | " .. objType .. " strata=" .. strata .. " level=" .. level .. " | " .. mouse .. " " .. click .. " " .. motion .. isCab .. isBg)
+        else
+            print("|cffff6060[CLICK DEBUG]|r No frame under cursor")
+        end
+    end
+
+    -- Enable scroll-to-scroll chat (Blizzard disables by default)
+    if SetCVar then SetCVar("chatMouseScroll", 1) end
 
     local function ApplyTimestampCVar()
         if not SetCVar then return end

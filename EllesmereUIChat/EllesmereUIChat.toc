@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Chat
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Chat enhancements -- clickable URLs, copy chat, search
+## Notes: A modern, light chat reskin with improved functionality
 ## Author: Ellesmere
-## Version: 6.9.2
+## Version: 6.9.3
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIChatDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

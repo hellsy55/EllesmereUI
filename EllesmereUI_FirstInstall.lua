@@ -60,7 +60,7 @@ local GROUPS = {
             { label = "Blizz UI Enhanced", addon = "EllesmereUIBlizzardSkin" },
             { label = "Friends List",      addon = "EllesmereUIFriends" },
             { label = "Damage Meters",     comingSoon = true },
-            { label = "Chat",              comingSoon = true },
+            { label = "Chat",              addon = "EllesmereUIChat" },
             { label = "Bags",              comingSoon = true },
             { label = "Mythic+ Timer",     addon = "EllesmereUIMythicTimer" },
             { label = "Quest Tracker",     addon = "EllesmereUIQuestTracker" },
