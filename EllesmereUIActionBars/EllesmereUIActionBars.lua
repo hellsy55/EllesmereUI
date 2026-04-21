@@ -419,6 +419,7 @@ for _, info in ipairs(BAR_CONFIG) do
         cooldownTextYOffset = 0,
         cooldownTextColor = { r = 1, g = 1, b = 1 },
         disableTooltips = false,
+        showRankIcon = false,
         orientation = "horizontal",
         numIcons = 12,
         numRows = 1,
@@ -2520,12 +2521,16 @@ local function LayoutBar(key)
                 btn.SpellActivationAlert:SetScale(1)
             end
 
-            -- Hide profession quality diamond overlays (added in Dragonflight)
+            -- Profession quality diamond overlays (added in Dragonflight)
             if btn.ProfessionQualityOverlayFrame then
-                btn.ProfessionQualityOverlayFrame:SetShown(false)
+                btn.ProfessionQualityOverlayFrame:SetShown(s.showRankIcon and true or false)
                 if not btn._eabQualityHooked then
                     btn.ProfessionQualityOverlayFrame:HookScript("OnShow", function(self)
-                        self:SetShown(false)
+                        local bInfo = buttonToBar[btn]
+                        local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
+                        if not bs or not bs.showRankIcon then
+                            self:SetShown(false)
+                        end
                     end)
                     btn._eabQualityHooked = true
                 end
@@ -3988,6 +3993,34 @@ local function DisableRangeCheckForBar(barKey)
 end
 
 -- Refresh range state for all bars (called from ApplyAll and on setting change)
+function EAB:RecalcFlyoutDirection(barKey)
+    if InCombatLockdown() then return end
+    local frame = barFrames[barKey]
+    local btns = barButtons[barKey]
+    local s = self.db.profile.bars[barKey]
+    if not frame or not btns or not s then return end
+    local isVert = (s.orientation == "vertical")
+    local cx, cy = frame:GetCenter()
+    if not cx or not cy then return end
+    local uiW = UIParent:GetWidth()
+    local uiH = UIParent:GetHeight()
+    local uiScale = UIParent:GetEffectiveScale()
+    local fScale  = frame:GetEffectiveScale()
+    cx = cx * fScale / uiScale
+    cy = cy * fScale / uiScale
+    local thirdW = uiW / 3
+    local thirdH = uiH / 3
+    local dir
+    if isVert then
+        dir = (cx > thirdW * 2) and "LEFT" or "RIGHT"
+    else
+        dir = (cy > thirdH * 2) and "DOWN" or "UP"
+    end
+    for _, btn in ipairs(btns) do
+        btn:SetAttribute("flyoutDirection", dir)
+    end
+end
+
 function EAB:ApplyRangeColoring()
     -- Set up the event listener BEFORE enabling range checks so any
     -- immediate ACTION_RANGE_CHECK_UPDATE events are caught.
@@ -4004,13 +4037,15 @@ function EAB:ApplyRangeColoring()
                 if not _range.slots[slot] then return end
                 local wasOut = _range.outOfRange[slot]
                 local isOut = checksRange and not inRange
-                if isOut then
+                local changed = false
+                if isOut and not wasOut then
                     _range.outOfRange[slot] = true
-                else
+                    changed = true
+                elseif not isOut and wasOut then
                     _range.outOfRange[slot] = nil
+                    changed = true
                 end
-                -- Only update visuals when state actually changes
-                if (wasOut ~= nil) == (isOut) then return end
+                if not changed then return end
                 local bars = EAB.db.profile.bars
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
@@ -4027,7 +4062,21 @@ function EAB:ApplyRangeColoring()
                 -- When a slot changes (paging, drag, etc.), re-enable range
                 -- checking for the new action and clear stale tint
                 if slot and _range.slots[slot] then
-                    _range.outOfRange[slot] = nil
+                    if _range.outOfRange[slot] then
+                        _range.outOfRange[slot] = nil
+                        local bars2 = EAB.db.profile.bars
+                        for _, info2 in ipairs(BAR_CONFIG) do
+                            local btns2 = barButtons[info2.key]
+                            local s2 = bars2[info2.key]
+                            if btns2 and s2 then
+                                for _, btn2 in ipairs(btns2) do
+                                    if GetButtonActionSlot(btn2) == slot then
+                                        ApplyRangeTint(btn2, false, s2)
+                                    end
+                                end
+                            end
+                        end
+                    end
                     if C_ActionBar and C_ActionBar.EnableActionRangeCheck then
                         pcall(C_ActionBar.EnableActionRangeCheck, slot, true)
                     end
@@ -6228,6 +6277,7 @@ local function RegisterWithUnlockMode()
                 EAB.db.profile.barPositions[info.key] = nil
             end,
             applyPos = function()
+                EAB:RecalcFlyoutDirection(info.key)
                 -- Skip bars owned by the unlock anchor system
                 if EllesmereUI and EllesmereUI.IsUnlockAnchored
                    and EllesmereUI.IsUnlockAnchored(info.key) then return end
@@ -6389,15 +6439,67 @@ function EAB:OnInitialize()
 
     -- Slash commands
     -- Expose apply hook for PP scale change re-apply
+    _G._EAB_RecalcFlyouts = function()
+        for _, info in ipairs(BAR_CONFIG) do
+            EAB:RecalcFlyoutDirection(info.key)
+        end
+    end
+
     _G._EAB_Apply = function()
         ApplyAll()
-        if not InCombatLockdown() then RestoreBarPositions() end
+        if not InCombatLockdown() then
+            RestoreBarPositions()
+            -- Recalculate flyout directions now that bars are at their
+            -- final positions. LayoutBar (inside ApplyAll) runs before
+            -- RestoreBarPositions, so it computed directions from the
+            -- default position, not the user's saved position.
+            C_Timer_After(0, function()
+                for _, info in ipairs(BAR_CONFIG) do
+                    EAB:RecalcFlyoutDirection(info.key)
+                end
+            end)
+        end
+    end
+
+
+    -- Hide quality overlay on newly-placed items (overlay is created lazily
+    -- by Blizzard after the slot changes, so defer the check by one frame).
+    do
+        local qf = CreateFrame("Frame")
+        qf:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+        qf:SetScript("OnEvent", function()
+            C_Timer_After(0, function()
+                local bars = EAB.db.profile.bars
+                for _, info in ipairs(BAR_CONFIG) do
+                    local btns = barButtons[info.key]
+                    local s = bars[info.key]
+                    if btns and s and not s.showRankIcon then
+                        for _, btn in ipairs(btns) do
+                            local ov = btn.ProfessionQualityOverlayFrame
+                            if ov and ov:IsShown() then
+                                ov:SetShown(false)
+                                if not btn._eabQualityHooked then
+                                    ov:HookScript("OnShow", function(self2)
+                                        local bInfo = buttonToBar[btn]
+                                        local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
+                                        if not bs or not bs.showRankIcon then
+                                            self2:SetShown(false)
+                                        end
+                                    end)
+                                    btn._eabQualityHooked = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end)
     end
 
     SLASH_ELLESMEREACTIONBARS1 = "/eab"
     SlashCmdList["ELLESMEREACTIONBARS"] = function(msg)
-        if EllesmereUI and EllesmereUI.Toggle then
-            EllesmereUI:Toggle()
+        if EllesmereUI and EllesmereUI.ShowModule then
+            EllesmereUI:ShowModule("EllesmereUIActionBars")
         end
     end
 

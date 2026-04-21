@@ -205,6 +205,8 @@ initFrame:SetScript("OnEvent", function(self)
                          if EllesmereUI._updateStatCategoryVisibility then
                              EllesmereUI._updateStatCategoryVisibility()
                          end
+                         local sf = CharacterFrame and CharacterFrame._scrollFrame
+                         if sf then sf:SetVerticalScroll(0) end
                          EllesmereUI:RefreshPage()
                      end }
         end

@@ -3636,7 +3636,7 @@ local function SkinFriendsFrame()
                     if g.name == groupName then g.collapsed = not g.collapsed; break end
                 end
             end
-            if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+            if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP("direct") end
         end)
 
         if not isFavorites and not isDefault and not isPending then
@@ -3937,12 +3937,19 @@ local function SkinFriendsFrame()
         end
         if not FriendsFrame or not FriendsFrame:IsShown() then return end
         if not EBS.db or not EBS.db.profile.friends.enabled then return end
-        -- Skip if a rebuild just completed (within 500ms). Blizzard fires
-        -- FriendsList_Update multiple times during the show sequence.
+        -- Direct user actions (collapse, initial show) run immediately.
+        -- Event-driven rebuilds (Blizzard fires FriendsList_Update multiple
+        -- times during the show sequence) are debounced with a short timer.
+        if source == "direct" then
+            if RebuildFriendsDataProviderImpl then
+                RebuildFriendsDataProviderImpl()
+            end
+            return
+        end
         if debugprofilestop() - _lastRebuildTime < 500 then return end
         if not _rebuildScheduled then
             _rebuildScheduled = true
-            C_Timer.After(0.2, function()
+            C_Timer.After(0.05, function()
                 _rebuildScheduled = false
                 if RebuildFriendsDataProviderImpl then
                     RebuildFriendsDataProviderImpl()
@@ -4219,7 +4226,7 @@ local function SkinFriendsFrame()
     end
 
     -- Expose for menu callbacks
-    _G._EBS_RebuildFriendsDP = function() RebuildFriendsDataProvider("global") end
+    _G._EBS_RebuildFriendsDP = function(source) RebuildFriendsDataProvider(source or "global") end
 
     -- Hook FriendsList_Update to rebuild after Blizzard
     if FriendsList_Update then

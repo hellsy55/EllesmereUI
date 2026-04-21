@@ -7235,6 +7235,13 @@ function InitializeFrames()
                     alphaTarget:SetAlpha(0)
                 end
 
+                -- 3D PlayerModel frames don't inherit parent alpha, so
+                -- explicitly sync the model's alpha with the visibility state.
+                local bd3d = frame.Portrait and frame.Portrait.backdrop and frame.Portrait.backdrop._3d
+                if bd3d then
+                    bd3d:SetAlpha(hiddenByOpts and 0 or 1)
+                end
+
                 -- Show/Hide and SetAttribute are restricted during lockdown.
                 if not isLocked then
                     local shouldShow

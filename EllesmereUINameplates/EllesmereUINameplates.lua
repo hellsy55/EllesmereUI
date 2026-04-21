@@ -3813,7 +3813,10 @@ end
 function NameplateFrame:UpdateClassification()
     if not self.unit then return end
     local slot = GetClassificationSlot()
-    if slot == "none" or InRealInstancedContent() then
+    local _, iType = GetInstanceInfo()
+    local inMPlusOrRaid = (iType == "raid")
+        or (iType == "party" and C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive())
+    if slot == "none" or inMPlusOrRaid then
         self.classFrame:Hide()
         self:UpdateNameWidth()
         return
@@ -3824,7 +3827,7 @@ function NameplateFrame:UpdateClassification()
     elseif c == "rareelite" then
         self.class:SetAtlas("nameplates-icon-elite-silver")
     elseif c == "rare" then
-        self.class:SetAtlas("nameplates-icon-star")
+        self.class:SetAtlas("nameplates-icon-rareelite")
     else
         self.classFrame:Hide()
         self:UpdateNameWidth()
@@ -5296,6 +5299,11 @@ do
         "textSlotCenterSize", "textSlotCenterXOffset", "textSlotCenterYOffset",
         -- Text slot color keys
         "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
+        -- Threat / aggro color settings
+        "tankHasAggroEnabled", "tankHasAggro",
+        "classicTankAggro",
+        "dpsHasAggro", "dpsNearAggro",
+        "offTankAggroEnabled", "offTankAggro",
     }
 
     -- Also handle spec changes that happen before the UI is ever opened

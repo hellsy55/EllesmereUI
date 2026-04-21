@@ -102,7 +102,12 @@ local CHANNEL_TICK_DATA = {
     [473728]  = { tickInterval = 0.2 },                             -- Void Ray (Devourer DH) — haste extends duration
     [212084]  = { ticks = 10 },                                    -- Fel Devastation (Vengeance DH)
     [198590]  = { ticks = 5 },                                     -- Drain Soul (Affliction Warlock)
+    [47757]   = { ticks = 3 },                                     -- Penance (Heal)
+    [47758]   = { ticks = 3 },                                     -- Penance (DPS)
+    [373129]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (DPS)
+    [400171]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (Heal)
 }
+
 
 -------------------------------------------------------------------------------
 --  Class/Spec resource mapping
@@ -2244,6 +2249,11 @@ local _runeStart = {}       -- [rune index] = cooldown start
 local _runeDuration = {}    -- [rune index] = cooldown duration
 local _runeReady = {}       -- [rune index] = true/false
 
+-- Evoker Essence recharge state (timer-based, UnitPower partial doesn't work for Essence)
+local _essenceNextTick = nil   -- GetTime() when the next pip will be ready
+local _essenceLastCount = nil  -- last known whole-pip count
+local _essenceTickDur = 0      -- seconds per pip recharge
+
 local function UpdateSecondaryResource()
     if not secondaryFrame or not secondaryFrame:IsShown() then return end
     if not cachedSecondary then return end
@@ -2653,10 +2663,11 @@ local function UpdateSecondaryResource()
         local useThresh = sp.thresholdEnabled and cur >= sp.thresholdCount
         local tr, tg, tb = sp.thresholdR, sp.thresholdG, sp.thresholdB
 
-        -- Fractional resource detection (Destruction warlock only, specID 267)
+        -- Fractional resource detection
         local frac = 0
         local preciseCur = cur
         if powerType == PT.SOUL_SHARDS then
+            -- Destruction warlock: UnitPower partial values work
             local specIdx = GetSpecialization()
             local specID = specIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(specIdx)
             if specID == 267 then
@@ -2665,6 +2676,42 @@ local function UpdateSecondaryResource()
                     preciseCur = raw / 10
                     frac = preciseCur - cur
                 end
+            end
+        elseif powerType == PT.ESSENCE then
+            -- Evoker Essence: timer-based recharge (UnitPower partial doesn't work)
+            local now = GetTime()
+            local maxE = UnitPowerMax("player", PT.ESSENCE) or maxPts
+            if issecretvalue and issecretvalue(maxE) then maxE = maxPts end
+
+            -- Detect pip gain/loss and reset the timer
+            if _essenceLastCount == nil then _essenceLastCount = cur end
+            if cur ~= _essenceLastCount then
+                if cur < maxE then
+                    local regen = GetPowerRegenForPowerType and GetPowerRegenForPowerType(PT.ESSENCE) or 0
+                    _essenceTickDur = (regen and regen > 0) and (1 / regen) or 5
+                    _essenceNextTick = now + _essenceTickDur
+                else
+                    _essenceNextTick = nil
+                end
+                _essenceLastCount = cur
+            end
+
+            -- If below max and no timer running, start one
+            if cur < maxE and not _essenceNextTick then
+                local regen = GetPowerRegenForPowerType and GetPowerRegenForPowerType(PT.ESSENCE) or 0
+                _essenceTickDur = (regen and regen > 0) and (1 / regen) or 5
+                _essenceNextTick = now + _essenceTickDur
+            end
+
+            -- At max: clear timer
+            if cur >= maxE then _essenceNextTick = nil end
+
+            -- Compute fill fraction for the recharging pip
+            if _essenceNextTick and _essenceTickDur > 0 then
+                local remaining = max(0, _essenceNextTick - now)
+                frac = 1 - (remaining / _essenceTickDur)
+                frac = max(0, min(1, frac))
+                preciseCur = cur + frac
             end
         end
 
@@ -2721,13 +2768,13 @@ local function UpdateSecondaryResource()
                 nextPip._rechargeBar = sb
             end
             nextPip._rechargeBar:SetValue(frac)
-            nextPip._rechargeBar:SetStatusBarColor(r * 0.5, g * 0.5, b * 0.5, a)
+            nextPip._rechargeBar:SetStatusBarColor(r * 0.75, g * 0.75, b * 0.75, a)
             nextPip._rechargeBar:Show()
         end
 
         -- Count text
         if sp.showText and secondaryFrame._countText then
-            if frac > 0 then
+            if frac > 0 and powerType ~= PT.ESSENCE then
                 secondaryFrame._countText:SetText(format("%.1f", preciseCur))
             else
                 secondaryFrame._countText:SetText(tostring(cur))
@@ -2916,11 +2963,20 @@ local function OnUpdate(self, dt)
         end
     end
 
-    -- DK rune updates (throttled to ~10 fps) � calls the full sorted
+    -- DK rune updates (throttled to ~10 fps) -- calls the full sorted
     -- update so rune positions stay consistent with depletion order.
     if cachedSecondary and cachedSecondary.type == "runes" then
         _runeThrottle = _runeThrottle + dt
         if _runeThrottle >= 0.1 then
+            _runeThrottle = 0
+            UpdateSecondaryResource()
+        end
+    end
+
+    -- Evoker Essence recharge animation (throttled to ~20 fps for smooth fill)
+    if _essenceNextTick and cachedSecondary and cachedSecondary.power == PT.ESSENCE then
+        _runeThrottle = _runeThrottle + dt
+        if _runeThrottle >= 0.05 then
             _runeThrottle = 0
             UpdateSecondaryResource()
         end
@@ -3247,49 +3303,23 @@ local fillTex = bar:GetStatusBarTexture()
 if cb.gradientEnabled then
     local dir = cb.gradientDir or "HORIZONTAL"
 
-    -- Hide the status bar fill
-    fillTex:SetVertexColor(1, 1, 1, 0)
-
-    if not castBarFrame._gradClip then
-        local clip = CreateFrame("Frame", nil, bar)
-        clip:SetClipsChildren(true)
-        clip:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        clip:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
-        clip:SetWidth(0.01)
-        clip:SetFrameLevel(bar:GetFrameLevel() + 1)
-
-        local tex = clip:CreateTexture(nil, "ARTWORK", nil, 1)
-        tex:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        tex:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
-
-        castBarFrame._gradClip = clip
-        castBarFrame._gradTex = tex
-    end
-
-    local clip = castBarFrame._gradClip
-    local tex = castBarFrame._gradTex
-
-    -- Match the selected cast bar texture
-    local texKey = cb.texture
-    local texPath = EllesmereUI.ResolveTexturePath(CAST_BAR_TEXTURES, texKey, "Interface\\Buttons\\WHITE8x8")
-    tex:SetTexture(texPath)
-
-    tex:SetVertexColor(1, 1, 1, 1)
     local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
     if cb.classColored then
         local cc = CLASS_COLORS[cachedClass]
         if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
     end
-    tex:SetGradient(dir,
+    fillTex:SetVertexColor(1, 1, 1, 1)
+    fillTex:SetGradient(dir,
         CreateColor(fR, fG, fB, fA),
         CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA)
     )
 
+    -- Hide the old clip-frame gradient if it exists from a prior session
+    if castBarFrame._gradClip then castBarFrame._gradClip:Hide() end
+    castBarFrame._gradientFullBar = nil
+
     castBarFrame._nameText:SetParent(castBarFrame._textFrame)
     castBarFrame._timerText:SetParent(castBarFrame._textFrame)
-
-    clip:Show()
-    castBarFrame._gradientFullBar = true
 else
     if castBarFrame._gradClip then
         castBarFrame._gradClip:Hide()
@@ -4007,6 +4037,9 @@ local function OnEvent(self, event, ...)
         UpdateVisibility()
         ScheduleRosterApply()
     elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        _essenceNextTick = nil
+        _essenceLastCount = nil
+        _essenceTickDur = 0
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
         BuildBars()

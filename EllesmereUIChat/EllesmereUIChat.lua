@@ -220,6 +220,10 @@ function ECHAT.ApplyFonts()
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
             eb:SetFont(font, size, outline)
+            if i <= 10 then
+                if eb.header then eb.header:SetFont(font, size, outline) end
+                if eb.headerSuffix then eb.headerSuffix:SetFont(font, size, outline) end
+            end
         end
     end
 end

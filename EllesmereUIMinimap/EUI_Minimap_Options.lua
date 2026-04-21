@@ -409,7 +409,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Hide Great Vault Button
+        -- Hide Great Vault Button | Hide M+ Portals Button
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Great Vault Button",
               tooltip="Hides the Great Vault shortcut button from the minimap button stack.",
@@ -419,7 +419,14 @@ initFrame:SetScript("OnEvent", function(self)
                 m.hideGreatVault = v
                 RefreshMinimap()
               end },
-            { type="label", text="" }
+            { type="toggle", text="Hide M+ Portals Button",
+              tooltip="Hides the M+ Portals shortcut button from the minimap button stack.",
+              getValue=function() local m = MinimapDB(); return m and m.hidePortals end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.hidePortals = v
+                RefreshMinimap()
+              end }
         );  y = y - h
 
         y = y - 10

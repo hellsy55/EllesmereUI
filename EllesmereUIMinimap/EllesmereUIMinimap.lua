@@ -35,6 +35,7 @@ local defaults = {
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
             hideGreatVault       = false,
+            hidePortals          = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
             addonBtnSize         = 24,
@@ -806,7 +807,8 @@ local function GatherMinimapButtons()
                     -- skip
                 elseif IsPinFrame(name) then
                     -- skip pin/POI frames
-                elseif child:IsObjectType("Button") and name then
+                elseif child:IsObjectType("Button") and name
+                    and not name:match("%d+$") then
                     local w = child:GetWidth() or 0
                     if w >= 20 then
                         -- Record initial addon visibility (only first time)
@@ -1041,6 +1043,236 @@ local function CreateGreatVaultBtn(parent)
     return btn
 end
 
+-------------------------------------------------------------------------------
+-- M+ Portal button. Identical flyout as Chat sidebar but anchored to minimap.
+-------------------------------------------------------------------------------
+local PORTAL_SPELLS = {
+    1254400, 1254572, 1254563, 1254559,
+    159898,  1254555, 1254551, 393273,
+}
+
+local _portalBtn = nil
+local _portalFlyout, _portalFlyoutBtns
+
+local function RefreshMinimapPortalButtons()
+    if not _portalFlyoutBtns then return end
+    for _, btn in ipairs(_portalFlyoutBtns) do
+        local spellID = btn.spellID
+        local known = IsPlayerSpell(spellID)
+        if btn._lastKnown ~= known then
+            btn._lastKnown = known
+            btn.icon:SetDesaturated(not known)
+            btn.icon:SetAlpha(known and 1 or 0.4)
+        end
+        if known then
+            local cdInfo = C_Spell.GetSpellCooldown(spellID)
+            if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+                btn.cooldown:SetCooldown(cdInfo.startTime, cdInfo.duration)
+            else
+                btn.cooldown:Clear()
+            end
+        else
+            btn.cooldown:Clear()
+        end
+    end
+end
+
+local function CreateMinimapPortalFlyout()
+    if _portalFlyout then return _portalFlyout end
+
+    local BTN_SIZE = 32
+    local SPACING = 1
+    local PADDING = 2
+    local COLS = 4
+    local ROWS = math.ceil(#PORTAL_SPELLS / COLS)
+
+    local flyW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
+    local flyH = PADDING * 2 + BTN_SIZE * ROWS + SPACING * (ROWS - 1)
+
+    local flyout = CreateFrame("Frame", "EUIMinimapPortalFlyout", UIParent)
+    flyout:SetSize(flyW, flyH)
+    flyout:SetFrameStrata("DIALOG")
+    flyout:SetFrameLevel(100)
+    flyout:Hide()
+
+    local bg = flyout:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.04, 0.04, 0.06, 0.95)
+
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP and PP.CreateBorder then
+        PP.CreateBorder(flyout, 1, 1, 1, 0.06, 1, "OVERLAY", 7)
+    end
+
+    local guard = CreateFrame("Frame")
+    guard:RegisterEvent("PLAYER_REGEN_DISABLED")
+    guard:SetScript("OnEvent", function() flyout:Hide() end)
+
+    _portalFlyoutBtns = {}
+    for i, spellID in ipairs(PORTAL_SPELLS) do
+        local col = (i - 1) % COLS
+        local row = math.floor((i - 1) / COLS)
+
+        local btn = CreateFrame("Button", "EUIMinimapPortal" .. i, flyout, "SecureActionButtonTemplate")
+        btn:SetSize(BTN_SIZE, BTN_SIZE)
+        btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
+            PADDING + col * (BTN_SIZE + SPACING),
+            -(PADDING + row * (BTN_SIZE + SPACING)))
+
+        btn.spellID = spellID
+
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexCoord(6/64, 58/64, 6/64, 58/64)
+        local spellInfo = C_Spell.GetSpellInfo(spellID)
+        if spellInfo then icon:SetTexture(spellInfo.iconID) end
+        btn.icon = icon
+
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 7)
+        end
+
+        local cd = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        cd:SetHideCountdownNumbers(true)
+        cd:SetDrawSwipe(true)
+        cd:SetDrawBling(false)
+        cd:SetDrawEdge(false)
+        btn.cooldown = cd
+
+        local hover = btn:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.20)
+
+        local castHL = btn:CreateTexture(nil, "OVERLAY", nil, 1)
+        castHL:SetAllPoints()
+        castHL:SetColorTexture(1, 1, 1, 0.4)
+        castHL:Hide()
+        btn._castHL = castHL
+
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        btn:SetAttribute("type", "spell")
+        btn:SetAttribute("spell", spellID)
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetSpellByID(self.spellID)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        _portalFlyoutBtns[i] = btn
+    end
+
+    flyout:SetScript("OnShow", function(self)
+        self:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+        RefreshMinimapPortalButtons()
+    end)
+    flyout:SetScript("OnHide", function(self)
+        self:UnregisterAllEvents()
+        for _, btn in ipairs(_portalFlyoutBtns) do
+            if btn._castHL then btn._castHL:Hide() end
+        end
+    end)
+    flyout:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
+        if event == "SPELL_UPDATE_COOLDOWN" then
+            RefreshMinimapPortalButtons()
+        elseif unit == "player" then
+            local casting = (event == "UNIT_SPELLCAST_START") and spellID or nil
+            for _, btn in ipairs(_portalFlyoutBtns) do
+                if btn._castHL then
+                    btn._castHL:SetShown(casting and casting == btn.spellID)
+                end
+            end
+        end
+    end)
+
+    tinsert(UISpecialFrames, "EUIMinimapPortalFlyout")
+
+    _portalFlyout = flyout
+    return flyout
+end
+
+local function ToggleMinimapPortalFlyout(anchorBtn)
+    if InCombatLockdown() then return end
+    local flyout = CreateMinimapPortalFlyout()
+    if flyout:IsShown() then
+        flyout:Hide()
+    else
+        local bs = anchorBtn:GetEffectiveScale()
+        local fs = flyout:GetEffectiveScale()
+        local bTop  = anchorBtn:GetTop()  * bs
+        local bLeft = anchorBtn:GetLeft() * bs
+        flyout:ClearAllPoints()
+        flyout:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", (bLeft - 4) / fs, (bTop + 4) / fs)
+        flyout:Show()
+    end
+end
+
+local function SizePortalBtn(btn, showBg)
+    local btnSz = GetInteractableBtnSize()
+    btn:SetSize(btnSz, btnSz)
+    if btn._bg then btn._bg:SetShown(showBg ~= false) end
+    local inset = 4
+    local avail = btnSz - inset * 2
+    btn._icon:SetSize(avail, avail)
+    btn._icon:ClearAllPoints()
+    btn._icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+end
+
+local function CreatePortalBtn(parent)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(GetInteractableBtnSize(), GetInteractableBtnSize())
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:EnableMouse(true)
+
+    local bg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+    bg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
+    bg:SetBackdropColor(0, 0, 0, 0.8)
+    bg:SetAllPoints(btn)
+    bg:SetFrameLevel(btn:GetFrameLevel() - 1)
+    btn._bg = bg
+
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetTexture("Interface\\Icons\\Spell_Arcane_PortalDalaran")
+    icon:SetTexCoord(6/64, 58/64, 6/64, 58/64)
+    btn._icon = icon
+
+    SizePortalBtn(btn)
+
+    btn:SetScript("OnEnter", function(self)
+        self._icon:SetVertexColor(1, 1, 1, 1)
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "M+ Portals") end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self._icon:SetVertexColor(0.85, 0.85, 0.85, 1)
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
+    btn:SetScript("OnMouseDown", function(self)
+        self._icon:SetVertexColor(0.7, 0.7, 0.7, 1)
+    end)
+    btn:SetScript("OnMouseUp", function(self)
+        local over = self:IsMouseOver()
+        local v = over and 1 or 0.85
+        self._icon:SetVertexColor(v, v, v, 1)
+    end)
+    btn:SetScript("OnClick", function(self)
+        if self._ebsFreeMoveJustDragged then return end
+        ToggleMinimapPortalFlyout(self)
+    end)
+
+    icon:SetVertexColor(0.85, 0.85, 0.85, 1)
+
+    btn._indicatorKey = "_portals"
+
+    return btn
+end
+
 local function BuildCustomIndicators(minimap)
     if _customIndicators.tracking then return end
 
@@ -1115,6 +1347,9 @@ local function BuildCustomIndicators(minimap)
 
     -- Great Vault button (built once, anchored later in LayoutIndicatorFrames)
     _greatVaultBtn = CreateGreatVaultBtn(minimap)
+
+    -- M+ Portal button (built once, anchored later in LayoutIndicatorFrames)
+    _portalBtn = CreatePortalBtn(minimap)
 end
 
 -- Hide the Blizzard originals so they never render or intercept clicks
@@ -1407,6 +1642,30 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 anchor = _greatVaultBtn
             end
         end
+
+        -- M+ Portal button: sits above the Great Vault button.
+        if _portalBtn then
+            if p.hidePortals then
+                _portalBtn:Hide()
+            else
+                SizePortalBtn(_portalBtn, showBg)
+                _portalBtn:SetParent(minimap)
+                _portalBtn:SetFrameLevel(minimap:GetFrameLevel() + 11)
+                _portalBtn:ClearAllPoints()
+                if freeMove then
+                    local idx = #ungrouped + (flyoutVisible and 1 or 0)
+                        + ((_greatVaultBtn and not p.hideGreatVault) and 1 or 0)
+                    local yOff = idx * ungroupBtnSize
+                    _portalBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
+                elseif anchor then
+                    _portalBtn:SetPoint("BOTTOM", anchor, "TOP", 0, 0)
+                else
+                    _portalBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, 0)
+                end
+                _portalBtn:Show()
+                anchor = _portalBtn
+            end
+        end
     end
 
     -- Free Move: hook shift+drag on all indicator buttons and apply saved offsets
@@ -1418,6 +1677,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
     if flyoutToggle then fmTargets[#fmTargets + 1] = flyoutToggle end
     if _greatVaultBtn and not p.hideGreatVault then fmTargets[#fmTargets + 1] = _greatVaultBtn end
+    if _portalBtn and not p.hidePortals then fmTargets[#fmTargets + 1] = _portalBtn end
     -- Include ungrouped addon buttons
     for _, btn in ipairs(cachedAddonButtons) do
         if _addonVisible[btn] ~= false and IsUngrouped(btn) then

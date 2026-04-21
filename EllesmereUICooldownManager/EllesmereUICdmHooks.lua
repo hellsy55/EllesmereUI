@@ -711,7 +711,13 @@ local function DecorateFrame(frame, barData)
                         end
                     end
                 end
-                fd.tex:SetDesaturated(true)
+                -- Only desaturate if the spell is actually on cooldown.
+                -- Spells procced without a real CD (e.g. Demonic Meta via
+                -- Eye Beam) should stay saturated. Filter GCDs the same
+                -- way the suppressGCD check above does.
+                local cdInfo2 = sid2 and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid2)
+                local onRealCD = cdInfo2 and cdInfo2.isActive and not cdInfo2.isOnGCD
+                fd.tex:SetDesaturated(onRealCD or false)
                 fd._isProcessingOverride = false
             end
             hooksecurefunc(fd.tex, "SetDesaturated", onDesatChange)

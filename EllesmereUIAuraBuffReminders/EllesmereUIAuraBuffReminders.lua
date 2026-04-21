@@ -153,59 +153,7 @@ end
 -------------------------------------------------------------------------------
 --  Midnight Season 1 Dungeon, Raid & PvP Instance Names
 -------------------------------------------------------------------------------
-local TALENT_REMINDER_ZONES = {
-    { name="The Voidspire",           type="raid", },
-    { name="The Dreamrift",           type="raid", },
-    { name="March on Quel'Danas",     type="raid", },
-
-    { name="Magister's Terrace",      type="dungeon", mapID=2515 },
-    { name="Maisara Caverns",         type="dungeon", mapID=2501 },
-    { name="Nexus-Point Xenas",       type="dungeon", mapID=2556 },
-    { name="Windrunner Spire",        type="dungeon", mapID=2492 },
-    { name="Algeth'ar Academy",       type="dungeon", mapID=2097 },
-    { name="Seat of the Triumvirate", type="dungeon", mapID=8910 },
-    { name="Skyreach",                type="dungeon", mapID=601  },
-    { name="Pit of Saron",            type="dungeon", mapID=184  },
-    -- PvP maps: mapID is nil (matched by instance type, not map ID)
-    { name="Nagrand Arena",           type="pvp",     mapID=nil },
-    { name="Blade's Edge Arena",      type="pvp",     mapID=nil },
-    { name="Ruins of Lordaeron",      type="pvp",     mapID=nil },
-    { name="Dalaran Sewers",          type="pvp",     mapID=nil },
-    { name="The Ring of Valor",       type="pvp",     mapID=nil },
-    { name="Tol'viron Arena",         type="pvp",     mapID=nil },
-    { name="Tiger's Peak",            type="pvp",     mapID=nil },
-    { name="Black Rook Hold Arena",   type="pvp",     mapID=nil },
-    { name="Ashamane's Fall",         type="pvp",     mapID=nil },
-    { name="Mugambala",               type="pvp",     mapID=nil },
-    { name="Hook Point",              type="pvp",     mapID=nil },
-    { name="Empyrean Domain",         type="pvp",     mapID=nil },
-    { name="Warsong Gulch",           type="pvp",     mapID=nil },
-    { name="Arathi Basin",            type="pvp",     mapID=nil },
-    { name="Eye of the Storm",        type="pvp",     mapID=nil },
-    { name="Strand of the Ancients",  type="pvp",     mapID=nil },
-    { name="Isle of Conquest",        type="pvp",     mapID=nil },
-    { name="Twin Peaks",              type="pvp",     mapID=nil },
-    { name="Silvershard Mines",       type="pvp",     mapID=nil },
-    { name="Battle for Gilneas",      type="pvp",     mapID=nil },
-    { name="Temple of Kotmogu",       type="pvp",     mapID=nil },
-    { name="Deepwind Gorge",          type="pvp",     mapID=nil },
-    { name="Ashran",                  type="pvp",     mapID=nil },
-    { name="Seething Shore",          type="pvp",     mapID=nil },
-    { name="Wintergrasp",             type="pvp",     mapID=nil },
-    { name="Slayer's Rise",           type="pvp",     mapID=nil },
-}
-
--- mapID to zone entry for fast ID-based matching
-local TALENT_REMINDER_ZONE_BY_MAPID = {}
-for _, z in ipairs(TALENT_REMINDER_ZONES) do
-    if z.mapID then
-        TALENT_REMINDER_ZONE_BY_MAPID[z.mapID] = z
-    end
-end
-
-local function GetCurrentTalentReminderZone()
-    return TALENT_REMINDER_ZONE_BY_MAPID[_cachedMapID]
-end
+-- Talent reminder zone data moved to EllesmereUIABR_TalentReminders.lua
 
 -------------------------------------------------------------------------------
 --  Talent query helpers
@@ -654,8 +602,9 @@ local AURAS = {
     { key="berserk_stance", class="WARRIOR", name="Berserker Stance", castSpell=386196, buffIDs={386196},
       check="player", specs={71, 72}, combatOk=false },
     -- Shadowform: OOC only. Void Form (194249) also satisfies the check.
+    -- shapeshiftIndex=1: fallback for PvP instances where aura API is restricted.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
-      check="player", specs={258}, combatOk=false },
+      check="player", specs={258}, combatOk=false, shapeshiftIndex=1 },
     -- Paladin Aura: in dungeons/raids only Devotion satisfies; elsewhere any aura works
     { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,
       buffIDs={465, 32223, 317920}, instanceBuffIDs={465},
@@ -716,15 +665,16 @@ local _IMBUE_EXCLUDE_SPELLS = {
 -- Rogue Poisons: data table drives options UI; detection uses unified scan below.
 -- Lethal and non-lethal categories match WoW's internal classification.
 local ROGUE_POISONS = {
-    -- Lethal poisons (mutually exclusive per slot)
+    -- Lethal poisons (mutually exclusive per slot).
+    -- Deadly first (core Assa poison), then talented, then other base.
     { key="deadly",     name="Deadly Poison",     castSpell=2823,   cat="lethal" },
+    { key="amplifying", name="Amplifying Poison", castSpell=381664, cat="lethal" },
     { key="instant",    name="Instant Poison",    castSpell=315584, cat="lethal" },
     { key="wound",      name="Wound Poison",      castSpell=8679,   cat="lethal" },
-    { key="amplifying", name="Amplifying Poison", castSpell=381664, cat="lethal" },
-    -- Non-lethal poisons (mutually exclusive per slot)
-    { key="crippling",  name="Crippling Poison",  castSpell=3408,   cat="nonlethal" },
+    -- Non-lethal poisons (mutually exclusive per slot).
     { key="numbing",    name="Numbing Poison",    castSpell=5761,   cat="nonlethal" },
     { key="atrophic",   name="Atrophic Poison",   castSpell=381637, cat="nonlethal" },
+    { key="crippling",  name="Crippling Poison",  castSpell=3408,   cat="nonlethal" },
 }
 -- Dragon-Tempered Blades (381801): allows 2 of each poison category
 local DTB_SPELL_ID = 381801
@@ -1096,6 +1046,7 @@ end
 local defaults = {
     profile = {
         display = {
+            remindersEnabled = true,
             glowType = 0,
             glowColor = {r=1, g=0.776, b=0.376},
             scale = 1.0,
@@ -1177,10 +1128,7 @@ local iconAnchor
 local iconPool = {}     -- all created icon buttons
 local activeIcons = {}  -- currently visible icons
 
--- Separate anchor + pool for talent reminder icons (shown below main icons)
-local talentIconAnchor
-local talentIconPool = {}
-local talentActiveIcons = {}
+-- Talent icon state moved to EllesmereUIABR_TalentReminders.lua
 
 -------------------------------------------------------------------------------
 --  Combat Icon Pool — non-secure frames for visual-only display during combat.
@@ -1371,14 +1319,6 @@ local function FadeOutSecureIcons()
             if btn._eabrGlowWrapper then StopAllGlows(btn._eabrGlowWrapper); btn._eabrGlowWrapper:SetAlpha(0) end
         end
     end
-    for i = 1, #talentActiveIcons do
-        local btn = talentActiveIcons[i]
-        if btn then
-            btn:SetAlpha(0)
-            if btn._text then btn._text:SetAlpha(0) end
-            if btn._eabrGlowWrapper then StopAllGlows(btn._eabrGlowWrapper); btn._eabrGlowWrapper:SetAlpha(0) end
-        end
-    end
 end
 
 local function ApplyGlow(btn, glowType, cr, cg, cb, overrideSz)
@@ -1439,27 +1379,6 @@ local function GetOrCreateIcon(index)
     return btn
 end
 
-local function GetOrCreateTalentIcon(index)
-    if talentIconPool[index] then return talentIconPool[index] end
-    local btn = CreateFrame("Button", "EABR_TalentIcon"..index, talentIconAnchor, "SecureActionButtonTemplate")
-    btn:SetSize(ICON_SIZE, ICON_SIZE)
-    btn:RegisterForClicks("LeftButtonDown", "LeftButtonUp")
-    securecallfunction(btn.SetPassThroughButtons, btn, "RightButton", "MiddleButton")
-    btn:SetFrameStrata(GetStrata())
-    btn:Hide()
-    local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints(); icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    btn._icon = icon
-    local PP = EllesmereUI and EllesmereUI.PP
-    if PP then PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 7) end
-    local text = btn:CreateFontString(nil, "OVERLAY")
-    text:SetPoint("TOP", btn, "BOTTOM", 0, -2)
-    SetABRFont(text, ResolveFontPath(), 11)
-    text:SetTextColor(1, 1, 1, 1)
-    btn._text = text
-    talentIconPool[index] = btn
-    return btn
-end
 
 -- Configure a button for spell casting
 -- Set icon to a plain texture (no click action)
@@ -1578,12 +1497,6 @@ local function HideAllIcons()
         if btn then RemoveGlow(btn); btn._text:SetText(""); btn._icon:SetDesaturated(false); btn:Hide() end
     end
     wipe(activeIcons)
-    for i = 1, #talentActiveIcons do
-        local btn = talentActiveIcons[i]
-        if btn then RemoveGlow(btn); btn._text:SetText(""); btn:Hide() end
-    end
-    wipe(talentActiveIcons)
-    if talentIconAnchor then EllesmereUI.SetElementVisibility(talentIconAnchor, false) end
 end
 
 local function ResizeAnchorCentered(newW, newH)
@@ -1655,50 +1568,6 @@ local function ShowIcon(iconIdx, m)
     activeIcons[#activeIcons+1] = btn
 end
 
-local function LayoutTalentIcons()
-    local count = #talentActiveIcons; if count == 0 then return end
-    local p = db.profile.display
-    local spacing = 40
-    local baseScale = p.scale or 1.0
-    local sz = floor(ICON_SIZE * baseScale + 0.5)
-    local totalW = (count * sz) + ((count - 1) * spacing)
-    local startX = -totalW / 2
-    for i, btn in ipairs(talentActiveIcons) do
-        btn:SetSize(sz, sz)
-        btn:SetAlpha(p.opacity or 1.0)
-        btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", talentIconAnchor, "TOP", startX + (i - 1) * (sz + spacing), 0)
-    end
-end
-
-local function ShowTalentIcon(iconIdx, m)
-    local btn = GetOrCreateTalentIcon(iconIdx)
-    ApplySetup(btn, m)
-    local p = db.profile.display
-    local glowType = p.glowType or 0
-    local gc = p.glowColor or DEFAULT_GLOW_COLOR
-    local baseScale = p.scale or 1.0
-    local sz = floor(ICON_SIZE * baseScale + 0.5)
-    RemoveGlow(btn)
-    ApplyGlow(btn, glowType, gc.r, gc.g, gc.b, sz)
-    if p.showText then
-        local tc = p.textColor or DEFAULT_TEXT_COLOR
-        local fontPath = ResolveFontPath(p.textFont)
-        local textSize = p.textSize or 11
-        local xOff = p.textXOffset or 0
-        local yOff = p.textYOffset or -2
-        SetABRFont(btn._text, fontPath, textSize)
-        btn._text:ClearAllPoints()
-        btn._text:SetPoint("TOP", btn, "BOTTOM", xOff, yOff)
-        btn._text:SetTextColor(tc.r, tc.g, tc.b, 1)
-        btn._text:Show()
-    else
-        btn._text:SetText("")
-        btn._text:Hide()
-    end
-    btn:Show()
-    talentActiveIcons[#talentActiveIcons+1] = btn
-end
 
 local function CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
 local rb = db.profile.raidBuffs
@@ -1805,7 +1674,13 @@ if inInstance or au.showNonInstanced then
                     else
                         -- Use instance-specific buff list if available and in instance
                         local checkIDs = (inInstance and aura.instanceBuffIDs) or aura.buffIDs
-                        isMissing = not PlayerHasAuraByID(checkIDs)
+                        -- In PvP instances the aura API is restricted; fall back to shapeshift
+                        -- form index for form-based auras (e.g. Shadowform) where available.
+                        if InPvPInstance() and aura.shapeshiftIndex then
+                            isMissing = (GetShapeshiftForm() ~= aura.shapeshiftIndex)
+                        else
+                            isMissing = not PlayerHasAuraByID(checkIDs)
+                        end
                     end
                     if isMissing then
                         local e = AcquireEntry()
@@ -2235,121 +2110,11 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
 
 end
 
-local function CollectTalentReminders(talentMissing, inInstance, inKeystone, inCombat)
-if not inKeystone and not inCombat and inInstance then
-    local reminders = db.profile.talentReminders
-    if reminders and #reminders > 0 then
-        local currentInstance = GetInstanceInfo()
-        local currentMapID = C_Map.GetBestMapForUnit("player")
-        local _, playerClass = UnitClass("player")
-        local playerSpecID = GetSpecializationInfo(GetSpecialization() or 1)
-        if currentInstance then
-            for _, reminder in ipairs(reminders) do
-                -- One-time migration: stamp class/spec on old reminders
-                -- when the current character knows the talent.
-                -- Only runs on zone-in or talent change (guarded by caller).
-                if _B._talentMigPending and not reminder.class
-                    and (IsPlayerSpell(reminder.spellID) or IsSpellKnown(reminder.spellID)) then
-                    _B._talentMigStamped = true
-                    reminder.class = playerClass
-                    -- Determine class vs spec talent
-                    if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
-                        local cfgID = C_ClassTalents.GetActiveConfigID()
-                        if cfgID and C_Traits and C_Traits.GetConfigInfo then
-                            local cfgInfo = C_Traits.GetConfigInfo(cfgID)
-                            if cfgInfo and cfgInfo.treeIDs then
-                                for _, treeID in ipairs(cfgInfo.treeIDs) do
-                                    local nodes = C_Traits.GetTreeNodes(treeID)
-                                    if nodes then for _, nodeID in ipairs(nodes) do
-                                        local ni = C_Traits.GetNodeInfo(cfgID, nodeID)
-                                        if ni and ni.entryIDs then for _, eID in ipairs(ni.entryIDs) do
-                                            local ei = C_Traits.GetEntryInfo(cfgID, eID)
-                                            if ei and ei.definitionID then
-                                                local di = C_Traits.GetDefinitionInfo(ei.definitionID)
-                                                if di and di.spellID == reminder.spellID then
-                                                    if ni.isClassNode then
-                                                        reminder.talentSource = "class"
-                                                    else
-                                                        reminder.talentSource = "spec"
-                                                        reminder.specID = playerSpecID
-                                                    end
-                                                end
-                                            end
-                                        end end
-                                    end end
-                                end
-                            end
-                        end
-                    end
-                end
-                -- Skip reminders for a different class
-                if reminder.class and reminder.class ~= playerClass then
-                    -- not this class, skip entirely
-                -- Skip spec-specific reminders for a different spec
-                elseif reminder.talentSource == "spec" and reminder.specID
-                    and reminder.specID ~= playerSpecID then
-                    -- not this spec, skip entirely
-                else
-                -- Build name set cache once per reminder
-                if not reminder._nameSet and reminder.zoneNames then
-                    local s = {}
-                    for _, zn in ipairs(reminder.zoneNames) do s[zn] = true end
-                    reminder._nameSet = s
-                end
-
-                -- Match by map ID first (multilanguage-safe), fall back to name
-                local zoneMatch = false
-                if currentMapID then
-                    local mapZone = TALENT_REMINDER_ZONE_BY_MAPID[currentMapID]
-                    if mapZone and reminder._nameSet then
-                        zoneMatch = reminder._nameSet[mapZone.name] or false
-                    end
-                end
-                if not zoneMatch and reminder._nameSet then
-                    zoneMatch = reminder._nameSet[currentInstance] or false
-                end
-
-                local hasTalent = IsPlayerSpell(reminder.spellID) or IsSpellKnown(reminder.spellID)
-
-                if zoneMatch and not hasTalent then
-                    local e = AcquireEntry()
-                    e.mode = "texture"
-                    e.texture = Tex(reminder.spellID) or 134400
-                    e.spellID = reminder.spellID
-                    e.label = reminder.spellName or "Unknown"
-                    e.cat = "talent"; e.scale = 1.0
-                    talentMissing[#talentMissing+1] = e
-                elseif not zoneMatch and reminder.showNotNeeded and hasTalent then
-                    local e = AcquireEntry()
-                    e.mode = "texture"
-                    e.texture = Tex(reminder.spellID) or 134400
-                    e.spellID = reminder.spellID
-                    e.label = (reminder.spellName or "Unknown") .. " (N/N)"
-                    e.cat = "talent"; e.scale = 1.0
-                    talentMissing[#talentMissing+1] = e
-                end
-                end -- class check
-            end
-            _B._talentMigPending = false
-            if _B._talentMigStamped then
-                _B._talentMigStamped = false
-                local stillNeeded = false
-                for _, r in ipairs(reminders) do
-                    if not r.class then stillNeeded = true; break end
-                end
-                if not stillNeeded then
-                    _B._talentMigNeeded = false
-                end
-            end
-        end
-    end
-end
-
-end
+-- CollectTalentReminders moved to EllesmereUIABR_TalentReminders.lua
 
 -- Reusable tables wiped each Refresh() call to avoid per-call allocation.
 -- Wrapped to save file-scope local slots (200 limit).
-local _refreshMissing, _refreshTalentMissing, _wasResting = {}, {}, false
+local _refreshMissing, _wasResting = {}, false
 
 local function Refresh()
     _cachedOutline = nil
@@ -2403,16 +2168,20 @@ local function Refresh()
     local missing = _refreshMissing
     wipe(missing)
 
+    local remindersOn = db.profile.display.remindersEnabled ~= false
+
     ---------------------------------------------------------------------------
     --  1) Raid Buffs
     ---------------------------------------------------------------------------
-    CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
+    if remindersOn then
+        CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
+    end
     if _memProbe then _m2 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
     --  2) Auras (suppressed in M+ keystones)
     ---------------------------------------------------------------------------
-    if not inKeystone and not inCombat then
+    if remindersOn and not inKeystone and not inCombat then
         CollectAuras(missing, playerClass, specID, inInstance, inCombat)
     end
     if _memProbe then _m3 = collectgarbage("count") end
@@ -2420,7 +2189,7 @@ local function Refresh()
     ---------------------------------------------------------------------------
     --  3) Consumables (suppressed in M+ keystones, in combat, and in PvP)
     ---------------------------------------------------------------------------
-    if not inKeystone and not inCombat and not inPvP then
+    if remindersOn and not inKeystone and not inCombat and not inPvP then
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
     end
     if _memProbe then _m4 = collectgarbage("count") end
@@ -2429,7 +2198,7 @@ local function Refresh()
     --  4) Pet Reminders (combat-safe: UnitExists/UnitIsDead are not restricted)
     --  Suppressed for petless specs, Grimoire of Sacrifice, etc.
     ---------------------------------------------------------------------------
-    if PET_CLASSES[playerClass] then
+    if remindersOn and PET_CLASSES[playerClass] then
         local co = db.profile.consumables
         if co and co.enabled and co.enabled.pet ~= false then
             local suppress = false
@@ -2479,14 +2248,7 @@ local function Refresh()
         end
     end
 
-    ---------------------------------------------------------------------------
-    --  5) Talent Reminders (suppressed in M+ keystones and always in combat)
-    ---------------------------------------------------------------------------
-    local talentMissing = _refreshTalentMissing
-    wipe(talentMissing)
-    if not inKeystone and not inCombat then
-        CollectTalentReminders(talentMissing, inInstance, inKeystone, inCombat)
-    end
+    -- Talent reminders handled by EllesmereUIABR_TalentReminders.lua
     if _memProbe then _m5 = collectgarbage("count") end
 
 
@@ -2572,15 +2334,6 @@ local function Refresh()
         end
     else
         EllesmereUI.SetElementVisibility(iconAnchor, false)
-    end
-
-    -- Talent reminders on a separate anchor below the main icons
-    if #talentMissing > 0 and talentIconAnchor then
-        for i, m in ipairs(talentMissing) do
-            ShowTalentIcon(i, m)
-        end
-        LayoutTalentIcons()
-        EllesmereUI.SetElementVisibility(talentIconAnchor, true)
     end
 
     -- MEMORY PROBE REPORT (temporary)
@@ -3078,16 +2831,7 @@ function EABR:OnEnable()
     -- Expose globals for options
     _G._EABR_AceDB = db
 
-    -- Check if any talent reminders need class/spec migration
-    local reminders = db.profile and db.profile.talentReminders
-    if reminders then
-        for _, r in ipairs(reminders) do
-            if not r.class then
-                _B._talentMigNeeded = true
-                break
-            end
-        end
-    end
+    -- Talent reminder migration handled by EllesmereUIABR_TalentReminders.lua
 
     _G._EABR_RequestRefresh = RequestRefresh
     _G._EABR_HideAllIcons = HideAllIcons
@@ -3113,7 +2857,7 @@ function EABR:OnEnable()
     _G._EABR_FLASK_ITEMS = FLASK_ITEMS
     _G._EABR_FOOD_ITEMS = FOOD_ITEMS
     _G._EABR_WEAPON_ENCHANT_CHOICES = WEAPON_ENCHANT_CHOICES
-    _G._EABR_TALENT_REMINDER_ZONES = TALENT_REMINDER_ZONES
+    -- _EABR_TALENT_REMINDER_ZONES set by EllesmereUIABR_TalentReminders.lua
 
     local STRATA_VALUES = {
         BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium",
@@ -3169,22 +2913,14 @@ function EABR:OnEnable()
     cursorAnchor:Show()
     EllesmereUI.SetElementVisibility(cursorAnchor, false)
 
-    -- Create talent reminder anchor (offset below main anchor)
-    talentIconAnchor = CreateFrame("Frame", "EABR_TalentAnchor", iconAnchor)
-    talentIconAnchor:SetSize(1, 1)
-    talentIconAnchor:SetFrameStrata(GetStrata())
-    talentIconAnchor:EnableMouse(false)
-    talentIconAnchor:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
-    talentIconAnchor:Show()
-    EllesmereUI.SetElementVisibility(talentIconAnchor, false)
+    -- Create talent reminder anchor (independent of iconAnchor so parent alpha doesn't hide it)
+    -- Talent anchor created by EllesmereUIABR_TalentReminders.lua
 
     local function ApplyStrata()
         local strata = GetStrata()
         iconAnchor:SetFrameStrata(strata)
         combatAnchor:SetFrameStrata(strata)
-        talentIconAnchor:SetFrameStrata(strata)
         for _, btn in pairs(iconPool) do btn:SetFrameStrata(strata) end
-        for _, btn in pairs(talentIconPool) do btn:SetFrameStrata(strata) end
         for _, f in pairs(combatIconPool) do f:SetFrameStrata(strata) end
     end
     _G._EABR_ApplyStrata = ApplyStrata
@@ -3300,7 +3036,12 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
+        -- Only flag Hunter's Mark needed if the target doesn't already have it
         _huntersMarkNeeded = true
+        if C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID
+            and UnitExists("target") and C_UnitAuras.GetUnitAuraBySpellID("target", 257284) then
+            _huntersMarkNeeded = false
+        end
         -- Hide secure buttons BEFORE setting combat flag (HideAllIcons
         -- checks InCombat and returns early if true). PLAYER_REGEN_DISABLED
         -- fires before InCombatLockdown() returns true, so Hide() is safe.
@@ -3337,14 +3078,6 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
             RequestRefresh()
         end
         return
-    end
-
-    if _B._talentMigNeeded then
-        if e == "PLAYER_ENTERING_WORLD" or e == "ZONE_CHANGED_NEW_AREA"
-           or e == "TRAIT_CONFIG_UPDATED" or e == "PLAYER_TALENT_UPDATE"
-           or e == "PLAYER_SPECIALIZATION_CHANGED" or e == "SPELLS_CHANGED" then
-            _B._talentMigPending = true
-        end
     end
 
     if e == "PLAYER_ENTERING_WORLD" then

@@ -393,7 +393,6 @@ qolFrame:SetScript("OnEvent", function(self)
         EllesmereUI._applyScreenshotStatus = ApplyScreenshotStatus
 
         local ssFrame = CreateFrame("Frame")
-        ssFrame:RegisterEvent("SCREENSHOT_STARTED")
         ssFrame:RegisterEvent("SCREENSHOT_SUCCEEDED")
         ssFrame:RegisterEvent("SCREENSHOT_FAILED")
         ssFrame:SetScript("OnEvent", function()
@@ -1514,7 +1513,7 @@ do
         durWarnOverlay = CreateFrame("Frame", "EUI_DurabilityWarning", UIParent)
         durWarnOverlay:SetSize(400, 40)
         durWarnOverlay:SetFrameStrata("DIALOG")
-        durWarnOverlay:SetFrameLevel(500)
+        durWarnOverlay:SetFrameLevel(99)
         durWarnOverlay:EnableMouse(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")

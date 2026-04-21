@@ -708,9 +708,17 @@ initFrame:SetScript("OnEvent", function(self)
         local displaySection
         displaySection, h = W:SectionHeader(parent, SECTION_DISPLAY, y);  y = y - h
 
-        -- Glow Type (dropdown + inline color swatch) | Show Text (inline color swatch + cog)
-        local displayFirstRow
-        displayFirstRow, h = W:DualRow(parent, y,
+        -- Row 1: Enable Reminders | Glow Type (+ inline swatch)
+        local row1
+        row1, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable AuraBuff Reminders",
+              tooltip="Master toggle for all aura, buff, and consumable reminders. Talent reminders are not affected.",
+              getValue=function() local d = DDB(); return d and d.remindersEnabled ~= false end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.remindersEnabled = v
+                  RefreshAll()
+                  EllesmereUI:RefreshPage()
+              end },
             { type="dropdown", text="Glow Type",
               values=_G._EABR_GLOW_VALUES or {[0]="None"},
               order=_G._EABR_GLOW_ORDER or {0},
@@ -719,21 +727,12 @@ initFrame:SetScript("OnEvent", function(self)
                   local d = DDB(); if not d then return end; d.glowType = v
                   RefreshAll(); UpdatePreviewHeader()
                   EllesmereUI:RefreshPage()
-              end },
-            { type="toggle", text="Show Text",
-              getValue=function() local d = DDB(); return d and d.showText end,
-              setValue=function(v)
-                  local d = DDB(); if not d then return end; d.showText = v
-                  RefreshAll()
-                  UpdatePreviewHeader()
-                  EllesmereUI:RefreshPage()
               end }
         );  y = y - h
-        row = displayFirstRow
 
-        -- Inline color swatch on Glow Type (left)
+        -- Inline color swatch on Glow Type (right of row 1)
         do
-            local rgn = row._leftRegion
+            local rgn = row1._rightRegion
             local swatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel()+5,
                 function()
                     local d = DDB()
@@ -772,9 +771,29 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateSwatchDisabled)
         end
 
-        -- Inline color swatch + cog on Show Text (right of row 1)
+        -- Row 2: Show Text (+ inline swatch + cog) | Scale
+        local row2
+        row2, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Text",
+              getValue=function() local d = DDB(); return d and d.showText end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.showText = v
+                  RefreshAll()
+                  UpdatePreviewHeader()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Scale", min=0.5, max=3.0, step=0.05,
+              getValue=function() local d = DDB(); return d and d.scale or 1.0 end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.scale = v
+                  RefreshAll()
+                  UpdatePreviewHeader()
+              end }
+        );  y = y - h
+
+        -- Inline color swatch + cog on Show Text (left of row 2)
         do
-            local rgn = row._rightRegion
+            local rgn = row2._leftRegion
             local swatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel()+5,
                 function()
                     local d = DDB()
@@ -846,28 +865,24 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateTextInlinesDisabled)
         end
 
-        -- Scale | Icon Spacing (inline DIRECTIONS cog, Y offset only)
-        local displaySecondRow
-        displaySecondRow, h = W:DualRow(parent, y,
-            { type="slider", text="Scale", min=0.5, max=3.0, step=0.05,
-              getValue=function() local d = DDB(); return d and d.scale or 1.0 end,
-              setValue=function(v)
-                  local d = DDB(); if not d then return end; d.scale = v
-                  RefreshAll()
-                  UpdatePreviewHeader()
-              end },
+        -- Row 3: Icon Spacing (+ directions cog) | Attach Important Buffs to Cursor
+        local row3
+        row3, h = W:DualRow(parent, y,
             { type="slider", text="Icon Spacing", min=0, max=50, step=1,
               getValue=function() local d = DDB(); return d and d.iconSpacing or 8 end,
               setValue=function(v)
                   local d = DDB(); if not d then return end; d.iconSpacing = v
                   RefreshAll()
                   RelayoutPreviewIcons()
-              end }
+              end },
+            { type="toggle", text="Attach Important Buffs to Cursor",
+              getValue=function() local d = DDB(); return d and d.cursorAttach end,
+              setValue=function(v) local d = DDB(); if not d then return end; d.cursorAttach = v; RefreshAll() end }
         );  y = y - h
 
-        -- Inline DIRECTIONS cog on Icon Spacing (right) for Y offset only
+        -- Inline DIRECTIONS cog on Icon Spacing (left of row 3) for Y offset
         do
-            local rgn = displaySecondRow._rightRegion
+            local rgn = row3._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Layout Settings",
                 rows = {
@@ -880,21 +895,14 @@ initFrame:SetScript("OnEvent", function(self)
             MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
         end
 
-        -- Attach Important Buffs to Cursor | Opacity
+        -- Row 4: Opacity | Frame Strata
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Attach Important Buffs to Cursor",
-              getValue=function() local d = DDB(); return d and d.cursorAttach end,
-              setValue=function(v) local d = DDB(); if not d then return end; d.cursorAttach = v; RefreshAll() end },
             { type="slider", text="Opacity", min=0, max=1, step=0.05,
               getValue=function() local d = DDB(); return d and d.opacity or 1 end,
               setValue=function(v)
                   local d = DDB(); if not d then return end; d.opacity = v
                   RefreshAll(); UpdatePreviewHeader()
-              end }
-        );  y = y - h
-
-        -- Frame Strata
-        _, h = W:DualRow(parent, y,
+              end },
             { type="dropdown", text="Frame Strata",
               values=_G._EABR_STRATA_VALUES or {MEDIUM="Medium"},
               order=_G._EABR_STRATA_ORDER or {"MEDIUM"},
@@ -902,8 +910,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   local d = DDB(); if not d then return end; d.frameStrata = v
                   if _G._EABR_ApplyStrata then _G._EABR_ApplyStrata() end
-              end },
-            { type="label", text="" }
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -1313,7 +1320,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         --  Talent enumeration helpers (live from C_Traits)
         -----------------------------------------------------------------------
-        local function GetTalentList(treeType)
+        local function GetAllTalents()
             local talents = {}
             local configID = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
             if not configID then return talents end
@@ -1323,38 +1330,12 @@ initFrame:SetScript("OnEvent", function(self)
             local nodes = C_Traits.GetTreeNodes(treeID)
             if not nodes then return talents end
 
-            -- Gather all node posX values to find the class/spec split point
-            -- Class nodes are on the left half, spec nodes on the right half
-            local nodeInfos = {}
-            local allPosX = {}
+            local seenSpells = {}
             for _, nodeID in ipairs(nodes) do
                 local nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
-                if nodeInfo and nodeInfo.ID and nodeInfo.ID > 0 and nodeInfo.entryIDs and #nodeInfo.entryIDs > 0 then
-                    nodeInfos[#nodeInfos + 1] = nodeInfo
-                    allPosX[#allPosX + 1] = nodeInfo.posX
-                end
-            end
-
-            -- Find the gap between class and spec trees
-            -- Sort posX values and find the largest gap
-            table.sort(allPosX)
-            local splitX = 0
-            local maxGap = 0
-            for i = 2, #allPosX do
-                local gap = allPosX[i] - allPosX[i-1]
-                if gap > maxGap then
-                    maxGap = gap
-                    splitX = (allPosX[i-1] + allPosX[i]) / 2
-                end
-            end
-
-            local seenSpells = {}
-            for _, nodeInfo in ipairs(nodeInfos) do
-                local isClassNode = nodeInfo.posX < splitX
-                -- Skip hero talent subtree nodes
-                if nodeInfo.subTreeID then
-                    -- skip
-                elseif (treeType == "class" and isClassNode) or (treeType == "spec" and not isClassNode) then
+                if nodeInfo and nodeInfo.ID and nodeInfo.ID > 0
+                    and nodeInfo.entryIDs and #nodeInfo.entryIDs > 0
+                    and not nodeInfo.subTreeID then
                     for _, entryID in ipairs(nodeInfo.entryIDs) do
                         local entryInfo = C_Traits.GetEntryInfo(configID, entryID)
                         if entryInfo and entryInfo.definitionID then
@@ -1388,7 +1369,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if z then names[#names + 1] = z.name end
                 end
             end
-            if #names == 0 then return "Select Dungeon/Raid" end
+            if #names == 0 then return "Select Dungeon/Raid/PvP Zone" end
             table.sort(names)
             return table.concat(names, ", ")
         end
@@ -1419,7 +1400,7 @@ initFrame:SetScript("OnEvent", function(self)
         zoneDDLbl:SetMaxLines(1)
         zoneDDLbl:SetJustifyH("LEFT")
         zoneDDLbl:SetWordWrap(false)
-        zoneDDLbl:SetText("Select Dungeon/Raid")
+        zoneDDLbl:SetText("Select Dungeon/Raid/PvP Zone")
 
         local zoneArrow = EllesmereUI.MakeDropdownArrow(zoneDDBtn, 14, EllesmereUI.PanelPP)
         zoneDDLbl:SetPoint("LEFT", zoneDDBtn, "LEFT", 14, 0)
@@ -1697,60 +1678,24 @@ initFrame:SetScript("OnEvent", function(self)
 
         y = y - ZONE_ROW_H
 
-        -- Row 2: Class Talents | Spec Talents (standard DualRow dropdowns)
-        local classTalents, specTalents = {}, {}
+        -- Row 2: Single talent dropdown
+        local allTalents = GetAllTalents()
 
-        local function RebuildTalentLists()
-            classTalents = GetTalentList("class")
-            specTalents = GetTalentList("spec")
-        end
-        RebuildTalentLists()
-
-        local selectedClassTalent = 0
-        local selectedSpecTalent = 0
-
-        -- Forward references for cross-dropdown label updates
-        local _classDDLbl, _specDDLbl
-
-        -- Build talent value tables for standard dropdowns
-        local classTalentValues, classTalentOrder = {}, {}
-        local specTalentValues, specTalentOrder = {}, {}
-
-        local function RebuildTalentDropdownValues()
-            wipe(classTalentValues); wipe(classTalentOrder)
-            wipe(specTalentValues); wipe(specTalentOrder)
-            classTalentValues[0] = "Select a talent..."
-            specTalentValues[0] = "Select a talent..."
-            classTalentOrder[1] = 0
-            specTalentOrder[1] = 0
-            for _, t in ipairs(classTalents) do
-                classTalentValues[t.spellID] = t.name
-                classTalentOrder[#classTalentOrder + 1] = t.spellID
-            end
-            for _, t in ipairs(specTalents) do
-                specTalentValues[t.spellID] = t.name
-                specTalentOrder[#specTalentOrder + 1] = t.spellID
-            end
-        end
-        RebuildTalentDropdownValues()
-
-        -- Talent dropdowns: two side-by-side with labels above
-        local TALENT_DD_W = 200
+        -- Talent dropdown: single centered
+        local TALENT_DD_W = 350
         local TALENT_DD_H = 30
         local TALENT_LABEL_H = 16
         local TALENT_GAP_Y = 6
-        local TALENT_GAP_X = 50
         local TALENT_ROW_H = TALENT_LABEL_H + TALENT_GAP_Y + TALENT_DD_H + 12
         local talentRow = CreateFrame("Frame", nil, parent)
         local talentRowW = parent:GetWidth() - CONTENT_PAD * 2
         PP.Size(talentRow, talentRowW, TALENT_ROW_H)
         PP.Point(talentRow, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, y)
 
-        local totalTalentW = TALENT_DD_W * 2 + TALENT_GAP_X
-        local talentStartX = (talentRowW - totalTalentW) / 2
+        local talentStartX = (talentRowW - TALENT_DD_W) / 2
 
         -- Helper: build a talent dropdown with search inside the popup
-        local function MakeTalentDropdown(parentRow, xOff, labelText, allTalents, valuesTable, source, otherLblRef)
+        local function MakeTalentDropdown(parentRow, xOff, labelText, allTalents)
             -- Label
             local lbl = parentRow:CreateFontString(nil, "OVERLAY")
             lbl:SetFont(fontPath, 11, GetABROptOutline())
@@ -1846,19 +1791,9 @@ initFrame:SetScript("OnEvent", function(self)
                 item._talentName = t.name
                 item._spellID = t.spellID
                 item:SetScript("OnClick", function()
-                    if source == "class" then
-                        selectedClassTalent = t.spellID
-                        selectedSpecTalent = 0
-                        selectedTalentSource = "class"
-                        if otherLblRef[1] then otherLblRef[1]:SetText("Select a talent...") end
-                    else
-                        selectedSpecTalent = t.spellID
-                        selectedClassTalent = 0
-                        selectedTalentSource = "spec"
-                        if otherLblRef[1] then otherLblRef[1]:SetText("Select a talent...") end
-                    end
                     selectedTalentSpellID = t.spellID
                     selectedTalentName = t.name
+                    selectedTalentSource = nil
                     btnLbl:SetText(t.name)
                     btnLbl:SetTextColor(1, 1, 1, 0.9)
                     popup:Hide()
@@ -2025,22 +1960,10 @@ initFrame:SetScript("OnEvent", function(self)
             return btn, btnLbl
         end
 
-        local _specLblRef = {}
-        local _classLblRef = {}
-
-        -- Class Talent dropdown
-        local classDDBtn, classDDLbl = MakeTalentDropdown(
-            talentRow, talentStartX, "Class Talent",
-            classTalents, classTalentValues, "class", _specLblRef)
-        _classLblRef[1] = classDDLbl
-        _classDDLbl = classDDLbl
-
-        -- Spec Talent dropdown
-        local specDDBtn, specDDLbl = MakeTalentDropdown(
-            talentRow, talentStartX + TALENT_DD_W + TALENT_GAP_X, "Spec Talent",
-            specTalents, specTalentValues, "spec", _classLblRef)
-        _specLblRef[1] = specDDLbl
-        _specDDLbl = specDDLbl
+        -- Single talent dropdown
+        local talentDDBtn, talentDDLbl = MakeTalentDropdown(
+            talentRow, talentStartX, "Select Talent",
+            allTalents)
 
         y = y - TALENT_ROW_H
 
@@ -2231,6 +2154,7 @@ initFrame:SetScript("OnEvent", function(self)
                     table.remove(p2.talentReminders, capturedIdx)
                     RebuildReminderList()
                     RefreshAll()
+                    if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
                 end)
 
                 -- Zone name (after delete icon, truncated to fit left portion)
@@ -2319,6 +2243,7 @@ initFrame:SetScript("OnEvent", function(self)
                     toggleCheck:SetShown(nowChecked)
                     ApplyToggleVisual(nowChecked, true)
                     RefreshAll()
+                    if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
                 end
 
                 toggleHit:SetScript("OnClick", DoToggle)
@@ -2402,28 +2327,25 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             local _, playerClass = UnitClass("player")
-            local specID = GetSpecializationInfo(GetSpecialization() or 1)
             p.talentReminders[#p.talentReminders + 1] = {
                 zoneNames = selZoneNames,
                 spellID = selectedTalentSpellID,
                 spellName = selectedTalentName,
                 showNotNeeded = false,
                 class = playerClass,
-                talentSource = selectedTalentSource,  -- "class" or "spec"
-                specID = (selectedTalentSource == "spec") and specID or nil,
             }
 
             -- Reset selection
             wipe(selectedZoneMap)
-            selectedClassTalent = 0
-            selectedSpecTalent = 0
             selectedTalentSpellID = nil
             selectedTalentName = nil
             selectedTalentSource = nil
-            zoneDDLbl:SetText("Select Dungeon/Raid")
+            zoneDDLbl:SetText("Select Dungeon/Raid/PvP Zone")
+            if talentDDLbl then talentDDLbl:SetText("Select a talent..."); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
 
             RebuildReminderList()
             RefreshAll()
+            if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
         end)
 
         -- Spacer before list

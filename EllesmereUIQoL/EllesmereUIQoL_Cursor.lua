@@ -259,6 +259,7 @@ local function ApplyTrail()
     end
 end
 
+local _unlockHidGCD, _unlockHidCast
 local function OnUpdate(_, elapsed)
     local s = UIParent:GetEffectiveScale()
     local x, y = GetCursorPosition()
@@ -266,6 +267,18 @@ local function OnUpdate(_, elapsed)
     if x ~= lastX or y ~= lastY then
         lastX, lastY = x, y
         f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+    end
+    -- Hide attached GCD/Cast circles during unlock mode
+    if EllesmereUI._unlockActive then
+        if gcdAttached and gcdRoot and gcdRoot:IsShown() then
+            gcdRoot:Hide(); _unlockHidGCD = true
+        end
+        if castAttached and castRoot and castRoot:IsShown() then
+            castRoot:Hide(); _unlockHidCast = true
+        end
+    else
+        if _unlockHidGCD and gcdRoot then gcdRoot:Show(); _unlockHidGCD = nil end
+        if _unlockHidCast and castRoot then castRoot:Show(); _unlockHidCast = nil end
     end
 end
 
@@ -466,7 +479,7 @@ local function ApplyGCDCircle()
     if g.instanceOnly and not InRealInstancedContent() then
         gcdRoot:Hide()
     end
-    if attached then
+    if attached and not EllesmereUI._unlockActive then
         -- When the cursor circle is visible, anchor directly to it.
         -- When the cursor circle is hidden (e.g. instance-only outside an instance),
         -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
@@ -829,7 +842,7 @@ local function ApplyCastCircle()
     if c.instanceOnly and not InRealInstancedContent() then
         castRoot:Hide()
     end
-    if attached then
+    if attached and not EllesmereUI._unlockActive then
         -- When the cursor circle is visible, anchor directly to it.
         -- When the cursor circle is hidden (e.g. instance-only outside an instance),
         -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.

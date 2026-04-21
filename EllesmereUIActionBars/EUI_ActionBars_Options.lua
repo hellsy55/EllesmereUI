@@ -2670,6 +2670,53 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
+            -- Row 5: Show Item Rank | (empty)
+            local rankRow
+            rankRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Show Item Rank",
+                  tooltip="Shows the consumable rank (quality) diamond icon on action buttons.",
+                  getValue=function() return SGet("showRankIcon") or false end,
+                  setValue=function(v)
+                      SSet("showRankIcon", v)
+                      if _G._EAB_Apply then _G._EAB_Apply() end
+                  end },
+                { type="label", text="" }
+            );  y = y - h
+            do
+                local rgn = rankRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Show Item Rank to all Bars",
+                    onClick = function()
+                        local v = SB().showRankIcon or false
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            EAB.db.profile.bars[key].showRankIcon = v
+                        end
+                        EAB:ApplyAll(); EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SB().showRankIcon or false
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].showRankIcon or false) ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SB().showRankIcon or false
+                            for _, key in ipairs(checkedKeys) do
+                                EAB.db.profile.bars[key].showRankIcon = v
+                            end
+                            EAB:ApplyAll(); EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+
             _, h = W:Spacer(parent, y, 20);  y = y - h
 
             -------------------------------------------------------------------

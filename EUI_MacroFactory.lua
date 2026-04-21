@@ -52,7 +52,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         {
             name = "EUI_Health",
             icon = "Interface\\Icons\\inv_potion_131",
-            label = "Health Pot",
+            label = "Health / Recuperate (Combat Based)",
             fixedBody = "/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
             fixedTooltip = "item:241304",
         },

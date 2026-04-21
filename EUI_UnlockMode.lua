@@ -2639,97 +2639,68 @@ local function CreateGrid(parent)
         local baseA = GridBaseAlpha()
         local centerA = GridCenterAlpha()
 
-        -- Vertical lines (centered on screen center, extending outward)
-        local centerX = floor(w / 2)
-        local centerY = floor(h / 2)
-        -- Lines left of center
-        local x = centerX - GRID_SPACING
-        while x > 0 do
+        -- Pixel-perfect: use PP.mult so lines are exactly 1 physical pixel
+        -- and spacing aligns to the physical pixel grid.
+        local mult = PP and PP.mult or 1
+        local lineW = mult
+        local spacing = GRID_SPACING * mult
+
+        -- Snap helper: round a UI coordinate to the nearest physical pixel
+        local function snap(v) return floor(v / mult + 0.5) * mult end
+
+        local centerX = snap(w / 2)
+        local centerY = snap(h / 2)
+
+        local function MakeLine(isVert, pos)
             idx = idx + 1
             local tex = self._lines[idx]
             if not tex then
                 tex = self:CreateTexture(nil, "BACKGROUND", nil, -7)
+                if tex.SetSnapToPixelGrid then
+                    tex:SetSnapToPixelGrid(false)
+                    tex:SetTexelSnappingBias(0)
+                end
                 self._lines[idx] = tex
             end
             tex:SetColorTexture(ar, ag, ab, baseA)
             tex._baseAlpha = baseA
             tex._isWhite = false
-            tex._isVert = true
-            tex._pos = x
+            tex._isVert = isVert
+            tex._pos = pos
             tex:ClearAllPoints()
-            tex:SetSize(1, h)
-            tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, 0)
-            tex:Show()
-            x = x - GRID_SPACING
-        end
-        -- Lines right of center
-        x = centerX + GRID_SPACING
-        while x < w do
-            idx = idx + 1
-            local tex = self._lines[idx]
-            if not tex then
-                tex = self:CreateTexture(nil, "BACKGROUND", nil, -7)
-                self._lines[idx] = tex
+            if isVert then
+                tex:SetSize(lineW, h)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", pos, 0)
+            else
+                tex:SetSize(w, lineW)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -pos)
             end
-            tex:SetColorTexture(ar, ag, ab, baseA)
-            tex._baseAlpha = baseA
-            tex._isWhite = false
-            tex._isVert = true
-            tex._pos = x
-            tex:ClearAllPoints()
-            tex:SetSize(1, h)
-            tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, 0)
             tex:Show()
-            x = x + GRID_SPACING
         end
 
-        -- Horizontal lines (centered on screen center, extending outward)
-        -- Note: y is distance from top
-        local y = centerY - GRID_SPACING
-        while y > 0 do
-            idx = idx + 1
-            local tex = self._lines[idx]
-            if not tex then
-                tex = self:CreateTexture(nil, "BACKGROUND", nil, -7)
-                self._lines[idx] = tex
-            end
-            tex:SetColorTexture(ar, ag, ab, baseA)
-            tex._baseAlpha = baseA
-            tex._isWhite = false
-            tex._isVert = false
-            tex._pos = y
-            tex:ClearAllPoints()
-            tex:SetSize(w, 1)
-            tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -y)
-            tex:Show()
-            y = y - GRID_SPACING
-        end
-        y = centerY + GRID_SPACING
-        while y < h do
-            idx = idx + 1
-            local tex = self._lines[idx]
-            if not tex then
-                tex = self:CreateTexture(nil, "BACKGROUND", nil, -7)
-                self._lines[idx] = tex
-            end
-            tex:SetColorTexture(ar, ag, ab, baseA)
-            tex._baseAlpha = baseA
-            tex._isWhite = false
-            tex._isVert = false
-            tex._pos = y
-            tex:ClearAllPoints()
-            tex:SetSize(w, 1)
-            tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -y)
-            tex:Show()
-            y = y + GRID_SPACING
-        end
+        -- Vertical lines extending outward from center
+        local x = centerX - spacing
+        while x > 0 do MakeLine(true, snap(x)); x = x - spacing end
+        x = centerX + spacing
+        while x < w do MakeLine(true, snap(x)); x = x + spacing end
 
+        -- Horizontal lines extending outward from center
+        local y = centerY - spacing
+        while y > 0 do MakeLine(false, snap(y)); y = y - spacing end
+        y = centerY + spacing
+        while y < h do MakeLine(false, snap(y)); y = y + spacing end
+
+        -- Center crosshair: full-length accent lines at screen center
         -- Center crosshair: full-length accent lines at screen center
         for _, axis in ipairs({"V", "H"}) do
             idx = idx + 1
             local tex = self._lines[idx]
             if not tex then
                 tex = self:CreateTexture(nil, "BACKGROUND", nil, -6)
+                if tex.SetSnapToPixelGrid then
+                    tex:SetSnapToPixelGrid(false)
+                    tex:SetTexelSnappingBias(0)
+                end
                 self._lines[idx] = tex
             end
             tex:SetColorTexture(ar, ag, ab, centerA)
@@ -2739,24 +2710,28 @@ local function CreateGrid(parent)
             tex._pos = 0
             tex:ClearAllPoints()
             if axis == "V" then
-                tex:SetSize(1, h)
-                tex:SetPoint("TOP", UIParent, "TOP", 0, 0)
+                tex:SetSize(lineW, h)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", centerX, 0)
             else
-                tex:SetSize(w, 1)
-                tex:SetPoint("LEFT", UIParent, "LEFT", 0, 0)
+                tex:SetSize(w, lineW)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -centerY)
             end
             tex:Show()
         end
 
         -- White crosshair pip at dead center (short lines forming a + shape)
         -- Always 50% alpha regardless of grid brightness mode
-        local CROSS_ARM = 20  -- pixels per arm from center
+        local CROSS_ARM = 20
         local CROSS_ALPHA = 0.5
         for _, axis in ipairs({"V", "H"}) do
             idx = idx + 1
             local tex = self._lines[idx]
             if not tex then
                 tex = self:CreateTexture(nil, "BACKGROUND", nil, -5)
+                if tex.SetSnapToPixelGrid then
+                    tex:SetSnapToPixelGrid(false)
+                    tex:SetTexelSnappingBias(0)
+                end
                 self._lines[idx] = tex
             end
             tex:SetColorTexture(1, 1, 1, CROSS_ALPHA)
@@ -2766,11 +2741,11 @@ local function CreateGrid(parent)
             tex._pos = 0
             tex:ClearAllPoints()
             if axis == "V" then
-                tex:SetSize(1, CROSS_ARM * 2)
-                tex:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                tex:SetSize(lineW, CROSS_ARM * 2)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", centerX, -(centerY - CROSS_ARM))
             else
-                tex:SetSize(CROSS_ARM * 2, 1)
-                tex:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                tex:SetSize(CROSS_ARM * 2, lineW)
+                tex:SetPoint("TOPLEFT", UIParent, "TOPLEFT", centerX - CROSS_ARM, -centerY)
             end
             tex:Show()
         end
@@ -7579,6 +7554,9 @@ local function DoClose()
     isUnlocked = false
     EllesmereUI._unlockActive = false
     EllesmereUI._unlockModeActive = false
+
+    -- Recalculate action bar flyout directions after positions are finalized
+    if _G._EAB_RecalcFlyouts then pcall(_G._EAB_RecalcFlyouts) end
 
     -- Notify beacon reminders to restore (if follow-mouse is active)
     if _G._EABR_BeaconRefresh then pcall(_G._EABR_BeaconRefresh) end

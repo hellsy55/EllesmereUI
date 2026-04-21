@@ -1572,6 +1572,10 @@ local function SkinCharacterSheet()
     -- so the stat sections start higher.
     EllesmereUI._updateScrollHeaderOffset = function()
         local showMP = EllesmereUIDB and EllesmereUIDB.showMythicRating
+        if showMP and C_ChallengeMode and C_ChallengeMode.GetOverallDungeonScore then
+            local score = C_ChallengeMode.GetOverallDungeonScore()
+            if not score or score <= 0 then showMP = false end
+        end
         local h = showMP and HEADER_H or (HEADER_H - 16)
         scrollFrame:ClearAllPoints()
         scrollFrame:SetPoint("TOPLEFT",     statsPanel, "TOPLEFT",     0,  -h)
@@ -2772,6 +2776,7 @@ local function SkinCharacterSheet()
 
         PaintTitleSelection(GetCurrentTitle())
         titlesScrollChild:SetHeight(-yOffset)
+        titlesScrollFrame:SetVerticalScroll(0)
     end
 
     -- Back-compat alias: a few call sites still say RefreshTitlesList().
