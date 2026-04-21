@@ -1156,7 +1156,7 @@ initFrame:SetScript("OnEvent", function(self)
         end,
     })
 
-    SLASH_EQOL1 = "/eqol"
+    SLASH_EQOL1 = "/qol"
     SlashCmdList.EQOL = function()
         if InCombatLockdown and InCombatLockdown() then return end
         EllesmereUI:ShowModule("EllesmereUIQoL")

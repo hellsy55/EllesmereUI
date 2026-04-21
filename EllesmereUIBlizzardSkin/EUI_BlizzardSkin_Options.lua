@@ -1,11 +1,10 @@
 -------------------------------------------------------------------------------
 --  EUI_BlizzardSkin_Options.lua
---  Sidebar module for Blizzard UI skin. Two tabs:
---    * Character Sheet        -- themed character panel options
---    * Tooltips, Menus & Popups -- reskin toggles for Blizzard tooltips/menus
 -------------------------------------------------------------------------------
-local PAGE_CHARSHEET = "Character Sheet"
-local PAGE_TOOLTIPS  = "Tooltips, Menus & Popups"
+local _, ns = ...
+local PAGE_CHARSHEET     = "Character Sheet"
+local PAGE_TOOLTIPS      = "Tooltips, Menus & Popups"
+local PAGE_DRAGONRIDING  = "Dragon Riding"
 
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -620,16 +619,245 @@ initFrame:SetScript("OnEvent", function(self)
         return math.abs(y)
     end
 
+    ---------------------------------------------------------------------------
+    --  Dragon Riding page
+    ---------------------------------------------------------------------------
+    local function EDR_DB()
+        return ns.edrDB and ns.edrDB.profile
+    end
+    local function EDR_Cfg(k) local p = EDR_DB(); return p and p[k] end
+    local function EDR_Set(k, v) local p = EDR_DB(); if p then p[k] = v end end
+    local function EDR_SetField(k, field, v)
+        local t = EDR_Cfg(k); if t then t[field] = v end
+    end
+    local function EDR_Rebuild() if ns.edrRebuild then ns.edrRebuild() end
+        if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+    end
+    local function EDR_Redraw() if ns.edrRedraw then ns.edrRedraw() end end
+
+    local function BuildDragonRidingPage(pageName, parent, yOffset)
+        local W = EllesmereUI.Widgets
+        local y = yOffset
+        local _, h
+
+        if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
+        parent._showRowDivider = true
+
+        local justifyValues = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
+        local justifyOrder  = { "LEFT", "CENTER", "RIGHT" }
+
+        _, h = W:SectionHeader(parent, "GENERAL", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Enabled",
+              getValue = function() return EDR_Cfg("enabled") == true end,
+              setValue = function(v) EDR_Set("enabled", v); EDR_Rebuild() end },
+            { type = "toggle", text = "Hide in Combat",
+              getValue = function() return EDR_Cfg("hideInCombat") == true end,
+              setValue = function(v) EDR_Set("hideInCombat", v); EDR_Rebuild() end }
+        ); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Width", min = 80, max = 600, step = 1,
+              getValue = function() return EDR_Cfg("width") end,
+              setValue = function(v) EDR_Set("width", v); EDR_Rebuild() end },
+            { type = "slider", text = "Inter-Element Gap", min = 0, max = 12, step = 1,
+              getValue = function() return EDR_Cfg("gap") end,
+              setValue = function(v) EDR_Set("gap", v); EDR_Rebuild() end }
+        ); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Stack Spacing", min = 0, max = 10, step = 1,
+              getValue = function() return EDR_Cfg("stackSpacing") end,
+              setValue = function(v) EDR_Set("stackSpacing", v); EDR_Rebuild() end },
+            { text = "" }
+        ); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        _, h = W:SectionHeader(parent, "BORDERS", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Borders",
+              getValue = function() return EDR_Cfg("borderEnabled") == true end,
+              setValue = function(v) EDR_Set("borderEnabled", v); EDR_Redraw() end },
+            { type = "slider", text = "Thickness", min = 1, max = 4, step = 1,
+              getValue = function() return EDR_Cfg("borderThickness") end,
+              setValue = function(v) EDR_Set("borderThickness", v); EDR_Redraw() end }
+        ); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "colorpicker", text = "Border Color", hasAlpha = true,
+              getValue = function() local t = EDR_Cfg("borderColor"); return t.r, t.g, t.b, t.a end,
+              setValue = function(r, g, b, a)
+                  local p = EDR_Cfg("borderColor")
+                  p.r, p.g, p.b, p.a = r, g, b, a
+                  EDR_Redraw()
+              end },
+            { text = "" }
+        ); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        _, h = W:SectionHeader(parent, "SPEED BAR", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Height", min = 4, max = 40, step = 1,
+              getValue = function() return EDR_Cfg("speedHeight") end,
+              setValue = function(v) EDR_Set("speedHeight", v); EDR_Rebuild() end },
+            { type = "toggle", text = "Thrill Color Change",
+              getValue = function() return EDR_Cfg("thrillColorToggle") == true end,
+              setValue = function(v) EDR_Set("thrillColorToggle", v); EDR_Redraw() end }
+        ); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "multiSwatch", text = "Color",
+              swatches = {
+                { text = "Normal",
+                  getValue = function() local t = EDR_Cfg("normalColor"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("normalColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+                { text = "Background",
+                  getValue = function() local t = EDR_Cfg("speedBarBg"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("speedBarBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+              } },
+            { type = "multiSwatch", text = "Thrill Color",
+              swatches = {
+                { text = "Thrill",
+                  getValue = function() local t = EDR_Cfg("thrillColor"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("thrillColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+                { text = "Tick",
+                  getValue = function() local t = EDR_Cfg("tickColor"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("tickColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+              } }
+        ); y = y - h
+        local speedTextRow
+        speedTextRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Speed Text",
+              getValue = function() return EDR_Cfg("speedText") and EDR_Cfg("speedText").enabled ~= false end,
+              setValue = function(v) EDR_SetField("speedText", "enabled", v); EDR_Redraw() end },
+            { type = "dropdown", text = "Speed Text Justify",
+              values = justifyValues, order = justifyOrder,
+              getValue = function() return (EDR_Cfg("speedText") or {}).justify or "CENTER" end,
+              setValue = function(v) EDR_SetField("speedText", "justify", v); EDR_Redraw() end }
+        )
+        local _, cogShow = EllesmereUI.BuildCogPopup({
+            title = "Speed Text Position",
+            rows = {
+                { type = "slider", label = "Size",     min = 6,    max = 32,  step = 1,
+                  get = function() return (EDR_Cfg("speedText") or {}).size    or 12 end,
+                  set = function(v) EDR_SetField("speedText", "size",    v); EDR_Redraw() end },
+                { type = "slider", label = "Offset X", min = -200, max = 200, step = 1,
+                  get = function() return (EDR_Cfg("speedText") or {}).offsetX or 0  end,
+                  set = function(v) EDR_SetField("speedText", "offsetX", v); EDR_Redraw() end },
+                { type = "slider", label = "Offset Y", min = -200, max = 200, step = 1,
+                  get = function() return (EDR_Cfg("speedText") or {}).offsetY or 0  end,
+                  set = function(v) EDR_SetField("speedText", "offsetY", v); EDR_Redraw() end },
+            },
+        })
+        local cogBtn = CreateFrame("Button", nil, speedTextRow._rightRegion)
+        cogBtn:SetSize(26, 26)
+        cogBtn:SetPoint("RIGHT", speedTextRow._rightRegion._lastInline or speedTextRow._rightRegion._control, "LEFT", -8, 0)
+        speedTextRow._rightRegion._lastInline = cogBtn
+        cogBtn:SetFrameLevel(speedTextRow._rightRegion:GetFrameLevel() + 5)
+        cogBtn:SetAlpha(0.4)
+        local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+        cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+        cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+        cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        _, h = W:SectionHeader(parent, "SKYRIDING STACKS", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Height", min = 2, max = 24, step = 1,
+              getValue = function() return EDR_Cfg("skyridingHeight") end,
+              setValue = function(v) EDR_Set("skyridingHeight", v); EDR_Rebuild() end },
+            { type = "multiSwatch", text = "Color",
+              swatches = {
+                { text = "Filled",
+                  getValue = function() local t = EDR_Cfg("skyridingFilled"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+                { text = "Background",
+                  getValue = function() local t = EDR_Cfg("skyridingBg"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+              } }
+        ); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        _, h = W:SectionHeader(parent, "SECOND WIND", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Height", min = 2, max = 24, step = 1,
+              getValue = function() return EDR_Cfg("secondWindHeight") end,
+              setValue = function(v) EDR_Set("secondWindHeight", v); EDR_Rebuild() end },
+            { type = "multiSwatch", text = "Color",
+              swatches = {
+                { text = "Filled",
+                  getValue = function() local t = EDR_Cfg("secondWindFilled"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+                { text = "Background",
+                  getValue = function() local t = EDR_Cfg("secondWindBg"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true },
+              } }
+        ); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        _, h = W:SectionHeader(parent, "WHIRLING SURGE", y); y = y - h
+        local wsTextRow
+        wsTextRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Cooldown Text",
+              getValue = function() return EDR_Cfg("whirlingSurgeText") and EDR_Cfg("whirlingSurgeText").enabled ~= false end,
+              setValue = function(v) EDR_SetField("whirlingSurgeText", "enabled", v); EDR_Redraw() end },
+            { text = "" }
+        )
+        local _, wsCogShow = EllesmereUI.BuildCogPopup({
+            title = "Cooldown Text Position",
+            rows = {
+                { type = "slider", label = "Size",     min = 6,    max = 32,  step = 1,
+                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).size    or 12 end,
+                  set = function(v) EDR_SetField("whirlingSurgeText", "size",    v); EDR_Redraw() end },
+                { type = "slider", label = "Offset X", min = -200, max = 200, step = 1,
+                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).offsetX or 0  end,
+                  set = function(v) EDR_SetField("whirlingSurgeText", "offsetX", v); EDR_Redraw() end },
+                { type = "slider", label = "Offset Y", min = -200, max = 200, step = 1,
+                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).offsetY or 0  end,
+                  set = function(v) EDR_SetField("whirlingSurgeText", "offsetY", v); EDR_Redraw() end },
+            },
+        })
+        local wsCog = CreateFrame("Button", nil, wsTextRow._rightRegion)
+        wsCog:SetSize(26, 26)
+        wsCog:SetPoint("RIGHT", wsTextRow._rightRegion._lastInline or wsTextRow._rightRegion._control, "LEFT", -8, 0)
+        wsTextRow._rightRegion._lastInline = wsCog
+        wsCog:SetFrameLevel(wsTextRow._rightRegion:GetFrameLevel() + 5)
+        wsCog:SetAlpha(0.4)
+        local wsCogTex = wsCog:CreateTexture(nil, "OVERLAY"); wsCogTex:SetAllPoints(); wsCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+        wsCog:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+        wsCog:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+        wsCog:SetScript("OnClick", function(s) wsCogShow(s) end)
+        y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        parent:SetHeight(math.abs(y - yOffset))
+    end
+
     EllesmereUI:RegisterModule("EllesmereUIBlizzardSkin", {
         title       = "Blizz UI Enhanced",
-        description = "Themed Blizzard frames: Character Sheet, tooltips, menus, popups.",
-        pages       = { PAGE_CHARSHEET, PAGE_TOOLTIPS },
+        description = "Themed Blizzard frames: Character Sheet, tooltips, menus, popups, Dragon Riding HUD.",
+        searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding",
+        pages       = { PAGE_CHARSHEET, PAGE_TOOLTIPS, PAGE_DRAGONRIDING },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_CHARSHEET then
                 return BuildCharacterSheetPage(pageName, parent, yOffset)
             end
             if pageName == PAGE_TOOLTIPS then
                 return BuildTooltipsPage(pageName, parent, yOffset)
+            end
+            if pageName == PAGE_DRAGONRIDING then
+                return BuildDragonRidingPage(pageName, parent, yOffset)
+            end
+        end,
+        onReset = function()
+            if EllesmereUIDragonRidingDB then
+                EllesmereUIDragonRidingDB.profiles = nil
+                EllesmereUIDragonRidingDB.profileKeys = nil
             end
         end,
     })

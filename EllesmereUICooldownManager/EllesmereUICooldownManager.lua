@@ -2004,7 +2004,7 @@ BuildCDMBar = function(barIndex)
     end
 
     -- Scale removed -- all sizing is width/height based now
-    frame:SetScale(1)
+    if not InCombatLockdown() then frame:SetScale(1) end
 
     -- Clear any previous mouse-tracking OnUpdate
     if frame._mouseTrack then
@@ -5402,9 +5402,14 @@ local function ScheduleTalentRebuild()
     end)
 end
 
+local _rosterRebuildPending = false
 local function ScheduleRosterRebuild()
     if EllesmereUI and EllesmereUI.InvalidateFrameCache then
         EllesmereUI.InvalidateFrameCache()
+    end
+    if InCombatLockdown() then
+        _rosterRebuildPending = true
+        return
     end
     C_Timer.After(0.2, function()
         BuildAllCDMBars()
@@ -5510,6 +5515,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if event == "PLAYER_REGEN_ENABLED" and _keybindRebuildPending then
             UpdateCDMKeybinds()
         end
+        -- Flush deferred roster rebuild that was blocked during combat
+        if event == "PLAYER_REGEN_ENABLED" and _rosterRebuildPending then
+            _rosterRebuildPending = false
+            C_Timer.After(0.2, function()
+                BuildAllCDMBars()
+            end)
+        end
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
@@ -5552,7 +5564,7 @@ end)
 
 SLASH_ECME1 = "/ecme"
 SLASH_ECME2 = "/cdmeffects"
-SLASH_ECME3 = "/cdm"
+SLASH_ECME3 = "/ecdm"
 SlashCmdList.ECME = function(msg)
     if InCombatLockdown and InCombatLockdown() then return end
     if EllesmereUI and EllesmereUI.ShowModule then

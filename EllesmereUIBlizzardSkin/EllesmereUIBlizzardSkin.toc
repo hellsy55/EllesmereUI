@@ -2,17 +2,18 @@
 ## Title: |cff0cd29fEllesmereUI|r Blizz UI Enhanced
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Themed Blizzard frames -- Character Sheet, Tooltips, Menus, Popups
+## Notes: Themed Blizzard frames -- Character Sheet, Tooltips, Menus, Popups, Dragon Riding HUD
 ## Author: Ellesmere
-## Version: 6.9.3
+## Version: 6.9.5
 ## Dependencies: EllesmereUI
-## SavedVariables: EllesmereUIBlizzardSkinDB
+## SavedVariables: EllesmereUIBlizzardSkinDB, EllesmereUIDragonRidingDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 
 # Main Luas
 EllesmereUIBlizzardSkin.lua
 EllesmereUIBlizzardSkin_CharacterSheet.lua
 EllesmereUIBlizzardSkin_InspectSheet.lua
+EllesmereUIBlizzardSkin_DragonRiding.lua
 
 # Options
 EUI_BlizzardSkin_Options.lua

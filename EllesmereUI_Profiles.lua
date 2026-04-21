@@ -1175,44 +1175,10 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if not found then
             table.insert(db.profileOrder, 1, profileName)
         end
-        -- Write spell assignments to dedicated store
-        if payload.data.spellAssignments then
-            if not EllesmereUIDB.spellAssignments then
-                EllesmereUIDB.spellAssignments = { specProfiles = {} }
-            end
-            local sa = EllesmereUIDB.spellAssignments
-            local imported = payload.data.spellAssignments
-            if imported.specProfiles then
-                for key, data in pairs(imported.specProfiles) do
-                    sa.specProfiles[key] = DeepCopy(data)
-                end
-            end
-            if imported.barGlows and next(imported.barGlows) then
-                -- barGlows is now per-spec in specProfiles, not global. Skip import.
-            end
-        end
-        -- Backward compat: extract specProfiles from CDM addon data (pre-migration format)
-        if payload.data.addons and payload.data.addons["EllesmereUICooldownManager"] then
-            local cdm = payload.data.addons["EllesmereUICooldownManager"]
-            if cdm.specProfiles then
-                if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
-                end
-                for key, data in pairs(cdm.specProfiles) do
-                    if not EllesmereUIDB.spellAssignments.specProfiles[key] then
-                        EllesmereUIDB.spellAssignments.specProfiles[key] = DeepCopy(data)
-                    end
-                end
-            end
-            if cdm.barGlows then
-                if not EllesmereUIDB.spellAssignments then
-                    EllesmereUIDB.spellAssignments = { specProfiles = {} }
-                end
-                if not next(EllesmereUIDB.spellAssignments.barGlows or {}) then
-                    -- barGlows is now per-spec in specProfiles, not global. Skip import.
-                end
-            end
-        end
+        -- CDM spell assignments are NOT written here. The caller shows
+        -- a spec picker popup that lets the user choose which specs to
+        -- import, then calls ApplyImportedSpecProfiles() with only the
+        -- selected specs. Writing here would bypass that selection.
         if specLocked then
             return true, nil, "spec_locked"
         end

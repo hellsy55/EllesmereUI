@@ -1687,7 +1687,7 @@ local function SkinChatFrame(cf)
 
         -- Portals button toggles dungeon portal flyout
         local portalBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_portal.png")
-        portalBtn:SetSize(24, 24)
+        portalBtn:SetSize(26, 26)
         portalBtn:ClearAllPoints()
         portalBtn:SetPoint("TOP", friendsCount, "BOTTOM", 0, -ICON_SPACING)
 
@@ -2903,30 +2903,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     if EUI.RegAccent then
         EUI.RegAccent({ type = "callback", fn = UpdateTabColors })
-    end
-
-    -- Debug: print what frame is under the cursor on right-click
-    SLASH_ECHATCLICK1 = "/echat_click"
-    SlashCmdList.ECHATCLICK = function()
-        local foci = GetMouseFoci and GetMouseFoci() or {}
-        local f = foci[1]
-        if f then
-            local name = f:GetName() or tostring(f)
-            local parent = f:GetParent()
-            local parentName = parent and (parent:GetName() or tostring(parent)) or "nil"
-            local mouse = f:IsMouseEnabled() and "mouse=ON" or "mouse=OFF"
-            local click = (f.IsMouseClickEnabled and f:IsMouseClickEnabled()) and "click=ON" or "click=OFF"
-            local motion = (f.IsMouseMotionEnabled and f:IsMouseMotionEnabled()) and "motion=ON" or "motion=OFF"
-            local objType = f.GetObjectType and f:GetObjectType() or "?"
-            local strata = f.GetFrameStrata and f:GetFrameStrata() or "?"
-            local level = f.GetFrameLevel and f:GetFrameLevel() or "?"
-            -- Check if it's the clickAnywhereButton
-            local isCab = (f == _G.ChatFrame1ClickAnywhereButton) and " [ClickAnywhereButton]" or ""
-            local isBg = (ChatFrame1._euiBg and f == ChatFrame1._euiBg) and " [euiBg]" or ""
-            print("|cffff6060[CLICK DEBUG]|r " .. name .. " | parent=" .. parentName .. " | " .. objType .. " strata=" .. strata .. " level=" .. level .. " | " .. mouse .. " " .. click .. " " .. motion .. isCab .. isBg)
-        else
-            print("|cffff6060[CLICK DEBUG]|r No frame under cursor")
-        end
     end
 
     -- Enable scroll-to-scroll chat (Blizzard disables by default)
