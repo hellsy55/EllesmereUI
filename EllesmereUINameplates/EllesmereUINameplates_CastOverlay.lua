@@ -114,7 +114,7 @@ local function ApplyCastBarTargetText(ov, plate)
 
     local spellTarget, spellTargetClass
     local rawTarget = UnitSpellTargetName and UnitSpellTargetName(unit)
-    if rawTarget then
+    if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
         local shortName = UnitName(rawTarget)
         spellTarget = shortName or rawTarget
         spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(unit)
