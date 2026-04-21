@@ -266,6 +266,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",  search_name = "EllesmereUI Blizz UI Enhanced",  icon_on = ICONS_PATH .. "sidebar\\blizzard-ig-on.png",        icon_off = ICONS_PATH .. "sidebar\\blizzard-ig.png"      },
     { folder = "EllesmereUIFriends",           display = "Friends List",       search_name = "EllesmereUI Friends List",       icon_on = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",         icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png"       },
     { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\mplus-ig-on.png",           icon_off = ICONS_PATH .. "sidebar\\mplus-ig.png"         },
+    { folder = "EllesmereUIDragonRiding",      display = "Dragon Riding",      search_name = "EllesmereUI Dragon Riding",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
     { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
@@ -318,6 +319,7 @@ EllesmereUI.ADDON_GROUPS = {
         members = {
             "EllesmereUIBlizzardSkin",
             "EllesmereUIMythicTimer",
+            "EllesmereUIDragonRiding",
             "EllesmereUIQuestTracker",
             "EllesmereUIFriends",
             "EllesmereUIMinimap",
@@ -6008,6 +6010,7 @@ function EllesmereUI:RegisterModule(folderName, config)
             EllesmereUIResourceBars = true,
             EllesmereUIUnitFrames = true,
             EllesmereUIMythicTimer = true,
+            EllesmereUIDragonRiding = true,
             -- v6.6 split
             EllesmereUIQoL = true,
             EllesmereUIBlizzardSkin = true,
