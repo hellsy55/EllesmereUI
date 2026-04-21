@@ -287,6 +287,15 @@ initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
 
+    -- Do nothing if the module is disabled / coming soon
+    if EUI and EUI.ADDON_ROSTER then
+        for _, info in ipairs(EUI.ADDON_ROSTER) do
+            if info.folder == "EllesmereUIDamageMeters" and info.comingSoon then
+                return
+            end
+        end
+    end
+
     EnsureDB()
 
     -- Enable the Blizzard damage meter CVar

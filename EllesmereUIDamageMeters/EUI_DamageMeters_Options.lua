@@ -11,6 +11,8 @@ initFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     if not EllesmereUI or not EllesmereUI.RegisterModule then return end
     if not EDM then return end
+    -- Do nothing if the module is disabled / coming soon
+    if not _G._EDM_DB then return end
 
     local function DB()
         local d = _G._EDM_DB
