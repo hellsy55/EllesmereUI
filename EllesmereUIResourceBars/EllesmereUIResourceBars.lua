@@ -2683,12 +2683,21 @@ local function UpdateSecondaryResource()
             local maxE = UnitPowerMax("player", PT.ESSENCE) or maxPts
             if issecretvalue and issecretvalue(maxE) then maxE = maxPts end
 
+            -- Safely query essence regen rate (secret in combat)
+            local function EssenceTickDuration()
+                if not GetPowerRegenForPowerType then return _essenceTickDur > 0 and _essenceTickDur or 5 end
+                local regen = GetPowerRegenForPowerType(PT.ESSENCE)
+                if not regen or (issecretvalue and issecretvalue(regen)) then
+                    return _essenceTickDur > 0 and _essenceTickDur or 5
+                end
+                return regen > 0 and (1 / regen) or 5
+            end
+
             -- Detect pip gain/loss and reset the timer
             if _essenceLastCount == nil then _essenceLastCount = cur end
             if cur ~= _essenceLastCount then
                 if cur < maxE then
-                    local regen = GetPowerRegenForPowerType and GetPowerRegenForPowerType(PT.ESSENCE) or 0
-                    _essenceTickDur = (regen and regen > 0) and (1 / regen) or 5
+                    _essenceTickDur = EssenceTickDuration()
                     _essenceNextTick = now + _essenceTickDur
                 else
                     _essenceNextTick = nil
@@ -2698,8 +2707,7 @@ local function UpdateSecondaryResource()
 
             -- If below max and no timer running, start one
             if cur < maxE and not _essenceNextTick then
-                local regen = GetPowerRegenForPowerType and GetPowerRegenForPowerType(PT.ESSENCE) or 0
-                _essenceTickDur = (regen and regen > 0) and (1 / regen) or 5
+                _essenceTickDur = EssenceTickDuration()
                 _essenceNextTick = now + _essenceTickDur
             end
 
