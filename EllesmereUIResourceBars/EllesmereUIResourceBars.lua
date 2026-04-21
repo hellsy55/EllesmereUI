@@ -3421,10 +3421,9 @@ ShowChannelTicks = function(spellID)
 
     local tickData = CHANNEL_TICK_DATA[spellID]
     local wantTicks = tickData and (cb.showTickMarks or cb.showLastTick)
-    local wantGCD = cb.showGCDBoundary
 
     -- Nothing to draw: hide stale marks and bail
-    if not wantTicks and not wantGCD then
+    if not wantTicks then
         for i = 1, #castBarFrame._ticks do
             castBarFrame._ticks[i]:Hide()
         end
@@ -3509,37 +3508,8 @@ ShowChannelTicks = function(spellID)
         castBarFrame._numTicks = 0
     end
 
-    -- GCD boundary mark
-    if wantGCD then
-        local gcdMark = castBarFrame._gcdMark
-        if not gcdMark then
-            gcdMark = bar:CreateTexture(nil, "OVERLAY", nil, 4)
-            castBarFrame._gcdMark = gcdMark
-        end
-
-        local channelDuration = castBarFrame._endTime - castBarFrame._startTime
-        if channelDuration > 0 then
-            local haste = UnitSpellHaste("player") / 100
-            local currentGCD = max(0.75, 1.5 / (1 + haste))
-            local gcdFraction = currentGCD / channelDuration
-
-            if gcdFraction > 0 and gcdFraction < 1 then
-                local snappedGcdOffset = floor(barWidth * (1 - gcdFraction) * effectiveScale + 0.5) / effectiveScale
-
-                gcdMark:SetColorTexture(cb.gcdBoundaryR or 1.0, cb.gcdBoundaryG or 0.82, cb.gcdBoundaryB or 0.0, cb.gcdBoundaryA or 0.95)
-                gcdMark:SetSize(highlightWidth, snappedHeight)
-                gcdMark:ClearAllPoints()
-                gcdMark:SetPoint("CENTER", bar, "LEFT", snappedGcdOffset, 0)
-                gcdMark:Show()
-            else
-                gcdMark:Hide()
-            end
-        else
-            gcdMark:Hide()
-        end
-    elseif castBarFrame._gcdMark then
-        castBarFrame._gcdMark:Hide()
-    end
+    -- GCD boundary mark removed (UnitSpellHaste returns secret values in combat)
+    if castBarFrame._gcdMark then castBarFrame._gcdMark:Hide() end
 end
 
 HideChannelTicks = function()
@@ -3678,7 +3648,18 @@ OnChannelStart = function()
     if not cb.enabled then return end
 
     local name, _, _, startTimeMS, endTimeMS, _, notInterruptible, spellID, _, _, channelCastID = UnitChannelInfo("player")
-    if not name then return end
+    if not name then
+        -- UnitChannelInfo can be empty on rapid channel restarts (e.g. SCK spam).
+        -- Single retry on the next frame; if still nil the channel was cancelled.
+        if not castBarFrame._channelRetry then
+            castBarFrame._channelRetry = true
+            C_Timer.After(0, function()
+                castBarFrame._channelRetry = nil
+                OnChannelStart()
+            end)
+        end
+        return
+    end
 
     castBarFrame._casting = false
     castBarFrame._channeling = true

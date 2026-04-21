@@ -6427,6 +6427,9 @@ function EllesmereUI:SelectModule(folderName)
             if entry.folder == folderName then displayName = entry.display; break end
         end
         rb._label:SetText("Reset " .. displayName)
+        rb._label:SetWidth(rb:GetWidth() * 0.85)
+        rb._label:SetWordWrap(false)
+        rb._label:SetMaxLines(1)
     end
     headerFrame._desc:SetText(config.description or "")
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
@@ -6814,7 +6817,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.0.6"
+EllesmereUI.VERSION = "7.0.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -3391,7 +3391,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.castBar.showChannelTicks = v
-                  if v and not (p.castBar.showTickMarks or p.castBar.showLastTick or p.castBar.showGCDBoundary) then
+                  if v and not (p.castBar.showTickMarks or p.castBar.showLastTick) then
                       p.castBar.showTickMarks = true
                   end
                   RefreshCast()
@@ -3425,19 +3425,9 @@ initFrame:SetScript("OnEvent", function(self)
             "Enable Channel Ticks"
         )
 
-        -- Marks Row 2: GCD Boundary (+ color) | Last Tick (+ color)
+        -- Marks Row 2: Last Tick (+ color) | (empty)
         local marksRow2
         marksRow2, h = W:DualRow(parent, y,
-            { type = "toggle", text = "GCD Boundary",
-              tooltip = "Shows where your GCD ends during a channel.",
-              disabled = marksOff,
-              disabledTooltip = "Enable Cast Bar Marks",
-              getValue = function() local p = DB(); return p and p.castBar.showGCDBoundary end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.castBar.showGCDBoundary = v; RefreshCast()
-                  EllesmereUI:RefreshPage()
-              end },
             { type = "toggle", text = "Last Tick",
               tooltip = "Highlights the final damage tick. Requires a supported channeled spell.",
               disabled = marksOff,
@@ -3447,26 +3437,11 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB(); if not p then return end
                   p.castBar.showLastTick = v; RefreshCast()
                   EllesmereUI:RefreshPage()
-              end }
+              end },
+            { type = "label", text = "" }
         );  y = y - h
 
         AttachInlineSwatch(marksRow2._leftRegion,
-            function()
-                local p = DB(); if not p then return 1, 0.82, 0, 0.95 end
-                return p.castBar.gcdBoundaryR or 1, p.castBar.gcdBoundaryG or 0.82,
-                       p.castBar.gcdBoundaryB or 0, p.castBar.gcdBoundaryA or 0.95
-            end,
-            function(r, g, b, a)
-                local p = DB(); if not p then return end
-                p.castBar.gcdBoundaryR = r; p.castBar.gcdBoundaryG = g
-                p.castBar.gcdBoundaryB = b; p.castBar.gcdBoundaryA = a
-                RefreshCast()
-            end,
-            function() return marksOff() or not (DB() and DB().castBar.showGCDBoundary) end,
-            "Enable GCD Boundary"
-        )
-
-        AttachInlineSwatch(marksRow2._rightRegion,
             function()
                 local p = DB(); if not p then return 1, 0.82, 0, 0.95 end
                 return p.castBar.lastTickR or 1, p.castBar.lastTickG or 0.82,
