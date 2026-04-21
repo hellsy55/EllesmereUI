@@ -4428,7 +4428,7 @@ function NameplateFrame:UpdateCast()
     -- pass through UnitName() to get a clean short name (no realm).
     local spellTarget, spellTargetClass
     local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
-    if rawTarget then
+    if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
         local shortName = UnitName(rawTarget)
         spellTarget = shortName or rawTarget
         spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)

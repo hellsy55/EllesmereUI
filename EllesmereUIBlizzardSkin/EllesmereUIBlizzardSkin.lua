@@ -80,7 +80,8 @@ local ADDON_NAME = ...
 
     local function _ttUnitColor(tt)
         if tt ~= _GameTooltip or tt:IsForbidden() then return end
-        local _, unit = tt:GetUnit()
+        local ok, _, unit = pcall(tt.GetUnit, tt)
+        if not ok then return end
         if not unit then
             if UnitExists("mouseover") then unit = "mouseover" end
         end
