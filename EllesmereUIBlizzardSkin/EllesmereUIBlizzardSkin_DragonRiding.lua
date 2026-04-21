@@ -37,8 +37,7 @@ local DB_DEFAULTS = {
         gap              = 2,
         stackSpacing     = 2,
 
-        borderEnabled   = true,
-        borderThickness = 1,
+        borderThickness = 0,
         borderColor     = { r = 0.0, g = 0.0, b = 0.0, a = 1.0 },
 
         maxSpeed          = 1300,
@@ -47,7 +46,7 @@ local DB_DEFAULTS = {
         normalColor       = { r = 0.055, g = 0.667, b = 0.761, a = 1.0 },
         thrillColor       = { r = 0.902, g = 0.494, b = 0.133, a = 1.0 },
         speedBarBg        = { r = 0.10, g = 0.10, b = 0.10, a = 0.80 },
-        tickColor         = { r = 1.00, g = 1.00, b = 1.00, a = 0.80 },
+        tickColor         = { r = 1.00, g = 1.00, b = 1.00, a = 0.50 },
 
         speedText = {
             enabled = true,
@@ -335,9 +334,9 @@ local function ApplyBordersAll()
     if not PP then return end
     local p = db.profile
     local c = p.borderColor
-    local thick = p.borderThickness or 1
+    local thick = p.borderThickness or 0
     for _, f in ipairs(borderedFrames) do
-        if p.borderEnabled then
+        if thick > 0 then
             PP.UpdateBorder(f, thick, c.r, c.g, c.b, c.a)
             PP.ShowBorder(f)
         else

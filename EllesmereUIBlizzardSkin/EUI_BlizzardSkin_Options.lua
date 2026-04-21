@@ -648,7 +648,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:SectionHeader(parent, "GENERAL", y); y = y - h
         _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Enabled",
+            { type = "toggle", text = "Enable Dragon Riding Bar",
               getValue = function() return EDR_Cfg("enabled") == true end,
               setValue = function(v) EDR_Set("enabled", v); EDR_Rebuild() end },
             { type = "toggle", text = "Hide in Combat",
@@ -659,7 +659,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Width", min = 80, max = 600, step = 1,
               getValue = function() return EDR_Cfg("width") end,
               setValue = function(v) EDR_Set("width", v); EDR_Rebuild() end },
-            { type = "slider", text = "Inter-Element Gap", min = 0, max = 12, step = 1,
+            { type = "slider", text = "Element Spacing", min = 0, max = 12, step = 1,
               getValue = function() return EDR_Cfg("gap") end,
               setValue = function(v) EDR_Set("gap", v); EDR_Rebuild() end }
         ); y = y - h
@@ -667,28 +667,66 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Stack Spacing", min = 0, max = 10, step = 1,
               getValue = function() return EDR_Cfg("stackSpacing") end,
               setValue = function(v) EDR_Set("stackSpacing", v); EDR_Rebuild() end },
+            { type = "toggle", text = "Show Icon Cooldown Text",
+              getValue = function() return EDR_Cfg("whirlingSurgeText") and EDR_Cfg("whirlingSurgeText").enabled ~= false end,
+              setValue = function(v) EDR_SetField("whirlingSurgeText", "enabled", v); EDR_Redraw() end }
+        ); y = y - h
+        local borderRow
+        borderRow, h = W:DualRow(parent, y,
+            { type = "slider", text = "Border Size", min = 0, max = 4, step = 1,
+              getValue = function() return EDR_Cfg("borderThickness") or 0 end,
+              setValue = function(v) EDR_Set("borderThickness", v); EDR_Redraw() end },
             { text = "" }
         ); y = y - h
+        do
+            local rgn = borderRow._leftRegion
+            local ctrl = rgn._control
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, borderRow:GetFrameLevel() + 3,
+                function() local t = EDR_Cfg("borderColor"); return t.r, t.g, t.b, t.a end,
+                function(r, g, b, a) local p = EDR_Cfg("borderColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                true, 20)
+            EllesmereUI.PanelPP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        end
         _, h = W:Spacer(parent, y, 20); y = y - h
 
-        _, h = W:SectionHeader(parent, "BORDERS", y); y = y - h
+        _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
         _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Show Borders",
-              getValue = function() return EDR_Cfg("borderEnabled") == true end,
-              setValue = function(v) EDR_Set("borderEnabled", v); EDR_Redraw() end },
-            { type = "slider", text = "Thickness", min = 1, max = 4, step = 1,
-              getValue = function() return EDR_Cfg("borderThickness") end,
-              setValue = function(v) EDR_Set("borderThickness", v); EDR_Redraw() end }
+            { type = "slider", text = "Charge Height", min = 2, max = 24, step = 1,
+              getValue = function() return EDR_Cfg("skyridingHeight") end,
+              setValue = function(v) EDR_Set("skyridingHeight", v); EDR_Rebuild() end },
+            { type = "multiSwatch", text = "Charge Color",
+              swatches = {
+                { text = "Background",
+                  getValue = function() local t = EDR_Cfg("skyridingBg"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Background" },
+                { text = "Stacks",
+                  getValue = function() local t = EDR_Cfg("skyridingFilled"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Charges" },
+              } }
         ); y = y - h
         _, h = W:DualRow(parent, y,
-            { type = "colorpicker", text = "Border Color", hasAlpha = true,
-              getValue = function() local t = EDR_Cfg("borderColor"); return t.r, t.g, t.b, t.a end,
-              setValue = function(r, g, b, a)
-                  local p = EDR_Cfg("borderColor")
-                  p.r, p.g, p.b, p.a = r, g, b, a
-                  EDR_Redraw()
-              end },
-            { text = "" }
+            { type = "slider", text = "Second Wind Height", min = 2, max = 24, step = 1,
+              getValue = function() return EDR_Cfg("secondWindHeight") end,
+              setValue = function(v) EDR_Set("secondWindHeight", v); EDR_Rebuild() end },
+            { type = "multiSwatch", text = "Second Wind Color",
+              swatches = {
+                { text = "Background",
+                  getValue = function() local t = EDR_Cfg("secondWindBg"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Background" },
+                { text = "Second Wind",
+                  getValue = function() local t = EDR_Cfg("secondWindFilled"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Second Wind" },
+              } }
         ); y = y - h
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -702,27 +740,31 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) EDR_Set("thrillColorToggle", v); EDR_Redraw() end }
         ); y = y - h
         _, h = W:DualRow(parent, y,
-            { type = "multiSwatch", text = "Color",
+            { type = "multiSwatch", text = "Speed Color",
               swatches = {
-                { text = "Normal",
-                  getValue = function() local t = EDR_Cfg("normalColor"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("normalColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
                 { text = "Background",
                   getValue = function() local t = EDR_Cfg("speedBarBg"); return t.r, t.g, t.b, t.a end,
                   setValue = function(r, g, b, a) local p = EDR_Cfg("speedBarBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
+                  hasAlpha = true,
+                  tooltip = "Background" },
+                { text = "Speed",
+                  getValue = function() local t = EDR_Cfg("normalColor"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("normalColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Speed" },
               } },
             { type = "multiSwatch", text = "Thrill Color",
               swatches = {
+                { text = "Hash",
+                  getValue = function() local t = EDR_Cfg("tickColor"); return t.r, t.g, t.b, t.a end,
+                  setValue = function(r, g, b, a) local p = EDR_Cfg("tickColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
+                  hasAlpha = true,
+                  tooltip = "Hash Marker" },
                 { text = "Thrill",
                   getValue = function() local t = EDR_Cfg("thrillColor"); return t.r, t.g, t.b, t.a end,
                   setValue = function(r, g, b, a) local p = EDR_Cfg("thrillColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
-                { text = "Tick",
-                  getValue = function() local t = EDR_Cfg("tickColor"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("tickColor"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
+                  hasAlpha = true,
+                  tooltip = "Thrill" },
               } }
         ); y = y - h
         local speedTextRow
@@ -730,7 +772,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Show Speed Text",
               getValue = function() return EDR_Cfg("speedText") and EDR_Cfg("speedText").enabled ~= false end,
               setValue = function(v) EDR_SetField("speedText", "enabled", v); EDR_Redraw() end },
-            { type = "dropdown", text = "Speed Text Justify",
+            { type = "dropdown", text = "Text Align",
               values = justifyValues, order = justifyOrder,
               getValue = function() return (EDR_Cfg("speedText") or {}).justify or "CENTER" end,
               setValue = function(v) EDR_SetField("speedText", "justify", v); EDR_Redraw() end }
@@ -759,79 +801,6 @@ initFrame:SetScript("OnEvent", function(self)
         cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
         cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
         cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
-        y = y - h
-        _, h = W:Spacer(parent, y, 20); y = y - h
-
-        _, h = W:SectionHeader(parent, "SKYRIDING STACKS", y); y = y - h
-        _, h = W:DualRow(parent, y,
-            { type = "slider", text = "Height", min = 2, max = 24, step = 1,
-              getValue = function() return EDR_Cfg("skyridingHeight") end,
-              setValue = function(v) EDR_Set("skyridingHeight", v); EDR_Rebuild() end },
-            { type = "multiSwatch", text = "Color",
-              swatches = {
-                { text = "Filled",
-                  getValue = function() local t = EDR_Cfg("skyridingFilled"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
-                { text = "Background",
-                  getValue = function() local t = EDR_Cfg("skyridingBg"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("skyridingBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
-              } }
-        ); y = y - h
-        _, h = W:Spacer(parent, y, 20); y = y - h
-
-        _, h = W:SectionHeader(parent, "SECOND WIND", y); y = y - h
-        _, h = W:DualRow(parent, y,
-            { type = "slider", text = "Height", min = 2, max = 24, step = 1,
-              getValue = function() return EDR_Cfg("secondWindHeight") end,
-              setValue = function(v) EDR_Set("secondWindHeight", v); EDR_Rebuild() end },
-            { type = "multiSwatch", text = "Color",
-              swatches = {
-                { text = "Filled",
-                  getValue = function() local t = EDR_Cfg("secondWindFilled"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindFilled"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
-                { text = "Background",
-                  getValue = function() local t = EDR_Cfg("secondWindBg"); return t.r, t.g, t.b, t.a end,
-                  setValue = function(r, g, b, a) local p = EDR_Cfg("secondWindBg"); p.r, p.g, p.b, p.a = r, g, b, a; EDR_Redraw() end,
-                  hasAlpha = true },
-              } }
-        ); y = y - h
-        _, h = W:Spacer(parent, y, 20); y = y - h
-
-        _, h = W:SectionHeader(parent, "WHIRLING SURGE", y); y = y - h
-        local wsTextRow
-        wsTextRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Show Cooldown Text",
-              getValue = function() return EDR_Cfg("whirlingSurgeText") and EDR_Cfg("whirlingSurgeText").enabled ~= false end,
-              setValue = function(v) EDR_SetField("whirlingSurgeText", "enabled", v); EDR_Redraw() end },
-            { text = "" }
-        )
-        local _, wsCogShow = EllesmereUI.BuildCogPopup({
-            title = "Cooldown Text Position",
-            rows = {
-                { type = "slider", label = "Size",     min = 6,    max = 32,  step = 1,
-                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).size    or 12 end,
-                  set = function(v) EDR_SetField("whirlingSurgeText", "size",    v); EDR_Redraw() end },
-                { type = "slider", label = "Offset X", min = -200, max = 200, step = 1,
-                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).offsetX or 0  end,
-                  set = function(v) EDR_SetField("whirlingSurgeText", "offsetX", v); EDR_Redraw() end },
-                { type = "slider", label = "Offset Y", min = -200, max = 200, step = 1,
-                  get = function() return (EDR_Cfg("whirlingSurgeText") or {}).offsetY or 0  end,
-                  set = function(v) EDR_SetField("whirlingSurgeText", "offsetY", v); EDR_Redraw() end },
-            },
-        })
-        local wsCog = CreateFrame("Button", nil, wsTextRow._rightRegion)
-        wsCog:SetSize(26, 26)
-        wsCog:SetPoint("RIGHT", wsTextRow._rightRegion._lastInline or wsTextRow._rightRegion._control, "LEFT", -8, 0)
-        wsTextRow._rightRegion._lastInline = wsCog
-        wsCog:SetFrameLevel(wsTextRow._rightRegion:GetFrameLevel() + 5)
-        wsCog:SetAlpha(0.4)
-        local wsCogTex = wsCog:CreateTexture(nil, "OVERLAY"); wsCogTex:SetAllPoints(); wsCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-        wsCog:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
-        wsCog:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
-        wsCog:SetScript("OnClick", function(s) wsCogShow(s) end)
         y = y - h
         _, h = W:Spacer(parent, y, 20); y = y - h
 
