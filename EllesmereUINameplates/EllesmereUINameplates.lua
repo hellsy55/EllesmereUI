@@ -4812,7 +4812,30 @@ function NameplateFrame:UNIT_SPELLCAST_STOP()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_CHANNEL_STOP()
-    self:UpdateCast()
+    -- Directly hide instead of UpdateCast: in restricted execution,
+    -- UnitCastingInfo can return secret values (not nil) for a stale
+    -- channel, making UpdateCast think a cast is still active.
+    if self.isCasting then
+        if self._castFallback then
+            self._castFallback = nil
+            _fallbackPlates[self] = nil
+            fallbackCastCount = fallbackCastCount - 1
+            if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
+        end
+        NotifyCastEnded()
+    end
+    self.isCasting = false
+    self:HideKickTick()
+    self:ClearImportantCastGlow()
+    self:ApplyScale()
+    if not self._interrupted then
+        self.cast:Hide()
+    end
+    self.castTimer:SetText("")
+    if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
+    if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
+        UpdateClassPowerOnPlate(self)
+    end
 end
 function NameplateFrame:UNIT_SPELLCAST_FAILED()
     self:UpdateCast()

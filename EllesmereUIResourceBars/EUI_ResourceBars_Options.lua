@@ -3349,7 +3349,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- ── MARKS section ───────────────────────────────────────────
-        _, h = W:SectionHeader(parent, "MARKS", y);  y = y - h
+        _, h = W:SectionHeader(parent, "TICK MARKERS", y);  y = y - h
 
         local marksOff = function()
             local p = DB()
@@ -3381,10 +3381,10 @@ initFrame:SetScript("OnEvent", function(self)
             if initOff then block:Show() else block:Hide() end
         end
 
-        -- Marks Row 1: Enable Cast Bar Marks (master) | Channel Ticks (+ color)
+        -- Marks Row 1: Enable Tick Markers (master) | Channel Ticks (+ color)
         local marksRow1
         marksRow1, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Enable Cast Bar Marks",
+            { type = "toggle", text = "Enable Tick Markers",
               disabled = castOff,
               disabledTooltip = "Enable Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showChannelTicks end,
@@ -3400,7 +3400,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Channel Ticks",
               tooltip = "Damage tick marks on channeled spells. Only supported spells are shown — request missing spells on Discord.",
               disabled = marksOff,
-              disabledTooltip = "Enable Cast Bar Marks",
+              disabledTooltip = "Enable Tick Markers",
               getValue = function() local p = DB(); return p and p.castBar.showTickMarks end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -3425,20 +3425,28 @@ initFrame:SetScript("OnEvent", function(self)
             "Enable Channel Ticks"
         )
 
-        -- Marks Row 2: Last Tick (+ color) | (empty)
+        -- Marks Row 2: Last Tick (+ color) | Colored Empowered Stages
         local marksRow2
         marksRow2, h = W:DualRow(parent, y,
             { type = "toggle", text = "Last Tick",
               tooltip = "Highlights the final damage tick. Requires a supported channeled spell.",
               disabled = marksOff,
-              disabledTooltip = "Enable Cast Bar Marks",
+              disabledTooltip = "Enable Tick Markers",
               getValue = function() local p = DB(); return p and p.castBar.showLastTick end,
               setValue = function(v)
                   local p = DB(); if not p then return end
                   p.castBar.showLastTick = v; RefreshCast()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            { type = "toggle", text = "Colored Empowered Stages",
+              tooltip = "Changes the cast bar color based on the current empower stage. Colors transition from red (stage 1) through yellow to green (max stage).",
+              disabled = castOff,
+              disabledTooltip = "Enable Player Cast Bar",
+              getValue = function() local p = DB(); return p and p.castBar.coloredEmpowerStages end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.coloredEmpowerStages = v; RefreshCast()
+              end }
         );  y = y - h
 
         AttachInlineSwatch(marksRow2._leftRegion,
@@ -3456,23 +3464,6 @@ initFrame:SetScript("OnEvent", function(self)
             function() return marksOff() or not (DB() and DB().castBar.showLastTick) end,
             "Enable Last Tick"
         )
-
-        -- ── EMPOWERED section ───────────────────────────────────────────
-        _, h = W:SectionHeader(parent, "EMPOWERED", y);  y = y - h
-
-        -- Colored Empowered Spells toggle
-        _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Colored Empowered Stages",
-              tooltip = "Changes the cast bar color based on the current empower stage. Colors transition from red (stage 1) through yellow to green (max stage).",
-              disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
-              getValue = function() local p = DB(); return p and p.castBar.coloredEmpowerStages end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.castBar.coloredEmpowerStages = v; RefreshCast()
-              end },
-            { type = "label", text = "" }
-        );  y = y - h
 
         -- Wire up click mappings for cast bar preview hit overlays
         _clickMappings.castBar       = { section = castSection, target = classSizeRow }

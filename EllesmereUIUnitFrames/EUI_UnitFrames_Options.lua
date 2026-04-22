@@ -7436,6 +7436,7 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
                 cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
                 cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+                return cogBtn
             end
             -- INDICATORS section (below DISPLAY)
             _, hh = Ww:SectionHeader(pp, "INDICATORS", yy);  yy = yy - hh
@@ -7542,7 +7543,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Cogwheel on Debuffs Location
+            -- Cogwheel on Debuffs Location (hidden when Simple Debuff Display overrides placement)
             do
                 local rightRgn = bossAuraRow._rightRegion
                 local _, bDebuffCogShowRaw = EllesmereUI.BuildCogPopup({
@@ -7559,7 +7560,29 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v) db.profile.boss.onlyPlayerDebuffs = v; ReloadAndUpdate() end },
                     },
                 })
-                BossCogBtn(rightRgn, bDebuffCogShowRaw)
+                local cogBtn = BossCogBtn(rightRgn, bDebuffCogShowRaw)
+                if cogBtn then
+                    local cogBlock = CreateFrame("Frame", nil, cogBtn)
+                    cogBlock:SetAllPoints()
+                    cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10)
+                    cogBlock:EnableMouse(true)
+                    cogBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Simple Debuff Display off"))
+                    end)
+                    cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    local function UpdateDebuffCogDisabled()
+                        local isSimple = db.profile.boss.simpleDebuffs ~= false
+                        if isSimple then
+                            cogBtn:SetAlpha(0.15)
+                            cogBlock:Show()
+                        else
+                            cogBtn:SetAlpha(0.4)
+                            cogBlock:Hide()
+                        end
+                    end
+                    UpdateDebuffCogDisabled()
+                    EllesmereUI.RegisterWidgetRefresh(UpdateDebuffCogDisabled)
+                end
             end
 
             return yy

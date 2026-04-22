@@ -5886,6 +5886,14 @@ local function ReloadFrames()
 
                 if frame.Portrait and frame.Portrait.backdrop then
                     PP.Size(frame.Portrait.backdrop, bossBarHeight, bossBarHeight)
+                    local bossPSide = settings.portraitSide or "right"
+                    frame.Portrait.backdrop:ClearAllPoints()
+                    if bossPSide == "left" then
+                        PP.Point(frame.Portrait.backdrop, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+                    else
+                        PP.Point(frame.Portrait.backdrop, "TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+                    end
+                    frame._portraitSide = bossPSide
                 end
                 if frame.Health then
                     frame.Health:ClearAllPoints()
