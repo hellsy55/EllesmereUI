@@ -68,6 +68,131 @@ end
 ns._MemSnap = MemSnap
 ns._MemDelta = MemDelta
 
+-------------------------------------------------------------------------------
+--  CDM Debug Diagnostics (/cdmdebug)
+--  Toggle verbose logging to identify pool churn / reanchor loops.
+-------------------------------------------------------------------------------
+local _cdmDebug = false
+local _dbgReanchorCount = 0
+local _dbgReanchorWindow = 0
+local _dbgTriggers = { cdidSet = 0, acquire = 0, layout = 0, refreshLayout = 0, activeState = 0, other = 0 }
+local _dbgLastTrigger = "?"
+local _dbgLastDump = 0
+
+local function CDMDebugPrint(...)
+    if not _cdmDebug then return end
+    print("|cffff8800[CDM-DBG]|r", ...)
+end
+
+-- Snapshot: dump Blizzard pool vs our claimed icons for a viewer
+local function CDMDebugDumpViewer(viewerName, defaultBarKey)
+    local viewer = _G[viewerName]
+    if not viewer or not viewer.itemFramePool then return end
+    local poolFrames = {}
+    local poolCount = 0
+    for frame in viewer.itemFramePool:EnumerateActive() do
+        poolCount = poolCount + 1
+        local cdID = frame.cooldownID
+        local sid, baseSID = ns.ResolveFrameSpellID and ns.ResolveFrameSpellID(frame)
+        local spName = sid and sid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid) or "?"
+        local shown = frame:IsShown()
+        local alpha = frame:GetAlpha()
+        poolFrames[#poolFrames + 1] = string.format(
+            "  cdID=%s sid=%s (%s) shown=%s a=%.1f",
+            tostring(cdID), tostring(sid), tostring(spName),
+            tostring(shown), alpha
+        )
+    end
+    print(string.format("|cff00ffff[CDM-DBG] %s pool:|r %d active frames (default -> %s)",
+        viewerName, poolCount, defaultBarKey))
+    for _, line in ipairs(poolFrames) do print(line) end
+end
+
+-- Snapshot: dump our icon arrays for a bar
+local function CDMDebugDumpBar(barKey)
+    local icons = ns.cdmBarIcons and ns.cdmBarIcons[barKey]
+    if not icons or #icons == 0 then
+        print(string.format("|cff00ff00[CDM-DBG] bar '%s':|r 0 icons", barKey))
+        return
+    end
+    print(string.format("|cff00ff00[CDM-DBG] bar '%s':|r %d icons", barKey, #icons))
+    local efc = ns._ecmeFC
+    for i, frame in ipairs(icons) do
+        local fc = efc and efc[frame]
+        local sid = fc and fc.spellID
+        local spName = sid and sid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid) or "?"
+        local isCustom = frame._isRacialFrame or frame._isTrinketFrame
+            or frame._isPresetFrame or frame._isItemPresetFrame
+            or frame._isCustomSpellFrame
+        print(string.format("  [%d] sid=%s (%s) custom=%s a=%.1f",
+            i, tostring(sid), tostring(spName), tostring(isCustom ~= nil), frame:GetAlpha()))
+    end
+end
+
+-- Per-second stats ticker
+local _dbgTickFrame = nil
+local function CDMDebugTick()
+    if not _cdmDebug then return end
+    local now = GetTime()
+    if now - _dbgReanchorWindow >= 2 then
+        if _dbgReanchorCount > 0 then
+            print(string.format(
+                "|cffff8800[CDM-DBG] reanchors/2s: %d|r  triggers: cdidSet=%d acquire=%d layout=%d refresh=%d activeState=%d other=%d",
+                _dbgReanchorCount,
+                _dbgTriggers.cdidSet, _dbgTriggers.acquire,
+                _dbgTriggers.layout, _dbgTriggers.refreshLayout,
+                _dbgTriggers.activeState, _dbgTriggers.other
+            ))
+        end
+        _dbgReanchorCount = 0
+        _dbgReanchorWindow = now
+        for k in pairs(_dbgTriggers) do _dbgTriggers[k] = 0 end
+    end
+end
+
+ns._cdmDebugActive = function() return _cdmDebug end
+
+SLASH_CDMDEBUG1 = "/cdmdebug"
+SlashCmdList.CDMDEBUG = function(msg)
+    if msg == "dump" then
+        print("|cffff8800[CDM-DBG] === FULL STATE DUMP ===|r")
+        CDMDebugDumpViewer("EssentialCooldownViewer", "cooldowns")
+        CDMDebugDumpViewer("UtilityCooldownViewer", "utility")
+        CDMDebugDumpViewer("BuffIconCooldownViewer", "buffs")
+        print("|cffff8800[CDM-DBG] --- Our bars ---|r")
+        local _ECME = ns.ECME
+        local p = _ECME and _ECME.db and _ECME.db.profile
+        if p and p.cdmBars and p.cdmBars.bars then
+            for _, bd in ipairs(p.cdmBars.bars) do
+                if bd.enabled then CDMDebugDumpBar(bd.key) end
+            end
+        end
+        print("|cffff8800[CDM-DBG] === END DUMP ===|r")
+        return
+    end
+    _cdmDebug = not _cdmDebug
+    if _cdmDebug then
+        print("|cffff8800[CDM-DBG]|r ENABLED. Reanchor/trigger stats every 2s.")
+        print("|cffff8800[CDM-DBG]|r  /cdmdebug dump  = full pool vs bar snapshot")
+        print("|cffff8800[CDM-DBG]|r  /cdmdebug        = toggle off")
+        _dbgReanchorWindow = GetTime()
+        _dbgReanchorCount = 0
+        for k in pairs(_dbgTriggers) do _dbgTriggers[k] = 0 end
+        if not _dbgTickFrame then
+            _dbgTickFrame = CreateFrame("Frame")
+            local accum = 0
+            _dbgTickFrame:SetScript("OnUpdate", function(_, dt)
+                accum = accum + dt
+                if accum >= 2 then accum = 0; CDMDebugTick() end
+            end)
+        end
+        _dbgTickFrame:Show()
+    else
+        print("|cffff8800[CDM-DBG]|r DISABLED.")
+        if _dbgTickFrame then _dbgTickFrame:Hide() end
+    end
+end
+
 -- Per-frame decoration state (weak-keyed)
 local hookFrameData = setmetatable({}, { __mode = "k" })
 ns._hookFrameData = hookFrameData
@@ -1151,6 +1276,7 @@ local reanchorFrame = nil
 local viewerHooksInstalled = false
 
 local function CollectAndReanchor()
+    _dbgReanchorCount = _dbgReanchorCount + 1
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.enabled then return end
 
@@ -1240,6 +1366,40 @@ local function CollectAndReanchor()
                                 end
                             end
                         end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Debug: log unclaimed Blizzard frames (pool frames not routed to any bar)
+    if _cdmDebug and GetTime() - _dbgLastDump >= 5 then
+        _dbgLastDump = GetTime()
+        for viewerName, defaultBarKey in pairs(VIEWER_TO_BAR) do
+            if defaultBarKey ~= "buffs" then
+                local viewer = _G[viewerName]
+                if viewer and viewer.itemFramePool and viewer.itemFramePool.EnumerateActive then
+                    local unclaimed = {}
+                    for frame in viewer.itemFramePool:EnumerateActive() do
+                        if IsFrameIncluded(frame) then
+                            local cdID = frame.cooldownID
+                            local barKey = ResolveCDIDToBar(cdID, defaultBarKey)
+                            local bd = barKey and barDataByKey[barKey]
+                            local claimed = bd and bd.enabled and bd.barType ~= "buffs" and not bd.isGhostBar
+                            local displaySID = ResolveFrameSpellID(frame)
+                            if not claimed or not displaySID or displaySID <= 0 then
+                                local spName = displaySID and displaySID > 0
+                                    and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(displaySID) or "?"
+                                unclaimed[#unclaimed + 1] = string.format(
+                                    "cdID=%s sid=%s (%s) route=%s shown=%s",
+                                    tostring(cdID), tostring(displaySID), spName,
+                                    tostring(barKey), tostring(frame:IsShown()))
+                            end
+                        end
+                    end
+                    if #unclaimed > 0 then
+                        CDMDebugPrint(string.format("UNCLAIMED in %s (%d frames):", viewerName, #unclaimed))
+                        for _, line in ipairs(unclaimed) do CDMDebugPrint("  " .. line) end
                     end
                 end
             end
@@ -1728,8 +1888,18 @@ local function CollectAndReanchor()
                     if icons[i] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
-                        icons[i]:ClearAllPoints()
-                        icons[i]:Hide()
+                        -- Alpha-hide only for Blizzard pool frames (same
+                        -- reason as Phase 4: Hide() triggers pool rebuild).
+                        -- Custom frames we own can be hidden safely.
+                        local isCustom = icons[i]._isRacialFrame or icons[i]._isTrinketFrame
+                            or icons[i]._isPresetFrame or icons[i]._isItemPresetFrame
+                            or icons[i]._isCustomSpellFrame
+                        if isCustom then
+                            icons[i]:ClearAllPoints()
+                            icons[i]:Hide()
+                        else
+                            icons[i]:SetAlpha(0)
+                        end
                         if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
                             icons[i].Cooldown:SetDrawSwipe(false)
                         end
@@ -1756,6 +1926,20 @@ local function CollectAndReanchor()
                     iconsChanged = true
                 end
                 if iconsChanged then
+                    if _cdmDebug then
+                        local reason = (newCount ~= prevCount)
+                            and string.format("count %d->%d", prevCount, newCount)
+                            or "frame refs changed"
+                        local spells = {}
+                        for si = 1, newCount do
+                            local sfc = _ecmeFC[icons[si]]
+                            local ssid = sfc and sfc.spellID
+                            local sn = ssid and ssid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(ssid) or "?"
+                            spells[#spells + 1] = string.format("%s(%s)", tostring(ssid), sn)
+                        end
+                        CDMDebugPrint(string.format("bar '%s' iconsChanged: %s -> [%s]",
+                            barKey, reason, table.concat(spells, ", ")))
+                    end
                     RefreshCDMIconAppearance(barKey)
                     LayoutCDMBar(barKey)
                     ApplyCDMTooltipState(barKey)
@@ -1781,8 +1965,15 @@ local function CollectAndReanchor()
                     if icons[i] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
-                        icons[i]:ClearAllPoints()
-                        icons[i]:Hide()
+                        local isCustom2 = icons[i]._isRacialFrame or icons[i]._isTrinketFrame
+                            or icons[i]._isPresetFrame or icons[i]._isItemPresetFrame
+                            or icons[i]._isCustomSpellFrame
+                        if isCustom2 then
+                            icons[i]:ClearAllPoints()
+                            icons[i]:Hide()
+                        else
+                            icons[i]:SetAlpha(0)
+                        end
                         if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
                             icons[i].Cooldown:SetDrawSwipe(false)
                         end
@@ -1840,9 +2031,14 @@ local function CollectAndReanchor()
                     frame.Cooldown:SetDrawSwipe(false)
                 end
             else
-                -- CD/utility frame: hide (unrouted or ghost-bar routed)
-                frame:ClearAllPoints()
-                frame:Hide()
+                -- CD/utility frame: unclaimed (unrouted or ghost-bar routed).
+                -- Alpha-hide only -- never ClearAllPoints/Hide on Blizzard
+                -- pool frames. Hiding a pool frame signals Blizzard that the
+                -- pool is stale, which triggers a full viewer rebuild. Spells
+                -- that continuously transform (e.g. Lightsmith Holy Armaments)
+                -- cause Blizzard to rebuild every tick; if we Hide here, we
+                -- amplify that into an infinite rebuild loop.
+                frame:SetAlpha(0)
                 if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
                     frame.Cooldown:SetDrawSwipe(false)
                 end
@@ -2181,44 +2377,56 @@ function ns.SetupViewerHooks()
     -- 1. Mixin hooks: detect spell changes on CDM frames.
     --    Reset frame spell cache so the next reanchor re-resolves the spellID
     --    (handles spell transforms like Avenging Crusader -> Crusader Strike).
-    local function ResetFrameAndReanchor(frame)
+    --
+    --    CD/utility bars: spell set is locked during a session. Changes only
+    --    happen via FullCDMRebuild (spec/talent/equip events). Real-time
+    --    reanchors from OnCooldownIDSet are unnecessary and catastrophic when
+    --    Blizzard continuously rebuilds pools (Lightsmith Holy Armaments).
+    --    We still clear the FC cache so the NEXT rebuild re-resolves correctly.
+    --
+    --    Buff bars: buffs are dynamic (appear/disappear at runtime), so they
+    --    still need real-time reanchors from OnCooldownIDSet.
+    local function ResetFrameCache(frame)
         if frame then
             local fc = _ecmeFC[frame]
+            if _cdmDebug then
+                local sid = fc and fc.spellID
+                local cdID = frame.cooldownID
+                local vf = frame.viewerFrame
+                local vName = vf and vf:GetName() or "?"
+                local spName = sid and sid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid) or "?"
+                CDMDebugPrint(string.format("OnCooldownIDSet: cdID=%s sid=%s (%s) viewer=%s",
+                    tostring(cdID), tostring(sid), spName, vName))
+            end
             if fc then
                 fc.resolvedSid = nil
                 fc.baseSpellID = nil
                 fc.overrideSid = nil
                 fc.cachedCdID = nil
             end
-            -- Don't clear fd.decorated or _cdidRouteMap here.
-            -- Decoration only needs to happen once per frame.
-            -- The cdidRouteMap entry is still valid (cooldownID doesn't
-            -- change on transforms, only the spell behind it changes).
-            -- CategorizeFrame will re-resolve the spell via baseSID.
         end
-        -- Spell-catalog invalidation is intentionally NOT done here.
-        -- OnCooldownIDSet fires constantly during combat as Blizzard's pool
-        -- recycles frames, but the CDM category sets themselves only change
-        -- on talent/spec/login events -- which already invalidate the cache
-        -- via FullCDMRebuild and ScheduleTalentRebuild. Marking dirty here
-        -- caused a 1.67ms RebuildCDMSpellCaches spike on every reanchor
-        -- during combat for no semantic gain.
-        QueueReanchor()
+        _dbgTriggers.cdidSet = _dbgTriggers.cdidSet + 1
     end
+    -- Buff mixins: clear cache + reanchor (dynamic)
     if CooldownViewerBuffIconItemMixin and CooldownViewerBuffIconItemMixin.OnCooldownIDSet then
-        hooksecurefunc(CooldownViewerBuffIconItemMixin, "OnCooldownIDSet", ResetFrameAndReanchor)
-    end
-    if CooldownViewerEssentialItemMixin and CooldownViewerEssentialItemMixin.OnCooldownIDSet then
-        hooksecurefunc(CooldownViewerEssentialItemMixin, "OnCooldownIDSet", ResetFrameAndReanchor)
-    end
-    if CooldownViewerUtilityItemMixin and CooldownViewerUtilityItemMixin.OnCooldownIDSet then
-        hooksecurefunc(CooldownViewerUtilityItemMixin, "OnCooldownIDSet", ResetFrameAndReanchor)
+        hooksecurefunc(CooldownViewerBuffIconItemMixin, "OnCooldownIDSet", function(frame)
+            ResetFrameCache(frame)
+            QueueReanchor()
+        end)
     end
     if CooldownViewerBuffBarItemMixin and CooldownViewerBuffBarItemMixin.OnCooldownIDSet then
         hooksecurefunc(CooldownViewerBuffBarItemMixin, "OnCooldownIDSet", function(frame)
             if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
-            ResetFrameAndReanchor(frame)
+            ResetFrameCache(frame)
+            QueueReanchor()
         end)
+    end
+    -- CD/utility mixins: clear cache only (static set, rebuilt by FullCDMRebuild)
+    if CooldownViewerEssentialItemMixin and CooldownViewerEssentialItemMixin.OnCooldownIDSet then
+        hooksecurefunc(CooldownViewerEssentialItemMixin, "OnCooldownIDSet", ResetFrameCache)
+    end
+    if CooldownViewerUtilityItemMixin and CooldownViewerUtilityItemMixin.OnCooldownIDSet then
+        hooksecurefunc(CooldownViewerUtilityItemMixin, "OnCooldownIDSet", ResetFrameCache)
     end
 
     -- 2. Pool acquire hooks: detect new frames + install per-frame hooks
@@ -2237,6 +2445,14 @@ function ns.SetupViewerHooks()
                 -- collapse the spam (fires many times per frame).
                 if frame.OnActiveStateChanged then
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
+                        _dbgTriggers.activeState = _dbgTriggers.activeState + 1
+                        if _cdmDebug then
+                            local afc = _ecmeFC[frame]
+                            local asid = afc and afc.spellID
+                            local asn = asid and asid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(asid) or "?"
+                            CDMDebugPrint(string.format("OnActiveStateChanged: sid=%s (%s) shown=%s",
+                                tostring(asid), asn, tostring(frame:IsShown())))
+                        end
                         ReapplyPositions()
                         if _activeStateReanchorPending then return end
                         _activeStateReanchorPending = true
@@ -2260,7 +2476,13 @@ function ns.SetupViewerHooks()
                 if isBarViewer and ns.InvalidateTBBFrameCache then
                     ns.InvalidateTBBFrameCache()
                 end
-                QueueReanchor()
+                _dbgTriggers.acquire = _dbgTriggers.acquire + 1
+                if _cdmDebug then
+                    CDMDebugPrint("Pool.Acquire on " .. vName)
+                end
+                -- Only buff viewers need real-time reanchors on Acquire.
+                -- CD/utility spell sets are static (rebuilt by FullCDMRebuild).
+                if isBuff then QueueReanchor() end
             end)
             -- Hook existing frames too
             if isBuff then InstallBuffFrameHooks(v) end
@@ -2281,6 +2503,15 @@ function ns.SetupViewerHooks()
                         if pp and pp.cdmBars and pp.cdmBars.useBlizzardBuffBars then return end
                     end
                     if itemFrame then
+                        -- Only blank frames we haven't seen before. During
+                        -- pool churn (e.g. Lightsmith Holy Armaments transform
+                        -- every tick), Blizzard releases and re-acquires ALL
+                        -- frames. Blanking already-decorated frames causes
+                        -- the entire bar to flicker alpha 0 -> barOpacity
+                        -- every cycle. Previously-decorated frames keep their
+                        -- current alpha; our SetPoint hook handles positioning.
+                        local fd = hookFrameData[itemFrame]
+                        if fd and fd.decorated then return end
                         itemFrame:SetAlpha(0)
                         if itemFrame.Cooldown and itemFrame.Cooldown.SetDrawSwipe then
                             itemFrame.Cooldown:SetDrawSwipe(false)
@@ -2303,23 +2534,19 @@ function ns.SetupViewerHooks()
         if viewer then
             if viewer.RefreshLayout then
                 hooksecurefunc(viewer, "RefreshLayout", function()
-                    QueueReanchor()
+                    _dbgTriggers.refreshLayout = _dbgTriggers.refreshLayout + 1
+                    if _cdmDebug then CDMDebugPrint("RefreshLayout on " .. viewerName) end
+                    -- No reanchor: CD/utility spell sets are static. Rebuilt
+                    -- by FullCDMRebuild on spec/talent/equip events only.
                 end)
             end
-            -- Re-apply our icon positions immediately when Blizzard
-            -- re-layouts so frames don't flash to Blizzard positions.
-            -- Re-layout ALL bars (including custom bars that share this viewer).
+            -- SetPoint hook on each icon already forces frames back to our
+            -- positions when Blizzard calls Layout. No deferred re-layout
+            -- needed -- that was running LayoutCDMBar for ALL bars on every
+            -- Blizzard Layout call, which during pool churn fires every tick.
             hooksecurefunc(viewer, "Layout", function()
-                C_Timer.After(0, function()
-                    local LCB = ns.LayoutCDMBar
-                    if LCB then
-                        for bk, icons in pairs(cdmBarIcons) do
-                            if icons and #icons > 0 then
-                                LCB(bk)
-                            end
-                        end
-                    end
-                end)
+                _dbgTriggers.layout = _dbgTriggers.layout + 1
+                if _cdmDebug then CDMDebugPrint("Layout on " .. viewerName) end
             end)
             local function SyncViewerToBar()
                 if InCombatLockdown() then return end
@@ -2340,20 +2567,31 @@ function ns.SetupViewerHooks()
         end
     end
 
-    -- 3b. Buff viewer RefreshLayout hooks: run an IMMEDIATE reanchor (not
-    -- queued) so icons are repositioned before the frame renders. Without
-    -- this, new buff icons flash at Blizzard's default viewer position for
-    -- up to 0.2s until the throttled reanchor fires.
+    -- 3b. Buff viewer RefreshLayout hooks: IMMEDIATE reanchor so buff
+    -- icons appear at our positions instantly (no 0.2s flash). A minimal
+    -- time guard collapses the spam when Blizzard rebuilds all pools
+    -- every tick (Lightsmith Holy Armaments churn) without adding latency
+    -- to real buff procs. 0.05s = one frame at 20 fps.
+    local _lastDirectReanchor = 0
+    local DIRECT_REANCHOR_GUARD = 0.05
+    local function DirectBuffReanchor(label)
+        _dbgTriggers.refreshLayout = _dbgTriggers.refreshLayout + 1
+        if _cdmDebug then CDMDebugPrint("RefreshLayout on " .. label) end
+        local now = GetTime()
+        if now - _lastDirectReanchor < DIRECT_REANCHOR_GUARD then return end
+        _lastDirectReanchor = now
+        CollectAndReanchor()
+    end
     local buffViewer = _G["BuffIconCooldownViewer"]
     if buffViewer and buffViewer.RefreshLayout then
         hooksecurefunc(buffViewer, "RefreshLayout", function()
-            CollectAndReanchor()
+            DirectBuffReanchor("BuffIconCooldownViewer")
         end)
     end
     local buffBarViewer = _G["BuffBarCooldownViewer"]
     if buffBarViewer and buffBarViewer.RefreshLayout then
         hooksecurefunc(buffBarViewer, "RefreshLayout", function()
-            CollectAndReanchor()
+            DirectBuffReanchor("BuffBarCooldownViewer")
         end)
     end
 
