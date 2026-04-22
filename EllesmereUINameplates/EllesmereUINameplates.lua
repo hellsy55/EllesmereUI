@@ -3107,6 +3107,28 @@ castFallbackFrame:SetScript("OnUpdate", function()
             if bc and bc:IsShown() then
                 plate.cast:SetMinMaxValues(bc:GetMinMaxValues())
                 plate.cast:SetValue(bc:GetValue())
+                -- Update cast target in fallback mode (not handled by UpdateCast)
+                if plate.castTarget then
+                    local tgt, tgtClass
+                    if UnitSpellTargetName then
+                        local ok = not UnitShouldDisplaySpellTargetName
+                            or UnitShouldDisplaySpellTargetName(plate.unit)
+                        if ok then
+                            local raw = UnitSpellTargetName(plate.unit)
+                            if raw and not (issecretvalue and issecretvalue(raw)) then
+                                tgt = UnitName(raw) or raw
+                                tgtClass = UnitSpellTargetClass and UnitSpellTargetClass(plate.unit)
+                            end
+                        end
+                    else
+                        local tu = plate.unit .. "target"
+                        if UnitExists(tu) then
+                            tgt = UnitName(tu)
+                            tgtClass = UnitClassBase and UnitClassBase(tu)
+                        end
+                    end
+                    plate.castTarget:SetText(tgt or "")
+                end
             else
                 if not plate._interrupted then
                     plate.cast:Hide()
@@ -4425,15 +4447,27 @@ function NameplateFrame:UpdateCast()
     end
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
-    -- Get the cast target name and class for display (Midnight APIs).
-    -- UnitSpellTargetName returns a unit token or full name-realm;
-    -- pass through UnitName() to get a clean short name (no realm).
+    -- Get the cast target name and class for display.
+    -- Check UnitShouldDisplaySpellTargetName first (prevents secret values).
+    -- Fall back to unit.."target" when the spell target API is unavailable.
     local spellTarget, spellTargetClass
-    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
-    if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
-        local shortName = UnitName(rawTarget)
-        spellTarget = shortName or rawTarget
-        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+    if UnitSpellTargetName then
+        local shouldShow = not UnitShouldDisplaySpellTargetName
+            or UnitShouldDisplaySpellTargetName(self.unit)
+        if shouldShow then
+            local rawTarget = UnitSpellTargetName(self.unit)
+            if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
+                local shortName = UnitName(rawTarget)
+                spellTarget = shortName or rawTarget
+                spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+            end
+        end
+    else
+        local targetUnit = self.unit .. "target"
+        if UnitExists(targetUnit) then
+            spellTarget = UnitName(targetUnit)
+            spellTargetClass = UnitClassBase and UnitClassBase(targetUnit)
+        end
     end
     local hasTarget = spellTarget and true or false
     self.castTarget:SetText(spellTarget or "")

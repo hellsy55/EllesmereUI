@@ -120,7 +120,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     }
     local DK_BLOOD = {
         { name="EUI_DnDCursor", icon="Interface\\Icons\\spell_shadow_deathanddecay", label="Death and Decay\n(Cursor)", fixedBody="/cast [@cursor] Death and Decay", fixedTooltip="Death and Decay" },
-        { name="EUI_GorefiendCursor", icon="Interface\\Icons\\ability_deathknight_dvikinggrasp", label="Gorefiend's Grasp\n(Cursor)", fixedBody="/cast [@cursor] Gorefiend's Grasp", fixedTooltip="Gorefiend's Grasp" },
+        { name="EUI_GorefiendCursor", icon="Interface\\Icons\\ability_deathknight_aoedeathgrip", label="Gorefiend's Grasp\n(Cursor)", fixedBody="/cast [@cursor] Gorefiend's Grasp", fixedTooltip="Gorefiend's Grasp" },
         { name="EUI_AbomLimb", icon="Interface\\Icons\\ability_deathknight_intovoidtentacles", label="Abomination Limb\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Abomination Limb", fixedTooltip="Abomination Limb" },
         { name="EUI_ControlUndead", icon="Interface\\Icons\\inv_misc_bone_skull_01", label="Control Undead\nManagement", fixedBody="/target pet\n/run PetDismiss()\n/use Control Undead\n/petassist" },
     }
@@ -149,9 +149,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_SigilMisery", icon="Interface\\Icons\\ability_demonhunter_sigilofmisery", label="Sigil of Misery\n(Cursor)", fixedBody="/cast [@cursor] Sigil of Misery", fixedTooltip="Sigil of Misery" },
     }
     local DH_DEVOURER = {
-        { name="EUI_VoidMeta1", icon="Interface\\Icons\\ability_demonhunter_metamorphasistank", label="Void Meta\n+ Trinket 1", fixedBody="/cast Void Metamorphosis\n/use 13", fixedTooltip="Void Metamorphosis" },
-        { name="EUI_VoidMeta2", icon="Interface\\Icons\\ability_demonhunter_metamorphasistank", label="Void Meta\n+ Trinket 2", fixedBody="/cast Void Metamorphosis\n/use 14", fixedTooltip="Void Metamorphosis" },
-        { name="EUI_ShiftCursor", icon="Interface\\Icons\\ability_racial_dvikingshift", label="Shift\n(Cursor)", fixedBody="/cast [@cursor] Shift", fixedTooltip="Shift" },
+        { name="EUI_ShiftCursor", icon="Interface\\Icons\\inv_12_dh_void_ability_shift", label="Shift\n(Cursor)", fixedBody="/cast [@cursor] Shift", fixedTooltip="Shift" },
     }
     local DH_HAVOC = {
         { name="EUI_TheHunt", icon="Interface\\Icons\\ability_ardenweald_demonhunter", label="The Hunt\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] The Hunt", fixedTooltip="The Hunt" },
@@ -171,7 +169,6 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_Soothe", icon="Interface\\Icons\\ability_hunter_beastsoothe", label="Soothe\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Soothe", fixedTooltip="Soothe" },
         { name="EUI_StopBear", icon="Interface\\Icons\\ability_racial_bearform", label="Stop Cast\nBear Form", fixedBody="/stopcasting\n/cast Bear Form" },
         { name="EUI_StopWildCharge", icon="Interface\\Icons\\spell_druid_wildcharge", label="Stop Cast\nWild Charge", fixedBody="/stopcasting\n/cast Wild Charge" },
-        { name="EUI_SkullBash", icon="Interface\\Icons\\inv_bone_skull_04", label="Skull Bash\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Skull Bash", fixedTooltip="Skull Bash" },
         { name="EUI_RemoveCorrupt", icon="Interface\\Icons\\spell_holy_removecurse", label="Remove Corruption\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Remove Corruption", fixedTooltip="Remove Corruption" },
     }
     local DRUID_BAL = {
@@ -180,9 +177,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_CelestialAlign", icon="Interface\\Icons\\spell_nature_natureguardian", label="Celestial Alignment\n(Cursor)", fixedBody="/cast [@cursor] Celestial Alignment", fixedTooltip="Celestial Alignment" },
     }
     local DRUID_FERAL = {
+        { name="EUI_SkullBash", icon="Interface\\Icons\\inv_bone_skull_04", label="Skull Bash\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Skull Bash", fixedTooltip="Skull Bash" },
         { name="EUI_SurvInstCombo", icon="Interface\\Icons\\ability_druid_tigersroar", label="Survival Instincts\nCombo", fixedBody="/cast Survival Instincts\n/cast Barkskin", fixedTooltip="Survival Instincts" },
     }
     local DRUID_GUARD = {
+        { name="EUI_SkullBash", icon="Interface\\Icons\\inv_bone_skull_04", label="Skull Bash\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Skull Bash", fixedTooltip="Skull Bash" },
         { name="EUI_Growl", icon="Interface\\Icons\\ability_physical_taunt", label="Growl\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Growl", fixedTooltip="Growl" },
     }
     local DRUID_RESTO = {
@@ -193,21 +192,21 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
     -- Evoker (1467=Devastation, 1468=Preservation, 1473=Augmentation)
     local EVOKER_GEN = {
-        { name="EUI_Quell", icon="Interface\\Icons\\ability_evoker_quell", label="Quell\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Quell", fixedTooltip="Quell" },
-        { name="EUI_CautFlame", icon="Interface\\Icons\\ability_evoker_cauterizingflame", label="Cauterizing Flame\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Cauterizing Flame", fixedTooltip="Cauterizing Flame" },
-        { name="EUI_RescueCursor", icon="Interface\\Icons\\ability_evoker_rescue", label="Rescue\n(Cursor)", fixedBody="/tar [@focus]\n/cast [@cursor] Rescue\n/targetlasttarget", fixedTooltip="Rescue" },
-        { name="EUI_RescueToYou", icon="Interface\\Icons\\ability_evoker_rescue", label="Rescue\n(To You)", fixedBody="/tar [@focus]\n/cast [@player] Rescue\n/targetlasttarget", fixedTooltip="Rescue" },
-        { name="EUI_SleepWalk", icon="Interface\\Icons\\ability_evoker_sleepwalk", label="Sleep Walk\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Sleep Walk", fixedTooltip="Sleep Walk" },
+        { name="EUI_CautFlame", icon="Interface\\Icons\\ability_evoker_fontofmagic_red", label="Cauterizing Flame\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Cauterizing Flame", fixedTooltip="Cauterizing Flame" },
+        { name="EUI_RescueCursor", icon="Interface\\Icons\\ability_evoker_flywithme", label="Rescue\n(Cursor)", fixedBody="/tar [@focus]\n/cast [@cursor] Rescue\n/targetlasttarget", fixedTooltip="Rescue" },
+        { name="EUI_RescueToYou", icon="Interface\\Icons\\ability_evoker_flywithme", label="Rescue\n(To You)", fixedBody="/tar [@focus]\n/cast [@player] Rescue\n/targetlasttarget", fixedTooltip="Rescue" },
+        { name="EUI_SleepWalk", icon="Interface\\Icons\\ability_xavius_dreamsimulacrum", label="Sleep Walk\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Sleep Walk", fixedTooltip="Sleep Walk" },
     }
     local EVOKER_AUG = {
+        { name="EUI_Quell", icon="Interface\\Icons\\ability_evoker_quell", label="Quell\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Quell", fixedTooltip="Quell" },
         { name="EUI_BlistScales", icon="Interface\\Icons\\ability_evoker_blisteringscales", label="Blistering Scales\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Blistering Scales", fixedTooltip="Blistering Scales" },
     }
     local EVOKER_DEV = {
+        { name="EUI_Quell", icon="Interface\\Icons\\ability_evoker_quell", label="Quell\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Quell", fixedTooltip="Quell" },
         { name="EUI_DragonrageBurst", icon="Interface\\Icons\\ability_evoker_dragonrage2", label="Dragonrage\nBurst", fixedBody="/cast Dragonrage\n/use 13\n/use 14", fixedTooltip="Dragonrage" },
     }
     local EVOKER_PRES = {
         { name="EUI_DreamBreath", icon="Interface\\Icons\\ability_evoker_dreambreath", label="Dream Breath\n(Cursor)", fixedBody="/cast [@cursor] Dream Breath", fixedTooltip="Dream Breath" },
-        { name="EUI_Spiritbloom", icon="Interface\\Icons\\ability_evoker_spiritbloom2", label="Spiritbloom\n(Cursor)", fixedBody="/cast [@cursor] Spiritbloom", fixedTooltip="Spiritbloom" },
     }
 
     -- Hunter (253=BeastMastery, 254=Marksmanship, 255=Survival)
@@ -257,7 +256,6 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
     -- Monk (268=Brewmaster, 270=Mistweaver, 269=Windwalker)
     local MONK_GEN = {
-        { name="EUI_SpearHand", icon="Interface\\Icons\\ability_monk_spearhand", label="Spear Hand Strike\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Spear Hand Strike", fixedTooltip="Spear Hand Strike" },
         { name="EUI_Detox", icon="Interface\\Icons\\ability_rogue_imrovedrecuperate", label="Detox\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Detox", fixedTooltip="Detox" },
         { name="EUI_Paralysis", icon="Interface\\Icons\\ability_monk_paralysis", label="Paralysis\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Paralysis", fixedTooltip="Paralysis" },
         { name="EUI_TigersLust", icon="Interface\\Icons\\ability_monk_tigerslust", label="Tiger's Lust\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Tiger's Lust", fixedTooltip="Tiger's Lust" },
@@ -265,17 +263,20 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_TouchOfDeath", icon="Interface\\Icons\\ability_monk_touchofdeath", label="Touch of Death\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Touch of Death", fixedTooltip="Touch of Death" },
     }
     local MONK_BREW = {
+        { name="EUI_SpearHand", icon="Interface\\Icons\\ability_monk_spearhand", label="Spear Hand Strike\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Spear Hand Strike", fixedTooltip="Spear Hand Strike" },
         { name="EUI_Provoke", icon="Interface\\Icons\\ability_monk_provoke", label="Provoke\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Provoke", fixedTooltip="Provoke" },
-        { name="EUI_BlackOxStatue", icon="Interface\\Icons\\monk_ability_dvikiingstorm", label="Black Ox Statue\n(Cursor)", fixedBody="/cast [@cursor] Summon Black Ox Statue" },
+        { name="EUI_BlackOxStatue", icon="Interface\\Icons\\monk_ability_summonoxstatue", label="Black Ox Statue\n(Cursor)", fixedBody="/cast [@cursor] Summon Black Ox Statue" },
+    }
+    local MONK_WW = {
+        { name="EUI_SpearHand", icon="Interface\\Icons\\ability_monk_spearhand", label="Spear Hand Strike\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Spear Hand Strike", fixedTooltip="Spear Hand Strike" },
     }
     local MONK_MW = {
         { name="EUI_LifeCocoon", icon="Interface\\Icons\\ability_monk_chicocoon", label="Life Cocoon\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Life Cocoon", fixedTooltip="Life Cocoon" },
-        { name="EUI_JadeSerpent", icon="Interface\\Icons\\ability_monk_dvikiingstorm", label="Jade Serpent\nStatue (Cursor)", fixedBody="/cast [@cursor] Summon Jade Serpent Statue", fixedTooltip="Summon Jade Serpent Statue" },
+        { name="EUI_JadeSerpent", icon="Interface\\Icons\\ability_monk_summonserpentstatue", label="Jade Serpent\nStatue (Cursor)", fixedBody="/cast [@cursor] Summon Jade Serpent Statue", fixedTooltip="Summon Jade Serpent Statue" },
     }
 
     -- Paladin (65=Holy, 66=Protection, 70=Retribution)
     local PALA_GEN = {
-        { name="EUI_Rebuke", icon="Interface\\Icons\\spell_holy_rebuke", label="Rebuke\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Rebuke", fixedTooltip="Rebuke" },
         { name="EUI_BoFreedom", icon="Interface\\Icons\\spell_holy_sealofvalor", label="Blessing of\nFreedom (Focus)", fixedBody="/cast [@focus,help,nodead][] Blessing of Freedom", fixedTooltip="Blessing of Freedom" },
         { name="EUI_BoProtection", icon="Interface\\Icons\\spell_holy_sealofprotection", label="Blessing of\nProtection (Focus)", fixedBody="/cast [@focus,help,nodead][] Blessing of Protection", fixedTooltip="Blessing of Protection" },
         { name="EUI_HammerJustice", icon="Interface\\Icons\\spell_holy_sealofmight", label="Hammer of Justice\n(Focus)", fixedBody="/cast [@focus,exists] Hammer of Justice" },
@@ -291,9 +292,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_BeaconLight", icon="Interface\\Icons\\ability_paladin_beaconoflight", label="Beacon of Light\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Beacon of Light", fixedTooltip="Beacon of Light" },
     }
     local PALA_PROT = {
+        { name="EUI_Rebuke", icon="Interface\\Icons\\spell_holy_rebuke", label="Rebuke\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Rebuke", fixedTooltip="Rebuke" },
         { name="EUI_HandReckoning", icon="Interface\\Icons\\spell_holy_unyieldingfaith", label="Hand of Reckoning\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Hand of Reckoning", fixedTooltip="Hand of Reckoning" },
     }
     local PALA_RET = {
+        { name="EUI_Rebuke", icon="Interface\\Icons\\spell_holy_rebuke", label="Rebuke\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Rebuke", fixedTooltip="Rebuke" },
         { name="EUI_ExecSentence", icon="Interface\\Icons\\spell_paladin_executionsentence", label="Execution Sentence\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Execution Sentence", fixedTooltip="Execution Sentence" },
     }
 
@@ -331,7 +334,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_DeathmarkBurst", icon="Interface\\Icons\\ability_rogue_deathmark", label="Deathmark\nBurst", fixedBody="/cast Deathmark\n/use 13", fixedTooltip="Deathmark" },
     }
     local ROGUE_OUTLAW = {
-        { name="EUI_GrapplingHook", icon="Interface\\Icons\\ability_rogue_dvikingrappling", label="Grappling Hook\n(Cursor)", fixedBody="/cast [@cursor] Grappling Hook", fixedTooltip="Grappling Hook" },
+        { name="EUI_GrapplingHook", icon="Interface\\Icons\\ability_rogue_grapplinghook", label="Grappling Hook\n(Cursor)", fixedBody="/cast [@cursor] Grappling Hook", fixedTooltip="Grappling Hook" },
     }
     local ROGUE_SUB = {
         { name="EUI_ShadowBlades", icon="Interface\\Icons\\inv_knife_1h_grimbatolraid_d_03", label="Shadow Blades\nBurst", fixedBody="/cast Shadow Blades\n/use 13", fixedTooltip="Shadow Blades" },
@@ -342,10 +345,10 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     -- Shaman (262=Elemental, 263=Enhancement, 264=Restoration)
     local SHAMAN_GEN = {
         { name="EUI_WindShear", icon="Interface\\Icons\\spell_nature_cyclonestrikes", label="Wind Shear\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Wind Shear", fixedTooltip="Wind Shear" },
-        { name="EUI_Purge", icon="Interface\\Icons\\spell_arcane_arcane01", label="Purge\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Purge", fixedTooltip="Purge" },
+        { name="EUI_Purge", icon="Interface\\Icons\\spell_nature_purge", label="Purge\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Purge", fixedTooltip="Purge" },
         { name="EUI_Hex", icon="Interface\\Icons\\spell_shaman_hex", label="Hex\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Hex", fixedTooltip="Hex" },
         { name="EUI_CleanseSpirit", icon="Interface\\Icons\\ability_shaman_cleansespirit", label="Cleanse Spirit\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Cleanse Spirit", fixedTooltip="Cleanse Spirit" },
-        { name="EUI_WindrushTotem", icon="Interface\\Icons\\ability_shaman_dvikingrusher", label="Windrush Totem\n(Cursor)", fixedBody="/cast [@cursor] Wind Rush Totem", fixedTooltip="Wind Rush Totem" },
+        { name="EUI_WindrushTotem", icon="Interface\\Icons\\ability_shaman_windwalktotem", label="Windrush Totem\n(Cursor)", fixedBody="/cast [@cursor] Wind Rush Totem", fixedTooltip="Wind Rush Totem" },
         { name="EUI_CapacitorTotem", icon="Interface\\Icons\\spell_nature_brilliance", label="Capacitor Totem\n(Cursor)", fixedBody="/cast [@cursor] Capacitor Totem", fixedTooltip="Capacitor Totem" },
     }
     local SHAMAN_ELE = {
@@ -353,11 +356,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_EarthquakeCursor", icon="Interface\\Icons\\spell_shaman_earthquake", label="Earthquake\n(Cursor)", fixedBody="/cast [@cursor] Earthquake", fixedTooltip="Earthquake" },
     }
     local SHAMAN_ENH = {
-        { name="EUI_AutoTotemMove", icon="Interface\\Icons\\spell_shaman_dvikiingstorm", label="Auto Totem Move\nfor Totemic", fixedBody="/cast Stormstrike\n/cast [@player] Totemic Projection" },
+        { name="EUI_AutoTotemMove", icon="Interface\\Icons\\ability_shaman_totemrelocation", label="Auto Totem Move\nfor Totemic", fixedBody="/cast Stormstrike\n/cast [@player] Totemic Projection" },
     }
     local SHAMAN_RESTO = {
         { name="EUI_HealingRain", icon="Interface\\Icons\\spell_nature_giftofthewaterspirit", label="Healing Rain\n(Cursor)", fixedBody="/cast [@cursor] Healing Rain", fixedTooltip="Healing Rain" },
-        { name="EUI_SpiritLink", icon="Interface\\Icons\\spell_shaman_dvikiingstorm", label="Spirit Link Totem\n(Cursor)", fixedBody="/cast [@cursor] Spirit Link Totem", fixedTooltip="Spirit Link Totem" },
+        { name="EUI_SpiritLink", icon="Interface\\Icons\\spell_shaman_spiritlink", label="Spirit Link Totem\n(Cursor)", fixedBody="/cast [@cursor] Spirit Link Totem", fixedTooltip="Spirit Link Totem" },
     }
 
     -- Warlock (265=Affliction, 266=Demonology, 267=Destruction)
@@ -366,15 +369,15 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         { name="EUI_Banish", icon="Interface\\Icons\\spell_shadow_cripple", label="Banish\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Banish", fixedTooltip="Banish" },
         { name="EUI_MortalCoil", icon="Interface\\Icons\\ability_warlock_mortalcoil", label="Mortal Coil\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Mortal Coil", fixedTooltip="Mortal Coil" },
         { name="EUI_Shadowfury", icon="Interface\\Icons\\spell_shadow_shadowfury", label="Shadowfury\n(Cursor)", fixedBody="/cast [@cursor] Shadowfury" },
-        { name="EUI_DemonicGateway", icon="Interface\\Icons\\spell_warlock_dvikingdemongateways", label="Demonic Gateway\n(Cursor)", fixedBody="/cast [@cursor] Demonic Gateway" },
-        { name="EUI_SoulburnHS", icon="Interface\\Icons\\warlock_-_soulburn", label="Soulburn\nHealthstone", fixedBody="/cast [known:Soulburn] Soulburn\n/use [known:Pact of Gluttony] Demonic Healthstone; Healthstone", fixedTooltip="[known:Pact of Gluttony] Demonic Healthstone; Healthstone" },
+        { name="EUI_DemonicGateway", icon="Interface\\Icons\\spell_warlock_demonicportal_green", label="Demonic Gateway\n(Cursor)", fixedBody="/cast [@cursor] Demonic Gateway" },
+        { name="EUI_SoulburnHS", icon="Interface\\Icons\\spell_warlock_soulburn", label="Soulburn\nHealthstone", fixedBody="/cast [known:Soulburn] Soulburn\n/use [known:Pact of Gluttony] Demonic Healthstone; Healthstone", fixedTooltip="[known:Pact of Gluttony] Demonic Healthstone; Healthstone" },
     }
     local LOCK_DEMO = {
-        { name="EUI_AxeToss", icon="Interface\\Icons\\ability_warlock_dvikingaxetoss", label="Axe Toss\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Axe Toss", fixedTooltip="Axe Toss" },
+        { name="EUI_AxeToss", icon="Interface\\Icons\\ability_warrior_titansgrip", label="Axe Toss\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Axe Toss", fixedTooltip="Axe Toss" },
     }
     local LOCK_DESTRO = {
-        { name="EUI_Havoc", icon="Interface\\Icons\\ability_warlock_dvikiinghavoc", label="Havoc\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Havoc", fixedTooltip="Havoc" },
-        { name="EUI_SummonInfernal", icon="Interface\\Icons\\spell_shadow_dvikinginfernal", label="Summon Infernal\n(Cursor)", fixedBody="/cast [@cursor] Summon Infernal" },
+        { name="EUI_Havoc", icon="Interface\\Icons\\ability_warlock_baneofhavoc", label="Havoc\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Havoc", fixedTooltip="Havoc" },
+        { name="EUI_SummonInfernal", icon="Interface\\Icons\\spell_shadow_summoninfernal", label="Summon Infernal\n(Cursor)", fixedBody="/cast [@cursor] Summon Infernal" },
         { name="EUI_RainOfFire", icon="Interface\\Icons\\spell_shadow_rainoffire", label="Rain of Fire\n(Cursor)", fixedBody="/cast [@cursor] Rain of Fire" },
         { name="EUI_Cataclysm", icon="Interface\\Icons\\achievement_zone_cataclysm", label="Cataclysm\n(Cursor)", fixedBody="/cast [@cursor] Cataclysm" },
     }
@@ -382,75 +385,75 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     -- Warrior (71=Arms, 72=Fury, 73=Protection)
     local WARRIOR_GEN = {
         { name="EUI_Pummel", icon="Interface\\Icons\\inv_gauntlets_04", label="Pummel\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Pummel", fixedTooltip="Pummel" },
-        { name="EUI_StormBolt", icon="Interface\\Icons\\warrior_talent_icon_dvikingstormbolt", label="Storm Bolt\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Storm Bolt", fixedTooltip="Storm Bolt" },
+        { name="EUI_StormBolt", icon="Interface\\Icons\\warrior_talent_icon_stormbolt", label="Storm Bolt\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Storm Bolt", fixedTooltip="Storm Bolt" },
         { name="EUI_Intervene", icon="Interface\\Icons\\ability_warrior_safeguard", label="Intervene\n(Focus)", fixedBody="/cast [@focus,help,nodead][] Intervene", fixedTooltip="Intervene" },
         { name="EUI_HeroicLeap", icon="Interface\\Icons\\ability_heroicleap", label="Heroic Leap\n(Cursor)", fixedBody="/cast [@cursor] Heroic Leap", fixedTooltip="Heroic Leap" },
         { name="EUI_OneButtonStance", icon="Interface\\Icons\\ability_warrior_defensivestance", label="One Button\nStance", fixedBody="/cast [stance:2]!Defensive Stance;[known:386164]!Battle Stance;[known:386196]!Berserker Stance" },
     }
     local WARRIOR_ARMS = {
-        { name="EUI_AvatarBurst", icon="Interface\\Icons\\warrior_talent_icon_dvikingavatar", label="Avatar\nBurst", fixedBody="/cast Avatar\n/cast Warbreaker\n/use 13", fixedTooltip="Avatar" },
+        { name="EUI_AvatarBurst", icon="Interface\\Icons\\warrior_talent_icon_avatar", label="Avatar\nBurst", fixedBody="/cast Avatar\n/cast Warbreaker\n/use 13", fixedTooltip="Avatar" },
     }
     local WARRIOR_FURY = {
         { name="EUI_ReckBurst", icon="Interface\\Icons\\warrior_talent_icon_innerrage", label="Recklessness\nBurst", fixedBody="/cast Recklessness\n/cast Avatar\n/use 13", fixedTooltip="Recklessness" },
     }
     local WARRIOR_PROT = {
         { name="EUI_Taunt", icon="Interface\\Icons\\spell_nature_reincarnation", label="Taunt\n(Focus)", fixedBody="/cast [@focus,harm,nodead][] Taunt", fixedTooltip="Taunt" },
-        { name="EUI_RavagerCursor", icon="Interface\\Icons\\warrior_talent_icon_dvikingravager", label="Ravager\n(Cursor)", fixedBody="/cast [@cursor] Ravager", fixedTooltip="Ravager" },
+        { name="EUI_RavagerCursor", icon="Interface\\Icons\\warrior_talent_icon_ravager", label="Ravager\n(Cursor)", fixedBody="/cast [@cursor] Ravager", fixedTooltip="Ravager" },
     }
 
     local SPEC_DEFS = {
         -- Death Knight
-        [250] = mergeMacros(DK_GEN, DK_BLOOD),
-        [251] = mergeMacros(DK_GEN, DK_FROST),
-        [252] = mergeMacros(DK_GEN, DK_UNHOLY),
+        [250] = mergeMacros(DK_BLOOD, DK_GEN),
+        [251] = mergeMacros(DK_FROST, DK_GEN),
+        [252] = mergeMacros(DK_UNHOLY, DK_GEN),
         -- Demon Hunter
-        [577] = mergeMacros(DH_GEN, DH_HAVOC, DH_DEVOURER),
-        [581] = mergeMacros(DH_GEN, DH_VENG, DH_DEVOURER),
+        [577] = mergeMacros(DH_HAVOC, DH_DEVOURER, DH_GEN),
+        [581] = mergeMacros(DH_VENG, DH_DEVOURER, DH_GEN),
         -- Druid
-        [102] = mergeMacros(DRUID_GEN, DRUID_BAL),
-        [103] = mergeMacros(DRUID_GEN, DRUID_FERAL),
-        [104] = mergeMacros(DRUID_GEN, DRUID_GUARD),
-        [105] = mergeMacros(DRUID_GEN, DRUID_RESTO),
+        [102] = mergeMacros(DRUID_BAL, DRUID_GEN),
+        [103] = mergeMacros(DRUID_FERAL, DRUID_GEN),
+        [104] = mergeMacros(DRUID_GUARD, DRUID_GEN),
+        [105] = mergeMacros(DRUID_RESTO, DRUID_GEN),
         -- Evoker
-        [1467] = mergeMacros(EVOKER_GEN, EVOKER_DEV),
-        [1468] = mergeMacros(EVOKER_GEN, EVOKER_PRES),
-        [1473] = mergeMacros(EVOKER_GEN, EVOKER_AUG),
+        [1467] = mergeMacros(EVOKER_DEV, EVOKER_GEN),
+        [1468] = mergeMacros(EVOKER_PRES, EVOKER_GEN),
+        [1473] = mergeMacros(EVOKER_AUG, EVOKER_GEN),
         -- Hunter
-        [253] = mergeMacros(HUNTER_GEN, HUNTER_BM),
-        [254] = mergeMacros(HUNTER_GEN, HUNTER_MM),
-        [255] = mergeMacros(HUNTER_GEN, HUNTER_SURV),
+        [253] = mergeMacros(HUNTER_BM, HUNTER_GEN),
+        [254] = mergeMacros(HUNTER_MM, HUNTER_GEN),
+        [255] = mergeMacros(HUNTER_SURV, HUNTER_GEN),
         -- Mage
-        [62]  = mergeMacros(MAGE_GEN, MAGE_ARCANE),
-        [63]  = mergeMacros(MAGE_GEN, MAGE_FIRE),
-        [64]  = mergeMacros(MAGE_GEN, MAGE_FROST_SPEC),
+        [62]  = mergeMacros(MAGE_ARCANE, MAGE_GEN),
+        [63]  = mergeMacros(MAGE_FIRE, MAGE_GEN),
+        [64]  = mergeMacros(MAGE_FROST_SPEC, MAGE_GEN),
         -- Monk
-        [268] = mergeMacros(MONK_GEN, MONK_BREW),
-        [269] = mergeMacros(MONK_GEN),
-        [270] = mergeMacros(MONK_GEN, MONK_MW),
+        [268] = mergeMacros(MONK_BREW, MONK_GEN),
+        [269] = mergeMacros(MONK_WW, MONK_GEN),
+        [270] = mergeMacros(MONK_MW, MONK_GEN),
         -- Paladin
-        [65]  = mergeMacros(PALA_GEN, PALA_HOLY),
-        [66]  = mergeMacros(PALA_GEN, PALA_PROT),
-        [70]  = mergeMacros(PALA_GEN, PALA_RET),
+        [65]  = mergeMacros(PALA_HOLY, PALA_GEN),
+        [66]  = mergeMacros(PALA_PROT, PALA_GEN),
+        [70]  = mergeMacros(PALA_RET, PALA_GEN),
         -- Priest
-        [256] = mergeMacros(PRIEST_GEN, PRIEST_DISC),
-        [257] = mergeMacros(PRIEST_GEN, PRIEST_HOLY),
-        [258] = mergeMacros(PRIEST_GEN, PRIEST_SHADOW),
+        [256] = mergeMacros(PRIEST_DISC, PRIEST_GEN),
+        [257] = mergeMacros(PRIEST_HOLY, PRIEST_GEN),
+        [258] = mergeMacros(PRIEST_SHADOW, PRIEST_GEN),
         -- Rogue
-        [259] = mergeMacros(ROGUE_GEN, ROGUE_ASS),
-        [260] = mergeMacros(ROGUE_GEN, ROGUE_OUTLAW),
-        [261] = mergeMacros(ROGUE_GEN, ROGUE_SUB),
+        [259] = mergeMacros(ROGUE_ASS, ROGUE_GEN),
+        [260] = mergeMacros(ROGUE_OUTLAW, ROGUE_GEN),
+        [261] = mergeMacros(ROGUE_SUB, ROGUE_GEN),
         -- Shaman
-        [262] = mergeMacros(SHAMAN_GEN, SHAMAN_ELE),
-        [263] = mergeMacros(SHAMAN_GEN, SHAMAN_ENH),
-        [264] = mergeMacros(SHAMAN_GEN, SHAMAN_RESTO),
+        [262] = mergeMacros(SHAMAN_ELE, SHAMAN_GEN),
+        [263] = mergeMacros(SHAMAN_ENH, SHAMAN_GEN),
+        [264] = mergeMacros(SHAMAN_RESTO, SHAMAN_GEN),
         -- Warlock
         [265] = mergeMacros(LOCK_GEN),
-        [266] = mergeMacros(LOCK_GEN, LOCK_DEMO),
-        [267] = mergeMacros(LOCK_GEN, LOCK_DESTRO),
+        [266] = mergeMacros(LOCK_DEMO, LOCK_GEN),
+        [267] = mergeMacros(LOCK_DESTRO, LOCK_GEN),
         -- Warrior
-        [71]  = mergeMacros(WARRIOR_GEN, WARRIOR_ARMS),
-        [72]  = mergeMacros(WARRIOR_GEN, WARRIOR_FURY),
-        [73]  = mergeMacros(WARRIOR_GEN, WARRIOR_PROT),
+        [71]  = mergeMacros(WARRIOR_ARMS, WARRIOR_GEN),
+        [72]  = mergeMacros(WARRIOR_FURY, WARRIOR_GEN),
+        [73]  = mergeMacros(WARRIOR_PROT, WARRIOR_GEN),
     }
 
     -- Detect current spec and class
