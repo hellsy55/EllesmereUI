@@ -3555,9 +3555,10 @@ local function FRSetFontSafe(fs, path, size, flags)
     if not fs then return end
     local safe = FRSafeFont(path)
     size = size or 11
-    flags = flags or "NONE"
+    if flags == "NONE" then flags = "" end
+    flags = flags or ""
     local curPath, curSize, curFlags = fs:GetFont()
-    if curPath == safe and curSize == size and (curFlags or "NONE") == flags then return end
+    if curPath == safe and curSize == size and (curFlags or "") == flags then return end
     fs:SetFont(safe, size, flags)
     if not fs:GetFont() then fs:SetFont("Fonts/FRIZQT__.TTF", size, flags) end
     if not fs:GetFont() then fs:SetFont("Fonts\\FRIZQT__.TTF", size, flags) end
@@ -3589,7 +3590,9 @@ local function FocusReminderUnitMatches(unit)
     if cls == "elite" or cls == "rareelite" or cls == "worldboss" then
         local lvl = UnitLevel(unit)
         local plvl = UnitLevel("player")
-        if lvl == -1 or (plvl and lvl >= plvl + 1) then return true end
+        local lvlClean = lvl and not (issecretvalue and issecretvalue(lvl))
+        local plvlClean = plvl and not (issecretvalue and issecretvalue(plvl))
+        if lvlClean and (lvl == -1 or (plvlClean and lvl >= plvl + 1)) then return true end
     end
     return false
 end

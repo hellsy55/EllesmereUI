@@ -399,7 +399,7 @@ local function ShowFlyoutPanel()
         })
         flyoutPanel:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
         flyoutPanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-        flyoutPanel:SetPoint("BOTTOMLEFT", flyoutToggle, "TOPLEFT", 0, 2)
+        flyoutPanel:SetPoint("BOTTOMLEFT", flyoutToggle, "BOTTOMRIGHT", 2, 0)
         flyoutPanel:SetClampedToScreen(true)
         flyoutOwnedFrames[flyoutPanel] = true
     end

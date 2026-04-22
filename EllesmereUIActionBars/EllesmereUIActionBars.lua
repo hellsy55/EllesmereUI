@@ -2910,6 +2910,13 @@ local function MakeButtonSquare(btn)
     SetSquareTexture(btn.Border, HIGHLIGHT_TEXTURES[1])
     _quickKeybindState.art.InitializeButton(btn)
     HideTexture(btn.FlyoutBorderShadow)
+    if btn.BorderShadow then
+        if EllesmereUI and EllesmereUI._hiddenParent then
+            btn.BorderShadow:SetParent(EllesmereUI._hiddenParent)
+        else
+            HideTexture(btn.BorderShadow)
+        end
+    end
     if btn.cooldown then
         btn.cooldown:ClearAllPoints()
         btn.cooldown:SetAllPoints(btn)

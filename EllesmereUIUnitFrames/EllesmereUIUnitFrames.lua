@@ -2226,7 +2226,9 @@ local function CreatePowerBar(frame, unit, settings)
             local isElite = (cls == "elite" or cls == "rareelite")
             local lvl = UnitLevel(u)
             local pLvl = UnitLevel("player")
-            if isElite and (lvl == -1 or (pLvl and lvl >= pLvl + 1)) then return false end
+            local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
+            local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
+            if isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1)) then return false end
             if UnitClassBase and UnitClassBase(u) == "PALADIN" then return false end
             return true
         end)
@@ -4911,7 +4913,9 @@ local function ReloadFrames()
                                 local isElite = (cls == "elite" or cls == "rareelite")
                                 local lvl = UnitLevel(unit)
                                 local pLvl = UnitLevel("player")
-                                local isMB = isElite and (lvl == -1 or (pLvl and lvl >= pLvl + 1))
+                                local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
+                                local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
+                                local isMB = isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1))
                                 local isCst = (UnitClassBase and UnitClassBase(unit) == "PALADIN")
                                 if not isBoss and not isMB and not isCst then shouldGray = true end
                             end
@@ -5268,7 +5272,9 @@ local function ReloadFrames()
                                 local isElite = (cls == "elite" or cls == "rareelite")
                                 local lvl = UnitLevel(unit)
                                 local pLvl = UnitLevel("player")
-                                local isMB = isElite and (lvl == -1 or (pLvl and lvl >= pLvl + 1))
+                                local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
+                                local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
+                                local isMB = isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1))
                                 local isCst = (UnitClassBase and UnitClassBase(unit) == "PALADIN")
                                 if not isBoss and not isMB and not isCst then shouldGray = true end
                             end

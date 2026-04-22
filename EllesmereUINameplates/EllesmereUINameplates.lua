@@ -2891,7 +2891,9 @@ local function GetReactionColor(unit)
     if classification == "elite" or classification == "worldboss" or classification == "rareelite" then
         local level = UnitLevel(unit)
         local playerLevel = UnitLevel("player")
-        if level == -1 or (playerLevel and level >= playerLevel + 1) then
+        local lvlClean = level and not (issecretvalue and issecretvalue(level))
+        local plvlClean = playerLevel and not (issecretvalue and issecretvalue(playerLevel))
+        if lvlClean and (level == -1 or (plvlClean and level >= playerLevel + 1)) then
             local c = _C("miniboss")
             if type(inCombat) == "boolean" and inCombat then
                 return c.r, c.g, c.b

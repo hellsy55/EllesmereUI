@@ -1171,20 +1171,23 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) local c = CDB(); if c then c.runeDisplayMode = v; RefreshAll() end end }
         );  y = y - h
 
-        -- Inky Black Potion toggle + inline "Choose Zones" button | empty right
+        -- Healthstone toggle | Inky Black Potion toggle
         row, h = W:DualRow(parent, y,
+            { type="toggle", text="Healthstone",
+              tooltip="Remind you to grab a Healthstone when a Warlock is in your group.",
+              getValue=function() local c = CDB(); return c and c.enabled and c.enabled.healthstone ~= false end,
+              setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.healthstone = v; RefreshAll(); RebuildPreviewHeader() end end },
             { type="toggle", text="Inky Black Potion",
               getValue=function() local c = CDB(); return c and c.enabled and c.enabled.inky_black end,
               setValue=function(v)
                   local c = CDB(); if c and c.enabled then c.enabled.inky_black = v; RefreshAll(); RebuildPreviewHeader() end
                   EllesmereUI:RefreshPage()
-              end },
-            nil
+              end }
         );  y = y - h
 
-        -- Inline "Choose Zones" button on the left region
+        -- Inline "Choose Zones" button on the right region (Inky Black)
         do
-            local rgn = row._leftRegion
+            local rgn = row._rightRegion
             local eg = EllesmereUI.ELLESMERE_GREEN or {r=0, g=0.82, b=0.62}
             local lerp = EllesmereUI.lerp
             local DARK_BG = EllesmereUI.DARK_BG or { r = 0.05, g = 0.07, b = 0.09 }

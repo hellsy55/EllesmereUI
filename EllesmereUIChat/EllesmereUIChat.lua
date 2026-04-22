@@ -983,8 +983,24 @@ local function _BuildAlphaCache()
     end
 end
 
+local function IsInProtectedInstance()
+    local _, instanceType = IsInInstance()
+    if instanceType == "raid" and InCombatLockdown() then return true end
+    if instanceType == "party" and C_ChallengeMode
+        and C_ChallengeMode.IsChallengeModeActive
+        and C_ChallengeMode.IsChallengeModeActive() then
+        return true
+    end
+    return false
+end
+
 local function _ApplyAlpha(alpha)
     _chatAlphaCurrent = alpha
+    -- Skip all SetAlpha calls on Blizzard chat frames in protected
+    -- instances (M+ keystones, raid combat). SetAlpha from addon code
+    -- taints the chat frame execution context, causing secret-value
+    -- errors on subsequent message events (e.g. MONSTER_YELL).
+    if IsInProtectedInstance() then return end
     if not _alphaFrames then _BuildAlphaCache() end
     for i = 1, #_alphaFrames do
         local af = _alphaFrames[i]
@@ -1104,16 +1120,7 @@ local function StripUIEscapes(text)
     return text
 end
 
-local function IsInProtectedInstance()
-    local _, instanceType = IsInInstance()
-    if instanceType == "raid" and InCombatLockdown() then return true end
-    if instanceType == "party" and C_ChallengeMode
-        and C_ChallengeMode.IsChallengeModeActive
-        and C_ChallengeMode.IsChallengeModeActive() then
-        return true
-    end
-    return false
-end
+-- IsInProtectedInstance moved above _ApplyAlpha (see ~line 986)
 
 -- Read all messages directly from the active chat frame on demand.
 -- No hooks needed: ScrollingMessageFrame:GetMessageInfo(i) returns

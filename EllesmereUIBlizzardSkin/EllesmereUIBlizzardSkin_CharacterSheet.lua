@@ -4070,7 +4070,8 @@ local function SkinCharacterSheet()
             -- Only flag missing enchants for level 90+ characters: leveling
             -- gear churn means the red icon and pulse would constantly fire
             -- on every replacement. Endgame players are the audience.
-            local atEnchantLevel = (UnitLevel("player") or 0) >= 90
+            local playerLvl = UnitLevel("player")
+            local atEnchantLevel = playerLvl and not (issecretvalue and issecretvalue(playerLvl)) and playerLvl >= 90 or false
             local isMissing    = atEnchantLevel and canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
             local hasEnchant   = enchantText and enchantText ~= ""
 

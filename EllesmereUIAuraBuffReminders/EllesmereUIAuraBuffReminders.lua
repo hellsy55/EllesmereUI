@@ -2235,7 +2235,8 @@ local function Refresh()
                and co.enabled.wrong_pet ~= false
                and UnitExists("pet") and not UnitIsDead("pet") then
                 local _, familyID = UnitCreatureFamily("pet")
-                if familyID ~= 29 then
+                local isFelguard = familyID and not (issecretvalue and issecretvalue(familyID)) and familyID == 29
+                if not isFelguard then
                     local e = AcquireEntry()
                     e.mode = "texture"
                     e.texture = 136216
@@ -2784,7 +2785,7 @@ _B.frame:SetScript("OnEvent", function(_, e, id)
         end
         return
     end
-    if e == "PLAYER_ENTERING_WORLD" or e == "ZONE_CHANGED_NEW_AREA" then
+    if e == "PLAYER_ENTERING_WORLD" or e == "ZONE_CHANGED_NEW_AREA" or e == "GROUP_ROSTER_UPDATE" then
         BeaconUpdateInstanceCache()
         BeaconUpdateOverlayEvents()
     end

@@ -139,7 +139,8 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
         local enchantText = EllesmereUI.GetEnchantText(slotID, inspectUnit)
         local canHaveEnchant = INSPECT_ENCHANT_SLOTS[slotID]
-        local atEnchantLevel = (UnitLevel(inspectUnit) or 0) >= 90
+        local inspLvl = UnitLevel(inspectUnit)
+        local atEnchantLevel = inspLvl and not (issecretvalue and issecretvalue(inspLvl)) and inspLvl >= 90 or false
         local isMissing = atEnchantLevel and canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
         local hasEnchant = enchantText and enchantText ~= ""
 
