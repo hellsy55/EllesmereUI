@@ -1784,12 +1784,15 @@ local function SkinChatFrame(cf)
 
     -- Prevent tabs from auto-fading (Blizzard's idle fade), but respect
     -- our visibility system which may legitimately set alpha to 0.
+    -- Hook suspends during instanced combat to avoid tainting Blizzard's
+    -- chat history pipeline (HistoryKeeper accessIDs table).
     local tab = _G[name .. "Tab"]
     if tab then
         tab:SetAlpha(1)
         local _ignoreTabAlpha = false
         hooksecurefunc(tab, "SetAlpha", function(self, a)
             if _ignoreTabAlpha then return end
+            if IsInProtectedInstance() then return end
             if not _visChatVisible then
                 if a > 0 then
                     _ignoreTabAlpha = true
