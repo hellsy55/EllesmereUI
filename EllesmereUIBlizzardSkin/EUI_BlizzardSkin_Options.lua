@@ -100,6 +100,45 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        _, h = W:SectionHeader(parent, "GROUP FINDER QUEUE", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reskin Queue Popup",
+              tooltip="Reskins the LFG/dungeon queue accept popup with the EUI dark style and adds an accept countdown timer bar.",
+              getValue=function()
+                  if not EllesmereUIDB then return true end
+                  -- One-time seed from master toggle (written by IsQueueReskinOn at runtime)
+                  if EllesmereUIDB.reskinQueuePopup == nil then
+                      EllesmereUIDB.reskinQueuePopup = (EllesmereUIDB.customTooltips ~= false)
+                  end
+                  return EllesmereUIDB.reskinQueuePopup
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.reskinQueuePopup = v
+                  if not v and EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Disabling queue popup reskin requires a UI reload to restore Blizzard's default style.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="toggle", text="Show Queue Timer",
+              tooltip="Shows a countdown bar below the queue accept popup indicating how long you have to accept.",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.showQueueTimer ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showQueueTimer = v
+              end }
+        );  y = y - h
+
         return math.abs(y)
     end
 
@@ -113,6 +152,24 @@ initFrame:SetScript("OnEvent", function(self)
         local PP = EllesmereUI.PanelPP
 
         parent._showRowDivider = true
+
+        -- Drag instructions (centered, above settings).
+        -- Wrapped in a Frame so the search system collects it as an orphan
+        -- and auto-hides it during search.
+        do
+            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local infoFrame = CreateFrame("Frame", nil, parent)
+            infoFrame:SetSize(parent:GetWidth() or 400, 30)
+            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoFrame._isSpacer = true
+            local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
+            infoLabel:SetFont(fontPath, 15, "")
+            infoLabel:SetTextColor(1, 1, 1, 0.75)
+            infoLabel:SetPoint("CENTER")
+            infoLabel:SetJustifyH("CENTER")
+            infoLabel:SetText("Shift+Drag to reposition  |  Ctrl+Drag to temporarily move (resets on close)")
+            y = y - 40
+        end
 
         local function themedOff()
             return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)

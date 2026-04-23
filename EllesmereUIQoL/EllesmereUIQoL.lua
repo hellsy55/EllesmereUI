@@ -1196,7 +1196,7 @@ do
             if unit and unit ~= "player" then return end
             if _statsPending then return end
             _statsPending = true
-            C_Timer.After(0, function()
+            C_Timer.After(0.5, function()
                 _statsPending = false
                 UpdateSecondaryStats()
             end)

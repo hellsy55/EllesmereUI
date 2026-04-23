@@ -243,7 +243,8 @@ local function BuildOverlay()
     f.barOverlay = barOverlay
 
     -- Kick tick mark: two invisible StatusBars + one visible tick texture.
-    -- No clip frame -- not worth the GPU batch break for a 2px tick.
+    -- Clip on the cast bar prevents overflow when kick CD > remaining cast.
+    bar:SetClipsChildren(true)
     local kickPositioner = CreateFrame("StatusBar", nil, bar)
     kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     kickPositioner:GetStatusBarTexture():SetAlpha(0)
@@ -270,7 +271,7 @@ local function BuildOverlay()
     -- Shield icon for uninterruptible casts (matches the on-plate
     -- castShieldFrame. Visibility is gated via SetAlphaFromBoolean so
     -- the secret-valued kickProtected flag stays safe.)
-    local shieldFrame = CreateFrame("Frame", nil, bar)
+    local shieldFrame = CreateFrame("Frame", nil, f)
     local shieldHeight = OVERLAY_H * 0.75
     local shieldWidth  = shieldHeight * (29 / 35)
     shieldFrame:SetSize(shieldWidth, shieldHeight)

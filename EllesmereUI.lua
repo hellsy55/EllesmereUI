@@ -46,6 +46,25 @@ local function ResolveFactionTheme(theme)
     return theme
 end
 
+-- Preload background textures into GPU cache so the panel background
+-- renders instantly on first open (avoids 1-frame content-before-bg flash).
+-- Uses a hidden 1x1 frame; the textures stay in VRAM once loaded.
+do
+    local mp = "Interface\\AddOns\\EllesmereUI\\media\\"
+    local preload = CreateFrame("Frame")
+    preload:SetSize(1, 1)
+    preload:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+    preload:Show()
+    for _, file in pairs(THEME_BG_FILES) do
+        local tex = preload:CreateTexture()
+        tex:SetTexture(mp .. file)
+        tex:SetAllPoints()
+    end
+    local baseTex = preload:CreateTexture()
+    baseTex:SetTexture(mp .. "backgrounds\\eui-bg.png")
+    baseTex:SetAllPoints()
+end
+
 -- EllesmereUIDB is initialized from SavedVariables at ADDON_LOADED time.
 -- Do NOT create it here -- that would overwrite saved data.
 
@@ -2031,6 +2050,147 @@ EllesmereUI.THEME_ORDER     = THEME_ORDER
 EllesmereUI.EXPRESSWAY = EXPRESSWAY
 EllesmereUI.MEDIA_PATH = MEDIA_PATH
 EllesmereUI.ICONS_PATH = ICONS_PATH
+
+-------------------------------------------------------------------------------
+--  Portal flyout hearthstone row: shared resolution logic.
+--  Called lazily from chat + minimap portal flyouts on Show only.
+-------------------------------------------------------------------------------
+do
+    local HEARTH_TOYS = {
+        54452,  -- Ethereal Portal
+        64488,  -- The Innkeeper's Daughter
+        93672,  -- Dark Portal
+        28585,  -- Ruby Slippers
+        142542, -- Tome of Town Portal
+        163045, -- Headless Horseman's Hearthstone
+        162973, -- Greatfather Winter's Hearthstone
+        165669, -- Lunar Elder's Hearthstone
+        165670, -- Peddlefeet's Lovely Hearthstone
+        165802, -- Noble Gardener's Hearthstone
+        166746, -- Fire Eater's Hearthstone
+        166747, -- Brewfest Reveler's Hearthstone
+        168907, -- Holographic Digitalization Hearthstone
+        172179, -- Eternal Traveler's Hearthstone
+        184353, -- Kyrian Hearthstone
+        180290, -- Night Fae Hearthstone
+        182773, -- Necrolord Hearthstone
+        183716, -- Venthyr Sinstone
+        188952, -- Dominated Hearthstone
+        190237, -- Broker Translocation Matrix
+        190196, -- Enlightened Hearthstone
+        193588, -- Timewalker's Hearthstone
+        200630, -- Ohn'ir Windsage's Hearthstone
+        206195, -- Path of the Naaru
+        209035, -- Hearthstone of the Flame
+        210455, -- Draenic Hologem
+        208704, -- Deepdweller's Earthen Hearthstone
+        212337, -- Stone of the Hearth
+        228940, -- Notorious Thread's Hearthstone
+        235016, -- Redeployment Module
+        236687, -- Explosive Hearthstone
+        245970, -- P.O.S.T. Master's Express Hearthstone
+        246565, -- Cosmic Hearthstone
+        250411, -- Timerunner's Hearthstone
+        257736, -- Lightcalled Hearthstone
+        263489, -- Naaru's Enfold
+        263933, -- Preyseeker's Hearthstone
+        265100, -- Corewarden's Hearthstone
+        142298, -- Astonishingly Scarlet Slippers
+    }
+    local SHAMAN_ASTRAL_RECALL = 556
+    local DALARAN_HS = 253629
+    local DALARAN_HS_FALLBACK = 140192
+    local HOUSING_ICON = MEDIA_PATH .. "icons\\housing-teleport.png"
+
+    -- Get the correct icon for a toy (not the base "learn" item icon)
+    local function ToyIcon(id)
+        if C_ToyBox and C_ToyBox.GetToyInfo then
+            local _, _, icon = C_ToyBox.GetToyInfo(id)
+            if icon then return icon end
+        end
+        return C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id) or 134414
+    end
+
+    -- M+/raid instance check (mirrors chat module's IsInProtectedInstance)
+    local function InProtectedInstance()
+        local _, instanceType = IsInInstance()
+        if instanceType == "raid" and InCombatLockdown() then return true end
+        if instanceType == "party" and C_ChallengeMode
+            and C_ChallengeMode.IsChallengeModeActive
+            and C_ChallengeMode.IsChallengeModeActive() then
+            return true
+        end
+        return false
+    end
+
+    -- Check if a toy/item hearthstone is on cooldown.
+    -- Skips in M+/raid combat to avoid secret value errors.
+    local function IsHearthOnCD(id)
+        if InProtectedInstance() then return true end
+        if C_Container and C_Container.GetItemCooldown then
+            local ok, start, dur = pcall(C_Container.GetItemCooldown, id)
+            if ok and start and dur and dur > 1.5 then return true end
+        end
+        return false
+    end
+
+    -- Resolve slot 1: For Shamans with Astral Recall known:
+    --   In M+/raid combat -> always Astral Recall (no CD checks, no secret values)
+    --   If any owned toy is on CD -> Astral Recall (shorter CD)
+    --   Otherwise -> random owned toy (variety)
+    -- For non-Shamans: random owned toy HS, fallback to item 6948
+    function EllesmereUI.ResolveHearthSlot()
+        local _, cls = UnitClass("player")
+        local isShaman = cls == "SHAMAN" and IsPlayerSpell(SHAMAN_ASTRAL_RECALL)
+
+        -- In protected instances, Shamans always get Astral Recall (no CD queries)
+        if isShaman and InProtectedInstance() then
+            local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(SHAMAN_ASTRAL_RECALL)
+            return "spell", SHAMAN_ASTRAL_RECALL, info and info.iconID or 136010
+        end
+
+        -- Collect owned hearthstone toys (6948 is always in bags, not a toy)
+        local owned = {}
+        for _, id in ipairs(HEARTH_TOYS) do
+            local hasToy = PlayerHasToy and PlayerHasToy(id)
+            if hasToy then
+                owned[#owned + 1] = id
+            end
+        end
+
+        -- Shaman: show Astral Recall if any owned toy is on CD
+        if isShaman and #owned > 0 then
+            local anyOnCD = false
+            for _, id in ipairs(owned) do
+                if IsHearthOnCD(id) then anyOnCD = true; break end
+            end
+            if anyOnCD then
+                local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(SHAMAN_ASTRAL_RECALL)
+                return "spell", SHAMAN_ASTRAL_RECALL, info and info.iconID or 136010
+            end
+        end
+
+        -- Random owned toy, or fallback to base hearthstone (item 6948)
+        if #owned == 0 then
+            local icon = C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(6948) or 134414
+            return "item", 6948, icon
+        end
+        local pick = owned[math.random(#owned)]
+        return "item", pick, ToyIcon(pick)
+    end
+
+    -- Resolve slot 2: Dalaran HS 253629 > fallback 140192
+    function EllesmereUI.ResolveDalaranSlot()
+        local hasPrimary = PlayerHasToy and PlayerHasToy(DALARAN_HS)
+        local id = hasPrimary and DALARAN_HS or DALARAN_HS_FALLBACK
+        return "item", id, ToyIcon(id)
+    end
+
+    -- Resolve slot 3: Housing dashboard (click handler, not a spell)
+    function EllesmereUI.ResolveHousingSlot()
+        return "housing", 0, HOUSING_ICON
+    end
+end
 
 -- Safe scroll range helper (avoids tainted secret number values)
 function EllesmereUI.SafeScrollRange(sf)
@@ -6794,7 +6954,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.1.4"
+EllesmereUI.VERSION = "7.1.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

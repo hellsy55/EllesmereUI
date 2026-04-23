@@ -144,6 +144,15 @@ local function GetCanonicalSpellIDForFrame(frame)
         if _IsUsableSID(sid) then return sid end
     end
 
+    -- 1b. frame:GetAuraSpellID() -- buff bar frames expose the actual aura
+    -- variant here (e.g. Eclipse Solar vs Eclipse Lunar) while GetSpellID
+    -- may not exist on these frame types.
+    local fnGetAura = frame.GetAuraSpellID
+    if type(fnGetAura) == "function" then
+        local sid = fnGetAura(frame)
+        if _IsUsableSID(sid) then return sid end
+    end
+
     -- Resolve cooldownInfo (frame.cooldownInfo OR frame:GetCooldownInfo())
     local info = frame.cooldownInfo
     if not info then

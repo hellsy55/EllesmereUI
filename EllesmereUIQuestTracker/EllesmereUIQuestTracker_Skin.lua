@@ -520,22 +520,6 @@ end
 local function ApplyQuestTypeIcon(block)
     if not block then return end
 
-    -- Blizzard's POI button (block.poiButton) is the left-side circular
-    -- quest-type icon. Suppress via alpha + disabled mouse on the
-    -- top-level frame only. Alpha 0 inherits to every child texture so
-    -- we never touch Blizzard-owned textures or reparent the button.
-    -- Re-applied on every skin pass because Blizzard's block pool
-    -- resets alpha on acquire.
-    if block.poiButton then
-        local pb = block.poiButton
-        if not pb._euiHidden then
-            pb._euiHidden = CreateFrame("Frame")
-            pb._euiHidden:Hide()
-        end
-        pb:SetParent(pb._euiHidden)
-    end
-
-
     local qID = block.id
     if type(qID) ~= "number" then
         if _blockIcons[block] then _blockIcons[block]:Hide() end
@@ -570,13 +554,16 @@ local function ApplyQuestTypeIcon(block)
     local ico = _blockIcons[block]
     if not ico then
         ico = block:CreateTexture(nil, "OVERLAY")
+        ico:SetPoint("TOPRIGHT", block, "TOPRIGHT", -2, 3)
         _blockIcons[block] = ico
     end
-    local size = QUEST_ICON_SIZE_OVERRIDE[key] or QUEST_ICON_SIZE
-    ico:SetSize(size, size)
-    ico:SetAtlas(atlas)
-    ico:ClearAllPoints()
-    ico:SetPoint("TOPRIGHT", block, "TOPRIGHT", -2, 3)
+    -- Skip redundant SetAtlas/SetSize when the icon already matches.
+    if ico._lastAtlas ~= atlas then
+        ico._lastAtlas = atlas
+        local size = QUEST_ICON_SIZE_OVERRIDE[key] or QUEST_ICON_SIZE
+        ico:SetSize(size, size)
+        ico:SetAtlas(atlas)
+    end
     ico:SetAlpha(1)
     ico:Show()
 end
@@ -612,26 +599,32 @@ do
     local sf = CreateFrame("Frame")
     sf:RegisterEvent("SUPER_TRACKING_CHANGED")
     sf:RegisterEvent("PLAYER_ENTERING_WORLD")
-    sf:SetScript("OnEvent", function()
+    sf:SetScript("OnEvent", function(_, event)
         if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
             local id = C_SuperTrack.GetSuperTrackedQuestID()
             _superTrackedID = (id and id ~= 0) and id or nil
         end
+        -- Super-tracking assigns a fresh POI button to the block.
+        -- Defer one frame so Blizzard's assignment lands first.
+        if event == "SUPER_TRACKING_CHANGED" then
+            C_Timer.After(0, function()
+                if not EQT._SuppressAllPOIs then return end
+                EQT._SuppressAllPOIs()
+            end)
+        end
     end)
 end
 
-function ApplyFocusHighlight(block)  -- global to file (called from SkinBlock)
+-- One-time layout setup for the title fontstring: font, anchors, width.
+-- Called once per block from SkinBlock's full pass.
+local function SetupTitleLayout(block)
     if not block then return end
     local fs = GetBlockTitleFS(block)
     if not fs then return end
-    -- Force the shared title size + EUI font/outline/shadow.
     StyleTitleFS(fs)
-    -- Constrain quest title to a fixed pixel width with no word wrap.
-    -- Blizzard anchors the title FS with TOPLEFT + TOPRIGHT (full block
-    -- width); SetWidth alone is a no-op while both anchors are present.
-    -- Strip the right anchor and re-apply just the left so SetWidth wins.
     if fs.SetWordWrap then fs:SetWordWrap(false) end
     if fs.SetNonSpaceWrap then fs:SetNonSpaceWrap(false) end
+    -- Strip Blizzard's TOPLEFT+TOPRIGHT dual anchor so SetWidth works.
     if fs.GetNumPoints and fs:GetNumPoints() > 0 then
         local point, relTo, relPoint, x, y = fs:GetPoint(1)
         if point then
@@ -640,6 +633,14 @@ function ApplyFocusHighlight(block)  -- global to file (called from SkinBlock)
         end
     end
     if fs.SetWidth then fs:SetWidth(220) end
+end
+
+-- Lightweight color-only refresh. Called on hover (OnEnter/OnLeave) and
+-- from the stamped fast-path in SkinBlock.
+function ApplyFocusHighlight(block)  -- global to file
+    if not block then return end
+    local fs = GetBlockTitleFS(block)
+    if not fs then return end
     local qID     = (type(block.id) == "number") and block.id or nil
     local isFocus = qID and (qID == GetSuperTrackedIDCached())
     local isDone  = qID and C_QuestLog and C_QuestLog.IsComplete
@@ -719,9 +720,105 @@ local function HookBlockLineMethods(block)
     end
 end
 
+-- Ornamental atlas keywords: textures with these substrings in their atlas
+-- name are decorative and should be hidden. Lookup table avoids 9x string.find.
+local ORNAMENTAL_KEYWORDS = {
+    evergreen = true, toast = true, filigree = true, parchment = true,
+    bountiful = true, shimmer = true, sparkle = true, trackerheader = true,
+    jailerstower = true,
+}
+local _ornamentalCache = setmetatable({}, { __mode = "k" })
+local function IsOrnamentalAtlas(rg)
+    local cached = _ornamentalCache[rg]
+    if cached ~= nil then return cached end
+    local atlas = rg.GetAtlas and rg:GetAtlas()
+    if type(atlas) ~= "string" then _ornamentalCache[rg] = false; return false end
+    local l = atlas:lower()
+    for kw in pairs(ORNAMENTAL_KEYWORDS) do
+        if l:find(kw, 1, true) then _ornamentalCache[rg] = true; return true end
+    end
+    _ornamentalCache[rg] = false
+    return false
+end
+
+-- Walk child frames of a block up to 3 levels deep. Strip ornamental
+-- atlas textures and style objective fontstrings. Defined at file scope
+-- so it's not recreated per SkinBlock call.
+local function ProcessBlockChildren(frame, depth)
+    if not frame or depth > 3 or not frame.GetChildren then return end
+    for _, child in ipairs({ frame:GetChildren() }) do
+        if child.GetObjectType then
+            local ok, otype = pcall(child.GetObjectType, child)
+            if ok then
+                if otype == "StatusBar" and EQT._SkinWidgetBar then
+                    EQT._SkinWidgetBar(child)
+                elseif (otype == "Frame" or otype == "Button")
+                       and not child.Tooltip then
+                    if child.GetRegions then
+                        for _, rg in ipairs({ child:GetRegions() }) do
+                            local ot = rg.GetObjectType and rg:GetObjectType()
+                            if ot == "Texture" then
+                                if IsOrnamentalAtlas(rg) then rg:SetTexture("") end
+                            elseif ot == "FontString" then
+                                StyleObjectiveFS(rg)
+                            end
+                        end
+                    end
+                    ProcessBlockChildren(child, depth + 1)
+                end
+            end
+        end
+    end
+end
+
+-- Suppress a POI button permanently. Hooks Show + SetAlpha so Blizzard
+-- can never make it visible again. The _euiSuppressed flag is on the
+-- frame object itself, so it persists even if the button is pooled.
+local _poiHiddenParent = CreateFrame("Frame")
+_poiHiddenParent:Hide()
+
+local function SuppressPOI(block)
+    local pb = block and block.poiButton
+    if not pb or pb._euiSuppressed then return end
+    pb._euiSuppressed = true
+    pb:SetParent(_poiHiddenParent)
+    pb:EnableMouse(false)
+    hooksecurefunc(pb, "SetParent", function(self, parent)
+        if parent ~= _poiHiddenParent then
+            self:SetParent(_poiHiddenParent)
+        end
+    end)
+end
+
+-- Skip all skinning work when the tracker is force-hidden (M+, raid, arena).
+-- Blizzard still calls AddBlock for scenario objectives; no point skinning
+-- blocks the player can't see.
+local function ShouldSkipSkin()
+    if EQT.IsSuppressed and EQT.IsSuppressed() then return true end
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+       and C_ChallengeMode.IsChallengeModeActive() then return true end
+    local _, instanceType = GetInstanceInfo()
+    if instanceType == "raid" or instanceType == "arena" then return true end
+    return false
+end
+
 local _dumpedTemplates = {}
 local function SkinBlock(block)
     if not block then return end
+    if ShouldSkipSkin() then return end
+
+    -- Suppress POI on every entry -- Blizzard may assign a new pooled
+    -- poiButton to the block between skin passes.
+    SuppressPOI(block)
+
+    -- Skip blocks already fully skinned. The heavy work (strip textures,
+    -- style fontstrings, walk children) only needs to happen once per block.
+    -- Quest type icons and focus highlight are cheap and re-applied below.
+    if block._eqtSkinned then
+        ApplyQuestTypeIcon(block)
+        ApplyFocusHighlight(block)
+        return
+    end
 
     -- Bail out completely for ANY ScenarioObjectiveTracker block when the
     -- player isn't in a delve or a dungeon (Prey / Abundance / Assault /
@@ -763,25 +860,28 @@ local function SkinBlock(block)
         block.GroupFinderButton:SetFrameLevel(bl + 5)
     end
 
-    -- Strip decorative block textures (dashed backgrounds, hover glow,
-    -- scenario banners, etc). FontStrings are untouched by StripTextures.
+    -- Strip named decorative textures by key.
     for _, k in ipairs({
         "Background", "HeaderBackground", "Stripe", "Sheen", "Glow",
         "Highlight", "ShineTop", "ShineBottom",
     }) do
         local r = block[k]
-        -- SetTexture("") only -- anti-taint pattern.
         if r and r.SetTexture then r:SetTexture("") end
     end
-    -- Preserve our own icon (if already stamped on a prior refresh).
-    local _keep = {}
-    if _blockIcons[block] then _keep[_blockIcons[block]] = true end
-    StripTextures(block, _keep)
 
-    -- Style every FontString region on the block (quest title, count).
-    -- Tint the first region -- that's the title in Blizzard's layout.
-    -- Final color is set by ApplyFocusHighlight below (title or focus).
-    StyleAllFontStrings(block)
+    -- Single GetRegions() walk: strip remaining textures AND style fontstrings
+    -- in one pass instead of two separate walks.
+    local myIcon = _blockIcons[block]
+    if block.GetRegions then
+        for _, rg in ipairs({ block:GetRegions() }) do
+            local ot = rg.GetObjectType and rg:GetObjectType()
+            if ot == "Texture" then
+                if rg ~= myIcon and rg.SetTexture then rg:SetTexture("") end
+            elseif ot == "FontString" then
+                StyleFontString(rg)
+            end
+        end
+    end
 
     -- Item button (quest item) count FontString if present.
     if block.itemButton and block.itemButton.Count then
@@ -792,58 +892,17 @@ local function SkinBlock(block)
     -- classification / frequency / turn-in state.
     ApplyQuestTypeIcon(block)
 
-    -- Focus highlight for super-tracked quest.
+    -- One-time title layout (font, anchor strip, width constraint).
+    SetupTitleLayout(block)
+
+    -- Focus color for super-tracked / completed / normal quest.
     ApplyFocusHighlight(block)
 
-    -- Strip + style direct children. Quest blocks hold their progress
-    -- bars, objective FontStrings and ornamental textures on child frames.
-    -- Read-only walk on child types; texture ops only, no mouse state
-    -- changes. Scenario blocks never reach this code because SkinBlock
-    -- bails for them above.
-    local function isOrnamentalAtlas(atlas)
-        if type(atlas) ~= "string" then return false end
-        local l = atlas:lower()
-        return l:find("evergreen", 1, true)
-            or l:find("toast", 1, true)
-            or l:find("filigree", 1, true)
-            or l:find("parchment", 1, true)
-            or l:find("bountiful", 1, true)
-            or l:find("shimmer", 1, true)
-            or l:find("sparkle", 1, true)
-            or l:find("trackerheader", 1, true)
-            or l:find("jailerstower", 1, true)
-    end
-    local function processFrame(frame, depth)
-        if not frame or depth > 3 or not frame.GetChildren then return end
-        for _, child in ipairs({ frame:GetChildren() }) do
-            if child.GetObjectType then
-                local ok, otype = pcall(child.GetObjectType, child)
-                if ok then
-                    if otype == "StatusBar" and EQT._SkinWidgetBar then
-                        EQT._SkinWidgetBar(child)
-                    elseif (otype == "Frame" or otype == "Button")
-                           and not child.Tooltip then
-                        if child.GetRegions then
-                            for _, rg in ipairs({ child:GetRegions() }) do
-                                local ot = rg.GetObjectType and rg:GetObjectType()
-                                if ot == "Texture" then
-                                    local atlas = rg.GetAtlas and rg:GetAtlas()
-                                    if atlas and isOrnamentalAtlas(atlas) then
-                                        -- SetTexture("") only -- anti-taint pattern.
-                                        rg:SetTexture("")
-                                    end
-                                elseif ot == "FontString" then
-                                    StyleObjectiveFS(rg)
-                                end
-                            end
-                        end
-                        processFrame(child, depth + 1)
-                    end
-                end
-            end
-        end
-    end
-    processFrame(block, 0)
+    -- Strip ornamental textures + style objective fontstrings on child frames.
+    -- Scenario blocks never reach here (SkinBlock bails above).
+    ProcessBlockChildren(block, 0)
+
+    block._eqtSkinned = true
 end
 
 -------------------------------------------------------------------------------
@@ -1225,19 +1284,32 @@ local function HookTracker(tracker)
 
     if tracker.AddBlock then
         hooksecurefunc(tracker, "AddBlock", function(_, block)
+            -- Clear the stamp on every AddBlock. Blizzard's pool reuse
+            -- re-adds decorative textures during Init, so a recycled block
+            -- needs a full re-skin even if it was skinned before.
+            if block then block._eqtSkinned = nil end
             SkinBlock(block)
         end)
     end
 
+    -- Skin permanent named blocks that aren't added via AddBlock
+    -- (scenario stage, objectives, widget containers, etc.). One-time
+    -- only -- they persist for the tracker's lifetime.
+    for _, fieldName in ipairs({
+        "StageBlock", "ObjectivesBlock",
+        "TopWidgetContainerBlock", "BottomWidgetContainerBlock",
+        "ProvingGroundsBlock", "MawBuffsBlock", "ChallengeModeBlock",
+    }) do
+        local fb = tracker[fieldName]
+        if fb then SkinBlock(fb) end
+    end
+
     if tracker.GetProgressBar then
         hooksecurefunc(tracker, "GetProgressBar", function(_, line)
+            if ShouldSkipSkin() then return end
             local bar = line and type(line) == "table" and line.ProgressBar
             if bar then
                 SkinProgressBar(bar)
-                -- Widget-bar skin owns the hide-all-FontStrings + ornament
-                -- drain path. Run it on live bar acquisition so new world-
-                -- quest / bonus-objective bars hide instantly instead of
-                -- waiting for the next event tick.
                 SkinWidgetBar(bar)
             end
         end)
@@ -1245,6 +1317,7 @@ local function HookTracker(tracker)
 
     if tracker.GetTimerBar then
         hooksecurefunc(tracker, "GetTimerBar", function(_, line)
+            if ShouldSkipSkin() then return end
             local bar = line and type(line) == "table" and line.TimerBar
             if bar then SkinTimerBar(bar) end
         end)
@@ -1255,18 +1328,20 @@ local function HookTracker(tracker)
     -- debounce in QueueResize coalesces bursts into a single measurement.
     if tracker.Update then
         hooksecurefunc(tracker, "Update", function(self)
+            if ShouldSkipSkin() then return end
             if self.Header then EnsureAccentDivider(self.Header) end
             if EQT.QueueResize then EQT.QueueResize() end
-            -- Re-skin blocks on this tracker so late-added blocks (world
-            -- quest tracked from map with another active, pool reuse,
-            -- etc.) pick up POI reparent / icon hide. Deferred one frame
-            -- so Blizzard's layout is done before we walk the blocks.
-            if not F.skinPending[self] then
-                F.skinPending[self] = true
-                C_Timer.After(0, function()
-                    F.skinPending[self] = nil
-                    SkinExistingBlocks(self)
-                end)
+            -- Suppress POI buttons that Blizzard assigned after AddBlock
+            -- (e.g. during LayoutBlock or expand/collapse). SuppressPOI is
+            -- a cheap flag check for already-hooked buttons.
+            if self.usedBlocks then
+                for _, byTemplate in pairs(self.usedBlocks) do
+                    if type(byTemplate) == "table" then
+                        for _, block in pairs(byTemplate) do
+                            if type(block) == "table" then SuppressPOI(block) end
+                        end
+                    end
+                end
             end
         end)
     end
@@ -1280,7 +1355,11 @@ local function HookTracker(tracker)
         end)
     end
 
+    -- Skin blocks that already exist before our hooks were installed.
+    -- Run immediately for blocks already populated, then once more
+    -- deferred to catch late-populated blocks from Blizzard's init.
     SkinExistingBlocks(tracker)
+    C_Timer.After(0.5, function() SkinExistingBlocks(tracker) end)
 end
 
 -------------------------------------------------------------------------------
@@ -1309,6 +1388,22 @@ local function EachTracker(fn)
             fn(t)
         end
     end
+end
+
+-- Sweep all tracker blocks and suppress any unsuppressed POI buttons.
+-- Called from SUPER_TRACKING_CHANGED (deferred) to catch fresh POIs
+-- that Blizzard assigns when the player clicks a quest on the map.
+EQT._SuppressAllPOIs = function()
+    EachTracker(function(tracker)
+        if not tracker.usedBlocks then return end
+        for _, byTemplate in pairs(tracker.usedBlocks) do
+            if type(byTemplate) == "table" then
+                for _, block in pairs(byTemplate) do
+                    if type(block) == "table" then SuppressPOI(block) end
+                end
+            end
+        end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -1349,41 +1444,40 @@ function EQT.InitSkin()
     evt:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     evt:RegisterEvent("TRACKED_RECIPE_UPDATE")
     evt:RegisterEvent("SUPER_TRACKING_CHANGED")
-    -- Debounce the event burst (QUEST_LOG_UPDATE alone can fire many
-    -- times per second on quest accept / objective progress). Coalesce
-    -- all refreshes into a single SkinExistingBlocks pass per 100ms.
-    local _evtSkinPending = false
+    -- Quest events just need a BG resize. Block skinning is handled by
+    -- AddBlock/AddObjective/GetProgressBar/GetTimerBar hooks, so we no
+    -- longer need to walk the entire tracker tree on every event.
     evt:SetScript("OnEvent", function()
         if EQT.QueueResize then EQT.QueueResize() end
-        if _evtSkinPending then return end
-        _evtSkinPending = true
-        C_Timer.After(0.1, function()
-            _evtSkinPending = false
-            EachTracker(SkinExistingBlocks)
-        end)
     end)
 
     -- Top-level ObjectiveTrackerFrame:Update fires whenever any section
-    -- changes (added, removed, resized). Hook it so the BG always follows.
+    -- changes (added, removed, resized). Route through QueueResize so
+    -- bursts of updates coalesce into a single deferred resize.
     local otf = _G.ObjectiveTrackerFrame
     if otf and otf.Update then
         hooksecurefunc(otf, "Update", function()
-            C_Timer.After(0, function()
-                if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
-            end)
+            if EQT.QueueResize then EQT.QueueResize() end
         end)
     end
-    -- Same story for the global container that orchestrates the modules.
     if _G.ObjectiveTracker_Update then
         hooksecurefunc("ObjectiveTracker_Update", function()
-            C_Timer.After(0, function()
-                if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
-            end)
+            if EQT.QueueResize then EQT.QueueResize() end
         end)
     end
 
     EQT.RestyleAll = function()
+        -- Clear skin stamps so the full strip+restyle runs again
         EachTracker(function(t)
+            if t.usedBlocks then
+                for _, byTemplate in pairs(t.usedBlocks) do
+                    if type(byTemplate) == "table" then
+                        for _, block in pairs(byTemplate) do
+                            if type(block) == "table" then block._eqtSkinned = nil end
+                        end
+                    end
+                end
+            end
             if t.Header then SkinHeader(t.Header) end
             SkinExistingBlocks(t)
         end)

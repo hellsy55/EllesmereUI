@@ -1086,8 +1086,12 @@ local function CreateMinimapPortalFlyout()
     local COLS = 4
     local ROWS = math.ceil(#PORTAL_SPELLS / COLS)
 
-    local flyW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
+    local portalW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
     local flyH = PADDING * 2 + BTN_SIZE * ROWS + SPACING * (ROWS - 1)
+    local HS_COUNT = 3
+    local HS_H = math.floor((flyH - PADDING * 2 - SPACING * (HS_COUNT - 1)) / HS_COUNT)
+    local hsX = PADDING + COLS * BTN_SIZE + (COLS - 1) * SPACING + SPACING
+    local flyW = hsX + HS_H + PADDING
 
     local flyout = CreateFrame("Frame", "EUIMinimapPortalFlyout", UIParent)
     flyout:SetSize(flyW, flyH)
@@ -1164,6 +1168,140 @@ local function CreateMinimapPortalFlyout()
         _portalFlyoutBtns[i] = btn
     end
 
+    -- Hearthstone column: 3 icons stacked vertically as a 5th column
+    local _hearthBtns = {}
+    for i = 1, HS_COUNT do
+        local btn = CreateFrame("Button", "EUIMinimapHearth" .. i, flyout, "SecureActionButtonTemplate")
+        btn:SetSize(HS_H, HS_H)
+        btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
+            hsX,
+            -(PADDING + (i - 1) * (HS_H + SPACING)))
+
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexCoord(6/64, 58/64, 6/64, 58/64)
+        btn.icon = icon
+
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 7)
+        end
+
+        local cd = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        cd:SetHideCountdownNumbers(true)
+        cd:SetDrawSwipe(true)
+        cd:SetDrawBling(false)
+        cd:SetDrawEdge(false)
+        btn.cooldown = cd
+
+        local hover = btn:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.20)
+
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if self._hsType == "spell" then
+                GameTooltip:SetSpellByID(self._hsID)
+            elseif self._hsType == "item" then
+                if self._hsID ~= 6948 and PlayerHasToy and PlayerHasToy(self._hsID) then
+                    GameTooltip:SetToyByItemID(self._hsID)
+                else
+                    GameTooltip:SetItemByID(self._hsID)
+                end
+            elseif self._hsType == "housing" then
+                GameTooltip:AddLine("Housing Dashboard")
+            end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        local castHL = btn:CreateTexture(nil, "OVERLAY", nil, 1)
+        castHL:SetAllPoints()
+        castHL:SetColorTexture(1, 1, 1, 0.4)
+        castHL:Hide()
+        btn._castHL = castHL
+
+        btn:HookScript("PostClick", function(self)
+            if self._hsType == "housing" then
+                if HousingFramesUtil and HousingFramesUtil.ToggleHousingDashboard then
+                    HousingFramesUtil.ToggleHousingDashboard()
+                end
+                if _portalFlyout then _portalFlyout:Hide() end
+            else
+                self._castHL:Show()
+            end
+        end)
+
+        _hearthBtns[i] = btn
+    end
+
+
+    local function RefreshHearthCooldowns()
+        for _, btn in ipairs(_hearthBtns) do
+            local aType, id = btn._hsType, btn._hsID
+            if aType == "spell" and C_Spell and C_Spell.GetSpellCooldown then
+                local cdInfo = C_Spell.GetSpellCooldown(id)
+                if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+                    btn.cooldown:SetCooldown(cdInfo.startTime, cdInfo.duration)
+                else
+                    btn.cooldown:Clear()
+                end
+            elseif aType == "item" and GetItemCooldown then
+                local ok, start, dur = pcall(GetItemCooldown, id)
+                if ok and start and dur and dur > 0 then
+                    btn.cooldown:SetCooldown(start, dur)
+                else
+                    btn.cooldown:Clear()
+                end
+            else
+                btn.cooldown:Clear()
+            end
+        end
+    end
+
+    local function ResolveHearthButtons()
+        if InCombatLockdown() then return end
+        local EUI = EllesmereUI
+        local resolvers = {
+            EUI.ResolveHearthSlot,
+            EUI.ResolveDalaranSlot,
+            EUI.ResolveHousingSlot,
+        }
+        for i, btn in ipairs(_hearthBtns) do
+            local aType, id, iconTex = resolvers[i]()
+            btn._hsType = aType
+            btn._hsID = id
+            btn.icon:SetTexture(iconTex)
+            btn.icon:SetTexCoord(aType == "housing" and 0 or 6/64,
+                                 aType == "housing" and 1 or 58/64,
+                                 aType == "housing" and 0 or 6/64,
+                                 aType == "housing" and 1 or 58/64)
+            if aType == "housing" then
+                btn:SetAttribute("type", nil)
+                btn:SetAttribute("macrotext", nil)
+            elseif aType == "spell" then
+                btn:SetAttribute("type", "macro")
+                local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+                local name = info and info.name or ""
+                btn:SetAttribute("macrotext", "/cast " .. name)
+            else
+                btn:SetAttribute("type", "macro")
+                if id == 6948 then
+                    btn:SetAttribute("macrotext", "/use item:" .. id)
+                else
+                    local toyName
+                    if C_ToyBox and C_ToyBox.GetToyInfo then
+                        local _, tn = C_ToyBox.GetToyInfo(id)
+                        toyName = tn
+                    end
+                    btn:SetAttribute("macrotext", toyName and ("/use " .. toyName) or ("/use item:" .. id))
+                end
+            end
+        end
+        RefreshHearthCooldowns()
+    end
+
     flyout:SetScript("OnShow", function(self)
         self:RegisterEvent("SPELL_UPDATE_COOLDOWN")
         self:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
@@ -1172,21 +1310,31 @@ local function CreateMinimapPortalFlyout()
         self:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
         self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
         RefreshMinimapPortalButtons()
+        ResolveHearthButtons()
     end)
     flyout:SetScript("OnHide", function(self)
         self:UnregisterAllEvents()
         for _, btn in ipairs(_portalFlyoutBtns) do
             if btn._castHL then btn._castHL:Hide() end
         end
+        for _, btn in ipairs(_hearthBtns) do
+            if btn._castHL then btn._castHL:Hide() end
+        end
     end)
     flyout:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
         if event == "SPELL_UPDATE_COOLDOWN" then
             RefreshMinimapPortalButtons()
+            RefreshHearthCooldowns()
         elseif unit == "player" then
             local casting = (event == "UNIT_SPELLCAST_START") and spellID or nil
             for _, btn in ipairs(_portalFlyoutBtns) do
                 if btn._castHL then
                     btn._castHL:SetShown(casting and casting == btn.spellID)
+                end
+            end
+            if not casting then
+                for _, btn in ipairs(_hearthBtns) do
+                    if btn._castHL then btn._castHL:Hide() end
                 end
             end
         end

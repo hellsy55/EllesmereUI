@@ -357,6 +357,289 @@ local ADDON_NAME = ...
         end)
     end
     EllesmereUI._initTooltipSkins = function() _ttInit(); _menuInit(); _popupInit() end
+
+    ---------------------------------------------------------------------------
+    --  LFG Queue Accept Popup: reskin + countdown timer bar
+    --  Skins LFGDungeonReadyPopup the same way we skin StaticPopups, and
+    --  adds an accent-colored countdown bar below the popup.
+    ---------------------------------------------------------------------------
+    do
+        local TIMER_DURATION = 40
+        local timerBar, timerText, timerEndTime
+
+        -- One-time default: inherit from master "Reskin Blizzard Elements"
+        -- toggle, then write the explicit value so future changes to the
+        -- master toggle don't silently affect this setting.
+        local function IsQueueReskinOn()
+            if not EllesmereUIDB then return true end
+            if EllesmereUIDB.reskinQueuePopup == nil then
+                EllesmereUIDB.reskinQueuePopup = (EllesmereUIDB.customTooltips ~= false)
+            end
+            return EllesmereUIDB.reskinQueuePopup
+        end
+
+        local function SkinQueuePopup()
+            local popup = LFGDungeonReadyPopup
+            if not popup then return end
+
+            -- Strip Blizzard border/decoration textures on popup and dialog.
+            -- Preserve dialog.background (the dungeon art image).
+            local dialog = LFGDungeonReadyDialog
+            local keepTextures = {}
+            if dialog and dialog.background then keepTextures[dialog.background] = true end
+            if dialog and dialog.bottomArt then keepTextures[dialog.bottomArt] = true end
+            for _, frame in ipairs({ popup, dialog }) do
+                if frame then
+                    for i = 1, _select("#", frame:GetRegions()) do
+                        local r = _select(i, frame:GetRegions())
+                        if r and r:IsObjectType("Texture") and not r._euiOwned and not keepTextures[r] then
+                            r:SetTexture(nil)
+                            if r.SetAtlas then r:SetAtlas("") end
+                        end
+                    end
+                    if frame.BG then frame.BG:SetAlpha(0) end
+                    if frame.NineSlice then frame.NineSlice:SetAlpha(0) end
+                    if frame.Border then frame.Border:SetAlpha(0) end
+                end
+            end
+
+            -- Reskin the close button (X)
+            local closeBtn = _G.LFGDungeonReadyDialogCloseButton
+            if closeBtn then
+                for i = 1, _select("#", closeBtn:GetRegions()) do
+                    local r = _select(i, closeBtn:GetRegions())
+                    if r and r:IsObjectType("Texture") and not r._euiOwned then
+                        r:SetAlpha(0)
+                    end
+                end
+                if not closeBtn._euiIcon then
+                    local icoW, icoH = closeBtn:GetSize()
+                    local ico = closeBtn:CreateTexture(nil, "OVERLAY", nil, 7)
+                    ico:SetSize((icoW or 16) - 2, (icoH or 16) - 2)
+                    ico:SetPoint("CENTER", closeBtn, "CENTER", -4, 4)
+                    ico:SetAtlas("UI-QuestTrackerButton-Secondary-Collapse-Pressed")
+                    ico._euiOwned = true
+                    closeBtn._euiIcon = ico
+                end
+                closeBtn._euiIcon:Show()
+            end
+
+            -- Our dark background + border (create once).
+            -- Keep frame levels as low as possible so the popup doesn't
+            -- render over unrelated UI elements it shouldn't overlap.
+            if not popup._euiBg then
+                local RS = EllesmereUI.RESKIN
+                popup._euiBg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
+                popup._euiBg:SetAllPoints()
+                popup._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+                popup._euiBg._euiOwned = true
+                if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
+                if _PP and _PP.CreateBorder then
+                    local brd = _PP.CreateBorder(popup, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                    if brd then brd:SetFrameLevel(popup:GetFrameLevel()) end
+                end
+            end
+
+            -- Skin buttons (Enter Dungeon / Leave Queue).
+            -- Re-strip textures every show (Blizzard re-applies art on each popup).
+            -- Only create bg/border once.
+            if dialog then
+                for _, btnName in ipairs({ "enterButton", "leaveButton" }) do
+                    local btn = dialog[btnName]
+                    if btn then
+                        -- Force all Blizzard texture regions invisible (every show).
+                        -- Named Left/Middle/Right textures are swapped by C++ on
+                        -- mouse down so SetTexture alone doesn't stick.
+                        for j = 1, select("#", btn:GetRegions()) do
+                            local r = select(j, btn:GetRegions())
+                            if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                                r:SetAlpha(0)
+                            end
+                        end
+                        -- Named template textures
+                        if btn.Left then btn.Left:SetAlpha(0) end
+                        if btn.Middle then btn.Middle:SetAlpha(0) end
+                        if btn.Right then btn.Right:SetAlpha(0) end
+                        -- Create our bg/border + hook texture suppression once
+                        if not btn._euiSkinned then
+                            btn._euiSkinned = true
+                            -- Hook SetAlpha on named textures so C++ press
+                            -- state changes can't make them visible again
+                            for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                                local tex = btn[texKey]
+                                if tex and tex.SetAlpha then
+                                    hooksecurefunc(tex, "SetAlpha", function(self, a)
+                                        if a > 0 then self:SetAlpha(0) end
+                                    end)
+                                end
+                            end
+                            local EG = EllesmereUI.ELLESMERE_GREEN
+                            local useAccent = _accentEnabled() and EG
+                            local RS2 = EllesmereUI.RESKIN
+                            local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+                            btnBg:SetAllPoints()
+                            btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                            btnBg._euiOwned = true
+                            if _PP and _PP.CreateBorder then
+                                if useAccent then
+                                    _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
+                                else
+                                    _PP.CreateBorder(btn, 1, 1, 1, RS2.BRD_ALPHA, 1, "OVERLAY", 7)
+                                end
+                            end
+                        end
+                        -- Accent-color the button text (every show)
+                        local EG = EllesmereUI.ELLESMERE_GREEN
+                        local useAccent = _accentEnabled() and EG
+                        local fs = btn:GetFontString()
+                        if fs and useAccent then
+                            fs:SetTextColor(EG.r, EG.g, EG.b, 1)
+                        end
+                    end
+                end
+            end
+        end
+
+        local timerBorder, timerBg
+
+        local function ShowQueueTimer(useEuiStyle)
+            local popup = LFGDungeonReadyPopup
+            if not popup then return end
+
+            if not timerBar then
+                timerBar = CreateFrame("StatusBar", nil, popup)
+                timerBar:SetMinMaxValues(0, TIMER_DURATION)
+
+                timerBg = timerBar:CreateTexture(nil, "BACKGROUND")
+                timerBg:SetAllPoints()
+                timerBg:SetColorTexture(0, 0, 0, 0.7)
+
+                -- Blizzard-style casting bar border (hidden when EUI style)
+                timerBorder = timerBar:CreateTexture(nil, "OVERLAY")
+                timerBorder:SetTexture(130874)
+                timerBorder:SetSize(256, 64)
+                timerBorder:SetPoint("TOP", timerBar, 0, 28)
+
+                timerText = timerBar:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                timerText:SetPoint("CENTER", timerBar, "CENTER", 0, 0)
+
+                if EllesmereUI.RegAccent then
+                    EllesmereUI.RegAccent({ type = "callback", fn = function()
+                        if timerBar._euiStyle then
+                            local r, g, b = EllesmereUI.GetAccentColor()
+                            timerBar:SetStatusBarColor(r, g, b, 0.75)
+                        end
+                    end })
+                end
+            end
+
+            -- Switch style based on whether the popup reskin is active
+            timerBar:ClearAllPoints()
+            if useEuiStyle then
+                timerBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                local mult = (_PP and _PP.mult) or 1
+                timerBar:SetHeight(11)
+                timerBar:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", mult, mult)
+                timerBar:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -mult, mult)
+                local ar, ag, ab = EllesmereUI.GetAccentColor()
+                timerBar:SetStatusBarColor(ar, ag, ab, 0.75)
+                timerBg:SetColorTexture(0, 0, 0, 0.5)
+                timerBorder:Hide()
+                timerBg:Show()
+                -- Apply EUI font
+                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
+                    or "Fonts\\FRIZQT__.TTF"
+                timerText:SetFont(fontPath, 9, "")
+                timerText:SetTextColor(1, 0.831, 0, 1) -- #ffd400
+                timerText:SetShadowOffset(1, -1)
+                timerText:SetShadowColor(0, 0, 0, 0.8)
+                timerBar._euiStyle = true
+            else
+                -- Blizzard style (matches BigWigs look)
+                timerBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                timerBar:SetPoint("TOP", popup, "BOTTOM", 0, -5)
+                timerBar:SetSize(190, 9)
+                timerBar:SetStatusBarColor(1, 0.1, 0)
+                timerBorder:Show()
+                timerBg:Show()
+                timerText:SetFontObject("GameFontHighlight")
+                timerBar._euiStyle = false
+            end
+
+            -- Hide other addons' timer bars (BigWigs etc.)
+            for _, child in ipairs({ popup:GetChildren() }) do
+                if child ~= timerBar and child.GetObjectType
+                   and child:GetObjectType() == "StatusBar" then
+                    child:Hide()
+                end
+            end
+
+            timerEndTime = GetTime() + TIMER_DURATION
+            timerBar:SetValue(TIMER_DURATION)
+            timerText:SetText(format("%d", TIMER_DURATION))
+            timerBar:Show()
+
+            timerBar:SetScript("OnUpdate", function(self)
+                local remaining = timerEndTime - GetTime()
+                if remaining <= 0 then
+                    self:SetScript("OnUpdate", nil)
+                    self:Hide()
+                    return
+                end
+                self:SetValue(remaining)
+                timerText:SetText(format("%d", math.ceil(remaining)))
+            end)
+        end
+
+        -- Skin the "queue missed" / role check status popup
+        local function SkinQueueStatus()
+            local status = _G.LFGDungeonReadyStatus
+            if not status or not IsQueueReskinOn() then return end
+            -- Strip textures (every show)
+            for i = 1, _select("#", status:GetRegions()) do
+                local r = _select(i, status:GetRegions())
+                if r and r:IsObjectType("Texture") and not r._euiOwned then
+                    r:SetTexture(nil)
+                    if r.SetAtlas then r:SetAtlas("") end
+                end
+            end
+            if status.BG then status.BG:SetAlpha(0) end
+            if status.NineSlice then status.NineSlice:SetAlpha(0) end
+            if status.Border then status.Border:SetAlpha(0) end
+            -- Our bg + border (once)
+            if not status._euiBg then
+                local RS = EllesmereUI.RESKIN
+                status._euiBg = status:CreateTexture(nil, "BACKGROUND", nil, -8)
+                status._euiBg:SetAllPoints()
+                status._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+                status._euiBg._euiOwned = true
+                if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
+                if _PP and _PP.CreateBorder then
+                    _PP.CreateBorder(status, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                end
+            end
+        end
+
+        local lfgFrame = CreateFrame("Frame")
+        lfgFrame:RegisterEvent("LFG_PROPOSAL_SHOW")
+        lfgFrame:RegisterEvent("LFG_PROPOSAL_FAILED")
+        lfgFrame:RegisterEvent("LFG_PROPOSAL_SUCCEEDED")
+        lfgFrame:SetScript("OnEvent", function(_, event)
+            if not EllesmereUIDB then return end
+            if event == "LFG_PROPOSAL_SHOW" then
+                local reskinOn = IsQueueReskinOn()
+                if reskinOn then
+                    SkinQueuePopup()
+                end
+                if EllesmereUIDB.showQueueTimer ~= false then
+                    ShowQueueTimer(reskinOn)
+                end
+            else
+                -- FAILED/SUCCEEDED: the status popup shows
+                SkinQueueStatus()
+            end
+        end)
+    end
 end)()
 
 -------------------------------------------------------------------------------

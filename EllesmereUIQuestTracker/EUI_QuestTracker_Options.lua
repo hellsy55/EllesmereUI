@@ -58,13 +58,19 @@ initFrame:SetScript("OnEvent", function(self)
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
-        -- Drag instructions (centered, above settings)
+        -- Drag instructions (centered, above settings).
+        -- Wrapped in a Frame so the search system collects it as an orphan
+        -- and auto-hides it during search.
         do
             local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-            local infoLabel = parent:CreateFontString(nil, "OVERLAY")
+            local infoFrame = CreateFrame("Frame", nil, parent)
+            infoFrame:SetSize(parent:GetWidth() or 400, 30)
+            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoFrame._isSpacer = true
+            local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
             infoLabel:SetFont(fontPath, 15, "")
             infoLabel:SetTextColor(1, 1, 1, 0.75)
-            infoLabel:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoLabel:SetPoint("CENTER")
             infoLabel:SetJustifyH("CENTER")
             infoLabel:SetText("Reposition this element within Blizzard Edit Mode")
             y = y - 40

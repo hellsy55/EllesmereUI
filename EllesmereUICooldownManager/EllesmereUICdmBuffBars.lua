@@ -818,12 +818,31 @@ local function MatchFrameToConfig(frame, cfg)
     if not gci then return false end
     local info = gci(cdID)
     if not info then return false end
+    -- Fast path: match via cooldownInfo struct fields.
     if cfg.spellIDs then
         for _, sid in ipairs(cfg.spellIDs) do
             if MatchesSID(info, sid) then return true end
         end
     elseif cfg.spellID and cfg.spellID > 0 then
-        return MatchesSID(info, cfg.spellID)
+        if MatchesSID(info, cfg.spellID) then return true end
+    else
+        return false
+    end
+    -- Fallback: compare against the frame's canonical spell ID. Buff bar
+    -- frames expose the actual aura variant via GetAuraSpellID which may
+    -- not appear in the cooldownInfo struct (e.g. Eclipse Solar/Lunar).
+    local GetCanonical = ns.GetCanonicalSpellIDForFrame
+    if GetCanonical then
+        local frameSID = GetCanonical(frame)
+        if frameSID then
+            if cfg.spellIDs then
+                for _, sid in ipairs(cfg.spellIDs) do
+                    if frameSID == sid then return true end
+                end
+            elseif cfg.spellID and cfg.spellID > 0 then
+                return frameSID == cfg.spellID
+            end
+        end
     end
     return false
 end
@@ -872,12 +891,18 @@ function ns.IsSpellInBuffBarViewer(spellID)
     if not viewer or not viewer.itemFramePool then return false end
     local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
     if not gci then return false end
+    local GetCanonical = ns.GetCanonicalSpellIDForFrame
     for frame in viewer.itemFramePool:EnumerateActive() do
         local cdID = frame.cooldownID
         if cdID then
             local info = gci(cdID)
             if info and MatchesSID(info, spellID) then
                 return true
+            end
+            -- Fallback: check frame's canonical spell ID (aura variants).
+            if GetCanonical then
+                local frameSID = GetCanonical(frame)
+                if frameSID == spellID then return true end
             end
         end
     end
@@ -893,23 +918,29 @@ function ns.GetTrackedBarSpells()
     local result = {}
     local viewer = _G["BuffBarCooldownViewer"]
     if not viewer or not viewer.itemFramePool then return result end
-    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-    if not gci then return result end
+    local GetCanonical = ns.GetCanonicalSpellIDForFrame
 
     local seen = {}
     for frame in viewer.itemFramePool:EnumerateActive() do
-        local cdID = frame.cooldownID
-        if cdID then
-            local info = gci(cdID)
-            local sid = info and (info.overrideSpellID or info.spellID)
+        if frame:IsShown() or frame.cooldownInfo then
+            local sid = GetCanonical and GetCanonical(frame)
             if sid and sid > 0 and not seen[sid] then
                 seen[sid] = true
-                local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+                -- Append subtext (e.g. "Solar", "Lunar") to disambiguate
+                -- spells that share a base name like Eclipse.
+                if name and C_Spell.GetSpellSubtext then
+                    local sub = C_Spell.GetSpellSubtext(sid)
+                    if sub and sub ~= "" then
+                        name = name .. " (" .. sub .. ")"
+                    end
+                end
+                local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
                 result[#result + 1] = {
                     spellID     = sid,
-                    cdID        = cdID,
-                    name        = spInfo and spInfo.name or ("Spell " .. sid),
-                    icon        = spInfo and spInfo.iconID,
+                    cdID        = frame.cooldownID,
+                    name        = name or ("Spell " .. sid),
+                    icon        = icon,
                     layoutIndex = frame.layoutIndex or 0,
                 }
             end

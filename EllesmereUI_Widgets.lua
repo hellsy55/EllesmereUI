@@ -507,6 +507,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     local _moBackground = _menuOpts and _menuOpts.background
     local _moBgVertexColor = _menuOpts and _menuOpts.backgroundVertexColor
     local _moItemH = _menuOpts and _menuOpts.itemHeight or 26
+    local _moMaxTextPct = _menuOpts and _menuOpts.maxTextWidthPct
     local _moOnItemHover = _menuOpts and _menuOpts.onItemHover
     local _moOnItemLeave = _menuOpts and _menuOpts.onItemLeave
     local mBgR, mBgG, mBgB, mBgA = DD_BG_R, DD_BG_G, DD_BG_B, DD_BG_HA
@@ -717,6 +718,10 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             iLbl:SetAlpha(1)
             iLbl:SetPoint("LEFT", item, "LEFT", isWide and 12 or 10, 0)
             iLbl:SetJustifyH("LEFT")
+            if _moMaxTextPct then
+                iLbl:SetWordWrap(false)
+                iLbl:SetWidth(menuW * _moMaxTextPct)
+            end
             iLbl:SetText(mainText)
             -- Optional annotation (smaller font, 75% alpha, same color)
             -- Optional icon. Three sources supported:

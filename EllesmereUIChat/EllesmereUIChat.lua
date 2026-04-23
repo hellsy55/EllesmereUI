@@ -758,8 +758,12 @@ local function CreatePortalFlyout()
     local COLS = 4
     local ROWS = math.ceil(#PORTAL_SPELLS / COLS)
 
-    local flyW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
+    local portalW = PADDING * 2 + BTN_SIZE * COLS + SPACING * (COLS - 1)
     local flyH = PADDING * 2 + BTN_SIZE * ROWS + SPACING * (ROWS - 1)
+    local HS_COUNT = 3
+    local HS_H = math.floor((flyH - PADDING * 2 - SPACING * (HS_COUNT - 1)) / HS_COUNT)
+    local hsX = PADDING + COLS * BTN_SIZE + (COLS - 1) * SPACING + SPACING
+    local flyW = hsX + HS_H + PADDING
 
     local flyout = CreateFrame("Frame", "EUIChatPortalFlyout", UIParent)
     flyout:SetSize(flyW, flyH)
@@ -844,6 +848,147 @@ local function CreatePortalFlyout()
         _portalBtns[i] = btn
     end
 
+    -- Hearthstone column: 3 icons stacked vertically as a 5th column
+    -- on the right side, separated by a thin vertical divider.
+    local _hearthBtns = {}
+    for i = 1, HS_COUNT do
+        local btn = CreateFrame("Button", "EUIChatHearth" .. i, flyout, "SecureActionButtonTemplate")
+        btn:SetSize(HS_H, HS_H)
+        btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
+            hsX,
+            -(PADDING + (i - 1) * (HS_H + SPACING)))
+
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexCoord(6/64, 58/64, 6/64, 58/64)
+        btn.icon = icon
+
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 7)
+        end
+
+        local cd = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        cd:SetHideCountdownNumbers(true)
+        cd:SetDrawSwipe(true)
+        cd:SetDrawBling(false)
+        cd:SetDrawEdge(false)
+        btn.cooldown = cd
+
+        local hover = btn:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.20)
+
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if self._hsType == "spell" then
+                GameTooltip:SetSpellByID(self._hsID)
+            elseif self._hsType == "item" then
+                if self._hsID ~= 6948 and PlayerHasToy and PlayerHasToy(self._hsID) then
+                    GameTooltip:SetToyByItemID(self._hsID)
+                else
+                    GameTooltip:SetItemByID(self._hsID)
+                end
+            elseif self._hsType == "housing" then
+                GameTooltip:AddLine("Housing Dashboard")
+            end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- Casting highlight overlay (same as portal buttons)
+        local castHL = btn:CreateTexture(nil, "OVERLAY", nil, 1)
+        castHL:SetAllPoints()
+        castHL:SetColorTexture(1, 1, 1, 0.4)
+        castHL:Hide()
+        btn._castHL = castHL
+
+        btn:HookScript("PostClick", function(self)
+            if self._hsType == "housing" then
+                if HousingFramesUtil and HousingFramesUtil.ToggleHousingDashboard then
+                    HousingFramesUtil.ToggleHousingDashboard()
+                end
+                if _portalFlyout then _portalFlyout:Hide() end
+            else
+                -- Show cast highlight immediately on click
+                self._castHL:Show()
+            end
+        end)
+
+        _hearthBtns[i] = btn
+    end
+
+
+    -- Cooldown-only refresh: updates swipes without re-resolving toys.
+    -- Called on SPELL_UPDATE_COOLDOWN events.
+    local function RefreshHearthCooldowns()
+        for _, btn in ipairs(_hearthBtns) do
+            local aType, id = btn._hsType, btn._hsID
+            if aType == "spell" and C_Spell and C_Spell.GetSpellCooldown then
+                local cdInfo = C_Spell.GetSpellCooldown(id)
+                if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+                    btn.cooldown:SetCooldown(cdInfo.startTime, cdInfo.duration)
+                else
+                    btn.cooldown:Clear()
+                end
+            elseif aType == "item" and GetItemCooldown then
+                local ok, start, dur = pcall(GetItemCooldown, id)
+                if ok and start and dur and dur > 0 then
+                    btn.cooldown:SetCooldown(start, dur)
+                else
+                    btn.cooldown:Clear()
+                end
+            else
+                btn.cooldown:Clear()
+            end
+        end
+    end
+
+    -- Full resolve: picks random toy, sets icon/macro/attributes.
+    -- Called once on Show only (not on cooldown events).
+    local function ResolveHearthButtons()
+        if InCombatLockdown() then return end
+        local EUI = EllesmereUI
+        local resolvers = {
+            EUI.ResolveHearthSlot,
+            EUI.ResolveDalaranSlot,
+            EUI.ResolveHousingSlot,
+        }
+        for i, btn in ipairs(_hearthBtns) do
+            local aType, id, iconTex = resolvers[i]()
+            btn._hsType = aType
+            btn._hsID = id
+            btn.icon:SetTexture(iconTex)
+            btn.icon:SetTexCoord(aType == "housing" and 0 or 6/64,
+                                 aType == "housing" and 1 or 58/64,
+                                 aType == "housing" and 0 or 6/64,
+                                 aType == "housing" and 1 or 58/64)
+            if aType == "housing" then
+                btn:SetAttribute("type", nil)
+                btn:SetAttribute("macrotext", nil)
+            elseif aType == "spell" then
+                btn:SetAttribute("type", "macro")
+                local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+                local name = info and info.name or ""
+                btn:SetAttribute("macrotext", "/cast " .. name)
+            else
+                btn:SetAttribute("type", "macro")
+                if id == 6948 then
+                    btn:SetAttribute("macrotext", "/use item:" .. id)
+                else
+                    local toyName
+                    if C_ToyBox and C_ToyBox.GetToyInfo then
+                        local _, tn = C_ToyBox.GetToyInfo(id)
+                        toyName = tn
+                    end
+                    btn:SetAttribute("macrotext", toyName and ("/use " .. toyName) or ("/use item:" .. id))
+                end
+            end
+        end
+        RefreshHearthCooldowns()
+    end
+
     -- Cooldown + casting highlight refresh while visible
     flyout:SetScript("OnShow", function(self)
         self:RegisterEvent("SPELL_UPDATE_COOLDOWN")
@@ -853,21 +998,32 @@ local function CreatePortalFlyout()
         self:RegisterEvent("UNIT_SPELLCAST_FAILED")
         self:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
         RefreshPortalButtons()
+        ResolveHearthButtons()
     end)
     flyout:SetScript("OnHide", function(self)
         self:UnregisterAllEvents()
         for _, btn in ipairs(_portalBtns) do
             if btn._castHL then btn._castHL:Hide() end
         end
+        for _, btn in ipairs(_hearthBtns) do
+            if btn._castHL then btn._castHL:Hide() end
+        end
     end)
     flyout:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
         if event == "SPELL_UPDATE_COOLDOWN" then
             RefreshPortalButtons()
+            RefreshHearthCooldowns()
         elseif unit == "player" then
             local casting = (event == "UNIT_SPELLCAST_START") and spellID or nil
             for _, btn in ipairs(_portalBtns) do
                 if btn._castHL then
                     btn._castHL:SetShown(casting and casting == btn.spellID)
+                end
+            end
+            -- Clear hearthstone cast highlights on cast end
+            if not casting then
+                for _, btn in ipairs(_hearthBtns) do
+                    if btn._castHL then btn._castHL:Hide() end
                 end
             end
         end
@@ -1154,34 +1310,8 @@ local function ReadActiveChatText()
 end
 
 -------------------------------------------------------------------------------
---  URL detection + copy popup
+--  Copy popup (used by sidebar copy-chat button)
 -------------------------------------------------------------------------------
-local URL_PATTERNS = {
-    "%f[%S](%a[%w+.-]+://%S+)",
-    "^(%a[%w+.-]+://%S+)",
-    "%f[%S](www%.[-%w_%%]+%.%a%a+/%S+)",
-    "^(www%.[-%w_%%]+%.%a%a+/%S+)",
-    "%f[%S](www%.[-%w_%%]+%.%a%a+)",
-    "^(www%.[-%w_%%]+%.%a%a+)",
-}
-
-local function ContainsURL(text)
-    if not text then return false end
-    for _, p in ipairs(URL_PATTERNS) do
-        if text:match(p) then return true end
-    end
-    return false
-end
-
-local function WrapURLs(text)
-    if not text then return text end
-    for _, p in ipairs(URL_PATTERNS) do
-        local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-        local hex = string.format("|cff%02x%02x%02x", eg.r * 255, eg.g * 255, eg.b * 255)
-        text = text:gsub(p, hex .. "|H" .. addonName .. "url:%1|h[%1]|h|r")
-    end
-    return text
-end
 
 local copyDimmer
 
@@ -1370,88 +1500,7 @@ local function ShowCopyPopup(text)
 end
 
 -------------------------------------------------------------------------------
---  Small inline URL copy popup (matches friends list BattleTag popup)
--------------------------------------------------------------------------------
-local urlBackdrop, urlPopup
-
-local function HideUrlPopup()
-    if urlPopup then urlPopup:Hide() end
-    if urlBackdrop then urlBackdrop:Hide() end
-end
-
-local function ShowUrlPopup(url)
-    if not urlPopup then
-        urlBackdrop = CreateFrame("Button", nil, UIParent)
-        urlBackdrop:SetFrameStrata("DIALOG")
-        urlBackdrop:SetFrameLevel(499)
-        urlBackdrop:SetAllPoints(UIParent)
-        local bdTex = urlBackdrop:CreateTexture(nil, "BACKGROUND")
-        bdTex:SetAllPoints()
-        bdTex:SetColorTexture(0, 0, 0, 0.10)
-        local fadeIn = urlBackdrop:CreateAnimationGroup()
-        fadeIn:SetToFinalAlpha(true)
-        local a = fadeIn:CreateAnimation("Alpha")
-        a:SetFromAlpha(0); a:SetToAlpha(1); a:SetDuration(0.2)
-        urlBackdrop._fadeIn = fadeIn
-        urlBackdrop:RegisterForClicks("AnyUp")
-        urlBackdrop:SetScript("OnClick", HideUrlPopup)
-        urlBackdrop:Hide()
-
-        urlPopup = CreateFrame("Frame", nil, UIParent)
-        urlPopup:SetFrameStrata("DIALOG")
-        urlPopup:SetFrameLevel(500)
-        urlPopup:SetSize(340, 52)
-        urlPopup:EnableMouse(true)
-        local popFade = urlPopup:CreateAnimationGroup()
-        popFade:SetToFinalAlpha(true)
-        local pa = popFade:CreateAnimation("Alpha")
-        pa:SetFromAlpha(0); pa:SetToAlpha(1); pa:SetDuration(0.2)
-        urlPopup._fadeIn = popFade
-
-        local bg = urlPopup:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.06, 0.08, 0.10, 0.97)
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(urlPopup, 1, 1, 1, 0.15, 1, "OVERLAY", 7)
-        end
-
-        local hint = urlPopup:CreateFontString(nil, "OVERLAY")
-        hint:SetFont(GetFont(), 8, "")
-        hint:SetTextColor(1, 1, 1, 0.5)
-        hint:SetPoint("TOP", urlPopup, "TOP", 0, -6)
-        hint:SetText("Ctrl+C to copy, Escape to close")
-
-        local eb = CreateFrame("EditBox", nil, urlPopup)
-        eb:SetSize(300, 16)
-        eb:SetPoint("TOP", hint, "BOTTOM", 0, -4)
-        eb:SetFont(GetFont(), 11, "")
-        eb:SetAutoFocus(false)
-        eb:SetJustifyH("CENTER")
-        local ebBg = eb:CreateTexture(nil, "BACKGROUND")
-        ebBg:SetColorTexture(0.10, 0.12, 0.16, 1)
-        ebBg:SetPoint("TOPLEFT", -6, 4); ebBg:SetPoint("BOTTOMRIGHT", 6, -4)
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(eb, 1, 1, 1, 0.02, 1, "OVERLAY", 7)
-        end
-        eb:SetScript("OnEscapePressed", function(self) self:ClearFocus(); HideUrlPopup() end)
-        eb:SetScript("OnKeyDown", function(self, key)
-            if key == "C" and IsControlKeyDown() then
-                C_Timer.After(0.05, HideUrlPopup)
-            end
-        end)
-        eb:SetScript("OnMouseUp", function(self) self:HighlightText() end)
-        urlPopup:SetScript("OnMouseDown", function() urlPopup._eb:SetFocus(); urlPopup._eb:HighlightText() end)
-        urlPopup._eb = eb
-    end
-    urlPopup._eb:SetText(url)
-    urlPopup:ClearAllPoints()
-    local cx, cy = GetCursorPosition()
-    local scale = UIParent:GetEffectiveScale()
-    urlPopup:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", cx / scale, cy / scale + 10)
-    urlBackdrop:SetAlpha(0); urlBackdrop:Show(); urlBackdrop._fadeIn:Play()
-    urlPopup:SetAlpha(0); urlPopup:Show(); urlPopup._fadeIn:Play()
-    urlPopup._eb:SetFocus(); urlPopup._eb:HighlightText()
-end
+--  (URL copy popup removed -- zero message pipeline modifications)
 
 -- Hyperlink tooltip on hover + click-to-toggle item detail popup
 local TOOLTIP_LINK_TYPES = {
@@ -1486,9 +1535,6 @@ end
 local _lastClickedLink = nil
 hooksecurefunc("SetItemRef", function(link)
     if not link then return end
-    local url = link:match("^" .. addonName .. "url:(.+)$")
-    if url then ShowUrlPopup(url); return end
-
     if IsInProtectedInstance() then return end
     local linkType = link:match("^([^:]+)")
     if linkType == "item" or linkType == "spell" or linkType == "enchant"
@@ -2071,9 +2117,8 @@ local function SkinChatFrame(cf)
             local function ClampTempLabel()
                 if not isTemp or IsInProtectedInstance() then return end
                 local tw = tab:GetWidth()
-                if tw and tw > 0 and not (issecretvalue and issecretvalue(tw)) then
-                    label:SetWidth(tw * 0.8)
-                end
+                if not tw or (issecretvalue and issecretvalue(tw)) then return end
+                if tw > 0 then label:SetWidth(tw * 0.8) end
             end
             ClampTempLabel()
             hooksecurefunc(tab, "SetText", function(_, newText)
@@ -2861,6 +2906,61 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        ---------------------------------------------------------------------------
+        --  7. Whisper sound alert
+        --     Plays a configurable sound on incoming whispers. Uses a standalone
+        --     event frame (not a message filter) for zero taint risk.
+        ---------------------------------------------------------------------------
+        do
+            local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
+            local WHISPER_SOUND_PATHS = {
+                ["none"]     = nil,
+                ["airhorn"]  = _SOUNDS_DIR .. "AirHorn.ogg",
+                ["banana"]   = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
+                ["bikehorn"] = _SOUNDS_DIR .. "BikeHorn.ogg",
+                ["boxing"]   = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
+                ["water"]    = _SOUNDS_DIR .. "WaterDrop.ogg",
+            }
+            local WHISPER_SOUND_NAMES = {
+                ["none"]     = "None",
+                ["airhorn"]  = "Air Horn",
+                ["banana"]   = "Banana Peel Slip",
+                ["bikehorn"] = "Bike Horn",
+                ["boxing"]   = "Boxing Arena",
+                ["water"]    = "Water Drop",
+            }
+            local WHISPER_SOUND_ORDER = {
+                "none", "airhorn", "banana", "bikehorn", "boxing", "water",
+            }
+            ECHAT.WHISPER_SOUND_PATHS = WHISPER_SOUND_PATHS
+            ECHAT.WHISPER_SOUND_NAMES = WHISPER_SOUND_NAMES
+            ECHAT.WHISPER_SOUND_ORDER = WHISPER_SOUND_ORDER
+
+            -- Append SharedMedia sounds
+            if EllesmereUI.AppendSharedMediaSounds then
+                EllesmereUI.AppendSharedMediaSounds(
+                    WHISPER_SOUND_PATHS,
+                    WHISPER_SOUND_NAMES,
+                    WHISPER_SOUND_ORDER
+                )
+            end
+
+            local _whisperThrottle = 0
+            local whisperFrame = CreateFrame("Frame")
+            whisperFrame:RegisterEvent("CHAT_MSG_WHISPER")
+            whisperFrame:RegisterEvent("CHAT_MSG_BN_WHISPER")
+            whisperFrame:SetScript("OnEvent", function()
+                local cfg = ECHAT.DB()
+                local key = cfg and cfg.whisperSoundKey
+                if not key or key == "none" then return end
+                local now = GetTime()
+                if now - _whisperThrottle < 5 then return end
+                _whisperThrottle = now
+                local path = WHISPER_SOUND_PATHS[key]
+                if path then PlaySoundFile(path, "Master") end
+            end)
+        end
+
         -- Hover detection: lightweight ticker checks cursor position for
         -- idle fade + scrollbar. Fires 4x/sec. Tabs and sidebar use
         -- OnEnter/OnLeave (they have EnableMouse for click handling).
@@ -3129,81 +3229,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  14. URL wrapping (clickable links in chat)
-    --      Disabled in M+ and raid combat to avoid taint.
-    ---------------------------------------------------------------------------
-    local URL_EVENTS = {
-        "CHAT_MSG_SAY", "CHAT_MSG_YELL",
-        "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
-        "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING",
-        "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
-        "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER",
-        "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM",
-        "CHAT_MSG_BN_WHISPER", "CHAT_MSG_BN_WHISPER_INFORM",
-        "CHAT_MSG_CHANNEL",
-    }
-    local function URLFilter(self, event, msg, ...)
-        if msg and ContainsURL(msg) then
-            return false, WrapURLs(msg), ...
-        end
-    end
-
-    local _urlFiltersActive = false
-    local function EnableURLFilters()
-        if _urlFiltersActive then return end
-        _urlFiltersActive = true
-        for _, ev in ipairs(URL_EVENTS) do
-            ChatFrame_AddMessageEventFilter(ev, URLFilter)
-        end
-    end
-    local function DisableURLFilters()
-        if not _urlFiltersActive then return end
-        _urlFiltersActive = false
-        for _, ev in ipairs(URL_EVENTS) do
-            ChatFrame_RemoveMessageEventFilter(ev, URLFilter)
-        end
-    end
-
-    local urlGuard = CreateFrame("Frame")
-    urlGuard:RegisterEvent("CHALLENGE_MODE_START")
-    urlGuard:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-    urlGuard:RegisterEvent("PLAYER_ENTERING_WORLD")
-    urlGuard:RegisterEvent("PLAYER_REGEN_DISABLED")
-    urlGuard:RegisterEvent("PLAYER_REGEN_ENABLED")
-    urlGuard:SetScript("OnEvent", function(_, event)
-        if event == "CHALLENGE_MODE_START" then
-
-            DisableURLFilters()
-        elseif event == "CHALLENGE_MODE_COMPLETED" then
-
-            EnableURLFilters()
-        elseif event == "PLAYER_REGEN_DISABLED" then
-            local _, instanceType = IsInInstance()
-            if instanceType == "raid" then
-                DisableURLFilters()
-            end
-        elseif event == "PLAYER_REGEN_ENABLED" then
-            local _, instanceType = IsInInstance()
-            if instanceType == "raid" then
-                EnableURLFilters()
-            end
-        elseif event == "PLAYER_ENTERING_WORLD" then
-            local _, instanceType = IsInInstance()
-            local inMPlus = instanceType == "party" and C_ChallengeMode
-                and C_ChallengeMode.IsChallengeModeActive
-                and C_ChallengeMode.IsChallengeModeActive()
-
-            if inMPlus then
-                DisableURLFilters()
-            else
-                EnableURLFilters()
-            end
-        end
-    end)
-    EnableURLFilters()
-
-    ---------------------------------------------------------------------------
-    --  15. Hide Blizzard social buttons (quick join, menu, channel, voice)
+    --  14. Hide Blizzard social buttons (quick join, menu, channel, voice)
     ---------------------------------------------------------------------------
     for _, frameName in ipairs({
         "QuickJoinToastButton", "ChatFrameMenuButton", "ChatFrameChannelButton",

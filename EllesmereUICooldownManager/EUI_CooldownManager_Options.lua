@@ -8262,6 +8262,7 @@ initFrame:SetScript("OnEvent", function(self)
             local soundOrder = ns.FOCUSKICK_SOUND_ORDER or { "none" }
             soundValues._menuOpts = {
                 itemHeight = 26,
+                maxTextWidthPct = 0.8,
                 iconAtlas = function(key)
                     if key == "none" then return nil end
                     local paths = ns.FOCUSKICK_SOUND_PATHS

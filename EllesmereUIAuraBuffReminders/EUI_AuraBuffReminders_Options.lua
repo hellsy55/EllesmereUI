@@ -231,7 +231,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Glow
             if not btn._glowWrapper then
                 local w = CreateFrame("Frame", nil, btn)
-                w:SetAllPoints(btn); w:SetFrameLevel(btn:GetFrameLevel() + 1)
+                w:SetAllPoints(btn); w:SetFrameLevel(btn:GetFrameLevel() + 3)
                 btn._glowWrapper = w
             end
             if Stop then Stop(btn._glowWrapper) end
@@ -458,16 +458,48 @@ initFrame:SetScript("OnEvent", function(self)
         local tc = d and d.textColor or {r=1, g=1, b=1}
         local opacity = d and d.opacity or 1.0
 
+        -- Reuse existing container + icons if count matches (avoids
+        -- full frame teardown/rebuild on tab switch which causes FPS dip)
+        if _previewContainer and #_previewIcons == #icons then
+            -- Re-parent and re-show (may have been orphaned by ClearContentHeader)
+            _previewContainer:SetParent(hdr)
+            _previewContainer:ClearAllPoints()
+            _previewContainer:SetPoint("CENTER", hdr, "CENTER", 0, 0)
+            _previewContainer:SetSize(hdrW, _previewContainer:GetHeight())
+            _previewContainer:Show()
+            -- Update textures/labels in case the icon set changed content
+            for i, pIcon in ipairs(_previewIcons) do
+                if pIcon.frame and icons[i] then
+                    if pIcon.frame._icon then pIcon.frame._icon:SetTexture(icons[i].texture or 134400) end
+                    if pIcon.frame._text then pIcon.frame._text:SetText(icons[i].label or "") end
+                    pIcon.data = icons[i]
+                end
+            end
+            UpdatePreviewHeader()
+            return
+        end
+
         -- Container for icons (centered within hardcoded 80px header)
         local textYOff = d and d.textYOffset or -2
         local textSz = d and d.textSize or 11
         local textOverhang = showText and (math.abs(textYOff) + textSz) or 0
-        local container = CreateFrame("Frame", nil, hdr)
-        container:SetSize(hdrW, sz + textOverhang)
-        container:SetPoint("CENTER", hdr, "CENTER", 0, 0)
-        _previewContainer = container
 
-        -- Create icon frames
+        -- Recycle or create container
+        if _previewContainer then
+            _previewContainer:SetParent(hdr)
+            _previewContainer:ClearAllPoints()
+        else
+            _previewContainer = CreateFrame("Frame", nil, hdr)
+        end
+        _previewContainer:SetSize(hdrW, sz + textOverhang)
+        _previewContainer:SetPoint("CENTER", hdr, "CENTER", 0, 0)
+        _previewContainer:Show()
+        local container = _previewContainer
+
+        -- Hide old icon frames before rebuilding
+        for _, pIcon in ipairs(_previewIcons) do
+            if pIcon.frame then pIcon.frame:Hide() end
+        end
         wipe(_previewIcons)
         local count = #icons
         local totalW = (count * sz) + ((count - 1) * spacing)

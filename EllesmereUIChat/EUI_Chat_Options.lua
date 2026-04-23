@@ -430,8 +430,34 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
-        -- Row 3: Lock Main Chat Size | (empty)
-        _, h = W:DualRow(parent, y,
+        -- Row 3: Lock Main Chat Size | Whisper Sound
+        -- Sound dropdown: shallow-copy the runtime tables so _menuOpts
+        -- (preview icon) doesn't pollute the shared tables.
+        local whisperSoundValues = {}
+        local whisperSoundPaths = ECHAT.WHISPER_SOUND_PATHS or {}
+        local whisperSoundNames = ECHAT.WHISPER_SOUND_NAMES or { none = "None" }
+        local whisperSoundOrder = ECHAT.WHISPER_SOUND_ORDER or { "none" }
+        for k, v in pairs(whisperSoundNames) do whisperSoundValues[k] = v end
+        whisperSoundValues._menuOpts = {
+            itemHeight = 26,
+            maxTextWidthPct = 0.8,
+            iconAtlas = function(key)
+                if key == "none" then return nil end
+                if not whisperSoundPaths[key] then return nil end
+                return "common-icon-sound"
+            end,
+            iconPressedAtlas = function(key)
+                if key == "none" then return nil end
+                return "common-icon-sound-pressed"
+            end,
+            iconOnClick = function(key)
+                local path = whisperSoundPaths[key]
+                if path then PlaySoundFile(path, "Master") end
+            end,
+            iconTooltip = function() return "Preview Sound" end,
+        }
+        local whisperSoundRow
+        whisperSoundRow, h = W:DualRow(parent, y,
             { type="toggle", text="Lock Main Chat Size",
               tooltip="Hides the resize handle on the main chat frame, preventing accidental resizing.",
               getValue=function() return Cfg("lockChatSize") or false end,
@@ -439,7 +465,10 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("lockChatSize", v)
                   if ECHAT.ApplyLockChatSize then ECHAT.ApplyLockChatSize() end
               end },
-            { type="label", text="" })
+            { type="dropdown", text="Whisper Sound",
+              values=whisperSoundValues, order=whisperSoundOrder,
+              getValue=function() return Cfg("whisperSoundKey") or "none" end,
+              setValue=function(v) Set("whisperSoundKey", v) end })
         y = y - h
 
         return math.abs(y)

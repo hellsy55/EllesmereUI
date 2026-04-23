@@ -1496,8 +1496,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     -- Kick tick mark: two invisible StatusBars + one visible tick texture.
     -- kickPositioner tracks cast elapsed; kickMarker tracks kick cooldown remaining.
     -- The tick texture sits at the right edge of kickMarker's fill.
-    -- No clip frame -- a 2px tick slightly overshooting the cast bar edge
-    -- on rare occasions is invisible and not worth the GPU batch break.
+    -- Clip on the cast bar itself prevents the tick from rendering outside
+    -- when kick CD exceeds remaining cast time.
+    plate.cast:SetClipsChildren(true)
     plate.kickPositioner = CreateFrame("StatusBar", nil, plate.cast)
     plate.kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickPositioner:GetStatusBarTexture():SetAlpha(0)
