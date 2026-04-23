@@ -118,6 +118,7 @@ local defaults = {
             showPlayerAbsorb = false,
             showPlayerCastbar = false,
             showPlayerCastIcon = true,
+            castReverseFill = false,
             castbarHideWhenInactive = true,
             lockCastbarToFrame = true,
             playerCastbarX = 0,
@@ -172,6 +173,8 @@ local defaults = {
             leaderIndicatorPosition = "topleft",
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
+            healthReverseFill = false,
+            powerReverseFill = false,
         },
         target = {
             frameWidth = 181,
@@ -195,6 +198,7 @@ local defaults = {
             castbarWidth = 0,
             showCastbar = true,
             showCastIcon = true,
+            castReverseFill = false,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
@@ -303,6 +307,8 @@ local defaults = {
             leaderIndicatorPosition = "topleft",
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
+            healthReverseFill = false,
+            powerReverseFill = false,
         },
         playerTarget = {
             frameWidth = 181,
@@ -339,6 +345,8 @@ local defaults = {
             playerCastbarY = 0,
             playerCastbarWidth = 0,
             playerCastbarHeight = 0,
+            healthReverseFill = false,
+            powerReverseFill = false,
         },
         totPet = {
             frameWidth = 101,
@@ -356,6 +364,7 @@ local defaults = {
             borderColor = { r = 0, g = 0, b = 0 },
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
+            healthReverseFill = false,
         },
         pet = {
             frameWidth = 101,
@@ -373,6 +382,7 @@ local defaults = {
             borderColor = { r = 0, g = 0, b = 0 },
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
+            healthReverseFill = false,
         },
         focus = {
             frameWidth = 160,
@@ -396,6 +406,7 @@ local defaults = {
             castbarWidth = 0,
             showCastbar = true,
             showCastIcon = true,
+            castReverseFill = false,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
@@ -497,6 +508,8 @@ local defaults = {
             raidMarkerAlign = "right",
             raidMarkerX = 0,
             raidMarkerY = 0,
+            healthReverseFill = false,
+            powerReverseFill = false,
         },
         boss = {
             frameWidth = 160,
@@ -519,6 +532,7 @@ local defaults = {
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
+            castReverseFill = false,
             castbarHideWhenInactive = false,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
@@ -559,6 +573,7 @@ local defaults = {
             raidMarkerAlign = "left",
             raidMarkerX = 0,
             raidMarkerY = 0,
+            healthReverseFill = false,
         },
         enabledFrames = {
             player = true,
@@ -1879,6 +1894,7 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
     ApplyHealthBarTexture(health, UnitToSettingsKey(unit))
     ApplyHealthBarAlpha(health, UnitToSettingsKey(unit))
     ApplyDarkTheme(health)
+    health:SetReverseFill(settings.healthReverseFill and true or false)
 
     return health
 end
@@ -2129,6 +2145,8 @@ local function CreatePowerBar(frame, unit, settings)
     if customBg then
         bg:SetColorTexture(customBg.r, customBg.g, customBg.b, 1)
     end
+
+    power:SetReverseFill(settings.powerReverseFill and true or false)
 
     -- Power percent text overlay
     -- Parent to frame (not power) so text isn't clipped by the bar clip container
@@ -2528,6 +2546,7 @@ local function CreateCastBar(frame, unit, settings)
     PP.Point(castbar, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
     castbar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     castbar:GetStatusBarTexture():SetHorizTile(false)
+    castbar:SetReverseFill(settings.castReverseFill and true or false)
 
     -- Castbar borders drawn on the castbar itself (same frame level as the
     -- fill texture) so the OVERLAY border sits above the ARTWORK fill.
@@ -3481,6 +3500,7 @@ local function StyleSimpleFrame(frame, unit)
     settings.healthBarTexture = origTex
     ApplyHealthBarAlpha(health, unitKey)
     ApplyDarkTheme(health)
+    health:SetReverseFill(settings.healthReverseFill and true or false)
 
     frame.Health = health
 
@@ -3651,6 +3671,7 @@ local function StylePetFrame(frame, unit)
     settings.healthBarTexture = origTex
     ApplyHealthBarAlpha(health, unitKey)
     ApplyDarkTheme(health)
+    health:SetReverseFill(settings.healthReverseFill and true or false)
 
     frame.Health = health
 
@@ -6166,6 +6187,7 @@ local function ReloadFrames()
                 ApplyHealthBarAlpha(frame.Health, UnitToSettingsKey(unit))
             end
             ApplyDarkTheme(frame.Health)
+            frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
             if frame.Health.ForceUpdate then
                 frame.Health:ForceUpdate()
             end
@@ -6202,7 +6224,13 @@ local function ReloadFrames()
                 elseif frame.Power.bg then
                     frame.Power.bg:SetColorTexture(17/255, 17/255, 17/255, 1)
                 end
+                frame.Power:SetReverseFill(settings.powerReverseFill and true or false)
                 if frame.Power.ForceUpdate then frame.Power:ForceUpdate() end
+            end
+
+            -- Apply castbar reverse fill
+            if frame.Castbar then
+                frame.Castbar:SetReverseFill(settings.castReverseFill and true or false)
             end
 
             if frame.unifiedBorder then

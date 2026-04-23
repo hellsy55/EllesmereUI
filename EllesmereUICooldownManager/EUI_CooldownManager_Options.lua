@@ -3123,7 +3123,12 @@ initFrame:SetScript("OnEvent", function(self)
                   EvictTBBTextConflicts(bd, "stacksPosition", v)
                   bd.stacksPosition = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            { type = "toggle", text = "Reverse Fill",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.reverseFill = v; RefreshTBB()
+              end }
         );  y = y - h
         do
             local rgn = stacksRow._leftRegion

@@ -160,9 +160,14 @@ end
 local BG_R, BG_G, BG_B, BG_A = 0.03, 0.045, 0.05, 0.70
 
 local EDIT_BG_R, EDIT_BG_G, EDIT_BG_B = 0.05, 0.065, 0.08
-local function GetFontSize()
-    local cfg = ECHAT.DB()
-    return cfg.fontSize or 12
+-- Chat frame text size is controlled by Blizzard's per-frame setting
+-- (right-click tab -> Font Size). We only control font family + outline.
+local function GetFrameFontSize(id)
+    if FCF_GetChatWindowInfo then
+        local _, fontSize = FCF_GetChatWindowInfo(id)
+        if fontSize and fontSize > 0 then return fontSize end
+    end
+    return 12
 end
 local function GetTabFontSize()
     local cfg = ECHAT.DB()
@@ -202,15 +207,17 @@ function ECHAT.ApplyBackground()
     end
 end
 
--- Re-apply font and size to all skinned chat frames, tabs, and edit boxes
+-- Re-apply font to all skinned chat frames, tabs, and edit boxes.
+-- Chat frame text size is Blizzard's per-frame setting; we only set
+-- font family + outline. Tab size is our own setting.
 function ECHAT.ApplyFonts()
     local font = GetFont()
-    local size = GetFontSize()
     local tabSize = GetTabFontSize()
     local outline = GetOutlineFlag()
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf and cf.SetFont then
+            local size = GetFrameFontSize(i)
             cf:SetFont(font, size, outline)
         end
         local tab = _G["ChatFrame" .. i .. "Tab"]
@@ -219,6 +226,7 @@ function ECHAT.ApplyFonts()
         end
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
+            local size = GetFrameFontSize(i)
             eb:SetFont(font, size, outline)
             if i <= 10 then
                 if eb.header then eb.header:SetFont(font, size, outline) end
@@ -1779,8 +1787,9 @@ local function SkinChatFrame(cf)
         cf._euiInputDiv = div
     end
 
-    -- Set custom font on the message frame
-    cf:SetFont(GetFont(), GetFontSize(), GetOutlineFlag())
+    -- Set custom font on the message frame (size from Blizzard's per-frame setting)
+    local cfId = cf:GetID()
+    cf:SetFont(GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
     if cf.SetShadowOffset then cf:SetShadowOffset(1, -1) end
     if cf.SetShadowColor then cf:SetShadowColor(0, 0, 0, 0.8) end
 
@@ -1834,7 +1843,8 @@ local function SkinChatFrame(cf)
         eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
         eb:SetHeight(23)
 
-        eb:SetFont(GetFont(), GetFontSize(), "")
+        local ebSize = GetFrameFontSize(cfId)
+        eb:SetFont(GetFont(), ebSize, "")
         eb:SetTextInsets(8, 8, 0, 0)
 
         -- Style the channel header only for the first 10 frames (1-10 are
@@ -1842,8 +1852,8 @@ local function SkinChatFrame(cf)
         -- where SetFont on their headers taints Blizzard's UpdateHeader math.
         local frameIdx = tonumber(name:match("ChatFrame(%d+)"))
         if frameIdx and frameIdx <= 10 then
-            if eb.header then eb.header:SetFont(GetFont(), GetFontSize(), "") end
-            if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), GetFontSize(), "") end
+            if eb.header then eb.header:SetFont(GetFont(), ebSize, "") end
+            if eb.headerSuffix then eb.headerSuffix:SetFont(GetFont(), ebSize, "") end
         end
         -- Up/Down arrow recalls message history without requiring Alt.
         eb:SetAltArrowKeyMode(false)
@@ -2649,6 +2659,30 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
+    --  2b. Font size is Blizzard-controlled (right-click tab -> Font Size).
+    --      Hook FCF_SetChatWindowFontSize so our custom font/outline is
+    --      re-applied whenever the user picks a new size. Also expand the
+    --      available font heights for more granularity.
+    ---------------------------------------------------------------------------
+    CHAT_FONT_HEIGHTS = { 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 }
+    hooksecurefunc("FCF_SetChatWindowFontSize", function(self, chatFrame, fontSize)
+        if not chatFrame then chatFrame = FCF_GetCurrentChatFrame() end
+        if not chatFrame then return end
+        local id = chatFrame:GetID()
+        local sz = fontSize or GetFrameFontSize(id)
+        local font = GetFont()
+        local outline = GetOutlineFlag()
+        chatFrame:SetFont(font, sz, outline)
+        local ebName = chatFrame:GetName() .. "EditBox"
+        local eb = _G[ebName]
+        if eb then
+            eb:SetFont(font, sz, "")
+            if eb.header then eb.header:SetFont(font, sz, "") end
+            if eb.headerSuffix then eb.headerSuffix:SetFont(font, sz, "") end
+        end
+    end)
+
+    ---------------------------------------------------------------------------
     --  3. Temporary window hook (whisper windows)
     --     When Blizzard creates a new temp window, skin it, re-hide chrome
     --     Blizzard may have re-shown, and re-chain tab positions.
@@ -2807,24 +2841,11 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Single message filter to reset idle on any chat message.
-        -- Replaces 18 per-frame AddMessage hooks with one filter that
-        -- fires once per message event (not per frame).
-        local function IdleMessageFilter(self, event, msg, ...)
-            OnActiveMessage()
-        end
-        for _, ev in ipairs({
-            "CHAT_MSG_SAY", "CHAT_MSG_YELL",
-            "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
-            "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
-            "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
-            "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_RAID_WARNING",
-            "CHAT_MSG_WHISPER", "CHAT_MSG_BN_WHISPER",
-            "CHAT_MSG_CHANNEL", "CHAT_MSG_SYSTEM",
-            "CHAT_MSG_LOOT",
-        }) do
-            ChatFrame_AddMessageEventFilter(ev, IdleMessageFilter)
-        end
+        -- Reset idle on any incoming chat message. Hook AddMessage on
+        -- ChatFrame1 instead of using ChatFrame_AddMessageEventFilter --
+        -- message filters run inside Blizzard's pipeline and taint
+        -- HistoryKeeper's secured accessIDs table.
+        hooksecurefunc(ChatFrame1, "AddMessage", OnActiveMessage)
 
         -- Also reset on new temporary window (whisper)
         hooksecurefunc("FCF_OpenTemporaryWindow", function()

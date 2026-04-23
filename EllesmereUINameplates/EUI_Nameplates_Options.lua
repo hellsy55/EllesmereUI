@@ -1120,8 +1120,13 @@ initFrame:SetScript("OnEvent", function(self)
             if dbRef and dbRef.showCastTimer ~= nil then pvShowTimer = dbRef.showCastTimer end
             if pvShowTimer then
                 castParts.timerFS:Show()
+                -- Anchor target to a fixed offset from cast bar edge (matching
+                -- the timer's base reservation) so timer X/Y offsets don't
+                -- drag the target along. At default offsets (0,0) the result
+                -- is identical to anchoring directly to the timer fontstring.
+                local pvTimerW = ctmSz * 2.2
                 castParts.targetFS:ClearAllPoints()
-                castParts.targetFS:SetPoint("RIGHT", castParts.timerFS, "LEFT", -4 + ctOX, ctOY)
+                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3 - pvTimerW + ctOX, ctOY)
             else
                 castParts.timerFS:Hide()
                 castParts.targetFS:ClearAllPoints()
@@ -4383,11 +4388,14 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             tmCogBtn:SetScript("OnClick", function(self)
                 ShowCogPopup(self, {
-                    title = "Cast Timer Offset",
+                    title = "Cast Timer Settings",
                     xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
                     xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                     yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
                     ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
+                    sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
                 })
             end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -4754,11 +4762,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 snCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Name Offset",
+                        title = "Spell Name Settings",
                         xGet = function() return DBVal("castNameOffsetX") or defaults.castNameOffsetX end,
                         xSet = function(v) DB().castNameOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castNameOffsetY") or defaults.castNameOffsetY end,
                         ySet = function(v) DB().castNameOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        sizeGet = function() return DBVal("castNameSize") or defaults.castNameSize end,
+                        sizeSet = function(v) DB().castNameSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
                     })
                 end)
                 EllesmereUI.RegisterWidgetRefresh(function()
@@ -4842,11 +4853,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 stCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Target Offset",
+                        title = "Spell Target Settings",
                         xGet = function() return DBVal("castTargetOffsetX") or defaults.castTargetOffsetX end,
                         xSet = function(v) DB().castTargetOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castTargetOffsetY") or defaults.castTargetOffsetY end,
                         ySet = function(v) DB().castTargetOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        sizeGet = function() return DBVal("castTargetSize") or defaults.castTargetSize end,
+                        sizeSet = function(v) DB().castTargetSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
                     })
                 end)
                 EllesmereUI.RegisterWidgetRefresh(function()

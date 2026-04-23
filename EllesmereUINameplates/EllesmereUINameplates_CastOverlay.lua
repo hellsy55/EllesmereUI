@@ -242,26 +242,18 @@ local function BuildOverlay()
     barOverlay:SetAlpha(0)
     f.barOverlay = barOverlay
 
-    -- Kick tick mark (mirrors plate.kickClip / kickPositioner / kickMarker /
-    -- kickTick from the on-plate cast bar). Two invisible StatusBars whose
-    -- secret-duration values are bound at cast start; a 2px white texture
-    -- sits at the right edge of the marker's fill and animates as the
-    -- marker counts down via the engine.
-    local kickClip = CreateFrame("Frame", nil, bar)
-    kickClip:SetAllPoints(bar)
-    kickClip:SetClipsChildren(true)
-    f.kickClip = kickClip
-    local kickPositioner = CreateFrame("StatusBar", nil, kickClip)
+    -- Kick tick mark: two invisible StatusBars + one visible tick texture.
+    -- No clip frame -- not worth the GPU batch break for a 2px tick.
+    local kickPositioner = CreateFrame("StatusBar", nil, bar)
     kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     kickPositioner:GetStatusBarTexture():SetAlpha(0)
     kickPositioner:SetPoint("CENTER", bar)
     kickPositioner:SetFrameLevel(bar:GetFrameLevel() + 1)
     kickPositioner:Hide()
     f.kickPositioner = kickPositioner
-    local kickMarker = CreateFrame("StatusBar", nil, kickClip)
+    local kickMarker = CreateFrame("StatusBar", nil, bar)
     kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     kickMarker:GetStatusBarTexture():SetAlpha(0)
-    kickMarker:SetClipsChildren(true)
     kickMarker:SetPoint("LEFT", kickPositioner:GetStatusBarTexture(), "RIGHT")
     kickMarker:SetSize(1, 1)
     kickMarker:SetFrameLevel(bar:GetFrameLevel() + 2)

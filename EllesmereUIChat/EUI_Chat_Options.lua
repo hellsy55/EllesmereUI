@@ -198,10 +198,10 @@ initFrame:SetScript("OnEvent", function(self)
             }
             local textSizeRow
             textSizeRow, h = W:DualRow(parent, y,
-                { type="slider", text="Text Size",
-                  min = 8, max = 24, step = 1,
-                  getValue=function() return Cfg("fontSize") or 12 end,
-                  setValue=function(v) Set("fontSize", v); RefreshAll() end },
+                { type="slider", text="Tab Text Size",
+                  min = 8, max = 16, step = 1,
+                  getValue=function() return Cfg("tabFontSize") or 10 end,
+                  setValue=function(v) Set("tabFontSize", v); RefreshAll() end },
                 { type="dropdown", text="Timestamps",
                   values=tsValues, order=tsOrder,
                   getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
@@ -209,31 +209,6 @@ initFrame:SetScript("OnEvent", function(self)
                       Set("timestampFormat", v)
                       if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
                   end })
-            -- Cog for Tab Text Size
-            do
-                local lrgn = textSizeRow._leftRegion
-                local _, cogShow = EllesmereUI.BuildCogPopup({
-                    title = "Text Settings",
-                    rows = {
-                        { type="slider", label="Tab Text Size",
-                          min = 8, max = 16, step = 1,
-                          get=function() return Cfg("tabFontSize") or 10 end,
-                          set=function(v) Set("tabFontSize", v); RefreshAll() end },
-                    },
-                })
-                local cogBtn = CreateFrame("Button", nil, lrgn)
-                cogBtn:SetSize(26, 26)
-                cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
-                lrgn._lastInline = cogBtn
-                cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(0.4)
-                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-                cogTex:SetAllPoints()
-                cogTex:SetTexture(EllesmereUI.COGS_ICON)
-                cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
-                cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
-            end
         end
         y = y - h
 

@@ -1493,22 +1493,20 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castBarOverlay:SetAllPoints(plate.cast:GetStatusBarTexture())
     plate.castBarOverlay:SetTexture("Interface\\Buttons\\WHITE8x8")
     plate.castBarOverlay:SetAlpha(0)
-    -- Kick tick mark: clip frame + two invisible StatusBars + one visible tick texture
-    -- interruptPositioner tracks cast elapsed; interruptMarker tracks kick cooldown remaining
-    -- The tick texture sits at the right edge of interruptMarker's fill
-    plate.kickClip = CreateFrame("Frame", nil, plate.cast)
-    plate.kickClip:SetAllPoints(plate.cast)
-    plate.kickClip:SetClipsChildren(true)
-    plate.kickPositioner = CreateFrame("StatusBar", nil, plate.kickClip)
+    -- Kick tick mark: two invisible StatusBars + one visible tick texture.
+    -- kickPositioner tracks cast elapsed; kickMarker tracks kick cooldown remaining.
+    -- The tick texture sits at the right edge of kickMarker's fill.
+    -- No clip frame -- a 2px tick slightly overshooting the cast bar edge
+    -- on rare occasions is invisible and not worth the GPU batch break.
+    plate.kickPositioner = CreateFrame("StatusBar", nil, plate.cast)
     plate.kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickPositioner:GetStatusBarTexture():SetAlpha(0)
     plate.kickPositioner:SetPoint("CENTER", plate.cast)
     plate.kickPositioner:SetFrameLevel(plate.cast:GetFrameLevel() + 1)
     plate.kickPositioner:Hide()
-    plate.kickMarker = CreateFrame("StatusBar", nil, plate.kickClip)
+    plate.kickMarker = CreateFrame("StatusBar", nil, plate.cast)
     plate.kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickMarker:GetStatusBarTexture():SetAlpha(0)
-    plate.kickMarker:SetClipsChildren(true)
     plate.kickMarker:SetPoint("LEFT", plate.kickPositioner:GetStatusBarTexture(), "RIGHT")
     plate.kickMarker:SetSize(1, 1) -- sized later in UpdateKickTick
     plate.kickMarker:SetFrameLevel(plate.cast:GetFrameLevel() + 2)

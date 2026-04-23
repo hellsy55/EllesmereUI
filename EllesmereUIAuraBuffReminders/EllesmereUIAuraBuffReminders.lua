@@ -14,6 +14,10 @@ local _B = {}  -- beacon state table, populated later
 local Known = function(id) return id and (IsPlayerSpell(id) or IsSpellKnown(id)) end
 local _eabrInCombat = false
 local _encounterSnapshotTime = nil
+local _needGroupAura = false
+local _isEvokerOwnOnRaid = false
+local _groupAuraBroadActive = false
+local _groupAuraDirty = false
 local InCombat = function() return _eabrInCombat or (InCombatLockdown and InCombatLockdown()) end
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local isSecret = issecretvalue or function() return false end
@@ -2816,6 +2820,19 @@ end)
 -------------------------------------------------------------------------------
 local mainFrame = CreateFrame("Frame")
 
+-- Toggle broad vs player-only UNIT_AURA registration.
+-- Defined at file scope so both OnEnable and the event handler can use it.
+local function _setBroad(on)
+    if on and not _groupAuraBroadActive then
+        mainFrame:RegisterEvent("UNIT_AURA")
+        _groupAuraBroadActive = true
+    elseif not on and _groupAuraBroadActive then
+        mainFrame:UnregisterEvent("UNIT_AURA")
+        mainFrame:RegisterUnitEvent("UNIT_AURA", "player")
+        _groupAuraBroadActive = false
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Lifecycle: OnInitialize (fires at ADDON_LOADED time)
 --  Creates the DB early so EABR is in _dbRegistry before PreSeedSpecProfile.
@@ -2944,21 +2961,39 @@ function EABR:OnEnable()
     BeaconInit()
     C_Timer.After(0.5, RegisterUnlockElements)
 
-    -- Register broad UNIT_AURA when group buff checking is needed.
-    local _groupAuraRegistered = false
+    -- Register broad UNIT_AURA only when the player's class actually needs
+    -- group aura tracking AND only while out of combat.  Broad UNIT_AURA
+    -- fires 100+ times/sec in a raid; in combat, CollectRaidBuffs only
+    -- checks the player's own auras (PlayerHasAuraByID), so group events
+    -- are pure waste.  Evoker keeps broad in combat for ownOnRaid cache
+    -- updates but skips RequestRefresh on group events (handler below).
     local function UpdateGroupAuraRegistration()
-        local needGroup = true  -- always broad: raid buff checks need party/raid unit auras for all classes
-        if needGroup and not _groupAuraRegistered then
-            mainFrame:RegisterEvent("UNIT_AURA")  -- broad: fires for any unit
+        local playerClass = GetPlayerClass()
+        _needGroupAura = false
+        _isEvokerOwnOnRaid = false
+        for _, buff in ipairs(RAID_BUFFS) do
+            if buff.class == playerClass then _needGroupAura = true; break end
+        end
+        for _, aura in ipairs(AURAS) do
+            if aura.class == playerClass and aura.check == "ownOnRaid" then
+                _needGroupAura = true
+                _isEvokerOwnOnRaid = true
+                break
+            end
+        end
+        if _needGroupAura then
             mainFrame:RegisterEvent("GROUP_JOINED")
             mainFrame:RegisterEvent("GROUP_LEFT")
-            _groupAuraRegistered = true
-        elseif not needGroup and _groupAuraRegistered then
-            mainFrame:UnregisterEvent("UNIT_AURA")
-            mainFrame:RegisterUnitEvent("UNIT_AURA", "player")
+            -- Start broad if OOC, player-only if in combat (Evoker excepted)
+            if InCombat() and not _isEvokerOwnOnRaid then
+                _setBroad(false)
+            else
+                _setBroad(true)
+            end
+        else
+            _setBroad(false)
             mainFrame:UnregisterEvent("GROUP_JOINED")
             mainFrame:UnregisterEvent("GROUP_LEFT")
-            _groupAuraRegistered = false
         end
     end
     _G._EABR_UpdateGroupAuraRegistration = UpdateGroupAuraRegistration
@@ -3037,6 +3072,10 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
+        -- Drop broad UNIT_AURA during combat (group events are useless --
+        -- CollectRaidBuffs only checks player auras in combat). Evoker
+        -- keeps broad for ownOnRaid cache updates.
+        if _needGroupAura and not _isEvokerOwnOnRaid then _setBroad(false) end
         -- Only flag Hunter's Mark needed if the target doesn't already have it
         _huntersMarkNeeded = true
         if C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID
@@ -3063,6 +3102,8 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
 
     if e == "PLAYER_REGEN_ENABLED" then
         _eabrInCombat = false
+        -- Restore broad UNIT_AURA for OOC group buff tracking
+        if _needGroupAura then _setBroad(true) end
         -- Leaving combat: clean up combat icons, do full OOC refresh with secure buttons
         _huntersMarkNeeded = false
         HideCombatIcons()
@@ -3092,9 +3133,13 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "UNIT_AURA" then
-        -- arg1 = unit token. Ignore non-group units (enemies, NPCs, pets).
-        local isEvoker = _cachedPlayerClass == "EVOKER"
+        -- arg1 = unit token. Player aura changes always refresh.
+        -- Group member aura changes only matter for Evoker ownOnRaid
+        -- cache updates and OOC raid buff checks. The broad UNIT_AURA
+        -- event is only registered for classes that need group tracking
+        -- (see UpdateGroupAuraRegistration).
         if arg1 == "player" then
+            local isEvoker = _cachedPlayerClass == "EVOKER"
             if isEvoker and InCombat() and IsInGroup() then
                 for _, id in ipairs(_ownOnRaidIDs) do
                     local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
@@ -3104,18 +3149,32 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
                 end
             end
             RequestRefresh()
-        elseif arg1 and (arg1:find("^party%d") or arg1:find("^raid%d")) then
-            if isEvoker and InCombat() and IsInGroup() then
-                for _, id in ipairs(_ownOnRaidIDs) do
-                    if not _preCombatOwnOnRaidCache[id] then
-                        local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, arg1, id)
-                        if ok and result ~= nil and not isSecret(result) then
-                            _preCombatOwnOnRaidCache[id] = true
+        else
+            -- Group member aura change. Fast unit-type check via first byte.
+            -- In combat only Evoker reaches here (ownOnRaid cache); non-Evoker
+            -- classes unregister broad UNIT_AURA on combat start.
+            -- OOC: coalesce group events into a single deferred refresh instead
+            -- of calling RequestRefresh() per event (100+ events/sec in a raid
+            -- would each enter RequestRefresh just to hit the queued guard).
+            local c = arg1 and arg1:byte(1)
+            if c == 112 or c == 114 then  -- 'p' or 'r'
+                if _isEvokerOwnOnRaid and InCombat() and IsInGroup() then
+                    for _, id in ipairs(_ownOnRaidIDs) do
+                        if not _preCombatOwnOnRaidCache[id] then
+                            local ok, result = pcall(C_UnitAuras.GetUnitAuraBySpellID, arg1, id)
+                            if ok and result ~= nil and not isSecret(result) then
+                                _preCombatOwnOnRaidCache[id] = true
+                            end
                         end
                     end
+                elseif not _groupAuraDirty then
+                    _groupAuraDirty = true
+                    C_Timer.After(0.3, function()
+                        _groupAuraDirty = false
+                        RequestRefresh()
+                    end)
                 end
             end
-            RequestRefresh()
         end
         return
     end

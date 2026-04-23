@@ -2381,19 +2381,18 @@ local function SkinCharacterSheet()
             if useBoth then
                 local rawResult = statEntry.rawFunc()
                 local pctResult = statEntry.func and statEntry.func()
-                if rawResult ~= nil and pctResult ~= nil
-                   and not issecretvalue(rawResult) and not issecretvalue(pctResult) then
+                if rawResult ~= nil and pctResult ~= nil then
                     statEntry.value:SetText(format("%d (%.2f%%)", rawResult, pctResult))
-                elseif rawResult == nil and pctResult == nil then
+                else
                     statEntry.value:SetText("0")
                 end
             else
                 local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
                 local fmt = useRaw and "%d" or statEntry.format
                 local result = fn and fn()
-                if result ~= nil and not issecretvalue(result) then
+                if result ~= nil then
                     statEntry.value:SetText(format(fmt, result))
-                elseif result == nil then
+                else
                     statEntry.value:SetText("0")
                 end
             end

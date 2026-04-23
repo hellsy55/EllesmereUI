@@ -1102,15 +1102,10 @@ do
         end
         local labelHex = c and format("%02x%02x%02x", cr * 255, cg * 255, cb * 255) or statsFrame._classHex
 
-        local _isSecret = issecretvalue or function() return false end
-        local crit = GetCritChance()
-        local haste = GetHaste()
+        local crit = GetCritChance("player")
+        local haste = UnitSpellHaste("player")
         local mastery = GetMasteryEffect()
-        local versA = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE)
-        local versB = GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)
-        if _isSecret(crit) or _isSecret(haste) or _isSecret(mastery)
-           or _isSecret(versA) or _isSecret(versB) then return end
-        local vers = versA + versB
+        local vers = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE)
 
         local txt =
             format("|cff%sCrit:|r  |cffffffff%.2f%%|r", labelHex, crit) .. "\n" ..
@@ -1131,12 +1126,10 @@ do
             local leech = GetLifesteal()
             local avoidance = GetAvoidance()
             local speed = GetSpeed()
-            if not _isSecret(leech) and not _isSecret(avoidance) and not _isSecret(speed) then
-                txt = txt .. "\n" ..
-                    format("|cff%sLeech:|r  |cffffffff%.2f%%|r", tertHex, leech) .. "\n" ..
-                    format("|cff%sAvoidance:|r  |cffffffff%.2f%%|r", tertHex, avoidance) .. "\n" ..
-                    format("|cff%sSpeed:|r  |cffffffff%.2f%%|r", tertHex, speed)
-            end
+            txt = txt .. "\n" ..
+                format("|cff%sLeech:|r  |cffffffff%.2f%%|r", tertHex, leech) .. "\n" ..
+                format("|cff%sAvoidance:|r  |cffffffff%.2f%%|r", tertHex, avoidance) .. "\n" ..
+                format("|cff%sSpeed:|r  |cffffffff%.2f%%|r", tertHex, speed)
         end
 
         statsText:SetText(txt)
@@ -1190,15 +1183,21 @@ do
                 statsText:SetShadowOffset(0, 0)
             end
         end
-        statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
-        statsFrame:RegisterEvent("COMBAT_RATING_UPDATE")
-        statsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        local _statsThrottled = false
-        statsFrame:SetScript("OnEvent", function()
-            if _statsThrottled then return end
-            _statsThrottled = true
-            C_Timer.After(0.5, function()
-                _statsThrottled = false
+        for _, ev in ipairs({
+            "UNIT_STATS", "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
+            "UNIT_ATTACK_POWER", "UNIT_RANGED_ATTACK_POWER", "UNIT_SPELL_HASTE",
+            "MASTERY_UPDATE", "SPELL_POWER_CHANGED", "PLAYER_DAMAGE_DONE_MODS",
+            "PLAYER_SPECIALIZATION_CHANGED", "PLAYER_ENTERING_WORLD",
+        }) do
+            statsFrame:RegisterEvent(ev)
+        end
+        local _statsPending = false
+        statsFrame:SetScript("OnEvent", function(_, _, unit)
+            if unit and unit ~= "player" then return end
+            if _statsPending then return end
+            _statsPending = true
+            C_Timer.After(0, function()
+                _statsPending = false
                 UpdateSecondaryStats()
             end)
         end)

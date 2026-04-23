@@ -1795,6 +1795,14 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(health, "TOPLEFT", barArea, "TOPLEFT", 0, -cpAboveH - btbTopOff - pvPwAbove)
                 if portraitFrame then portraitFrame._anchored = false end
             end
+            healthFill:ClearAllPoints()
+            if s.healthReverseFill then
+                healthFill:SetPoint("TOPRIGHT", health, "TOPRIGHT", 0, 0)
+                healthFill:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+            else
+                healthFill:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+                healthFill:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
+            end
             PP.Width(healthFill, math.floor(fw * (_previewHealthPct or 0.70) + 0.5))
 
             -- Live-update dark mode colors
@@ -1838,8 +1846,14 @@ initFrame:SetScript("OnEvent", function(self)
                 healthFill:SetColorTexture(uHR, uHG, uHB, 1)
                 if isDark then
                     healthBgColor:ClearAllPoints()
-                    healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", math.floor(fw * (_previewHealthPct or 0.70) + 0.5), 0)
-                    healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+                    local hpW = math.floor(fw * (_previewHealthPct or 0.70) + 0.5)
+                    if s.healthReverseFill then
+                        healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+                        healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", -hpW, 0)
+                    else
+                        healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", hpW, 0)
+                        healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+                    end
                 else
                     healthBgColor:ClearAllPoints()
                     healthBgColor:SetAllPoints(health)
@@ -1927,6 +1941,14 @@ initFrame:SetScript("OnEvent", function(self)
                     if ph > 0 then power:Show() else power:Hide() end
                 end
                 if pf._powerFill then
+                    pf._powerFill:ClearAllPoints()
+                    if s.powerReverseFill then
+                        pf._powerFill:SetPoint("TOPRIGHT", power, "TOPRIGHT", 0, 0)
+                        pf._powerFill:SetPoint("BOTTOMRIGHT", power, "BOTTOMRIGHT", 0, 0)
+                    else
+                        pf._powerFill:SetPoint("TOPLEFT", power, "TOPLEFT", 0, 0)
+                        pf._powerFill:SetPoint("BOTTOMLEFT", power, "BOTTOMLEFT", 0, 0)
+                    end
                     PP.Width(pf._powerFill, math.floor(pvPw * (_previewPowerPct or 0.85) + 0.5))
                 end
 
@@ -2069,6 +2091,14 @@ initFrame:SetScript("OnEvent", function(self)
                     castbar:SetSize(tw, ch)
                     castbar:Show()
                     if castFill then
+                        castFill:ClearAllPoints()
+                        if s.castReverseFill then
+                            PP.Point(castFill, "TOPRIGHT", castbar, "TOPRIGHT", -1, 0)
+                            PP.Point(castFill, "BOTTOMRIGHT", castbar, "BOTTOMRIGHT", -1, 1)
+                        else
+                            PP.Point(castFill, "TOPLEFT", castbar, "TOPLEFT", 1, 0)
+                            PP.Point(castFill, "BOTTOMLEFT", castbar, "BOTTOMLEFT", 1, 1)
+                        end
                         castFill:SetWidth(math.floor((tw - 2) * (_previewCastFill or 0.6) + 0.5))
                         -- Update fill color from per-unit settings (class colored only for player)
                         local fillC
@@ -4152,7 +4182,7 @@ initFrame:SetScript("OnEvent", function(self)
             RegisterWidgetRefresh(UpdateRightCogState)
         end
 
-        -- Row 4: Center Text + empty
+        -- Row 4: Center Text + Reverse Fill
         local sharedCenterTextRow
         sharedCenterTextRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Center Text", values=healthTextValues, order=healthTextOrder,
@@ -4165,7 +4195,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ReloadAndUpdate(); UpdatePreview()
               end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Reverse Fill",
+              getValue=function() return SVal("healthReverseFill", false) end,
+              setValue=function(v) SSet("healthReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
         -- Sync icon: Center Text (left)
         do
             local rgn = sharedCenterTextRow._leftRegion
@@ -4689,7 +4721,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 4: Text Color (multiSwatch: custom left, power colored right) + empty
+        -- Row 4: Text Color (multiSwatch: custom left, power colored right) + Reverse Fill
         local sharedPowerRow4
         sharedPowerRow4, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Text Color",
@@ -4736,7 +4768,9 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("powerPercentTextPowerColor", false) and 1 or 0.3
                   end },
               } },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Reverse Fill",
+              getValue=function() return SVal("powerReverseFill", false) end,
+              setValue=function(v) SSet("powerReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
         -- Sync icon: Text Color (left of row 4)
         do
             local rgn = sharedPowerRow4._leftRegion
@@ -5184,6 +5218,13 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+
+        -- Row 4: Reverse Fill + empty
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reverse Fill",
+              getValue=function() return SValSupported("castReverseFill", false) end,
+              setValue=function(v) SSetSupported("castReverseFill", v); ReloadAndUpdate(); UpdatePreview() end },
+            { type="label", text="" });  y = y - h
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -7227,7 +7268,7 @@ initFrame:SetScript("OnEvent", function(self)
                 ReloadAndUpdate()
               end });  y = y - h
 
-        -- Row: Center Text (solo)
+        -- Row: Center Text + Reverse Fill
         local centerRow
         centerRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Center Text", values=healthTextValues, order=healthTextOrder,
@@ -7239,7 +7280,10 @@ initFrame:SetScript("OnEvent", function(self)
                     settingsTable.rightTextContent = "none"
                 end
                 ReloadAndUpdate()
-              end }, { type="label", text="" });  y = y - h
+              end },
+            { type="toggle", text="Reverse Fill",
+              getValue=function() return settingsTable.healthReverseFill end,
+              setValue=function(v) settingsTable.healthReverseFill = v; ReloadAndUpdate() end });  y = y - h
 
         return y, displayHeader, sizeRow, textHeader, textRow, enableRowFrame
     end
@@ -7438,6 +7482,13 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnClick", function(self) showFn(self) end)
                 return cogBtn
             end
+            -- Reverse Fill row (end of DISPLAY section)
+            _, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Reverse Fill",
+                  getValue=function() return db.profile.boss.healthReverseFill end,
+                  setValue=function(v) db.profile.boss.healthReverseFill = v; ReloadAndUpdate() end },
+                { type="label", text="" });  yy = yy - hh
+
             -- INDICATORS section (below DISPLAY)
             _, hh = Ww:SectionHeader(pp, "INDICATORS", yy);  yy = yy - hh
 

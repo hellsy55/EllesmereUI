@@ -183,6 +183,7 @@ local TBB_DEFAULT_BAR = {
     height    = 24,
     width     = 270,
     verticalOrientation = false,
+    reverseFill = false,
     texture   = "none",
     fillR = _classR, fillG = _classG, fillB = _classB, fillA = 1,
     bgR = 0, bgG = 0, bgB = 0, bgA = 0.4,
@@ -454,6 +455,7 @@ local function SetupTBBThresholdOverlay(bar, cfg)
     local texPath = EllesmereUI.ResolveTexturePath(TBB_TEXTURES, cfg.texture or "none", "Interface\\Buttons\\WHITE8x8")
     overlay:SetStatusBarTexture(texPath)
     overlay:SetOrientation(cfg.verticalOrientation and "VERTICAL" or "HORIZONTAL")
+    overlay:SetReverseFill(cfg.reverseFill and true or false)
     overlay:GetStatusBarTexture():SetVertexColor(
         cfg.stackThresholdR or 0.8, cfg.stackThresholdG or 0.1,
         cfg.stackThresholdB or 0.1, cfg.stackThresholdA or 1)
@@ -577,8 +579,9 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         sb:SetAllPoints(bar)
     end
 
-    -- Orientation
+    -- Orientation and fill direction
     sb:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+    sb:SetReverseFill(cfg.reverseFill and true or false)
 
     -- Texture
     local texPath = EllesmereUI.ResolveTexturePath(TBB_TEXTURES, cfg.texture or "none", "Interface\\Buttons\\WHITE8x8")

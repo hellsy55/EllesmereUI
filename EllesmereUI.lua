@@ -1033,39 +1033,21 @@ do
         if not ok or not es then return end
         local onePixel = es > 0 and (PP.perfect / es) or PP.mult
         local bs = borderSize or 1
-        local t = bs > 0 and math.max(onePixel, math.floor(bs + 0.5) * onePixel) or 0
-        local top, bottom, left, right = container._top, container._bottom, container._left, container._right
+        local edgeSize = bs > 0 and math.max(onePixel, math.floor(bs + 0.5) * onePixel) or 0
 
-        -- Hide all strips when border size is 0 (SetHeight/Width(0) still renders 1px)
-        if t == 0 then
-            top:Hide(); bottom:Hide(); left:Hide(); right:Hide()
+        if edgeSize == 0 then
+            container:SetBackdrop(nil)
             return
         end
-        top:Show(); bottom:Show(); left:Show(); right:Show()
 
-        -- Top: full width, sits at the top edge
-        top:ClearAllPoints()
-        top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-        top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
-        top:SetHeight(t)
-
-        -- Bottom: full width, sits at the bottom edge
-        bottom:ClearAllPoints()
-        bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
-        bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-        bottom:SetHeight(t)
-
-        -- Left: between top and bottom strips
-        left:ClearAllPoints()
-        left:SetPoint("TOPLEFT", top, "BOTTOMLEFT", 0, 0)
-        left:SetPoint("BOTTOMLEFT", bottom, "TOPLEFT", 0, 0)
-        left:SetWidth(t)
-
-        -- Right: between top and bottom strips
-        right:ClearAllPoints()
-        right:SetPoint("TOPRIGHT", top, "BOTTOMRIGHT", 0, 0)
-        right:SetPoint("BOTTOMRIGHT", bottom, "TOPRIGHT", 0, 0)
-        right:SetWidth(t)
+        container:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = edgeSize,
+        })
+        local bc = container._bdColor
+        if bc then
+            container:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4])
+        end
     end
 
     ---------------------------------------------------------------------------
@@ -1106,34 +1088,31 @@ do
         if bd then return bd.container end
         r = r or 0; g = g or 0; b = b or 0; a = a or 1
         borderSize = borderSize or 1
-        drawLayer = drawLayer or "OVERLAY"
-        subLevel = subLevel or 1
 
-        local container = CreateFrame("Frame", nil, frame)
+        -- Single native SetBackdrop call replaces 4 texture objects per border.
+        -- BackdropTemplate renders the edge in C++ with one draw call.
+        local container = CreateFrame("Frame", nil, frame, "BackdropTemplate")
         container:SetAllPoints(frame)
-        -- Don't bump frame level — the textures' drawLayer and subLevel
-        -- control visual stacking. Keeping the container at the parent's
-        -- level avoids covering sibling frames like glow overlays.
-        container:SetFrameLevel(frame:GetFrameLevel())
+        container:SetFrameLevel(frame:GetFrameLevel() + 1)
 
-        local function MakeTex()
-            local tex = container:CreateTexture(nil, drawLayer, nil, subLevel)
-            tex:SetColorTexture(r, g, b, a)
-            PP.DisablePixelSnap(tex)
-            return tex
+        -- Guard: BackdropTemplateMixin.SetupTextureCoordinates does arithmetic
+        -- on frame width/height. In tainted execution (nameplates, combat aura
+        -- updates) those values are secret and the arithmetic errors. Replace
+        -- with a wrapper that skips the call when size is restricted.
+        if container.SetupTextureCoordinates then
+            container.SetupTextureCoordinates = function(self)
+                local w, h = self:GetSize()
+                if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return end
+                BackdropTemplateMixin.SetupTextureCoordinates(self)
+            end
         end
 
-        container._top = MakeTex()
-        container._bottom = MakeTex()
-        container._left = MakeTex()
-        container._right = MakeTex()
+        -- Store color for SnapBorderTextures to re-apply after SetBackdrop
+        container._bdColor = { r, g, b, a }
 
         -- Store border data externally (avoids tainting secure frames)
         bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
         _ppBorderData[frame] = bd
-        -- Also write to frame for backwards compat with code that reads
-        -- frame._ppBorders directly. Safe on EUI-owned frames; Blizzard
-        -- frames get tainted but PP.GetBorder() avoids that path.
         frame._ppBorders = container
         frame._ppBorderSize = borderSize
         frame._ppBorderColor = bd.borderColor
@@ -1173,10 +1152,8 @@ do
         a = a or 1
         bd.borderColor = { r, g, b, a }
         frame._ppBorderColor = bd.borderColor
-        bd.container._top:SetColorTexture(r, g, b, a)
-        bd.container._bottom:SetColorTexture(r, g, b, a)
-        bd.container._left:SetColorTexture(r, g, b, a)
-        bd.container._right:SetColorTexture(r, g, b, a)
+        bd.container._bdColor = bd.borderColor
+        bd.container:SetBackdropBorderColor(r, g, b, a)
     end
 
     function PP.UpdateBorder(frame, borderSize, r, g, b, a)
@@ -6817,7 +6794,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.1.3"
+EllesmereUI.VERSION = "7.1.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
