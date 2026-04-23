@@ -3069,8 +3069,9 @@ local function SkinFriendsFrame()
             sPh:SetShown(t == "")
             clearBtn:SetShown(t ~= "")
             _ebsSearchTerm = t:lower()
-            -- Filter friends list
-            if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+            -- Filter friends list -- "direct" bypasses the 500ms debounce
+            -- so every keystroke updates the list immediately.
+            if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP("direct") end
             -- Filter Recent Allies via DataProvider rebuild
             if frame._ebsRASetSearch then frame._ebsRASetSearch(_ebsSearchTerm) end
         end)

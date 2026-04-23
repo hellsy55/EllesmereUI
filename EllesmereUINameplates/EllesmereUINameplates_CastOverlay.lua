@@ -113,23 +113,10 @@ local function ApplyCastBarTargetText(ov, plate)
     end
 
     local spellTarget, spellTargetClass
-    if UnitSpellTargetName then
-        local shouldShow = not UnitShouldDisplaySpellTargetName
-            or UnitShouldDisplaySpellTargetName(unit)
-        if shouldShow then
-            local rawTarget = UnitSpellTargetName(unit)
-            if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
-                local shortName = UnitName(rawTarget)
-                spellTarget = shortName or rawTarget
-                spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(unit)
-            end
-        end
-    else
-        local targetUnit = unit .. "target"
-        if UnitExists(targetUnit) then
-            spellTarget = UnitName(targetUnit)
-            spellTargetClass = UnitClassBase and UnitClassBase(targetUnit)
-        end
+    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(unit)
+    if rawTarget then
+        spellTarget = rawTarget
+        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(unit)
     end
     local hasTarget = spellTarget and true or false
     ov.target:SetText(spellTarget or "")

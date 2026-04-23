@@ -2040,44 +2040,37 @@ local function SkinChatFrame(cf)
         local labelText = blizLabel and blizLabel:GetText() or "Tab"
         tab:SetPushedTextOffset(0, 0)
 
-        if cf.isTemporary then
-            -- Temporary tabs: restyle Blizzard's own label (avoids width issues)
-            if blizLabel and not tab._euiLabel then
-                blizLabel:SetFont(GetFont(), GetTabFontSize(), "")
-                blizLabel:SetTextColor(1, 1, 1, 0.5)
-                blizLabel:SetJustifyH("CENTER")
-                blizLabel:ClearAllPoints()
-                blizLabel:SetPoint("CENTER", tab, "CENTER", 0, 0)
-                local _ignoreLabelPt = false
-                hooksecurefunc(blizLabel, "SetPoint", function(self)
-                    if _ignoreLabelPt then return end
-                    _ignoreLabelPt = true
-                    self:ClearAllPoints()
-                    self:SetPoint("CENTER", tab, "CENTER", 0, 0)
-                    _ignoreLabelPt = false
-                end)
-                tab._euiLabel = blizLabel
+        -- All tabs (regular + temporary): create our own label, hide
+        -- Blizzard's. Never call SetFont/SetText on Blizzard's fontstring
+        -- from addon code -- doing so taints GetStringWidth(), which makes
+        -- PanelTemplates_TabResize blow up with a secret-value error.
+        if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
+        if not tab._euiLabel then
+            local label = tab:CreateFontString(nil, "OVERLAY")
+            label:SetFont(GetFont(), GetTabFontSize(), "")
+            label:SetPoint("CENTER", tab, "CENTER", 0, 0)
+            label:SetJustifyH("CENTER")
+            label:SetWordWrap(false)
+            label:SetText(labelText)
+            tab._euiLabel = label
+            -- Temporary tabs (whispers etc.) can have long names that
+            -- overflow the tab. Clamp the label to 80% of the tab width
+            -- so text truncates cleanly. Skip in protected instances
+            -- to avoid any taint from reading tab geometry.
+            local isTemp = cf.isTemporary
+            local function ClampTempLabel()
+                if not isTemp or IsInProtectedInstance() then return end
+                local tw = tab:GetWidth()
+                if tw and tw > 0 and not (issecretvalue and issecretvalue(tw)) then
+                    label:SetWidth(tw * 0.8)
+                end
             end
-        else
-            -- Regular tabs: our own label renders the text; Blizzard's is hidden.
-            -- We don't modify Blizzard's label text or call tab:SetWidth to avoid
-            -- taint propagation to PanelTemplates_TabResize.
-            if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
-            if not tab._euiLabel then
-                local label = tab:CreateFontString(nil, "OVERLAY")
-                label:SetFont(GetFont(), GetTabFontSize(), "")
-                label:SetPoint("CENTER", tab, "CENTER", 0, 0)
-                label:SetJustifyH("CENTER")
-                label:SetWordWrap(false)
-                label:SetText(labelText)
-                tab._euiLabel = label
-                hooksecurefunc(tab, "SetText", function(_, newText)
-                    if not newText or not label then return end
-                    label:SetText(newText)
-                end)
-                -- Tab width is managed by Blizzard. We don't call SetWidth
-                -- from addon code to avoid tainting the tab's width value.
-            end
+            ClampTempLabel()
+            hooksecurefunc(tab, "SetText", function(_, newText)
+                if not newText or not label then return end
+                label:SetText(newText)
+                ClampTempLabel()
+            end)
         end
 
         -- Accent underline (active tab indicator).

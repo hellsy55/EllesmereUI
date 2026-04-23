@@ -1094,28 +1094,38 @@ initFrame:SetScript("OnEvent", function(self)
             local eic = (DB() and DB().enemyInCombat) or defaults.enemyInCombat
             health:SetStatusBarColor(eic.r, eic.g, eic.b, 1)
 
-            -- Cast text sizes and colors
+            -- Cast text sizes, colors, and offsets
             local cns = DBVal("castNameSize") or defaults.castNameSize
             local cts = DBVal("castTargetSize") or defaults.castTargetSize
             local cnc = (DB() and DB().castNameColor) or defaults.castNameColor
             local ctmSz = DBVal("castTimerSize") or defaults.castTimerSize
             local ctmC = (DB() and DB().castTimerColor) or defaults.castTimerColor
+            local cnOX = DBVal("castNameOffsetX") or defaults.castNameOffsetX
+            local cnOY = DBVal("castNameOffsetY") or defaults.castNameOffsetY
+            local ctOX = DBVal("castTargetOffsetX") or defaults.castTargetOffsetX
+            local ctOY = DBVal("castTargetOffsetY") or defaults.castTargetOffsetY
+            local tmOX = DBVal("castTimerOffsetX") or defaults.castTimerOffsetX
+            local tmOY = DBVal("castTimerOffsetY") or defaults.castTimerOffsetY
             SetPVFont(castParts.nameFS, fontPath, cns, npOutline)
             SetPVFont(castParts.targetFS, fontPath, cts, npOutline)
             SetPVFont(castParts.timerFS, fontPath, ctmSz, npOutline)
             castParts.timerFS:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
             castParts.nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
+            castParts.nameFS:ClearAllPoints()
+            castParts.nameFS:SetPoint("LEFT", cast, "LEFT", 5 + cnOX, cnOY)
+            castParts.timerFS:ClearAllPoints()
+            castParts.timerFS:SetPoint("RIGHT", cast, "RIGHT", -3 + tmOX, tmOY)
             local dbRef = DB()
             local pvShowTimer = defaults.showCastTimer
             if dbRef and dbRef.showCastTimer ~= nil then pvShowTimer = dbRef.showCastTimer end
             if pvShowTimer then
                 castParts.timerFS:Show()
                 castParts.targetFS:ClearAllPoints()
-                castParts.targetFS:SetPoint("RIGHT", castParts.timerFS, "LEFT", -4, 0)
+                castParts.targetFS:SetPoint("RIGHT", castParts.timerFS, "LEFT", -4 + ctOX, ctOY)
             else
                 castParts.timerFS:Hide()
                 castParts.targetFS:ClearAllPoints()
-                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
+                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3 + ctOX, ctOY)
             end
             local useClassColor = defaults.castTargetClassColor
             if dbRef and dbRef.castTargetClassColor ~= nil then useClassColor = dbRef.castTargetClassColor end
@@ -4356,6 +4366,33 @@ initFrame:SetScript("OnEvent", function(self)
             local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
             PP.Point(ctSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
             EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
+
+            -- Inline cog for Cast Timer X/Y offset
+            local tmCogBtn = CreateFrame("Button", nil, rightRgn)
+            tmCogBtn:SetSize(26, 26)
+            tmCogBtn:SetPoint("RIGHT", ctSwatch, "LEFT", -6, 0)
+            tmCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            tmCogBtn:SetAlpha(0.4)
+            local tmCogTex = tmCogBtn:CreateTexture(nil, "OVERLAY")
+            tmCogTex:SetAllPoints()
+            tmCogTex:SetTexture(COGS_ICON)
+            tmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            tmCogBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                if cogPopupOwner ~= self then self:SetAlpha(0.4) end
+            end)
+            tmCogBtn:SetScript("OnClick", function(self)
+                ShowCogPopup(self, {
+                    title = "Cast Timer Offset",
+                    xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
+                    xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
+                    ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                })
+            end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
+            end)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -4700,6 +4737,35 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(snSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
             EllesmereUI.RegisterWidgetRefresh(function() snUpdateSwatch() end)
 
+            -- LEFT: Spell Name inline cog for X/Y offset
+            do
+                local snCogBtn = CreateFrame("Button", nil, leftRgn)
+                snCogBtn:SetSize(26, 26)
+                snCogBtn:SetPoint("RIGHT", snSwatch, "LEFT", -6, 0)
+                snCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                snCogBtn:SetAlpha(0.4)
+                local snCogTex = snCogBtn:CreateTexture(nil, "OVERLAY")
+                snCogTex:SetAllPoints()
+                snCogTex:SetTexture(COGS_ICON)
+                snCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                snCogBtn:SetScript("OnLeave", function(self)
+                    EllesmereUI.HideWidgetTooltip()
+                    if cogPopupOwner ~= self then self:SetAlpha(0.4) end
+                end)
+                snCogBtn:SetScript("OnClick", function(self)
+                    ShowCogPopup(self, {
+                        title = "Spell Name Offset",
+                        xGet = function() return DBVal("castNameOffsetX") or defaults.castNameOffsetX end,
+                        xSet = function(v) DB().castNameOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        yGet = function() return DBVal("castNameOffsetY") or defaults.castNameOffsetY end,
+                        ySet = function(v) DB().castNameOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    })
+                end)
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    snCogBtn:SetAlpha(cogPopupOwner == snCogBtn and 0.7 or 0.4)
+                end)
+            end
+
             -- RIGHT: Spell Target inline double swatch (custom + class colored)
             local rightRgn = spellNameRow._rightRegion
             local ctrl = rightRgn._control
@@ -4758,6 +4824,35 @@ initFrame:SetScript("OnEvent", function(self)
             if isCC == nil then isCC = defaults.castTargetClassColor end
             stSwatch:SetAlpha(isCC and 0.3 or 1)
             ccSwatch:SetAlpha(isCC and 1 or 0.3)
+
+            -- RIGHT: Spell Target inline cog for X/Y offset
+            do
+                local stCogBtn = CreateFrame("Button", nil, rightRgn)
+                stCogBtn:SetSize(26, 26)
+                stCogBtn:SetPoint("RIGHT", stSwatch, "LEFT", -6, 0)
+                stCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+                stCogBtn:SetAlpha(0.4)
+                local stCogTex = stCogBtn:CreateTexture(nil, "OVERLAY")
+                stCogTex:SetAllPoints()
+                stCogTex:SetTexture(COGS_ICON)
+                stCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                stCogBtn:SetScript("OnLeave", function(self)
+                    EllesmereUI.HideWidgetTooltip()
+                    if cogPopupOwner ~= self then self:SetAlpha(0.4) end
+                end)
+                stCogBtn:SetScript("OnClick", function(self)
+                    ShowCogPopup(self, {
+                        title = "Spell Target Offset",
+                        xGet = function() return DBVal("castTargetOffsetX") or defaults.castTargetOffsetX end,
+                        xSet = function(v) DB().castTargetOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                        yGet = function() return DBVal("castTargetOffsetY") or defaults.castTargetOffsetY end,
+                        ySet = function(v) DB().castTargetOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    })
+                end)
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    stCogBtn:SetAlpha(cogPopupOwner == stCogBtn and 0.7 or 0.4)
+                end)
+            end
         end
         y = y - h
 

@@ -159,12 +159,18 @@ local defaults = {
     castOverlayEnabled = false,
     castNameSize = 10,
     castNameColor = { r = 1, g = 1, b = 1 },
+    castNameOffsetX = 0,
+    castNameOffsetY = 0,
     castTargetSize = 10,
     castTargetClassColor = true,
     castTargetColor = { r = 1, g = 1, b = 1 },
+    castTargetOffsetX = 0,
+    castTargetOffsetY = 0,
     showCastTimer = true,
     castTimerSize = 10,
     castTimerColor = { r = 1, g = 1, b = 1 },
+    castTimerOffsetX = 0,
+    castTimerOffsetY = 0,
     targetScale = 100,
     showAllDebuffs = false,
     borderStyle = "ellesmere",
@@ -3110,22 +3116,10 @@ castFallbackFrame:SetScript("OnUpdate", function()
                 -- Update cast target in fallback mode (not handled by UpdateCast)
                 if plate.castTarget then
                     local tgt, tgtClass
-                    if UnitSpellTargetName then
-                        local ok = not UnitShouldDisplaySpellTargetName
-                            or UnitShouldDisplaySpellTargetName(plate.unit)
-                        if ok then
-                            local raw = UnitSpellTargetName(plate.unit)
-                            if raw and not (issecretvalue and issecretvalue(raw)) then
-                                tgt = UnitName(raw) or raw
-                                tgtClass = UnitSpellTargetClass and UnitSpellTargetClass(plate.unit)
-                            end
-                        end
-                    else
-                        local tu = plate.unit .. "target"
-                        if UnitExists(tu) then
-                            tgt = UnitName(tu)
-                            tgtClass = UnitClassBase and UnitClassBase(tu)
-                        end
+                    local raw = UnitSpellTargetName and UnitSpellTargetName(plate.unit)
+                    if raw then
+                        tgt = raw
+                        tgtClass = UnitSpellTargetClass and UnitSpellTargetClass(plate.unit)
                     end
                     plate.castTarget:SetText(tgt or "")
                 end
@@ -3208,12 +3202,18 @@ function NameplateFrame:ApplyAppearance()
         self.name:SetTextColor(nr, ng, nb, 1)
     end
     self:RefreshNamePosition()
-    -- Cast text sizes and colors
+    -- Cast text sizes, colors, and offsets
     local cns = (p and p.castNameSize) or defaults.castNameSize
     local cts = (p and p.castTargetSize) or defaults.castTargetSize
     local cnc = (p and p.castNameColor) or defaults.castNameColor
     local ctmSz = (p and p.castTimerSize) or defaults.castTimerSize
     local ctmC = (p and p.castTimerColor) or defaults.castTimerColor
+    local cnOX = (p and p.castNameOffsetX) or defaults.castNameOffsetX
+    local cnOY = (p and p.castNameOffsetY) or defaults.castNameOffsetY
+    local ctOX = (p and p.castTargetOffsetX) or defaults.castTargetOffsetX
+    local ctOY = (p and p.castTargetOffsetY) or defaults.castTargetOffsetY
+    local tmOX = (p and p.castTimerOffsetX) or defaults.castTimerOffsetX
+    local tmOY = (p and p.castTimerOffsetY) or defaults.castTimerOffsetY
     SetFSFont(self.castName, cns, GetNPOutline())
     SetFSFont(self.castTarget, cts, GetNPOutline())
     SetFSFont(self.castTimer, ctmSz, GetNPOutline())
@@ -3230,8 +3230,12 @@ function NameplateFrame:ApplyAppearance()
         self.castName:SetWidth(castW * 0.42)
         self.castTimer:SetWidth(timerW)
         self.castTarget:SetWidth(castW * 0.42)
+        self.castName:ClearAllPoints()
+        self.castName:SetPoint("LEFT", self.cast, "LEFT", 5 + cnOX, cnOY)
         self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW, 0)
+        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW + ctOX, ctOY)
+        self.castTimer:ClearAllPoints()
+        self.castTimer:SetPoint("RIGHT", self.cast, "RIGHT", -3 + tmOX, tmOY)
     end
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     -- Aura duration/stack text settings (unified across debuffs, buffs, CCs)
@@ -4448,26 +4452,14 @@ function NameplateFrame:UpdateCast()
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
     -- Get the cast target name and class for display.
-    -- Check UnitShouldDisplaySpellTargetName first (prevents secret values).
-    -- Fall back to unit.."target" when the spell target API is unavailable.
+    -- UnitSpellTargetName returns a secret value -- pass directly to
+    -- SetText (which accepts secrets). Do NOT pass through UnitName()
+    -- or Ambiguate() as those reject secret values.
     local spellTarget, spellTargetClass
-    if UnitSpellTargetName then
-        local shouldShow = not UnitShouldDisplaySpellTargetName
-            or UnitShouldDisplaySpellTargetName(self.unit)
-        if shouldShow then
-            local rawTarget = UnitSpellTargetName(self.unit)
-            if rawTarget and not (issecretvalue and issecretvalue(rawTarget)) then
-                local shortName = UnitName(rawTarget)
-                spellTarget = shortName or rawTarget
-                spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
-            end
-        end
-    else
-        local targetUnit = self.unit .. "target"
-        if UnitExists(targetUnit) then
-            spellTarget = UnitName(targetUnit)
-            spellTargetClass = UnitClassBase and UnitClassBase(targetUnit)
-        end
+    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
+    if rawTarget then
+        spellTarget = rawTarget
+        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
     end
     local hasTarget = spellTarget and true or false
     self.castTarget:SetText(spellTarget or "")
