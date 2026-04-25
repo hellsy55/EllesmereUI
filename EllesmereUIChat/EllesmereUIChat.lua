@@ -20,6 +20,15 @@ local ECHAT = ns.ECHAT
 
 local min, max, floor, ceil, abs = min, max, floor, ceil, math.abs
 
+-- Per-frame data table. All custom state is stored here instead of writing
+-- properties onto Blizzard's chat frame tables (which taints them and causes
+-- HistoryKeeper errors in protected instances).
+local _cfd = {}
+local function CFD(cf)
+    local d = _cfd[cf]
+    if not d then d = {}; _cfd[cf] = d end
+    return d
+end
 
 local CHAT_DEFAULTS = {
     profile = {
@@ -175,24 +184,24 @@ function ECHAT.ApplyBackground()
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and cf._euiBg then
+        if cf and CFD(cf).bg then
             -- Update main bg texture
-            local bgTex = cf._euiBg:GetRegions()
+            local bgTex = CFD(cf).bg:GetRegions()
             if bgTex and bgTex.SetColorTexture then
                 bgTex:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
             end
         end
         -- Update skinned Blizzard tab backgrounds
         local tab = _G["ChatFrame" .. i .. "Tab"]
-        if tab and tab._euiBg then
-            local isActive = tab._euiUnderline and tab._euiUnderline:IsShown()
-            tab._euiBg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
+        if tab and CFD(tab).bg then
+            local isActive = CFD(tab).underline and CFD(tab).underline:IsShown()
+            CFD(tab).bg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
         end
     end
     -- Update sidebar bg
     local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiSidebar then
-        local sbBg = cf1._euiSidebar:GetRegions()
+    if cf1 and CFD(cf1).sidebar then
+        local sbBg = CFD(cf1).sidebar:GetRegions()
         if sbBg and sbBg.SetColorTexture then
             sbBg:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
         end
@@ -232,7 +241,7 @@ function ECHAT.ApplySidebarVisibility()
     local cfg = ECHAT.DB()
     local mode = cfg.sidebarVisibility or "always"
     local cf1 = _G.ChatFrame1
-    local sidebar = cf1 and cf1._euiSidebar
+    local sidebar = cf1 and CFD(cf1).sidebar
     if not sidebar then return end
 
     if mode == "never" then
@@ -263,7 +272,7 @@ function ECHAT.ApplySidebarVisibility()
             else
                 _sidebarFadeAlpha = max(_sidebarFadeTarget, _sidebarFadeAlpha - step)
             end
-            local sb = _G.ChatFrame1 and _G.ChatFrame1._euiSidebar
+            local sb = _G.ChatFrame1 and CFD(_G.ChatFrame1).sidebar
             if sb then sb:SetAlpha(min(_sidebarFadeAlpha, _chatAlphaCurrent)) end
             if _sidebarFadeAlpha == _sidebarFadeTarget then self:Hide() end
         end)
@@ -277,21 +286,21 @@ function ECHAT.ApplyBorders()
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and cf._euiBg and cf._euiBg._ppBorders then
-            cf._euiBg._ppBorders:SetShown(not hide)
+        if cf and CFD(cf).bg and CFD(cf).bg._ppBorders then
+            CFD(cf).bg._ppBorders:SetShown(not hide)
         end
-        if cf and cf._euiInputDiv then
-            cf._euiInputDiv:SetShown(not hide)
+        if cf and CFD(cf).inputDiv then
+            CFD(cf).inputDiv:SetShown(not hide)
         end
     end
     local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiSidebar then
+    if cf1 and CFD(cf1).sidebar then
         local sbBgHidden = cfg.hideSidebarBg
-        if cf1._euiSidebar._ppBorders then
-            cf1._euiSidebar._ppBorders:SetShown(not hide and not sbBgHidden)
+        if CFD(cf1).sidebar._ppBorders then
+            CFD(cf1).sidebar._ppBorders:SetShown(not hide and not sbBgHidden)
         end
-        if cf1._euiSidebar._euiDiv then
-            cf1._euiSidebar._euiDiv:SetShown(not hide)
+        if CFD(cf1).sidebarDiv then
+            CFD(cf1).sidebarDiv:SetShown(not hide)
         end
     end
 end
@@ -300,7 +309,7 @@ end
 function ECHAT.ApplySidebarIcons()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
+    local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
 
     local ICON_GAP = cfg.sidebarIconSpacing or 10
@@ -311,41 +320,42 @@ function ECHAT.ApplySidebarIcons()
     local showSettings = cfg.showSettings ~= false
 
     -- Friends + count (re-anchor with custom spacing)
-    if sb._friendsBtn then
-        sb._friendsBtn:SetShown(showFriends)
+    if CFD(cf1).friendsBtn then
+        CFD(cf1).friendsBtn:SetShown(showFriends)
         if showFriends then
-            sb._friendsBtn:ClearAllPoints()
-            sb._friendsBtn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
+            CFD(cf1).friendsBtn:ClearAllPoints()
+            CFD(cf1).friendsBtn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP)
         end
     end
-    if sb._friendsCount then sb._friendsCount:SetShown(showFriends) end
+    if CFD(cf1).friendsCount then CFD(cf1).friendsCount:SetShown(showFriends) end
 
     -- Build ordered list of visible top-group buttons, sorted by check order
     local iconOrder = cfg.sidebarIconOrder or {}
+    local sbd = CFD(cf1)
     local allMiddle = {
-        { key = "showCopy",     ref = "_copyBtn" },
-        { key = "showPortals",  ref = "_portalBtn" },
-        { key = "showVoice",    ref = "_voiceBtn" },
-        { key = "showSettings", ref = "_settingsBtn" },
+        { key = "showCopy",     ref = "copyBtn" },
+        { key = "showPortals",  ref = "portalBtn" },
+        { key = "showVoice",    ref = "voiceBtn" },
+        { key = "showSettings", ref = "settingsBtn" },
     }
     local topBtns = {}
     for _, info in ipairs(allMiddle) do
-        if cfg[info.key] ~= false and sb[info.ref] then
+        if cfg[info.key] ~= false and sbd[info.ref] then
             local ord = iconOrder[info.key]
             if type(ord) ~= "number" then ord = 999 end
-            topBtns[#topBtns + 1] = { btn = sb[info.ref], order = ord }
+            topBtns[#topBtns + 1] = { btn = sbd[info.ref], order = ord }
         end
     end
     table.sort(topBtns, function(a, b) return a.order < b.order end)
 
     -- Hide all first
-    if sb._copyBtn then sb._copyBtn:Hide() end
-    if sb._portalBtn then sb._portalBtn:Hide() end
-    if sb._voiceBtn then sb._voiceBtn:Hide() end
-    if sb._settingsBtn then sb._settingsBtn:Hide() end
+    if CFD(cf1).copyBtn then CFD(cf1).copyBtn:Hide() end
+    if CFD(cf1).portalBtn then CFD(cf1).portalBtn:Hide() end
+    if CFD(cf1).voiceBtn then CFD(cf1).voiceBtn:Hide() end
+    if CFD(cf1).settingsBtn then CFD(cf1).settingsBtn:Hide() end
 
     -- Re-anchor visible buttons in chain (sorted by order)
-    local anchor = showFriends and sb._friendsCount or nil
+    local anchor = showFriends and CFD(cf1).friendsCount or nil
     for _, entry in ipairs(topBtns) do
         entry.btn:ClearAllPoints()
         if anchor then
@@ -358,7 +368,7 @@ function ECHAT.ApplySidebarIcons()
     end
 
     -- Scroll is independent
-    if sb._scrollBtn then sb._scrollBtn:SetShown(cfg.showScroll ~= false) end
+    if CFD(cf1).scrollBtn then CFD(cf1).scrollBtn:SetShown(cfg.showScroll ~= false) end
 
     -- Re-apply free move offsets after chain layout
     if ECHAT.ApplyIconFreeMove then ECHAT.ApplyIconFreeMove() end
@@ -410,35 +420,35 @@ ECHAT.ApplyChatSize = ApplyChatSize
 function ECHAT.ApplyLockChatSize()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    if not cf1 or not cf1._euiResizeGrip then return end
-    cf1._euiResizeGrip:SetShown(not cfg.lockChatSize)
+    if not cf1 or not CFD(cf1).resizeGrip then return end
+    CFD(cf1).resizeGrip:SetShown(not cfg.lockChatSize)
 end
 
 -- Flip sidebar to left or right side of chat bg
 function ECHAT.ApplySidebarPosition()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
-    if not sb or not cf1._euiBg then return end
+    local sb = cf1 and CFD(cf1).sidebar
+    if not sb or not CFD(cf1).bg then return end
     local PP = EllesmereUI and EllesmereUI.PP
     local onePx = (PP and PP.mult) or 1
     sb:ClearAllPoints()
     if cfg.sidebarRight then
-        sb:SetPoint("TOPLEFT", cf1._euiBg, "TOPRIGHT", -onePx, 0)
-        sb:SetPoint("BOTTOMLEFT", cf1._euiBg, "BOTTOMRIGHT", -onePx, 0)
+        sb:SetPoint("TOPLEFT", CFD(cf1).bg, "TOPRIGHT", 0, 0)
+        sb:SetPoint("BOTTOMLEFT", CFD(cf1).bg, "BOTTOMRIGHT", 0, 0)
     else
-        sb:SetPoint("TOPRIGHT", cf1._euiBg, "TOPLEFT", onePx, 0)
-        sb:SetPoint("BOTTOMRIGHT", cf1._euiBg, "BOTTOMLEFT", onePx, 0)
+        sb:SetPoint("TOPRIGHT", CFD(cf1).bg, "TOPLEFT", 0, 0)
+        sb:SetPoint("BOTTOMRIGHT", CFD(cf1).bg, "BOTTOMLEFT", 0, 0)
     end
     -- Move the divider to the correct edge
-    if sb._euiDiv then
-        sb._euiDiv:ClearAllPoints()
+    if CFD(cf1).sidebarDiv then
+        CFD(cf1).sidebarDiv:ClearAllPoints()
         if cfg.sidebarRight then
-            sb._euiDiv:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, 0)
-            sb._euiDiv:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", 0, 0)
+            CFD(cf1).sidebarDiv:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, 0)
+            CFD(cf1).sidebarDiv:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", 0, 0)
         else
-            sb._euiDiv:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, 0)
-            sb._euiDiv:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
+            CFD(cf1).sidebarDiv:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, 0)
+            CFD(cf1).sidebarDiv:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
         end
     end
 
@@ -448,7 +458,7 @@ end
 function ECHAT.ApplyIconColor()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
+    local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
     local r, g, b
     if cfg.iconUseAccent and EllesmereUI.GetAccentColor then
@@ -458,17 +468,18 @@ function ECHAT.ApplyIconColor()
     end
     local ICON_ALPHA = 0.4
     local ICON_HOVER_ALPHA = 0.9
+    local d = CFD(cf1)
     local ICON_LABELS = {
-        _friendsBtn = "Friends", _copyBtn = "Copy Chat", _portalBtn = "M+ Portals",
-        _voiceBtn = "Voice/Channels", _settingsBtn = "Settings", _scrollBtn = "Scroll to Bottom",
+        friendsBtn = "Friends", copyBtn = "Copy Chat", portalBtn = "M+ Portals",
+        voiceBtn = "Voice/Channels", settingsBtn = "Settings", scrollBtn = "Scroll to Bottom",
     }
-    local fc = sb._friendsCount
-    for _, key in ipairs({ "_friendsBtn", "_copyBtn", "_portalBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
-        local btn = sb[key]
+    local fc = d.friendsCount
+    for _, key in ipairs({ "friendsBtn", "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
+        local btn = CFD(cf1)[key]
         if btn and btn._icon then
             btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
             local label = ICON_LABELS[key]
-            if key == "_friendsBtn" and fc then
+            if key == "friendsBtn" and fc then
                 fc:SetTextColor(r, g, b, 0.5)
                 btn:SetScript("OnEnter", function(self)
                     btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
@@ -502,7 +513,7 @@ end
 function ECHAT.ApplySidebarBackground()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
+    local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
     local show = not cfg.hideSidebarBg
     local sbBg = sb:GetRegions()
@@ -519,22 +530,22 @@ function ECHAT.ApplySidebarIconScale()
     local cfg = ECHAT.DB()
     local scale = cfg.sidebarIconScale or 1.0
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
+    local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
 
     local BASE_FRIEND = 26
     local BASE_ICON = 22
     local BASE_FONT = 9
 
-    for _, key in ipairs({ "_copyBtn", "_portalBtn", "_voiceBtn", "_settingsBtn", "_scrollBtn" }) do
-        local btn = sb[key]
+    for _, key in ipairs({ "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
+        local btn = CFD(cf1)[key]
         if btn then btn:SetSize(BASE_ICON * scale, BASE_ICON * scale) end
     end
-    if sb._friendsBtn then
-        sb._friendsBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
+    if CFD(cf1).friendsBtn then
+        CFD(cf1).friendsBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
     end
-    if sb._friendsCount then
-        sb._friendsCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
+    if CFD(cf1).friendsCount then
+        CFD(cf1).friendsCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
     end
 end
 
@@ -646,20 +657,20 @@ end
 function ECHAT.ApplyIconFreeMove()
     local cfg = ECHAT.DB()
     local cf1 = _G.ChatFrame1
-    local sb = cf1 and cf1._euiSidebar
+    local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
 
     local btns = {
-        { ref = "_friendsBtn", key = "friends" },
-        { ref = "_copyBtn",    key = "copy" },
-        { ref = "_portalBtn",  key = "portals" },
-        { ref = "_voiceBtn",   key = "voice" },
-        { ref = "_settingsBtn", key = "settings" },
-        { ref = "_scrollBtn",  key = "scroll" },
+        { ref = "friendsBtn", key = "friends" },
+        { ref = "copyBtn",    key = "copy" },
+        { ref = "portalBtn",  key = "portals" },
+        { ref = "voiceBtn",   key = "voice" },
+        { ref = "settingsBtn", key = "settings" },
+        { ref = "scrollBtn",  key = "scroll" },
     }
 
     for _, info in ipairs(btns) do
-        local btn = sb[info.ref]
+        local btn = CFD(cf1)[info.ref]
         if btn then
             btn._freeMoveKey = info.key
             EnableIconFreeMove(btn)
@@ -1036,14 +1047,14 @@ function ECHAT.ApplyInputPosition()
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and cf._euiBg then
+        if cf and CFD(cf).bg then
             local name = cf:GetName()
             if not name then break end
             local eb = _G[name .. "EditBox"]
-            local bg = cf._euiBg
-            local div = cf._euiInputDiv
+            local bg = CFD(cf).bg
+            local div = CFD(cf).inputDiv
             local fsc = cf.FontStringContainer
-            local track = cf._euiScrollTrack
+            local track = CFD(cf).scrollTrack
 
             if eb then
                 eb:ClearAllPoints()
@@ -1107,7 +1118,7 @@ local function _BuildAlphaCache()
     _alphaFrames = {}
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and cf._euiBg then
+        if cf and CFD(cf).bg then
             _alphaFrames[#_alphaFrames + 1] = {
                 cf = cf,
                 tab = _G["ChatFrame" .. i .. "Tab"],
@@ -1128,7 +1139,7 @@ local function _ApplyAlpha(alpha)
         if _G.GeneralDockManager and _euiDockStyled then
             _G.GeneralDockManager:SetAlpha(alpha)
         end
-        if cf:IsShown() or cf._euiBg:IsShown() then
+        if cf:IsShown() or CFD(cf).bg:IsShown() then
             -- bg is a child of cf, so it inherits cf's alpha automatically.
             -- Don't set bg alpha explicitly or it compounds (0.5 * 0.5 = 0.25).
             cf:SetAlpha(alpha)
@@ -1144,17 +1155,17 @@ local function _ApplyAlpha(alpha)
                     end
                 end
             end
-            if cf._euiScrollTrack then cf._euiScrollTrack:SetAlpha(alpha) end
-            if cf._euiResizeGrip then cf._euiResizeGrip:SetAlpha(alpha * 0.2) end
+            if CFD(cf).scrollTrack then CFD(cf).scrollTrack:SetAlpha(alpha) end
+            if CFD(cf).resizeGrip then CFD(cf).resizeGrip:SetAlpha(alpha * 0.2) end
         end
     end
     local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiSidebar then
+    if cf1 and CFD(cf1).sidebar then
         local sbMode = ECHAT.DB().sidebarVisibility or "always"
         if sbMode == "mouseover" then
-            cf1._euiSidebar:SetAlpha(min(alpha, _sidebarFadeAlpha))
+            CFD(cf1).sidebar:SetAlpha(min(alpha, _sidebarFadeAlpha))
         elseif sbMode ~= "never" then
-            cf1._euiSidebar:SetAlpha(alpha)
+            CFD(cf1).sidebar:SetAlpha(alpha)
         end
     end
 end
@@ -1589,10 +1600,14 @@ local function OnHyperlinkLeave(self)
     end
 end
 
--- TEMPORARILY DISABLED: URL + item tooltip toggle via SetItemRef global hook.
--- Testing whether this global hooksecurefunc taints FCF_OpenTemporaryWindow.
--- local _lastClickedLink = nil
--- hooksecurefunc("SetItemRef", function(link) ... end)
+-- URL click handler: open copy popup when user clicks a wrapped URL link.
+hooksecurefunc("SetItemRef", function(link)
+    if not link then return end
+    local url = link:match("^" .. addonName .. "url:(.+)$")
+    if url then
+        ShowUrlPopup(url)
+    end
+end)
 
 -------------------------------------------------------------------------------
 --  Chat frame reskin
@@ -1630,7 +1645,7 @@ local TAB_TEX_SUFFIXES = {
 
 -- Update visual state of one skinned tab (colors, underline, pulse)
 local function UpdateTabStyle(tab)
-    if not tab or not tab._euiSkinned then return end
+    if not tab or not CFD(tab).skinned then return end
     local chatFrame = _G["ChatFrame" .. tab:GetID()]
     if not chatFrame then return end
     local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
@@ -1654,12 +1669,12 @@ local function UpdateTabStyle(tab)
     end
 
     -- Background shade
-    if tab._euiBg then
-        tab._euiBg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
+    if CFD(tab).bg then
+        CFD(tab).bg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
     end
 
     -- Accent underline
-    if tab._euiUnderline then tab._euiUnderline:SetShown(isActive) end
+    if CFD(tab).underline then CFD(tab).underline:SetShown(isActive) end
 
 end
 
@@ -1668,9 +1683,8 @@ local function SkinTab(cf)
     local name = cf:GetName()
     if not name then return end
     local tab = _G[name .. "Tab"]
-    if not tab or tab._euiSkinned then return end
-    tab._euiSkinned = true
-
+    if not tab or CFD(tab).skinned then return end
+    CFD(tab).skinned = true
     -- Strip Blizzard tab textures, but preserve the glow frame
     -- so FCF_StartAlertFlash can animate it for new message alerts.
     for _, suffix in ipairs(TAB_TEX_SUFFIXES) do
@@ -1683,20 +1697,25 @@ local function SkinTab(cf)
     bg._euiOwned = true
     bg:SetAllPoints()
     bg:SetColorTexture(BG_R, BG_G, BG_B, BG_A * 0.67)
-    tab._euiBg = bg
+    CFD(tab).bg = bg
 
-    -- Accent underline (active tab only)
-    local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-    local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
-    underline._euiOwned = true
-    underline:SetHeight((PP and PP.mult) or 1)
-    underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
-    underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
-    underline:SetColorTexture(eg.r, eg.g, eg.b, 1)
-    underline:Hide()
-    if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(underline) end
-    if EUI.RegAccent then EUI.RegAccent({ type = "solid", obj = underline, a = 1 }) end
-    tab._euiUnderline = underline
+    -- Accent underline: deferred to avoid pixel snap hooks firing during
+    -- chat init's secure window.
+    C_Timer.After(0, function()
+        local ulHost = CreateFrame("Frame", nil, UIParent)
+        ulHost:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
+        ulHost:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
+        ulHost:SetHeight((PP and PP.mult) or 1)
+        ulHost:SetFrameStrata("MEDIUM")
+        ulHost:SetFrameLevel(5)
+        local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
+        local underline = ulHost:CreateTexture(nil, "OVERLAY", nil, 6)
+        underline:SetAllPoints()
+        underline:SetColorTexture(eg.r, eg.g, eg.b, 1)
+        ulHost:Hide()
+        if EUI.RegAccent then EUI.RegAccent({ type = "solid", obj = underline, a = 1 }) end
+        CFD(tab).underline = ulHost
+    end)
 
     -- Hover highlight
     local hover = tab:CreateTexture(nil, "HIGHLIGHT")
@@ -1732,8 +1751,6 @@ local function SkinTab(cf)
         self:SetAlpha(isActive and 1 or 0.5, true)
     end)
 
-
-
     -- Hook SetPoint: zero out Blizzard's y=-1 on LEFT/LEFT anchors
     -- (tabs anchored to ScrollFrameChild). Skip tabs 1-2.
     if tab:GetID() >= 3 then
@@ -1758,13 +1775,13 @@ local function StyleDockManager()
     local gdm = _G.GeneralDockManager
     if not gdm or _euiDockStyled then return end
     local cf1 = _G.ChatFrame1
-    if not cf1 or not cf1._euiBg then return end
+    if not cf1 or not CFD(cf1).bg then return end
     _euiDockStyled = true
 
     -- Position above our chat bg (matches old EUI_ChatTabBar position)
     gdm:ClearAllPoints()
-    gdm:SetPoint("BOTTOMLEFT", cf1._euiBg, "TOPLEFT", 0, 0)
-    gdm:SetPoint("BOTTOMRIGHT", cf1._euiBg, "TOPRIGHT", 0, 0)
+    gdm:SetPoint("BOTTOMLEFT", CFD(cf1).bg, "TOPLEFT", 0, 0)
+    gdm:SetPoint("BOTTOMRIGHT", CFD(cf1).bg, "TOPRIGHT", 0, 0)
     local dockH = PP and PP.SnapForES and PP.SnapForES(24, gdm:GetEffectiveScale()) or 24
     gdm:SetHeight(dockH)
     if _G.GeneralDockManagerScrollFrame then
@@ -1795,8 +1812,8 @@ local function SkinEditBox(cf)
     if not name then return end
     local eb = _G[name .. "EditBox"]
     local idx = tonumber(name:match("ChatFrame(%d+)"))
-    if not eb or not idx or eb._euiSkinned then return end
-    eb._euiSkinned = true
+    if not eb or not idx or CFD(eb).skinned then return end
+    CFD(eb).skinned = true
 
     -- Hide Blizzard chrome textures
     for _, texName in ipairs({
@@ -1816,14 +1833,13 @@ local function SkinEditBox(cf)
     eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
     eb:SetHeight(23)
 
-    -- Font (edit box itself is safe on all frames)
+    -- Font
     local ebSize = GetFrameFontSize(cf:GetID())
     eb:SetFont(GetFont(), ebSize, "")
     eb:SetTextInsets(8, 8, 0, 0)
 
     -- Arrow key history
     -- Hook UpdateHeader to re-apply custom font on the header ("Say:", etc.)
-    -- Runs in secure context after Blizzard updates the header text.
     if eb.UpdateHeader then
         hooksecurefunc(eb, "UpdateHeader", function(self)
             if self.header then
@@ -1836,12 +1852,12 @@ local function SkinEditBox(cf)
     end
 
     eb:SetAltArrowKeyMode(false)
-    if not eb._euiHistory then
-            eb._euiHistory = {}
-            eb._euiHistIdx = 0
+    if not CFD(eb).history then
+            CFD(eb).history = {}
+            CFD(eb).histIdx = 0
             hooksecurefunc(eb, "AddHistoryLine", function(self, text)
                 if issecretvalue and (issecretvalue(text)) then return end
-                local h = self._euiHistory
+                local h = CFD(self).history
                 local last = h[#h]
                 if issecretvalue and last and issecretvalue(last) then
                     h[#h] = nil -- remove stale secret entry
@@ -1853,23 +1869,23 @@ local function SkinEditBox(cf)
             end)
             eb:HookScript("OnKeyDown", function(self, key)
                 if key ~= "UP" and key ~= "DOWN" then return end
-                local h = self._euiHistory
+                local h = CFD(self).history
                 if #h == 0 then return end
                 if key == "UP" then
-                    self._euiHistIdx = self._euiHistIdx + 1
-                    if self._euiHistIdx > #h then self._euiHistIdx = #h end
+                    CFD(self).histIdx = CFD(self).histIdx + 1
+                    if CFD(self).histIdx > #h then CFD(self).histIdx = #h end
                 elseif key == "DOWN" then
-                    self._euiHistIdx = self._euiHistIdx - 1
-                    if self._euiHistIdx < 0 then self._euiHistIdx = 0 end
+                    CFD(self).histIdx = CFD(self).histIdx - 1
+                    if CFD(self).histIdx < 0 then CFD(self).histIdx = 0 end
                 end
-                if self._euiHistIdx == 0 then
+                if CFD(self).histIdx == 0 then
                     self:SetText("")
                 else
-                    self:SetText(h[#h - self._euiHistIdx + 1])
+                    self:SetText(h[#h - CFD(self).histIdx + 1])
                 end
             end)
             eb:HookScript("OnEditFocusLost", function(self)
-                self._euiHistIdx = 0
+                CFD(self).histIdx = 0
             end)
         end
 end
@@ -1877,8 +1893,7 @@ end
 local function SkinChatFrame(cf)
     if not cf or _skinned[cf] then return end
     _skinned[cf] = true
-    _alphaFrames = nil -- invalidate cache so new frame is included in fade
-
+    _alphaFrames = nil
     local name = cf:GetName()
     if not name then return end
 
@@ -1887,7 +1902,7 @@ local function SkinChatFrame(cf)
     -- handled by standalone event frames (see sections 5/6 below).
 
     -- Unified dark background (covers chat + edit box as one panel)
-    if not cf._euiBg then
+    if not CFD(cf).bg then
         local bg = CreateFrame("Frame", nil, cf)
         local eb = _G[name .. "EditBox"]
         bg:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
@@ -1899,35 +1914,26 @@ local function SkinChatFrame(cf)
         bgTex:SetAllPoints()
         bgTex:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
 
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(bg, 1, 1, 1, 0.06, 1, "OVERLAY", 7)
-        end
-        -- Hide bg for frames not yet visible to prevent flash on first show
         if not cf:IsShown() then
             bg:Hide()
             cf:HookScript("OnShow", function() bg:Show() end)
         end
-        cf._euiBg = bg
+        CFD(cf).bg = bg
     end
 
     -- Sidebar: 40px panel to the left of the main chat frame for icons.
     -- Parented to UIParent so it stays visible regardless of active tab.
-    if name == "ChatFrame1" and not cf._euiSidebar then
+    if name == "ChatFrame1" and not CFD(cf).sidebar then
         local sidebar = CreateFrame("Frame", nil, UIParent)
         sidebar:SetWidth(40)
-        local onePxSB = (PP and PP.mult) or 1
-        sidebar:SetPoint("TOPRIGHT", cf._euiBg, "TOPLEFT", onePxSB, 0)
-        sidebar:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMLEFT", onePxSB, 0)
+        sidebar:SetPoint("TOPRIGHT", CFD(cf).bg, "TOPLEFT", 0, 0)
+        sidebar:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMLEFT", 0, 0)
         sidebar:SetFrameStrata(cf:GetFrameStrata())
         sidebar:SetFrameLevel(cf:GetFrameLevel() + 1)
 
         local sbBg = sidebar:CreateTexture(nil, "BACKGROUND")
         sbBg:SetAllPoints()
         sbBg:SetColorTexture(BG_R, BG_G, BG_B, BG_A)
-
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(sidebar, 1, 1, 1, 0.06, 1, "OVERLAY", 7)
-        end
 
         -- Sidebar mouseover hover (for "mouseover" visibility mode)
         sidebar:EnableMouse(true)
@@ -1950,17 +1956,17 @@ local function SkinChatFrame(cf)
             end
         end)
 
-        -- 1px divider between sidebar and chat bg
+        -- 1px vertical divider between sidebar and chat bg
         local onePx = (PP and PP.mult) or 1
         local sbDiv = sidebar:CreateTexture(nil, "OVERLAY", nil, 7)
+        sbDiv._euiOwned = true
         sbDiv:SetWidth(onePx)
         sbDiv:SetColorTexture(1, 1, 1, 0.06)
         sbDiv:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, 0)
         sbDiv:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
         if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(sbDiv) end
-        sidebar._euiDiv = sbDiv
+        CFD(cf).sidebarDiv = sbDiv
 
-        -- Sidebar icons
         local MEDIA = "Interface\\AddOns\\EllesmereUIChat\\Media\\"
         local ICON_SIZE = 22
         local ICON_SPACING = 10
@@ -1986,49 +1992,89 @@ local function SkinChatFrame(cf)
             return btn
         end
 
-        -- Top group: Friends, Count, Copy, Voice, Settings
-        local friendsBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_friends.png", nil, "TOP", -ICON_SPACING)
-        friendsBtn:SetSize(26, 26)
+        -- Read visibility + ordering config at creation time
+        local icfg = ECHAT.DB()
+        local showFriends  = icfg.showFriends ~= false
+        local showCopy     = icfg.showCopy ~= false
+        local showPortals  = icfg.showPortals ~= false
+        local showVoice    = icfg.showVoice ~= false
+        local showSettings = icfg.showSettings ~= false
+        local iconOrder    = icfg.sidebarIconOrder or {}
 
-        -- Online friends count below the friends icon
-        local friendsCount = sidebar:CreateFontString(nil, "OVERLAY")
-        friendsCount:SetFont(GetFont(), 9, "")
-        friendsCount:SetTextColor(1, 1, 1, 0.5)
-        friendsCount:SetPoint("TOP", friendsBtn, "BOTTOM", 0, 7)
-        friendsCount:SetText("0")
+        -- Friends + count (always first when enabled)
+        local anchor = nil
+        local friendsBtn, friendsCount, copyBtn, portalBtn, voiceBtn, settingsBtn
 
-        -- Highlight count + tooltip when hovering friends icon
-        friendsBtn:HookScript("OnEnter", function(self)
-            friendsCount:SetTextColor(1, 1, 1, 0.9)
-            if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
-                EUI.ShowWidgetTooltip(self, "Friends")
-            end
-        end)
-        friendsBtn:HookScript("OnLeave", function()
+        if showFriends then
+            friendsBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_friends.png", nil, "TOP", -ICON_SPACING)
+            friendsBtn:SetSize(26, 26)
+
+            friendsCount = sidebar:CreateFontString(nil, "OVERLAY")
+            friendsCount:SetFont(GetFont(), 9, "")
             friendsCount:SetTextColor(1, 1, 1, 0.5)
-            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
-        end)
+            friendsCount:SetPoint("TOP", friendsBtn, "BOTTOM", 0, 7)
+            friendsCount:SetText("0")
 
-        local function UpdateFriendsCount()
-            local _, numOnline = BNGetNumFriends()
-            local wowOnline = C_FriendList.GetNumOnlineFriends()
-            friendsCount:SetText(numOnline + wowOnline)
+            friendsBtn:HookScript("OnEnter", function(self)
+                friendsCount:SetTextColor(1, 1, 1, 0.9)
+                if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                    EUI.ShowWidgetTooltip(self, "Friends")
+                end
+            end)
+            friendsBtn:HookScript("OnLeave", function()
+                friendsCount:SetTextColor(1, 1, 1, 0.5)
+                if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            end)
+
+            local function UpdateFriendsCount()
+                local _, numOnline = BNGetNumFriends()
+                local wowOnline = C_FriendList.GetNumOnlineFriends()
+                friendsCount:SetText(numOnline + wowOnline)
+            end
+
+            local fcEvents = CreateFrame("Frame")
+            fcEvents:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
+            fcEvents:RegisterEvent("BN_FRIEND_INFO_CHANGED")
+            fcEvents:RegisterEvent("FRIENDLIST_UPDATE")
+            fcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+            fcEvents:SetScript("OnEvent", UpdateFriendsCount)
+
+            CFD(cf).friendsCount = friendsCount
+            anchor = friendsCount
         end
 
-        local fcEvents = CreateFrame("Frame")
-        fcEvents:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
-        fcEvents:RegisterEvent("BN_FRIEND_INFO_CHANGED")
-        fcEvents:RegisterEvent("FRIENDLIST_UPDATE")
-        fcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
-        fcEvents:SetScript("OnEvent", UpdateFriendsCount)
+        -- Middle group: ordered by sidebarIconOrder config
+        local middleIcons = {
+            { key = "showCopy",     show = showCopy,     tex = "chat_copy.png" },
+            { key = "showPortals",  show = showPortals,  tex = "chat_portal.png", size = 26 },
+            { key = "showVoice",    show = showVoice,    tex = "chat_voice.png" },
+            { key = "showSettings", show = showSettings,  tex = "chat_settings.png" },
+        }
+        table.sort(middleIcons, function(a, b)
+            local oa = iconOrder[a.key]; if type(oa) ~= "number" then oa = 999 end
+            local ob = iconOrder[b.key]; if type(ob) ~= "number" then ob = 999 end
+            return oa < ob
+        end)
 
-        sidebar._friendsCount = friendsCount
-
-        local copyBtn    = MakeSidebarIcon(sidebar, MEDIA .. "chat_copy.png")
-        copyBtn:ClearAllPoints()
-        copyBtn:SetPoint("TOP", friendsCount, "BOTTOM", 0, -ICON_SPACING)
-        local voiceBtn   = MakeSidebarIcon(sidebar, MEDIA .. "chat_voice.png", copyBtn)
-        local settingsBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_settings.png", voiceBtn)
+        local middleBtns = {}
+        for _, info in ipairs(middleIcons) do
+            if info.show then
+                local btn = MakeSidebarIcon(sidebar, MEDIA .. info.tex)
+                if info.size then btn:SetSize(info.size, info.size) end
+                btn:ClearAllPoints()
+                if anchor then
+                    btn:SetPoint("TOP", anchor, "BOTTOM", 0, -ICON_SPACING)
+                else
+                    btn:SetPoint("TOP", sidebar, "TOP", 0, -ICON_SPACING)
+                end
+                anchor = btn
+                middleBtns[info.key] = btn
+            end
+        end
+        copyBtn     = middleBtns["showCopy"]
+        portalBtn   = middleBtns["showPortals"]
+        voiceBtn    = middleBtns["showVoice"]
+        settingsBtn = middleBtns["showSettings"]
 
         -- Bottom: Scroll (anchored to bottom with gap)
         local scrollBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_scroll2.png")
@@ -2047,9 +2093,9 @@ local function SkinChatFrame(cf)
                 if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
             end)
         end
-        HookIconTooltip(copyBtn, "Copy Chat")
-        HookIconTooltip(voiceBtn, "Voice/Channels")
-        HookIconTooltip(settingsBtn, "Settings")
+        if copyBtn then HookIconTooltip(copyBtn, "Copy Chat") end
+        if voiceBtn then HookIconTooltip(voiceBtn, "Voice/Channels") end
+        if settingsBtn then HookIconTooltip(settingsBtn, "Settings") end
         HookIconTooltip(scrollBtn, "Scroll to Bottom")
 
         -- Scroll to bottom
@@ -2061,37 +2107,42 @@ local function SkinChatFrame(cf)
         end)
 
         -- Copy chat history from the active tab (reads directly from the frame)
+        if copyBtn then
         copyBtn:SetScript("OnClick", function()
             local fullText = ReadActiveChatText()
             if fullText == "" then fullText = "(No chat history)" end
             ShowCopyPopup(fullText)
         end)
+        end
 
         -- Friends button toggles FriendsFrame
+        if friendsBtn then
         friendsBtn:SetScript("OnClick", function()
             if InCombatLockdown() then return end
             ToggleFriendsFrame()
         end)
+        end
 
-        -- Portals button toggles dungeon portal flyout
-        local portalBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_portal.png")
-        portalBtn:SetSize(26, 26)
-        portalBtn:ClearAllPoints()
-        portalBtn:SetPoint("TOP", friendsCount, "BOTTOM", 0, -ICON_SPACING)
+        -- Portals button click handler
 
+        if portalBtn then
         portalBtn:SetScript("OnClick", function(self)
             if InCombatLockdown() then return end
             ECHAT.TogglePortalFlyout(self)
         end)
         HookIconTooltip(portalBtn, "M+ Portals")
+        end
 
         -- Voice button toggles ChannelFrame
+        if voiceBtn then
         voiceBtn:SetScript("OnClick", function()
             if InCombatLockdown() then return end
             ToggleChannelFrame()
         end)
+        end
 
         -- Settings button toggles EUI options on Chat module
+        if settingsBtn then
         settingsBtn:SetScript("OnClick", function()
             if InCombatLockdown() then return end
             local mf = EUI._mainFrame
@@ -2116,15 +2167,17 @@ local function SkinChatFrame(cf)
                 end)
             end
         end)
+        end
 
-        sidebar._friendsBtn = friendsBtn
-        sidebar._copyBtn = copyBtn
-        sidebar._portalBtn = portalBtn
-        sidebar._voiceBtn = voiceBtn
-        sidebar._settingsBtn = settingsBtn
-        sidebar._scrollBtn = scrollBtn
+        local sbd = CFD(cf)
+        sbd.friendsBtn = friendsBtn
+        sbd.copyBtn = copyBtn
+        sbd.portalBtn = portalBtn
+        sbd.voiceBtn = voiceBtn
+        sbd.settingsBtn = settingsBtn
+        sbd.scrollBtn = scrollBtn
 
-        cf._euiSidebar = sidebar
+        CFD(cf).sidebar = sidebar
     end
 
     -- Top clip: prevent text bleeding into the tab area.
@@ -2132,24 +2185,24 @@ local function SkinChatFrame(cf)
     -- Blizzard's font strings are positioned absolutely by the layout
     -- engine and ignore FSC container bounds.
     local fsc = cf.FontStringContainer
-    if fsc and not cf._euiTopClipped then
-        cf._euiTopClipped = true
+    if fsc and not CFD(cf).topClipped then
+        CFD(cf).topClipped = true
         fsc:ClearAllPoints()
         fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -6)
         fsc:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 0, 0)
     end
 
     -- Horizontal divider above input field
-    if not cf._euiInputDiv then
+    if not CFD(cf).inputDiv then
         local onePx = (PP and PP.mult) or 1
-        local div = cf._euiBg:CreateTexture(nil, "OVERLAY", nil, 7)
+        local div = CFD(cf).bg:CreateTexture(nil, "OVERLAY", nil, 7)
         div._euiOwned = true
         div:SetHeight(onePx)
         div:SetColorTexture(1, 1, 1, 0.06)
         div:SetPoint("BOTTOMLEFT", cf, "BOTTOMLEFT", -10, -8)
         div:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -8)
         if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(div) end
-        cf._euiInputDiv = div
+        CFD(cf).inputDiv = div
     end
 
     -- Chat frame font/shadow/fade (one-time, at login)
@@ -2161,16 +2214,16 @@ local function SkinChatFrame(cf)
 
     -- 3. Hyperlink handlers (per-frame, on our bg frame -- not on Blizzard's cf)
     --    OnHyperlinkEnter/Leave for tooltip, OnHyperlinkClick for item toggle
-    if not cf._euiHyperlinkHooked then
-        cf._euiHyperlinkHooked = true
+    if not CFD(cf).hyperlinkHooked then
+        CFD(cf).hyperlinkHooked = true
         cf:HookScript("OnHyperlinkEnter", OnHyperlinkEnter)
         cf:HookScript("OnHyperlinkLeave", OnHyperlinkLeave)
         -- Item tooltip toggle + URL click handled by global SetItemRef hook
     end
 
-    -- 4. Edit box (frames 1-10 only; 11+ are temporary whisper windows
-    --    where any addon modification taints UpdateHeader)
+    -- 4. Edit box
     SkinEditBox(cf)
+
 
     -- 5. Tab (consolidated in SkinTab -- strips textures, sets height,
     --    creates bg/pulse/underline, click hook)
@@ -2192,7 +2245,7 @@ local function SkinChatFrame(cf)
             -- Restyle with our custom resize texture
             resizeBtn:SetSize(18, 18)
             resizeBtn:ClearAllPoints()
-            resizeBtn:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMRIGHT", -2, 2)
+            resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
             resizeBtn:SetFrameStrata("HIGH")
             -- Strip default textures and apply ours
             if resizeBtn.GetRegions then
@@ -2213,10 +2266,10 @@ local function SkinChatFrame(cf)
     end
 
     -- Custom resize grip on ChatFrame1's bg (bottom-right corner)
-    if name == "ChatFrame1" and cf._euiBg and not cf._euiResizeGrip then
+    if name == "ChatFrame1" and CFD(cf).bg and not CFD(cf).resizeGrip then
         local grip = CreateFrame("Button", nil, UIParent)
         grip:SetSize(18, 18)
-        grip:SetPoint("BOTTOMRIGHT", cf._euiBg, "BOTTOMRIGHT", -2, 2)
+        grip:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
         grip:SetFrameStrata("HIGH")
         grip:SetFrameLevel(100)
         local gripTex = grip:CreateTexture(nil, "OVERLAY")
@@ -2233,7 +2286,7 @@ local function SkinChatFrame(cf)
         local function FinishResize(self)
             self._dragging = false
             _cfResizing = false
-            cf._euiResizeTarget = nil
+            CFD(cf).resizeTarget = nil
             self:SetAlpha(0.2)
             -- Save size and update position to reflect new dimensions
             local cfg = ECHAT.DB()
@@ -2294,14 +2347,14 @@ local function SkinChatFrame(cf)
             local tgtX = self._anchorX + dW / 2
             local tgtY = self._anchorY - dH / 2
             -- Store target so the SetPoint hook can enforce it against Blizzard
-            cf._euiResizeTarget = { self._anchorPt, self._anchorRelPt, tgtX, tgtY }
+            CFD(cf).resizeTarget = { self._anchorPt, self._anchorRelPt, tgtX, tgtY }
             _cfIgnoreSetPoint = true
             cf:SetSize(newW, newH)
             cf:ClearAllPoints()
             cf:SetPoint(self._anchorPt, UIParent, self._anchorRelPt, tgtX, tgtY)
             _cfIgnoreSetPoint = false
         end)
-        cf._euiResizeGrip = grip
+        CFD(cf).resizeGrip = grip
     end
 
     -- Hide scroll buttons + scroll-to-bottom
@@ -2350,8 +2403,8 @@ local function SkinChatFrame(cf)
     -- that matches the chat panel's width and style.
     if name == "ChatFrame2" then
         local qbf = _G.CombatLogQuickButtonFrame_Custom
-        if qbf and not qbf._euiSkinned then
-            qbf._euiSkinned = true
+        if qbf and not CFD(qbf).skinned then
+            CFD(qbf).skinned = true
 
             -- Strip all default textures
             if qbf.GetRegions then
@@ -2460,10 +2513,10 @@ local function SkinChatFrame(cf)
 
     -- Thin scrollbar: reads scroll state from Blizzard's own ScrollBar.
     -- Clickable + draggable. Parented to our bg frame.
-    if not cf._euiScrollTrack and cf.ScrollBar then
+    if not CFD(cf).scrollTrack and cf.ScrollBar then
         local blizSB = cf.ScrollBar
-        local track = CreateFrame("Button", nil, cf._euiBg)
-        track:SetFrameLevel(cf._euiBg:GetFrameLevel() + 10)
+        local track = CreateFrame("Button", nil, CFD(cf).bg)
+        track:SetFrameLevel(CFD(cf).bg:GetFrameLevel() + 10)
         track:SetWidth(8)
         track:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
         track:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 5, 2)
@@ -2492,7 +2545,7 @@ local function SkinChatFrame(cf)
 
         local function CheckHover()
             local ok, over = pcall(function()
-                return _dragging or cf._euiBg:IsMouseOver() or track:IsMouseOver()
+                return _dragging or CFD(cf).bg:IsMouseOver() or track:IsMouseOver()
             end)
             if ok and over then
                 _hovered = true; ShowTrack()
@@ -2501,7 +2554,7 @@ local function SkinChatFrame(cf)
             end
         end
 
-        cf._euiBg:EnableMouse(false)
+        CFD(cf).bg:EnableMouse(false)
         -- bg OnEnter/OnLeave removed -- hover detection is in the polling ticker
         track._showTrack = ShowTrack
         track._hideTrack = HideTrack
@@ -2640,7 +2693,7 @@ local function SkinChatFrame(cf)
             end
         end)
 
-        cf._euiScrollTrack = track
+        CFD(cf).scrollTrack = track
     end
 end
 
@@ -2652,7 +2705,7 @@ local function UpdateTabColors()
 
     for i = 1, 20 do
         local tab = _G["ChatFrame" .. i .. "Tab"]
-        if tab and tab._euiSkinned then
+        if tab and CFD(tab).skinned then
             UpdateTabStyle(tab)
         end
     end
@@ -2677,10 +2730,10 @@ local function UpdateTabColors()
     local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
         and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
     local cf1 = _G.ChatFrame1
-    if cf1 and cf1._euiResizeGrip then
+    if cf1 and CFD(cf1).resizeGrip then
         local cfg = ECHAT.DB()
         local locked = cfg and cfg.lockChatSize
-        cf1._euiResizeGrip:SetShown(not locked and selected == cf1)
+        CFD(cf1).resizeGrip:SetShown(not locked and selected == cf1)
     end
 end
 
@@ -2718,11 +2771,25 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     CHAT_FONT_HEIGHTS = { 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 }
 
+
     ---------------------------------------------------------------------------
     --  2c. Clickable URLs via message event filters
-    --  TEMPORARILY DISABLED: Testing whether AddMessageEventFilter taints
-    --  FCF_OpenTemporaryWindow / HistoryKeeper in protected instances.
     ---------------------------------------------------------------------------
+    local URL_EVENTS = {
+        "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER",
+        "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID",
+        "CHAT_MSG_RAID_LEADER", "CHAT_MSG_INSTANCE_CHAT",
+        "CHAT_MSG_INSTANCE_CHAT_LEADER", "CHAT_MSG_WHISPER",
+        "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_BN_WHISPER",
+        "CHAT_MSG_BN_WHISPER_INFORM", "CHAT_MSG_CHANNEL",
+    }
+    local function UrlFilter(self, event, msg, ...)
+        if not msg or not ContainsURL(msg) then return false end
+        return false, WrapURLs(msg), ...
+    end
+    for _, ev in ipairs(URL_EVENTS) do
+        ChatFrame_AddMessageEventFilter(ev, UrlFilter)
+    end
 
     ---------------------------------------------------------------------------
     --  3. Temporary window detection (whisper windows)
@@ -2747,7 +2814,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SkinTab(cf)
                 -- Re-enforce height (Blizzard resets it on temp window creation)
                 local tab = _G["ChatFrame" .. i .. "Tab"]
-                if tab and tab._euiSkinned then
+                if tab and CFD(tab).skinned then
                     local th = PP and PP.SnapForES and PP.SnapForES(24, tab:GetEffectiveScale()) or 24
                     tab:SetHeight(th)
                 end
@@ -2990,12 +3057,12 @@ initFrame:SetScript("OnEvent", function(self)
                 _pollFrames[#_pollFrames + 1] = {
                     cf    = cf,
                     tab   = _G["ChatFrame" .. i .. "Tab"],
-                    bg    = cf._euiBg,
-                    track = cf._euiScrollTrack,
+                    bg    = CFD(cf).bg,
+                    track = CFD(cf).scrollTrack,
                 }
             end
         end
-        local _pollSidebar = ChatFrame1._euiSidebar
+        local _pollSidebar = CFD(ChatFrame1).sidebar
 
         C_Timer.NewTicker(0.15, function()
             RefreshCursorPos()
@@ -3088,7 +3155,7 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     ECHAT.ApplySidebarVisibility()
     ECHAT.ApplyBorders()
-    ECHAT.ApplySidebarIcons()
+    -- ECHAT.ApplySidebarIcons() -- causes taint
     ECHAT.ApplySidebarPosition()
     ECHAT.ApplyIconColor()
     ECHAT.ApplyInputPosition()
@@ -3098,21 +3165,22 @@ initFrame:SetScript("OnEvent", function(self)
     ECHAT.ApplyLockChatSize()
 
     -- Profile-swap refresh: re-read DB and refresh all chat visuals.
-    _G._ECHAT_RefreshAll = function()
-        ECHAT.ApplySidebarVisibility()
-        ECHAT.ApplyBorders()
-        ECHAT.ApplySidebarIcons()
-        ECHAT.ApplySidebarPosition()
-        ECHAT.ApplyIconColor()
-        ECHAT.ApplyInputPosition()
-        ECHAT.ApplySidebarBackground()
-        ECHAT.ApplySidebarIconScale()
-        ECHAT.ApplyIconFreeMove()
-        ECHAT.ApplyLockChatSize()
-        ECHAT.ApplyBackground()
-        ECHAT.ApplyFonts()
-        if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
-    end
+    -- TODO: re-enable after taint audit is complete
+    -- _G._ECHAT_RefreshAll = function()
+    --     ECHAT.ApplySidebarVisibility()
+    --     ECHAT.ApplyBorders()
+    --     ECHAT.ApplySidebarIcons()
+    --     ECHAT.ApplySidebarPosition()
+    --     ECHAT.ApplyIconColor()
+    --     ECHAT.ApplyInputPosition()
+    --     ECHAT.ApplySidebarBackground()
+    --     ECHAT.ApplySidebarIconScale()
+    --     ECHAT.ApplyIconFreeMove()
+    --     ECHAT.ApplyLockChatSize()
+    --     ECHAT.ApplyBackground()
+    --     ECHAT.ApplyFonts()
+    --     if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
+    -- end
 
     ---------------------------------------------------------------------------
     --  9-12. Chat positioning: Blizzard / Edit Mode owns position+size.
@@ -3124,7 +3192,7 @@ initFrame:SetScript("OnEvent", function(self)
     do
         local cfg = ECHAT.DB()
         if cfg and not cfg._editModeNoticeDismissed and cfg.chatPosition then
-            local cf1bg = ChatFrame1._euiBg
+            local cf1bg = CFD(ChatFrame1).bg
             if cf1bg then
                 local overlay = CreateFrame("Frame", nil, cf1bg)
                 overlay:SetAllPoints(cf1bg)
@@ -3331,7 +3399,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local cfg = ECHAT.DB()
                 if cfg and not cfg.toastPosition then
                     -- Default: anchor to top of chat bg
-                    local cf1bg = _G.ChatFrame1 and _G.ChatFrame1._euiBg
+                    local cf1bg = _G.ChatFrame1 and _G.CFD(ChatFrame1).bg
                     if cf1bg then
                         toast:ClearAllPoints()
                         toast:SetPoint("BOTTOMLEFT", cf1bg, "TOPLEFT", 0, 30)

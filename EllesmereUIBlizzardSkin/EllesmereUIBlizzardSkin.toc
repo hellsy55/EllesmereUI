@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Custom Blizzard UI Elements: Character Sheet, Tooltips, Menus, Popups, Dragon Riding and more!
 ## Author: Ellesmere
-## Version: 7.1.8
+## Version: 7.1.9
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBlizzardSkinDB, EllesmereUIDragonRidingDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

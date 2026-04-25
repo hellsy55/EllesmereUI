@@ -333,6 +333,9 @@ local function LayoutFlyoutButtons()
         if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(true) end
         -- Strip decorative border/background textures
         StripButtonDecorations(btn)
+        -- Hide ungrouped overlays left over from a previous ungroup cycle
+        if btn._ungroupBg then btn._ungroupBg:Hide() end
+        if btn._ungroupRing then btn._ungroupRing:Hide() end
         -- Also force all child frames up to the same strata/level
         for _, child in ipairs({ btn:GetChildren() }) do
             child:SetFrameStrata("DIALOG")
@@ -868,8 +871,11 @@ local function GatherMinimapButtons()
                 elseif child:IsObjectType("Button") and name
                     and not name:match("%d+$") then
                     local w = child:GetWidth() or 0
-                    if w >= 20 then
-                        -- Record initial addon visibility (only first time)
+                    -- Width gate only for first discovery; once a button is
+                    -- tracked in _addonVisible it is always re-collected so
+                    -- our own SetSize (e.g. slider < 20) can't permanently
+                    -- drop it from the list.
+                    if w >= 20 or _addonVisible[child] ~= nil then
                         if _addonVisible[child] == nil then
                             _addonVisible[child] = child:IsShown()
                         end
@@ -892,11 +898,20 @@ _G._EBS_AddonVisible = _addonVisible
 
 -- Hide all collected minimap buttons from the map surface
 -- Ungrouped buttons are left alone (positioned by LayoutIndicatorFrames)
+-- Buttons currently displayed inside the open flyout are also skipped --
+-- HideMinimapChild uses _suppressVisTrack which bypasses the force-show
+-- protection in the Hide hook, so calling it on flyout buttons while the
+-- panel is visible would silently zero their alpha with no recovery.
 local function HideAllMinimapButtons()
     GatherMinimapButtons()
+    local flyoutOpen = flyoutPanel and flyoutPanel:IsShown()
     for _, btn in ipairs(cachedAddonButtons) do
         if not IsUngrouped(btn) then
-            HideMinimapChild(btn)
+            if flyoutOpen and btn:GetParent() == flyoutPanel then
+                -- Button is visible in the flyout grid; leave it alone
+            else
+                HideMinimapChild(btn)
+            end
         end
     end
 end
@@ -1825,9 +1840,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     ubg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
                     ubg:SetBackdropColor(0, 0, 0, 0.8)
                     ubg:SetAllPoints(btn)
-                    ubg:SetFrameLevel(btn:GetFrameLevel() - 1)
                     btn._ungroupBg = ubg
                 end
+                -- Re-assert strata/level every layout; the flyout child-loop
+                -- bumps all children to DIALOG which would render the bg
+                -- above the icon after ungrouping.
+                btn._ungroupBg:SetFrameStrata(btn:GetFrameStrata())
+                btn._ungroupBg:SetFrameLevel(btn:GetFrameLevel() - 1)
                 btn._ungroupBg:Show()
                 if btn._ungroupRing then btn._ungroupRing:Hide() end
             else
@@ -2308,11 +2327,23 @@ local function ApplyMinimap()
             C_Timer.After(0.1, function()
                 pollPending = false
                 HideAllMinimapButtons()
+                -- New buttons may have appeared; force flyout rebuild on
+                -- next open so they get picked up by the grid.
+                InvalidateFlyout()
+                -- If the flyout is already open, rebuild immediately so
+                -- newly-discovered buttons appear without closing/reopening.
+                if flyoutPanel and flyoutPanel:IsShown() then
+                    BuildFlyoutContents()
+                end
             end)
         end)
     end
     addonButtonPoll:Show()
 
+    -- Force the flyout to rebuild on next open so it picks up any
+    -- changes to the button list (ungroup, new addon, profile swap, etc.)
+    -- and re-shows buttons that HideAllMinimapButtons just hid.
+    InvalidateFlyout()
     -- Close the flyout if it was open (layout may have changed)
     HideFlyoutPanel()
 

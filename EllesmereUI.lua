@@ -7018,7 +7018,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.1.8"
+EllesmereUI.VERSION = "7.1.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7714,8 +7714,8 @@ initFrame:SetScript("OnEvent", function(self, event)
                 end
                 local headerText = header.Text or (header.GetRegions and select(1, header:GetRegions()))
                 if headerText and headerText.SetTextColor then
-                    local ar, ag, ab = EllesmereUI.GetAccentColor()
-                    headerText:SetTextColor(ar or 0.05, ag or 0.82, ab or 0.61, 1)
+                    local EG = ELLESMERE_GREEN
+                    headerText:SetTextColor(EG.r, EG.g, EG.b, 1)
                     local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
                     local _, hSize = headerText:GetFont()
                     headerText:SetFont(euiFont, hSize or 16, "")
@@ -7865,8 +7865,8 @@ initFrame:SetScript("OnEvent", function(self, event)
                 if header then
                     local headerText = header.Text
                     if headerText and headerText.SetTextColor then
-                        local ar, ag, ab = EllesmereUI.GetAccentColor()
-                        headerText:SetTextColor(ar or 0.05, ag or 0.82, ab or 0.61, 1)
+                        local EG = ELLESMERE_GREEN
+                        headerText:SetTextColor(EG.r, EG.g, EG.b, 1)
                     end
                 end
             end

@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Skin + QoL layer over Blizzard's ObjectiveTrackerFrame
 ## Author: Ellesmere
-## Version: 7.1.8
+## Version: 7.1.9
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQuestTrackerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
