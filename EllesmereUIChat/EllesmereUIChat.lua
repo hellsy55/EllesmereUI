@@ -3399,7 +3399,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local cfg = ECHAT.DB()
                 if cfg and not cfg.toastPosition then
                     -- Default: anchor to top of chat bg
-                    local cf1bg = _G.ChatFrame1 and _G.CFD(ChatFrame1).bg
+                    local cf1bg = _G.ChatFrame1 and CFD(_G.ChatFrame1).bg
                     if cf1bg then
                         toast:ClearAllPoints()
                         toast:SetPoint("BOTTOMLEFT", cf1bg, "TOPLEFT", 0, 30)
