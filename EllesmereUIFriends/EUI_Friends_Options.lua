@@ -204,28 +204,11 @@ initFrame:SetScript("OnEvent", function(self)
 
         EllesmereUI:ClearContentHeader()
 
-        -- Drag instructions (centered, above settings).
-        -- Wrapped in a Frame so the search system collects it as an orphan
-        -- and auto-hides it during search.
-        do
-            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-            local infoFrame = CreateFrame("Frame", nil, parent)
-            infoFrame:SetSize(parent:GetWidth() or 400, 30)
-            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
-            infoFrame._isSpacer = true
-            local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
-            infoLabel:SetFont(fontPath, 15, "")
-            infoLabel:SetTextColor(1, 1, 1, 0.75)
-            infoLabel:SetPoint("CENTER")
-            infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Shift+Drag to reposition  |  Ctrl+Drag to temporarily move (resets on close)")
-            y = y - 40
-        end
 
         -- DISPLAY
         _, h = W:SectionHeader(parent, "DISPLAY", y);  y = y - h
 
-        -- Class Icon Theme (left) | blank (right)
+        -- Class Icon Theme | Class Color Names
         _, h = W:DualRow(parent, y,
             { type="dropdown", text="Class Icon Theme",
               values = ICON_STYLE_VALUES,
@@ -236,9 +219,15 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.iconStyle = v
-                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
+                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Class Color Names",
+              getValue=function() local f = FriendsDB(); return f and f.classColorNames end,
+              setValue=function(v)
+                local f = FriendsDB(); if not f then return end
+                f.classColorNames = v
+                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+              end }
         );  y = y - h
 
         -- Border Size | Border Color
@@ -304,25 +293,6 @@ initFrame:SetScript("OnEvent", function(self)
               } }
         );  y = y - h
 
-        -- Class Color Names (with inline swatch) | Window Scale
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Class Color Names",
-              getValue=function() local f = FriendsDB(); return f and f.classColorNames end,
-              setValue=function(v)
-                local f = FriendsDB(); if not f then return end
-                f.classColorNames = v
-                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
-              end },
-            { type="slider", text="Window Scale", min=0.5, max=1.5, step=0.05,
-              getValue=function() local f = FriendsDB(); return f and f.scale or 1 end,
-              setValue=function(v)
-                local f = FriendsDB(); if not f then return end
-                f.scale = v
-                if FriendsFrame and FriendsFrame._ebsApplyScaleAndPosition then
-                    FriendsFrame._ebsApplyScaleAndPosition()
-                end
-              end }
-        );  y = y - h
         -- Enable Accent Colors | Enable Faction Banners
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Enable Accent Colors",
@@ -337,7 +307,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.factionBanners = v
-                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
+                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
               end }
         );  y = y - h
 

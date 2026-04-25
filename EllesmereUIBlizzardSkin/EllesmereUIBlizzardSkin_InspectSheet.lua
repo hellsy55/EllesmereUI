@@ -897,12 +897,8 @@ local function SkinInspectSheet()
 
     UpdateTabVisuals()
 
-    -- Set frame scale and strata (guard for the rare case where inspect
-    -- loads for the first time during combat -- SetScale is blocked then)
-    local scale = EllesmereUIDB and EllesmereUIDB.themedInspectSheetScale or 1
-    if not InCombatLockdown() then
-        frame:SetScale(scale)
-    end
+    -- Scale fully owned by Blizzard (SetScale on secure panels taints
+    -- UIParentPanelManager execution context).
     frame:SetFrameStrata("HIGH")
 
     -- Center the title within the frame (406px wide). Hardcoded to avoid
@@ -1084,7 +1080,8 @@ if EllesmereUI then
     end)
 
 else
-    print("|cffff0000Error:|r EllesmereUI not found! Themed Inspect Sheet requires EllesmereUI.")
+    -- EllesmereUI.Print not available here (EllesmereUI is nil)
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000Error:|r EllesmereUI not found! Themed Inspect Sheet requires EllesmereUI.")
 end
 
 -- Initialize defaults

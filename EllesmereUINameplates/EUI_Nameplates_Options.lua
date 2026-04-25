@@ -184,6 +184,7 @@ initFrame:SetScript("OnEvent", function(self)
     local showRaidMarkerPreview = false
     local showClassificationPreview = false
     local showTargetGlowPreview = false
+    local showAbsorbPreview = false
     local showDispelGlowPreview = false
 
     -- Transient flags: force-show indicators during slider drag
@@ -326,6 +327,48 @@ initFrame:SetScript("OnEvent", function(self)
         previewHashLine:SetPoint("TOP", health, "TOP", 0, 0)
         previewHashLine:SetPoint("BOTTOM", health, "BOTTOM", 0, 0)
         previewHashLine:Hide()
+
+        -- Absorb preview: mask + two StatusBars matching real absorb rendering
+        local absorbMask = health:CreateMaskTexture()
+        absorbMask:SetAllPoints(health)
+        absorbMask:SetTexture("Interface\\Buttons\\WHITE8X8")
+        local previewAbsorb = CreateFrame("StatusBar", nil, health)
+        previewAbsorb:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        previewAbsorb:SetPoint("BOTTOMLEFT", health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+        previewAbsorb:SetReverseFill(false)
+        previewAbsorb:SetMinMaxValues(0, 100)
+        previewAbsorb:SetValue(95)
+        previewAbsorb:SetFrameLevel(health:GetFrameLevel())
+        previewAbsorb:Hide()
+        local function ApplyPreviewAbsorbStyle()
+            local style = DBVal("absorbStyle") or "blizzard"
+            local tex = ns.NP_ABSORB_STYLE_TEX[style] or ns.NP_ABSORB_STYLE_TEX.blizzard
+            local alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
+            if style == "clean" then
+                alpha = (DBVal("absorbCleanAlpha") or 30) / 100
+            end
+            previewAbsorb:SetStatusBarTexture(tex)
+            previewAbsorb:SetStatusBarColor(1, 1, 1, alpha)
+            local fill = previewAbsorb:GetStatusBarTexture()
+            if fill then fill:SetDrawLayer("ARTWORK", 1); fill:AddMaskTexture(absorbMask) end
+        end
+        local function ToggleAbsorbPreview()
+            if showAbsorbPreview then
+                local barW = health:GetWidth()
+                local barH = health:GetHeight()
+                local hpPct = (previewHpPct or 75) / 100
+                local missingW = barW * (1 - hpPct)
+                local absorbW = missingW * 0.95
+                if absorbW < 2 then absorbW = 2 end
+                previewAbsorb:SetSize(absorbW, barH)
+                previewAbsorb:SetMinMaxValues(0, 1)
+                previewAbsorb:SetValue(1)
+                ApplyPreviewAbsorbStyle()
+                previewAbsorb:Show()
+            else
+                previewAbsorb:Hide()
+            end
+        end
 
         -- Bar texture: applied directly via SetStatusBarTexture (no overlay)
         -- (updated in the preview refresh below)
@@ -771,17 +814,15 @@ initFrame:SetScript("OnEvent", function(self)
             castParts.icon:SetTexture(displayCastIcons[_previewCastIconIdx or 1])
 
             -- Border style toggle
-            local bStyle = DBVal("borderStyle") or defaults.borderStyle
-            if bStyle == "none" then
-                borderFrame:Hide(); simpleBorderFrame:Hide()
-                for _, e in ipairs(_solidEdges) do e:Hide() end
-            elseif bStyle == "simple" then
+            local bOn = DBVal("showBorder")
+            if bOn == nil then bOn = defaults.showBorder end
+            if bOn then
                 borderFrame:Hide(); simpleBorderFrame:Show()
                 for _, e in ipairs(_solidEdges) do e:Show() end
-                simpleBorderFrame:ApplySize(DBVal("simpleBorderSize") or defaults.simpleBorderSize)
+                simpleBorderFrame:ApplySize(DBVal("borderSize") or defaults.borderSize)
             else
-                borderFrame:Show(); simpleBorderFrame:Hide()
-                for _, e in ipairs(_solidEdges) do e:Show() end
+                borderFrame:Hide(); simpleBorderFrame:Hide()
+                for _, e in ipairs(_solidEdges) do e:Hide() end
             end
 
             -- Refresh all 1px AddBorder edges (cast icon, aura icons)
@@ -1646,6 +1687,9 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, tex in ipairs(simpleBorderFrame._texs) do tex:SetVertexColor(1, 1, 1) end
                 for _, e in ipairs(_solidEdges) do e:SetColorTexture(1, 1, 1, 1); UnsnapTex(e) end
             end
+
+            -- Absorb preview: update and toggle
+            ToggleAbsorbPreview()
 
             -- Notify framework so the scroll area adjusts to the new preview height
             -- Add the preset header offset + bottom padding so the full content header
@@ -2995,6 +3039,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  Display page  (preview in content header + settings in scroll area)
     ---------------------------------------------------------------------------
     local _updatePreviewHooked = false
+    local LazyColorPreviewBar -- forward declaration; defined after MakeColorPreviewBar
 
     local function BuildDisplayPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
@@ -3002,7 +3047,9 @@ initFrame:SetScript("OnEvent", function(self)
         local _, h
 
         local function isBorderNone()
-            return (DBVal("borderStyle") or defaults.borderStyle) == "none"
+            local v = DBVal("showBorder")
+            if v == nil then return not defaults.showBorder end
+            return not v
         end
 
         -- Set content header with preview centered above nameplate preview
@@ -3228,100 +3275,6 @@ initFrame:SetScript("OnEvent", function(self)
         local styleHeader
         styleHeader, h = W:SectionHeader(parent, "STYLE", y);  y = y - h
 
-        local targetGlowRow
-        targetGlowRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Target Glow Style",
-              values={ ellesmereui = "EllesmereUI", vibrant = "Vibrant", none = "None" },
-              getValue=function() return DBVal("targetGlowStyle") or defaults.targetGlowStyle end,
-              setValue=function(v)
-                DB().targetGlowStyle = v
-                for _, plate in pairs(plates) do plate:ApplyTarget() end
-                UpdatePreview()
-              end,
-              order={ "ellesmereui", "vibrant", "none" } },
-            { type="toggle", text="Show Arrows on Target",
-              getValue=function() return DBVal("showTargetArrows") == true end,
-              setValue=function(v)
-                DB().showTargetArrows = v
-                for _, plate in pairs(plates) do
-                    plate:ApplyTarget(); plate:UpdateAuras()
-                end
-                UpdatePreview()
-              end });  y = y - h
-
-        -- Inline cog on Show Arrows (right region) for arrow scale
-        do
-            local rightRgn = targetGlowRow._rightRegion
-            local arrowOff = function() return DBVal("showTargetArrows") ~= true end
-            local _, arrowCogShow = EllesmereUI.BuildCogPopup({
-                title = "Arrow Scale",
-                rows = {
-                    { type="slider", label="Scale", min=0.5, max=3.0, step=0.1,
-                      get=function() return DBVal("targetArrowScale") or defaults.targetArrowScale or 1.0 end,
-                      set=function(v)
-                        DB().targetArrowScale = v
-                        for _, plate in pairs(plates) do
-                            local sc = v
-                            local aw = math.floor(11 * sc + 0.5)
-                            local ah = math.floor(16 * sc + 0.5)
-                            if plate.leftArrow then PP.Size(plate.leftArrow, aw, ah) end
-                            if plate.rightArrow then PP.Size(plate.rightArrow, aw, ah) end
-                        end
-                        UpdatePreview()
-                      end },
-                },
-            })
-            local arrowCogBtn = CreateFrame("Button", nil, rightRgn)
-            arrowCogBtn:SetSize(26, 26)
-            arrowCogBtn:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
-            rightRgn._lastInline = arrowCogBtn
-            arrowCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-            local arrowCogTex = arrowCogBtn:CreateTexture(nil, "OVERLAY")
-            arrowCogTex:SetAllPoints()
-            arrowCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            local function UpdateArrowCogAlpha()
-                arrowCogBtn:SetAlpha(arrowOff() and 0.15 or 0.4)
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateArrowCogAlpha)
-            UpdateArrowCogAlpha()
-            arrowCogBtn:SetScript("OnClick", function(self)
-                if not arrowOff() then arrowCogShow(self) end
-            end)
-            arrowCogBtn:SetScript("OnEnter", function(self)
-                if not arrowOff() then self:SetAlpha(0.75) end
-            end)
-            arrowCogBtn:SetScript("OnLeave", function(self) UpdateArrowCogAlpha() end)
-        end
-
-        -- Eye icon to the left of the Target Glow Style dropdown to toggle glow on preview
-        do
-            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
-            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
-            local leftRgn = targetGlowRow._leftRegion
-            local eyeBtn = CreateFrame("Button", nil, leftRgn)
-            eyeBtn:SetSize(26, 26)
-            eyeBtn:SetPoint("RIGHT", leftRgn._control, "LEFT", -8, 0)
-            eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            eyeBtn:SetAlpha(0.4)
-            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-            eyeTex:SetAllPoints()
-            local function RefreshTargetGlowEye()
-                if showTargetGlowPreview then
-                    eyeTex:SetTexture(EYE_INVISIBLE)
-                else
-                    eyeTex:SetTexture(EYE_VISIBLE)
-                end
-            end
-            RefreshTargetGlowEye()
-            eyeBtn:SetScript("OnClick", function()
-                showTargetGlowPreview = not showTargetGlowPreview
-                RefreshTargetGlowEye()
-                UpdatePreview()
-            end)
-            eyeBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-        end
-
         local function RefreshAllTextures()
             ns.RefreshAllSettings()
             for _, plate in pairs(ns.friendlyPlates or {}) do
@@ -3331,34 +3284,105 @@ initFrame:SetScript("OnEvent", function(self)
 
         local borderStyleRow
         borderStyleRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Border Style",
-              values={ ellesmere = "EllesmereUI", simple = "Simple", none = "None" },
-              getValue=function() return DBVal("borderStyle") or defaults.borderStyle end,
-              setValue=function(v)
-                DB().borderStyle = v
-                ns.RefreshBorderStyle()
-                UpdatePreview()
-                if _G._EUI_ColorPreviews then
-                    for _, prev in ipairs(_G._EUI_ColorPreviews) do
-                        if prev.RefreshBorderStyle then prev:RefreshBorderStyle() end
-                    end
-                end
-                EllesmereUI:RefreshPage()
+            { type="toggle", text="Show Border",
+              getValue=function()
+                local v = DBVal("showBorder")
+                if v == nil then return defaults.showBorder end
+                return v
               end,
-              order={ "ellesmere", "simple", "none" } },
+              setValue=function(v)
+                DB().showBorder = v
+                ns.RefreshBorder()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
             { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
               getValue=function() return DBVal("healthBarTexture") or "none" end,
               setValue=function(v)
                 DB().healthBarTexture = v
                 RefreshAllTextures()
                 UpdatePreview()
-              end });  y = y - h
+              end })
+        y = y - h
 
-        -- Inline color swatch and size cog next to the Border Style dropdown
+        local absorbStyleValues = {
+            ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
+        }
+        local absorbStyleOrder = { "blizzard", "striped", "clean" }
+        local absorbStyleRow
+        absorbStyleRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return DBVal("absorbStyle") or "blizzard" end,
+              setValue=function(v)
+                DB().absorbStyle = v
+                ns.ApplyAbsorbStyleAll()
+                UpdatePreview()
+              end },
+            { type="label", text="" });  y = y - h
+        do
+            local rgn = absorbStyleRow._leftRegion
+            local _, absorbCogShow = EllesmereUI.BuildCogPopup({
+                title = "Absorb Settings",
+                rows = {
+                    { type = "slider", label = "Clean Opacity", min = 5, max = 100, step = 1,
+                      get = function() return DBVal("absorbCleanAlpha") or 30 end,
+                      set = function(v)
+                        DB().absorbCleanAlpha = v
+                        ns.ApplyAbsorbStyleAll()
+                        UpdatePreview()
+                      end },
+                },
+            })
+            local absorbCogBtn = CreateFrame("Button", nil, rgn)
+            absorbCogBtn:SetSize(26, 26)
+            absorbCogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = absorbCogBtn
+            absorbCogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            absorbCogBtn:SetAlpha(0.4)
+            local absorbCogTex = absorbCogBtn:CreateTexture(nil, "OVERLAY")
+            absorbCogTex:SetAllPoints(); absorbCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            absorbCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            absorbCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            absorbCogBtn:SetScript("OnClick", function(s) absorbCogShow(s) end)
+        end
+
+        -- Eye icon: toggle absorb preview on the preview nameplate
+        do
+            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
+            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
+            local rgn = absorbStyleRow._leftRegion
+            local eyeBtn = CreateFrame("Button", nil, rgn)
+            eyeBtn:SetSize(26, 26)
+            eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = eyeBtn
+            eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            eyeBtn:SetAlpha(0.4)
+            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+            eyeTex:SetAllPoints()
+            local function RefreshAbsorbEye()
+                if showAbsorbPreview then
+                    eyeTex:SetTexture(EYE_INVISIBLE)
+                else
+                    eyeTex:SetTexture(EYE_VISIBLE)
+                end
+            end
+            RefreshAbsorbEye()
+            eyeBtn:SetScript("OnClick", function()
+                showAbsorbPreview = not showAbsorbPreview
+                RefreshAbsorbEye()
+                UpdatePreview()
+            end)
+            eyeBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+        end
+
+        -- Inline color swatch and size cog next to Show Border toggle
         do
             local leftRgn = borderStyleRow._leftRegion
-            local function isNotSimple()
-                return (DBVal("borderStyle") or defaults.borderStyle) ~= "simple"
+            local function isBorderOff()
+                local v = DBVal("showBorder")
+                if v == nil then return not defaults.showBorder end
+                return not v
             end
             local borderColorGet = function()
                 local c = (DB() and DB().borderColor) or defaults.borderColor
@@ -3368,34 +3392,28 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().borderColor = { r = r, g = g, b = b }
                 ns.RefreshBorderColor()
                 UpdatePreview()
-                if _G._EUI_ColorPreviews then
-                    for _, prev in ipairs(_G._EUI_ColorPreviews) do
-                        if prev.RefreshBorderColor then prev:RefreshBorderColor() end
-                    end
-                end
             end
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, borderColorGet, borderColorSet, nil, 20)
             PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-            -- Disabled state when border style is "none"
             EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isBorderNone()
+                local off = isBorderOff()
                 swatch:SetAlpha(off and 0.15 or 1)
                 swatch:EnableMouse(not off)
                 updateSwatch()
             end)
-            local off = isBorderNone()
+            local off = isBorderOff()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
 
-            -- Cog for simple border size (only active when style is "simple")
+            -- Cog for border size
             local _, borderSizeCogShow = EllesmereUI.BuildCogPopup({
-                title = "Simple Border Size",
+                title = "Border Size",
                 rows = {
-                    { type="slider", label="Size", min=1, max=12, step=1,
-                      get=function() return DBVal("simpleBorderSize") or defaults.simpleBorderSize end,
+                    { type="slider", label="Size", min=1, max=4, step=1,
+                      get=function() return DBVal("borderSize") or defaults.borderSize end,
                       set=function(v)
-                        DB().simpleBorderSize = v
-                        ns.RefreshSimpleBorderSize()
+                        DB().borderSize = v
+                        ns.RefreshBorder()
                         UpdatePreview()
                       end },
                 },
@@ -3408,15 +3426,15 @@ initFrame:SetScript("OnEvent", function(self)
             borderSizeCogTex:SetAllPoints()
             borderSizeCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
             local function UpdateBorderSizeCogAlpha()
-                borderSizeCogBtn:SetAlpha(isNotSimple() and 0.15 or 0.4)
+                borderSizeCogBtn:SetAlpha(isBorderOff() and 0.15 or 0.4)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateBorderSizeCogAlpha)
             UpdateBorderSizeCogAlpha()
             borderSizeCogBtn:SetScript("OnClick", function(self)
-                if not isNotSimple() then borderSizeCogShow(self) end
+                if not isBorderOff() then borderSizeCogShow(self) end
             end)
             borderSizeCogBtn:SetScript("OnEnter", function(self)
-                if not isNotSimple() then self:SetAlpha(0.75) end
+                if not isBorderOff() then self:SetAlpha(0.75) end
             end)
             borderSizeCogBtn:SetScript("OnLeave", function(self) UpdateBorderSizeCogAlpha() end)
         end
@@ -4404,6 +4422,343 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        -----------------------------------------------------------------------
+        --  TARGET & FOCUS EFFECTS
+        -----------------------------------------------------------------------
+        local tfxHeader
+        tfxHeader, h = W:SectionHeader(parent, "TARGET & FOCUS EFFECTS", y);  y = y - h
+
+        local targetGlowRow
+        targetGlowRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Target Glow Style",
+              values={ ellesmereui = "EllesmereUI", vibrant = "Vibrant", none = "None" },
+              getValue=function() return DBVal("targetGlowStyle") or defaults.targetGlowStyle end,
+              setValue=function(v)
+                DB().targetGlowStyle = v
+                for _, plate in pairs(plates) do plate:ApplyTarget() end
+                UpdatePreview()
+              end,
+              order={ "ellesmereui", "vibrant", "none" } },
+            { type="toggle", text="Show Arrows on Target",
+              getValue=function() return DBVal("showTargetArrows") == true end,
+              setValue=function(v)
+                DB().showTargetArrows = v
+                for _, plate in pairs(plates) do
+                    plate:ApplyTarget(); plate:UpdateAuras()
+                end
+                UpdatePreview()
+              end });  y = y - h
+
+        -- Inline cog on Show Arrows (right region) for arrow scale
+        do
+            local rightRgn = targetGlowRow._rightRegion
+            local arrowOff = function() return DBVal("showTargetArrows") ~= true end
+            local _, arrowCogShow = EllesmereUI.BuildCogPopup({
+                title = "Arrow Scale",
+                rows = {
+                    { type="slider", label="Scale", min=0.5, max=3.0, step=0.1,
+                      get=function() return DBVal("targetArrowScale") or defaults.targetArrowScale or 1.0 end,
+                      set=function(v)
+                        DB().targetArrowScale = v
+                        for _, plate in pairs(plates) do
+                            local sc = v
+                            local aw = math.floor(11 * sc + 0.5)
+                            local ah = math.floor(16 * sc + 0.5)
+                            if plate.leftArrow then PP.Size(plate.leftArrow, aw, ah) end
+                            if plate.rightArrow then PP.Size(plate.rightArrow, aw, ah) end
+                        end
+                        UpdatePreview()
+                      end },
+                },
+            })
+            local arrowCogBtn = CreateFrame("Button", nil, rightRgn)
+            arrowCogBtn:SetSize(26, 26)
+            arrowCogBtn:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
+            rightRgn._lastInline = arrowCogBtn
+            arrowCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local arrowCogTex = arrowCogBtn:CreateTexture(nil, "OVERLAY")
+            arrowCogTex:SetAllPoints()
+            arrowCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function UpdateArrowCogAlpha()
+                arrowCogBtn:SetAlpha(arrowOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateArrowCogAlpha)
+            UpdateArrowCogAlpha()
+            arrowCogBtn:SetScript("OnClick", function(self)
+                if not arrowOff() then arrowCogShow(self) end
+            end)
+            arrowCogBtn:SetScript("OnEnter", function(self)
+                if not arrowOff() then self:SetAlpha(0.75) end
+            end)
+            arrowCogBtn:SetScript("OnLeave", function(self) UpdateArrowCogAlpha() end)
+        end
+
+        -- Eye icon to the left of the Target Glow Style dropdown to toggle glow on preview
+        do
+            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
+            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
+            local leftRgn = targetGlowRow._leftRegion
+            local eyeBtn = CreateFrame("Button", nil, leftRgn)
+            eyeBtn:SetSize(26, 26)
+            eyeBtn:SetPoint("RIGHT", leftRgn._control, "LEFT", -8, 0)
+            eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            eyeBtn:SetAlpha(0.4)
+            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+            eyeTex:SetAllPoints()
+            local function RefreshTargetGlowEye()
+                if showTargetGlowPreview then
+                    eyeTex:SetTexture(EYE_INVISIBLE)
+                else
+                    eyeTex:SetTexture(EYE_VISIBLE)
+                end
+            end
+            RefreshTargetGlowEye()
+            eyeBtn:SetScript("OnClick", function()
+                showTargetGlowPreview = not showTargetGlowPreview
+                RefreshTargetGlowEye()
+                UpdatePreview()
+            end)
+            eyeBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+        end
+
+        -- Enable Target Color ---- Target Texture
+        local isTargetColorDisabled = function()
+            local db = DB()
+            if db and db.targetColorEnabled ~= nil then return not db.targetColorEnabled end
+            return not defaults.targetColorEnabled
+        end
+        local isTargetTextureNone = function()
+            return (DBVal("targetOverlayTexture") or defaults.targetOverlayTexture) == "none"
+        end
+        local isFocusColorDisabled = function()
+            local db = DB()
+            if db and db.focusColorEnabled ~= nil then return not db.focusColorEnabled end
+            return not defaults.focusColorEnabled
+        end
+        local isFocusTextureNone = function()
+            return (DBVal("focusOverlayTexture") or defaults.focusOverlayTexture) == "none"
+        end
+
+        local targetPrev, focusPrev
+
+        local targetColorRow
+        targetColorRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Target Color",
+              getValue=function()
+                local db = DB()
+                if db and db.targetColorEnabled ~= nil then return db.targetColorEnabled end
+                return defaults.targetColorEnabled
+              end,
+              setValue=function(v)
+                DB().targetColorEnabled = v
+                RefreshAllPlates()
+                if targetPrev then
+                    if v then
+                        targetPrev.SetColorOverride(nil)
+                    else
+                        targetPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
+                    end
+                    targetPrev.UpdateColor()
+                    targetPrev.SetDisabled(not v)
+                end
+                EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Enable Focus Color",
+              getValue=function()
+                local db = DB()
+                if db and db.focusColorEnabled ~= nil then return db.focusColorEnabled end
+                return defaults.focusColorEnabled
+              end,
+              setValue=function(v)
+                DB().focusColorEnabled = v
+                RefreshAllPlates()
+                if focusPrev then
+                    if v then
+                        focusPrev.SetColorOverride(nil)
+                    else
+                        focusPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
+                    end
+                    focusPrev.UpdateColor()
+                    focusPrev.SetDisabled(not v)
+                end
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
+
+        -- Inline Target Color swatch
+        do
+            local leftRgn = targetColorRow._leftRegion
+            local targetColorGet = function() return DBColor("target") end
+            local targetColorSet = function(r, g, b)
+                DB().target = { r = r, g = g, b = b }
+                RefreshAllPlates()
+                if targetPrev then targetPrev.UpdateColor() end
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, targetColorGet, targetColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isTargetColorDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isTargetColorDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Inline Focus Color swatch
+        do
+            local rightRgn = targetColorRow._rightRegion
+            local focusColorGet = function() return DBColor("focus") end
+            local focusColorSet = function(r, g, b)
+                DB().focus = { r = r, g = g, b = b }
+                RefreshAllPlates()
+                if focusPrev then focusPrev.UpdateColor() end
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, focusColorGet, focusColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isFocusColorDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isFocusColorDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Target Texture ---- Focus Texture
+        local textureDualRow
+        textureDualRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Target Texture",
+              values={ ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes", none = "None" },
+              getValue=function() return DBVal("targetOverlayTexture") or defaults.targetOverlayTexture end,
+              setValue=function(v)
+                DB().targetOverlayTexture = v
+                RefreshAllPlates()
+                if targetPrev and targetPrev.UpdateOverlay then targetPrev.UpdateOverlay() end
+                EllesmereUI:RefreshPage()
+              end,
+              order={ "striped-v2", "striped-wide-v2", "none" } },
+            { type="dropdown", text="Focus Texture",
+              values={ ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes", none = "None" },
+              getValue=function() return DBVal("focusOverlayTexture") or defaults.focusOverlayTexture end,
+              setValue=function(v)
+                DB().focusOverlayTexture = v
+                RefreshAllPlates()
+                if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
+                EllesmereUI:RefreshPage()
+              end,
+              order={ "striped-v2", "striped-wide-v2", "none" } });  y = y - h
+
+        -- Inline Target Texture color swatch
+        do
+            local leftRgn = textureDualRow._leftRegion
+            local targetTexColorGet = function()
+                local c = (DB() and DB().targetOverlayColor) or defaults.targetOverlayColor
+                return c.r, c.g, c.b
+            end
+            local targetTexColorSet = function(r, g, b)
+                DB().targetOverlayColor = { r = r, g = g, b = b }
+                RefreshAllPlates()
+                if targetPrev and targetPrev.UpdateOverlay then targetPrev.UpdateOverlay() end
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, targetTexColorGet, targetTexColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            leftRgn._lastInline = swatch
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isTargetTextureNone()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isTargetTextureNone()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Inline Focus Texture color swatch
+        do
+            local rightRgn = textureDualRow._rightRegion
+            local focusTexColorGet = function()
+                local c = (DB() and DB().focusOverlayColor) or defaults.focusOverlayColor
+                return c.r, c.g, c.b
+            end
+            local focusTexColorSet = function(r, g, b)
+                DB().focusOverlayColor = { r = r, g = g, b = b }
+                RefreshAllPlates()
+                if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, focusTexColorGet, focusTexColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            rightRgn._lastInline = swatch
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isFocusTextureNone()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isFocusTextureNone()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Target Preview ---- Focus Preview
+        local previewDualRow
+        previewDualRow, h = W:DualRow(parent, y,
+            { type="label", text="Target Preview" },
+            { type="label", text="Focus Preview" });  y = y - h
+
+        targetPrev = LazyColorPreviewBar(previewDualRow, "health", "target", previewDualRow._leftRegion)
+        do
+            local function RepositionTargetBar()
+                local rgn = previewDualRow._leftRegion
+                for _, child in ipairs({ previewDualRow:GetChildren() }) do
+                    if child.GetNumPoints and child:GetNumPoints() > 0 then
+                        local _, rel = child:GetPoint(1)
+                        if rel == rgn then
+                            child:ClearAllPoints()
+                            PP.Point(child, "RIGHT", rgn, "RIGHT", -20, 0)
+                            return
+                        end
+                    end
+                end
+            end
+            previewDualRow:HookScript("OnShow", RepositionTargetBar)
+            C_Timer.After(0, RepositionTargetBar)
+        end
+        if isTargetColorDisabled() then
+            targetPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
+        end
+        targetPrev.SetDisabled(isTargetColorDisabled())
+        targetPrev.UpdateColor()
+
+        focusPrev = LazyColorPreviewBar(previewDualRow, "health", "focus", previewDualRow._rightRegion)
+        do
+            local function RepositionFocusBar()
+                local rgn = previewDualRow._rightRegion
+                for _, child in ipairs({ previewDualRow:GetChildren() }) do
+                    if child.GetNumPoints and child:GetNumPoints() > 0 then
+                        local _, rel = child:GetPoint(1)
+                        if rel == rgn then
+                            child:ClearAllPoints()
+                            PP.Point(child, "RIGHT", rgn, "RIGHT", -20, 0)
+                            return
+                        end
+                    end
+                end
+            end
+            previewDualRow:HookScript("OnShow", RepositionFocusBar)
+            C_Timer.After(0, RepositionFocusBar)
+        end
+        if isFocusColorDisabled() then
+            focusPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
+        end
+        focusPrev.SetDisabled(isFocusColorDisabled())
+        focusPrev.UpdateColor()
 
         -----------------------------------------------------------------------
         --  CLASS RESOURCE
@@ -5571,12 +5926,15 @@ initFrame:SetScript("OnEvent", function(self)
                 return clip, tex
             end
 
-            if colorKey == "focus" then
-                local tex = DBVal("focusOverlayTexture") or defaults.focusOverlayTexture
+            local _overlayTexKey   = (colorKey == "target") and "targetOverlayTexture"  or "focusOverlayTexture"
+            local _overlayAlphaKey = (colorKey == "target") and "targetOverlayAlpha"   or "focusOverlayAlpha"
+            local _overlayColorKey = (colorKey == "target") and "targetOverlayColor"   or "focusOverlayColor"
+            if colorKey == "focus" or colorKey == "target" then
+                local tex = DBVal(_overlayTexKey) or defaults[_overlayTexKey]
                 if tex ~= "none" then
                     local fillRef = health:GetStatusBarTexture()
-                    local oAlpha = DBVal("focusOverlayAlpha") or defaults.focusOverlayAlpha
-                    local oc = (DB() and DB().focusOverlayColor) or defaults.focusOverlayColor
+                    local oAlpha = DBVal(_overlayAlphaKey) or defaults[_overlayAlphaKey]
+                    local oc = (DB() and DB()[_overlayColorKey]) or defaults[_overlayColorKey]
                     overlayFillClip, overlayFillTex = MakeOverlayClip(fillRef, "TOPLEFT", fillRef, "BOTTOMRIGHT", 2)
                     overlayFillTex:SetTexture(MEDIA .. tex .. ".png")
                     overlayFillTex:SetAlpha(oAlpha)
@@ -5595,15 +5953,15 @@ initFrame:SetScript("OnEvent", function(self)
             end
             -- Live update hook: refresh overlay texture from DB
             container.UpdateOverlay = function()
-                if colorKey ~= "focus" then return end
-                local tex = DBVal("focusOverlayTexture") or defaults.focusOverlayTexture
+                if colorKey ~= "focus" and colorKey ~= "target" then return end
+                local tex = DBVal(_overlayTexKey) or defaults[_overlayTexKey]
                 if tex == "none" then
                     if overlayFillClip then overlayFillClip:Hide() end
                     if overlayBgClip then overlayBgClip:Hide() end
                 else
                     local fillRef = health:GetStatusBarTexture()
-                    local oAlpha = DBVal("focusOverlayAlpha") or defaults.focusOverlayAlpha
-                    local oc = (DB() and DB().focusOverlayColor) or defaults.focusOverlayColor
+                    local oAlpha = DBVal(_overlayAlphaKey) or defaults[_overlayAlphaKey]
+                    local oc = (DB() and DB()[_overlayColorKey]) or defaults[_overlayColorKey]
                     if not overlayFillClip then
                         overlayFillClip, overlayFillTex = MakeOverlayClip(fillRef, "TOPLEFT", fillRef, "BOTTOMRIGHT", 2)
                     end
@@ -5768,6 +6126,74 @@ initFrame:SetScript("OnEvent", function(self)
         return container
     end
 
+    -- Shared preview bar list and lazy builder (used by both Display and Colors pages)
+    local _colorPagePreviews = {}
+
+    LazyColorPreviewBar = function(parentRow, colorType, colorKey, anchorFrame)
+        local real = nil
+        local proxy = {}
+        local _disabled = false
+        local _colorOverrideFn = nil
+        local function EnsureBuilt()
+            if real then return real end
+            real = MakeColorPreviewBar(parentRow, colorType, colorKey, anchorFrame)
+            if _disabled and real._health then real._health:SetAlpha(0.3) end
+            return real
+        end
+        proxy.UpdateColor = function()
+            local r = EnsureBuilt()
+            if r and r.UpdateColor then
+                if _colorOverrideFn then
+                    local cr, cg, cb = _colorOverrideFn()
+                    if cr and r._health then
+                        r._health:SetStatusBarColor(cr, cg, cb, 1)
+                        return
+                    end
+                end
+                r.UpdateColor()
+            end
+        end
+        proxy.UpdateOverlay = function()
+            local r = EnsureBuilt()
+            if r and r.UpdateOverlay then r.UpdateOverlay() end
+        end
+        proxy.RefreshBorderStyle = function()
+            if real and real.RefreshBorderStyle then real.RefreshBorderStyle() end
+        end
+        proxy.RefreshBorderColor = function()
+            if real and real.RefreshBorderColor then real.RefreshBorderColor() end
+        end
+        proxy.Randomize = function()
+            if real and real.Randomize then real.Randomize() end
+        end
+        proxy.RefreshHealthText = function()
+            if real and real.RefreshHealthText then real.RefreshHealthText() end
+        end
+        proxy.SetDisabled = function(off)
+            _disabled = off
+            if real and real._health then
+                real._health:SetAlpha(off and 0.3 or 1)
+            end
+        end
+        proxy.SetColorOverride = function(fn)
+            _colorOverrideFn = fn
+        end
+        parentRow:HookScript("OnShow", function()
+            if not real then
+                EnsureBuilt()
+                _G._EUI_ColorPreviews[#_G._EUI_ColorPreviews + 1] = real
+            end
+            if real and real._health then
+                real._health:SetAlpha(_disabled and 0.3 or 1)
+            end
+        end)
+        if parentRow:IsVisible() then
+            EnsureBuilt()
+        end
+        _colorPagePreviews[#_colorPagePreviews + 1] = proxy
+        return proxy
+    end
+
     local function BuildColorsPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -5789,103 +6215,17 @@ initFrame:SetScript("OnEvent", function(self)
             return prev
         end
 
-        -- Collect all lazy preview proxies for refresh registration
-        local _colorPagePreviews = {}
-
-        -- Lazy wrapper: defers MakeColorPreviewBar until the parent row is first shown.
-        -- Returns a proxy table with UpdateColor/UpdateOverlay/RefreshBorderStyle/RefreshBorderColor
-        -- that forward to the real preview bar once built.
-        -- anchorFrame: optional override for positioning (e.g. DualRow half-region)
-        local function LazyColorPreviewBar(parentRow, colorType, colorKey, anchorFrame)
-            local real = nil
-            local proxy = {}
-            local _disabled = false
-            local _colorOverrideFn = nil
-            local function EnsureBuilt()
-                if real then return real end
-                real = MakeColorPreviewBar(parentRow, colorType, colorKey, anchorFrame)
-                if _disabled and real._health then real._health:SetAlpha(0.3) end
-                return real
-            end
-            -- Proxy methods: build on first call
-            proxy.UpdateColor = function()
-                local r = EnsureBuilt()
-                if r and r.UpdateColor then
-                    if _colorOverrideFn then
-                        local cr, cg, cb = _colorOverrideFn()
-                        if cr and r._health then
-                            r._health:SetStatusBarColor(cr, cg, cb, 1)
-                            return
-                        end
-                    end
-                    r.UpdateColor()
-                end
-            end
-            proxy.UpdateOverlay = function()
-                local r = EnsureBuilt()
-                if r and r.UpdateOverlay then r.UpdateOverlay() end
-            end
-            proxy.RefreshBorderStyle = function()
-                if real and real.RefreshBorderStyle then real.RefreshBorderStyle() end
-            end
-            proxy.RefreshBorderColor = function()
-                if real and real.RefreshBorderColor then real.RefreshBorderColor() end
-            end
-            proxy.Randomize = function()
-                if real and real.Randomize then real.Randomize() end
-            end
-            proxy.RefreshHealthText = function()
-                if real and real.RefreshHealthText then real.RefreshHealthText() end
-            end
-            proxy.SetDisabled = function(off)
-                _disabled = off
-                if real and real._health then
-                    real._health:SetAlpha(off and 0.3 or 1)
-                end
-            end
-            proxy.SetColorOverride = function(fn)
-                _colorOverrideFn = fn
-            end
-            -- Build when parent row becomes visible (first scroll into view)
-            parentRow:HookScript("OnShow", function()
-                if not real then
-                    EnsureBuilt()
-                    _G._EUI_ColorPreviews[#_G._EUI_ColorPreviews + 1] = real
-                end
-                -- Re-apply disabled state every time the row becomes visible,
-                -- in case SetDisabled was called before the bar was built.
-                if real and real._health then
-                    real._health:SetAlpha(_disabled and 0.3 or 1)
-                end
-            end)
-            -- If the row is already visible (top of page), build immediately
-            if parentRow:IsVisible() then
-                EnsureBuilt()
-            end
-            _colorPagePreviews[#_colorPagePreviews + 1] = proxy
-            return proxy
-        end
-
-        local focusPrev
+        -- LazyColorPreviewBar and _colorPagePreviews moved to init scope
+        -- (shared between Display and Colors pages)
 
         -----------------------------------------------------------------------
         --  ENEMY COLORS
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_ENEMY, y);  y = y - h
 
-        local function isFocusColorDisabled()
-            local db = DB()
-            if db and db.focusColorEnabled ~= nil then return not db.focusColorEnabled end
-            return not defaults.focusColorEnabled
-        end
-
-        local function isFocusTextureNone()
-            return (DBVal("focusOverlayTexture") or defaults.focusOverlayTexture) == "none"
-        end
-
-        -- Enemy Types ---- Enable Focus Color
-        local enemyFocusDualFrame
-        enemyFocusDualFrame, h = W:DualRow(parent, y,
+        -- Enemy Types
+        local enemyTypesRow
+        enemyTypesRow, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Enemy Types",
               swatches = {
                 { tooltip = "Enemies",
@@ -5907,152 +6247,41 @@ initFrame:SetScript("OnEvent", function(self)
                     RefreshAllPlates()
                   end },
               } },
-            { type="toggle", text="Enable Focus Color",
-              getValue=function()
-                local db = DB()
-                if db and db.focusColorEnabled ~= nil then return db.focusColorEnabled end
-                return defaults.focusColorEnabled
-              end,
+            { type="toggle", text="Enable Quest Mob Color",
+              getValue=function() return DBVal("questMobColorEnabled") == true end,
               setValue=function(v)
-                DB().focusColorEnabled = v
-                RefreshAllPlates()
-                if focusPrev then
-                    if v then
-                        focusPrev.SetColorOverride(nil)
-                    else
-                        focusPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
-                    end
-                    focusPrev.UpdateColor()
-                    focusPrev.SetDisabled(not v)
+                DB().questMobColorEnabled = v
+                for _, plate in pairs(ns.plates) do
+                    plate:UpdateHealthColor()
                 end
                 EllesmereUI:RefreshPage()
-              end });  y = y - h
-
-        -- Inline Focus Color swatch next to Enable Focus Color toggle
-        do
-            local rightRgn = enemyFocusDualFrame._rightRegion
-            local focusColorGet = function() return DBColor("focus") end
-            local focusColorSet = function(r, g, b)
-                DB().focus = { r = r, g = g, b = b }
-                RefreshAllPlates()
-                if focusPrev then focusPrev.UpdateColor() end
-            end
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, focusColorGet, focusColorSet, nil, 20)
-            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isFocusColorDisabled()
-                swatch:SetAlpha(off and 0.15 or 1)
-                swatch:EnableMouse(not off)
-                updateSwatch()
-            end)
-            local off = isFocusColorDisabled()
-            swatch:SetAlpha(off and 0.15 or 1)
-            swatch:EnableMouse(not off)
-        end
-
-        -- Focus Texture ---- Focus Preview
-        local focusPreviewRow
-        focusPreviewRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Focus Texture",
-              values={ ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes", none = "None" },
-              getValue=function() return DBVal("focusOverlayTexture") or defaults.focusOverlayTexture end,
-              setValue=function(v)
-                DB().focusOverlayTexture = v
-                RefreshAllPlates()
-                if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
-                EllesmereUI:RefreshPage()
               end,
-              order={ "striped-v2", "striped-wide-v2", "none" } },
-            { type="label", text="Focus Preview" });  y = y - h
+              tooltip="Colors enemy nameplates for quest mobs you still need to kill." });  y = y - h
 
-        -- Inline texture color swatch next to Focus Texture dropdown
+        -- Inline Quest Mob Color swatch
         do
-            local leftRgn = focusPreviewRow._leftRegion
-            local focusTexColorGet = function()
-                local c = (DB() and DB().focusOverlayColor) or defaults.focusOverlayColor
+            local rightRgn = enemyTypesRow._rightRegion
+            local questColorGet = function()
+                local c = DB().questMobColor or defaults.questMobColor
                 return c.r, c.g, c.b
             end
-            local focusTexColorSet = function(r, g, b)
-                DB().focusOverlayColor = { r = r, g = g, b = b }
+            local questColorSet = function(r, g, b)
+                DB().questMobColor = { r = r, g = g, b = b }
                 RefreshAllPlates()
-                if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
             end
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, focusTexColorGet, focusTexColorSet, nil, 20)
-            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-            leftRgn._lastInline = swatch
+            local isQuestOff = function() return DBVal("questMobColorEnabled") ~= true end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, questColorGet, questColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
             EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isFocusTextureNone()
+                local off = isQuestOff()
                 swatch:SetAlpha(off and 0.15 or 1)
                 swatch:EnableMouse(not off)
                 updateSwatch()
             end)
-            local off = isFocusTextureNone()
+            local off = isQuestOff()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
-
-            -- Cog popup for Texture Opacity next to the color swatch
-            local _, cogShowFn = EllesmereUI.BuildCogPopup({
-                title = "Focus Texture Settings",
-                rows = {
-                    { type="slider", label="Opacity", min=0, max=1.0, step=0.05,
-                      get=function() return DBVal("focusOverlayAlpha") or defaults.focusOverlayAlpha end,
-                      set=function(v)
-                        DB().focusOverlayAlpha = v
-                        RefreshAllPlates()
-                        if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, leftRgn)
-            cogBtn:SetSize(26, 26)
-            PP.Point(cogBtn, "RIGHT", swatch, "LEFT", -9, 0)
-            cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 6)
-            local cogIcon = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogIcon:SetAllPoints()
-            cogIcon:SetTexture(EllesmereUI.COGS_ICON)
-            cogIcon:SetAlpha(0.4)
-            cogBtn:SetScript("OnEnter", function() cogIcon:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function() cogIcon:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShowFn(self) end)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isFocusTextureNone()
-                cogBtn:SetAlpha(off and 0.15 or 1)
-                cogBtn:EnableMouse(not off)
-            end)
-            cogBtn:SetAlpha(isFocusTextureNone() and 0.15 or 1)
-            cogBtn:EnableMouse(not isFocusTextureNone())
         end
-
-        -- Focus preview bar anchored so its right edge aligns with the
-        -- Enable Focus Color toggle's right edge (SIDE_PAD = 20 from region edge).
-        -- MakeColorPreviewBar positions the bar at -(20+24+27) = -71 to leave room
-        -- for a swatch; we override that to -20 since there's no swatch here.
-        focusPrev = LazyColorPreviewBar(focusPreviewRow, "health", "focus", focusPreviewRow._rightRegion)
-        do
-            local function RepositionFocusBar()
-                local rgn = focusPreviewRow._rightRegion
-                for _, child in ipairs({ focusPreviewRow:GetChildren() }) do
-                    if child.GetNumPoints and child:GetNumPoints() > 0 then
-                        local _, rel = child:GetPoint(1)
-                        if rel == rgn then
-                            child:ClearAllPoints()
-                            PP.Point(child, "RIGHT", rgn, "RIGHT", -20, 0)
-                            return
-                        end
-                    end
-                end
-            end
-            -- Reposition on every show (handles scroll-in visibility)
-            focusPreviewRow:HookScript("OnShow", RepositionFocusBar)
-            -- Also reposition immediately if the row is already visible
-            -- (the lazy builder may have already created the bar)
-            C_Timer.After(0, RepositionFocusBar)
-        end
-        if isFocusColorDisabled() then
-            focusPrev.SetColorOverride(function() return DBColor("enemyInCombat") end)
-        end
-        focusPrev.SetDisabled(isFocusColorDisabled())
-        focusPrev.UpdateColor()
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -6479,64 +6708,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
-
-        -----------------------------------------------------------------------
-        --  OTHER COLORS
-        -----------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, SECTION_OTHER, y);  y = y - h
-
-        -- Row 1: Quest Mob Color (left only, right empty)
-        local function questMobColorOff()
-            return DBVal("questMobColorEnabled") ~= true
-        end
-
-        local questMobRow
-        questMobRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Quest Mob Color",
-              getValue=function() return DBVal("questMobColorEnabled") == true end,
-              setValue=function(v)
-                DB().questMobColorEnabled = v
-                for _, plate in pairs(ns.plates) do
-                    plate:UpdateHealthColor()
-                end
-                EllesmereUI:RefreshPage()
-              end,
-              tooltip="Colors enemy nameplates for quest mobs you still need to kill." },
-            nil);  y = y - h
-
-        -- Inline color swatch on the quest mob toggle
-        do
-            local leftRgn = questMobRow._leftRegion
-            local qmColorGet = function()
-                local c = DB().questMobColor or defaults.questMobColor
-                return c.r, c.g, c.b
-            end
-            local qmColorSet = function(r, g, b)
-                DB().questMobColor = { r = r, g = g, b = b }
-                for _, plate in pairs(ns.plates) do
-                    plate:UpdateHealthColor()
-                end
-            end
-            local qmSwatch, qmUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, qmColorGet, qmColorSet, nil, 20)
-            PP.Point(qmSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-            leftRgn._lastInline = qmSwatch
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = questMobColorOff()
-                qmSwatch:SetAlpha(off and 0.15 or 1)
-                qmSwatch:EnableMouse(not off)
-                qmUpdateSwatch()
-            end)
-            qmSwatch:SetAlpha(questMobColorOff() and 0.15 or 1)
-            qmSwatch:EnableMouse(not questMobColorOff())
-            qmSwatch:SetScript("OnEnter", function(self)
-                if questMobColorOff() then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Quest Mob Color"))
-                end
-            end)
-            qmSwatch:SetScript("OnLeave", function(self)
-                EllesmereUI.HideWidgetTooltip()
-            end)
-        end
 
         -- Build a refresh-all function for page cache restore
         _colorPreviewRefreshAll = function()

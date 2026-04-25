@@ -376,10 +376,34 @@ do
     end
     EllesmereUI._reskinModules = reskinSet
 
+    -- On first login, if only the Default profile exists (new user),
+    -- stamp all reskin modules as synced. This runs once and writes
+    -- explicit values so adding profiles later doesn't change them.
+    function EllesmereUI._initSyncDefaults()
+        if not EllesmereUIDB then return end
+        if EllesmereUIDB._syncDefaultsStamped then return end
+        EllesmereUIDB._syncDefaultsStamped = true
+        local profiles = EllesmereUIDB.profiles
+        if not profiles then return end
+        local count = 0
+        for _ in pairs(profiles) do
+            count = count + 1
+            if count > 1 then return end
+        end
+        -- Single profile: default all reskin modules to synced
+        if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
+        for folder in pairs(reskinSet) do
+            if EllesmereUIDB.syncedModules[folder] == nil then
+                EllesmereUIDB.syncedModules[folder] = true
+            end
+        end
+    end
+
     function EllesmereUI.IsModuleSynced(folder)
         if not EllesmereUIDB then return false end
         local sm = EllesmereUIDB.syncedModules
-        return sm and sm[folder] or false
+        if sm and sm[folder] then return true end
+        return false
     end
 
     function EllesmereUI.SyncModuleToAllProfiles(folder)
@@ -400,7 +424,7 @@ do
     function EllesmereUI.SetModuleSynced(folder, synced)
         if not EllesmereUIDB then return end
         if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
-        EllesmereUIDB.syncedModules[folder] = synced or nil
+        EllesmereUIDB.syncedModules[folder] = synced and true or false
         if synced then
             EllesmereUI.SyncModuleToAllProfiles(folder)
         end
@@ -411,6 +435,7 @@ do
     initFrame:RegisterEvent("PLAYER_LOGIN")
     initFrame:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
+        EllesmereUI._initSyncDefaults()
         if EllesmereUI.Lite and EllesmereUI.Lite.RegisterPreLogout then
             EllesmereUI.Lite.RegisterPreLogout(function()
                 if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return end
@@ -434,6 +459,22 @@ EllesmereUI.GLOBAL_KEY = "_EUIGlobal"
 EllesmereUI.ADDON_ROSTER = ADDON_ROSTER
 EllesmereUI.LOCALE_FONT_FALLBACK = LOCALE_FONT_FALLBACK
 EllesmereUI.EXPRESSWAY = LOCALE_FONT_FALLBACK or EXPRESSWAY
+
+-- Taint-safe print. Uses AddMessage instead of the global print(), which
+-- routes through Blizzard's C-side handler and taints the chat frame
+-- execution context. Silently drops the message inside protected instances
+-- (raid combat / active M+ keystone) where any addon message delivery
+-- taints FCF_OpenTemporaryWindow's whisper processing chain.
+function EllesmereUI.Print(...)
+    local f = DEFAULT_CHAT_FRAME
+    if not f then return end
+    local _, instanceType = IsInInstance()
+    if instanceType == "raid" and InCombatLockdown() then return end
+    if instanceType == "party" and C_ChallengeMode
+       and C_ChallengeMode.IsChallengeModeActive
+       and C_ChallengeMode.IsChallengeModeActive() then return end
+    f:AddMessage(strjoin(" ", tostringall(...)))
+end
 
 local mainFrame, bgFrame, clickArea, sidebar, contentFrame
 local headerFrame, tabBar, scrollFrame, scrollChild, footerFrame, contentHeaderFrame
@@ -934,6 +975,7 @@ do
     function PP.DisablePixelSnap(obj)
         if not obj then return end
         if issecretvalue and issecretvalue(obj) then return end
+        if issecrettable and issecrettable(obj) then return end
         if _pixelSnapDisabled[obj] then return end
         if obj.IsForbidden and obj:IsForbidden() then return end
 
@@ -966,6 +1008,7 @@ do
     --  Blizzard's code on spell swaps, page changes, combat transitions, etc.
     ---------------------------------------------------------------------------
     local function WatchPixelSnap(frame, snap)
+        if issecrettable and issecrettable(frame) then return end
         if (frame and not frame:IsForbidden()) and _pixelSnapDisabled[frame] and snap then
             _pixelSnapDisabled[frame] = nil
         end
@@ -2829,7 +2872,7 @@ function EllesmereUI.PerformResetWipe()
     if not EllesmereUI.NeedsBetaReset() then return false end
     -- Safety: log the wipe to help diagnose unexpected triggers
     local ver = EllesmereUIDB and EllesmereUIDB._resetVersion
-    print("|cffff0000[EllesmereUI]|r Reset wipe triggered. _resetVersion=" .. tostring(ver))
+    EllesmereUI.Print("|cffff0000[EllesmereUI]|r Reset wipe triggered. _resetVersion=" .. tostring(ver))
     -- Extra guard: if the DB has real user data (profiles, positions, etc.)
     -- but _resetVersion is somehow missing, do NOT wipe. Only wipe if
     -- _resetVersion is genuinely below threshold (old beta data).
@@ -6329,7 +6372,7 @@ function EllesmereUI:SelectPage(pageName)
                 if W and W.WideButton then
                     startY = startY - 5
                     local synced = EllesmereUI.IsModuleSynced(activeModule)
-                    local syncLabel = synced and "Apply Settings Per Profile (Desync)" or "Apply Settings to All Profiles (Sync)"
+                    local syncLabel = synced and "Settings are Cross-Profile. Click to Desync" or "Settings are Per-Profile. Click to Sync"
                     local syncFolder = activeModule
                     local syncBtnFrame, syncH
                     local syncBtnLbl
@@ -6348,7 +6391,7 @@ function EllesmereUI:SelectPage(pageName)
                             syncBtnLbl:SetTextColor(eg.r, eg.g, eg.b, 1)
                             C_Timer.After(1.2, function()
                                 if syncBtnLbl then
-                                    syncBtnLbl:SetText("Apply Settings Per Profile (Desync)")
+                                    syncBtnLbl:SetText("Settings are Cross-Profile. Click to Desync")
                                     syncBtnLbl:SetTextColor(1, 1, 1, 1)
                                 end
                                 syncLocked = false
@@ -6358,8 +6401,22 @@ function EllesmereUI:SelectPage(pageName)
                                 end
                             end)
                         elseif syncBtnLbl then
-                            syncBtnLbl:SetText("Apply Settings to All Profiles (Sync)")
-                            if syncBtnObj then syncBtnObj:SetAlpha(1) end
+                            -- Was on, now desynced: show "Desynced" confirmation
+                            syncLocked = true
+                            if syncBtnObj then syncBtnObj:Disable() end
+                            syncBtnLbl:SetText("Desynced")
+                            syncBtnLbl:SetTextColor(1, 0.4, 0.4, 1)
+                            C_Timer.After(1.2, function()
+                                if syncBtnLbl then
+                                    syncBtnLbl:SetText("Settings are Per-Profile. Click to Sync")
+                                    syncBtnLbl:SetTextColor(1, 1, 1, 1)
+                                end
+                                syncLocked = false
+                                if syncBtnObj then
+                                    syncBtnObj:Enable()
+                                    syncBtnObj:SetAlpha(1)
+                                end
+                            end)
                         end
                     end)
                     do
@@ -6372,19 +6429,26 @@ function EllesmereUI:SelectPage(pageName)
                                     syncBtnLbl = rgn; break
                                 end
                             end
-                            -- Desync state: dimmed at 50%, 75% on hover
+                            -- Tooltip explaining both states
+                            btn:HookScript("OnEnter", function(self)
+                                local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
+                                local hex = string.format("|cff%02x%02x%02x", eg.r * 255, eg.g * 255, eg.b * 255)
+                                if EllesmereUI.IsModuleSynced(syncFolder) then
+                                    self:SetAlpha(0.75)
+                                    EllesmereUI.ShowWidgetTooltip(self, hex .. "Settings are Cross-Profile:|r Changes to this module apply to all profiles. Click to desync and use separate settings per profile.")
+                                else
+                                    EllesmereUI.ShowWidgetTooltip(self, hex .. "Settings are Per-Profile:|r Each profile has its own settings for this module. Click to sync and copy the current settings to all profiles.")
+                                end
+                            end)
+                            btn:HookScript("OnLeave", function(self)
+                                if EllesmereUI.IsModuleSynced(syncFolder) then
+                                    self:SetAlpha(0.5)
+                                end
+                                EllesmereUI.HideWidgetTooltip()
+                            end)
+                            -- Desync state: dimmed at 50%
                             if synced then
                                 btn:SetAlpha(0.5)
-                                btn:HookScript("OnEnter", function(self)
-                                    if EllesmereUI.IsModuleSynced(syncFolder) then
-                                        self:SetAlpha(0.75)
-                                    end
-                                end)
-                                btn:HookScript("OnLeave", function(self)
-                                    if EllesmereUI.IsModuleSynced(syncFolder) then
-                                        self:SetAlpha(0.5)
-                                    end
-                                end)
                             end
                         end
                     end
@@ -6954,7 +7018,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.1.5"
+EllesmereUI.VERSION = "7.1.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7160,9 +7224,6 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "MythicPlusTimer",          label = "Mythic Plus Timer",          targets = { "EllesmereUIMythicTimer" } },
             { addon = "WarpDeplete",              label = "WarpDeplete",                targets = { "EllesmereUIMythicTimer" } },
             { addon = "MPlusTimer",               label = "MPlusTimer",                 targets = { "EllesmereUIMythicTimer" } },
-            { addon = "Drift",     label = "Drift",     targets = { "EllesmereUIBlizzardSkin" },
-              moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
-              message = "Drift conflicts with the EllesmereUI's Character Sheet and makes it so the window is not scalable." },
             { addon = "ChonkyCharacterSheet",     label = "Chonky Character Sheet",     targets = { "EllesmereUIBlizzardSkin" },
               moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
               message = "Chonky Character Sheet conflicts with the EllesmereUI's Character Sheet. Disable either Chonky or the Character Sheet skin in Blizzard UI Enhanced settings." },
@@ -7267,7 +7328,7 @@ EllesmereUI._RunConflictCheck = function()
                     modal       = true,
                 })
             else
-                print("|cffff6060[EllesmereUI]|r " .. msg:gsub("\n", " "))
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r " .. msg:gsub("\n", " "))
                 ShowNextConflict()
             end
         end
@@ -7608,7 +7669,7 @@ initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_REGEN_DISABLED" then
         if mainFrame and mainFrame:IsShown() then
             EllesmereUI:Hide()
-            print("|cffff6060[EllesmereUI]|r Options closed -- entering combat.")
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Options closed -- entering combat.")
         end
         return
     end
@@ -7632,6 +7693,94 @@ initFrame:SetScript("OnEvent", function(self, event)
     -- Add EllesmereUI + Unlock Mode buttons to the Game Menu (pause menu).
     -- Both share a single Layout hook to avoid double-push conflicts.
     if GameMenuFrame and not GameMenuFrame.EllesmereUI then
+        -- Skin the game menu frame (one-time).
+        -- Defaults to matching reskinQueuePopup if never explicitly set.
+        local _reskinMenu = EllesmereUIDB and EllesmereUIDB.reskinGameMenu
+        if _reskinMenu == nil then _reskinMenu = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
+        if _reskinMenu then
+            -- Strip decorative textures
+            for i = 1, select("#", GameMenuFrame:GetRegions()) do
+                local r = select(i, GameMenuFrame:GetRegions())
+                if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
+            end
+            if GameMenuFrame.NineSlice then GameMenuFrame.NineSlice:SetAlpha(0) end
+            if GameMenuFrame.Border then GameMenuFrame.Border:SetAlpha(0) end
+            -- Strip header textures, accent-color the title, nudge down
+            local header = GameMenuFrame.Header
+            if header then
+                for i = 1, select("#", header:GetRegions()) do
+                    local r = select(i, header:GetRegions())
+                    if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
+                end
+                local headerText = header.Text or (header.GetRegions and select(1, header:GetRegions()))
+                if headerText and headerText.SetTextColor then
+                    local ar, ag, ab = EllesmereUI.GetAccentColor()
+                    headerText:SetTextColor(ar or 0.05, ag or 0.82, ab or 0.61, 1)
+                    local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
+                    local _, hSize = headerText:GetFont()
+                    headerText:SetFont(euiFont, hSize or 16, "")
+                end
+                header:ClearAllPoints()
+                header:SetPoint("TOP", GameMenuFrame, "TOP", 0, -10)
+            end
+            -- Dark bg + border
+            local RS = EllesmereUI.RESKIN
+            local _gmBg = GameMenuFrame:CreateTexture(nil, "BACKGROUND")
+            _gmBg:SetAllPoints()
+            _gmBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+            local PP = EllesmereUI.PP
+            if PP and PP.CreateBorder then
+                PP.CreateBorder(GameMenuFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+            end
+            -- Skin pooled buttons via InitButtons hook
+            hooksecurefunc(GameMenuFrame, "InitButtons", function(menu)
+                if not menu.buttonPool then return end
+                for menuBtn in menu.buttonPool:EnumerateActive() do
+                    if not menuBtn._euiSkinned then
+                        menuBtn._euiSkinned = true
+                        for j = 1, select("#", menuBtn:GetRegions()) do
+                            local r = select(j, menuBtn:GetRegions())
+                            if r and r:IsObjectType("Texture") and r ~= menuBtn:GetFontString() then
+                                r:SetAlpha(0)
+                            end
+                        end
+                        if menuBtn.Left then menuBtn.Left:SetAlpha(0) end
+                        if menuBtn.Middle then menuBtn.Middle:SetAlpha(0) end
+                        if menuBtn.Right then menuBtn.Right:SetAlpha(0) end
+                        for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                            local tex = menuBtn[texKey]
+                            if tex and tex.SetAlpha then
+                                hooksecurefunc(tex, "SetAlpha", function(self, a)
+                                    if a > 0 then self:SetAlpha(0) end
+                                end)
+                            end
+                        end
+                        -- Inset container: bg + border sit 2px inside the
+                        -- button edges for a tighter, cleaner look.
+                        local inset = CreateFrame("Frame", nil, menuBtn)
+                        inset:SetPoint("TOPLEFT", 2, -2)
+                        inset:SetPoint("BOTTOMRIGHT", -2, 2)
+                        inset:SetFrameLevel(menuBtn:GetFrameLevel())
+                        local btnBg = inset:CreateTexture(nil, "BACKGROUND", nil, -6)
+                        btnBg:SetAllPoints()
+                        btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                        if PP and PP.CreateBorder then
+                            PP.CreateBorder(inset, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                        end
+                        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                        hl:SetAllPoints(inset)
+                        hl:SetColorTexture(1, 1, 1, 0.1)
+                        local fs = menuBtn:GetFontString()
+                        if fs then
+                            local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
+                            local _, size, flags = fs:GetFont()
+                            fs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
+                        end
+                    end
+                end
+            end)
+        end
+
         local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         btn:SetSize(200, 35)
         btn:SetScript("OnClick", function()
@@ -7658,12 +7807,68 @@ initFrame:SetScript("OnEvent", function(self, event)
         end)
         GameMenuFrame.EllesmereUIUnlock = unlockBtn
 
+        -- Skin our custom buttons the same way as pooled Blizzard buttons
+        if _reskinMenu then
+            local RS = EllesmereUI.RESKIN
+            local PP = EllesmereUI.PP
+            for _, customBtn in ipairs({ btn, unlockBtn }) do
+                for j = 1, select("#", customBtn:GetRegions()) do
+                    local r = select(j, customBtn:GetRegions())
+                    if r and r:IsObjectType("Texture") and r ~= customBtn:GetFontString() then
+                        r:SetAlpha(0)
+                    end
+                end
+                if customBtn.Left then customBtn.Left:SetAlpha(0) end
+                if customBtn.Middle then customBtn.Middle:SetAlpha(0) end
+                if customBtn.Right then customBtn.Right:SetAlpha(0) end
+                for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                    local tex = customBtn[texKey]
+                    if tex and tex.SetAlpha then
+                        hooksecurefunc(tex, "SetAlpha", function(self, a)
+                            if a > 0 then self:SetAlpha(0) end
+                        end)
+                    end
+                end
+                local inset = CreateFrame("Frame", nil, customBtn)
+                inset:SetPoint("TOPLEFT", 2, -2)
+                inset:SetPoint("BOTTOMRIGHT", -2, 2)
+                inset:SetFrameLevel(customBtn:GetFrameLevel())
+                local cBg = inset:CreateTexture(nil, "BACKGROUND", nil, -6)
+                cBg:SetAllPoints()
+                cBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                if PP and PP.CreateBorder then
+                    PP.CreateBorder(inset, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                end
+                local hl = customBtn:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints(inset)
+                hl:SetColorTexture(1, 1, 1, 0.1)
+                local cfs = customBtn:GetFontString()
+                if cfs then
+                    local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
+                    local _, size, flags = cfs:GetFont()
+                    cfs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
+                end
+            end
+        end
+
         local _gameMenuBaseHeight = nil
         hooksecurefunc(GameMenuFrame, "Layout", function()
             if InCombatLockdown() then
                 btn:Hide()
                 unlockBtn:Hide()
                 return
+            end
+
+            -- Re-apply accent color to header text on every open (only when skinned)
+            if _reskinMenu then
+                local header = GameMenuFrame.Header
+                if header then
+                    local headerText = header.Text
+                    if headerText and headerText.SetTextColor then
+                        local ar, ag, ab = EllesmereUI.GetAccentColor()
+                        headerText:SetTextColor(ar or 0.05, ag or 0.82, ab or 0.61, 1)
+                    end
+                end
             end
 
             -- Determine which buttons are visible
@@ -7690,12 +7895,26 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             if not anchorBtn then return end
 
+            -- Match our buttons to the Blizzard button size
+            local anchorW, anchorH = anchorBtn:GetWidth(), anchorBtn:GetHeight()
+            if anchorW and anchorW > 0 then
+                btn:SetSize(anchorW, anchorH or 35)
+                unlockBtn:SetSize(anchorW, anchorH or 35)
+            end
+
             -- Position our buttons in a chain below the anchor
             local extraH = 0
             local lastBtn = anchorBtn
+            local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
+            local btnFontSize = 13
+
             if showEUI then
                 btn:Show()
                 btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
+                if _reskinMenu then
+                    local fs = btn:GetFontString()
+                    if fs then fs:SetFont(euiFont, btnFontSize, "") end
+                end
                 btn:ClearAllPoints()
                 btn:SetPoint("TOP", lastBtn, "BOTTOM", 0, -12)
                 lastBtn = btn
@@ -7704,6 +7923,10 @@ initFrame:SetScript("OnEvent", function(self, event)
             if showUnlock then
                 unlockBtn:Show()
                 unlockBtn:SetText(hex .. "EUI|r |cffffffffUnlock Mode|r")
+                if _reskinMenu then
+                    local fs2 = unlockBtn:GetFontString()
+                    if fs2 then fs2:SetFont(euiFont, btnFontSize, "") end
+                end
                 unlockBtn:ClearAllPoints()
                 unlockBtn:SetPoint("TOP", lastBtn, "BOTTOM", 0, showEUI and -4 or -12)
                 extraH = extraH + (showEUI and 40 or 40)

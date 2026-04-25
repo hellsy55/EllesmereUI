@@ -863,7 +863,7 @@ local function UpdateTrinketFrame(slotID)
                                     end
                                 end
                             end
-                            if totalSec >= 20 then isRealOnUse = true end
+                            if totalSec >= 10 then isRealOnUse = true end
                         end
                     end
                 end
@@ -972,8 +972,20 @@ local _racialCdListener = CreateFrame("Frame")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
 _racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
+_racialCdListener:RegisterEvent("BAG_UPDATE_DELAYED")
 _racialCdListener:RegisterEvent("ENCOUNTER_END")
-_racialCdListener:SetScript("OnEvent", function(_, event)
+_racialCdListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+_racialCdListener:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+-- Combat lockout spellID -> itemID map (built once from presets)
+local _combatLockoutSpells = {}
+for _, preset in ipairs(ns.CDM_ITEM_PRESETS or {}) do
+    if preset.combatLockout and preset.spellID then
+        _combatLockoutSpells[preset.spellID] = preset.itemID
+    end
+end
+
+_racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
     -- Encounter end (boss kill/wipe): Blizzard resets potion CDs, but our
     -- cached _cdStart/_cdDur would keep the old swipe until wall-clock
     -- expiry. Force-clear all item-preset caches. Return early so the
@@ -984,10 +996,33 @@ _racialCdListener:SetScript("OnEvent", function(_, event)
     if event == "ENCOUNTER_END" then
         for _, f in pairs(_presetFrames) do
             if f._isItemPresetFrame then
-                f._cdStart = nil; f._cdDur = nil
+                f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
                 if f._cooldown then f._cooldown:Clear() end
                 if f._tex then f._tex:SetDesaturated(false) end
                 f._lastDesat = false
+            end
+        end
+        return
+    end
+    -- Healthstone combat lockout: track usage in combat, clear on combat end
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" then
+        local targetItemID = spellID and _combatLockoutSpells[spellID]
+        if targetItemID and InCombatLockdown() then
+            for _, f in pairs(_presetFrames) do
+                if f._isItemPresetFrame and f._presetItemID == targetItemID then
+                    f._inCombatLockout = true
+                    if f._cooldown then f._cooldown:Clear() end
+                    if f._tex then f._tex:SetDesaturated(true) end
+                    f._lastDesat = true
+                end
+            end
+        end
+        return
+    end
+    if event == "PLAYER_REGEN_ENABLED" then
+        for _, f in pairs(_presetFrames) do
+            if f._isItemPresetFrame and f._inCombatLockout then
+                f._inCombatLockout = nil
             end
         end
         return
@@ -1030,15 +1065,27 @@ _racialCdListener:SetScript("OnEvent", function(_, event)
                     f._cooldown:Clear()
                     f._cdStart = nil; f._cdDur = nil
                 end
-                -- Desaturate when on cooldown or zero count
+                -- Update charge count + desaturate
                 local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
-                local total = C_Item.GetItemCount(f._presetItemID) or 0
+                local total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
                 if total == 0 and f._presetData and f._presetData.altItemIDs then
                     for _, altID in ipairs(f._presetData.altItemIDs) do
-                        total = total + (C_Item.GetItemCount(altID) or 0)
+                        total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                     end
                 end
-                local shouldDesat = (total == 0 or itemOnCD) and true or false
+                if f._itemCountText then
+                    if total > 1 then
+                        f._itemCountText:SetText(total)
+                        f._itemCountText:Show()
+                    elseif total == 1 and f._presetData and f._presetData.combatLockout then
+                        f._itemCountText:SetText(total)
+                        f._itemCountText:Show()
+                    else
+                        f._itemCountText:SetText("")
+                        f._itemCountText:Hide()
+                    end
+                end
+                local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
                     f._lastDesat = shouldDesat
                     if f._tex then f._tex:SetDesaturated(shouldDesat) end
@@ -1423,7 +1470,8 @@ local function CollectAndReanchor()
                             local tf = _trinketFrames[slot]
                             if not tf then tf = GetOrCreateTrinketFrame(slot) end
                             UpdateTrinketFrame(slot)
-                            if _trinketItemCache[slot] and tf._trinketIsOnUse then
+                            local showPassive = barData and barData.showPassiveTrinkets
+                            if _trinketItemCache[slot] and (tf._trinketIsOnUse or showPassive) then
                                 UpdateTrinketCooldown(slot)
                                 frames[#frames + 1] = tf
                                 local fc = FC(tf)
@@ -1520,10 +1568,10 @@ local function CollectAndReanchor()
                                     f._cdStart = nil; f._cdDur = nil
                                 end
                                 local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
-                                local total = C_Item.GetItemCount(itemID) or 0
+                                local total = C_Item.GetItemCount(itemID, false, true) or 0
                                 if f._presetData and f._presetData.altItemIDs then
                                     for _, altID in ipairs(f._presetData.altItemIDs) do
-                                        total = total + (C_Item.GetItemCount(altID) or 0)
+                                        total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                                     end
                                 end
                                 if f._itemCountText then
@@ -1531,12 +1579,15 @@ local function CollectAndReanchor()
                                     if total > 1 and showItemCount then
                                         f._itemCountText:SetText(total)
                                         f._itemCountText:Show()
+                                    elseif total == 1 and showItemCount and f._presetData and f._presetData.combatLockout then
+                                        f._itemCountText:SetText(total)
+                                        f._itemCountText:Show()
                                     else
                                         f._itemCountText:SetText("")
                                         f._itemCountText:Hide()
                                     end
                                 end
-                                local shouldDesat = (total == 0 or itemOnCD) and true or false
+                                local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                                 if f._tex then f._tex:SetDesaturated(shouldDesat) end
                                 f._lastDesat = shouldDesat
                                 frames[#frames + 1] = f
@@ -1725,15 +1776,14 @@ local function CollectAndReanchor()
                     -- hook on every frame, forces our color always).
                 end
 
-                -- Clear excess icons
+                -- Clear excess icons. Skip frames still in the active set
+                -- (a frame can shift from slot N+1 to slot N when an icon
+                -- is removed, so old slot N+1 == new slot N).
                 local newCount = #frames
                 for i = newCount + 1, #icons do
-                    if icons[i] then
+                    if icons[i] and not usedFrames[icons[i]] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
-                        -- Alpha-hide only for Blizzard pool frames (same
-                        -- reason as Phase 4: Hide() triggers pool rebuild).
-                        -- Custom frames we own can be hidden safely.
                         local isCustom = icons[i]._isRacialFrame or icons[i]._isTrinketFrame
                             or icons[i]._isPresetFrame or icons[i]._isItemPresetFrame
                             or icons[i]._isCustomSpellFrame
@@ -2636,7 +2686,7 @@ end
 
 local function ShowEditModeLockNotice()
     if not _editModeLockNoticeShown then
-        print("|cff0cd29fEllesmereUI CDM:|r Cooldown Viewer settings are managed by EllesmereUI. Edit Mode changes are disabled.")
+        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Cooldown Viewer settings are managed by EllesmereUI. Edit Mode changes are disabled.")
         _editModeLockNoticeShown = true
     end
 end

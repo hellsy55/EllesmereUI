@@ -32,7 +32,6 @@ local QT_DEFAULTS = {
 
             -- Skin toggles
             skinHeaders          = true,
-            skinProgressBars     = true,
             accentHeaders        = true,
 
             -- Font sizes (single source of truth used by skin code)
@@ -141,6 +140,15 @@ loader:SetScript("OnEvent", function(_, event, arg1)
     end
     TryInit()
 end)
+
+-- Profile-swap refresh: called from EllesmereUI.RefreshAllAddons to re-read
+-- DB and refresh all visuals after a profile switch without /reload.
+_G._EQT_RefreshAll = function()
+    if EQT.RefreshFonts then EQT.RefreshFonts() end
+    if EQT.UpdateVisibility then EQT.UpdateVisibility() end
+    if EQT.RestyleAll then EQT.RestyleAll() end
+    if EQT.ApplyBackground then EQT.ApplyBackground() end
+end
 
 -------------------------------------------------------------------------------
 -- Slash commands

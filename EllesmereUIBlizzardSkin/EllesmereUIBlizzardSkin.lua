@@ -429,14 +429,22 @@ local ADDON_NAME = ...
             -- render over unrelated UI elements it shouldn't overlap.
             if not popup._euiBg then
                 local RS = EllesmereUI.RESKIN
-                popup._euiBg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
+                if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
+                -- Child frame parented to dialog so it inherits the dialog's
+                -- strata, but at frame level dialog-1 so it renders BELOW the
+                -- dialog's own textures (dungeon art, buttons) but ABOVE
+                -- external UI (options panel) that sits at the popup's lower
+                -- frame level. Anchored to the popup for full coverage.
+                local bgFrame = CreateFrame("Frame", nil, dialog or popup)
+                bgFrame:SetAllPoints(popup)
+                bgFrame:SetFrameLevel(math.max(1, (dialog or popup):GetFrameLevel() - 1))
+                popup._euiBgFrame = bgFrame
+                popup._euiBg = bgFrame:CreateTexture(nil, "ARTWORK")
                 popup._euiBg:SetAllPoints()
                 popup._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
                 popup._euiBg._euiOwned = true
-                if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
                 if _PP and _PP.CreateBorder then
-                    local brd = _PP.CreateBorder(popup, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-                    if brd then brd:SetFrameLevel(popup:GetFrameLevel()) end
+                    _PP.CreateBorder(bgFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
                 end
             end
 
@@ -507,7 +515,8 @@ local ADDON_NAME = ...
             if not popup then return end
 
             if not timerBar then
-                timerBar = CreateFrame("StatusBar", nil, popup)
+                local timerParent = popup._euiBgFrame or dialog or popup
+                timerBar = CreateFrame("StatusBar", nil, timerParent)
                 timerBar:SetMinMaxValues(0, TIMER_DURATION)
 
                 timerBg = timerBar:CreateTexture(nil, "BACKGROUND")
@@ -533,14 +542,20 @@ local ADDON_NAME = ...
                 end
             end
 
+            -- Anchor target: use dialog when a third-party mover (EnhanceQoL)
+            -- manages the dialog position, since the popup wrapper stays put.
+            local dialog = LFGDungeonReadyDialog
+            local anchorFrame = popup
+            if dialog and dialog._eqolLayoutHooks then anchorFrame = dialog end
+
             -- Switch style based on whether the popup reskin is active
             timerBar:ClearAllPoints()
             if useEuiStyle then
                 timerBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 local mult = (_PP and _PP.mult) or 1
                 timerBar:SetHeight(11)
-                timerBar:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", mult, mult)
-                timerBar:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -mult, mult)
+                timerBar:SetPoint("BOTTOMLEFT", anchorFrame, "BOTTOMLEFT", mult, mult)
+                timerBar:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", -mult, mult)
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 timerBar:SetStatusBarColor(ar, ag, ab, 0.75)
                 timerBg:SetColorTexture(0, 0, 0, 0.5)
@@ -557,7 +572,7 @@ local ADDON_NAME = ...
             else
                 -- Blizzard style (matches BigWigs look)
                 timerBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-                timerBar:SetPoint("TOP", popup, "BOTTOM", 0, -5)
+                timerBar:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -5)
                 timerBar:SetSize(190, 9)
                 timerBar:SetStatusBarColor(1, 0.1, 0)
                 timerBorder:Show()
@@ -620,6 +635,17 @@ local ADDON_NAME = ...
             end
         end
 
+        -- Hook LFGDungeonReadyStatus OnShow so the skin applies the moment
+        -- the acceptance panel appears (before any specific event fires).
+        local _statusHooked = false
+        local function HookStatusOnShow()
+            if _statusHooked then return end
+            local status = _G.LFGDungeonReadyStatus
+            if not status then return end
+            _statusHooked = true
+            status:HookScript("OnShow", function() SkinQueueStatus() end)
+        end
+
         local lfgFrame = CreateFrame("Frame")
         lfgFrame:RegisterEvent("LFG_PROPOSAL_SHOW")
         lfgFrame:RegisterEvent("LFG_PROPOSAL_FAILED")
@@ -627,9 +653,15 @@ local ADDON_NAME = ...
         lfgFrame:SetScript("OnEvent", function(_, event)
             if not EllesmereUIDB then return end
             if event == "LFG_PROPOSAL_SHOW" then
-                local reskinOn = IsQueueReskinOn()
+                -- Skip reskin when a third-party mover (EnhanceQoL) manages
+                -- the dialog position. Our skin elements are on the popup
+                -- wrapper and won't follow when the dialog is moved.
+                local dialog = LFGDungeonReadyDialog
+                local thirdPartyMover = dialog and dialog._eqolLayoutHooks
+                local reskinOn = IsQueueReskinOn() and not thirdPartyMover
                 if reskinOn then
                     SkinQueuePopup()
+                    HookStatusOnShow()
                 end
                 if EllesmereUIDB.showQueueTimer ~= false then
                     ShowQueueTimer(reskinOn)
@@ -641,6 +673,202 @@ local ADDON_NAME = ...
         end)
     end
 end)()
+
+-------------------------------------------------------------------------------
+--  Premade Group Invite Popup: same dark skin as the LFG queue popup.
+--  LFGListInviteDialog appears when a group leader accepts your application.
+-------------------------------------------------------------------------------
+do
+    local function SkinPremadeInvite()
+        local dialog = _G.LFGListInviteDialog
+        if not dialog then return end
+        if not EllesmereUIDB or not EllesmereUIDB.reskinQueuePopup then return end
+        if dialog._euiSkinned then return end
+        dialog._euiSkinned = true
+
+        local RS = EllesmereUI.RESKIN
+        local _PP = EllesmereUI and EllesmereUI.PP
+
+        -- Strip Blizzard border/decoration only (preserve role icon + content)
+        if dialog.Bg then dialog.Bg:SetAlpha(0) end
+        if dialog.BG then dialog.BG:SetAlpha(0) end
+        if dialog.NineSlice then dialog.NineSlice:SetAlpha(0) end
+        if dialog.Border then dialog.Border:SetAlpha(0) end
+
+        -- Dark bg + border
+        local bg = dialog:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+        bg._euiOwned = true
+        if _PP and _PP.CreateBorder then
+            _PP.CreateBorder(dialog, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+        end
+
+        -- Skin buttons
+        local function _accentOn()
+            return EllesmereUIDB and EllesmereUIDB.accentReskinElements
+        end
+        for _, btnName in ipairs({ "AcceptButton", "DeclineButton", "AcknowledgeButton" }) do
+            local btn = dialog[btnName]
+            if btn then
+                -- Strip all texture regions (every show, Blizzard re-applies)
+                for j = 1, select("#", btn:GetRegions()) do
+                    local r = select(j, btn:GetRegions())
+                    if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                        r:SetAlpha(0)
+                    end
+                end
+                if btn.Left then btn.Left:SetAlpha(0) end
+                if btn.Middle then btn.Middle:SetAlpha(0) end
+                if btn.Right then btn.Right:SetAlpha(0) end
+                if not btn._euiSkinned then
+                    btn._euiSkinned = true
+                    for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                        local tex = btn[texKey]
+                        if tex and tex.SetAlpha then
+                            hooksecurefunc(tex, "SetAlpha", function(self, a)
+                                if a > 0 then self:SetAlpha(0) end
+                            end)
+                        end
+                    end
+                    local EG = EllesmereUI.ELLESMERE_GREEN
+                    local useAccent = _accentOn() and EG
+                    local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+                    btnBg:SetAllPoints()
+                    btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                    btnBg._euiOwned = true
+                    if _PP and _PP.CreateBorder then
+                        if useAccent then
+                            _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
+                        else
+                            _PP.CreateBorder(btn, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                        end
+                    end
+                end
+                -- Accent text (every show)
+                local EG = EllesmereUI.ELLESMERE_GREEN
+                local useAccent = _accentOn() and EG
+                local fs = btn:GetFontString()
+                if fs and useAccent then
+                    fs:SetTextColor(EG.r, EG.g, EG.b, 1)
+                end
+            end
+        end
+    end
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function(self, _, addon)
+        if _G.LFGListInviteDialog then
+            self:UnregisterAllEvents()
+            _G.LFGListInviteDialog:HookScript("OnShow", SkinPremadeInvite)
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  LFG Application Dialog (Sign Up popup): same dark skin.
+-------------------------------------------------------------------------------
+do
+    local function SkinApplicationDialog()
+        local dialog = _G.LFGListApplicationDialog
+        if not dialog then return end
+        if not EllesmereUIDB or not EllesmereUIDB.reskinQueuePopup then return end
+        if dialog._euiSkinned then return end
+        dialog._euiSkinned = true
+
+        local RS = EllesmereUI.RESKIN
+        local _PP = EllesmereUI and EllesmereUI.PP
+
+        -- Strip border/decoration only (preserve content)
+        if dialog.Bg then dialog.Bg:SetAlpha(0) end
+        if dialog.BG then dialog.BG:SetAlpha(0) end
+        if dialog.NineSlice then dialog.NineSlice:SetAlpha(0) end
+        if dialog.Border then dialog.Border:SetAlpha(0) end
+
+        -- Dark bg + border
+        local bg = dialog:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+        bg._euiOwned = true
+        if _PP and _PP.CreateBorder then
+            _PP.CreateBorder(dialog, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+        end
+
+        -- Skin the description edit box
+        local desc = _G.LFGListApplicationDialogDescription
+        if desc then
+            -- Strip all texture regions (edge textures, bg, etc.)
+            for i = 1, select("#", desc:GetRegions()) do
+                local r = select(i, desc:GetRegions())
+                if r and r:IsObjectType("Texture") and not r._euiOwned then
+                    r:SetAlpha(0)
+                end
+            end
+            if desc.NineSlice then desc.NineSlice:SetAlpha(0) end
+            local descBg = desc:CreateTexture(nil, "BACKGROUND")
+            descBg:SetAllPoints()
+            descBg:SetColorTexture(0.06, 0.06, 0.06, 0.8)
+            descBg._euiOwned = true
+            if _PP and _PP.CreateBorder then
+                _PP.CreateBorder(desc, 1, 1, 1, 0.08, 1, "OVERLAY", 7)
+            end
+        end
+
+        local function _accentOn()
+            return EllesmereUIDB and EllesmereUIDB.accentReskinElements
+        end
+        for _, btnName in ipairs({ "SignUpButton", "CancelButton" }) do
+            local btn = dialog[btnName]
+            if btn and not btn._euiSkinned then
+                btn._euiSkinned = true
+                for j = 1, select("#", btn:GetRegions()) do
+                    local r = select(j, btn:GetRegions())
+                    if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                        r:SetAlpha(0)
+                    end
+                end
+                if btn.Left then btn.Left:SetAlpha(0) end
+                if btn.Middle then btn.Middle:SetAlpha(0) end
+                if btn.Right then btn.Right:SetAlpha(0) end
+                for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                    local tex = btn[texKey]
+                    if tex and tex.SetAlpha then
+                        hooksecurefunc(tex, "SetAlpha", function(self, a)
+                            if a > 0 then self:SetAlpha(0) end
+                        end)
+                    end
+                end
+                local EG = EllesmereUI.ELLESMERE_GREEN
+                local useAccent = _accentOn() and EG
+                local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+                btnBg:SetAllPoints()
+                btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                btnBg._euiOwned = true
+                if _PP and _PP.CreateBorder then
+                    if useAccent then
+                        _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
+                    else
+                        _PP.CreateBorder(btn, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                    end
+                end
+                local fs = btn:GetFontString()
+                if fs and useAccent then
+                    fs:SetTextColor(EG.r, EG.g, EG.b, 1)
+                end
+            end
+        end
+    end
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function(self, _, addon)
+        if _G.LFGListApplicationDialog then
+            self:UnregisterAllEvents()
+            _G.LFGListApplicationDialog:HookScript("OnShow", SkinApplicationDialog)
+        end
+    end)
+end
 
 -------------------------------------------------------------------------------
 --  UberTooltips CVar enforcement (only if user has manually set it in EUI)

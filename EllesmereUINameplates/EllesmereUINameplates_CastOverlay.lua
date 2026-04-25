@@ -151,15 +151,10 @@ end
 --  (immediate) and from the throttled OnUpdate (catches mid-cast changes
 --  like target acquired or focus changed).
 --
---  Three settings affect the on-plate cast bar's visual size:
---    1. targetScale       (NameplateFrame:ApplyScale, when unit is target)
---    2. castScale         (NameplateFrame:ApplyScale, when unit is casting)
---    3. focusCastHeight   (per-plate height multiplier when unit is focus)
---
---  (1) and (2) are applied as a SetScale on the plate frame. We mirror that
---  by setting the overlay's own SetScale to the plate's effective scale
---  (relative to UIParent so the math is consistent across UIParent scales).
---  (3) is a height multiplier we compute and apply directly.
+--  The overlay is parented to UIParent for strata independence. Scale is
+--  matched to the plate's effective scale so target/cast scale settings
+--  are reflected. focusCastHeight is a per-plate height multiplier
+--  applied directly.
 -------------------------------------------------------------------------------
 local function ApplyOverlayLayout(ov, plate)
     if not plate or not plate.health then return end
@@ -602,7 +597,7 @@ local function ReleaseOverlay(plate)
     ov.plate = nil
     ov.durObj = nil
     -- Clear cached layout values so the next acquire from the pool
-    -- always re-applies size/scale on first use
+    -- always re-applies size/scale/height on first use
     ov._lastScale = nil
     ov._lastHeight = nil
     overlayPool[#overlayPool + 1] = ov
@@ -633,16 +628,9 @@ local function ConfigureOverlay(ov, plate)
     end
     if type(name) == "nil" then dprint("  bail: no name") return end
 
-    -- Defensive resync. ApplyOverlayLayout's _lastScale / _lastHeight cache
-    -- makes SetScale / SetHeight no-ops when the computed value hasn't
-    -- changed, which is normally correct. But if the overlay's rendered
-    -- state ever drifts from the cache (rare, but reported as an oversized
-    -- opaque backdrop that persists until /reload), the cache will suppress
-    -- the correction every subsequent frame. Cast events are infrequent, so
-    -- unconditionally re-asserting layout + bg anchors here costs almost
-    -- nothing and self-heals on the very next cast instead of requiring a
-    -- reload. Note: we clear the cache BEFORE calling ApplyOverlayLayout so
-    -- the compare-and-skip branch always lands on "apply".
+    -- Defensive resync: clear cached scale/height so ApplyOverlayLayout
+    -- always re-applies on cast start. Costs nothing (cast events are
+    -- infrequent) and self-heals any drift without requiring a reload.
     ov._lastScale = nil
     ov._lastHeight = nil
     if ov.bg then
@@ -822,21 +810,28 @@ function ns.RefreshCastOverlay(plate)
             ov.plate = plate
             activePlates[plate] = ov
 
-            -- Anchor exactly the same way as the on-plate cast bar:
-            -- TOPLEFT/TOPRIGHT to the health bar's BOTTOMLEFT/BOTTOMRIGHT
-            -- so the overlay sits flush below the health bar at the
-            -- health bar's full width.
             local anchorTo = plate.health
             if not anchorTo then
                 dprint("  bail: no plate.health")
                 ReleaseOverlay(plate)
                 return
             end
+            -- Parented to UIParent for HIGH strata independence (renders
+            -- above stacked nameplates). An OnHide hook on the plate
+            -- releases the overlay when the nameplate disappears,
+            -- preventing stale black-square remnants.
+            ov:SetParent(UIParent)
+            ov:SetFrameStrata("HIGH")
+            ov:SetFrameLevel(50)
+            if not plate._castOverlayHideHook then
+                plate._castOverlayHideHook = true
+                plate:HookScript("OnHide", function(self)
+                    if activePlates[self] then ReleaseOverlay(self) end
+                end)
+            end
             ov:ClearAllPoints()
             ov:SetPoint("TOPLEFT",  anchorTo, "BOTTOMLEFT",  0, 0)
             ov:SetPoint("TOPRIGHT", anchorTo, "BOTTOMRIGHT", 0, 0)
-            -- Apply size and scale (height, icon size, shield size,
-            -- effective scale to match target/cast scale settings)
             ApplyOverlayLayout(ov, plate)
 
             -- Hide the on-plate cast bar visually so its background and
@@ -844,10 +839,7 @@ function ns.RefreshCastOverlay(plate)
             -- still functional, just invisible). Restored in ReleaseOverlay.
             if plate.cast then plate.cast:SetAlpha(0) end
 
-            dprint("  anchored flush to plate.health")
-            -- Show AFTER ConfigureOverlay so bg is only visible once the
-            -- bar texture is confirmed valid. Prevents the bg-only black
-            -- square that appeared when ConfigureOverlay bailed early.
+            dprint("  anchored to plate.health, parented to plate")
             ov._needsShow = true
         end
         ConfigureOverlay(ov, plate)

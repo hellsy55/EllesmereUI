@@ -601,6 +601,18 @@ function EllesmereUI.RefreshAllAddons()
     if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
     -- Nameplates
     if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
+    -- Quest Tracker
+    if _G._EQT_RefreshAll then _G._EQT_RefreshAll() end
+    -- Chat (sidebar icons, borders, fonts, visibility)
+    if _G._ECHAT_RefreshAll then _G._ECHAT_RefreshAll() end
+    -- Friends List
+    if _G._EFR_ApplyFriends then _G._EFR_ApplyFriends() end
+    -- Mythic Timer
+    if _G._EMT_Apply then _G._EMT_Apply() end
+    -- Dragon Riding HUD
+    if _G._EDR_Rebuild then _G._EDR_Rebuild() end
+    -- Minimap (flyout button state)
+    if _G._EMIN_RefreshFlyout then _G._EMIN_RefreshFlyout() end
     -- Global class/power colors (updates oUF, nameplates, raid frames)
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
     -- After all addons have rebuilt and positioned their frames from
@@ -1179,6 +1191,15 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         -- a spec picker popup that lets the user choose which specs to
         -- import, then calls ApplyImportedSpecProfiles() with only the
         -- selected specs. Writing here would bypass that selection.
+        -- Disable all reskin module syncs so the pre-logout sync
+        -- doesn't overwrite other profiles with the imported data.
+        if EllesmereUI._reskinModules and EllesmereUIDB then
+            if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
+            for folder in pairs(EllesmereUI._reskinModules) do
+                EllesmereUIDB.syncedModules[folder] = false
+            end
+        end
+
         if specLocked then
             return true, nil, "spec_locked"
         end

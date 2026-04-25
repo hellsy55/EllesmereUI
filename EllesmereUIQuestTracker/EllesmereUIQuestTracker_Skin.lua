@@ -39,10 +39,6 @@ local function GetFocusRGB()
     local c = EQT.DB()
     return c.focusR or 0.871, c.focusG or 0.251, c.focusB or 1.0
 end
-local C_TIMER     = { r = 1.00, g = 0.82, b = 0.20 }
-local C_TIMER_LOW = { r = 1.00, g = 0.30, b = 0.30 }
-local C_BAR_BG    = { r = 0.15, g = 0.15, b = 0.15, a = 0.8 }
-
 local SUB_TRACKERS = {
     "ScenarioObjectiveTracker",
     "UIWidgetObjectiveTracker",
@@ -70,8 +66,6 @@ local function GetObjSize()   return EQT.Cfg("objectiveFontSize") or 11 end
 -------------------------------------------------------------------------------
 local _hookedTrackers    = setmetatable({}, { __mode = "k" })
 local _hookedBlocks      = setmetatable({}, { __mode = "k" })
-local _skinnedBars       = setmetatable({}, { __mode = "k" })
-local _skinnedTimerBars  = setmetatable({}, { __mode = "k" })
 local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our icon texture
 
 -- External weak-keyed flag tables. Every "am I in a state?" bool / number
@@ -79,16 +73,6 @@ local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our i
 -- line, FontString, StatusBar, bar, etc.) lives here instead so Blizzard's
 -- iteration of its own tables never sees our additions. This is the
 -- canonical taint-avoidance pattern per CLAUDE.md.
-local function _wk() return setmetatable({}, { __mode = "k" }) end
-local F = {
-    heightHooked         = _wk(),
-    ignoreHeight         = _wk(),
-    fillHooked           = _wk(),
-    ownerBlockResolved   = _wk(),
-    blockShrunk          = _wk(),
-    skinPending          = _wk(),
-    ghost                = _wk(),  -- bar -> our standalone ghost Frame
-}
 local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
 local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
 
@@ -176,10 +160,6 @@ function EQT.RefreshFonts()
             ApplyShadow(fs)
         end
     end
-end
-
-local function GetPP()
-    return EllesmereUI and EllesmereUI.PanelPP
 end
 
 -- Physical-pixel-perfect 1px accent divider under each section header.
@@ -750,9 +730,7 @@ local function ProcessBlockChildren(frame, depth)
         if child.GetObjectType then
             local ok, otype = pcall(child.GetObjectType, child)
             if ok then
-                if otype == "StatusBar" and EQT._SkinWidgetBar then
-                    EQT._SkinWidgetBar(child)
-                elseif (otype == "Frame" or otype == "Button")
+                if (otype == "Frame" or otype == "Button")
                        and not child.Tooltip then
                     if child.GetRegions then
                         for _, rg in ipairs({ child:GetRegions() }) do
@@ -791,8 +769,6 @@ local function SuppressPOI(block)
 end
 
 -- Skip all skinning work when the tracker is force-hidden (M+, raid, arena).
--- Blizzard still calls AddBlock for scenario objectives; no point skinning
--- blocks the player can't see.
 local function ShouldSkipSkin()
     if EQT.IsSuppressed and EQT.IsSuppressed() then return true end
     if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
@@ -802,7 +778,6 @@ local function ShouldSkipSkin()
     return false
 end
 
-local _dumpedTemplates = {}
 local function SkinBlock(block)
     if not block then return end
     if ShouldSkipSkin() then return end
@@ -819,31 +794,6 @@ local function SkinBlock(block)
         ApplyFocusHighlight(block)
         return
     end
-
-    -- Bail out completely for ANY ScenarioObjectiveTracker block when the
-    -- player isn't in a delve or a dungeon (Prey / Abundance / Assault /
-    -- outdoor scenario events). Their child frames include Blizzard widget
-    -- visualizers (TextWithState etc.) pooled and reused for AreaPOI
-    -- tooltip widgets -- ANY method call on those FontStrings / Textures
-    -- / Frames taints the pool, then later when GameTooltip processes a
-    -- POI widget set, arithmetic on textHeight fails. Leaving these
-    -- blocks completely unstyled (Blizzard default) is the only safe
-    -- option. The section HEADER ("Stormarion Assault" etc.) is skinned
-    -- via SkinHeader on a separate path, so it still gets our accent.
-    local sot = _G.ScenarioObjectiveTracker
-    local underScenarioTracker = false
-    if sot and block.parentModule == sot then
-        underScenarioTracker = true
-    elseif sot then
-        local f, depth = block:GetParent(), 0
-        while f and depth < 6 do
-            if f == sot then underScenarioTracker = true; break end
-            f = f.GetParent and f:GetParent()
-            depth = depth + 1
-        end
-    end
-    -- Bail for Scenario tracker blocks entirely (no safe mutations possible).
-    if underScenarioTracker then return end
 
     HookBlockLineMethods(block)
 
@@ -899,288 +849,11 @@ local function SkinBlock(block)
     ApplyFocusHighlight(block)
 
     -- Strip ornamental textures + style objective fontstrings on child frames.
-    -- Scenario blocks never reach here (SkinBlock bails above).
     ProcessBlockChildren(block, 0)
 
     block._eqtSkinned = true
 end
 
--------------------------------------------------------------------------------
--- Progress bar ghost: instead of fighting Blizzard's textures / animations /
--- Icon / Label on every repaint, we hide the native bar outright and render
--- our own standalone frame next to it. The native bar stays in Blizzard's
--- layout (so line height / anchor math still works), but its alpha is 0 so
--- nothing it owns is ever visible. Our ghost is parented to the native
--- bar's parent and pinned to the bar's rect, with a live value hook.
--------------------------------------------------------------------------------
-local _skinnedWidgetBars = setmetatable({}, { __mode = "k" })
-local function CreateGhostBar(bar)
-    if not bar then return end
-    if not EQT.Cfg("skinProgressBars") then return end
-
-    -- Bail if this bar belongs to Scenario / Bonus / WorldQuest tracker.
-    -- Same widget-pool taint rationale as SkinBlock -- their frames are
-    -- pooled into tooltip widgets.
-    do
-        local sot = _G.ScenarioObjectiveTracker
-        local bot = _G.BonusObjectiveTracker
-        local wqt = _G.WorldQuestObjectiveTracker
-        if sot or bot or wqt then
-            local f, depth = bar:GetParent(), 0
-            while f and depth < 8 do
-                if f == sot or f == bot or f == wqt then return end
-                f = f.GetParent and f:GetParent()
-                depth = depth + 1
-            end
-        end
-    end
-
-    local valueBar = bar
-    if bar.Bar and bar.Bar.GetValue then valueBar = bar.Bar end
-
-    -- Hide the native bar subtree. SetAlpha(0) inherits to every
-    -- descendant (Icon, Label, BarGlow, animations, everything), so we
-    -- never have to strip textures or block anim groups again.
-    bar:SetAlpha(0)
-    if bar.EnableMouse then bar:EnableMouse(false) end
-
-    -- Create the ghost once. Parented to the native bar's parent so our
-    -- alpha stays at 1 regardless of what Blizzard does to the native bar.
-    if not F.ghost[bar] then
-        local ghost = CreateFrame("Frame", nil, bar:GetParent() or bar)
-        ghost:SetFrameLevel((bar:GetFrameLevel() or 0) + 1)
-        -- Explicitly disable mouse so the ghost (which extends past the
-        -- bar's natural rect to give us the wider visual) doesn't eat
-        -- clicks intended for the quest item button or LFG eyeball that
-        -- sit in the same horizontal band.
-        ghost:EnableMouse(false)
-        -- SetPropagateMouseMotion/Clicks are protected (combat-locked).
-        -- EnableMouse(false) already makes the frame transparent to mouse
-        -- hit testing, so the propagate calls are belt-and-suspenders.
-        -- Skip them in combat to avoid the ADDON_ACTION_BLOCKED warning
-        -- when a new ghost bar is created mid-fight (rare but possible).
-        if not InCombatLockdown() then
-            if ghost.SetPropagateMouseMotion then ghost:SetPropagateMouseMotion(true) end
-            if ghost.SetPropagateMouseClicks then ghost:SetPropagateMouseClicks(true) end
-        end
-        local bg = ghost:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(C_BAR_BG.r, C_BAR_BG.g, C_BAR_BG.b, C_BAR_BG.a)
-        ghost._bg = bg
-        local fill = ghost:CreateTexture(nil, "ARTWORK")
-        fill:SetPoint("TOPLEFT",    ghost, "TOPLEFT",    0, 0)
-        fill:SetPoint("BOTTOMLEFT", ghost, "BOTTOMLEFT", 0, 0)
-        ghost._fill = fill
-        local PP = GetPP()
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(ghost, 0, 0, 0, 1, 1, "OVERLAY", 7)
-        end
-        F.ghost[bar] = ghost
-    end
-    local ghost = F.ghost[bar]
-
-    -- Re-parent the ghost if Blizzard moved the native bar to a new parent
-    -- (pool re-use on zone / track change).
-    local desiredParent = bar:GetParent()
-    if desiredParent and ghost:GetParent() ~= desiredParent then
-        ghost:SetParent(desiredParent)
-    end
-
-    do
-        local r, g, b = GetAccent()
-        ghost._fill:SetColorTexture(r, g, b, 0.9)
-    end
-
-    -- Pin the ghost to the native bar's rect (the native bar is alpha 0
-    -- but still in Blizzard's layout under the last objective line). Inset
-    -- 48px from the right to clear the objective bullet / indent. Deferred
-    -- one frame so Blizzard's post-Show re-parent lands before we anchor.
-    local function reanchor()
-        local p = bar:GetParent()
-        if not p then return end
-        if ghost:GetParent() ~= p then ghost:SetParent(p) end
-        ghost:ClearAllPoints()
-        ghost:SetPoint("TOPLEFT",  bar, "TOPLEFT",  0,  0)
-        ghost:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 48, 0)
-        ghost:SetHeight(8)
-    end
-    reanchor()
-    C_Timer.After(0, reanchor)
-
-    local function updateFill()
-        local minV, maxV = 0, 1
-        if valueBar.GetMinMaxValues then minV, maxV = valueBar:GetMinMaxValues() end
-        local v = valueBar.GetValue and valueBar:GetValue() or 0
-        local range = (maxV or 1) - (minV or 0)
-        local ratio = 0
-        if range > 0 then ratio = math.max(0, math.min(1, (v - minV) / range)) end
-        local w = ghost:GetWidth() or 0
-        ghost._fill:SetWidth(math.max(0.001, w * ratio))
-        ghost._fill:Show()
-    end
-    updateFill()
-    if not F.fillHooked[bar] then
-        F.fillHooked[bar] = true
-        if valueBar ~= bar and valueBar.HookScript then
-            valueBar:HookScript("OnValueChanged", updateFill)
-            valueBar:HookScript("OnMinMaxChanged", updateFill)
-        elseif bar.GetObjectType and bar:GetObjectType() == "StatusBar" then
-            bar:HookScript("OnValueChanged", updateFill)
-            bar:HookScript("OnMinMaxChanged", updateFill)
-        end
-        if ghost.HookScript then
-            ghost:HookScript("OnSizeChanged", updateFill)
-        end
-        -- Mirror native show/hide so the ghost appears/vanishes with the bar.
-        if bar.HookScript then
-            bar:HookScript("OnShow", function()
-                ghost:Show(); reanchor(); updateFill()
-            end)
-            bar:HookScript("OnHide", function() ghost:Hide() end)
-        end
-    end
-
-    -- Lock outer bar + inner StatusBar to 8px. Debug confirmed the world-
-    -- quest outer bar ships at 38px with a single TOPLEFT anchor (no
-    -- BOTTOM anchor), and the inner .Bar is 17px with only a LEFT anchor.
-    -- Both are freely SetHeight-able; the reserved 30px of dead space IS
-    -- the outer bar's 38 vs our 8px ghost. Reentry-guarded hook.
-    local function lockHeight(f)
-        if not f or not f.SetHeight or F.heightHooked[f] then return end
-        F.heightHooked[f] = true
-        hooksecurefunc(f, "SetHeight", function(self)
-            if F.ignoreHeight[self] then return end
-            F.ignoreHeight[self] = true
-            self:SetHeight(8)
-            F.ignoreHeight[self] = nil
-        end)
-        f:SetHeight(8)
-    end
-    lockHeight(bar)
-    if bar.Bar and bar.Bar ~= bar then lockHeight(bar.Bar) end
-
-    -- Blizzard's tracker layout reads `bar.height` (Lua field, not
-    -- :GetHeight()) to compute the owning block's .height, then anchors
-    -- the next block below that. bar.height ships at 38; shrinking the
-    -- frame with SetHeight(8) doesn't touch this field, so the block
-    -- keeps reserving ~30 extra px of dead space. Overwrite it.
-    if bar.height ~= nil then bar.height = 8 end
-    -- Find & shrink the owning block once per bar. Cached on bar so
-    -- subsequent CreateGhostBar calls skip the full sibling walk. Even
-    -- after the cached block is no longer the current owner (pool reuse),
-    -- the .height/SetHeight adjustment has already been applied and
-    -- gated by F.blockShrunk[c], so re-walking is wasted work.
-    if not F.ownerBlockResolved[bar] then
-        F.ownerBlockResolved[bar] = true
-        local bp = bar:GetParent()
-        if bp and bp.GetNumChildren then
-            local bTop = bar.GetTop and bar:GetTop()
-            local bBot = bar.GetBottom and bar:GetBottom()
-            if bTop and bBot then
-                for i = 1, bp:GetNumChildren() do
-                    local c = select(i, bp:GetChildren())
-                    if c and type(c.usedLines) == "table" and c ~= bar
-                       and c.height and not F.blockShrunk[c] then
-                        local cTop = c.GetTop and c:GetTop()
-                        local cBot = c.GetBottom and c:GetBottom()
-                        if cTop and cBot and cTop >= bTop and cBot <= bBot then
-                            F.blockShrunk[c] = true
-                            c.height = (c.height or c:GetHeight() or 0) - 30
-                            if c.SetHeight then c:SetHeight(c.height) end
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if bar:IsShown() then ghost:Show() else ghost:Hide() end
-    _skinnedWidgetBars[bar] = true
-end
-
-local function SkinProgressBar(bar)
-    if not bar then return end
-    if _skinnedBars[bar] then return end
-    _skinnedBars[bar] = true
-    CreateGhostBar(bar)
-end
-
-local function SkinWidgetBar(bar)
-    CreateGhostBar(bar)
-end
-EQT._SkinWidgetBar = SkinWidgetBar
-
--- Recursively (2 levels) find StatusBar frames under a block and skin them.
--- Read-only walk -- we never touch mouse state on children.
-local function ScanBlockForWidgetBars() end  -- no-op kept for back-compat
-EQT._ScanBlockForWidgetBars = ScanBlockForWidgetBars
-
--- Iterate every tracker's usedProgressBars pool and skin each. World-quest
--- / bonus-objective / scenario widget progress bars live on the tracker
--- itself, not on line.ProgressBar, so they miss our GetProgressBar hook.
-local function SkinTrackerProgressBars(tracker)
-    if not tracker or not tracker.usedProgressBars then return end
-    -- Skip bars on Scenario / Bonus / WorldQuest trackers. Their widget
-    -- visualizers are pooled into tooltip widgets and any ghost-bar
-    -- mutation taints MoneyFrame / reward tooltip rendering.
-    if tracker == _G.ScenarioObjectiveTracker then return end
-    if tracker == _G.BonusObjectiveTracker then return end
-    if tracker == _G.WorldQuestObjectiveTracker then return end
-    for _, bySomething in pairs(tracker.usedProgressBars) do
-        if type(bySomething) == "table" then
-            if bySomething.GetObjectType then
-                -- Flat: usedProgressBars[key] = bar
-                SkinWidgetBar(bySomething)
-            else
-                -- Nested: usedProgressBars[key1][key2] = bar
-                for _, bar in pairs(bySomething) do
-                    if type(bar) == "table" and bar.GetObjectType then
-                        SkinWidgetBar(bar)
-                    end
-                end
-            end
-        end
-    end
-end
-EQT._SkinTrackerProgressBars = SkinTrackerProgressBars
-
--------------------------------------------------------------------------------
--- Timer bar skin: same flat texture, yellow tint swapping to red when low.
--------------------------------------------------------------------------------
-local function SkinTimerBar(bar)
-    if not bar then return end
-    if _skinnedTimerBars[bar] then return end
-    _skinnedTimerBars[bar] = true
-
-    if not EQT.Cfg("skinProgressBars") then return end
-
-    -- Bail if this bar belongs to ScenarioObjectiveTracker.
-    do
-        local sot = _G.ScenarioObjectiveTracker
-        if sot then
-            local f, depth = bar:GetParent(), 0
-            while f and depth < 8 do
-                if f == sot then return end
-                f = f.GetParent and f:GetParent()
-                depth = depth + 1
-            end
-        end
-    end
-
-    local sb = bar.Bar or bar
-    local tex = sb and sb.GetStatusBarTexture and sb:GetStatusBarTexture()
-    if tex then tex:SetVertexColor(C_TIMER.r, C_TIMER.g, C_TIMER.b, 0.9) end
-
-    if bar.BarBG then bar.BarBG:SetColorTexture(C_BAR_BG.r, C_BAR_BG.g, C_BAR_BG.b, C_BAR_BG.a) end
-    if bar.Label then StyleFontString(bar.Label) end
-    StyleAllFontStrings(bar)
-
-    local PP = GetPP()
-    if PP and PP.CreateBorder then
-        PP.CreateBorder(sb or bar, 0, 0, 0, 1, 1, "OVERLAY", 7)
-    end
-end
 
 -------------------------------------------------------------------------------
 -- Re-skin every block a tracker has already populated. Safe to call any time
@@ -1192,33 +865,6 @@ local function SkinExistingBlocks(tracker)
     -- Refresh the accent divider under this tracker's header on every pass
     -- so collapsed/re-expanded states always keep a visible divider.
     if tracker.Header then EnsureAccentDivider(tracker.Header) end
-
-    -- ScenarioObjectiveTracker is left at Blizzard's native height/layout
-    -- in ALL contexts (delves / dungeons / scenarios). Any height
-    -- compaction from us pushes widget-visualizer-positioned elements
-    -- (timers, progress bars, lives indicators) outside our bounds.
-
-    -- Walk the tracker's usedProgressBars pool -- catches world-quest and
-    -- bonus-objective widget bars that don't live on line.ProgressBar.
-    if EQT.Cfg("skinProgressBars") and EQT._SkinTrackerProgressBars then
-        EQT._SkinTrackerProgressBars(tracker)
-    end
-
-    -- Skin scenario / fixed named blocks that live as permanent fields on
-    -- the tracker, NOT in usedBlocks (StageBlock = "Act I..." / "Stage
-    -- Complete", ObjectivesBlock, widget container blocks, etc).
-    -- Skin named tracker fields. ScenarioObjectiveTracker children are
-    -- handled by Blizzard natively now (SkinBlock bails for them); only
-    -- non-scenario blocks pass through. We intentionally do NOT hook
-    -- ObjectivesBlock SetHeight — Blizzard's layout stays untouched.
-    for _, fieldName in ipairs({
-        "StageBlock", "ObjectivesBlock",
-        "TopWidgetContainerBlock", "BottomWidgetContainerBlock",
-        "ProvingGroundsBlock", "MawBuffsBlock", "ChallengeModeBlock",
-    }) do
-        local fb = tracker[fieldName]
-        if fb then SkinBlock(fb) end
-    end
 
     -- Collect blocks into an ordered list sorted top-to-bottom by Y. We use
     -- this to apply sequential per-section numbering (1, 2, 3...) that
@@ -1246,19 +892,11 @@ local function SkinExistingBlocks(tracker)
             SkinBlock(block)
         end
 
-        -- Style objective lines and their progress/timer bars.
+        -- Style objective lines.
         for _, block in ipairs(ordered) do
             if block.lines then
                 for _, line in pairs(block.lines) do
                     StyleObjectiveLine(line)
-                    if line.ProgressBar then
-                        _skinnedBars[line.ProgressBar] = nil
-                        SkinProgressBar(line.ProgressBar)
-                    end
-                    if line.TimerBar then
-                        _skinnedTimerBars[line.TimerBar] = nil
-                        SkinTimerBar(line.TimerBar)
-                    end
                 end
             end
         end
@@ -1272,6 +910,22 @@ local function HookTracker(tracker)
     if not tracker then return end
     if _hookedTrackers[tracker] then return end
     _hookedTrackers[tracker] = true
+
+    -- ScenarioObjectiveTracker: only skin the header. Its child frames
+    -- (blocks, progress bars, widget containers) share Blizzard's widget
+    -- pool with tooltip/AreaPOI widgets. ANY method call on those frames
+    -- taints the pool, causing secret-value arithmetic errors when
+    -- GameTooltip processes widget sets later.
+    if tracker == _G.ScenarioObjectiveTracker then
+        if tracker.Header then SkinHeader(tracker.Header) end
+        if tracker.Update then
+            hooksecurefunc(tracker, "Update", function(self)
+                if self.Header then EnsureAccentDivider(self.Header) end
+                if EQT.QueueResize then EQT.QueueResize() end
+            end)
+        end
+        return
+    end
 
     if tracker.Header then
         SkinHeader(tracker.Header)
@@ -1289,37 +943,6 @@ local function HookTracker(tracker)
             -- needs a full re-skin even if it was skinned before.
             if block then block._eqtSkinned = nil end
             SkinBlock(block)
-        end)
-    end
-
-    -- Skin permanent named blocks that aren't added via AddBlock
-    -- (scenario stage, objectives, widget containers, etc.). One-time
-    -- only -- they persist for the tracker's lifetime.
-    for _, fieldName in ipairs({
-        "StageBlock", "ObjectivesBlock",
-        "TopWidgetContainerBlock", "BottomWidgetContainerBlock",
-        "ProvingGroundsBlock", "MawBuffsBlock", "ChallengeModeBlock",
-    }) do
-        local fb = tracker[fieldName]
-        if fb then SkinBlock(fb) end
-    end
-
-    if tracker.GetProgressBar then
-        hooksecurefunc(tracker, "GetProgressBar", function(_, line)
-            if ShouldSkipSkin() then return end
-            local bar = line and type(line) == "table" and line.ProgressBar
-            if bar then
-                SkinProgressBar(bar)
-                SkinWidgetBar(bar)
-            end
-        end)
-    end
-
-    if tracker.GetTimerBar then
-        hooksecurefunc(tracker, "GetTimerBar", function(_, line)
-            if ShouldSkipSkin() then return end
-            local bar = line and type(line) == "table" and line.TimerBar
-            if bar then SkinTimerBar(bar) end
         end)
     end
 

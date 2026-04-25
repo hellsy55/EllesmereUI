@@ -115,7 +115,8 @@ local defaults = {
             detachedPortraitBorderSize = 7,
             healthBarOpacity = 90,
             powerBarOpacity = 100,
-            showPlayerAbsorb = false,
+            showPlayerAbsorb = "none",
+            absorbCleanAlpha = 30,
             showPlayerCastbar = false,
             showPlayerCastIcon = true,
             castReverseFill = false,
@@ -336,7 +337,8 @@ local defaults = {
             healthDisplay = "both",
             showBuffs = true,
             onlyPlayerDebuffs = false,
-            showPlayerAbsorb = false,
+            showPlayerAbsorb = "none",
+            absorbCleanAlpha = 30,
             showPlayerCastbar = false,
             showClassPowerBar = false,
             classPowerBarX = 0,
@@ -476,6 +478,8 @@ local defaults = {
             btbBgOpacity = 1.0,
             healthBarOpacity = 90,
             powerBarOpacity = 100,
+            showPlayerAbsorb = "none",
+            absorbCleanAlpha = 30,
             onlyPlayerDebuffs = true,
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
@@ -1609,6 +1613,10 @@ local function ReparentBarsToClip(frame, powerPosition)
                 frame.Power:SetParent(clip)
             end
         end
+        -- Power bar must render above absorb overlay (health level + 1).
+        -- SetParent resets frame level, so re-assert after every reparent.
+        local hpLevel = frame.Health and frame.Health:GetFrameLevel() or clip:GetFrameLevel()
+        frame.Power:SetFrameLevel(hpLevel + 2)
     end
 end
 
@@ -1903,6 +1911,46 @@ end
 -- top-level symlink have been corrected; this is the path that resolves.
 local ABSORB_SHIELD_TEX = "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga"
 
+-- Absorb bar style textures and alpha values. "striped" and "blizzard"
+-- textures will be added to Media/ when the user uploads them.
+local ABSORB_STYLE_TEX = {
+    striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+    clean    = "Interface\\Buttons\\WHITE8X8",
+    blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+}
+local ABSORB_STYLE_ALPHA = {
+    striped  = 0.8,
+    clean    = 0.3,
+    blizzard = 0.8,
+}
+
+local function ApplyAbsorbStyle(absorbBar, style, settings)
+    if not absorbBar then return end
+    local tex = ABSORB_STYLE_TEX[style] or ABSORB_SHIELD_TEX
+    local alpha = ABSORB_STYLE_ALPHA[style] or 0.8
+    if style == "clean" and settings then
+        alpha = (settings.absorbCleanAlpha or 30) / 100
+    end
+    local mask = absorbBar._absorbMask
+    absorbBar:SetStatusBarTexture(tex)
+    absorbBar:SetStatusBarColor(1, 1, 1, alpha)
+    local fill = absorbBar:GetStatusBarTexture()
+    if fill then
+        fill:SetDrawLayer("ARTWORK", 1)
+        if mask then fill:AddMaskTexture(mask) end
+    end
+    local fw = absorbBar._forward
+    if fw then
+        fw:SetStatusBarTexture(tex)
+        fw:SetStatusBarColor(1, 1, 1, alpha)
+        local fwFill = fw:GetStatusBarTexture()
+        if fwFill then
+            fwFill:SetDrawLayer("ARTWORK", 1)
+            if mask then fwFill:AddMaskTexture(mask) end
+        end
+    end
+end
+
 -- Two-segment absorb rendering using dynamic clip-frame trickery, so it
 -- works with secret-valued absorbs (player absorbs in 12.0+). We cannot
 -- split the absorb value in Lua (min/subtract on secret values is blocked),
@@ -1937,6 +1985,13 @@ local function CreateAbsorbBar(frame, unit, settings)
 
     local hpBar = frame.Health
 
+    -- Mask texture: constrains absorb rendering to exact health bar bounds
+    -- at the GPU level. Prevents subpixel bleed where absorb textures
+    -- extend 1px outside the health bar at certain frame positions.
+    local absorbMask = hpBar:CreateMaskTexture()
+    absorbMask:SetAllPoints(hpBar)
+    absorbMask:SetTexture("Interface\\Buttons\\WHITE8X8")
+
     -- Current HP clip: bounds the backfill bar to the filled health area.
     -- The BOTTOMRIGHT anchor tracks healthTexture.BOTTOMRIGHT, so as the
     -- health value changes the clip's right edge follows the fill edge.
@@ -1947,9 +2002,11 @@ local function CreateAbsorbBar(frame, unit, settings)
 
     -- Missing HP clip: bounds the forward bar to the empty health area.
     -- TOPLEFT anchor tracks healthTexture.TOPRIGHT, so the clip's left edge
-    -- follows the fill edge as current HP changes.
+    -- follows the fill edge as current HP changes. The -1 overlap prevents
+    -- a 1px gap at subpixel health values where the texture edge and clip
+    -- edge round to different pixels.
     local missClip = CreateFrame("Frame", nil, hpBar)
-    missClip:SetPoint("TOPLEFT",     hpBar:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    missClip:SetPoint("TOPLEFT",     hpBar:GetStatusBarTexture(), "TOPRIGHT", -1, 0)
     missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
     missClip:SetClipsChildren(true)
 
@@ -1960,7 +2017,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     local backfillBar = CreateFrame("StatusBar", nil, curClip)
     backfillBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local bfFill = backfillBar:GetStatusBarTexture()
-    if bfFill then bfFill:SetDrawLayer("ARTWORK", 1) end
+    if bfFill then bfFill:SetDrawLayer("ARTWORK", 1); bfFill:AddMaskTexture(absorbMask) end
     backfillBar:SetStatusBarColor(1, 1, 1, 0.8)
     backfillBar:SetReverseFill(true)
     backfillBar:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
@@ -1976,7 +2033,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     local forwardBar = CreateFrame("StatusBar", nil, missClip)
     forwardBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local fwFill = forwardBar:GetStatusBarTexture()
-    if fwFill then fwFill:SetDrawLayer("ARTWORK", 1) end
+    if fwFill then fwFill:SetDrawLayer("ARTWORK", 1); fwFill:AddMaskTexture(absorbMask) end
     forwardBar:SetStatusBarColor(1, 1, 1, 0.8)
     forwardBar:SetReverseFill(false)
     forwardBar:SetPoint("TOPLEFT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
@@ -2004,6 +2061,13 @@ local function CreateAbsorbBar(frame, unit, settings)
     backfillBar._hpCalculator = hpCalc
     backfillBar._curClip      = curClip
     backfillBar._missClip     = missClip
+    backfillBar._absorbMask   = absorbMask
+
+    -- Raise power bar above absorb overlay so it renders on top
+    local power = frame and frame.Power
+    if power then
+        power:SetFrameLevel(math.max(power:GetFrameLevel(), hpBar:GetFrameLevel() + 2))
+    end
 
     backfillBar:HookScript("OnHide", function()
         forwardBar:Hide()
@@ -2022,12 +2086,11 @@ local function CreateAbsorbBar(frame, unit, settings)
             local calc = ab._hpCalculator
             if not hp then return end
 
-            -- Respect the user's showPlayerAbsorb toggle: hide both segments
-            -- and skip the update entirely when absorbs are disabled. Without
-            -- this, every unit event would re-Show() them after ReloadFrames
-            -- hid them.
+            -- Respect the user's absorb style setting: hide both segments
+            -- and skip the update when absorbs are "none". Without this,
+            -- every unit event would re-Show() them after ReloadFrames hid them.
             local s = GetSettingsForUnit(updUnit)
-            if s and s.showPlayerAbsorb == false then
+            if s and (not s.showPlayerAbsorb or s.showPlayerAbsorb == "none") then
                 ab:Hide()
                 if fw then fw:Hide() end
                 return
@@ -2048,6 +2111,15 @@ local function CreateAbsorbBar(frame, unit, settings)
             local hpW, hpH = hp:GetWidth(), hp:GetHeight()
             ab:SetWidth(hpW); ab:SetHeight(hpH)
             if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
+
+            -- Re-apply absorb style only when the style setting changes
+            -- (not on every health event). Calling SetStatusBarTexture on
+            -- every update causes the bar to flash visible even at zero absorb.
+            local absStyle = s and s.showPlayerAbsorb
+            if absStyle and absStyle ~= "none" and ab._lastAbsStyle ~= absStyle then
+                ab._lastAbsStyle = absStyle
+                ApplyAbsorbStyle(ab, absStyle, s)
+            end
 
             -- Both bars get the raw absorb value and the normal maxHealth.
             -- The clip frames do the "min(absorb, curHealth)" and
@@ -3257,6 +3329,7 @@ local function StyleFocusFrame(frame, unit)
     local healthRightInset = (showPortrait and isAttached and effectiveSide == "right") and adjPortraitH or 0
     frame.Health = CreateHealthBar(frame, unit, settings.healthHeight, healthXOffset, settings, healthRightInset)
     frame.Power = CreatePowerBar(frame, unit, settings)
+    CreateAbsorbBar(frame, unit, settings)
     frame.Castbar = CreateCastBar(frame, unit, settings)
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, pSide, focusBarHeight, unit)
@@ -5026,7 +5099,7 @@ local function ReloadFrames()
                         end
                     end
 
-                    -- Live toggle player absorbs.
+                    -- Live toggle + style player absorbs.
                     -- Never Enable/Disable the oUF HealthPrediction element
                     -- here: tearing down the element unregisters events and
                     -- resets the calculator, which causes the absorb display
@@ -5036,7 +5109,9 @@ local function ReloadFrames()
                     -- keeps running in the background and the value stays
                     -- live whether the bar is visible or not.
                     if frame.HealthPrediction and frame.HealthPrediction.damageAbsorb then
-                        if settings.showPlayerAbsorb then
+                        local absStyle = settings.showPlayerAbsorb
+                        if absStyle and absStyle ~= "none" then
+                            ApplyAbsorbStyle(frame.HealthPrediction.damageAbsorb, absStyle, settings)
                             frame.HealthPrediction.damageAbsorb:Show()
                         else
                             frame.HealthPrediction.damageAbsorb:Hide()
@@ -7144,13 +7219,30 @@ function InitializeFrames()
         end
     end
 
-    -- Player absorbs: hide the bar if not wanted, but leave the oUF
-    -- HealthPrediction element enabled so events keep flowing and the
-    -- calculator stays in sync. Toggling the element itself caused the
-    -- player absorb display to drift stale over time.
-    if frames.player and frames.player.HealthPrediction and frames.player.HealthPrediction.damageAbsorb then
-        if not db.profile.player.showPlayerAbsorb then
-            frames.player.HealthPrediction.damageAbsorb:Hide()
+    -- Absorbs: apply style and hide if "none" for player, target, focus.
+    -- Leave the oUF HealthPrediction element enabled so events keep flowing
+    -- and the calculator stays in sync.
+    for _, uKey in ipairs({ "player", "target", "focus" }) do
+        local f = frames[uKey]
+        if f and f.HealthPrediction and f.HealthPrediction.damageAbsorb then
+            local absStyle = db.profile[uKey] and db.profile[uKey].showPlayerAbsorb
+            if absStyle and absStyle ~= "none" then
+                ApplyAbsorbStyle(f.HealthPrediction.damageAbsorb, absStyle, db.profile[uKey])
+                f.HealthPrediction.damageAbsorb:Show()
+                if f.HealthPrediction.damageAbsorb._forward then
+                    f.HealthPrediction.damageAbsorb._forward:Show()
+                end
+            else
+                f.HealthPrediction.damageAbsorb:Hide()
+                if f.HealthPrediction.damageAbsorb._forward then
+                    f.HealthPrediction.damageAbsorb._forward:Hide()
+                end
+            end
+            -- Force oUF to re-run the HealthPrediction element so the new
+            -- texture is visible immediately without waiting for a health event
+            if f.HealthPrediction and f.HealthPrediction.ForceUpdate then
+                f.HealthPrediction:ForceUpdate()
+            end
         end
     end
 

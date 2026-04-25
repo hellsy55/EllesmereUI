@@ -924,13 +924,13 @@ end
 --  Override Controller
 --  Monitors vehicle/override/possess/form/petbattle states via attribute
 --  drivers and propagates state changes to all registered bar frames.
---  Parented to OverrideActionBar so it auto-detects override UI visibility.
+--  Parented to UIParent -- never parent addon frames to OverrideActionBar
+--  as that taints its child hierarchy and blocks BeginActionBarTransition.
 -------------------------------------------------------------------------------
 local OverrideController
 do
-    local parent = OverrideActionBar or UIParent
-    OverrideController = CreateFrame("Frame", "EABOverrideController", parent,
-        "SecureHandlerAttributeTemplate, SecureHandlerShowHideTemplate")
+    OverrideController = CreateFrame("Frame", "EABOverrideController", UIParent,
+        "SecureHandlerAttributeTemplate")
 
     OverrideController:SetAttributeNoHandler("_onattributechanged", [[
         -- Propagate known state attributes to all registered bar frames
@@ -955,16 +955,16 @@ do
         end
     ]])
 
-    OverrideController:SetAttributeNoHandler("_onshow", [[ self:SetAttribute("overrideui", 1) ]])
-    OverrideController:SetAttributeNoHandler("_onhide", [[ self:SetAttribute("overrideui", 0) ]])
-
     -- Secure table of bar frames that receive state broadcasts
     OverrideController:Execute([[ _eabBarFrames = table.new() ]])
 
-    -- Register attribute drivers for all relevant state conditions
+    -- Register attribute drivers for all relevant state conditions.
+    -- overrideui driven by [overridebar][vehicleui] instead of parenting
+    -- to OverrideActionBar (which would taint the protected frame).
     for attr, driver in pairs({
         form = "[form]1;0",
         overridebar = "[overridebar]1;0",
+        overrideui = "[overridebar][vehicleui]1;0",
         possessbar = "[possessbar]1;0",
         sstemp = "[shapeshift]1;0",
         vehicle = "[@vehicle,exists]1;0",
@@ -972,11 +972,6 @@ do
         petbattleui = "[petbattle]1;0",
     }) do
         RegisterAttributeDriver(OverrideController, attr, driver)
-    end
-
-    -- Initialize override UI state from OverrideActionBar visibility
-    if OverrideActionBar then
-        OverrideController:SetAttributeNoHandler("overrideui", OverrideActionBar:IsVisible() and 1 or 0)
     end
 end
 
@@ -1270,9 +1265,10 @@ local function HideBlizzardBars()
     end
     -- MainActionBar retains events so Blizzard's own grid helpers still fire,
     -- even though the visible MainBar buttons are EAB-owned.
-    if MainActionBarController then
-        MainActionBarController:UnregisterAllEvents()
-    end
+    -- Do NOT call MainActionBarController:UnregisterAllEvents().
+    -- Disabling the controller taints the cast bar animation chain
+    -- (StopFinishAnims iterates a forbidden table in combat).
+    -- Stock bars are already dead via reparent + Show hooks.
     if MainMenuBarPageNumber then MainMenuBarPageNumber:Hide() end
 
     -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
@@ -5896,9 +5892,13 @@ do
         -- Block Blizzard from repositioning the button.
         -- Use a guard flag to prevent infinite recursion since our own
         -- SetPoint calls inside the hook would re-trigger it.
+        -- Gate on InCombatLockdown: repositioning a secure frame from
+        -- addon code in combat taints the execution context, which
+        -- propagates through hooksecurefunc to ActionBarController and
+        -- blocks OverrideActionBar:Show() (infinite transition loop).
         local hookGuard = false
         hooksecurefunc(btn, "SetPoint", function(self, _, parent)
-            if hookGuard then return end
+            if hookGuard or InCombatLockdown() then return end
             local bar1 = barFrames["MainBar"]
             local anchor = bar1 or UIParent
             if parent ~= anchor and parent ~= UIParent then
@@ -5911,7 +5911,10 @@ do
         -- Override visibility: only show when the player can actually exit
         -- a vehicle, never for Edit Mode previews.  This also fixes campaign
         -- vehicles whose ActionBarController state isn't MAIN.
+        -- Gate on InCombatLockdown: SetShown on a secure frame from addon
+        -- code in combat taints the ActionBarController execution context.
         hooksecurefunc(btn, "UpdateShownState", function(self)
+            if InCombatLockdown() then return end
             local shouldShow = CanExitVehicle()
             if self:IsShown() ~= shouldShow then
                 self:SetShown(shouldShow)
@@ -7488,9 +7491,8 @@ function EAB:FinishSetup()
                 bar:Hide()
             end
         end
-        if MainActionBarController then
-            MainActionBarController:UnregisterAllEvents()
-        end
+        -- Do NOT touch MainActionBarController or ActionBarButtonEventsFrame.
+        -- Stock bars are dead via reparent + Show hooks.
     end)
 
     -- Hook Show on stock bars so they can never re-appear regardless

@@ -1544,22 +1544,30 @@ initFrame:SetScript("OnEvent", function(self)
         PP.CreateBorder(border, bdrColor.r, bdrColor.g, bdrColor.b, 1, bdrSize)
         if bdrSize == 0 then border:Hide() end
 
-        -- Absorb bar (player only, uses shield.tga like the real addon)
+        -- Absorb bar (style-aware preview for player, target, focus)
         local absorbBar
-        if unitKey == "player" then
-            -- Use a StatusBar with reverse fill + shield texture, same as CreateAbsorbBar
+        if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
+            local absStyle = settings.showPlayerAbsorb
+            local PREV_ABS_TEX = {
+                striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                clean    = "Interface\\Buttons\\WHITE8X8",
+                blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+            }
+            local PREV_ABS_ALPHA = { striped = 0.8, clean = 0.3, blizzard = 0.8 }
+            local tex   = PREV_ABS_TEX[absStyle] or PREV_ABS_TEX.striped
+            local alpha = PREV_ABS_ALPHA[absStyle] or 0.8
             absorbBar = CreateFrame("StatusBar", nil, health)
-            absorbBar:SetStatusBarTexture("Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shield.tga")
-            absorbBar:SetStatusBarColor(1, 1, 1, 0.8)
+            absorbBar:SetStatusBarTexture(tex)
+            absorbBar:SetStatusBarColor(1, 1, 1, alpha)
             absorbBar:SetReverseFill(true)
             PP.Point(absorbBar, "TOPRIGHT", healthFill, "TOPRIGHT", 0, 0)
             PP.Point(absorbBar, "BOTTOMRIGHT", healthFill, "BOTTOMRIGHT", 0, 0)
             PP.Width(absorbBar, frameW)
             PP.Height(absorbBar, healthH)
             absorbBar:SetMinMaxValues(0, 1)
-            absorbBar:SetValue(0.14)  -- ~10% absorb relative to 70% health fill
+            absorbBar:SetValue(0.14)
             absorbBar:SetFrameLevel(health:GetFrameLevel() + 1)
-            if not settings.showPlayerAbsorb then absorbBar:Hide() end
+            if not absStyle or absStyle == "none" then absorbBar:Hide() end
         end
 
         -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
@@ -2299,9 +2307,18 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Absorb bar (player only)
+            -- Absorb bar (player only) -- update texture + alpha on style change
             if absorbBar then
-                if s.showPlayerAbsorb then
+                local absS = s.showPlayerAbsorb
+                if absS and absS ~= "none" then
+                    local _paTex = {
+                        striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                        clean    = "Interface\\Buttons\\WHITE8X8",
+                        blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+                    }
+                    local _paAlpha = { striped = 0.8, clean = (s.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
+                    absorbBar:SetStatusBarTexture(_paTex[absS] or _paTex.striped)
+                    absorbBar:SetStatusBarColor(1, 1, 1, _paAlpha[absS] or 0.8)
                     absorbBar:ClearAllPoints()
                     absorbBar:SetPoint("TOPRIGHT", healthFill, "TOPRIGHT", 0, 0)
                     absorbBar:SetPoint("BOTTOMRIGHT", healthFill, "BOTTOMRIGHT", 0, 0)
@@ -2859,7 +2876,8 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     local UNIT_SUPPORTS = {
         powerHeight          = { player=true, target=true, focus=true },
-        showPlayerAbsorb     = { player=true },
+        showPlayerAbsorb     = { player=true, target=true, focus=true },
+        absorbCleanAlpha     = { player=true, target=true, focus=true },
         showBuffs            = { player=true, target=true, focus=true },
         combatIndicatorStyle   = { player=true },
         combatIndicatorColor   = { player=true },
@@ -6345,8 +6363,8 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         sharedAddHeader, h = W:SectionHeader(parent, "ADDITIONAL SETTINGS", y); y = y - h
 
-        -- Row 1: Show Absorbs on Frame + Combat Indicator (player-only in single edit)
-        local _showAbsorbsCombat = selectedUnit == "player"
+        -- Row 1: Absorb Style + Combat Indicator
+        local _showAbsorbsCombat = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
         if _showAbsorbsCombat then
         local COMBAT_MEDIA_P = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
         local combatIndValues = {
@@ -6365,31 +6383,60 @@ initFrame:SetScript("OnEvent", function(self)
             end },
         }
         local combatIndOrder = { "none", "standard", "class" }
+        local absorbStyleValues = {
+            ["none"]="None", ["striped"]="Striped", ["clean"]="Clean (Flat)",
+            ["blizzard"]="Blizzard",
+        }
+        local absorbStyleOrder = { "none", "striped", "clean", "blizzard" }
         local sharedAddRow1
         sharedAddRow1, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Absorbs on Frame",
-              getValue=function() return SValSupported("showPlayerAbsorb", false) end,
-              setValue=function(v) SSetSupported("showPlayerAbsorb", v) end },
+            { type="dropdown", text="Absorb Style",
+              values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return SValSupported("showPlayerAbsorb", "none") end,
+              setValue=function(v) SSetSupported("showPlayerAbsorb", v); ReloadAndUpdate(); UpdatePreview() end },
             { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
               getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
               setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
         SApplySupport(sharedAddRow1._leftRegion, "showPlayerAbsorb")
         SApplySupport(sharedAddRow1._rightRegion, "combatIndicatorStyle")
+        -- Inline cog for Absorb Style: Clean Opacity slider
+        do
+            local rgn = sharedAddRow1._leftRegion
+            local _, absorbCogShow = EllesmereUI.BuildCogPopup({
+                title = "Absorb Settings",
+                rows = {
+                    { type = "slider", label = "Clean Opacity", min = 5, max = 100, step = 1,
+                      get = function() return SValSupported("absorbCleanAlpha", 30) end,
+                      set = function(v) SSetSupported("absorbCleanAlpha", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            local absorbCogBtn = CreateFrame("Button", nil, rgn)
+            absorbCogBtn:SetSize(26, 26)
+            absorbCogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = absorbCogBtn
+            absorbCogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            absorbCogBtn:SetAlpha(0.4)
+            local absorbCogTex = absorbCogBtn:CreateTexture(nil, "OVERLAY")
+            absorbCogTex:SetAllPoints(); absorbCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            absorbCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            absorbCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            absorbCogBtn:SetScript("OnClick", function(s) absorbCogShow(s) end)
+        end
         -- Sync icons: Show Absorbs (left) and Combat Indicator (right)
         do
             local rgn = sharedAddRow1._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Show Absorbs to all Frames",
+                tooltip = "Apply Absorb Style to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or false
+                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or false
+                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().showPlayerAbsorb or false) ~= v then return false end
+                        if (UNIT_DB_MAP[key]().showPlayerAbsorb or "none") ~= v then return false end
                     end
                     return true
                 end,
@@ -6399,7 +6446,7 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or false
+                        local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
                         for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,

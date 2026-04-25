@@ -1398,6 +1398,11 @@ local function NotifyElementMoved(key)
 end
 
 local function HookFrameSizeChanged(key)
+    -- Skip all hooks on chat frames: ChatFrame1 is docked inside
+    -- Blizzard's secure FCF_OpenTemporaryWindow chain, and any addon
+    -- code in OnSizeChanged/SetPoint hooks taints the execution context.
+    -- Chat handles its own position and size persistence.
+    if key and key:find("^ECHAT_") then return end
     local bar = GetBarFrame(key)
     if not bar then return end
     if not _sizeHookedFrames[bar] then
@@ -2343,6 +2348,12 @@ local function ApplySavedPositions()
     for _, key in ipairs(registeredOrder) do
         local elem = registeredElements[key]
         if elem then
+            -- Chat frames manage their own position and must not be touched
+            -- by the init loop: any hook or SetPoint on ChatFrame1 taints
+            -- FCF_OpenTemporaryWindow's secure chain.
+            if elem.noInitHook then
+                -- skip applyPosition, MigrateAndApplyPosition, HookFrameSizeChanged
+            elseif true then
             -- Let addon initialize/build (e.g. CDM's BuildAllCDMBars)
             -- Skip protected frames during combat to avoid ADDON_ACTION_BLOCKED
             if elem.applyPosition then
@@ -2371,7 +2382,8 @@ local function ApplySavedPositions()
                     end
                 end
             end
-        end
+        end -- elseif true
+        end -- if elem
         -- Install OnSizeChanged hook so future resizes auto-propagate
         HookFrameSizeChanged(key)
     end

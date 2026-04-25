@@ -692,8 +692,8 @@ local function SkinCharacterSheet()
         end
     end
 
-    local scale = EllesmereUIDB and EllesmereUIDB.themedCharacterSheetScale or 1
-    frame:SetScale(scale)
+    -- Scale fully owned by Blizzard (SetScale on secure panels taints
+    -- UIParentPanelManager execution context).
     frame:SetFrameStrata("HIGH")
 
     -- Frame size is entirely Blizzard's -- no SetWidth/SetHeight or OnUpdate
@@ -4271,112 +4271,9 @@ if EllesmereUI then
     initFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
         if CharacterFrame then
-            -- =============================================================
-            -- Drag-to-move: shift = save to DB, ctrl = session-only.
-            -- Mirrors the friends-list implementation exactly:
-            --   * HookScript (not SetScript) so we never replace Blizzard's
-            --     secure OnMouseDown/Up handlers and never taint the frame.
-            --   * SetMovable/StartMoving/StopMovingOrSizing are insecure-safe
-            --     APIs designed to work on secure frames.
-            --   * hooksecurefunc(frame, "SetPoint", ...) re-applies our saved
-            --     position synchronously whenever Blizzard's UIPanelLayout
-            --     (or any other system) repositions the frame -- this is what
-            --     prevents the "blink" of the frame appearing at Blizzard's
-            --     default spot before our position takes effect.
-            --   * A reentry guard (_ebsIgnoreSetPoint) breaks the recursion
-            --     caused by our own SetPoint inside the hook.
-            -- =============================================================
-            CharacterFrame:SetMovable(true)
-            CharacterFrame:SetClampedToScreen(true)
-            local _ebsDragging       = false
-            local _ebsTempPos        = nil
-            local _ebsIgnoreSetPoint = false
-
-            local function SaveCharacterFramePos()
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                local point, _, relPoint, x, y = CharacterFrame:GetPoint(1)
-                if point then
-                    EllesmereUIDB.characterFramePos = {
-                        point = point, relPoint = relPoint, x = x, y = y,
-                    }
-                end
-            end
-
-            -- Forward-declared; actual body assigned after _otherPanelActive
-            -- is defined below (so ApplyCharacterFramePos can bail when
-            -- another UIPanel is shifting us).
-            local _otherPanelActive
-            local function ApplyCharacterFramePos()
-                if InCombatLockdown() then return end
-                if _otherPanelActive and _otherPanelActive() then return end
-                local pos = _ebsTempPos
-                    or (EllesmereUIDB and EllesmereUIDB.characterFramePos)
-                if not (pos and pos.point) then return end
-                _ebsIgnoreSetPoint = true
-                CharacterFrame:ClearAllPoints()
-                CharacterFrame:SetPoint(
-                    pos.point, UIParent, pos.relPoint, pos.x, pos.y)
-                _ebsIgnoreSetPoint = false
-            end
-
-            CharacterFrame:HookScript("OnMouseDown", function(self, button)
-                if button ~= "LeftButton" then return end
-                if not IsShiftKeyDown() and not IsControlKeyDown() then return end
-                _ebsDragging = IsShiftKeyDown() and "save" or "temp"
-                self:StartMoving()
-            end)
-            CharacterFrame:HookScript("OnMouseUp", function(self, button)
-                if button ~= "LeftButton" or not _ebsDragging then return end
-                self:StopMovingOrSizing()
-                local point, _, relPoint, x, y = self:GetPoint(1)
-                if _ebsDragging == "save" then
-                    SaveCharacterFramePos()
-                elseif _ebsDragging == "temp" then
-                    _ebsTempPos = { point = point, relPoint = relPoint, x = x, y = y }
-                end
-                _ebsDragging = false
-            end)
-
-            CharacterFrame:HookScript("OnShow", function()
-                _ebsTempPos = _ebsTempPos  -- preserve across open (cleared on hide)
-                ApplyCharacterFramePos()
-                -- Blizzard's UIPanelLayout sets the default position AFTER
-                -- OnShow fires, clobbering our initial apply. Re-apply on
-                -- the next frame so our saved position wins on fresh opens.
-                -- Subsequent UIPanelLayout shifts (when another panel opens)
-                -- are not fought -- they only happen while the frame is
-                -- already shown, so this one-shot delay doesn't interfere.
-                C_Timer.After(0, ApplyCharacterFramePos)
-            end)
-            CharacterFrame:HookScript("OnHide", function()
-                _ebsTempPos = nil
-            end)
-
-            -- Re-apply saved position on SetPoint, but ONLY when
-            -- CharacterFrame is the sole active UIPanel. If another panel
-            -- is in the stack ("left" / "center" / "right"), UIPanelLayout
-            -- is actively shifting it -- let Blizzard's panel system win
-            -- so the frame behaves like a normal Blizzard window.
-            -- Body of the forward-declared upvalue so ApplyCharacterFramePos
-            -- can see it. Assigns, doesn't shadow.
-            _otherPanelActive = function()
-                local slots = { "doublewide", "fullscreen", "left", "center", "right" }
-                for _, slot in ipairs(slots) do
-                    local f = GetUIPanel and GetUIPanel(slot)
-                    if f and f ~= CharacterFrame then return true end
-                end
-                return false
-            end
-            hooksecurefunc(CharacterFrame, "SetPoint", function()
-                if _ebsIgnoreSetPoint then return end
-                if InCombatLockdown() then return end
-                if _otherPanelActive() then return end
-                ApplyCharacterFramePos()
-            end)
-
-            -- Apply once at login so the frame is already positioned if the
-            -- user opens it for the first time this session.
-            ApplyCharacterFramePos()
+            -- Positioning fully owned by Blizzard's UIPanelLayout system.
+            -- Custom drag-to-move was removed to eliminate taint in the
+            -- UIParentPanelManager execution context.
 
             -- Kick off skinning 1s after PLAYER_LOGIN (off the critical path
             -- so it doesn't add to the login CPU spike) instead of inside the

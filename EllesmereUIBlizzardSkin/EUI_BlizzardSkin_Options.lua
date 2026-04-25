@@ -104,7 +104,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:SectionHeader(parent, "GROUP FINDER QUEUE", y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local _eqolLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EnhanceQoL")
+        local queueRow
+        queueRow, h = W:DualRow(parent, y,
             { type="toggle", text="Reskin Queue Popup",
               tooltip="Reskins the LFG/dungeon queue accept popup with the EUI dark style and adds an accept countdown timer bar.",
               getValue=function()
@@ -139,6 +141,58 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Red "!" warning left of the toggle when EnhanceQoL is loaded
+        if _eqolLoaded and queueRow and queueRow._leftRegion then
+            local rgn = queueRow._leftRegion
+            local toggle = rgn._control
+            if toggle then
+                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+                local warnBtn = CreateFrame("Button", nil, rgn)
+                warnBtn:SetSize(28, 28)
+                warnBtn:SetPoint("RIGHT", toggle, "LEFT", -4, 0)
+                warnBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local warnFS = warnBtn:CreateFontString(nil, "OVERLAY")
+                warnFS:SetFont(fontPath, 28, "")
+                warnFS:SetTextColor(1, 0.3, 0.3, 1)
+                warnFS:SetText("!")
+                warnFS:SetPoint("CENTER")
+                warnBtn:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, "Enhance QoL's Mover may conflict with this reskin. The reskin is auto-disabled when its mover is active.")
+                end)
+                warnBtn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            end
+        end
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        _, h = W:SectionHeader(parent, "GAME PAUSE MENU", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reskin Pause Menu",
+              tooltip="Reskins the ESC / Game Menu with the EUI dark style, matching fonts, and accent-colored title.",
+              getValue=function()
+                  if not EllesmereUIDB then return true end
+                  if EllesmereUIDB.reskinGameMenu == nil then
+                      EllesmereUIDB.reskinGameMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
+                  end
+                  return EllesmereUIDB.reskinGameMenu
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.reskinGameMenu = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Changing the pause menu reskin requires a UI reload.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
         return math.abs(y)
     end
 
@@ -153,23 +207,6 @@ initFrame:SetScript("OnEvent", function(self)
 
         parent._showRowDivider = true
 
-        -- Drag instructions (centered, above settings).
-        -- Wrapped in a Frame so the search system collects it as an orphan
-        -- and auto-hides it during search.
-        do
-            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-            local infoFrame = CreateFrame("Frame", nil, parent)
-            infoFrame:SetSize(parent:GetWidth() or 400, 30)
-            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
-            infoFrame._isSpacer = true
-            local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
-            infoLabel:SetFont(fontPath, 15, "")
-            infoLabel:SetTextColor(1, 1, 1, 0.75)
-            infoLabel:SetPoint("CENTER")
-            infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Shift+Drag to reposition  |  Ctrl+Drag to temporarily move (resets on close)")
-            y = y - 40
-        end
 
         local function themedOff()
             return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
@@ -323,35 +360,6 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        do
-            local leftRgn = enableRow._leftRegion
-            local _, scaleCogShow = EllesmereUI.BuildCogPopup({
-                title = "Character Sheet Settings",
-                rows = {
-                    { type="slider", label="Scale", min=0.5, max=1.5, step=0.05,
-                      get=function()
-                          return EllesmereUIDB and EllesmereUIDB.themedCharacterSheetScale or 1
-                      end,
-                      set=function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.themedCharacterSheetScale = v
-                          if CharacterFrame then CharacterFrame:SetScale(v) end
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, leftRgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = cogBtn
-            cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) scaleCogShow(self) end)
-        end
 
         AttachDisabledOverlay(enableRow._rightRegion)
 
@@ -565,57 +573,6 @@ initFrame:SetScript("OnEvent", function(self)
                 return not (EllesmereUIDB and EllesmereUIDB.themedInspectSheet)
             end
 
-            local leftRgn = themedInspectSheetRow._leftRegion
-            local _, themedInspectCogShow = EllesmereUI.BuildCogPopup({
-                title = "Inspect Sheet Settings",
-                rows = {
-                    { type="slider", label="Scale",
-                      min=0.5, max=1.5, step=0.05,
-                      get=function()
-                          return EllesmereUIDB and EllesmereUIDB.themedInspectSheetScale or 1
-                      end,
-                      set=function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.themedInspectSheetScale = v
-                          if InspectFrame then
-                              InspectFrame:SetScale(v)
-                          end
-                      end },
-                },
-            })
-
-            local themedInspectCogBtn = CreateFrame("Button", nil, leftRgn)
-            themedInspectCogBtn:SetSize(26, 26)
-            themedInspectCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = themedInspectCogBtn
-            themedInspectCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            themedInspectCogBtn:SetAlpha(themedOff() and 0.15 or 0.4)
-            local themedInspectCogTex = themedInspectCogBtn:CreateTexture(nil, "OVERLAY")
-            themedInspectCogTex:SetAllPoints()
-            themedInspectCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            themedInspectCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            themedInspectCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(themedOff() and 0.15 or 0.4) end)
-            themedInspectCogBtn:SetScript("OnClick", function(self) themedInspectCogShow(self) end)
-
-            local themedInspectCogBlock = CreateFrame("Frame", nil, themedInspectCogBtn)
-            themedInspectCogBlock:SetAllPoints()
-            themedInspectCogBlock:SetFrameLevel(themedInspectCogBtn:GetFrameLevel() + 10)
-            themedInspectCogBlock:EnableMouse(true)
-            themedInspectCogBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(themedInspectCogBtn, EllesmereUI.DisabledTooltip("Enable Inspect Sheet"))
-            end)
-            themedInspectCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            EllesmereUI.RegisterWidgetRefresh(function()
-                if themedOff() then
-                    themedInspectCogBtn:SetAlpha(0.15)
-                    themedInspectCogBlock:Show()
-                else
-                    themedInspectCogBtn:SetAlpha(0.4)
-                    themedInspectCogBlock:Hide()
-                end
-            end)
-            if themedOff() then themedInspectCogBtn:SetAlpha(0.15) themedInspectCogBlock:Show() else themedInspectCogBtn:SetAlpha(0.4) themedInspectCogBlock:Hide() end
         end
 
         local itemLevelInspectRow

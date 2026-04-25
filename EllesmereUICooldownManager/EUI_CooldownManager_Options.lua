@@ -9118,9 +9118,16 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Blizzard Override: Hide Rotation Helper
+        -- Show Non-On Use Trinkets | Hide Rotation Helper
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Blizzard Override: Hide Rotation Helper",
+            { type="toggle", text="Show Non-On Use Trinkets",
+              tooltip = "Show equipped trinkets even if they don't have an on-use effect.",
+              getValue=function() return BD().showPassiveTrinkets == true end,
+              setValue=function(v)
+                  BD().showPassiveTrinkets = v
+                  if ns.FullCDMRebuild then ns.FullCDMRebuild("trinket_toggle") end
+              end },
+            { type="toggle", text="Hide Rotation Helper",
               tooltip = "Force-hide Blizzard's Assisted Combat Highlight (rotation helper glow) on all CDM bars, even if enabled in Blizzard's Combat settings.",
               getValue=function()
                   local p = DB(); return p and p.cdmBars and p.cdmBars.hideRotationHelper == true
@@ -9131,8 +9138,7 @@ initFrame:SetScript("OnEvent", function(self)
                       p.cdmBars.hideRotationHelper = v
                       if ns.UpdateRotationHighlights then ns.UpdateRotationHighlights() end
                   end
-              end },
-            { type="label", text="" });  y = y - h
+              end });  y = y - h
 
         end -- custom_buff extras guard
 

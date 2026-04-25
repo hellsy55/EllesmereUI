@@ -1570,6 +1570,55 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "np_border_ellesmere_to_simple_v3",
+    scope       = "profile",
+    description = "No-op (superseded by np_border_v5).",
+    body = function() end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "np_border_v5",
+    scope       = "profile",
+    description = "Migrate borderStyle/simpleBorderSize to showBorder/borderSize. 'none' -> showBorder=false, everything else -> showBorder=true, borderSize=1.",
+    body = function(ctx)
+        local np = ctx.profile.addons and ctx.profile.addons.EllesmereUINameplates
+        if not np then return end
+        -- Migrate from old keys to new keys
+        local oldStyle = np.borderStyle
+        if oldStyle == "none" then
+            np.showBorder = false
+        else
+            np.showBorder = true
+        end
+        np.borderSize = 1
+        -- Clean up old keys
+        np.borderStyle = nil
+        np.simpleBorderSize = nil
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "uf_absorb_style_dropdown_v1",
+    scope       = "profile",
+    description = "Migrate showPlayerAbsorb from boolean toggle to style string dropdown. true -> 'striped', false/nil -> 'none'.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if not uf then return end
+        for _, unitKey in ipairs({ "player", "target", "playerTarget", "focus" }) do
+            local unitCfg = uf[unitKey]
+            if unitCfg then
+                local v = unitCfg.showPlayerAbsorb
+                if v == true then
+                    unitCfg.showPlayerAbsorb = "striped"
+                elseif v == false or v == nil then
+                    unitCfg.showPlayerAbsorb = "none"
+                end
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

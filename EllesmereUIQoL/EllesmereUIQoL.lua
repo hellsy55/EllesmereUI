@@ -547,18 +547,8 @@ qolFrame:SetScript("OnEvent", function(self)
 
         -- Auto sell junk
         if EllesmereUIDB.autoSellJunk ~= false then
-            local soldCount = 0
-            for bag = 0, 4 do
-                for slot = 1, C_Container.GetContainerNumSlots(bag) do
-                    local info = C_Container.GetContainerItemInfo(bag, slot)
-                    if info and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
-                        C_Container.UseContainerItem(bag, slot)
-                        soldCount = soldCount + 1
-                    end
-                end
-            end
-            if soldCount > 0 then
-                print("|cff0CD29DEllesmereUI:|r Sold " .. soldCount .. " junk item" .. (soldCount > 1 and "s" or "") .. ".")
+            if C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
+                C_MerchantFrame.SellAllJunkItems()
             end
         end
 
@@ -585,7 +575,7 @@ qolFrame:SetScript("OnEvent", function(self)
                     local gold = floor(cost / 10000)
                     local silver = floor((cost % 10000) / 100)
                     local src = useGuild and " (guild bank)" or ""
-                    print("|cff0CD29DEllesmereUI:|r Repaired all items for " .. gold .. "g " .. silver .. "s." .. src)
+                    EllesmereUI.Print("|cff0CD29DEllesmereUI:|r Repaired all items for " .. gold .. "g " .. silver .. "s." .. src)
                 end
             end
         end

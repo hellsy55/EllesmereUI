@@ -66,7 +66,39 @@ local HP_BAR_SLOTS = {
     { key = "textSlotCenter", anchor = "CENTER", point = "CENTER", xOff = 0 },
 }
 
+ns.NP_ABSORB_STYLE_TEX = {
+    blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard-nameplates.png",
+    striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+    clean    = "Interface\\Buttons\\WHITE8X8",
+}
+ns.NP_ABSORB_STYLE_ALPHA = {
+    blizzard = 0.8,
+    striped  = 0.8,
+    clean    = 0.3,
+}
+
+-- Overflow for _displayPresetKeys: defined outside the main function
+-- scope to stay under Lua 5.1's 200-local limit.
+function ns._appendDisplayPresetKeys(t)
+    for _, k in ipairs({
+        "topSlotSize", "topSlotXOffset", "topSlotYOffset",
+        "rightSlotSize", "rightSlotXOffset", "rightSlotYOffset",
+        "leftSlotSize", "leftSlotXOffset", "leftSlotYOffset",
+        "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset", "toprightSlotGrowth",
+        "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset", "topleftSlotGrowth",
+        "textSlotTopSize", "textSlotTopXOffset", "textSlotTopYOffset",
+        "textSlotRightSize", "textSlotRightXOffset", "textSlotRightYOffset",
+        "textSlotLeftSize", "textSlotLeftXOffset", "textSlotLeftYOffset",
+        "textSlotCenterSize", "textSlotCenterXOffset", "textSlotCenterYOffset",
+        "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
+        "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro",
+        "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
+    }) do t[#t + 1] = k end
+end
+
 local defaults = {
+    absorbStyle = "blizzard",
+    absorbCleanAlpha = 30,
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
     tapped  = { r = 0.50, g = 0.50, b = 0.50 },
@@ -75,6 +107,11 @@ local defaults = {
     focusOverlayTexture = "striped-v2",
     focusOverlayAlpha = 0.40,
     focusOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
+    target = { r = 0.459, g = 0.890, b = 0.580 },
+    targetColorEnabled = false,
+    targetOverlayTexture = "none",
+    targetOverlayAlpha = 0.40,
+    targetOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
     caster  = { r = 0.231, g = 0.510, b = 0.965 },
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
@@ -173,9 +210,9 @@ local defaults = {
     castTimerOffsetY = 0,
     targetScale = 100,
     showAllDebuffs = false,
-    borderStyle = "ellesmere",
+    showBorder = true,
+    borderSize = 1,
     borderColor = { r = 0.067, g = 0.067, b = 0.067 },
-    simpleBorderSize = 6,
     pandemicGlow = false,
     pandemicGlowStyle = 1,
     pandemicGlowColor = { r = 1.0, g = 0.800, b = 0.329 },
@@ -278,6 +315,33 @@ local function ApplyHealthBarTexture(plate)
     health:SetStatusBarTexture(path)
 end
 ns.ApplyHealthBarTexture = ApplyHealthBarTexture
+
+function ns.ApplyAbsorbStyle(plate)
+    local style = (p and p.absorbStyle) or defaults.absorbStyle
+    local tex   = ns.NP_ABSORB_STYLE_TEX[style] or ns.NP_ABSORB_STYLE_TEX.blizzard
+    local alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
+    if style == "clean" then
+        alpha = ((p and p.absorbCleanAlpha) or defaults.absorbCleanAlpha or 30) / 100
+    end
+    local mask = plate._absorbMask
+    for _, bar in ipairs({ plate.absorb, plate.absorbForward, plate.absorbOverflow }) do
+        if bar then
+            bar:SetStatusBarTexture(tex)
+            bar:SetStatusBarColor(1, 1, 1, alpha)
+            local fill = bar:GetStatusBarTexture()
+            if fill then
+                fill:SetDrawLayer("ARTWORK", 1)
+                if mask then fill:AddMaskTexture(mask) end
+            end
+        end
+    end
+end
+
+function ns.ApplyAbsorbStyleAll()
+    for _, plate in pairs(ns.plates) do
+        ns.ApplyAbsorbStyle(plate)
+    end
+end
 
 local HOVER_ALPHA = 0.3
 local function GetNameplateYOffset()
@@ -689,10 +753,12 @@ local function GetClassPowerEmptyColor()
     return c
 end
 ns.GetClassPowerEmptyColor = GetClassPowerEmptyColor
-local function GetBorderStyle()
-    return (p and p.borderStyle) or defaults.borderStyle
+local function IsBorderEnabled()
+    local v = p and p.showBorder
+    if v == nil then return defaults.showBorder end
+    return v
 end
-ns.GetBorderStyle = GetBorderStyle
+ns.IsBorderEnabled = IsBorderEnabled
 local function GetBorderColor()
     local c = (p and p.borderColor) or defaults.borderColor
     return c.r, c.g, c.b
@@ -1269,10 +1335,42 @@ local function EnsureFocusOverlay(plate)
     plate.focusClipBg:Hide()
 end
 
+ns.EnsureTargetOverlay = function(plate)
+    if plate.targetClipFill then return end
+    local overlayAlpha = (p and p.targetOverlayAlpha) or defaults.targetOverlayAlpha
+    local overlayColor = (p and p.targetOverlayColor) or defaults.targetOverlayColor
+    local STRIPE_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\striped-v2.png"
+    local fillTex = plate.health:GetStatusBarTexture()
+    plate.targetClipFill = CreateFrame("Frame", nil, plate.health)
+    plate.targetClipFill:SetClipsChildren(true)
+    plate.targetClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
+    plate.targetClipFill:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 1)
+    plate.targetClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.targetOverlayFill = plate.targetClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
+    plate.targetOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.targetOverlayFill:SetSize(200, 24)
+    plate.targetOverlayFill:SetTexture(STRIPE_TEX)
+    plate.targetOverlayFill:SetAlpha(overlayAlpha)
+    plate.targetOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.targetClipFill:Hide()
+    plate.targetClipBg = CreateFrame("Frame", nil, plate.health)
+    plate.targetClipBg:SetClipsChildren(true)
+    plate.targetClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
+    plate.targetClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 1)
+    plate.targetClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.targetOverlayBg = plate.targetClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
+    plate.targetOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.targetOverlayBg:SetSize(200, 24)
+    plate.targetOverlayBg:SetTexture(STRIPE_TEX)
+    plate.targetOverlayBg:SetAlpha(overlayAlpha * 0.3)
+    plate.targetOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.targetClipBg:Hide()
+end
+
 local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(plate)
     plate:SetFlattensRenderLayers(true)
     plate.health = CreateFrame("StatusBar", nil, plate)
-    plate.health:SetFrameLevel(10)  
+    plate.health:SetFrameLevel(10)
     plate.health:SetPoint("CENTER", plate, "CENTER", 0, GetNameplateYOffset())
     plate.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     plate.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
@@ -1287,23 +1385,26 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.hashLine:SetPoint("TOP", plate.health, "TOP", 0, 0)
     plate.hashLine:SetPoint("BOTTOM", plate.health, "BOTTOM", 0, 0)
     plate.hashLine:Hide()
-    plate.absorbClip = CreateFrame("Frame", nil, plate.health)
-    plate.absorbClip:SetAllPoints(plate.health)
-    plate.absorbClip:SetClipsChildren(true)
-    plate.absorb = CreateFrame("StatusBar", nil, plate.absorbClip)
-    plate.absorb:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
-    plate.absorb:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
-    plate.absorb:SetStatusBarColor(1, 1, 1, 0.8)
+    -- Mask texture: constrains absorb rendering to exact health bar bounds
+    -- at the GPU level. Prevents subpixel bleed where absorb textures
+    -- extend 1px outside the health bar at certain nameplate positions.
+    local absorbMask = plate.health:CreateMaskTexture()
+    absorbMask:SetAllPoints(plate.health)
+    absorbMask:SetTexture("Interface\\Buttons\\WHITE8X8")
+    plate._absorbMask = absorbMask
+
+    plate.absorb = CreateFrame("StatusBar", nil, plate.health)
+    plate.absorb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    plate.absorb:GetStatusBarTexture():AddMaskTexture(absorbMask)
     plate.absorb:SetReverseFill(true)
     plate.absorb:SetPoint("TOPRIGHT", plate.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
     plate.absorb:SetPoint("BOTTOMRIGHT", plate.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
     plate.absorb:SetWidth(GetHealthBarWidth())
     plate.absorb:SetHeight(GetHealthBarHeight())
     plate.absorb:SetFrameLevel(plate.health:GetFrameLevel())
-    plate.absorbForward = CreateFrame("StatusBar", nil, plate.absorbClip)
-    plate.absorbForward:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
-    plate.absorbForward:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
-    plate.absorbForward:SetStatusBarColor(1, 1, 1, 0.8)
+    plate.absorbForward = CreateFrame("StatusBar", nil, plate.health)
+    plate.absorbForward:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    plate.absorbForward:GetStatusBarTexture():AddMaskTexture(absorbMask)
     plate.absorbForward:SetReverseFill(false)
     plate.absorbForward:SetPoint("TOPLEFT", plate.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
     plate.absorbForward:SetPoint("BOTTOMLEFT", plate.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
@@ -1312,9 +1413,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.absorbForward:SetFrameLevel(plate.health:GetFrameLevel())
     plate.absorbForward:Hide()
     plate.absorbOverflow = CreateFrame("StatusBar", nil, plate.health)
-    plate.absorbOverflow:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
-    plate.absorbOverflow:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
-    plate.absorbOverflow:SetStatusBarColor(1, 1, 1, 0.8)
+    plate.absorbOverflow:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     plate.absorbOverflow:SetReverseFill(false)
     plate.absorbOverflow:SetPoint("TOPLEFT", plate.health, "TOPRIGHT", 0, 0)
     plate.absorbOverflow:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMRIGHT", 0, 0)
@@ -1340,70 +1439,32 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
             PP.CreateBorder(parent, 0, 0, 0, 1, 1, "OVERLAY", 5)
         end
     end
-    local BORDER_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\border-colorless.png"
-    local BORDER_TEX_SIMPLE = "Interface\\AddOns\\EllesmereUINameplates\\Media\\border-simple.png"
-    local BORDER_CORNER = 6
-
-    local function CreateBorderSet(parent, tex, color)
-        local f = CreateFrame("Frame", nil, parent)
-        f:SetFrameLevel(parent:GetFrameLevel() + 5)
-        f:SetAllPoints()
-        f._texs = {}
-        local function Mk()
-            local t = f:CreateTexture(nil, "OVERLAY", nil, 7)
-            t:SetTexture(tex)
-            t:SetVertexColor(color.r, color.g, color.b)
-            f._texs[#f._texs + 1] = t
-            return t
-        end
-        local tl = Mk(); tl:SetSize(BORDER_CORNER, BORDER_CORNER); tl:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0); tl:SetTexCoord(0, 0.5, 0, 0.5)
-        local tr = Mk(); tr:SetSize(BORDER_CORNER, BORDER_CORNER); tr:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0); tr:SetTexCoord(0.5, 1, 0, 0.5)
-        local bl = Mk(); bl:SetSize(BORDER_CORNER, BORDER_CORNER); bl:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0); bl:SetTexCoord(0, 0.5, 0.5, 1)
-        local br = Mk(); br:SetSize(BORDER_CORNER, BORDER_CORNER); br:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0); br:SetTexCoord(0.5, 1, 0.5, 1)
-        local top = Mk(); top:SetHeight(BORDER_CORNER); top:SetPoint("TOPLEFT", tl, "TOPRIGHT", 0, 0); top:SetPoint("TOPRIGHT", tr, "TOPLEFT", 0, 0); top:SetTexCoord(0.5, 0.5, 0, 0.5)
-        local bot = Mk(); bot:SetHeight(BORDER_CORNER); bot:SetPoint("BOTTOMLEFT", bl, "BOTTOMRIGHT", 0, 0); bot:SetPoint("BOTTOMRIGHT", br, "BOTTOMLEFT", 0, 0); bot:SetTexCoord(0.5, 0.5, 0.5, 1)
-        local lft = Mk(); lft:SetWidth(BORDER_CORNER); lft:SetPoint("TOPLEFT", tl, "BOTTOMLEFT", 0, 0); lft:SetPoint("BOTTOMLEFT", bl, "TOPLEFT", 0, 0); lft:SetTexCoord(0, 0.5, 0.5, 0.5)
-        local rgt = Mk(); rgt:SetWidth(BORDER_CORNER); rgt:SetPoint("TOPRIGHT", tr, "BOTTOMRIGHT", 0, 0); rgt:SetPoint("BOTTOMRIGHT", br, "TOPRIGHT", 0, 0); rgt:SetTexCoord(0.5, 1, 0.5, 0.5)
-        f._corners = { tl, tr, bl, br }
-        f._hEdges  = { top, bot }
-        f._vEdges  = { lft, rgt }
-        function f:ApplySize(sz)
-            for _, c in ipairs(self._corners) do c:SetSize(sz, sz) end
-            for _, e in ipairs(self._hEdges)  do e:SetHeight(sz) end
-            for _, e in ipairs(self._vEdges)  do e:SetWidth(sz) end
-        end
-        return f
-    end
-
+    -- Border: single pixel-perfect PP.CreateBorder (BackdropTemplate).
+    -- Two settings: showBorder (bool) and borderSize (physical pixels).
+    local PP = EllesmereUI and EllesmereUI.PP
     local bc = { r = 0, g = 0, b = 0 }
     bc.r, bc.g, bc.b = GetBorderColor()
-    plate.borderFrame = CreateBorderSet(plate.health, BORDER_TEX, bc)
-    plate._simpleBorderFrame = CreateBorderSet(plate.health, BORDER_TEX_SIMPLE, bc)
+    if PP and PP.CreateBorder then
+        local sz = (p and p.borderSize) or defaults.borderSize
+        PP.CreateBorder(plate.health, bc.r, bc.g, bc.b, 1, sz, "OVERLAY", 7)
+        if not IsBorderEnabled() then PP.HideBorder(plate.health) end
+    end
 
-    function plate:ApplyBorderStyle()
-        local style = GetBorderStyle()
-        if style == "none" then
-            plate.borderFrame:Hide()
-            plate._simpleBorderFrame:Hide()
-        elseif style == "simple" then
-            plate.borderFrame:Hide()
-            plate._simpleBorderFrame:Show()
+    function plate:ApplyBorder()
+        if not PP then return end
+        if IsBorderEnabled() then
+            local sz = (p and p.borderSize) or defaults.borderSize
+            PP.SetBorderSize(plate.health, sz)
+            PP.ShowBorder(plate.health)
         else
-            plate.borderFrame:Show()
-            plate._simpleBorderFrame:Hide()
+            PP.HideBorder(plate.health)
         end
     end
     function plate:ApplyBorderColor()
+        if not PP then return end
         local cr, cg, cb = GetBorderColor()
-        for _, tex in ipairs(plate.borderFrame._texs) do tex:SetVertexColor(cr, cg, cb) end
-        for _, tex in ipairs(plate._simpleBorderFrame._texs) do tex:SetVertexColor(cr, cg, cb) end
+        PP.SetBorderColor(plate.health, cr, cg, cb, 1)
     end
-    function plate:ApplySimpleBorderSize()
-        local sz = (p and p.simpleBorderSize) or defaults.simpleBorderSize
-        plate._simpleBorderFrame:ApplySize(sz)
-    end
-    plate:ApplyBorderStyle()
-    plate:ApplySimpleBorderSize()
     -- Target glow, target arrows, and focus overlay are lazy-created on
     -- demand (EnsureGlow / EnsureArrows / EnsureFocusOverlay) since only
     -- 1 plate at a time ever shows them. This saves ~14 objects per plate.
@@ -1775,25 +1836,20 @@ end
 -- so the overlay bar can apply the same interrupt-ready tint as the on-plate
 -- cast bar without duplicating the logic.
 ns.ComputeCastBarTint = ComputeCastBarTint
-function ns.RefreshBorderStyle()
+function ns.RefreshBorder()
+    -- Bump appearance gen so pooled/off-screen plates pick up the
+    -- change on their next SetUnit (cache-hit re-spawns check this).
+    ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
     for _, plate in pairs(ns.plates) do
-        if plate.ApplyBorderStyle then
-            plate:ApplyBorderStyle()
-        end
+        if plate.ApplyBorder then plate:ApplyBorder() end
     end
 end
+ns.RefreshBorderStyle = ns.RefreshBorder
+ns.RefreshSimpleBorderSize = ns.RefreshBorder
 function ns.RefreshBorderColor()
+    ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
     for _, plate in pairs(ns.plates) do
-        if plate.ApplyBorderColor then
-            plate:ApplyBorderColor()
-        end
-    end
-end
-function ns.RefreshSimpleBorderSize()
-    for _, plate in pairs(ns.plates) do
-        if plate.ApplySimpleBorderSize then
-            plate:ApplySimpleBorderSize()
-        end
+        if plate.ApplyBorderColor then plate:ApplyBorderColor() end
     end
 end
 function ns.RefreshNameplateYOffset()
@@ -2863,7 +2919,16 @@ local function GetReactionColor(unit)
             end
         end
     end
-    -- 4. Focus color (if enabled)
+    -- 4. Target color (if enabled)
+    local targetC = _C("target")
+    if targetC and UnitIsUnit(unit, "target") then
+        local tEnabled = defaults.targetColorEnabled
+        if db.targetColorEnabled ~= nil then tEnabled = db.targetColorEnabled end
+        if tEnabled then
+            return targetC.r, targetC.g, targetC.b
+        end
+    end
+    -- 5. Focus color (if enabled)
     local focusC = _C("focus")
     if focusC and UnitIsUnit(unit, "focus") then
         local enabled = defaults.focusColorEnabled
@@ -3317,6 +3382,9 @@ function NameplateFrame:ApplyAppearance()
         self.absorbOverflow:SetHeight(GetHealthBarHeight())
     end
     ApplyHealthBarTexture(self)
+    ns.ApplyAbsorbStyle(self)
+    self:ApplyBorder()
+    self:ApplyBorderColor()
 end
 
 function NameplateFrame:SetUnit(unit, nameplate)
@@ -3817,6 +3885,26 @@ function NameplateFrame:UpdateHealthColor()
         self.focusClipFill:Hide()
         self.focusClipBg:Hide()
     end
+    -- Target overlay: identical to focus overlay but for current target
+    local targetTex = db2.targetOverlayTexture or defaults.targetOverlayTexture
+    if targetTex ~= "none" and UnitIsUnit(unit, "target") then
+        ns.EnsureTargetOverlay(self)
+        local MEDIA = "Interface\\AddOns\\EllesmereUINameplates\\Media\\"
+        local texPath = MEDIA .. targetTex .. ".png"
+        local overlayAlpha = db2.targetOverlayAlpha or defaults.targetOverlayAlpha
+        local oc = db2.targetOverlayColor or defaults.targetOverlayColor
+        self.targetOverlayFill:SetTexture(texPath)
+        self.targetOverlayFill:SetAlpha(overlayAlpha)
+        self.targetOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
+        self.targetClipFill:Show()
+        self.targetOverlayBg:SetTexture(texPath)
+        self.targetOverlayBg:SetAlpha(overlayAlpha * 0.3)
+        self.targetOverlayBg:SetVertexColor(oc.r, oc.g, oc.b)
+        self.targetClipBg:Show()
+    elseif self.targetClipFill then
+        self.targetClipFill:Hide()
+        self.targetClipBg:Hide()
+    end
 end
 function NameplateFrame:UpdateHealth()
     self:UpdateHealthValues()
@@ -4014,8 +4102,7 @@ function NameplateFrame:ApplyTarget()
     end
     -- Vibrant: override health bar border to white on selected target
     if isTarget and style == "vibrant" then
-        for _, tex in ipairs(self.borderFrame._texs) do tex:SetVertexColor(1, 1, 1) end
-        for _, tex in ipairs(self._simpleBorderFrame._texs) do tex:SetVertexColor(1, 1, 1) end
+        if PP then PP.SetBorderColor(self.health, 1, 1, 1, 1) end
     else
         self:ApplyBorderColor()
     end
@@ -4028,6 +4115,7 @@ function NameplateFrame:ApplyTarget()
             PP.Size(self.rightArrow, aw, ah)
             self.leftArrow:Show()
             self.rightArrow:Show()
+            PositionArrowsOutsideAuras(self)
         elseif self.leftArrow then
             self.leftArrow:Hide()
             self.rightArrow:Hide()
@@ -5188,6 +5276,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
     elseif event == "PLAYER_TARGET_CHANGED" then
         for _, plate in pairs(ns.plates) do
             plate:ApplyTarget()
+            plate:UpdateHealthColor()
         end
     elseif event == "PLAYER_FOCUS_CHANGED" then
         local focusPct = GetFocusCastHeight()
@@ -5318,9 +5407,11 @@ do
         p[K_SNAP] = nil
     end
 
-    -- Store preset keys so the login handler can use them (set once, never changes)
+    -- Store preset keys so the login handler can use them (set once, never changes).
+    -- Split into two tables and concatenated to stay under Lua 5.1's
+    -- per-function constant limit.
     ns._displayPresetKeys = {
-        "borderStyle", "borderColor", "targetGlowStyle", "showTargetArrows",
+        "showBorder", "borderSize", "borderColor", "targetGlowStyle", "showTargetArrows",
         "showClassPower", "classPowerPos", "classPowerYOffset", "classPowerXOffset", "classPowerScale",
         "classPowerClassColors", "classPowerCustomColor", "classPowerGap",
         "textSlotTop", "textSlotRight", "textSlotLeft", "textSlotCenter",
@@ -5334,27 +5425,9 @@ do
         "auraDurationTextSize", "auraDurationTextColor",
         "auraStackTextSize", "auraStackTextColor",
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
-        "raidMarkerPos",
-        "classificationSlot",
-        -- Slot-based size + XY offsets
-        "topSlotSize", "topSlotXOffset", "topSlotYOffset",
-        "rightSlotSize", "rightSlotXOffset", "rightSlotYOffset",
-        "leftSlotSize", "leftSlotXOffset", "leftSlotYOffset",
-        "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset", "toprightSlotGrowth",
-        "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset", "topleftSlotGrowth",
-        -- Text slot size + XY offsets
-        "textSlotTopSize", "textSlotTopXOffset", "textSlotTopYOffset",
-        "textSlotRightSize", "textSlotRightXOffset", "textSlotRightYOffset",
-        "textSlotLeftSize", "textSlotLeftXOffset", "textSlotLeftYOffset",
-        "textSlotCenterSize", "textSlotCenterXOffset", "textSlotCenterYOffset",
-        -- Text slot color keys
-        "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
-        -- Threat / aggro color settings
-        "tankHasAggroEnabled", "tankHasAggro",
-        "classicTankAggro",
-        "dpsHasAggro", "dpsNearAggro",
-        "offTankAggroEnabled", "offTankAggro",
+        "raidMarkerPos", "classificationSlot",
     }
+    ns._appendDisplayPresetKeys(ns._displayPresetKeys)
 
     -- Also handle spec changes that happen before the UI is ever opened
     local specLoginFrame = CreateFrame("Frame")

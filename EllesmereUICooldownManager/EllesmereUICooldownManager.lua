@@ -332,6 +332,7 @@ local CDM_ITEM_PRESETS = {
         itemID   = 5512,
         spellID  = 6262,
         altItemIDs = { 224464 },
+        combatLockout = true,
     },
     {
         key      = "demonic_healthstone",
@@ -339,6 +340,7 @@ local CDM_ITEM_PRESETS = {
         itemID   = 224464,
         spellID  = 452930,
         altItemIDs = { 5512 },
+        combatLockout = true,
     },
 }
 ns.CDM_ITEM_PRESETS = CDM_ITEM_PRESETS
@@ -2488,7 +2490,8 @@ LayoutCDMBar = function(barKey)
                     local slot = -sid
                     local tf = ns._trinketFrames and ns._trinketFrames[slot]
                     local hasItem = GetInventoryItemID("player", slot) ~= nil
-                    if hasItem and tf and tf._trinketIsOnUse then visibleAssigned = visibleAssigned + 1 end
+                    local showPassive = barData and barData.showPassiveTrinkets
+                    if hasItem and tf and (tf._trinketIsOnUse or showPassive) then visibleAssigned = visibleAssigned + 1 end
                 elseif sid and sid <= -100 then
                     -- Item preset: always counted (frame exists if icon resolved)
                     visibleAssigned = visibleAssigned + 1

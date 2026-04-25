@@ -388,7 +388,9 @@ local function RestoreFlyoutButtons()
     wipe(flyoutSavedParents)
 end
 
-local function ShowFlyoutPanel()
+local _flyoutBuilt = false
+
+local function EnsureFlyoutPanel()
     if not flyoutPanel then
         flyoutPanel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
         flyoutPanel:SetFrameStrata("DIALOG")
@@ -403,14 +405,55 @@ local function ShowFlyoutPanel()
         flyoutPanel:SetClampedToScreen(true)
         flyoutOwnedFrames[flyoutPanel] = true
     end
+end
+
+-- Build the flyout contents once. Buttons are reparented into the grid
+-- and stay there permanently. Only rebuilds when the button list changes
+-- (new addon loaded, button ungrouped, etc).
+local function BuildFlyoutContents()
+    EnsureFlyoutPanel()
     LayoutFlyoutButtons()
+    _flyoutBuilt = true
+end
+
+-- Force a rebuild on next show (called when button list changes)
+local function InvalidateFlyout()
+    _flyoutBuilt = false
+end
+
+-- Profile-swap refresh: re-show buttons in the flyout and invalidate
+-- so the next open rebuilds with new settings. Also re-asserts alpha
+-- on buttons that may have been hidden by re-initialization.
+_G._EMIN_RefreshFlyout = function()
+    InvalidateFlyout()
+    if flyoutPanel and flyoutPanel:IsShown() then
+        BuildFlyoutContents()
+    end
+    -- Re-assert alpha on buttons in the flyout (profile swap may have
+    -- re-hidden them via HideMinimapChild during re-init)
+    for _, btn in ipairs(cachedAddonButtons) do
+        if btn:GetParent() == flyoutPanel then
+            btn:SetAlpha(1)
+            btn:Show()
+        end
+    end
+end
+
+local function ShowFlyoutPanel()
+    EnsureFlyoutPanel()
+    -- Show the panel BEFORE layout so the Show hook on addon buttons
+    -- sees flyoutPanel:IsShown() == true and skips the alpha-zero path.
     flyoutPanel:Show()
+    if not _flyoutBuilt then
+        BuildFlyoutContents()
+    end
 end
 
 local function HideFlyoutPanel()
     if flyoutPanel then
         flyoutPanel:Hide()
-        RestoreFlyoutButtons()
+        -- Do NOT restore buttons or wipe saved parents.
+        -- Buttons stay parented to the flyout panel permanently.
     end
 end
 
@@ -744,11 +787,18 @@ local function HideMinimapChild(btn)
         -- Track addon-intended visibility via Show/Hide hooks
         hooksecurefunc(btn, "Show", function(self)
             if not _suppressVisTrack then
-                _addonVisible[self] = true
+                -- Don't track addon Show() while flyout is open: the button
+                -- is already visible in our grid, and tracking would let a
+                -- subsequent Hide() mark it as unwanted.
+                if not (flyoutPanel and flyoutPanel:IsShown()) then
+                    _addonVisible[self] = true
+                end
             end
             if InCombatLockdown() then return end
-            -- Allow showing when parented to the flyout panel
-            if self:GetParent() == flyoutPanel then return end
+            -- Never zero alpha while the flyout is open -- addon buttons
+            -- are visible in the grid and periodic Show() calls from
+            -- LibDBIcon/addons would make them disappear mid-view.
+            if flyoutPanel and flyoutPanel:IsShown() then return end
             -- Allow ungrouped buttons to stay visible
             if IsUngrouped(self) then return end
             local mp = EBS.db and EBS.db.profile.minimap
@@ -758,6 +808,14 @@ local function HideMinimapChild(btn)
         end)
         hooksecurefunc(btn, "Hide", function(self)
             if not _suppressVisTrack then
+                -- Freeze visibility tracking while the flyout is open.
+                -- LibDBIcon and addons periodically call Hide() during
+                -- internal refreshes; letting that mark _addonVisible=false
+                -- causes buttons to vanish from the open flyout grid.
+                if flyoutPanel and flyoutPanel:IsShown() then
+                    self:Show()
+                    return
+                end
                 _addonVisible[self] = false
             end
         end)
@@ -1050,6 +1108,10 @@ local PORTAL_SPELLS = {
     1254400, 1254572, 1254563, 1254559,
     159898,  1254555, 1254551, 393273,
 }
+local PORTAL_SHORT = {
+    [1254400] = "WRS", [1254572] = "MT",  [1254563] = "NPX", [1254559] = "MC",
+    [159898]  = "SR",  [1254555] = "PoS", [1254551] = "SoT", [393273]  = "AA",
+}
 
 local _portalBtn = nil
 local _portalFlyout, _portalFlyoutBtns
@@ -1143,6 +1205,21 @@ local function CreateMinimapPortalFlyout()
         cd:SetDrawBling(false)
         cd:SetDrawEdge(false)
         btn.cooldown = cd
+
+        local short = PORTAL_SHORT[spellID]
+        if short then
+            local fontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+            local labelFrame = CreateFrame("Frame", nil, btn)
+            labelFrame:SetAllPoints()
+            labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)
+            local label = labelFrame:CreateFontString(nil, "OVERLAY", nil)
+            label:SetFont(fontPath, 8, "OUTLINE")
+            label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
+            label:SetTextColor(1, 1, 1, 0.9)
+            label:SetText(short)
+            label:SetShadowOffset(1, -1)
+            label:SetShadowColor(0, 0, 0, 1)
+        end
 
         local hover = btn:CreateTexture(nil, "HIGHLIGHT")
         hover:SetAllPoints()

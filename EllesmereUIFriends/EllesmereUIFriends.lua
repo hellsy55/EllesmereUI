@@ -1640,132 +1640,13 @@ local function SkinFriendsFrame()
             FriendsListFrame.ScrollBox._ebsBackdrop = bd
         end
 
-        -- Scale + position helpers
-        local _ebsTempPos = nil  -- ctrl-drag temporary position, cleared on hide
-
-        local function ApplyScaleAndPosition()
-            local fp = EBS.db.profile.friends
-            local scale = fp.scale or 1
-            -- Only call SetScale when it actually changed -- calling it on
-            -- a visible frame forces WoW to recalculate every child's world
-            -- coordinates in one frame, causing a visible stutter.
-            if frame:GetScale() ~= scale then
-                frame:SetScale(scale)
-                if frame._ebsOurScrollBox then frame._ebsOurScrollBox:SetScale(scale) end
-                if frame._ebsOurScrollBar then frame._ebsOurScrollBar:SetScale(scale) end
-                if frame._ebsOurScrollBox and frame._ebsOurScrollBox._ebsTrack then
-                    frame._ebsOurScrollBox._ebsTrack:SetScale(scale)
-                    if frame._ebsOurScrollBox._ebsTrack._hitArea then
-                        frame._ebsOurScrollBox._ebsTrack._hitArea:SetScale(scale)
-                    end
-                end
-            end
-            -- Position: saved > default Blizzard
-            local pos = _ebsTempPos or fp.position
-            if pos then
-                local px, py = pos.x, pos.y
-                local PPa = EllesmereUI and EllesmereUI.PP
-                if PPa and px and py then
-                    local es = frame:GetEffectiveScale()
-                    local isCenterAnchor = (pos.point == "CENTER")
-                        and (pos.relPoint == "CENTER" or pos.relPoint == nil)
-                    if isCenterAnchor and PPa.SnapCenterForDim then
-                        px = PPa.SnapCenterForDim(px, frame:GetWidth() or 0, es)
-                        py = PPa.SnapCenterForDim(py, frame:GetHeight() or 0, es)
-                    elseif PPa.SnapForES then
-                        px = PPa.SnapForES(px, es)
-                        py = PPa.SnapForES(py, es)
-                    end
-                end
-                frame:ClearAllPoints()
-                frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
-            end
-        end
-        frame._ebsApplyScaleAndPosition = ApplyScaleAndPosition
-
-        local function SaveFramePosition()
-            local fp = EBS.db.profile.friends
-            local point, _, relPoint, x, y = frame:GetPoint(1)
-            if point then
-                fp.position = { point = point, relPoint = relPoint, x = x, y = y }
-            end
-        end
-
-        -- Drag system: shift=permanent save, ctrl=temporary (resets on close)
-        frame:SetMovable(true)
-        frame:SetClampedToScreen(true)
-        local _ebsDragging = false
-
-        frame:HookScript("OnMouseDown", function(self, button)
-            if button ~= "LeftButton" then return end
-            if not IsShiftKeyDown() and not IsControlKeyDown() then return end
-            _ebsDragging = IsShiftKeyDown() and "save" or "temp"
-            self:StartMoving()
-        end)
-        frame:HookScript("OnMouseUp", function(self, button)
-            if button ~= "LeftButton" or not _ebsDragging then return end
-            self:StopMovingOrSizing()
-            local point, _, relPoint, x, y = self:GetPoint(1)
-            if _ebsDragging == "save" then
-                SaveFramePosition()
-            elseif _ebsDragging == "temp" then
-                _ebsTempPos = { point = point, relPoint = relPoint, x = x, y = y }
-            end
-            _ebsDragging = false
-        end)
-
+        -- Apply size on show (scale + positioning fully owned by Blizzard)
         frame:HookScript("OnShow", function()
-            _ebsTempPos = nil  -- clear temp position on each open
             if not InCombatLockdown() then
                 ApplySize()
-                ApplyScaleAndPosition()
             end
-        end)
-        frame:HookScript("OnHide", function()
-            _ebsTempPos = nil
         end)
         ApplySize()
-        ApplyScaleAndPosition()
-
-        -- Prevent Blizzard's panel system from overriding our position.
-        -- When ShowUIPanel or UpdateUIPanelPositions fires (opening character
-        -- panel, clicking bottom tabs, etc.), Blizzard calls SetPoint on
-        -- FriendsFrame. This hook re-applies our saved position immediately.
-        local _ebsIgnoreSetPoint = false
-        hooksecurefunc(frame, "SetPoint", function()
-            if _ebsIgnoreSetPoint then return end
-            if InCombatLockdown() then return end
-            if not EBS.db or not EBS.db.profile.friends.enabled then return end
-            local fp = EBS.db.profile.friends
-            local pos = _ebsTempPos or fp.position
-            if not pos then return end
-            local px, py = pos.x, pos.y
-            local PPa = EllesmereUI and EllesmereUI.PP
-            if PPa and px and py then
-                local es = frame:GetEffectiveScale()
-                local isCenterAnchor = (pos.point == "CENTER")
-                    and (pos.relPoint == "CENTER" or pos.relPoint == nil)
-                if isCenterAnchor and PPa.SnapCenterForDim then
-                    px = PPa.SnapCenterForDim(px, frame:GetWidth() or 0, es)
-                    py = PPa.SnapCenterForDim(py, frame:GetHeight() or 0, es)
-                elseif PPa.SnapForES then
-                    px = PPa.SnapForES(px, es)
-                    py = PPa.SnapForES(py, es)
-                end
-            end
-            -- Skip if already at the correct position (avoids ClearAllPoints
-            -- flash during Blizzard's UIPanelLayout pass on show)
-            local curPt, _, curRel, curX, curY = frame:GetPoint(1)
-            if curPt == pos.point and curRel == pos.relPoint
-               and curX and curY and math.abs(curX - px) < 0.01
-               and math.abs(curY - py) < 0.01 then
-                return
-            end
-            _ebsIgnoreSetPoint = true
-            frame:ClearAllPoints()
-            frame:SetPoint(pos.point, UIParent, pos.relPoint, px, py)
-            _ebsIgnoreSetPoint = false
-        end)
     end
 
     -- Dark background
@@ -4229,17 +4110,18 @@ local function SkinFriendsFrame()
     -- Expose for menu callbacks
     _G._EBS_RebuildFriendsDP = function(source) RebuildFriendsDataProvider(source or "global") end
 
-    -- Hook FriendsList_Update to rebuild after Blizzard
-    if FriendsList_Update then
-        hooksecurefunc("FriendsList_Update", function() RebuildFriendsDataProvider("FriendsList_Update") end)
-    end
-
-    -- BNet invite events don't trigger FriendsList_Update, so listen
-    -- for those separately.
-    local friendInviteEvents = CreateFrame("Frame")
-    friendInviteEvents:RegisterEvent("BN_FRIEND_INVITE_ADDED")
-    friendInviteEvents:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
-    friendInviteEvents:SetScript("OnEvent", function(_, event)
+    -- Rebuild on the same events that drive FriendsList_Update, via our
+    -- own event frame instead of hooksecurefunc("FriendsList_Update").
+    -- The global hook tainted every Blizzard call site (BN whisper
+    -- processing, HistoryKeeper token creation) because the wrapper
+    -- injected addon code into secure execution paths.
+    local friendsEventFrame = CreateFrame("Frame")
+    friendsEventFrame:RegisterEvent("FRIENDLIST_UPDATE")
+    friendsEventFrame:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
+    friendsEventFrame:RegisterEvent("BN_FRIEND_INFO_CHANGED")
+    friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_ADDED")
+    friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
+    friendsEventFrame:SetScript("OnEvent", function(_, event)
         RebuildFriendsDataProvider("event:" .. event)
     end)
 

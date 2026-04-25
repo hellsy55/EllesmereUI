@@ -39,7 +39,22 @@ initFrame:SetScript("OnEvent", function(self)
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
-        -- -- DISPLAY ---------------------------------------------------------
+        -- Edit Mode reposition label
+        do
+            local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+            local infoFrame = CreateFrame("Frame", nil, parent)
+            infoFrame:SetSize(parent:GetWidth(), 20)
+            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
+            infoFrame._isSpacer = true
+            local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
+            infoLabel:SetFont(fontPath, 15, "")
+            infoLabel:SetTextColor(1, 1, 1, 0.75)
+            infoLabel:SetPoint("CENTER")
+            infoLabel:SetJustifyH("CENTER")
+            infoLabel:SetText("Reposition this element within Blizzard Edit Mode")
+            y = y - 40
+        end
+
         -- -- DISPLAY -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
@@ -179,7 +194,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 4: Text Size (+ cog: Tab Text Size) | Timestamps
+        -- Row 4: Timestamps | (empty)
         do
             local tsValues = {
                 ["__blizzard"]  = { text = "Use Blizzard Setting" },
@@ -196,19 +211,15 @@ initFrame:SetScript("OnEvent", function(self)
                 "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
                 "%H:%M ", "%H:%M:%S ",
             }
-            local textSizeRow
-            textSizeRow, h = W:DualRow(parent, y,
-                { type="slider", text="Tab Text Size",
-                  min = 8, max = 16, step = 1,
-                  getValue=function() return Cfg("tabFontSize") or 10 end,
-                  setValue=function(v) Set("tabFontSize", v); RefreshAll() end },
+            _, h = W:DualRow(parent, y,
                 { type="dropdown", text="Timestamps",
                   values=tsValues, order=tsOrder,
                   getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
                   setValue=function(v)
                       Set("timestampFormat", v)
                       if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
-                  end })
+                  end },
+                { type="label", text="" })
         end
         y = y - h
 
@@ -401,17 +412,12 @@ initFrame:SetScript("OnEvent", function(self)
         -- -- EXTRAS ------------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
 
-        -- Row 1: Hide Tooltip on Hover | Hide Combat Log Tab
+        -- Row 1: Hide Tooltip on Hover | (empty)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Tooltip on Hover",
               getValue=function() return Cfg("hideTooltipOnHover") or false end,
               setValue=function(v) Set("hideTooltipOnHover", v) end },
-            { type="toggle", text="Hide Combat Log Tab",
-              getValue=function() return Cfg("hideCombatLogTab") or false end,
-              setValue=function(v)
-                  Set("hideCombatLogTab", v)
-                  if ECHAT.ApplyHideCombatLogTab then ECHAT.ApplyHideCombatLogTab() end
-              end })
+            { type="label", text="" })
         y = y - h
 
         -- Row 2: Hide Borders | Input on Top

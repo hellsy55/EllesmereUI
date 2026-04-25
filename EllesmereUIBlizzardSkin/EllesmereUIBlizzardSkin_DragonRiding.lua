@@ -575,6 +575,13 @@ function ApplyPos()
     rootFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 end
 
+-- Profile-swap refresh: re-read DB and rebuild the HUD.
+_G._EDR_Rebuild = function()
+    if not rootFrame then return end
+    Rebuild()
+    ApplyPos()
+end
+
 function RegisterUnlockElements()
     if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
     local MK = EllesmereUI.MakeUnlockElement
