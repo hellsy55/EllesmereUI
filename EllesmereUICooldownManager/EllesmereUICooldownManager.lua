@@ -588,12 +588,7 @@ ns.EnsureMappings = EnsureMappings
 -------------------------------------------------------------------------------
 local MAIN_BAR_KEYS = { cooldowns = true, utility = true, buffs = true }
 
--- Ghost buff bar: a hidden routing sink for buff spells the user removes.
--- Icons routed here get alpha 0 via the _visHidden mechanism.
-local GHOST_BUFF_BAR_KEY = "__ghost_buffs"
-MAIN_BAR_KEYS[GHOST_BUFF_BAR_KEY] = true
-
--- Ghost CD bar: same concept for CD/utility spells. When the user "removes"
+-- Ghost CD bar: hidden routing sink for CD/utility spells. When the user "removes"
 -- a spell from a CD or utility bar, it routes here instead of being deleted.
 -- This means every spell in Blizzard's viewer pool always has a route,
 -- eliminating the need for allowSet filtering during collection.
@@ -3169,9 +3164,84 @@ local function RefreshCDMIconAppearance(barKey)
         elseif hadActiveGlow then
             -- Don't touch: active glow is managed by the SetSwipeColor hook.
             -- Stopping it here causes a visible blink.
+        elseif ifd and ifd._cdStateGlowOn then
+            -- cdState glow active: stop it so the desat hook restarts
+            -- with the updated style. Also re-evaluate immediately for
+            -- off-CD spells (desat hook won't fire for those).
+            if glowOv then StopNativeGlow(glowOv) end
+            ifd._cdStateGlowOn = false
+            local fc = _ecmeFC[icon]
+            local sid = fc and fc.spellID
+            local bk = fc and fc.barKey
+            if sid and bk then
+                local sd = ns.GetBarSpellData(bk)
+                local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+                if not ss and sd and sd.spellSettings and sd.assignedSpells
+                   and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    for _, asid in ipairs(sd.assignedSpells) do
+                        if asid and asid > 0 and asid ~= sid
+                           and sd.spellSettings[asid] then
+                            if C_SpellBook.FindSpellOverrideByID(asid) == sid then
+                                ss = sd.spellSettings[asid]
+                                break
+                            end
+                        end
+                    end
+                end
+                local cse = ss and ss.cdStateEffect
+                if (cse == "pixelGlowReady" or cse == "buttonGlowReady") and glowOv then
+                    local cseInfo = C_Spell.GetSpellCooldown(sid)
+                    if cseInfo and (not cseInfo.isActive or cseInfo.isOnGCD) then
+                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, 1, 1, 1)
+                        ifd._cdStateGlowOn = true
+                    end
+                end
+            end
         elseif glowOv then
             StopNativeGlow(glowOv)
             if ifd then ifd.procGlowActive = false end
+        end
+
+        -- Apply initial cdState effect (hidden/glow) so the state is
+        -- correct before the first desat tick and before the visibility
+        -- system runs. Idempotent: re-evaluates current CD state.
+        local fc = _ecmeFC[icon]
+        local csSid = fc and fc.spellID
+        local csBk = fc and fc.barKey
+        if csSid and csBk and csBk:sub(1, 7) ~= "__ghost" then
+            local csSd = ns.GetBarSpellData(csBk)
+            local csSs = csSd and csSd.spellSettings and csSd.spellSettings[csSid]
+            if not csSs and csSd and csSd.spellSettings and csSd.assignedSpells
+               and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                for _, asid in ipairs(csSd.assignedSpells) do
+                    if asid and asid > 0 and asid ~= csSid
+                       and csSd.spellSettings[asid] then
+                        if C_SpellBook.FindSpellOverrideByID(asid) == csSid then
+                            csSs = csSd.spellSettings[asid]
+                            break
+                        end
+                    end
+                end
+            end
+            local cse = csSs and csSs.cdStateEffect
+            if cse then
+                local cseInfo = C_Spell.GetSpellCooldown(csSid)
+                local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+                if cse == "hiddenOnCD" or cse == "hiddenReady" then
+                    local hide = (cse == "hiddenOnCD") == onCD
+                    icon:SetAlpha(hide and 0 or (barData.barOpacity or 1))
+                    if fc then fc._cdStateHidden = hide or false end
+                elseif not ifd or not ifd._cdStateGlowOn then
+                    if (cse == "pixelGlowReady" or cse == "buttonGlowReady")
+                       and not onCD and glowOv then
+                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, 1, 1, 1)
+                        if ifd then ifd._cdStateGlowOn = true end
+                    end
+                end
+            elseif fc and fc._cdStateHidden then
+                fc._cdStateHidden = false
+                icon:SetAlpha(barData.barOpacity or 1)
+            end
         end
     end
 end
@@ -3771,29 +3841,13 @@ ns.EnsureFocusReminderProxy = EnsureFocusReminderProxy
 
 -- Ghost bars: ensure both buff and CD ghost bars exist in the bars array.
 -- Called from BuildAllCDMBars before iterating bars.
-ns.GHOST_BUFF_BAR_KEY = GHOST_BUFF_BAR_KEY
 ns.GHOST_CD_BAR_KEY = GHOST_CD_BAR_KEY
 local function EnsureGhostBars()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return end
-    local hasBuff, hasCD = false, false
+    local hasCD = false
     for _, b in ipairs(p.cdmBars.bars) do
-        if b.key == GHOST_BUFF_BAR_KEY then hasBuff = true end
         if b.key == GHOST_CD_BAR_KEY then hasCD = true end
-    end
-    if not hasBuff then
-        p.cdmBars.bars[#p.cdmBars.bars + 1] = {
-            key = GHOST_BUFF_BAR_KEY,
-            name = "Hidden Buffs",
-            barType = "buffs",
-            isGhostBar = true,
-            enabled = true,
-            barVisibility = "never",
-            iconSize = 1,
-            spacing = 0,
-            numRows = 1,
-            growDirection = "RIGHT",
-        }
     end
     if not hasCD then
         p.cdmBars.bars[#p.cdmBars.bars + 1] = {
@@ -3964,7 +4018,13 @@ _CDMApplyVisibility = function()
                 local icons = cdmBarIcons[barData.key]
                 if icons then
                     for ii = 1, #icons do
-                        if icons[ii] then icons[ii]:SetAlpha(visAlpha) end
+                        local ic = icons[ii]
+                        if ic then
+                            local icfc = _ecmeFC[ic]
+                            if not (icfc and icfc._cdStateHidden) then
+                                ic:SetAlpha(visAlpha)
+                            end
+                        end
                     end
                 end
                 if wasHidden then
@@ -4034,7 +4094,13 @@ local function ApplyBarOpacity(barKey)
     local icons = cdmBarIcons[barKey]
     if icons then
         for i = 1, #icons do
-            if icons[i] then icons[i]:SetAlpha(a) end
+            local ic = icons[i]
+            if ic then
+                local icfc = _ecmeFC[ic]
+                if not (icfc and icfc._cdStateHidden) then
+                    ic:SetAlpha(a)
+                end
+            end
         end
     end
 end
@@ -4577,11 +4643,13 @@ function ns.RepopulateFromBlizzard()
         end
     end
 
-    -- Filter Blizzard entries off all CD/utility/buff bars (main + custom).
-    -- Skip ghost and custom_buff bars -- they're handled separately
-    -- (or not at all, in custom_buff's case, since they're a separate system).
+    -- Filter Blizzard entries off all CD/utility bars (main + custom).
+    -- Skip ghost, custom_buff, and default buff bar. The default buff bar
+    -- (key == "buffs") has no assignedSpells to filter -- Blizzard's viewer
+    -- is the authority. Extra buff bars ARE filtered for user assignments.
     for _, barData in ipairs(p.cdmBars.bars) do
         if not barData.isGhostBar
+           and barData.key ~= "buffs"
            and (barData.barType == "cooldowns" or barData.barType == "utility"
                 or barData.barType == "buffs"
                 or MAIN_BAR_KEYS[barData.key]) then
@@ -4603,11 +4671,7 @@ function ns.RepopulateFromBlizzard()
         FilterListPreservingUserAdded(ghostSD, ghostSD.assignedSpells)
         FilterSetPreservingUserAdded(ghostSD, ghostSD.removedSpells)
     end
-    local ghostBuffSD = ns.GetBarSpellData(GHOST_BUFF_BAR_KEY)
-    if ghostBuffSD then
-        FilterListPreservingUserAdded(ghostBuffSD, ghostBuffSD.assignedSpells)
-        FilterSetPreservingUserAdded(ghostBuffSD, ghostBuffSD.removedSpells)
-    end
+    -- Ghost buff bar removed: buff visibility managed by Blizzard CDM.
 
     -- (Site #10 re-snapshot deleted: under the new model, "repopulate from
     -- Blizzard" is just "wipe diversions and let the route map's spillover
@@ -4625,8 +4689,12 @@ function ns.RepopulateFromBlizzard()
     -- user-added entries that the filter preserved. Walk each affected
     -- bar's icons and append any positive spell IDs (Blizzard frames)
     -- not already present, preserving the existing user-entry order.
+    -- Skip the default buff bar (key == "buffs"): Blizzard's viewer is
+    -- the authority for buffs, no assignedSpells list needed. Extra buff
+    -- bars (user-created groups) ARE reseeded for their assignments.
     for _, barData in ipairs(p.cdmBars.bars) do
         if not barData.isGhostBar
+           and barData.key ~= "buffs"
            and (barData.barType == "cooldowns" or barData.barType == "utility"
                 or barData.barType == "buffs"
                 or MAIN_BAR_KEYS[barData.key]) then
@@ -5102,6 +5170,7 @@ function ECME:CDMFinishSetup()
         end
         RegisterStateDriver(_cdmVehicleProxy, "cdmvehicle", "[vehicleui][petbattle] hide; show")
     end
+
 
     -- Edit mode close: no forced rebuild needed. The reanchor naturally skips
     -- inactive buff frames with hideWhenInactive (ghost frames from Edit Mode)

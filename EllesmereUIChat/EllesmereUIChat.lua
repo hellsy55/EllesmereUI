@@ -147,8 +147,9 @@ local function RefreshCursorPos()
 end
 local function IsCursorOverCached(frame)
     if not frame or not frame:IsVisible() then return false end
-    local left, bottom, width, height = frame:GetRect()
-    if not left then return false end
+    local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
+    if not ok or not left then return false end
+    if issecretvalue and issecretvalue(left) then return false end
     local scale = frame:GetEffectiveScale()
     local cx, cy = _rawCX / scale, _rawCY / scale
     return cx >= left and cx <= left + width and cy >= bottom and cy <= bottom + height
@@ -169,10 +170,7 @@ local function GetFrameFontSize(id)
     end
     return 12
 end
-local function GetTabFontSize()
-    local cfg = ECHAT.DB()
-    return cfg.tabFontSize or 10
-end
+-- GetTabFontSize removed: tab font size hardcoded to 11
 
 -- Apply background settings from DB to all skinned chat frames
 function ECHAT.ApplyBackground()
@@ -1159,6 +1157,14 @@ local function _ApplyAlpha(alpha)
             if CFD(cf).resizeGrip then CFD(cf).resizeGrip:SetAlpha(alpha * 0.2) end
         end
     end
+    -- Fade active-tab underline (parented to UIParent, not dock manager)
+    for i = 1, 20 do
+        local tab = _G["ChatFrame" .. i .. "Tab"]
+        if tab then
+            local ul = CFD(tab).underline
+            if ul and ul:IsShown() then ul:SetAlpha(alpha) end
+        end
+    end
     local cf1 = _G.ChatFrame1
     if cf1 and CFD(cf1).sidebar then
         local sbMode = ECHAT.DB().sidebarVisibility or "always"
@@ -1657,15 +1663,19 @@ local function UpdateTabStyle(tab)
         tab.conversationIcon:SetParent(_hiddenParent)
     end
 
-    -- FontString color + centering only. Do NOT call SetFont on Blizzard's
-    -- tab FontString -- it taints GetStringWidth() which breaks
-    -- PanelTemplates_TabResize with secret-value errors.
-    local fs = tab:GetFontString()
+    -- Use cached tab.Text ref from SkinTab (avoids GetFontString() on
+    -- Blizzard tab). Safe here: UpdateTabStyle only runs from deferred
+    -- contexts (FCFDock_SelectWindow C_Timer, SkinPass), never inside
+    -- FCF_OpenTemporaryWindow's secure chain. If taint resurfaces, rip SetFont first.
+    local fs = CFD(tab).tabText
     if fs then
-        fs:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
+        fs:SetFont(GetFont(), 11, "")
         fs:SetJustifyH("CENTER")
         fs:ClearAllPoints()
         fs:SetPoint("CENTER", tab, 0, 0)
+        if not chatFrame.isTemporary then
+            fs:SetTextColor(1, 1, 1)
+        end
     end
 
     -- Background shade
@@ -1723,15 +1733,12 @@ local function SkinTab(cf)
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, 0.05)
 
-    -- Center the tab text and fix height to match our design
-    local blizFS = tab:GetFontString()
-    if blizFS then
-        blizFS:ClearAllPoints()
-        blizFS:SetPoint("CENTER", tab, 0, 0)
-    end
+    -- Cache the tab's text FontString for UpdateTabStyle (avoids
+    -- repeated GetFontString() calls on the Blizzard tab).
+    -- Some tab implementations use _G[name.."TabText"] instead of tab.Text.
+    CFD(tab).tabText = tab.Text or _G[name .. "TabText"]
     tab:SetPushedTextOffset(0, 0)
-    local tabH = PP and PP.SnapForES and PP.SnapForES(24, tab:GetEffectiveScale()) or 24
-    tab:SetHeight(tabH)
+    tab:SetHeight(24)
 
     -- Reparent the whisper conversation icon to hidden container
     if tab.conversationIcon then
@@ -1782,7 +1789,7 @@ local function StyleDockManager()
     gdm:ClearAllPoints()
     gdm:SetPoint("BOTTOMLEFT", CFD(cf1).bg, "TOPLEFT", 0, 0)
     gdm:SetPoint("BOTTOMRIGHT", CFD(cf1).bg, "TOPRIGHT", 0, 0)
-    local dockH = PP and PP.SnapForES and PP.SnapForES(24, gdm:GetEffectiveScale()) or 24
+    local dockH = 24
     gdm:SetHeight(dockH)
     if _G.GeneralDockManagerScrollFrame then
         _G.GeneralDockManagerScrollFrame:SetHeight(dockH)
@@ -2472,7 +2479,7 @@ local function SkinChatFrame(cf)
                         -- Restyle the text
                         local fs = btn:GetFontString()
                         if fs then
-                            fs:SetFont(GetFont(), GetTabFontSize(), "")
+                            fs:SetFont(GetFont(), 12, "")
                         end
                         -- Update colors on click
                         btn:HookScript("OnClick", UpdateCLFilterColors)
@@ -2719,7 +2726,6 @@ local function UpdateTabColors()
             local tab = n and _G[n .. "Tab"]
             if tab and tab:IsShown() then
                 if prev then
-                    tab:ClearAllPoints()
                     tab:SetPoint("LEFT", prev, "RIGHT", onePx, 0)
                 end
                 prev = tab
@@ -2815,8 +2821,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Re-enforce height (Blizzard resets it on temp window creation)
                 local tab = _G["ChatFrame" .. i .. "Tab"]
                 if tab and CFD(tab).skinned then
-                    local th = PP and PP.SnapForES and PP.SnapForES(24, tab:GetEffectiveScale()) or 24
-                    tab:SetHeight(th)
+                    tab:SetHeight(24)
                 end
             end
             -- Re-apply font if Blizzard reset it (e.g. font size change)
@@ -2837,6 +2842,20 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     if FCFDock_SelectWindow then
         hooksecurefunc("FCFDock_SelectWindow", function()
+            C_Timer.After(0, UpdateTabColors)
+        end)
+    end
+    -- DO NOT hook FCFTab_UpdateColors -- it fires INSIDE
+    -- FCF_OpenTemporaryWindow's secure chain and taints even safe
+    -- operations like SetTextColor (session 46 root cause #1).
+    -- Tab text coloring is handled in UpdateTabStyle instead, which
+    -- runs from FCFDock_SelectWindow (deferred, outside secure chain).
+    -- Tab close: Blizzard resets all tab colors via FCFTab_UpdateColors
+    -- but FCFDock_SelectWindow only fires if the ACTIVE tab was closed.
+    -- Closing a non-active tab skips our color refresh. FCF_Close is a
+    -- top-level user action, safe to hook (not inside a secure chain).
+    if FCF_Close then
+        hooksecurefunc("FCF_Close", function()
             C_Timer.After(0, UpdateTabColors)
         end)
     end
@@ -2862,7 +2881,7 @@ initFrame:SetScript("OnEvent", function(self)
         if sfc then
             sfc:ClearAllPoints()
             sfc:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 0)
-            local dockH2 = PP and PP.SnapForES and PP.SnapForES(24, gdm2:GetEffectiveScale()) or 24
+            local dockH2 = 24
             sfc:SetHeight(dockH2)
         end
         UpdateTabColors()

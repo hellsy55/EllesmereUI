@@ -1780,21 +1780,9 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rightRgn, growCogShow)
             end
 
-            -- Row 3: Vertical Orientation | Show Paging Arrows (MainBar only)
+            -- Row 3: Vertical Orientation | (empty — paging arrows moved to PAGING section)
             do
-                local rightWidget
-                if SelectedKey() == "MainBar" then
-                    rightWidget = { type="toggle", text="Show Paging Arrows",
-                      getValue=function() return SGet("showPagingArrows") or false end,
-                      setValue=function(v)
-                          SSet("showPagingArrows", v, function(k)
-                              if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
-                          end)
-                      end,
-                      tooltip="Show page up/down arrows next to Action Bar 1 for cycling through action bar pages 1-6." }
-                else
-                    rightWidget = { type="label", text="" }
-                end
+                local rightWidget = { type="label", text="" }
                 local orientRow
                 orientRow, h = W:DualRow(parent, y,
                     { type="toggle", text="Vertical Orientation",
@@ -1911,6 +1899,126 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             -------------------------------------------------------------------
+            --  PAGING (MainBar + Bars 2-8 only, not Stance/Pet/Micro/Bag)
+            -------------------------------------------------------------------
+            do
+                local selKey = SelectedKey()
+                local _bkp = ns.EAB_VTABLE and ns.EAB_VTABLE.BAR_KEY_TO_PAGE
+                local showPaging = selKey and _bkp and _bkp[selKey]
+                if showPaging then
+                    _, h = W:SectionHeader(parent, "PAGING", y);  y = y - h
+
+                    local _, playerClass = UnitClass("player")
+                    local EAB_VT = ns.EAB_VTABLE or {}
+                    local PG_STATES = EAB_VT.PAGING_STATES or {}
+                    local BKP = EAB_VT.BAR_KEY_TO_PAGE or {}
+
+                    -- Build dropdown values: None, Bar 1-8
+                    local pagingValues = { none = "None" }
+                    local pagingOrder = { "none" }
+                    local barList = {
+                        { key = "MainBar", label = "Action Bar 1 (Main)" },
+                        { key = "Bar2",    label = "Action Bar 2" },
+                        { key = "Bar3",    label = "Action Bar 3" },
+                        { key = "Bar4",    label = "Action Bar 4" },
+                        { key = "Bar5",    label = "Action Bar 5" },
+                        { key = "Bar6",    label = "Action Bar 6" },
+                        { key = "Bar7",    label = "Action Bar 7" },
+                        { key = "Bar8",    label = "Action Bar 8" },
+                    }
+                    for _, bl in ipairs(barList) do
+                        -- Skip self (can't page a bar to itself)
+                        if bl.key ~= selKey then
+                            local pg = BKP[bl.key]
+                            if pg then
+                                pagingValues[tostring(pg)] = bl.label
+                                pagingOrder[#pagingOrder + 1] = tostring(pg)
+                            end
+                        end
+                    end
+
+                    local function GetPagingVal(stateId)
+                        local paging = SGet("paging")
+                        if not paging then return "none" end
+                        local v = paging[stateId]
+                        if not v then return "none" end
+                        return tostring(v)
+                    end
+                    local function SetPagingVal(stateId, val)
+                        local bars = EAB.db.profile.bars[selKey]
+                        if not bars.paging then bars.paging = {} end
+                        if val == "none" then
+                            bars.paging[stateId] = false
+                        else
+                            bars.paging[stateId] = tonumber(val)
+                        end
+                        -- Clean up: if all values are false (all disabled), reset
+                        local anySet = false
+                        for _, v in pairs(bars.paging) do
+                            if v then anySet = true; break end
+                        end
+                        if not anySet then bars.paging = {} end
+                        if ns.RebuildBarPaging then ns.RebuildBarPaging(selKey) end
+                    end
+
+                    -- Row 1: Show Paging Arrows (MainBar only) | Shift Modifier
+                    local pagingArrowsWidget
+                    if selKey == "MainBar" then
+                        pagingArrowsWidget = { type="toggle", text="Show Paging Arrows",
+                          getValue=function() return SGet("showPagingArrows") or false end,
+                          setValue=function(v)
+                              SSet("showPagingArrows", v, function()
+                                  if ns.LayoutPagingFrame then ns.LayoutPagingFrame() end
+                              end)
+                          end,
+                          tooltip="Show page up/down arrows next to Action Bar 1 for cycling through action bar pages 1-6." }
+                    else
+                        pagingArrowsWidget = { type="label", text="" }
+                    end
+                    _, h = W:DualRow(parent, y,
+                        pagingArrowsWidget,
+                        { type="dropdown", text="Shift Modifier",
+                          values=pagingValues, order=pagingOrder,
+                          getValue=function() return GetPagingVal("shift") end,
+                          setValue=function(v) SetPagingVal("shift", v) end });  y = y - h
+
+                    -- Row 2: Ctrl Modifier | Alt Modifier
+                    _, h = W:DualRow(parent, y,
+                        { type="dropdown", text="Ctrl Modifier",
+                          values=pagingValues, order=pagingOrder,
+                          getValue=function() return GetPagingVal("ctrl") end,
+                          setValue=function(v) SetPagingVal("ctrl", v) end },
+                        { type="dropdown", text="Alt Modifier",
+                          values=pagingValues, order=pagingOrder,
+                          getValue=function() return GetPagingVal("alt") end,
+                          setValue=function(v) SetPagingVal("alt", v) end });  y = y - h
+
+                    -- Class form dropdowns (paired into DualRows)
+                    local classStatesLocal = PG_STATES.class and PG_STATES.class[playerClass]
+                    if classStatesLocal then
+                        for i = 1, #classStatesLocal, 2 do
+                            local left = classStatesLocal[i]
+                            local right = classStatesLocal[i + 1]
+                            local rightWidget
+                            if right then
+                                rightWidget = { type="dropdown", text=right.label,
+                                  values=pagingValues, order=pagingOrder,
+                                  getValue=function() return GetPagingVal(right.id) end,
+                                  setValue=function(v) SetPagingVal(right.id, v) end }
+                            else
+                                rightWidget = { type="label", text="" }
+                            end
+                            _, h = W:DualRow(parent, y,
+                                { type="dropdown", text=left.label,
+                                  values=pagingValues, order=pagingOrder,
+                                  getValue=function() return GetPagingVal(left.id) end,
+                                  setValue=function(v) SetPagingVal(left.id, v) end },
+                                rightWidget);  y = y - h
+                        end
+                    end
+                end
+            end
+
             -------------------------------------------------------------------
             --  ICON APPEARANCE
             -------------------------------------------------------------------

@@ -1542,11 +1542,20 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castSpark:SetBlendMode("ADD")
     local shieldHeight = CAST_H * 0.75
     local shieldWidth = shieldHeight * (29 / 35)
-    plate.castShieldFrame = CreateFrame("Frame", nil, plate.cast)
+    -- Parent to cast's parent so SetClipsChildren(true) on the cast
+    -- bar (for kick tick) doesn't clip the shield hanging off the left.
+    -- Visibility synced manually via ShowCast/HideCast paths.
+    plate.castShieldFrame = CreateFrame("Frame", nil, plate.cast:GetParent())
     plate.castShieldFrame:SetSize(shieldWidth, shieldHeight)
     plate.castShieldFrame:SetPoint("CENTER", plate.cast, "LEFT", 0, 0)
     plate.castShieldFrame:SetFrameLevel(plate.castIconFrame:GetFrameLevel() + 5)
     plate.castShieldFrame:Hide()
+    -- Auto-hide shield when cast bar hides (no longer a child of cast bar
+    -- so parent-child auto-hide doesn't apply)
+    plate.cast:HookScript("OnHide", function()
+        plate.castShieldFrame:Hide()
+        plate.castShieldFrame:SetAlpha(1)
+    end)
     plate.castShield = plate.castShieldFrame:CreateTexture(nil, "OVERLAY")
     plate.castShield:SetAllPoints()
     plate.castShield:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\shield.png")

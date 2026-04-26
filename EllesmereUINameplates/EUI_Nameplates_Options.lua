@@ -6356,17 +6356,9 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Show a glow on the cast bar when the enemy is casting a spell Blizzard marks as important." },
                 { type="toggle", text="Casts In Front of Nameplates",
                   tooltip="Forces all casts to be shown in front of nameplates for visual clarity",
-                  getValue=function() return DBVal("castOverlayEnabled") == true end,
-                  setValue=function(v)
-                    DB().castOverlayEnabled = v
-                    if not v and ns.ClearAllCastOverlays then
-                        ns.ClearAllCastOverlays()
-                    else
-                        for _, plate in pairs(plates) do
-                            if ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
-                        end
-                    end
-                  end });  y = y - h
+                  disabled=function() return true end, disabledTooltip="This option is currently under maintenance",
+                  getValue=function() return false end,
+                  setValue=function() end });  y = y - h
 
             -- Inline color swatch
             do

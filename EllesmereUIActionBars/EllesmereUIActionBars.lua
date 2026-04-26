@@ -26,6 +26,7 @@ local EAB_VTABLE = {
     Hover = {},
     MainBarPageSync = {},
 }
+ns.EAB_VTABLE = EAB_VTABLE
 EAB.VisibilityCompat = EAB.VisibilityCompat or {}
 
 -------------------------------------------------------------------------------
@@ -398,6 +399,7 @@ for _, info in ipairs(BAR_CONFIG) do
         alwaysShowButtons = true,
         showPagingArrows = false,
         pagingArrowsRight = false,
+        paging = {},
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         outOfRangeColoring = false,
@@ -943,9 +945,9 @@ do
             -- Blizzard's vehicle/override/shapeshift APIs.
             local pg = 0
             if HasVehicleActionBar and HasVehicleActionBar() then
-                pg = GetVehicleBarIndex() or 0
+                pg = GetVehicleBarIndex and GetVehicleBarIndex() or 0
             elseif HasOverrideActionBar and HasOverrideActionBar() then
-                pg = GetOverrideBarIndex() or 0
+                pg = GetOverrideBarIndex and GetOverrideBarIndex() or 0
             elseif HasTempShapeshiftActionBar and HasTempShapeshiftActionBar() then
                 pg = GetTempShapeshiftBarIndex() or 0
             end
@@ -1284,7 +1286,7 @@ local function HideBlizzardBars()
         if mainFrame then
             curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
         else
-            curPage = GetActionBarPage and GetActionBarPage() or 1
+            curPage = EAB_VTABLE.GetActionBarPage()
         end
         local maxPages = NUM_ACTIONBAR_PAGES or 6
         local newPage = curPage + 1
@@ -1297,7 +1299,7 @@ local function HideBlizzardBars()
         if mainFrame then
             curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
         else
-            curPage = GetActionBarPage and GetActionBarPage() or 1
+            curPage = EAB_VTABLE.GetActionBarPage()
         end
         local maxPages = NUM_ACTIONBAR_PAGES or 6
         local newPage = curPage - 1
@@ -1561,11 +1563,111 @@ end
 
 local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
 
+-- Safe API wrappers: 12.0.5 may move these globals to C_ActionBar.
+-- Stored on EAB_VTABLE to avoid 200-local Lua 5.1 limit.
+do
+    local V = EAB_VTABLE
+    V.GetOverrideBarIndex = GetOverrideBarIndex or (C_ActionBar and C_ActionBar.GetOverrideBarIndex) or function() return 14 end
+    V.GetVehicleBarIndex = GetVehicleBarIndex or (C_ActionBar and C_ActionBar.GetVehicleBarIndex) or function() return 12 end
+    V.GetActionBarPage = GetActionBarPage or (C_ActionBar and C_ActionBar.GetActionBarPage) or function() return 1 end
+    V.HasVehicleActionBar = HasVehicleActionBar or (C_ActionBar and C_ActionBar.HasVehicleActionBar) or function() return false end
+    V.HasOverrideActionBar = HasOverrideActionBar or (C_ActionBar and C_ActionBar.HasOverrideActionBar) or function() return false end
+    V.HasTempShapeshiftActionBar = HasTempShapeshiftActionBar or (C_ActionBar and C_ActionBar.HasTempShapeshiftActionBar) or function() return false end
+end
+
 -------------------------------------------------------------------------------
---  Paging State Conditions (class-specific)
+--  Configurable Paging System
+--  Allows per-bar paging based on modifier keys and class forms/stances.
+--  When paging config is empty, bars behave exactly as before (zero impact).
+-------------------------------------------------------------------------------
+
+-- All paging data stored on EAB_VTABLE to avoid 200-local Lua 5.1 limit.
+EAB_VTABLE.BAR_KEY_TO_PAGE = {
+    MainBar = 1,  Bar2 = 6,  Bar3 = 5,  Bar4 = 3,
+    Bar5 = 4,     Bar6 = 13, Bar7 = 14, Bar8 = 15,
+}
+EAB_VTABLE.PAGING_STATES = {
+    modifier = {
+        { id = "alt",   macro = "[mod:alt]",   label = "Alt" },
+        { id = "shift", macro = "[mod:shift]", label = "Shift" },
+        { id = "ctrl",  macro = "[mod:ctrl]",  label = "Ctrl" },
+    },
+    class = {
+        DRUID = {
+            { id = "prowl",   macro = "[bonusbar:1,stealth]", label = "Prowl" },
+            { id = "cat",     macro = "[bonusbar:1]",         label = "Cat Form" },
+            { id = "tree",    macro = "[bonusbar:2]",         label = "Tree of Life" },
+            { id = "bear",    macro = "[bonusbar:3]",         label = "Bear Form" },
+            { id = "moonkin", macro = "[bonusbar:4]",         label = "Moonkin Form" },
+        },
+        ROGUE = {
+            { id = "stealth", macro = "[bonusbar:1]", label = "Stealth" },
+        },
+        WARRIOR = {
+            { id = "battle",    macro = "[bonusbar:1]", label = "Battle Stance" },
+            { id = "defensive", macro = "[bonusbar:2]", label = "Defensive Stance" },
+        },
+        EVOKER = {
+            { id = "soar", macro = "[bonusbar:1]", label = "Soar" },
+        },
+    },
+}
+
+function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
+    if not pagingConfig or not next(pagingConfig) then return nil end
+    local PG = EAB_VTABLE.PAGING_STATES
+    local _, class = UnitClass("player")
+    local parts = {}
+    if barKey == "MainBar" then
+        if EAB_VTABLE.GetOverrideBarIndex then
+            parts[#parts + 1] = "[overridebar] " .. EAB_VTABLE.GetOverrideBarIndex()
+        end
+        if EAB_VTABLE.GetVehicleBarIndex then
+            parts[#parts + 1] = "[vehicleui][possessbar] " .. EAB_VTABLE.GetVehicleBarIndex()
+        end
+    end
+    for _, state in ipairs(PG.modifier) do
+        local page = pagingConfig[state.id]
+        if page then
+            parts[#parts + 1] = state.macro .. " " .. page
+        end
+    end
+    -- Class defaults: MainBar falls back to hardcoded form pages for
+    -- unconfigured (nil) states so setting a modifier doesn't break forms.
+    -- false = explicitly disabled by user ("None"), nil = unconfigured.
+    local CLASS_DEFAULTS = {
+        DRUID  = { prowl = 7, cat = 7, tree = 8, bear = 9, moonkin = 10 },
+        ROGUE  = { stealth = 7 },
+    }
+    local classStates = PG.class[class]
+    if classStates then
+        local defs = barKey == "MainBar" and CLASS_DEFAULTS[class]
+        for _, state in ipairs(classStates) do
+            local page = pagingConfig[state.id]
+            if page then
+                parts[#parts + 1] = state.macro .. " " .. page
+            elseif page == nil and defs and defs[state.id] then
+                -- Unconfigured: use class default (MainBar only)
+                parts[#parts + 1] = state.macro .. " " .. defs[state.id]
+            end
+            -- page == false: explicitly disabled, skip
+        end
+    end
+    if barKey == "MainBar" then
+        parts[#parts + 1] = "[bonusbar:5] 11"
+        for i = 2, NUM_AB_PAGES do
+            parts[#parts + 1] = "[bar:" .. i .. "] " .. i
+        end
+    end
+    parts[#parts + 1] = tostring(defaultPage or 1)
+    return table.concat(parts, "; ")
+end
+
+-------------------------------------------------------------------------------
+--  Paging State Conditions (class-specific, hardcoded fallback)
+--  Used when no custom paging is configured. Produces the exact same
+--  conditional string as the original implementation for zero impact.
 --  Format: "[condition] pageNumber; ..."
---  Page numbers map to action bar pages (1-based).
---  bonusbar:5 = dragonriding for all classes.
 -------------------------------------------------------------------------------
 local function GetClassPagingConditions()
     local _, class = UnitClass("player")
@@ -1573,11 +1675,11 @@ local function GetClassPagingConditions()
 
     -- Override bar (soft vehicle / quest abilities) and possess bar: remap bar 1
     -- to show those action slots so our buttons stay visible and keybinds work.
-    if GetOverrideBarIndex then
-        conditions = conditions .. "[overridebar] " .. GetOverrideBarIndex() .. "; "
+    if EAB_VTABLE.GetOverrideBarIndex then
+        conditions = conditions .. "[overridebar] " .. EAB_VTABLE.GetOverrideBarIndex() .. "; "
     end
-    if GetVehicleBarIndex then
-        conditions = conditions .. "[vehicleui][possessbar] " .. GetVehicleBarIndex() .. "; "
+    if EAB_VTABLE.GetVehicleBarIndex then
+        conditions = conditions .. "[vehicleui][possessbar] " .. EAB_VTABLE.GetVehicleBarIndex() .. "; "
     end
 
     -- Class-specific paging
@@ -1721,12 +1823,12 @@ local function SetupPagingFrame()
             end
             return
         end
-        local page = GetActionBarPage and GetActionBarPage() or 1
+        local page = EAB_VTABLE.GetActionBarPage()
         pageText:SetText(tostring(page))
     end)
 
     -- Initial text
-    local initPage = GetActionBarPage and GetActionBarPage() or 1
+    local initPage = EAB_VTABLE.GetActionBarPage()
     pageText:SetText(tostring(initPage))
 
     -- Wire arrow buttons to cycle pages via secure macro
@@ -1835,16 +1937,18 @@ local function CreateBarFrame(info)
         -- IDs and derive action via CalculateAction path 1 (page-based).
         --
         -- Buttons inherit actionpage from this bar frame via useparent-actionpage.
-        -- The state driver evaluates class-specific paging conditions (forms,
-        -- vehicle, override, possess, bonus bars) and the _onstate-page handler
+        -- The state driver evaluates paging conditions (forms, vehicle, override,
+        -- possess, bonus bars, modifiers) and the _onstate-page handler
         -- propagates the result to actionpage from the restricted env (untainted).
-        --
-        -- C_ActionBar.GetActionBarPage() is NOT sufficient as a fallback because
-        -- it only returns the "manual" page (Ctrl+PageUp/Down), not the dynamic
-        -- page set by ActionBarController_UpdateAll for vehicle/override/form
-        -- states. Blizzard normally handles this by setting actionpage directly
-        -- on MainActionBar, but our buttons are parented to EABBar_MainBar.
-        local pagingConditions = GetClassPagingConditions()
+        local barSettings = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[key]
+        local customPaging = barSettings and barSettings.paging
+        local pagingConditions
+        if customPaging and next(customPaging) then
+            pagingConditions = EAB_VTABLE.BuildPagingConditions("MainBar", customPaging, 1)
+        else
+            -- No custom paging: use hardcoded class defaults (zero impact)
+            pagingConditions = GetClassPagingConditions()
+        end
 
         -- Mark MainBar as the override bar target so the override controller
         -- propagates vehicle/override/petbattle state changes.
@@ -1877,6 +1981,25 @@ local function CreateBarFrame(info)
     -- CalculateAction path 1 computes: action = ID + (page - 1) * 12.
     if info.nativeActionPage then
         frame:Execute(("self:SetAttribute('actionpage', %d)"):format(info.nativeActionPage))
+
+        -- Configurable paging for Bars 2-8: when the user has set up paging
+        -- conditions (modifier keys, form swaps), install a state driver on
+        -- top of the default page. When no conditions match, the fallback is
+        -- the bar's native page (identical to current behavior).
+        local barSettings = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[key]
+        local customPaging = barSettings and barSettings.paging
+        if customPaging and next(customPaging) then
+            frame:SetAttributeNoHandler("_onstate-page", [[
+                local page = tonumber(newstate) or 1
+                self:SetAttribute("actionpage", page)
+                self:ChildUpdate("eab-page", page)
+            ]])
+            frame._eabPagingInstalled = true
+            local conditions = EAB_VTABLE.BuildPagingConditions(key, customPaging, info.nativeActionPage)
+            if conditions then
+                RegisterStateDriver(frame, "page", conditions)
+            end
+        end
     end
 
     barFrames[key] = frame
@@ -1908,6 +2031,66 @@ local function CreateBarFrame(info)
     _ownedFrames[frame] = true
     return frame
 end
+
+-- Rebuild the paging state driver for a bar after settings change.
+-- Called from the options panel when the user modifies paging config.
+-- Must be called out of combat.
+function ns.RebuildBarPaging(barKey)
+    if InCombatLockdown() then return end
+    local frame = barFrames[barKey]
+    if not frame then return end
+    local info = frame._barInfo
+    if not info then return end
+    local barSettings = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[barKey]
+    local customPaging = barSettings and barSettings.paging
+
+    if barKey == "MainBar" then
+        local pagingConditions
+        if customPaging and next(customPaging) then
+            pagingConditions = EAB_VTABLE.BuildPagingConditions("MainBar", customPaging, 1)
+        else
+            pagingConditions = GetClassPagingConditions()
+        end
+        -- Force re-evaluation by unregistering first
+        UnregisterStateDriver(frame, "page")
+        RegisterStateDriver(frame, "page", pagingConditions)
+    elseif info.nativeActionPage then
+        if customPaging and next(customPaging) then
+            -- Install handler if not already present
+            if not frame._eabPagingInstalled then
+                frame:SetAttributeNoHandler("_onstate-page", [[
+                    local page = tonumber(newstate) or 1
+                    self:SetAttribute("actionpage", page)
+                    self:ChildUpdate("eab-page", page)
+                ]])
+                frame._eabPagingInstalled = true
+                -- Install button handlers for ChildUpdate
+                local btns = barButtons[barKey]
+                if btns then
+                    for _, btn in ipairs(btns) do
+                        if not btn:GetAttribute("_childupdate-eab-page") then
+                            btn:SetAttributeNoHandler("_childupdate-eab-page", [[
+                                local page = tonumber(message) or 1
+                                self:SetAttribute("actionpage", page)
+                            ]])
+                        end
+                    end
+                end
+            end
+            local conditions = EAB_VTABLE.BuildPagingConditions(barKey, customPaging, info.nativeActionPage)
+            if conditions then
+                UnregisterStateDriver(frame, "page")
+                RegisterStateDriver(frame, "page", conditions)
+            end
+        else
+            -- No paging configured: remove state driver, restore fixed page
+            UnregisterStateDriver(frame, "page")
+            frame:Execute(("self:SetAttribute('actionpage', %d)"):format(info.nativeActionPage))
+        end
+    end
+    -- Update modifier event registration
+end
+
 
 -------------------------------------------------------------------------------
 --  Bar Setup creates frames and buttons for each bar
@@ -2017,6 +2200,14 @@ local function SetupBar(info, skipProtected)
                 end
                 if info.nativeMainBar then
                     EAB_VTABLE.MainBarPageSync.InstallButton(btn)
+                elseif info.nativeActionPage and frame._eabPagingInstalled
+                       and not btn:GetAttribute("_childupdate-eab-page") then
+                    -- Bars 2-8 with paging: install a simple handler that
+                    -- sets actionpage on the button (secure, combat-safe).
+                    btn:SetAttributeNoHandler("_childupdate-eab-page", [[
+                        local page = tonumber(message) or 1
+                        self:SetAttribute("actionpage", page)
+                    ]])
                 end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
@@ -3862,6 +4053,9 @@ function EAB_VTABLE.MainBarPageSync.InstallButton(btn)
 
     btn:SetAttributeNoHandler("_childupdate-eab-page", ([[
         local page = tonumber(message) or 1
+        -- Set actionpage directly on the button so OnAttributeChanged fires
+        -- and UpdateAction refreshes icon/cooldown. Works in combat (secure).
+        self:SetAttribute("actionpage", page)
         local visible = self:GetAttribute("eab-withincutoff") ~= 0
 
         if visible and self:GetAttribute("eab-showempty") == 0 then
@@ -3926,7 +4120,7 @@ local function GetButtonActionSlot(btn)
         -- This correctly reflects vehicle/override/form pages, unlike
         -- C_ActionBar.GetActionBarPage() which only tracks the manual page.
         local frame = barFrames["MainBar"]
-        local page = frame and tonumber(frame:GetAttribute("actionpage")) or C_ActionBar.GetActionBarPage()
+        local page = frame and tonumber(frame:GetAttribute("actionpage")) or EAB_VTABLE.GetActionBarPage()
         offset = (page - 1) * NUM_ACTIONBAR_BUTTONS
     end
     return offset + info.index
@@ -5263,7 +5457,7 @@ local function UpdateFlipbook(btn)
     end
 end
 
--- Resolve the spellID for a button. Mirrors Bartender's Action.GetSpellId:
+-- Resolve the spellID for a button.
 -- GetActionInfo for direct spells, GetMacroSpell fallback for macros.
 -- Stored on _procState to avoid adding a top-level local (200 limit).
 _procState.GetButtonSpellID = function(btn)
@@ -6895,6 +7089,8 @@ function EAB:FinishSetup()
 
     DoSetupSecure()
 
+    -- Start modifier key listener if any bar has modifier paging configured
+
     -- Set override keybindings immediately at load time, before combat
     -- state is restored. This ensures keybinds work on /reload in combat.
     UpdateKeybinds()
@@ -7188,7 +7384,7 @@ function EAB:FinishSetup()
             -- Reset stale flags -- if we're not actually in a vehicle/housing
             -- the flags should be false
             local inVehicle = (UnitInVehicle and UnitInVehicle("player"))
-                              or (HasVehicleActionBar and HasVehicleActionBar())
+                              or EAB_VTABLE.HasVehicleActionBar()
 
             if not inVehicle and _bindState.vehicleCleared then
                 _bindState.vehicleCleared = false
@@ -7491,8 +7687,50 @@ function EAB:FinishSetup()
                 bar:Hide()
             end
         end
-        -- Do NOT touch MainActionBarController or ActionBarButtonEventsFrame.
-        -- Stock bars are dead via reparent + Show hooks.
+        -- Silence ActionBarButtonEventsFrame to prevent taint from
+        -- BlizzardSkin propagating to MultiBar buttons during combat.
+        -- PlayerCastingBarFrame is independent (CastingBarMixin registers its
+        -- own UNIT_SPELLCAST_* events), so this is safe unconditionally.
+        -- Only UpdatePressAndHoldAction (press-and-hold input) is lost for
+        -- EAB-owned buttons; ExtraActionButton and OverrideActionBar buttons
+        -- are preserved in abef.frames so they keep full Blizzard behavior.
+        local abef = _G.ActionBarButtonEventsFrame
+        if abef then
+            abef:UnregisterAllEvents()
+            abef:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+            abef:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
+            -- Keep only Blizzard-owned buttons that we don't replace:
+            -- ExtraActionButton (zone ability) and OverrideActionBarButton
+            -- (vehicle/override abilities).
+            local function IsBlizzardKeepButton(name)
+                if not name then return false end
+                return name:match("^ExtraActionButton%d")
+                    or name:match("^OverrideActionBarButton%d")
+            end
+            if abef.frames then
+                for i = #abef.frames, 1, -1 do
+                    local f = abef.frames[i]
+                    local n = f and f.GetName and f:GetName()
+                    if not IsBlizzardKeepButton(n) then
+                        abef.frames[i] = nil
+                    end
+                end
+            end
+            hooksecurefunc(abef, "RegisterFrame", function(_, added)
+                local frames = abef.frames
+                if not frames then return end
+                for idx = #frames, 1, -1 do
+                    local f = frames[idx]
+                    if f == added then
+                        local n = f and f.GetName and f:GetName()
+                        if not IsBlizzardKeepButton(n) then
+                            frames[idx] = nil
+                        end
+                        break
+                    end
+                end
+            end)
+        end
     end)
 
     -- Hook Show on stock bars so they can never re-appear regardless

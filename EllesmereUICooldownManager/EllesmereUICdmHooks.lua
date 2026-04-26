@@ -734,6 +734,71 @@ local function DecorateFrame(frame, barData)
         -- chain, which propagates taint to frame properties like isActive and
         -- allowAvailableAlert. Active state animations are handled during
         -- reanchor instead.
+
+        -- Cooldown State Effect: separate additive hook on SetDesaturated.
+        -- Blizzard calls SetDesaturated on every CD tick AND on CD end,
+        -- making it the right event for both "on CD" and "off CD" transitions.
+        -- This hook is independent from onDesatChange (hideActive) above.
+        if fd.tex and not fd._cdStateHooked then
+            fd._cdStateHooked = true
+            hooksecurefunc(fd.tex, "SetDesaturated", function()
+                if fd._isProcessingOverride then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                local bk2 = fc2 and fc2.barKey
+                if not sid2 or not bk2 then return end
+                if bk2:sub(1, 7) == "__ghost" then return end
+                local sd2 = ns.GetBarSpellData(bk2)
+                local ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
+                -- Fallback: sid2 may be a spell override while settings are
+                -- stored under the base ID. Scan assignedSpells for a match.
+                if not ss2 and sd2 and sd2.spellSettings and sd2.assignedSpells
+                   and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    for _, asid in ipairs(sd2.assignedSpells) do
+                        if asid and asid > 0 and asid ~= sid2
+                           and sd2.spellSettings[asid] then
+                            if C_SpellBook.FindSpellOverrideByID(asid) == sid2 then
+                                ss2 = sd2.spellSettings[asid]
+                                break
+                            end
+                        end
+                    end
+                end
+                local cse = ss2 and ss2.cdStateEffect
+                if not cse then
+                    if fd._cdStateGlowOn then
+                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                        fd._cdStateGlowOn = false
+                    end
+                    if fc2 and fc2._cdStateHidden then fc2._cdStateHidden = false end
+                    return
+                end
+                local cseInfo = C_Spell.GetSpellCooldown(sid2)
+                local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+                if cse == "hiddenOnCD" then
+                    local bd2 = barDataByKey and barDataByKey[bk2]
+                    local hide = onCD
+                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
+                    if fc2 then fc2._cdStateHidden = hide or false end
+                elseif cse == "hiddenReady" then
+                    local bd2 = barDataByKey and barDataByKey[bk2]
+                    local hide = not onCD
+                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
+                    if fc2 then fc2._cdStateHidden = hide or false end
+                elseif cse == "pixelGlowReady" or cse == "buttonGlowReady" then
+                    if not onCD then
+                        if fd.glowOverlay and not fd._cdStateGlowOn then
+                            local style = cse == "pixelGlowReady" and 1 or 3
+                            ns.StartNativeGlow(fd.glowOverlay, style, 1, 1, 1)
+                            fd._cdStateGlowOn = true
+                        end
+                    elseif fd._cdStateGlowOn then
+                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                        fd._cdStateGlowOn = false
+                    end
+                end
+            end)
+        end
     end
 
     hookFrameData[frame] = fd
@@ -1074,15 +1139,24 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
                     end
                 end
                 if f._itemCountText then
-                    if total > 1 then
-                        f._itemCountText:SetText(total)
-                        f._itemCountText:Show()
-                    elseif total == 1 and f._presetData and f._presetData.combatLockout then
-                        f._itemCountText:SetText(total)
-                        f._itemCountText:Show()
-                    else
+                    local fc = _ecmeFC[f]
+                    local bk = fc and fc.barKey
+                    local bd = bk and barDataByKey[bk]
+                    local showIC = not bd or bd.showItemCount ~= false
+                    local displayCount = showIC
+                        and ((total > 1) and total
+                        or (total == 1 and f._presetData and f._presetData.combatLockout) and total
+                        or nil) or nil
+                    if displayCount then
+                        if f._lastItemCount ~= displayCount then
+                            f._itemCountText:SetText(displayCount)
+                            f._lastItemCount = displayCount
+                        end
+                        if not f._itemCountText:IsShown() then f._itemCountText:Show() end
+                    elseif f._lastItemCount then
                         f._itemCountText:SetText("")
                         f._itemCountText:Hide()
+                        f._lastItemCount = nil
                     end
                 end
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
@@ -1329,7 +1403,10 @@ local function CollectAndReanchor()
                     -- Blizzard's "hide when inactive" state machine.
                     if frame:IsShown() then
                         local barHidden = container and container._visHidden
-                        frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                        local fcH = _ecmeFC[frame]
+                        if not (fcH and fcH._cdStateHidden) then
+                            frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                        end
                     end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
@@ -1576,15 +1653,20 @@ local function CollectAndReanchor()
                                 end
                                 if f._itemCountText then
                                     local showItemCount = barData.showItemCount ~= false
-                                    if total > 1 and showItemCount then
-                                        f._itemCountText:SetText(total)
-                                        f._itemCountText:Show()
-                                    elseif total == 1 and showItemCount and f._presetData and f._presetData.combatLockout then
-                                        f._itemCountText:SetText(total)
-                                        f._itemCountText:Show()
-                                    else
+                                    local displayCount = showItemCount
+                                        and ((total > 1) and total
+                                        or (total == 1 and f._presetData and f._presetData.combatLockout) and total
+                                        or nil) or nil
+                                    if displayCount then
+                                        if f._lastItemCount ~= displayCount then
+                                            f._itemCountText:SetText(displayCount)
+                                            f._lastItemCount = displayCount
+                                        end
+                                        if not f._itemCountText:IsShown() then f._itemCountText:Show() end
+                                    elseif f._lastItemCount then
                                         f._itemCountText:SetText("")
                                         f._itemCountText:Hide()
+                                        f._lastItemCount = nil
                                     end
                                 end
                                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
@@ -1728,7 +1810,10 @@ local function CollectAndReanchor()
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
                     icons[i] = frame
-                    frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                    local fcH = _ecmeFC[frame]
+                    if not (fcH and fcH._cdStateHidden) then
+                        frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                    end
                     frame:Show()
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
@@ -2236,6 +2321,73 @@ local function ProcessReanchorQueue(self)
 end
 
 -------------------------------------------------------------------------------
+--  Sync extra buff bars with Blizzard CDM viewer
+--
+--  When the user removes a buff from Blizzard CDM settings, the viewer stops
+--  creating frames for it. The default buff bar self-heals (reads from live
+--  cdmBarIcons), but extra buff bars store their own assignedSpells which
+--  become orphans -- visible in the preview but never active in-game.
+--  This function enumerates the buff viewer's pool to build a set of all
+--  spell IDs Blizzard currently tracks, then removes any positive (Blizzard-
+--  sourced) assignedSpells entries from extra buff bars that aren't in it.
+-------------------------------------------------------------------------------
+function ns.SyncExtraBuffBarsWithViewer()
+    local p = ECME.db and ECME.db.profile
+    if not p or not p.cdmBars then return end
+
+    -- Build set of spell IDs Blizzard's buff viewer currently has frames for.
+    -- EnumerateActive includes tracked-but-inactive buffs (they have cooldownInfo
+    -- even when hidden), but excludes spells the user removed from CDM settings
+    -- (those frames are released from the pool).
+    local trackedSet = {}
+    local buffViewer = _G["BuffIconCooldownViewer"]
+    if buffViewer and buffViewer.itemFramePool and buffViewer.itemFramePool.EnumerateActive then
+        for frame in buffViewer.itemFramePool:EnumerateActive() do
+            local displaySID, baseSID = ResolveFrameSpellID(frame)
+            if displaySID and displaySID > 0 then trackedSet[displaySID] = true end
+            if baseSID and baseSID > 0 then trackedSet[baseSID] = true end
+            -- Also grab linked spell IDs so override variants match
+            local fc = _ecmeFC[frame]
+            if fc and fc.linkedSpellIDs then
+                for _, lid in ipairs(fc.linkedSpellIDs) do
+                    if lid and lid > 0 then trackedSet[lid] = true end
+                end
+            end
+        end
+    end
+
+    -- Filter orphaned entries from each extra buff bar
+    local changed = false
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and bd.barType == "buffs" and bd.key ~= "buffs"
+           and not bd.isGhostBar then
+            local sd = ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells then
+                local writeIdx = 1
+                for readIdx = 1, #sd.assignedSpells do
+                    local id = sd.assignedSpells[readIdx]
+                    -- Keep: negative IDs (presets), custom spells, and tracked spells
+                    if type(id) ~= "number" or id <= 0
+                       or (sd.customSpellIDs and sd.customSpellIDs[id])
+                       or trackedSet[id] then
+                        sd.assignedSpells[writeIdx] = id
+                        writeIdx = writeIdx + 1
+                    else
+                        changed = true
+                    end
+                end
+                for i = writeIdx, #sd.assignedSpells do sd.assignedSpells[i] = nil end
+            end
+        end
+    end
+
+    if changed then
+        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+        QueueReanchor()
+    end
+end
+
+-------------------------------------------------------------------------------
 --  SetupViewerHooks (mixin hooks)
 --
 --  Hook strategy:
@@ -2436,13 +2588,19 @@ function ns.SetupViewerHooks()
 
     -- 4. CooldownViewerSettings show/hide: force reanchor.
     -- When CDM settings panel closes, Blizzard may re-layout its viewers.
-    -- Queue a reanchor to re-sync our bar positions.
+    -- Queue a reanchor to re-sync our bar positions.  Also sync extra buff
+    -- bars: spells removed from Blizzard CDM no longer produce viewer frames,
+    -- so their assignedSpells entries become orphans stuck in the preview.
     if EventRegistry and EventRegistry.RegisterCallback then
         local cdmSettingsOwner = {}
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow",
             QueueReanchor, cdmSettingsOwner)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnHide", function()
             C_Timer.After(0.1, QueueReanchor)
+            -- Delay sync slightly longer so Blizzard finishes rebuilding pools
+            C_Timer.After(0.3, function()
+                ns.SyncExtraBuffBarsWithViewer()
+            end)
         end, cdmSettingsOwner)
     end
 

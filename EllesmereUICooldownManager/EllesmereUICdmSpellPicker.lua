@@ -425,8 +425,7 @@ end
 --- Buff bars are NOT migrated: under the OLD model, the buff path's
 --- viewerBarKey fallback already showed everything from BuffIconCooldownViewer
 --- regardless of assignedSpells, so the old visual already matches the new
---- model. The user's existing __ghost_buffs entries (if any) are preserved
---- as-is.
+--- model. Ghost buff bar cleanup is handled by EnsureGhostBars.
 function ns.MigrateSpecToBarFilterModelV6()
     local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
     local sp = sa and sa.specProfiles
@@ -449,7 +448,6 @@ function ns.MigrateSpecToBarFilterModelV6()
         ["utility"]      = true,
         ["buffs"]        = true,
         ["__ghost_cd"]   = true,
-        ["__ghost_buffs"] = true,
     }
     for _, bd in ipairs(barList) do
         if bd.key then liveBarKeys[bd.key] = true end
@@ -730,7 +728,6 @@ ns.GetBarType = ResolveBarType
 --- auto-move sweep, render path, route map, and picker source selection.
 ---
 --- Special cases:
----   __ghost_buffs -> buff family
 ---   __ghost_cd    -> non-buff family
 ---   custom_buff   -> NOT considered a buff bar (separate aura system)
 local function IsBarBuffFamily(bdOrKey)
@@ -743,8 +740,7 @@ local function IsBarBuffFamily(bdOrKey)
         bd  = barDataByKey[key]
     end
 
-    if key == "__ghost_buffs" then return true end
-    if key == "__ghost_cd"    then return false end
+    if key == "__ghost_cd" then return false end
 
     local barType = ResolveBarType(bd or key)
     return barType == "buffs"
@@ -878,10 +874,15 @@ function ns.AddPresetToBar(barKey, preset)
             -- Glow-based presets removed (Time Spiral etc.)
             return false
         else
-            local primaryID = preset.spellIDs[1]
-            for _, existing in ipairs(spellList) do
-                if existing == primaryID then return false, "exists" end
+            -- Check ALL preset members against existing spells so partial
+            -- overlap is rejected (e.g. variant 701 already on bar blocks
+            -- adding preset {700, 701, 702}).
+            for _, sid in ipairs(preset.spellIDs) do
+                for _, existing in ipairs(spellList) do
+                    if existing == sid then return false, "exists" end
+                end
             end
+            local primaryID = preset.spellIDs[1]
             spellList[#spellList + 1] = primaryID
             if not sd.spellDurations then sd.spellDurations = {} end
             sd.spellDurations[primaryID] = preset.duration or 30
@@ -1003,18 +1004,17 @@ function ns.RemoveTrackedSpell(barKey, idx)
         end
     end
 
-    -- Route the removed spell to the appropriate ghost bar so frames stay
-    -- in the routing system but are hidden. Buff-family bars route to the
-    -- ghost buff bar; CD/utility bars route to the ghost CD bar. Negative
+    -- Route the removed spell to the ghost CD bar so frames stay in the
+    -- routing system but are hidden. Buff-family bars no longer ghost:
+    -- buff visibility is managed by Blizzard's CDM settings. Negative
     -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
     -- ghost routing entirely.
-    local bd = barDataByKey[barKey]
     local isNonViewer = removedID and removedID > 0
         and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
           or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
-    if removedID and removedID > 0 and not isNonViewer then
-        local ghostKey = IsBarBuffFamily(barKey) and ns.GHOST_BUFF_BAR_KEY or ns.GHOST_CD_BAR_KEY
-        ns.AddSpellToBar(ghostKey, removedID)
+    if removedID and removedID > 0 and not isNonViewer
+       and not IsBarBuffFamily(barKey) then
+        ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
     end
 
     local frame = cdmBarFrames[barKey]
@@ -1133,11 +1133,6 @@ function ns.RemoveCDMBar(key)
     local p = ECME.db.profile
     for i, barData in ipairs(p.cdmBars.bars) do
         if barData.key == key then
-            -- Determine which ghost bar receives the orphaned spells.
-            -- Resolved from the bar's family BEFORE we delete its config.
-            local isBuffFamily = ns.IsBarBuffFamily(barData)
-            local ghostKey = isBuffFamily and ns.GHOST_BUFF_BAR_KEY or ns.GHOST_CD_BAR_KEY
-
             -- Clean up frame
             local frame = cdmBarFrames[key]
             if frame then EllesmereUI.SetElementVisibility(frame, false) end

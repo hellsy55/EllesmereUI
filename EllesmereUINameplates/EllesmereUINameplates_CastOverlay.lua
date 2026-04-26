@@ -15,6 +15,17 @@
 local addonName, ns = ...
 if not ns then return end
 
+-- Cast overlay feature is disabled for maintenance.
+-- All entry points are no-ops; the file still loads so existing
+-- call sites (UpdateCast, ClearUnit, options) don't nil-check error.
+do
+    ns.RefreshCastOverlay = function() end
+    ns.RefreshCastOverlayKickTick = function() end
+    ns.RefreshCastOverlayColor = function() end
+    ns.ClearAllCastOverlays = function() end
+    return
+end
+
 local PP = EllesmereUI and EllesmereUI.PP
 
 local pairs, tremove = pairs, table.remove

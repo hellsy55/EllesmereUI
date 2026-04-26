@@ -1145,6 +1145,37 @@ do
         end
     end
 
+    --- Re-snap only borders whose parent frame is a descendant of `root`.
+    --- Used by tab switch to avoid resnapping 600+ borders across the
+    --- entire addon when only ~30 on the active page need it.
+    function PP.ResnapBordersUnder(root)
+        if not root then return PP.ResnapAllBorders() end
+        local count = 0
+        for i = 1, allBordersN do
+            local entry = allBorders[i]
+            local f = entry.frame
+            if f and entry.container then
+                -- Walk up the parent chain (max 10 levels to avoid infinite loops)
+                local parent = f
+                local found = false
+                for _ = 1, 10 do
+                    parent = parent:GetParent()
+                    if not parent then break end
+                    if parent == root then found = true; break end
+                end
+                if found then
+                    count = count + 1
+                    local bd = _ppBorderData[f]
+                    local ok = pcall(SnapBorderTextures, entry.container, f, bd and bd.borderSize or 1)
+                    if not ok then
+                        entry.container = nil
+                        entry.frame = nil
+                    end
+                end
+            end
+        end
+    end
+
     function PP.CreateBorder(frame, r, g, b, a, borderSize, drawLayer, subLevel)
         local bd = _ppBorderData[frame]
         if bd then return bd.container end
@@ -3666,6 +3697,7 @@ local function CreateMainFrame()
                 end
             end
         end
+        _activePageWrapper = nil
     end)
 
     -- Pixel-perfect scale: make 1 WoW unit = 1 screen pixel
@@ -6239,6 +6271,7 @@ end
 -- Page cache: maps "moduleName::pageName" -> { wrapper, totalH, headerBuilder }
 -- On revisit, we show the cached wrapper and refresh widget values instead of rebuilding.
 _pageCache = {}
+local _activePageWrapper  -- the currently-visible wrapper frame
 
 -- Invalidate all cached pages (called on profile reset, module reload, etc.)
 function EllesmereUI:InvalidatePageCache()
@@ -6249,6 +6282,7 @@ function EllesmereUI:InvalidatePageCache()
         end
         _pageCache[key] = nil
     end
+    _activePageWrapper = nil
     if EllesmereUI.InvalidateContentHeaderCache then
         EllesmereUI:InvalidateContentHeaderCache()
     end
@@ -6256,6 +6290,7 @@ end
 
 function EllesmereUI:SelectPage(pageName)
     if not activeModule or not modules[activeModule] then return end
+    if pageName == activePage then return end
 
     -- "Unlock Mode" is a fake nav item — fire unlock mode without changing page state.
     -- Capture the current module + page so DoClose can restore them exactly.
@@ -6310,9 +6345,11 @@ function EllesmereUI:SelectPage(pageName)
 
     if cached and cached.wrapper then
         -- Fast path: re-show cached page
-        -- Hide all current scrollChild children AND regions
-        -- (regions needed to clean up install page FontStrings/textures)
-        HideAllChildren(scrollChild)
+        -- Hide only the previous wrapper (tracked explicitly so it works
+        -- across module switches where the cache key would mismatch).
+        if _activePageWrapper then
+            _activePageWrapper:Hide()
+        end
 
         -- Restore content header from cache; fall back to rebuild if not cached
         if not EllesmereUI:RestoreContentHeaderFromCache(cacheKey) then
@@ -6325,10 +6362,16 @@ function EllesmereUI:SelectPage(pageName)
 
         -- Show the cached wrapper and set scroll child height
         cached.wrapper:Show()
+        _activePageWrapper = cached.wrapper
         contentFrame:SetHeight(cached.totalH + 30)
 
-        -- Restore any elements hidden by a previous inline search
-        EllesmereUI:ApplyInlineSearch("")
+        -- Restore any elements hidden by a previous inline search.
+        -- Skip if the search box is already empty -- ApplyInlineSearch("")
+        -- calls CollectAllChildren which sorts + re-anchors every widget.
+        local searchText = tabBar and tabBar._searchBox and tabBar._searchBox:GetText() or ""
+        if searchText ~= "" then
+            EllesmereUI:ApplyInlineSearch("")
+        end
 
         -- Restore this page's refresh list
         ClearWidgetRefreshList()
@@ -6346,8 +6389,13 @@ function EllesmereUI:SelectPage(pageName)
         if config.onPageCacheRestore then config.onPageCacheRestore(pageName) end
     else
         -- Cold path: build page for the first time
-        -- Hide any visible wrappers AND regions from other pages / install page
-        HideAllChildren(scrollChild)
+        -- Hide the previous wrapper if tracked; fall back to full hide
+        -- for the very first page (install page stray regions, etc.)
+        if _activePageWrapper then
+            _activePageWrapper:Hide()
+        else
+            HideAllChildren(scrollChild)
+        end
 
         -- Clear content header
         lastHeaderPadded = false
@@ -6360,6 +6408,7 @@ function EllesmereUI:SelectPage(pageName)
         -- Create a wrapper frame for this page
         local wrapper = CreateFrame("Frame", nil, scrollChild)
         wrapper:SetAllPoints(scrollChild)
+        _activePageWrapper = wrapper
 
         local config = modules[activeModule]
         local totalH = 0
@@ -6505,7 +6554,11 @@ function EllesmereUI:SelectPage(pageName)
     -- Waiting 1 frame ensures the frame hierarchy has finished layout before
     -- we recalculate effective scales.
     C_Timer.After(0, function()
-        if PP and PP.ResnapAllBorders then PP.ResnapAllBorders() end
+        if PP and PP.ResnapBordersUnder and _activePageWrapper then
+            PP.ResnapBordersUnder(_activePageWrapper)
+        elseif PP and PP.ResnapAllBorders then
+            PP.ResnapAllBorders()
+        end
     end)
 end
 
@@ -6598,6 +6651,7 @@ end
 
 function EllesmereUI:SelectModule(folderName)
     if not modules[folderName] then return end
+    if folderName == activeModule then return end
 
     -- Re-sync pixel perfect mult on every addon switch
     if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
@@ -7018,7 +7072,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2"
+EllesmereUI.VERSION = "7.2.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7693,93 +7747,12 @@ initFrame:SetScript("OnEvent", function(self, event)
     -- Add EllesmereUI + Unlock Mode buttons to the Game Menu (pause menu).
     -- Both share a single Layout hook to avoid double-push conflicts.
     if GameMenuFrame and not GameMenuFrame.EllesmereUI then
-        -- Skin the game menu frame (one-time).
-        -- Defaults to matching reskinQueuePopup if never explicitly set.
-        local _reskinMenu = EllesmereUIDB and EllesmereUIDB.reskinGameMenu
-        if _reskinMenu == nil then _reskinMenu = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
-        if _reskinMenu then
-            -- Strip decorative textures
-            for i = 1, select("#", GameMenuFrame:GetRegions()) do
-                local r = select(i, GameMenuFrame:GetRegions())
-                if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
-            end
-            if GameMenuFrame.NineSlice then GameMenuFrame.NineSlice:SetAlpha(0) end
-            if GameMenuFrame.Border then GameMenuFrame.Border:SetAlpha(0) end
-            -- Strip header textures, accent-color the title, nudge down
-            local header = GameMenuFrame.Header
-            if header then
-                for i = 1, select("#", header:GetRegions()) do
-                    local r = select(i, header:GetRegions())
-                    if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
-                end
-                local headerText = header.Text or (header.GetRegions and select(1, header:GetRegions()))
-                if headerText and headerText.SetTextColor then
-                    local EG = ELLESMERE_GREEN
-                    headerText:SetTextColor(EG.r, EG.g, EG.b, 1)
-                    local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
-                    local _, hSize = headerText:GetFont()
-                    headerText:SetFont(euiFont, hSize or 16, "")
-                end
-                header:ClearAllPoints()
-                header:SetPoint("TOP", GameMenuFrame, "TOP", 0, -10)
-            end
-            -- Dark bg + border
-            local RS = EllesmereUI.RESKIN
-            local _gmBg = GameMenuFrame:CreateTexture(nil, "BACKGROUND")
-            _gmBg:SetAllPoints()
-            _gmBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-            local PP = EllesmereUI.PP
-            if PP and PP.CreateBorder then
-                PP.CreateBorder(GameMenuFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-            end
-            -- Skin pooled buttons via InitButtons hook
-            hooksecurefunc(GameMenuFrame, "InitButtons", function(menu)
-                if not menu.buttonPool then return end
-                for menuBtn in menu.buttonPool:EnumerateActive() do
-                    if not menuBtn._euiSkinned then
-                        menuBtn._euiSkinned = true
-                        for j = 1, select("#", menuBtn:GetRegions()) do
-                            local r = select(j, menuBtn:GetRegions())
-                            if r and r:IsObjectType("Texture") and r ~= menuBtn:GetFontString() then
-                                r:SetAlpha(0)
-                            end
-                        end
-                        if menuBtn.Left then menuBtn.Left:SetAlpha(0) end
-                        if menuBtn.Middle then menuBtn.Middle:SetAlpha(0) end
-                        if menuBtn.Right then menuBtn.Right:SetAlpha(0) end
-                        for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
-                            local tex = menuBtn[texKey]
-                            if tex and tex.SetAlpha then
-                                hooksecurefunc(tex, "SetAlpha", function(self, a)
-                                    if a > 0 then self:SetAlpha(0) end
-                                end)
-                            end
-                        end
-                        -- Inset container: bg + border sit 2px inside the
-                        -- button edges for a tighter, cleaner look.
-                        local inset = CreateFrame("Frame", nil, menuBtn)
-                        inset:SetPoint("TOPLEFT", 2, -2)
-                        inset:SetPoint("BOTTOMRIGHT", -2, 2)
-                        inset:SetFrameLevel(menuBtn:GetFrameLevel())
-                        local btnBg = inset:CreateTexture(nil, "BACKGROUND", nil, -6)
-                        btnBg:SetAllPoints()
-                        btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                        if PP and PP.CreateBorder then
-                            PP.CreateBorder(inset, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-                        end
-                        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-                        hl:SetAllPoints(inset)
-                        hl:SetColorTexture(1, 1, 1, 0.1)
-                        local fs = menuBtn:GetFontString()
-                        if fs then
-                            local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
-                            local _, size, flags = fs:GetFont()
-                            fs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
-                        end
-                    end
-                end
-            end)
-        end
+        -- Game menu frame+button skinning lives in EllesmereUIBlizzardSkin.lua
+        -- so it only applies when that addon is enabled. Detect whether the
+        -- skin is active so EUI's own buttons match the skinned menu style.
+        local _blizzSkinLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUIBlizzardSkin")
+        local _reskinMenu = _blizzSkinLoaded and EllesmereUIDB and EllesmereUIDB.reskinGameMenu
+        if _reskinMenu == nil and _blizzSkinLoaded then _reskinMenu = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
 
         local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         btn:SetSize(200, 35)

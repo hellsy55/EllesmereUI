@@ -1619,6 +1619,39 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Remove ghost buff bar: buff visibility is now managed by Blizzard CDM
+-- settings. Clean up the bar entry from all profiles and spell data from
+-- all spec profiles. One-time migration.
+EllesmereUI.RegisterMigration({
+    id          = "cdm_remove_ghost_buff_bar_v1",
+    scope       = "profile",
+    description = "Remove __ghost_buffs bar entry from cdmBars.bars array.",
+    body = function(ctx)
+        local bars = ctx.profile.cdmBars and ctx.profile.cdmBars.bars
+        if not bars then return end
+        for i = #bars, 1, -1 do
+            if bars[i].key == "__ghost_buffs" then
+                table.remove(bars, i)
+            end
+        end
+    end,
+})
+EllesmereUI.RegisterMigration({
+    id          = "cdm_remove_ghost_buff_spelldata_v1",
+    scope       = "global",
+    description = "Remove __ghost_buffs spell data from all spec profiles.",
+    body = function(ctx)
+        local sa = ctx.db and ctx.db.spellAssignments
+        local sp = sa and sa.specProfiles
+        if not sp then return end
+        for _, specData in pairs(sp) do
+            if specData.barSpells then
+                specData.barSpells["__ghost_buffs"] = nil
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

@@ -871,6 +871,107 @@ do
 end
 
 -------------------------------------------------------------------------------
+--  Game Menu Skinning
+--  Restyles the pause menu (GameMenuFrame) with EUI dark style + border.
+--  Runs once on PLAYER_LOGIN so GameMenuFrame is available.
+-------------------------------------------------------------------------------
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if not GameMenuFrame then return end
+        -- Defaults to matching reskinQueuePopup if never explicitly set.
+        local reskin = EllesmereUIDB and EllesmereUIDB.reskinGameMenu
+        if reskin == nil then reskin = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
+        if not reskin then return end
+
+        local RS = EllesmereUI.RESKIN
+        local PP = EllesmereUI.PP
+        local ELLESMERE_GREEN = EllesmereUI.ELLESMERE_GREEN or { r = 0.27, g = 0.86, b = 0.49 }
+
+        -- Strip decorative textures
+        for i = 1, select("#", GameMenuFrame:GetRegions()) do
+            local r = select(i, GameMenuFrame:GetRegions())
+            if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
+        end
+        if GameMenuFrame.NineSlice then GameMenuFrame.NineSlice:SetAlpha(0) end
+        if GameMenuFrame.Border then GameMenuFrame.Border:SetAlpha(0) end
+        -- Strip header textures, accent-color the title, nudge down
+        local header = GameMenuFrame.Header
+        if header then
+            for i = 1, select("#", header:GetRegions()) do
+                local r = select(i, header:GetRegions())
+                if r and r:IsObjectType("Texture") then r:SetAlpha(0) end
+            end
+            local headerText = header.Text or (header.GetRegions and select(1, header:GetRegions()))
+            if headerText and headerText.SetTextColor then
+                headerText:SetTextColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+                local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
+                local _, hSize = headerText:GetFont()
+                headerText:SetFont(euiFont, hSize or 16, "")
+            end
+            header:ClearAllPoints()
+            header:SetPoint("TOP", GameMenuFrame, "TOP", 0, -10)
+        end
+        -- Dark bg + border
+        local gmBg = GameMenuFrame:CreateTexture(nil, "BACKGROUND")
+        gmBg:SetAllPoints()
+        gmBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(GameMenuFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+        end
+        -- Skin pooled buttons via InitButtons hook
+        hooksecurefunc(GameMenuFrame, "InitButtons", function(menu)
+            if not menu.buttonPool then return end
+            for menuBtn in menu.buttonPool:EnumerateActive() do
+                if not menuBtn._euiSkinned then
+                    menuBtn._euiSkinned = true
+                    for j = 1, select("#", menuBtn:GetRegions()) do
+                        local r = select(j, menuBtn:GetRegions())
+                        if r and r:IsObjectType("Texture") and r ~= menuBtn:GetFontString() then
+                            r:SetAlpha(0)
+                        end
+                    end
+                    if menuBtn.Left then menuBtn.Left:SetAlpha(0) end
+                    if menuBtn.Middle then menuBtn.Middle:SetAlpha(0) end
+                    if menuBtn.Right then menuBtn.Right:SetAlpha(0) end
+                    for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                        local tex = menuBtn[texKey]
+                        if tex and tex.SetAlpha then
+                            hooksecurefunc(tex, "SetAlpha", function(self, a)
+                                if a > 0 then self:SetAlpha(0) end
+                            end)
+                        end
+                    end
+                    -- Inset container: bg + border sit 2px inside the
+                    -- button edges for a tighter, cleaner look.
+                    local inset = CreateFrame("Frame", nil, menuBtn)
+                    inset:SetPoint("TOPLEFT", 2, -2)
+                    inset:SetPoint("BOTTOMRIGHT", -2, 2)
+                    inset:SetFrameLevel(menuBtn:GetFrameLevel())
+                    local btnBg = inset:CreateTexture(nil, "BACKGROUND", nil, -6)
+                    btnBg:SetAllPoints()
+                    btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                    if PP and PP.CreateBorder then
+                        PP.CreateBorder(inset, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                    end
+                    local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                    hl:SetAllPoints(inset)
+                    hl:SetColorTexture(1, 1, 1, 0.1)
+                    local fs = menuBtn:GetFontString()
+                    if fs then
+                        local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
+                        local _, size, flags = fs:GetFont()
+                        fs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+-------------------------------------------------------------------------------
 --  UberTooltips CVar enforcement (only if user has manually set it in EUI)
 -------------------------------------------------------------------------------
 do

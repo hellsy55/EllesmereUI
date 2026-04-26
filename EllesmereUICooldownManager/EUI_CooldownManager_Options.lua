@@ -4158,8 +4158,11 @@ initFrame:SetScript("OnEvent", function(self)
         local mH = 4
         local allItems = {}
 
-        -- "Remove Spell" option at top (only for right-click on existing icon)
-        if slotIndex then
+        -- "Remove Spell" option at top (only for right-click on existing icon).
+        -- Default buff bar (key == "buffs") doesn't support removal -- buff
+        -- visibility is managed through Blizzard's CDM settings. Extra buff
+        -- bars allow removal (un-routes the spell back to the default bar).
+        if slotIndex and barKey ~= "buffs" then
             local rmItem = CreateFrame("Button", nil, inner)
             rmItem:SetHeight(ITEM_H)
             rmItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -4245,6 +4248,13 @@ initFrame:SetScript("OnEvent", function(self)
                         { val = "custom",  label = "CD Swipe Color" },
                         { val = "class",   label = "CD Swipe Class Colored" },
                         { val = "none",    label = "Hide Active State" },
+                    }
+                    local CD_STATE_ITEMS = {
+                        { val = nil,               label = "None" },
+                        { val = "hiddenOnCD",      label = "Hidden (On CD)" },
+                        { val = "hiddenReady",     label = "Hidden (CD Ready)" },
+                        { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
+                        { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
                     }
 
                     -- Track open subnavs on the menu frame so OnUpdate can see them
@@ -4377,6 +4387,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.activeGlowR = ss.activeGlowR
                                                 os.activeGlowG = ss.activeGlowG
                                                 os.activeGlowB = ss.activeGlowB
+                                                os.cdStateEffect = ss.cdStateEffect
                                             end
                                         end
                                     end
@@ -4422,7 +4433,19 @@ initFrame:SetScript("OnEvent", function(self)
                     local procRow = MakeSubnavRow("Proc Glow", GLOW_ITEMS,
                         function() return ss.procGlow end,
                         function(v) EnsureSS(); ss.procGlow = v end,
-                        function() return ss.procGlow == nil end)
+                        function() return ss.procGlow == nil end,
+                        function(si, item)
+                            local isGlow = item.val and item.val > 0
+                            local cse = ss.cdStateEffect
+                            if isGlow and (cse == "pixelGlowReady" or cse == "buttonGlowReady") then
+                                si:SetAlpha(0.35)
+                                si:SetScript("OnClick", function() end)
+                                si:SetScript("OnEnter", function()
+                                    EllesmereUI.ShowWidgetTooltip(si, "Disable CD Ready glow first")
+                                end)
+                                si:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                            end
+                        end)
                     if isCustomInjected and procRow then
                         procRow:SetAlpha(0.35)
                         procRow:SetScript("OnEnter", function()
@@ -4563,6 +4586,37 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
+                    -- 4. Cooldown State Effect (default = nil / none)
+                    local cdStateRow = MakeSubnavRow("Cooldown State Effect", CD_STATE_ITEMS,
+                        function() return ss.cdStateEffect end,
+                        function(v)
+                            EnsureSS(); ss.cdStateEffect = v
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.cdStateEffect == nil end,
+                        function(si, item)
+                            local isGlow = (item.val == "pixelGlowReady" or item.val == "buttonGlowReady")
+                            if isGlow and ss.procGlow and ss.procGlow > 0 then
+                                si:SetAlpha(0.35)
+                                si:SetScript("OnClick", function() end)
+                                si:SetScript("OnEnter", function()
+                                    EllesmereUI.ShowWidgetTooltip(si, "Disable Proc Glow first")
+                                end)
+                                si:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                            end
+                        end)
+                    if isCustomInjected and cdStateRow then
+                        cdStateRow:SetAlpha(0.35)
+                        cdStateRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(cdStateRow, customDisabledTip)
+                            end
+                        end)
+                        cdStateRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
                     -- Divider before sync toggle
                     local div2 = inner:CreateTexture(nil, "ARTWORK")
                     div2:SetHeight(1)
@@ -4647,6 +4701,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeGlowR = ss.activeGlowR
                                     os.activeGlowG = ss.activeGlowG
                                     os.activeGlowB = ss.activeGlowB
+                                    os.cdStateEffect = ss.cdStateEffect
                                 end
                             end
                             if ns.QueueReanchor then ns.QueueReanchor() end
@@ -6504,13 +6559,15 @@ initFrame:SetScript("OnEvent", function(self)
             slot._slotIdx = idx
 
             -- Right-click: spell picker to replace; Middle-click: remove
-            -- Buff bars: no removal or replacement (Blizzard controls the list)
+            -- Default buff bar: no interaction (Blizzard controls the list)
             slot:SetScript("OnClick", function(self, button)
                 if GetTime() - dragEndTime < 0.2 then
                     return
                 end
                 local bd = SelectedCDMBar()
                 if not bd then return end
+                -- Default buff bar icons are view-only in preview
+                if bd.key == "buffs" then return end
 
                 if button == "MiddleButton" then
                     local si = self._slotIdx
@@ -6908,12 +6965,37 @@ initFrame:SetScript("OnEvent", function(self)
             local isCustomBuffBar = (bd.barType == "custom_buff")
             local isFocusKick = (bd.key == "focuskick")
 
-            -- All bar types (CD/utility/buff/custom) read from assignedSpells.
-            -- assignedSpells is pure user intent -- every entry is something
-            -- the user wants on this bar, and the route map + live CDM viewer
-            -- decide at runtime whether the frame is currently available.
-            local sdUpd = EnsureAssignedSpells(bd.key)
-            local tracked = sdUpd and sdUpd.assignedSpells or {}
+            -- CD/utility and extra buff bars read from assignedSpells (user intent).
+            -- The DEFAULT buff bar reads from live cdmBarIcons (Blizzard viewer
+            -- is the authority; there is no ghost buff bar to divert from).
+            local tracked
+            local liveTextures  -- spell ID -> texture from live frame (buff bar only)
+            if bd.key == "buffs" then
+                local liveIcons = ns.cdmBarIcons and ns.cdmBarIcons[bd.key]
+                if liveIcons then
+                    tracked = {}
+                    liveTextures = {}
+                    local ecmeFC = ns._ecmeFC
+                    for _, icon in ipairs(liveIcons) do
+                        local fc = ecmeFC and ecmeFC[icon]
+                        local sid = fc and fc.spellID
+                        if sid and sid > 0 then
+                            tracked[#tracked + 1] = sid
+                            -- Read texture directly from Blizzard's frame
+                            local iconWidget = icon.Icon or icon._tex
+                            if iconWidget and iconWidget.GetTexture then
+                                liveTextures[sid] = iconWidget:GetTexture()
+                            end
+                        end
+                    end
+                else
+                    local sdUpd = EnsureAssignedSpells(bd.key)
+                    tracked = sdUpd and sdUpd.assignedSpells or {}
+                end
+            else
+                local sdUpd = EnsureAssignedSpells(bd.key)
+                tracked = sdUpd and sdUpd.assignedSpells or {}
+            end
             local count = #tracked
 
             -- Use the same stride logic as the runtime (ComputeTopRowStride)
@@ -7051,9 +7133,19 @@ initFrame:SetScript("OnEvent", function(self)
                             local itemID = GetInventoryItemID("player", -id)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
-                            local liveID = ResolveToLive(id)
-                            tex = C_Spell.GetSpellTexture(liveID)
-                            slot._previewSpellID = liveID
+                            -- Default buff bar: read texture from the live Blizzard
+                            -- frame (always correct, even for untalented spells).
+                            -- CD/utility + extra buff bars: resolve to live override.
+                            if liveTextures and liveTextures[id] then
+                                tex = liveTextures[id]
+                            else
+                                local displayID = ResolveToLive(id)
+                                tex = C_Spell.GetSpellTexture(displayID)
+                                if not tex and displayID ~= id then
+                                    tex = C_Spell.GetSpellTexture(id)
+                                end
+                            end
+                            slot._previewSpellID = id
                         end
                         if tex then
                             slot._icon:SetTexture(tex)
@@ -7229,7 +7321,7 @@ initFrame:SetScript("OnEvent", function(self)
                 clickFS:SetJustifyH("CENTER")
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 clickFS:SetTextColor(ar, ag, ab, 1)
-                clickFS:SetText("Reorder icons through Blizzard CDM Settings")
+                clickFS:SetText("Manage shown buffs through Blizzard CDM Settings")
                 clickBtn:SetScript("OnEnter", function() clickFS:SetTextColor(1, 1, 1, 1) end)
                 clickBtn:SetScript("OnLeave", function()
                     local r, g, b = EllesmereUI.GetAccentColor()
@@ -7238,15 +7330,10 @@ initFrame:SetScript("OnEvent", function(self)
                 self._buffInfoClick = clickBtn
             end
             if isBuffBar then
-                local infoFS = self._buffInfoText
-                infoFS:SetText("")
-                infoFS:ClearAllPoints()
-                infoFS:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
-                infoFS:SetWidth(self:GetWidth() - 20)
-                infoFS:Show()
+                if self._buffInfoText then self._buffInfoText:Hide() end
                 local clickBtn = self._buffInfoClick
                 clickBtn:ClearAllPoints()
-                clickBtn:SetPoint("TOP", infoFS, "BOTTOM", 0, -2)
+                clickBtn:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
                 clickBtn:SetWidth(self:GetWidth() - 20)
                 clickBtn:Show()
                 -- Clean up hidden rows from previous implementation
@@ -7255,7 +7342,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if self._hiddenHeader then self._hiddenHeader:Hide() end
                 if self._focusKickInfoText then self._focusKickInfoText:Hide() end
-                self:SetHeight(totalH + 10 + infoFS:GetStringHeight() + 20 + 14)
+                self:SetHeight(totalH + 10 + 14 + 20)
             elseif isFocusKick then
                 if self._buffInfoText then self._buffInfoText:Hide() end
                 if self._buffInfoClick then self._buffInfoClick:Hide() end
@@ -7963,8 +8050,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 3: Number of Rows | Bar Opacity (cd/utility only, excl. focuskick)
-        local isCDOrUtilityRow3 = (barData.barType == "cooldowns" or barData.barType == "utility") and not isFocusKick
+        -- Row 3: Number of Rows | Bar Opacity (cd/utility/buff, excl. focuskick)
+        local isCDOrUtilityRow3 = (barData.barType == "cooldowns" or barData.barType == "utility" or barData.barType == "buffs") and not isFocusKick
         local row3Right
         if isCDOrUtilityRow3 then
             row3Right = { type="slider", text="Bar Opacity",
