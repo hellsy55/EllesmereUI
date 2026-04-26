@@ -6345,11 +6345,7 @@ function EllesmereUI:SelectPage(pageName)
 
     if cached and cached.wrapper then
         -- Fast path: re-show cached page
-        -- Hide only the previous wrapper (tracked explicitly so it works
-        -- across module switches where the cache key would mismatch).
-        if _activePageWrapper then
-            _activePageWrapper:Hide()
-        end
+        HideAllChildren(scrollChild)
 
         -- Restore content header from cache; fall back to rebuild if not cached
         if not EllesmereUI:RestoreContentHeaderFromCache(cacheKey) then
@@ -6389,13 +6385,7 @@ function EllesmereUI:SelectPage(pageName)
         if config.onPageCacheRestore then config.onPageCacheRestore(pageName) end
     else
         -- Cold path: build page for the first time
-        -- Hide the previous wrapper if tracked; fall back to full hide
-        -- for the very first page (install page stray regions, etc.)
-        if _activePageWrapper then
-            _activePageWrapper:Hide()
-        else
-            HideAllChildren(scrollChild)
-        end
+        HideAllChildren(scrollChild)
 
         -- Clear content header
         lastHeaderPadded = false
@@ -7072,7 +7062,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.1"
+EllesmereUI.VERSION = "7.2.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -1631,11 +1631,13 @@ do
                     end)
                 end
             end
-        elseif isFirstLogin or charChanged then
-            -- No spec assignment for this character. If the current
-            -- activeProfile is spec-assigned (left over from a previous
-            -- character), switch to the last non-spec profile so this
-            -- character doesn't inherit another spec's layout.
+        elseif charChanged then
+            -- No spec assignment for this character and character changed
+            -- (alt swap). If the current activeProfile is spec-assigned
+            -- (left over from the previous character), switch to the last
+            -- non-spec profile so this character doesn't inherit another
+            -- character's spec layout. Skip on plain /reload (same char)
+            -- to respect the user's intentional profile choice.
             local current = db.activeProfile or "Default"
             local currentIsSpecAssigned = false
             if db.specProfiles then

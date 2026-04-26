@@ -124,10 +124,12 @@ local function ApplyCastBarTargetText(ov, plate)
     end
 
     local spellTarget, spellTargetClass
-    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(unit)
-    if rawTarget then
-        spellTarget = rawTarget
-        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(unit)
+    if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(unit) then
+        local rawTarget = UnitSpellTargetName and UnitSpellTargetName(unit)
+        if rawTarget then
+            spellTarget = rawTarget
+            spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(unit)
+        end
     end
     local hasTarget = spellTarget and true or false
     ov.target:SetText(spellTarget or "")
@@ -248,17 +250,20 @@ local function BuildOverlay()
     barOverlay:SetAlpha(0)
     f.barOverlay = barOverlay
 
-    -- Kick tick mark: two invisible StatusBars + one visible tick texture.
-    -- Clip on the cast bar prevents overflow when kick CD > remaining cast.
-    bar:SetClipsChildren(true)
-    local kickPositioner = CreateFrame("StatusBar", nil, bar)
+    -- Kick tick: clip frame so the tick doesn't overflow the cast bar.
+    -- Only kick elements live inside; text/icon/spark stay unclipped.
+    local kickClip = CreateFrame("Frame", nil, bar)
+    kickClip:SetAllPoints(bar)
+    kickClip:SetClipsChildren(true)
+    f.kickClip = kickClip
+    local kickPositioner = CreateFrame("StatusBar", nil, kickClip)
     kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     kickPositioner:GetStatusBarTexture():SetAlpha(0)
     kickPositioner:SetPoint("CENTER", bar)
     kickPositioner:SetFrameLevel(bar:GetFrameLevel() + 1)
     kickPositioner:Hide()
     f.kickPositioner = kickPositioner
-    local kickMarker = CreateFrame("StatusBar", nil, bar)
+    local kickMarker = CreateFrame("StatusBar", nil, kickClip)
     kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     kickMarker:GetStatusBarTexture():SetAlpha(0)
     kickMarker:SetPoint("LEFT", kickPositioner:GetStatusBarTexture(), "RIGHT")

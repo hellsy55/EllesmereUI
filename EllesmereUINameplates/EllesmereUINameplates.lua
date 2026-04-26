@@ -1542,20 +1542,11 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castSpark:SetBlendMode("ADD")
     local shieldHeight = CAST_H * 0.75
     local shieldWidth = shieldHeight * (29 / 35)
-    -- Parent to cast's parent so SetClipsChildren(true) on the cast
-    -- bar (for kick tick) doesn't clip the shield hanging off the left.
-    -- Visibility synced manually via ShowCast/HideCast paths.
-    plate.castShieldFrame = CreateFrame("Frame", nil, plate.cast:GetParent())
+    plate.castShieldFrame = CreateFrame("Frame", nil, plate.cast)
     plate.castShieldFrame:SetSize(shieldWidth, shieldHeight)
     plate.castShieldFrame:SetPoint("CENTER", plate.cast, "LEFT", 0, 0)
     plate.castShieldFrame:SetFrameLevel(plate.castIconFrame:GetFrameLevel() + 5)
     plate.castShieldFrame:Hide()
-    -- Auto-hide shield when cast bar hides (no longer a child of cast bar
-    -- so parent-child auto-hide doesn't apply)
-    plate.cast:HookScript("OnHide", function()
-        plate.castShieldFrame:Hide()
-        plate.castShieldFrame:SetAlpha(1)
-    end)
     plate.castShield = plate.castShieldFrame:CreateTexture(nil, "OVERLAY")
     plate.castShield:SetAllPoints()
     plate.castShield:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\shield.png")
@@ -1563,19 +1554,20 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castBarOverlay:SetAllPoints(plate.cast:GetStatusBarTexture())
     plate.castBarOverlay:SetTexture("Interface\\Buttons\\WHITE8x8")
     plate.castBarOverlay:SetAlpha(0)
-    -- Kick tick mark: two invisible StatusBars + one visible tick texture.
-    -- kickPositioner tracks cast elapsed; kickMarker tracks kick cooldown remaining.
-    -- The tick texture sits at the right edge of kickMarker's fill.
-    -- Clip on the cast bar itself prevents the tick from rendering outside
-    -- when kick CD exceeds remaining cast time.
-    plate.cast:SetClipsChildren(true)
-    plate.kickPositioner = CreateFrame("StatusBar", nil, plate.cast)
+    -- Kick tick: clip frame so the tick doesn't render outside the cast bar
+    -- when kick CD exceeds remaining cast time. Only the kick elements live
+    -- inside this clip frame; everything else (icon, text, shield, spark)
+    -- stays on the unclipped cast bar so nothing gets cut off.
+    plate.kickClip = CreateFrame("Frame", nil, plate.cast)
+    plate.kickClip:SetAllPoints(plate.cast)
+    plate.kickClip:SetClipsChildren(true)
+    plate.kickPositioner = CreateFrame("StatusBar", nil, plate.kickClip)
     plate.kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickPositioner:GetStatusBarTexture():SetAlpha(0)
     plate.kickPositioner:SetPoint("CENTER", plate.cast)
     plate.kickPositioner:SetFrameLevel(plate.cast:GetFrameLevel() + 1)
     plate.kickPositioner:Hide()
-    plate.kickMarker = CreateFrame("StatusBar", nil, plate.cast)
+    plate.kickMarker = CreateFrame("StatusBar", nil, plate.kickClip)
     plate.kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickMarker:GetStatusBarTexture():SetAlpha(0)
     plate.kickMarker:SetPoint("LEFT", plate.kickPositioner:GetStatusBarTexture(), "RIGHT")
@@ -3188,11 +3180,9 @@ castFallbackFrame:SetScript("OnUpdate", function()
                 plate.cast:SetValue(bc:GetValue())
                 -- Update cast target in fallback mode (not handled by UpdateCast)
                 if plate.castTarget then
-                    local tgt, tgtClass
-                    local raw = UnitSpellTargetName and UnitSpellTargetName(plate.unit)
-                    if raw then
-                        tgt = raw
-                        tgtClass = UnitSpellTargetClass and UnitSpellTargetClass(plate.unit)
+                    local tgt
+                    if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(plate.unit) then
+                        tgt = UnitSpellTargetName and UnitSpellTargetName(plate.unit)
                     end
                     plate.castTarget:SetText(tgt or "")
                 end
@@ -4548,14 +4538,16 @@ function NameplateFrame:UpdateCast()
     self.castName:SetText(type(name) ~= "nil" and name or "")
     
     -- Get the cast target name and class for display.
-    -- UnitSpellTargetName returns a secret value -- pass directly to
-    -- SetText (which accepts secrets). Do NOT pass through UnitName()
-    -- or Ambiguate() as those reject secret values.
+    -- UnitShouldDisplaySpellTargetName gates whether the target is
+    -- available; UnitSpellTargetName returns a secret value -- pass
+    -- directly to SetText (which accepts secrets).
     local spellTarget, spellTargetClass
-    local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
-    if rawTarget then
-        spellTarget = rawTarget
-        spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+    if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(self.unit) then
+        local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
+        if rawTarget then
+            spellTarget = rawTarget
+            spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+        end
     end
     local hasTarget = spellTarget and true or false
     self.castTarget:SetText(spellTarget or "")

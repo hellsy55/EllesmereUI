@@ -5057,6 +5057,13 @@ function EAB:UpdateHousingVisibility()
         -- forms are also handled here to cover cases [mounted] does not match.
         local function ShouldHideNonMacro(s)
             if not s then return false end
+            if s.visHideNoTarget then
+                -- [noexists] in the state driver handles combat. Out of
+                -- combat, also hide when the only "target" is a soft
+                -- interact target (interactable NPC in view cone).
+                if not UnitExists("target") then return true end
+                if UnitIsUnit("target", "softinteract") then return true end
+            end
             if s.visOnlyInstances then
                 local _, iType, diffID = GetInstanceInfo()
                 diffID = tonumber(diffID) or 0

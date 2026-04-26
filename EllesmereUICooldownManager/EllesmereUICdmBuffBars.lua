@@ -106,8 +106,7 @@ end
 local PANDEMIC_THRESHOLD = 0.30
 
 --- Check if a spell is in the pandemic window via C_UnitAuras.
---- Returns true if the aura exists, has duration, and remaining <= 30%.
---- Only checks player auras (self-buffs).
+--- Checks player auras first, then target debuffs AND helpful buffs.
 function ns.IsInPandemicWindow(spellID)
     if not spellID or spellID <= 0 then return false end
     -- Check player auras first (self-buffs like HoTs, shields).
@@ -116,13 +115,17 @@ function ns.IsInPandemicWindow(spellID)
         local rem = aura.expirationTime - GetTime()
         return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
     end
-    -- Fallback: check target debuffs (DoTs like Flame Shock).
+    -- Fallback: check target for both debuffs (DoTs) and helpful buffs (HoTs).
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
     if name and UnitExists("target") and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
-        local aura = C_UnitAuras.GetAuraDataBySpellName("target", name, "HARMFUL|PLAYER")
-        if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
-            local rem = aura.expirationTime - GetTime()
-            return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
+        for _, filter in ipairs({"HARMFUL|PLAYER", "HELPFUL|PLAYER"}) do
+            local a2 = C_UnitAuras.GetAuraDataBySpellName("target", name, filter)
+            if a2 and a2.duration and a2.duration > 0 and a2.expirationTime then
+                if not (issecretvalue and (issecretvalue(a2.duration) or issecretvalue(a2.expirationTime))) then
+                    local rem = a2.expirationTime - GetTime()
+                    if rem > 0 and (rem / a2.duration) <= PANDEMIC_THRESHOLD then return true end
+                end
+            end
         end
     end
     return false
@@ -146,6 +149,27 @@ local function IsInPandemicFromChild(blzChild)
     return rem > 0 and (rem / dur) <= PANDEMIC_THRESHOLD
 end
 ns.IsInPandemicFromChild = IsInPandemicFromChild
+
+-------------------------------------------------------------------------------
+--  Pandemic state via Blizzard hooks (bonus, combat-safe if it fires)
+-------------------------------------------------------------------------------
+local _pandemicState  = {}   -- frame -> true when in pandemic
+local _pandemicHooked = {}   -- frame -> true once hooks are installed
+ns._pandemicState = _pandemicState
+
+function ns.HookPandemicState(frame)
+    if not frame or _pandemicHooked[frame] then return end
+    if not frame.ShowPandemicStateFrame then return end
+    _pandemicHooked[frame] = true
+    hooksecurefunc(frame, "ShowPandemicStateFrame", function(self)
+        _pandemicState[self] = true
+    end)
+    if frame.HidePandemicStateFrame then
+        hooksecurefunc(frame, "HidePandemicStateFrame", function(self)
+            _pandemicState[self] = nil
+        end)
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Popular Buffs (derived from BUFF_BAR_PRESETS, with compat alias)
@@ -1169,6 +1193,7 @@ function ns.UpdateTrackedBuffBarTimers()
             bar:Hide()
         else
             local blzChild = FindChild(cfg)
+            if blzChild then ns.HookPandemicState(blzChild) end
 
             local isActive = blzChild and blzChild.IsShown and blzChild:IsShown() or false
 
@@ -1265,11 +1290,10 @@ function ns.UpdateTrackedBuffBarTimers()
                         end
                     end
 
-                    -- Pandemic glow (via C_UnitAuras, combat-safe)
-                    -- Checks player auras first, then the child's auraInstanceID
-                    -- for buffs on other units (e.g. Lifebloom on a target).
+                    -- Pandemic glow: hook signal first, then C_UnitAuras fallbacks.
                     if _anyPandemic and cfg.pandemicGlow then
-                        local inPandemic = ns.IsInPandemicWindow(cfg.spellID)
+                        local inPandemic = (blzChild and _pandemicState[blzChild])
+                            or ns.IsInPandemicWindow(cfg.spellID)
                             or IsInPandemicFromChild(blzChild)
                             or (blzChild and blzChild.PandemicIcon
                                 and blzChild.PandemicIcon:IsShown())

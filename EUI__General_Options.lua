@@ -1572,6 +1572,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     title   = "Profile Imported",
                                     content = "\"" .. name .. "\" was saved but cannot be loaded because this spec has an assigned profile. Switch specs or remove the spec assignment to use it.",
                                 })
+                                ReloadUI()
                             elseif ok then
                                 -- Show spec picker if imported data has CDM specProfiles
                                 local importedSpecInfo = importedCDMSnap

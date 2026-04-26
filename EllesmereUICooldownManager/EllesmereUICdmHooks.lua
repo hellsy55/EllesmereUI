@@ -497,6 +497,9 @@ local function DecorateFrame(frame, barData)
 
     fd.tooltipShown = false
 
+    -- Hook Blizzard's pandemic state callbacks (combat-safe).
+    ns.HookPandemicState(frame)
+
     local fc = FC(frame)
     if not fc.tooltipHooked then
         fc.tooltipHooked = true
@@ -632,17 +635,20 @@ local function DecorateFrame(frame, barData)
                 local hasGlow2 = ss2 and ss2.activeGlow and ss2.activeGlow > 0
                 if isActive and hasGlow2 then
                     if fd.glowOverlay and not fd._activeGlowOn then
-                        local gr, gg, gb
-                        if ss2.activeGlowClassColor then
-                            local _, ct = UnitClass("player")
-                            if ct then
-                                local cc = RAID_CLASS_COLORS[ct]
-                                if cc then gr, gg, gb = cc.r, cc.g, cc.b end
+                        -- Unified glow color takes priority
+                        local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(ss2)
+                        if not gr then
+                            if ss2.activeGlowClassColor then
+                                local _, ct = UnitClass("player")
+                                if ct then
+                                    local cc = RAID_CLASS_COLORS[ct]
+                                    if cc then gr, gg, gb = cc.r, cc.g, cc.b end
+                                end
                             end
+                            gr = gr or (ss2.activeGlowR or 1)
+                            gg = gg or (ss2.activeGlowG or 0.85)
+                            gb = gb or (ss2.activeGlowB or 0)
                         end
-                        gr = gr or (ss2.activeGlowR or 1)
-                        gg = gg or (ss2.activeGlowG or 0.85)
-                        gb = gb or (ss2.activeGlowB or 0)
                         ns.StartNativeGlow(fd.glowOverlay, ss2.activeGlow, gr, gg, gb)
                         fd._activeGlowOn = true
                     end
@@ -773,6 +779,14 @@ local function DecorateFrame(frame, barData)
                     if fc2 and fc2._cdStateHidden then fc2._cdStateHidden = false end
                     return
                 end
+                -- Clear stale hidden state when switching to a non-hidden effect
+                if cse ~= "hiddenOnCD" and cse ~= "hiddenReady" then
+                    if fc2 and fc2._cdStateHidden then
+                        fc2._cdStateHidden = false
+                        local bd2 = barDataByKey and barDataByKey[bk2]
+                        frame:SetAlpha(bd2 and bd2.barOpacity or 1)
+                    end
+                end
                 local cseInfo = C_Spell.GetSpellCooldown(sid2)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "hiddenOnCD" then
@@ -789,7 +803,8 @@ local function DecorateFrame(frame, barData)
                     if not onCD then
                         if fd.glowOverlay and not fd._cdStateGlowOn then
                             local style = cse == "pixelGlowReady" and 1 or 3
-                            ns.StartNativeGlow(fd.glowOverlay, style, 1, 1, 1)
+                            local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(ss2)
+                            ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
                             fd._cdStateGlowOn = true
                         end
                     elseif fd._cdStateGlowOn then
@@ -2669,19 +2684,20 @@ function ns.SetupViewerHooks()
                                     fd.buffGlowActive = false
                                 end
 
-                                -- Pandemic glow
+                                -- Pandemic glow: hook signal first, then
+                                -- C_UnitAuras fallbacks + PandemicIcon.
                                 if pandemicOn and sid and sid > 0 and fd then
-                                    -- Check player auras, child frame aura data
-                                    -- (covers buffs on other units like Lifebloom),
-                                    -- and Blizzard's native PandemicIcon
-                                    local cached = _pandemicTickCache[sid]
-                                    if cached == nil then
-                                        cached = ns.IsInPandemicWindow(sid) and true or false
-                                        _pandemicTickCache[sid] = cached
+                                    local inPandemic = ns._pandemicState[frame]
+                                    if not inPandemic then
+                                        local cached = _pandemicTickCache[sid]
+                                        if cached == nil then
+                                            cached = ns.IsInPandemicWindow(sid) and true or false
+                                            _pandemicTickCache[sid] = cached
+                                        end
+                                        inPandemic = cached
+                                            or ns.IsInPandemicFromChild(frame)
+                                            or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
                                     end
-                                    local inPandemic = cached
-                                        or ns.IsInPandemicFromChild(frame)
-                                        or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
                                     if inPandemic then
                                         if not fd.pandemicGlowActive then
                                             if not fd.pandemicOverlay then

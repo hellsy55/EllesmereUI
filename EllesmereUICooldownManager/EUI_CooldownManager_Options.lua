@@ -3867,33 +3867,39 @@ initFrame:SetScript("OnEvent", function(self)
         local sd = ns.GetBarSpellData(barKeyE)
         if not sd then return sd end
         if sd.assignedSpells then
-            -- One-time normalization: if any stored ID is an override,
-            -- replace it with the base so the preview can resolve live.
-            local dirty = false
-            for i, sid in ipairs(sd.assignedSpells) do
-                local base = NormalizeToBase(sid)
-                if base ~= sid then
-                    sd.assignedSpells[i] = base
-                    dirty = true
+            -- Normalize overrides to base IDs and deduplicate in one pass.
+            local seen = {}
+            local writeIdx = 1
+            for readIdx = 1, #sd.assignedSpells do
+                local sid = NormalizeToBase(sd.assignedSpells[readIdx])
+                if not seen[sid] then
+                    seen[sid] = true
+                    sd.assignedSpells[writeIdx] = sid
+                    writeIdx = writeIdx + 1
                 end
             end
-            return sd
+            for i = writeIdx, #sd.assignedSpells do sd.assignedSpells[i] = nil end
         end
-        local liveIcons = ns.cdmBarIcons[barKeyE]
+        -- Append any live-bar spells missing from assignedSpells so the
+        -- preview always matches what the player sees on their CDM bars
+        -- (e.g. after re-talenting a spell post-repopulate).
+        local liveIcons = ns.cdmBarIcons and ns.cdmBarIcons[barKeyE]
         if liveIcons then
+            if not sd.assignedSpells then sd.assignedSpells = {} end
+            local seen = {}
+            for _, existing in ipairs(sd.assignedSpells) do
+                seen[existing] = true
+            end
             local removed = sd.removedSpells
-            local spells = {}
             for _, icon in ipairs(liveIcons) do
                 local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
                 if _sid and _sid > 0 then
                     _sid = NormalizeToBase(_sid)
-                    if not (removed and removed[_sid]) then
-                        spells[#spells + 1] = _sid
+                    if not seen[_sid] and not (removed and removed[_sid]) then
+                        sd.assignedSpells[#sd.assignedSpells + 1] = _sid
+                        seen[_sid] = true
                     end
                 end
-            end
-            if #spells > 0 then
-                sd.assignedSpells = spells
             end
         end
         return sd
@@ -4388,11 +4394,16 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.activeGlowG = ss.activeGlowG
                                                 os.activeGlowB = ss.activeGlowB
                                                 os.cdStateEffect = ss.cdStateEffect
+                                                os.glowColor = ss.glowColor
+                                                os.glowColorR = ss.glowColorR
+                                                os.glowColorG = ss.glowColorG
+                                                os.glowColorB = ss.glowColorB
                                             end
                                         end
                                     end
                                     sub:Hide()
                                     UpdateLabelColor()
+                                    if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                                     if ns.QueueReanchor then ns.QueueReanchor() end
                                 end)
 
@@ -4617,6 +4628,77 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
+                    -- 5. Glow Effect Color (unified color for all glow types)
+                    local GLOW_COLOR_ITEMS = {
+                        { val = nil,      label = "Default" },
+                        { val = "class",  label = "Class Color" },
+                        { val = "custom", label = "Custom" },
+                    }
+                    local glowColorRow = MakeSubnavRow("Glow Effect Color", GLOW_COLOR_ITEMS,
+                        function()
+                            if ss.glowColor == "class" then return "class" end
+                            if ss.glowColor == "custom" then return "custom" end
+                            return nil
+                        end,
+                        function(v)
+                            EnsureSS()
+                            ss.glowColor = v
+                            if v == "custom" and not ss.glowColorR then
+                                ss.glowColorR = 1; ss.glowColorG = 0.788; ss.glowColorB = 0.137
+                            end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.glowColor == nil end,
+                        function(si, item, sub)
+                            if item.val == "custom" then
+                                local swatchBtn = CreateFrame("Button", nil, si)
+                                swatchBtn:SetSize(14, 14)
+                                swatchBtn:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                swatchBtn:SetFrameLevel(si:GetFrameLevel() + 3)
+                                local swatchTex = swatchBtn:CreateTexture(nil, "ARTWORK")
+                                swatchTex:SetAllPoints()
+                                swatchTex:SetColorTexture(
+                                    ss.glowColorR or 1,
+                                    ss.glowColorG or 0.788,
+                                    ss.glowColorB or 0.137, 1)
+                                swatchBtn:SetScript("OnClick", function()
+                                    EnsureSS()
+                                    ss.glowColor = "custom"
+                                    if not ss.glowColorR then
+                                        ss.glowColorR = 1; ss.glowColorG = 0.788; ss.glowColorB = 0.137
+                                    end
+                                    sub:Hide()
+                                    menu:Hide()
+                                    local snapR, snapG, snapB = ss.glowColorR, ss.glowColorG, ss.glowColorB
+                                    local function OnPickerChanged()
+                                        local popup = EllesmereUI._colorPickerPopup
+                                        if not popup then return end
+                                        local r, g, b = popup:GetColorRGB()
+                                        ss.glowColorR = r; ss.glowColorG = g; ss.glowColorB = b
+                                        swatchTex:SetColorTexture(r, g, b, 1)
+                                        if sd._syncIconSettings and sd.assignedSpells and sd.spellSettings then
+                                            for _, otherSid in ipairs(sd.assignedSpells) do
+                                                if otherSid and otherSid > 0 and otherSid ~= spellID then
+                                                    if not sd.spellSettings[otherSid] then sd.spellSettings[otherSid] = {} end
+                                                    local os2 = sd.spellSettings[otherSid]
+                                                    os2.glowColor = "custom"
+                                                    os2.glowColorR = r; os2.glowColorG = g; os2.glowColorB = b
+                                                end
+                                            end
+                                        end
+                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                    end
+                                    EllesmereUI:ShowColorPicker({
+                                        r = snapR, g = snapG, b = snapB,
+                                        swatchFunc = OnPickerChanged,
+                                        cancelFunc = function()
+                                            ss.glowColorR = snapR; ss.glowColorG = snapG; ss.glowColorB = snapB
+                                        end,
+                                    }, swatchBtn)
+                                end)
+                            end
+                        end)
+
                     -- Divider before sync toggle
                     local div2 = inner:CreateTexture(nil, "ARTWORK")
                     div2:SetHeight(1)
@@ -4702,8 +4784,13 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeGlowG = ss.activeGlowG
                                     os.activeGlowB = ss.activeGlowB
                                     os.cdStateEffect = ss.cdStateEffect
+                                    os.glowColor = ss.glowColor
+                                    os.glowColorR = ss.glowColorR
+                                    os.glowColorG = ss.glowColorG
+                                    os.glowColorB = ss.glowColorB
                                 end
                             end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                             if ns.QueueReanchor then ns.QueueReanchor() end
                         end
                         UpdateSyncLabel()

@@ -1289,6 +1289,24 @@ ResolveBlizzChildSpellID = function(blizzChild)
     return nil
 end
 
+-- Resolve unified glow color for a spell. Returns r, g, b or nil if default.
+-- Checks ss.glowColor: "class" -> class color, "custom" -> ss.glowColorR/G/B.
+local function ResolveGlowColor(ss)
+    if not ss or not ss.glowColor then return nil end
+    if ss.glowColor == "class" then
+        local _, ct = UnitClass("player")
+        if ct then
+            local cc = RAID_CLASS_COLORS[ct]
+            if cc then return cc.r, cc.g, cc.b end
+        end
+    elseif ss.glowColor == "custom" and ss.glowColorR then
+        return ss.glowColorR, ss.glowColorG or 0.788, ss.glowColorB or 0.137
+    end
+    return nil
+end
+
+ns.ResolveGlowColor = ResolveGlowColor
+
 -- Show proc glow on one of our icons. Uses per-spell settings if available.
 local function ShowProcGlow(icon, cr, cg, cb)
     if not icon then return end
@@ -1311,7 +1329,11 @@ local function ShowProcGlow(icon, cr, cg, cb)
         if ss then
             if ss.procGlow == 0 then return end -- proc glow disabled
             if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
-            if ss.procGlowClassColor then
+            -- Unified glow color takes priority over per-type settings
+            local ur, ug, ub = ResolveGlowColor(ss)
+            if ur then
+                cr, cg, cb = ur, ug, ub
+            elseif ss.procGlowClassColor then
                 local _, ct = UnitClass("player")
                 if ct then
                     local cc = RAID_CLASS_COLORS[ct]
@@ -3192,7 +3214,8 @@ local function RefreshCDMIconAppearance(barKey)
                 if (cse == "pixelGlowReady" or cse == "buttonGlowReady") and glowOv then
                     local cseInfo = C_Spell.GetSpellCooldown(sid)
                     if cseInfo and (not cseInfo.isActive or cseInfo.isOnGCD) then
-                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, 1, 1, 1)
+                        local gr, gg, gb = ResolveGlowColor(ss)
+                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
                         ifd._cdStateGlowOn = true
                     end
                 end
@@ -3231,11 +3254,19 @@ local function RefreshCDMIconAppearance(barKey)
                     local hide = (cse == "hiddenOnCD") == onCD
                     icon:SetAlpha(hide and 0 or (barData.barOpacity or 1))
                     if fc then fc._cdStateHidden = hide or false end
-                elseif not ifd or not ifd._cdStateGlowOn then
-                    if (cse == "pixelGlowReady" or cse == "buttonGlowReady")
-                       and not onCD and glowOv then
-                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, 1, 1, 1)
-                        if ifd then ifd._cdStateGlowOn = true end
+                else
+                    -- Clear stale hidden state when switching to a glow effect
+                    if fc and fc._cdStateHidden then
+                        fc._cdStateHidden = false
+                        icon:SetAlpha(barData.barOpacity or 1)
+                    end
+                    if not ifd or not ifd._cdStateGlowOn then
+                        if (cse == "pixelGlowReady" or cse == "buttonGlowReady")
+                           and not onCD and glowOv then
+                            local gr, gg, gb = ResolveGlowColor(csSs)
+                            StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
+                            if ifd then ifd._cdStateGlowOn = true end
+                        end
                     end
                 end
             elseif fc and fc._cdStateHidden then
@@ -4597,6 +4628,40 @@ local function CDMFirstLoginCapture()
     ECME.db.sv._capturedOnce_CDM = true
 end
 
+--- Re-seed assignedSpells from live cdmBarIcons. Appends any positive
+--- spell IDs present on the live bars but missing from assignedSpells.
+--- Called after CollectAndReanchor so the preview stays in sync with
+--- what the player actually sees on their CDM bars.
+function ns.ReseedAssignedSpellsFromLiveIcons()
+    local p = ECME and ECME.db and ECME.db.profile
+    if not p or not p.cdmBars then return end
+    for _, barData in ipairs(p.cdmBars.bars) do
+        if not barData.isGhostBar
+           and barData.key ~= "buffs"
+           and (barData.barType == "cooldowns" or barData.barType == "utility"
+                or barData.barType == "buffs"
+                or MAIN_BAR_KEYS[barData.key]) then
+            local sd = ns.GetBarSpellData(barData.key)
+            local icons = ns.cdmBarIcons and ns.cdmBarIcons[barData.key]
+            if sd and icons then
+                if not sd.assignedSpells then sd.assignedSpells = {} end
+                local seen = {}
+                for _, existing in ipairs(sd.assignedSpells) do
+                    seen[existing] = true
+                end
+                for _, icon in ipairs(icons) do
+                    local fc = ns._ecmeFC and ns._ecmeFC[icon]
+                    local sid = (fc and fc.spellID) or icon._spellID
+                    if type(sid) == "number" and sid > 0 and not seen[sid] then
+                        sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                        seen[sid] = true
+                    end
+                end
+            end
+        end
+    end
+end
+
 --- Repopulate all main bars from Blizzard CDM for the current spec.
 --- Wipes ONLY Blizzard-sourced entries (positive spell IDs that the CDM
 --- viewer owns) from assignedSpells/removedSpells, then rebuilds route
@@ -4682,41 +4747,7 @@ function ns.RepopulateFromBlizzard()
     ns.FullCDMRebuild("repopulate")
     if ns.CollectAndReanchor then ns.CollectAndReanchor() end
 
-    -- Re-seed Blizzard spell IDs into assignedSpells from the live icon
-    -- arrays. CollectAndReanchor populated cdmBarIcons with whatever the
-    -- viewer pools currently expose for each bar; the preview reads
-    -- assignedSpells, so without this step it would only show the
-    -- user-added entries that the filter preserved. Walk each affected
-    -- bar's icons and append any positive spell IDs (Blizzard frames)
-    -- not already present, preserving the existing user-entry order.
-    -- Skip the default buff bar (key == "buffs"): Blizzard's viewer is
-    -- the authority for buffs, no assignedSpells list needed. Extra buff
-    -- bars (user-created groups) ARE reseeded for their assignments.
-    for _, barData in ipairs(p.cdmBars.bars) do
-        if not barData.isGhostBar
-           and barData.key ~= "buffs"
-           and (barData.barType == "cooldowns" or barData.barType == "utility"
-                or barData.barType == "buffs"
-                or MAIN_BAR_KEYS[barData.key]) then
-            local sd = ns.GetBarSpellData(barData.key)
-            local icons = ns.cdmBarIcons and ns.cdmBarIcons[barData.key]
-            if sd and icons then
-                if not sd.assignedSpells then sd.assignedSpells = {} end
-                local seen = {}
-                for _, existing in ipairs(sd.assignedSpells) do
-                    seen[existing] = true
-                end
-                for _, icon in ipairs(icons) do
-                    local fc = ns._ecmeFC and ns._ecmeFC[icon]
-                    local sid = (fc and fc.spellID) or icon._spellID
-                    if type(sid) == "number" and sid > 0 and not seen[sid] then
-                        sd.assignedSpells[#sd.assignedSpells + 1] = sid
-                        seen[sid] = true
-                    end
-                end
-            end
-        end
-    end
+    ns.ReseedAssignedSpellsFromLiveIcons()
 
     C_Timer.After(1, function()
         local sk = ns.GetActiveSpecKey()
