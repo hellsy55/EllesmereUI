@@ -2729,3 +2729,68 @@ function EBS:OnEnable()
         })
     end
 end
+
+-------------------------------------------------------------------------------
+--  FARMHUD COMPABILITY
+-------------------------------------------------------------------------------
+local fhFix = CreateFrame("Frame")
+fhFix:RegisterEvent("PLAYER_ENTERING_WORLD")
+fhFix:SetScript("OnEvent", function(self, event)
+    -- Check for Farmhud
+    if not FarmHud then return end
+    
+    -- Force centered Minimap
+    hooksecurefunc(Minimap, "SetPoint", function(self)
+        if FarmHud:IsShown() and not self._fhLock then
+            self._fhLock = true
+            self:ClearAllPoints()
+            self:SetPoint("CENTER", FarmHud, "CENTER", 0, 0)
+            self._fhLock = false
+        end
+    end)
+
+    hooksecurefunc(Minimap, "SetParent", function(self, parent)
+        if FarmHud:IsShown() and parent ~= FarmHud and not self._fhLock then
+            self._fhLock = true
+            self:SetParent(FarmHud)
+            self._fhLock = false
+        end
+    end)
+
+    -- Hide Borders
+    local function ToggleEBSGraphics(show)
+        local alpha = show and 1 or 0
+        
+        -- Circle
+        if Minimap._circBorder then Minimap._circBorder:SetAlpha(alpha) end
+        if Minimap._texCircBorder then Minimap._texCircBorder:SetAlpha(alpha) end
+        
+        -- Square
+        if Minimap._ppBorders and EllesmereUI and EllesmereUI.PP then
+            if show then
+                -- Ursprungsfarbe wiederherstellen (Fallback auf Standard)
+                local p = _G._EBS_AceDB and _G._EBS_AceDB.profile.minimap
+                if p then
+                    EllesmereUI.PP.SetBorderColor(Minimap, p.borderR or 0, p.borderG or 0, p.borderB or 0, p.borderA or 1)
+                end
+            else
+                EllesmereUI.PP.SetBorderColor(Minimap, 0, 0, 0, 0)
+            end
+        end
+
+        -- Check für darkened Boxes
+        for _, child in ipairs({Minimap:GetChildren()}) do
+            -- FIX: Vorher prüfen, ob child.GetBackdrop existiert!
+            if child.GetBackdrop and child:GetBackdrop() and child:GetBackdrop().bgFile == "Interface\\ChatFrame\\ChatFrameBackground" then
+                child:SetAlpha(alpha)
+            end
+        end
+    end
+
+    -- Farmhud Hook
+    FarmHud:HookScript("OnShow", function() ToggleEBSGraphics(false) end)
+    FarmHud:HookScript("OnHide", function() ToggleEBSGraphics(true) end)
+    
+    -- Only check on Login
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+end)
