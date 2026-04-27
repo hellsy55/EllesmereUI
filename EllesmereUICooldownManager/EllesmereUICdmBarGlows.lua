@@ -62,8 +62,8 @@ end
 --- Get barGlows data from SavedVariables (with lazy init)
 function ns.GetBarGlows()
     local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-    if not specKey then return { enabled = true, selectedBar = 1, assignments = {} } end
-    if not EllesmereUIDB then return { enabled = true, selectedBar = 1, assignments = {} } end
+    if not specKey then return { enabled = true, selectedBar = "cooldowns", assignments = {} } end
+    if not EllesmereUIDB then return { enabled = true, selectedBar = "cooldowns", assignments = {} } end
     if not EllesmereUIDB.spellAssignments then
         EllesmereUIDB.spellAssignments = { specProfiles = {} }
     end

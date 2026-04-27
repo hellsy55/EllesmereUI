@@ -1334,7 +1334,9 @@ local function ApplyAllWidthHeightMatches()
     -- the new target width. CDM itself fires ApplyAllWidthHeightMatches
     -- at the end of its rebuild via _pendingApplyOnReanchor, so skipping
     -- here is safe -- the right pass runs immediately after.
-    if EllesmereUI._cdmRebuilding then return end
+    -- _cdmRebuilding guard removed: CDM's own ApplyAllWidthHeightMatches
+    -- call at the end of CollectAndReanchor corrects any transient widths.
+    -- The guard was blocking unrelated UF height matches during spec swap.
     -- Break any circular chains from old data before applying
     MatchH.BreakMatchCycles(MatchH.GetWidthMatchDB())
     MatchH.BreakMatchCycles(MatchH.GetHeightMatchDB())
@@ -6707,11 +6709,17 @@ do
     function EllesmereUI:RegisterUnlockElements(elements)
         _origRegister(self, elements)
         if not isUnlocked then return end
-        -- Unlock mode is open -- spawn movers for any newly registered keys
+        -- Unlock mode is open -- spawn movers for any newly registered keys,
+        -- and hide existing movers whose element is now intentionally hidden.
         local spawned = false
         for _, elem in ipairs(elements) do
             local key = elem.key
-            if not movers[key] then
+            if movers[key] then
+                -- Re-registration: hide mover if element is now hidden
+                if elem.isHidden and elem.isHidden() then
+                    movers[key]:Hide()
+                end
+            else
                 local m = CreateMover(key)
                 if m then
                     m:Sync()
@@ -7603,6 +7611,9 @@ local function DoClose()
         end
         objTrackerWasVisible = false
     end
+    -- Restore EllesmereUI QT background
+    local qtBg = _G.EllesmereUIQTBackground
+    if qtBg then qtBg:SetAlpha(1) end
 
     if not unlockFrame then return end
 
@@ -7611,7 +7622,7 @@ local function DoClose()
     if openAnimFrame then openAnimFrame:Hide() end
     if lockAnimFrame then lockAnimFrame:Hide() end
     if gridFrame then gridFrame:SetScript("OnUpdate", nil); gridFrame:Hide() end
-    if hudFrame then hudFrame:SetScript("OnUpdate", nil); hudFrame:Hide() end
+    if hudFrame then hudFrame:Hide() end
     if unlockTipFrame then unlockTipFrame:SetScript("OnUpdate", nil); unlockTipFrame:Hide() end
     if unlockFrame._anchorLineDriver then unlockFrame._anchorLineDriver:Hide() end
     if unlockFrame._anchorLineFrame  then unlockFrame._anchorLineFrame:Hide() end
@@ -8215,6 +8226,9 @@ function ns.OpenUnlockMode()
     else
         objTrackerWasVisible = false
     end
+    -- Also hide EllesmereUI QT background (separate UIParent child)
+    local qtBg = _G.EllesmereUIQTBackground
+    if qtBg then qtBg:SetAlpha(0) end
 
     -- Reset session state and snapshot current positions
     wipe(pendingPositions)
@@ -8443,13 +8457,16 @@ function ns.OpenUnlockMode()
                         elseif not movers[rk]:IsShown() then
                             -- Mover exists but bar frame was not ready on
                             -- first Sync -- re-sync now that it may be available
-                            local rm = movers[rk]
-                            rm:Sync()
-                            if rm:IsShown() then
-                                rm:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
-                                spawned = true
-                            else
-                                missing = true
+                            local re = registeredElements[rk]
+                            if not (re and re.isHidden and re.isHidden()) then
+                                local rm = movers[rk]
+                                rm:Sync()
+                                if rm:IsShown() then
+                                    rm:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
+                                    spawned = true
+                                else
+                                    missing = true
+                                end
                             end
                         end
                     end
@@ -8830,6 +8847,8 @@ local function ResumeAfterCombat()
         objTracker:SetAlpha(0)
         if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, false) end
     end
+    local qtBg = _G.EllesmereUIQTBackground
+    if qtBg then qtBg:SetAlpha(0) end
 
     -- Notify beacon reminders to hide
     if _G._EABR_BeaconRefresh then pcall(_G._EABR_BeaconRefresh) end

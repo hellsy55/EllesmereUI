@@ -231,8 +231,8 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
 
     -- Pandemic glow style dropdown values (excludes ShapeGlow, adds "None")
-    local PAN_GLOW_VALUES = { [0] = "None" }
-    local PAN_GLOW_ORDER  = { 0 }
+    local PAN_GLOW_VALUES = { [0] = "None", [-1] = "Blizzard Default" }
+    local PAN_GLOW_ORDER  = { 0, -1 }
     if ns.GLOW_STYLES then
         for i, entry in ipairs(ns.GLOW_STYLES) do
             if not entry.shapeGlow then
@@ -2859,6 +2859,59 @@ initFrame:SetScript("OnEvent", function(self)
         parent._showRowDivider = true
 
         -------------------------------------------------------------------
+        --  BAR GROUPING (shared across all bars)
+        -------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "Bar Grouping", y);  y = y - h
+
+        -- Group Tracking Bars toggle | Grouped Grow Direction dropdown
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Group Tracking Bars",
+              getValue = function()
+                  local t = ns.GetTrackedBuffBars()
+                  return t and t.groupEnabled
+              end,
+              setValue = function(v)
+                  local t = ns.GetTrackedBuffBars()
+                  if t then t.groupEnabled = v end
+                  ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "dropdown", text = "Grouped Grow Direction",
+              values = { DOWN = "Down", UP = "Up", LEFT = "Left", RIGHT = "Right" },
+              order = { "DOWN", "UP", "LEFT", "RIGHT" },
+              disabled = function() return not ns.GetTrackedBuffBars().groupEnabled end,
+              disabledTooltip = "Group Tracking Bars",
+              getValue = function()
+                  local t = ns.GetTrackedBuffBars()
+                  return t and t.groupGrowDirection or "DOWN"
+              end,
+              setValue = function(v)
+                  local t = ns.GetTrackedBuffBars()
+                  if t then t.groupGrowDirection = v end
+                  ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Bar Spacing slider | empty label
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Bar Spacing", min = -2, max = 20, step = 1,
+              disabled = function() return not ns.GetTrackedBuffBars().groupEnabled end,
+              disabledTooltip = "Group Tracking Bars",
+              getValue = function()
+                  local t = ns.GetTrackedBuffBars()
+                  return t and t.groupSpacing or 2
+              end,
+              setValue = function(v)
+                  local t = ns.GetTrackedBuffBars()
+                  if t then t.groupSpacing = v end
+                  ns.BuildTrackedBuffBars()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "label", text = "" }
+        );  y = y - h
+
+        -------------------------------------------------------------------
         --  BAR LAYOUT
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
@@ -2867,7 +2920,8 @@ initFrame:SetScript("OnEvent", function(self)
         local tbbKey = "TBB_" .. _tbbSelectedBar
         local thDis, thTip, thRaw = EllesmereUI.MatchGuard(tbbKey, "Height")
         local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
-        _, h = W:DualRow(parent, y,
+        local hwRow
+        hwRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 500, step = 1,
               disabled = thDis, disabledTooltip = thTip, rawTooltip = thRaw,
@@ -2889,6 +2943,51 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end }
         );  y = y - h
+
+        -- Sync icon: Apply Height to all Bars
+        if EllesmereUI.BuildSyncIcon then
+            EllesmereUI.BuildSyncIcon({
+                region = hwRow._leftRegion,
+                tooltip = "Apply Height to all Bars",
+                isSynced = function()
+                    local bd = SelectedTBB(); if not bd then return false end
+                    local val = bd.height or 24
+                    local t = ns.GetTrackedBuffBars()
+                    for _, b in ipairs(t.bars or {}) do
+                        if (b.height or 24) ~= val then return false end
+                    end
+                    return true
+                end,
+                onClick = function()
+                    local bd = SelectedTBB(); if not bd then return end
+                    local val = bd.height or 24
+                    local t = ns.GetTrackedBuffBars()
+                    for _, b in ipairs(t.bars or {}) do b.height = val end
+                    RefreshTBB(); EllesmereUI:RefreshPage()
+                end,
+            })
+            -- Sync icon: Apply Width to all Bars
+            EllesmereUI.BuildSyncIcon({
+                region = hwRow._rightRegion,
+                tooltip = "Apply Width to all Bars",
+                isSynced = function()
+                    local bd = SelectedTBB(); if not bd then return false end
+                    local val = bd.width or 270
+                    local t = ns.GetTrackedBuffBars()
+                    for _, b in ipairs(t.bars or {}) do
+                        if (b.width or 270) ~= val then return false end
+                    end
+                    return true
+                end,
+                onClick = function()
+                    local bd = SelectedTBB(); if not bd then return end
+                    local val = bd.width or 270
+                    local t = ns.GetTrackedBuffBars()
+                    for _, b in ipairs(t.bars or {}) do b.width = val end
+                    RefreshTBB(); EllesmereUI:RefreshPage()
+                end,
+            })
+        end
 
         -- Vertical Orientation | Bar Texture
         _, h = W:DualRow(parent, y,
@@ -3228,31 +3327,25 @@ initFrame:SetScript("OnEvent", function(self)
         fillRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Fill Color",
               values = {
-                  auto = "Auto (Blizzard Color)",
                   none = "Custom Color",
-                  VERTICAL = "Custom - Vertical Gradient",
-                  HORIZONTAL = "Custom - Horizontal Gradient",
+                  VERTICAL = "Vertical Gradient",
+                  HORIZONTAL = "Horizontal Gradient",
               },
-              order = { "auto", "none", "VERTICAL", "HORIZONTAL" },
+              order = { "none", "HORIZONTAL", "VERTICAL" },
               getValue = function()
-                  local bd = SelectedTBB(); if not bd then return "auto" end
-                  if (bd.fillColorMode or "auto") == "auto" then return "auto" end
+                  local bd = SelectedTBB(); if not bd then return "none" end
+                  -- Treat legacy "auto" as "custom" (no migration needed)
                   if not bd.gradientEnabled then return "none" end
                   return bd.gradientDir or "HORIZONTAL"
               end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
-                  if v == "auto" then
-                      bd.fillColorMode = "auto"
+                  bd.fillColorMode = "custom"
+                  if v == "none" then
                       bd.gradientEnabled = false
                   else
-                      bd.fillColorMode = "custom"
-                      if v == "none" then
-                          bd.gradientEnabled = false
-                      else
-                          bd.gradientEnabled = true
-                          bd.gradientDir = v
-                      end
+                      bd.gradientEnabled = true
+                      bd.gradientDir = v
                   end
                   RefreshTBB(); EllesmereUI:RefreshPage()
               end },
@@ -3317,7 +3410,7 @@ initFrame:SetScript("OnEvent", function(self)
             gradBlock:EnableMouse(true)
             gradBlock:SetScript("OnEnter", function()
                 local bd = SelectedTBB()
-                local isAuto = not bd or (bd.fillColorMode or "auto") == "auto"
+                local isAuto = false
                 local msg = isAuto and "Set Fill Color to a Custom option" or "This option requires a gradient to be set"
                 EllesmereUI.ShowWidgetTooltip(gradSwatch, EllesmereUI.DisabledTooltip(msg))
             end)
@@ -3325,7 +3418,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local function UpdateSwatchStates()
                 local bd = SelectedTBB()
-                local isAuto = not bd or (bd.fillColorMode or "auto") == "auto"
+                local isAuto = false
                 local noGrad = not bd or not bd.gradientEnabled
                 -- Fill swatch: disabled in auto mode
                 if isAuto then fillSwatch:SetAlpha(0.3); fillBlock:Show()

@@ -1482,11 +1482,18 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Bar Opacity", min=0, max=100, step=5,
               getValue=function()
                   local bs = SB()
-                  local eff = bs.mouseoverEnabled and 1 or (bs.mouseoverAlpha or 1)
-                  return floor(eff * 100 + 0.5)
+                  if bs.mouseoverEnabled then
+                      return floor((bs._savedBarAlpha or 1) * 100 + 0.5)
+                  end
+                  return floor((bs.mouseoverAlpha or 1) * 100 + 0.5)
               end,
               setValue=function(v)
-                  SSet("mouseoverAlpha", v / 100, function(k) EAB:ApplyBarOpacity(k) end)
+                  local bs = SB()
+                  if bs.mouseoverEnabled then
+                      bs._savedBarAlpha = v / 100
+                  else
+                      SSet("mouseoverAlpha", v / 100, function(k) EAB:ApplyBarOpacity(k) end)
+                  end
                   SUpdatePreview()
               end });  y = y - h
         -- Sync icon: Bar Opacity (right)

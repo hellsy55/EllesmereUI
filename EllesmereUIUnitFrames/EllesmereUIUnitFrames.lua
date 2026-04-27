@@ -4584,9 +4584,10 @@ local function CreateCustomClassPower(playerFrame, style)
             if event == "PLAYER_SPECIALIZATION_CHANGED" then
                 DestroyCustomClassPower()
                 frames._classPowerBar = nil
-                C_Timer.After(0.1, function()
-                    if ns.ReloadFrames then ns.ReloadFrames() end
-                end)
+                -- Don't call ReloadFrames here. The profile system handles
+                -- the full rebuild via RefreshAllAddons -> _EUF_ReloadFrames.
+                -- Width/height matches are re-applied after CDM clears
+                -- _specProfileSwitching in ProcessSpecChange.
                 return
             elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
                 if not _G._ERB_AceDB and EllesmereUI then
@@ -7859,10 +7860,10 @@ function SetupOptionsPanel()
                         return
                     end
                     if k == "classPower" then return end
+                    if not EllesmereUI._unlockActive then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
-                    -- Subtract portrait width to get the bar-only frameWidth
                     local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and s.showPortrait ~= false
                     local isAttached = (db.profile.portraitStyle or "attached") == "attached"
                     if showPortrait and isAttached then
@@ -7881,6 +7882,7 @@ function SetupOptionsPanel()
                 end,
                 setHeight = function(k, h)
                     if k == "playerCastbar" then
+                        if not EllesmereUI._unlockActive then return end
                         local newH = math.max(math.floor(h + 0.5), 5)
                         db.profile.player.playerCastbarHeight = newH
                         local cbBg = frames.player and frames.player.Castbar and frames.player.Castbar:GetParent()
@@ -7890,6 +7892,7 @@ function SetupOptionsPanel()
                         return
                     end
                     if k == "targetCastbar" or k == "focusCastbar" then
+                        if not EllesmereUI._unlockActive then return end
                         local cbUnit = k:gsub("Castbar", "")
                         local s = GetSettingsForUnit(cbUnit)
                         local newH = math.max(math.floor(h + 0.5), 5)
@@ -7901,10 +7904,10 @@ function SetupOptionsPanel()
                         return
                     end
                     if k == "classPower" then return end
+                    if not EllesmereUI._unlockActive then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
-                    -- Subtract power bar and BTB from total to get healthHeight
                     local powerPos = s.powerPosition or "below"
                     local powerIsAtt = (powerPos == "below" or powerPos == "above")
                     local powerH = powerIsAtt and (s.powerHeight or 6) or 0

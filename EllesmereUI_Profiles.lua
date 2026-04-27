@@ -621,36 +621,46 @@ function EllesmereUI.RefreshAllAddons()
     -- and resync anchor offsets so the anchor relationships stay correct for
     -- future drags. Triple-deferred so it runs AFTER debounced rebuilds have
     -- completed and frames are at final positions.
-    C_Timer.After(0, function()
+    -- Position re-application and anchor resync are deferred to
+    -- OnSpecSwitchComplete (if spec switching) or run inline here
+    -- for non-spec profile switches (manual switch from options).
+    if not EllesmereUI._specProfileSwitching then
         C_Timer.After(0, function()
             C_Timer.After(0, function()
-                -- Skip during spec-driven profile switch. _applySavedPositions
-                -- iterates registered elements and calls each one's
-                -- applyPosition callback, which for CDM bars is BuildAllCDMBars.
-                -- That triggers a rebuild + ApplyAllWidthHeightMatches before
-                -- CDMFinishSetup has had a chance to run, propagating
-                -- transient mid-rebuild sizes through width-match and
-                -- corrupting iconSize in saved variables. CDM's SPELLS_CHANGED
-                -- handler handles the rebuild; other addons' positions don't
-                -- change on spec swap so skipping is safe.
-                if EllesmereUI._specProfileSwitching then return end
-                -- Re-apply centralized positions (migrates legacy formats)
                 if EllesmereUI._applySavedPositions then
                     EllesmereUI._applySavedPositions()
                 end
-                -- Resync anchor offsets (does NOT move frames)
                 if EllesmereUI.ResyncAnchorOffsets then
                     EllesmereUI.ResyncAnchorOffsets()
                 end
             end)
         end)
-    end)
-    -- Note: _specProfileSwitching is cleared by CDM's ProcessSpecChange
-    -- after its rebuild settles -- not here. The rebuild runs from
-    -- SPELLS_CHANGED which is well after this triple-deferred chain
-    -- (~3 frames = ~50ms), so clearing the flag here would let width-match
-    -- propagation run against transient mid-rebuild bar sizes once CDM
-    -- starts rebuilding and corrupt iconSize in saved variables.
+    end
+    -- If CDM is loaded, it calls OnSpecSwitchComplete from ProcessSpecChange
+    -- after its SPELLS_CHANGED rebuild finishes. If CDM is NOT loaded,
+    -- complete immediately since there's nothing to wait for.
+    local cdmLoaded = C_AddOns and C_AddOns.IsAddOnLoaded
+        and C_AddOns.IsAddOnLoaded("EllesmereUICooldownManager")
+    if not cdmLoaded then
+        EllesmereUI.OnSpecSwitchComplete()
+    end
+end
+
+--- Called by CDM (or RefreshAllAddons if CDM not loaded) when the spec
+--- switch rebuild is fully settled. Clears the suppression flag and
+--- re-applies width/height matches so all matched frames pick up
+--- the new profile dimensions.
+function EllesmereUI.OnSpecSwitchComplete()
+    EllesmereUI._specProfileSwitching = false
+    if EllesmereUI.ApplyAllWidthHeightMatches then
+        EllesmereUI.ApplyAllWidthHeightMatches()
+    end
+    if EllesmereUI._applySavedPositions then
+        EllesmereUI._applySavedPositions()
+    end
+    if EllesmereUI.ResyncAnchorOffsets then
+        EllesmereUI.ResyncAnchorOffsets()
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1456,7 +1466,7 @@ do
                     if current ~= targetProfile then
                         local fontWillChange = EllesmereUI.ProfileChangesFont(
                             EllesmereUIDB.profiles[targetProfile])
-                        EllesmereUI._specProfileSwitching = true
+                        -- _specProfileSwitching disabled (see doSwitch comment)
                         EllesmereUI.SwitchProfile(targetProfile)
                         EllesmereUI.RefreshAllAddons()
                         if fontWillChange then
@@ -1519,7 +1529,7 @@ do
                             if cur ~= target then
                                 local fontChange = EllesmereUI.ProfileChangesFont(
                                     EllesmereUIDB.profiles[target])
-                                EllesmereUI._specProfileSwitching = true
+                                -- _specProfileSwitching disabled (see doSwitch comment)
                                 EllesmereUI.SwitchProfile(target)
                                 EllesmereUI.RefreshAllAddons()
                                 if fontChange then
@@ -1592,7 +1602,11 @@ do
             local current = db.activeProfile or "Default"
             if current ~= targetProfile then
                 local function doSwitch()
-                    EllesmereUI._specProfileSwitching = true
+                    -- _specProfileSwitching disabled: was causing width/height
+                    -- matches to never re-apply because SPELLS_CHANGED fires
+                    -- before PLAYER_SPECIALIZATION_CHANGED (CDM completes
+                    -- before the flag is set, flag stuck true forever).
+                    -- EllesmereUI._specProfileSwitching = true
                     local fontWillChange = EllesmereUI.ProfileChangesFont(db.profiles[targetProfile])
                     EllesmereUI.SwitchProfile(targetProfile)
                     EllesmereUI.RefreshAllAddons()

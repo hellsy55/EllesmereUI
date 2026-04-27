@@ -238,16 +238,20 @@ local function SetupDamageMeter()
                     local f = _G.DamageMeter
                     if not f then return end
                     f:SetWidth(math.max(150, newW))
-                    local cfg = ns.EDM.DB()
-                    if cfg then cfg.dmWidth = f:GetWidth() end
+                    if EllesmereUI._unlockActive then
+                        local cfg = ns.EDM.DB()
+                        if cfg then cfg.dmWidth = f:GetWidth() end
+                    end
                 end,
                 setHeight = function(_, newH)
                     if InCombatLockdown() then return end
                     local f = _G.DamageMeter
                     if not f then return end
                     f:SetHeight(math.max(80, newH))
-                    local cfg = ns.EDM.DB()
-                    if cfg then cfg.dmHeight = f:GetHeight() end
+                    if EllesmereUI._unlockActive then
+                        local cfg = ns.EDM.DB()
+                        if cfg then cfg.dmHeight = f:GetHeight() end
+                    end
                 end,
                 isHidden = function()
                     local cfg = ns.EDM.DB()

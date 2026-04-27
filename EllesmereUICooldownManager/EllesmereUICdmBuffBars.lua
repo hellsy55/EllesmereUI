@@ -102,56 +102,8 @@ local function SetFont(fs, size)
     end
 end
 
--- Pandemic threshold: glow when remaining% <= this value (30%)
-local PANDEMIC_THRESHOLD = 0.30
-
---- Check if a spell is in the pandemic window via C_UnitAuras.
---- Checks player auras first, then target debuffs AND helpful buffs.
-function ns.IsInPandemicWindow(spellID)
-    if not spellID or spellID <= 0 then return false end
-    -- Check player auras first (self-buffs like HoTs, shields).
-    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    if aura and aura.duration and aura.duration > 0 and aura.expirationTime then
-        local rem = aura.expirationTime - GetTime()
-        return rem > 0 and (rem / aura.duration) <= PANDEMIC_THRESHOLD
-    end
-    -- Fallback: check target for both debuffs (DoTs) and helpful buffs (HoTs).
-    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
-    if name and UnitExists("target") and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
-        for _, filter in ipairs({"HARMFUL|PLAYER", "HELPFUL|PLAYER"}) do
-            local a2 = C_UnitAuras.GetAuraDataBySpellName("target", name, filter)
-            if a2 and a2.duration and a2.duration > 0 and a2.expirationTime then
-                if not (issecretvalue and (issecretvalue(a2.duration) or issecretvalue(a2.expirationTime))) then
-                    local rem = a2.expirationTime - GetTime()
-                    if rem > 0 and (rem / a2.duration) <= PANDEMIC_THRESHOLD then return true end
-                end
-            end
-        end
-    end
-    return false
-end
-
---- Check pandemic via a Blizzard child frame's auraInstanceID.
---- Works for buffs on any unit (self, target, party members).
-local function IsInPandemicFromChild(blzChild)
-    if not blzChild then return false end
-    local auraInstID = blzChild.auraInstanceID
-    local auraUnit = blzChild.auraDataUnit
-    if not auraInstID or not auraUnit then return false end
-    local ad = C_UnitAuras.GetAuraDataByAuraInstanceID(auraUnit, auraInstID)
-    if not ad then return false end
-    local dur = ad.duration
-    local exp = ad.expirationTime
-    if not dur or not exp then return false end
-    if issecretvalue and (issecretvalue(dur) or issecretvalue(exp)) then return false end
-    if dur <= 0 then return false end
-    local rem = exp - GetTime()
-    return rem > 0 and (rem / dur) <= PANDEMIC_THRESHOLD
-end
-ns.IsInPandemicFromChild = IsInPandemicFromChild
-
 -------------------------------------------------------------------------------
---  Pandemic state via Blizzard hooks (bonus, combat-safe if it fires)
+--  Pandemic state via Blizzard hooks
 -------------------------------------------------------------------------------
 local _pandemicState  = {}   -- frame -> true when in pandemic
 local _pandemicHooked = {}   -- frame -> true once hooks are installed
@@ -163,6 +115,17 @@ function ns.HookPandemicState(frame)
     _pandemicHooked[frame] = true
     hooksecurefunc(frame, "ShowPandemicStateFrame", function(self)
         _pandemicState[self] = true
+        -- Hide Blizzard's PandemicIcon unless "Blizzard Default" (-1).
+        -- Custom glow styles (>0) replace it; None (0/false) suppresses it.
+        local fc = ns._ecmeFC and ns._ecmeFC[self]
+        local bk = fc and fc.barKey
+        if bk then
+            local bd = ns.barDataByKey and ns.barDataByKey[bk]
+            local style = bd and bd.pandemicGlow and bd.pandemicGlowStyle
+            if not style or style ~= -1 then
+                if self.PandemicIcon then self.PandemicIcon:Hide() end
+            end
+        end
     end)
     if frame.HidePandemicStateFrame then
         hooksecurefunc(frame, "HidePandemicStateFrame", function(self)
@@ -237,8 +200,8 @@ local TBB_DEFAULT_BAR = {
     stackThresholdMaxEnabled = false,
     stackThresholdMax = 10,
     stackThresholdTicks = "",
-    pandemicGlow = false,
-    pandemicGlowStyle = 1,
+    pandemicGlow = true,
+    pandemicGlowStyle = -1,
     pandemicGlowColor = { r = 1, g = 1, b = 0 },
     pandemicGlowLines = 8,
     pandemicGlowThickness = 2,
@@ -1290,13 +1253,14 @@ function ns.UpdateTrackedBuffBarTimers()
                         end
                     end
 
-                    -- Pandemic glow: hook signal first, then C_UnitAuras fallbacks.
+                    -- Pandemic glow: Blizzard's ShowPandemicStateFrame
+                    -- hook sets _pandemicState. User must configure
+                    -- pandemic alerts in Blizzard CDM settings.
                     if _anyPandemic and cfg.pandemicGlow then
-                        local inPandemic = (blzChild and _pandemicState[blzChild])
-                            or ns.IsInPandemicWindow(cfg.spellID)
-                            or IsInPandemicFromChild(blzChild)
-                            or (blzChild and blzChild.PandemicIcon
-                                and blzChild.PandemicIcon:IsShown())
+                        local inPandemic = blzChild and _pandemicState[blzChild]
+                        -- TBBs always show our glow (including Blizzard Default)
+                        -- because Blizzard's native PandemicIcon is on the
+                        -- hidden blzChild frame, not our visible TBB bar.
                         if inPandemic then
                             if not bar._pandemicGlowActive then UpdatePandemic(bar, cfg) end
                             if bar._pandemicGlowTarget then bar._pandemicGlowTarget:SetAlpha(1) end
@@ -1436,6 +1400,7 @@ function ns.BuildTrackedBuffBars()
     _anyStacks    = false
 
     local anyEnabled = false
+    local lastGroupedBar  -- tracks previous enabled bar for grouped anchoring
     for i, cfg in ipairs(bars) do
         -- Update gating flags
         if cfg.pandemicGlow                             then _anyPandemic  = true end
@@ -1483,22 +1448,41 @@ function ns.BuildTrackedBuffBars()
                 bar._nameSet = displayName and displayName ~= "" or false
             end
 
-            -- Saved position
-            local posKey = tostring(i)
-            local pos = _tbbPos[posKey]
-            if pos and pos.point then
-                local unlockKey = "TBB_" .. posKey
-                local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
-                if not anchored or not bar:GetLeft() then
-                    bar:ClearAllPoints()
-                    if pos.scale then pcall(function() bar:SetScale(pos.scale) end) end
-                    bar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+            -- Saved position / grouping
+            local groupEnabled = tbb.groupEnabled
+            if groupEnabled and lastGroupedBar then
+                -- Grouped: position relative to previous enabled bar
+                local growDir = (tbb.groupGrowDirection or "DOWN"):upper()
+                local spacing = tbb.groupSpacing or 2
+                bar:ClearAllPoints()
+                if growDir == "DOWN" then
+                    bar:SetPoint("TOP", lastGroupedBar, "BOTTOM", 0, -spacing)
+                elseif growDir == "UP" then
+                    bar:SetPoint("BOTTOM", lastGroupedBar, "TOP", 0, spacing)
+                elseif growDir == "RIGHT" then
+                    bar:SetPoint("LEFT", lastGroupedBar, "RIGHT", spacing, 0)
+                elseif growDir == "LEFT" then
+                    bar:SetPoint("RIGHT", lastGroupedBar, "LEFT", -spacing, 0)
                 end
             else
-                bar:ClearAllPoints()
-                bar:SetPoint("CENTER", UIParent, "CENTER", 0, 200 - (i - 1) * ((cfg.height or 24) + 4))
+                -- Independent positioning (bar 1 always, or grouping disabled)
+                local posKey = tostring(i)
+                local pos = _tbbPos[posKey]
+                if pos and pos.point then
+                    local unlockKey = "TBB_" .. posKey
+                    local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(unlockKey)
+                    if not anchored or not bar:GetLeft() then
+                        bar:ClearAllPoints()
+                        if pos.scale then pcall(function() bar:SetScale(pos.scale) end) end
+                        bar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                    end
+                else
+                    bar:ClearAllPoints()
+                    bar:SetPoint("CENTER", UIParent, "CENTER", 0, 200 - (i - 1) * ((cfg.height or 24) + 4))
+                end
             end
 
+            if tbb.groupEnabled then lastGroupedBar = bar end
             bar._tbbReady    = true
             bar._isPassive   = nil
             bar._stackCount  = 0
@@ -1543,6 +1527,7 @@ function ns.RegisterTBBUnlockElements()
     local bars = tbb and tbb.bars
     if not bars or #bars == 0 then return end
 
+    local groupEnabled = tbb.groupEnabled
     local elements = {}
     for i, cfg in ipairs(bars) do
         local idx = i
@@ -1551,14 +1536,19 @@ function ns.RegisterTBBUnlockElements()
         if bar then
             elements[#elements + 1] = MK({
                 key   = "TBB_" .. posKey,
-                label = "Tracking Bar: " .. (cfg.name or ("Bar " .. idx)),
+                label = groupEnabled and idx == 1
+                    and "Tracking Bar Group"
+                    or ("Tracking Bar: " .. (cfg.name or ("Bar " .. idx))),
                 group = "Cooldown Manager",
                 order = 650,
                 noAnchorTarget = true,
                 isHidden = function()
                     local t = ns.GetTrackedBuffBars()
                     local b = t and t.bars
-                    return not b or idx > #b
+                    if not b or idx > #b then return true end
+                    -- When grouping, only bar 1 shows a mover
+                    if t.groupEnabled and idx > 1 then return true end
+                    return false
                 end,
                 getFrame = function() return tbbFrames[idx] end,
                 getSize  = function()
@@ -1570,17 +1560,16 @@ function ns.RegisterTBBUnlockElements()
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
                     if not c then return end
-                    -- Subtract icon size so c.width stores bar-only width
                     local iconMode = c.iconDisplay or "none"
                     local hasIcon = iconMode ~= "none"
                     local isVert = c.verticalOrientation
                     if hasIcon and not isVert then
                         w = w - (c.height or 24)
                     end
-                    c.width = w
-                    -- Resize frame directly without full rebuild to avoid
-                    -- position resets from BuildTrackedBuffBars
                     local f = tbbFrames[idx]
+                    if EllesmereUI._unlockActive then
+                        c.width = w
+                    end
                     if f then
                         local totalW = hasIcon and not isVert and (w + (c.height or 24)) or w
                         f:SetWidth(totalW)
@@ -1590,15 +1579,16 @@ function ns.RegisterTBBUnlockElements()
                     local t = ns.GetTrackedBuffBars()
                     local c = t.bars and t.bars[idx]
                     if not c then return end
-                    -- Subtract icon size so c.height stores bar-only height
                     local iconMode = c.iconDisplay or "none"
                     local hasIcon = iconMode ~= "none"
                     local isVert = c.verticalOrientation
                     if hasIcon and isVert then
                         h = h - (c.width or 200)
                     end
-                    c.height = h
                     local f = tbbFrames[idx]
+                    if EllesmereUI._unlockActive then
+                        c.height = h
+                    end
                     if f then
                         local totalH = hasIcon and isVert and (h + (c.width or 200)) or h
                         f:SetHeight(totalH)

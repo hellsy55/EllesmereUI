@@ -3538,7 +3538,8 @@ UpdateCastBar = function(dt)
             OnCastStop()
             return
         end
-        local progress = (now - castBarFrame._startTime) / (castBarFrame._endTime - castBarFrame._startTime)
+        local castDur = castBarFrame._endTime - castBarFrame._startTime
+        local progress = (castDur > 0) and ((now - castBarFrame._startTime) / castDur) or 0
         progress = min(max(progress, 0), 1)
         bar:SetValue(progress)
         -- Size the gradient clip frame to match the fill width
@@ -3572,7 +3573,8 @@ UpdateCastBar = function(dt)
             end
         end
     elseif castBarFrame._channeling then
-        local progress = (castBarFrame._endTime - now) / (castBarFrame._endTime - castBarFrame._startTime)
+        local chanDur = castBarFrame._endTime - castBarFrame._startTime
+        local progress = (chanDur > 0) and ((castBarFrame._endTime - now) / chanDur) or 0
         progress = min(max(progress, 0), 1)
         bar:SetValue(progress)
         -- Size the gradient clip frame to match the fill width

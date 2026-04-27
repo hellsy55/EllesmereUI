@@ -703,15 +703,23 @@ local SHAMAN_IMBUES = {
 -- Shaman Shields: three entries based on Elemental Orbit (383010) talent.
 -- With Orbit: Earth Shield self-buff (383648) + Lightning/Water Shield both needed.
 -- Without Orbit: any of Earth/Lightning/Water Shield on self.
+-- Resolve the correct shield cast spell based on spec.
+-- Resto (264) -> Water Shield (52127), others -> Lightning Shield (192106).
+local function ShamanShieldCastSpell()
+    local specIdx = GetSpecialization and GetSpecialization() or 0
+    local specID = specIdx and specIdx > 0 and GetSpecializationInfo(specIdx) or 0
+    return (specID == 264) and 52127 or 192106
+end
+
 local SHAMAN_SHIELDS = {
     { key="es_orbit", name="Earth Shield (Self)",
       castSpell=974, buffIDs={383648}, requireTalent=383010,
       check="player" },
     { key="ls_ws_orbit", name="Lightning/Water Shield",
-      castSpell=192106, buffIDs={192106, 52127}, requireTalent=383010,
+      castSpellFn=ShamanShieldCastSpell, buffIDs={192106, 52127}, requireTalent=383010,
       check="player" },
     { key="shield_basic", name="Shield",
-      castSpell=974, buffIDs={974, 192106, 52127}, excludeTalent=383010,
+      castSpellFn=ShamanShieldCastSpell, buffIDs={974, 192106, 52127}, excludeTalent=383010,
       check="player" },
 }
 
@@ -1763,6 +1771,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                             e.cat = "consumable"; e.data = rite; e.scale = co.scale or 1.0
                             e.dismissKey = "consumable:" .. rite.key
                             missing[#missing+1] = e
+                            break -- rites are mutually exclusive weapon enchants
                         end
                     end
                 end
@@ -1798,7 +1807,8 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 -- Earth Shield self-buff (383648) is combat-safe and handled
                 -- separately below. Other shields are OOC only.
                 for _, shield in ipairs(SHAMAN_SHIELDS) do
-                    if co.enabled[shield.key] ~= false and Known(shield.castSpell) then
+                    local castID = shield.castSpellFn and shield.castSpellFn() or shield.castSpell
+                    if co.enabled[shield.key] ~= false and Known(castID) then
                         local ok = true
                         if shield.requireTalent and not Known(shield.requireTalent) then ok = false end
                         if shield.excludeTalent and Known(shield.excludeTalent) then ok = false end
@@ -1806,7 +1816,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                         if shield.key == "es_orbit" then ok = false end
                         if ok and not PlayerHasAuraByID(shield.buffIDs) then
                             local e = AcquireEntry()
-                            e.mode = "spell"; e.spellID = shield.castSpell
+                            e.mode = "spell"; e.spellID = castID
                             e.label = ShortLabel(shield.name, "SHAMAN_SHIELD")
                             e.cat = "consumable"; e.data = shield; e.scale = co.scale or 1.0
                             e.dismissKey = "consumable:" .. shield.key
@@ -2466,6 +2476,7 @@ local function RegisterUnlockElements()
             end,
             linkedDimensions = true,
             setWidth = function(_, newW)
+                if not EllesmereUI._unlockActive then return end
                 local p = db.profile.display
                 local spacing = p.iconSpacing or 8
                 local count = max(#activeIcons, 2)
@@ -2475,6 +2486,7 @@ local function RegisterUnlockElements()
                 if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
             end,
             setHeight = function(_, newH)
+                if not EllesmereUI._unlockActive then return end
                 local p = db.profile.display
                 local textH = 0
                 if p.showText then

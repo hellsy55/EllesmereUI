@@ -745,7 +745,13 @@ local function CreateStandaloneFrame()
 
     local f = CreateFrame("Frame", "EllesmereUIMythicTimerStandalone", UIParent, "BackdropTemplate")
     f:SetSize(260, 200)
-    f:SetPoint("TOPLEFT", UIParent, "CENTER", -130, 100)
+    -- Default position: top of quest tracker, or right-side fallback
+    local otf = _G.ObjectiveTrackerFrame
+    if otf and otf:GetTop() then
+        f:SetPoint("TOPRIGHT", otf, "TOPRIGHT", 0, 0)
+    else
+        f:SetPoint("RIGHT", UIParent, "RIGHT", -100, 0)
+    end
     f:SetFrameStrata("MEDIUM")
     f:SetFrameLevel(10)
     f:SetClampedToScreen(true)

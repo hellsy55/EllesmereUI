@@ -787,7 +787,13 @@ local function DecorateFrame(frame, barData)
                         frame:SetAlpha(bd2 and bd2.barOpacity or 1)
                     end
                 end
-                local cseInfo = C_Spell.GetSpellCooldown(sid2)
+                -- Query cooldown on the live override (e.g. Shimmer, not
+                -- Blink) so charge-based replacements report correctly.
+                local liveSid = sid2
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    liveSid = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
+                end
+                local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "hiddenOnCD" then
                     local bd2 = barDataByKey and barDataByKey[bk2]
@@ -2636,7 +2642,6 @@ function ns.SetupViewerHooks()
         local cdmBuffTickFrame = CreateFrame("Frame")
         local cdmBuffAccum = 0
         local _, _cachedClassToken = UnitClass("player")
-        local _pandemicTickCache = {}
         cdmBuffTickFrame:SetScript("OnUpdate", function(_, elapsed)
             cdmBuffAccum = cdmBuffAccum + elapsed
             if cdmBuffAccum < 0.1 then return end
@@ -2645,7 +2650,6 @@ function ns.SetupViewerHooks()
             local p = ECME and ECME.db and ECME.db.profile
             if not p or not p.cdmBars or not p.cdmBars.bars then return end
             local needsReanchor = false
-            wipe(_pandemicTickCache)
             for _, bd in ipairs(p.cdmBars.bars) do
                 if bd.enabled then
                     local isBuff = (bd.barType == "buffs" or bd.key == "buffs" or bd.barType == "custom_buff")
@@ -2684,20 +2688,15 @@ function ns.SetupViewerHooks()
                                     fd.buffGlowActive = false
                                 end
 
-                                -- Pandemic glow: hook signal first, then
-                                -- C_UnitAuras fallbacks + PandemicIcon.
-                                if pandemicOn and sid and sid > 0 and fd then
+                                -- Pandemic glow: Blizzard's ShowPandemicStateFrame
+                                -- hook sets _pandemicState. User must configure
+                                -- pandemic alerts in Blizzard CDM settings.
+                                if pandemicOn and fd then
                                     local inPandemic = ns._pandemicState[frame]
-                                    if not inPandemic then
-                                        local cached = _pandemicTickCache[sid]
-                                        if cached == nil then
-                                            cached = ns.IsInPandemicWindow(sid) and true or false
-                                            _pandemicTickCache[sid] = cached
-                                        end
-                                        inPandemic = cached
-                                            or ns.IsInPandemicFromChild(frame)
-                                            or (frame.PandemicIcon and frame.PandemicIcon:IsShown())
-                                    end
+                                    -- Blizzard Default (-1): skip custom glow,
+                                    -- let Blizzard's native PandemicIcon show.
+                                    local pStyle = bd.pandemicGlowStyle or 1
+                                    if pStyle == -1 then inPandemic = false end
                                     if inPandemic then
                                         if not fd.pandemicGlowActive then
                                             if not fd.pandemicOverlay then

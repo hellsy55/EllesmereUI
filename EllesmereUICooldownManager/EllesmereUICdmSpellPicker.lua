@@ -1104,8 +1104,8 @@ function ns.AddCDMBar(barType, name, numRows)
         stackCountR = 1, stackCountG = 1, stackCountB = 1,
         -- Custom bars use a spell list instead of mirroring Blizzard
         outOfRangeOverlay = false,
-        pandemicGlow = false,
-        pandemicGlowStyle = 1,
+        pandemicGlow = true,
+        pandemicGlowStyle = -1,
         pandemicGlowColor = { r = 1, g = 1, b = 0 },
         pandemicGlowLines = 8,
         pandemicGlowThickness = 2,

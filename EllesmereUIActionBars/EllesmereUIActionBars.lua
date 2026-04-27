@@ -138,7 +138,7 @@ function EAB.VisibilityCompat.ApplyMode(settings, mode)
     local wasMouseover = settings.mouseoverEnabled
     settings.mouseoverEnabled = (mode == "mouseover")
     if mode == "mouseover" then
-        if not wasMouseover then
+        if not settings._savedBarAlpha then
             settings._savedBarAlpha = settings.mouseoverAlpha or 1
         end
         settings.mouseoverAlpha = 0
@@ -3659,6 +3659,8 @@ function EAB:ApplyBarOpacity(barKey)
     if not s then return end
     local frame = barFrames[barKey]
     if not frame then return end
+    -- In mouseover mode the hover system owns alpha (0 when unhovered,
+    -- mouseoverAlpha when hovered). Don't override it here.
     if not s.mouseoverEnabled then
         frame:SetAlpha(s.mouseoverAlpha or 1)
         if barKey == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
@@ -4425,11 +4427,11 @@ end
 function EAB_VTABLE.Hover.FadeIn(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
-
+        local targetAlpha = s._savedBarAlpha or 1
         state.fadeDir = "in"
         StopFade(state.frame)
-        FadeTo(state.frame, 1, s.mouseoverSpeed or 0.15)
-        if barKey == "MainBar" then SyncPagingAlpha(1) end
+        FadeTo(state.frame, targetAlpha, s.mouseoverSpeed or 0.15)
+        if barKey == "MainBar" then SyncPagingAlpha(targetAlpha) end
     end
 end
 

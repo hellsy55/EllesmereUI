@@ -1652,6 +1652,22 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "mythic_timer_default_pos_to_otf_v2",
+    scope       = "profile",
+    description = "Wipe M+ Timer position if it matches the old hardcoded default (0,0) so the new OTF-based default kicks in.",
+    body = function(ctx)
+        local emt = ctx.profile.addons and ctx.profile.addons.EllesmereUIMythicTimer
+        if not emt then return end
+        local pos = emt.standalonePos
+        if not pos then return end
+        if pos.centerX and pos.centerY
+           and math.abs(pos.centerX) < 3 and math.abs(pos.centerY) < 3 then
+            emt.standalonePos = nil
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

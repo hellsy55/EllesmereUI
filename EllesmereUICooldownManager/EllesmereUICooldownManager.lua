@@ -828,10 +828,11 @@ local function ProcessSpecChange(newSpecKey)
         ns.FullCDMRebuild("talent_reconcile")
     end
 
-    -- Clear the spec-switch suppression flag so normal NotifyElementResized
-    -- propagation can resume. By this point CollectAndReanchor has finished
-    -- and the pending-apply pass above has fired.
-    if EllesmereUI then EllesmereUI._specProfileSwitching = false end
+    -- Signal the profile system that CDM's spec rebuild is complete.
+    -- This clears _specProfileSwitching and re-applies width/height matches.
+    if EllesmereUI and EllesmereUI.OnSpecSwitchComplete then
+        EllesmereUI.OnSpecSwitchComplete()
+    end
 end
 ns.ProcessSpecChange = ProcessSpecChange
 
@@ -3212,7 +3213,11 @@ local function RefreshCDMIconAppearance(barKey)
                 end
                 local cse = ss and ss.cdStateEffect
                 if (cse == "pixelGlowReady" or cse == "buttonGlowReady") and glowOv then
-                    local cseInfo = C_Spell.GetSpellCooldown(sid)
+                    local glowLive = sid
+                    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                        glowLive = C_SpellBook.FindSpellOverrideByID(sid) or sid
+                    end
+                    local cseInfo = C_Spell.GetSpellCooldown(glowLive)
                     if cseInfo and (not cseInfo.isActive or cseInfo.isOnGCD) then
                         local gr, gg, gb = ResolveGlowColor(ss)
                         StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
@@ -3248,7 +3253,11 @@ local function RefreshCDMIconAppearance(barKey)
             end
             local cse = csSs and csSs.cdStateEffect
             if cse then
-                local cseInfo = C_Spell.GetSpellCooldown(csSid)
+                local csLive = csSid
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    csLive = C_SpellBook.FindSpellOverrideByID(csSid) or csSid
+                end
+                local cseInfo = C_Spell.GetSpellCooldown(csLive)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "hiddenOnCD" or cse == "hiddenReady" then
                     local hide = (cse == "hiddenOnCD") == onCD

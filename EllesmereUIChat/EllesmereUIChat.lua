@@ -3336,16 +3336,20 @@ initFrame:SetScript("OnEvent", function(self)
                     local cf1 = _G.ChatFrame1
                     if not cf1 then return end
                     cf1:SetWidth(max(200, newW))
-                    local cfg = ECHAT.DB()
-                    if cfg then cfg.chatWidth = cf1:GetWidth() end
+                    if EllesmereUI._unlockActive then
+                        local cfg = ECHAT.DB()
+                        if cfg then cfg.chatWidth = cf1:GetWidth() end
+                    end
                 end,
                 setHeight = function(_, newH)
                     if InCombatLockdown() then return end
                     local cf1 = _G.ChatFrame1
                     if not cf1 then return end
                     cf1:SetHeight(max(100, newH))
-                    local cfg = ECHAT.DB()
-                    if cfg then cfg.chatHeight = cf1:GetHeight() end
+                    if EllesmereUI._unlockActive then
+                        local cfg = ECHAT.DB()
+                        if cfg then cfg.chatHeight = cf1:GetHeight() end
+                    end
                 end,
                 isHidden = function()
                     local cfg = ECHAT.DB()
