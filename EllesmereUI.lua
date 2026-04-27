@@ -6687,6 +6687,9 @@ function EllesmereUI:SelectModule(folderName)
         end
     end
     local targetPage = validPage or (config.pages and config.pages[1])
+    -- Clear activePage so SelectPage doesn't bail when the target page
+    -- has the same name as the previous module's page (e.g. both have "General").
+    activePage = nil
     if targetPage then
         self:SelectPage(targetPage)
     else
@@ -7062,7 +7065,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.3"
+EllesmereUI.VERSION = "7.2.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -381,11 +381,13 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Row 2: UI Scale | EUI Options Scale
+        -- Row 2: UI Scale | Set UI Scale to 0.5333
         _, h = W:DualRow(parent, y,
             { type="slider", text="UI Scale",
               min=0.40, max=1.00, step=0.01,
               tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
+              disabled=function() return EllesmereUIDB and EllesmereUIDB.ppFixedScale end,
+              disabledTooltip="Set UI Scale to 0.5333",
               getValue=function()
                 if EllesmereUI._uiScaleDragVal then
                     return EllesmereUI._uiScaleDragVal
@@ -394,6 +396,8 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
+                -- Snap 0.53 to exact pixel-perfect 0.5333...
+                if math.abs(v - 0.53) < 0.005 then v = 0.5333333333 end
                 EllesmereUI._uiScaleDragVal = v
                 EllesmereUIDB.ppUIScaleAuto = false
                 local mf = EllesmereUI._mainFrame
@@ -421,6 +425,39 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
               end },
+            { type="toggle", text="Set UI Scale to 0.5333",
+              tooltip="Sets the UI scale to the exact pixel-perfect value used by other addons. EllesmereUI does not require this to be pixel perfect.",
+              getValue=function()
+                return EllesmereUIDB and EllesmereUIDB.ppFixedScale or false
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.ppFixedScale = v
+                if v then
+                    EllesmereUIDB.ppUIScaleAuto = false
+                    EllesmereUIDB.ppUIScale = 0.5333333333
+                    local mf = EllesmereUI._mainFrame
+                    local panelScaleBefore
+                    if mf then panelScaleBefore = mf:GetEffectiveScale() end
+                    EllesmereUI.PP.SetUIScale(0.5333333333)
+                    if mf and panelScaleBefore then
+                        local newEff = UIParent:GetEffectiveScale()
+                        if newEff > 0 then mf:SetScale(panelScaleBefore / newEff) end
+                    end
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "UI Scale Changed",
+                        message = "UI scale set to 0.5333. A reload is recommended.",
+                        confirmText = "Reload Now",
+                        cancelText = "Later",
+                        onConfirm = function() ReloadUI() end,
+                    })
+                end
+                EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Row 3: EUI Options Scale | Hide Pause Menu Button
+        _, h = W:DualRow(parent, y,
             { type="dropdown", text="EUI Options Scale",
               values={ ["Tiny (75%)"]="Tiny (75%)", ["Small (90%)"]="Small (90%)", ["Normal (100%)"]="Normal (100%)", ["Large (110%)"]="Large (110%)", ["Huge (125%)"]="Huge (125%)", ["Massive (150%)"]="Massive (150%)" },
               order={ "Tiny (75%)", "Small (90%)", "Normal (100%)", "Large (110%)", "Huge (125%)", "Massive (150%)" },
@@ -444,23 +481,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if EllesmereUI.SetPanelScale then
                     EllesmereUI:SetPanelScale(scale)
                 end
-              end }
-        );  y = y - h
-
-        -- Row 3: Show Minimap Button | Hide Pause Menu Button
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Minimap Button",
-              getValue=function()
-                return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.showMinimapButton = v
-                if v then
-                    EllesmereUI.ShowMinimapButton()
-                else
-                    EllesmereUI.HideMinimapButton()
-                end
               end },
             { type="toggle", text="Hide Pause Menu Button",
               tooltip="Hides the EllesmereUI button from the game's Escape/pause menu.",
@@ -473,7 +493,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 4: Hide Unlock Mode Menu Button | (empty)
+        -- Row 4: Hide Unlock Mode Menu Button | Show Minimap Button
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Unlock Mode Menu Button",
               tooltip="Hides the Unlock Mode button from the game's Escape/pause menu. You can still toggle Unlock Mode from the EUI options panel.",
@@ -484,7 +504,19 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.hideUnlockMenuButton = v
               end },
-            { type="label", text="" }
+            { type="toggle", text="Show Minimap Button",
+              getValue=function()
+                return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.showMinimapButton = v
+                if v then
+                    EllesmereUI.ShowMinimapButton()
+                else
+                    EllesmereUI.HideMinimapButton()
+                end
+              end }
         );  y = y - h
 
 

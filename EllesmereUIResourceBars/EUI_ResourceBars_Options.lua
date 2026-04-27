@@ -1669,9 +1669,19 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "Power Bar",
                 rows = {
                     { type = "toggle", label = "Expand Bar if No Resource",
-                      tooltip = "When your spec has no class resource, automatically adds the class resource height to the power bar",
-                      get = function() local p = DB(); return p and p.primary.expandIfNoResource end,
+                      tooltip = "When your spec has no class resource, automatically adds the class resource height to the power bar. Automatically disabled when Power Bar height is matched to another element.",
+                      get = function()
+                          -- Force off when height matched
+                          if EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
+                              return false
+                          end
+                          local p = DB(); return p and p.primary.expandIfNoResource
+                      end,
                       set = function(v)
+                          -- Block enable when height matched
+                          if v and EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
+                              return
+                          end
                           local p = DB(); if not p then return end
                           p.primary.expandIfNoResource = v; Refresh()
                       end },

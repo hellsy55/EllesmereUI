@@ -1350,6 +1350,13 @@ local function CollectAndReanchor()
                         local euiOpen = EllesmereUI and EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown()
                         if frame:IsShown() or euiOpen then
                             local targetBar, displaySID, baseSID = CategorizeFrame(frame, defaultBarKey)
+                            -- When panel is open, hidden frames are included for
+                            -- preview. But only allow them on the default buff
+                            -- bar -- extra bars get wrong/default icons from
+                            -- hidden untalented frames.
+                            if not frame:IsShown() and targetBar ~= "buffs" then
+                                targetBar = nil
+                            end
                             if targetBar and displaySID and displaySID > 0 then
                                 local barSeen = seenSpell[targetBar]
                                 if not barSeen then barSeen = {}; seenSpell[targetBar] = barSeen end
@@ -2723,7 +2730,23 @@ function ns.SetupViewerHooks()
                                     end
                                 end
 
-                                -- (Per-icon active state handled by hooks in DecorateFrame, not ticker)
+                                -- Stale active glow cleanup: when a DoT
+                                -- expires naturally, Blizzard may not call
+                                -- SetSwipeColor until the next GCD. Check
+                                -- the current swipe color and clear the glow
+                                -- if the spell is no longer active.
+                                if fd and fd._activeGlowOn then
+                                    local swipeColor = frame.cooldownSwipeColor
+                                    if swipeColor and type(swipeColor) ~= "number" and swipeColor.GetRGBA then
+                                        local r = swipeColor:GetRGBA()
+                                        -- Only clear if we can confirm r is a clean 0 (not active).
+                                        -- If r is secret or unavailable, leave the glow alone.
+                                        if r and type(r) == "number" and not issecretvalue(r) and r == 0 then
+                                            if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                                            fd._activeGlowOn = false
+                                        end
+                                    end
+                                end
                             end
                         end
                     end

@@ -7581,6 +7581,9 @@ local function DoClose()
     -- Notify beacon reminders to restore (if follow-mouse is active)
     if _G._EABR_BeaconRefresh then pcall(_G._EABR_BeaconRefresh) end
 
+    -- Restore expandIfNoResource after unlock mode finishes
+    if _G._ERB_RestoreExpand then pcall(_G._ERB_RestoreExpand) end
+
     -- Restore unit frame buffs/debuffs
     local UF_FRAME_NAMES = {
         "EllesmereUIUnitFrames_Player", "EllesmereUIUnitFrames_Target",
@@ -8184,6 +8187,11 @@ function ns.OpenUnlockMode()
         if EllesmereUI.ShowWelcomePopup then EllesmereUI:ShowWelcomePopup() end
         return
     end
+    -- Disable expandIfNoResource before _unlockActive is set so the
+    -- Rebuild inside runs in normal gameplay state and the power bar
+    -- is at its true stored height before movers capture positions.
+    if _G._ERB_SuppressExpand then pcall(_G._ERB_SuppressExpand) end
+
     isUnlocked = true
     EllesmereUI._unlockActive = true
     EllesmereUI._unlockModeActive = true

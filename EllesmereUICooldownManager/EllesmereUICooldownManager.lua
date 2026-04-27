@@ -3823,6 +3823,7 @@ local function RefreshFocusReminders()
     end
 end
 ns.RefreshFocusReminders = RefreshFocusReminders
+_G._ECME_RefreshFocusReminders = RefreshFocusReminders
 
 -- Refresh the cached context flags (instance type + role) and trigger a
 -- visual refresh if either flag transitioned. Called on PLAYER_ENTERING_WORLD,

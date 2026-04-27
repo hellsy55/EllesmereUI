@@ -6111,16 +6111,24 @@ do
             end
         end)
 
-        -- Override visibility: only show when the player can actually exit
-        -- a vehicle, never for Edit Mode previews.  This also fixes campaign
-        -- vehicles whose ActionBarController state isn't MAIN.
-        -- Gate on InCombatLockdown: SetShown on a secure frame from addon
-        -- code in combat taints the ActionBarController execution context.
-        hooksecurefunc(btn, "UpdateShownState", function(self)
+        -- Override visibility via our own event frame instead of
+        -- hooksecurefunc on UpdateShownState. Hooking UpdateShownState
+        -- taints Blizzard's secure vehicle transition path and causes
+        -- OverrideActionBar:Show() to be action-blocked in combat.
+        local vehVisFrame = CreateFrame("Frame")
+        vehVisFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
+        vehVisFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
+        vehVisFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
+        vehVisFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
+        vehVisFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        vehVisFrame:SetScript("OnEvent", function(_, event, unit)
+            if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
+                if unit ~= "player" then return end
+            end
             if InCombatLockdown() then return end
             local shouldShow = CanExitVehicle()
-            if self:IsShown() ~= shouldShow then
-                self:SetShown(shouldShow)
+            if btn:IsShown() ~= shouldShow then
+                btn:SetShown(shouldShow)
             end
         end)
     end

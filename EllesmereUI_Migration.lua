@@ -1653,6 +1653,19 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "erb_disable_expand_if_height_matched_v1",
+    scope       = "profile",
+    description = "Disable expandIfNoResource on power bar if height match is active for ERB_Power.",
+    body = function(ctx)
+        local hm = EllesmereUIDB and EllesmereUIDB.unlockHeightMatch
+        if not hm or not hm["ERB_Power"] then return end
+        local erb = ctx.profile.addons and ctx.profile.addons.EllesmereUIResourceBars
+        local pp = erb and erb.primary
+        if pp then pp.expandIfNoResource = false end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "mythic_timer_default_pos_to_otf_v2",
     scope       = "profile",
     description = "Wipe M+ Timer position if it matches the old hardcoded default (0,0) so the new OTF-based default kicks in.",

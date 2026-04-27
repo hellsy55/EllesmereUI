@@ -1558,10 +1558,13 @@ local function BuildBars()
     -- Power bar (primary resource)
     cachedPrimary = GetPrimaryPowerType()
     local pp = p.primary or FALLBACK.primary
-    -- Expand height when spec has no class resource and the option is enabled
+    -- Expand height when spec has no class resource and the option is enabled.
+    -- Suppress the expand when unlock mode or EUI options panel is open so
+    -- the mover/getSize reflects the real stored height, not the expanded one.
     local ppHeight = pp.height or 14
     local ppExpandDelta = 0
-    if pp.expandIfNoResource then
+    local _heightMatched = EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
+    if pp.expandIfNoResource and not _heightMatched then
         local secRes = GetSecondaryResource()
         if not secRes then
             local sp2 = p.secondary or FALLBACK.secondary
@@ -1644,6 +1647,8 @@ local function BuildBars()
                 SmoothBarAnimate(primaryBar, "h", ppHeight, function() ApplyPowerBarTransform() end)
             end
         end
+        -- expandIfNoResource: nudge position so extra height appears on the
+        -- correct side. Default = grow up. Anchored to top of CR = grow down.
         primaryBar:ApplyBorder(pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
 
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color)
@@ -4125,6 +4130,24 @@ function ERB:OnInitialize()
 
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end
+    -- Unlock mode: disable expandIfNoResource before positions are captured,
+    -- restore on close. Prevents expanded height from corrupting saved state.
+    _G._ERB_SuppressExpand = function()
+        local p = self.db and self.db.profile and self.db.profile.primary
+        if p and p.expandIfNoResource then
+            p._expandWasOn = true
+            p.expandIfNoResource = false
+            ERB:ApplyAll()
+        end
+    end
+    _G._ERB_RestoreExpand = function()
+        local p = self.db and self.db.profile and self.db.profile.primary
+        if p and p._expandWasOn then
+            p._expandWasOn = nil
+            p.expandIfNoResource = true
+            ERB:ApplyAll()
+        end
+    end
     _G._ERB_GetSecondaryResource = GetSecondaryResource
     _G._ERB_CalcPipGeometry = CalcPipGeometry
     _G._ERB_GetPrimaryPowerType = GetPrimaryPowerType
@@ -4175,6 +4198,18 @@ function ERB:OnEnable()
     -- will re-apply after the full game state is available.
     ERB:ApplyAll()
     RegisterUnlockElements()
+
+    -- Collapse/restore expandIfNoResource when EUI options panel opens/closes
+    if EllesmereUI.RegisterOnShow then
+        EllesmereUI:RegisterOnShow(function()
+            if _G._ERB_SuppressExpand then _G._ERB_SuppressExpand() end
+        end)
+    end
+    if EllesmereUI.RegisterOnHide then
+        EllesmereUI:RegisterOnHide(function()
+            if _G._ERB_RestoreExpand then _G._ERB_RestoreExpand() end
+        end)
+    end
 end
 
 -------------------------------------------------------------------------------

@@ -6534,6 +6534,38 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Row 3: Focus Text Reminders (left) | empty (right)
+        do
+            -- Access the FocusKick bar config in CDM's profile data
+            local function GetFocusKickBar()
+                local cdmDb = _G._ECME_AceDB
+                local p = cdmDb and cdmDb.profile
+                local bars = p and p.cdmBars and p.cdmBars.bars
+                if not bars then return nil end
+                for _, b in ipairs(bars) do
+                    if b.key == "focuskick" then return b end
+                end
+                return nil
+            end
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Focus Text Reminders",
+                  tooltip = "Display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus. This is the same setting as in the FocusKick bar options.",
+                  getValue = function()
+                      local fk = GetFocusKickBar()
+                      return fk and fk.focusReminderEnabled == true
+                  end,
+                  setValue = function(v)
+                      local fk = GetFocusKickBar()
+                      if fk then fk.focusReminderEnabled = v end
+                      if _G._ECME_RefreshFocusReminders then
+                          _G._ECME_RefreshFocusReminders()
+                      end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type = "label", text = "" }
+            );  y = y - h
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------

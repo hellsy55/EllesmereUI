@@ -8338,7 +8338,7 @@ initFrame:SetScript("OnEvent", function(self)
             local NP_SIDE_VALUES = { LEFT = "Left", RIGHT = "Right", TOP = "Top", BOTTOM = "Bottom" }
             local NP_SIDE_ORDER  = { "LEFT", "RIGHT", "TOP", "BOTTOM" }
 
-            -- Row 1: Nameplate Anchor (left) | Focus Reminders (right)
+            -- Row 1: Nameplate Anchor (left) | Focus Text Reminders (right)
             local npRow
             npRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Nameplate Anchor",
@@ -8349,7 +8349,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns.ApplyFocusKickAnchor then ns.ApplyFocusKickAnchor() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="toggle", text="Focus Reminders",
+                { type="toggle", text="Focus Text Reminders",
                   tooltip = "This will display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus.",
                   getValue = function()
                       local bd = BD()
@@ -8477,13 +8477,13 @@ initFrame:SetScript("OnEvent", function(self)
                 })
                 MakeCogBtn(rgn, frCogShow, customSwatch, EllesmereUI.RESIZE_ICON)
 
-                -- Disable both swatches + cog when Focus Reminders toggle is off
+                -- Disable both swatches + cog when Focus Text Reminders toggle is off
                 local enableBlock = CreateFrame("Frame", nil, customSwatch)
                 enableBlock:SetAllPoints()
                 enableBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 20)
                 enableBlock:EnableMouse(true)
                 enableBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Enable Focus Reminders"))
+                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Enable Focus Text Reminders"))
                 end)
                 enableBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
