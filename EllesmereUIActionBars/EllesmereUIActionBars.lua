@@ -6477,6 +6477,47 @@ function EAB:OnInitialize()
         end
     end
 
+    -- Flip MicroBar anchor for unlock mode drag
+    _G._EAB_UnlockModeOpen = function()
+        local h = extraBarHolders["MicroBar"]
+        if not h or not h._eabMicroBlizzFrame then return end
+        local bf = h._eabMicroBlizzFrame
+        if InCombatLockdown() then return end
+        -- Position holder at MicroMenuContainer's current location
+        local bL, bR = bf:GetLeft(), bf:GetRight()
+        local bT, bB = bf:GetTop(), bf:GetBottom()
+        if bL and bR and bT and bB then
+            local bS = bf:GetEffectiveScale()
+            local uS = UIParent:GetEffectiveScale()
+            local uiW, uiH = UIParent:GetSize()
+            local cx = (bL + bR) * 0.5 * bS / uS - uiW / 2
+            local cy = (bT + bB) * 0.5 * bS / uS - uiH / 2
+            h:ClearAllPoints()
+            h:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
+        end
+        -- Anchor MicroMenuContainer to follow holder
+        h._eabMicroGuardSet(true)
+        bf:ClearAllPoints()
+        bf:SetPoint("CENTER", h, "CENTER", 0, 0)
+        h._eabMicroGuardSet(false)
+        h._eabMicroFlipped = true
+    end
+
+    -- Restore passive follow on unlock mode close
+    _G._EAB_UnlockModeClose = function()
+        local h = extraBarHolders["MicroBar"]
+        if not h or not h._eabMicroBlizzFrame then return end
+        local bf = h._eabMicroBlizzFrame
+        if InCombatLockdown() then return end
+        local pos = EAB.db.profile.barPositions["MicroBar"]
+        if pos and pos.point then
+            bf:ClearAllPoints()
+            bf:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        end
+        h._eabMicroFlipped = false
+        h._eabMicroPassiveFollow()
+    end
+
     _G._EAB_Apply = function()
         ApplyAll()
         if not InCombatLockdown() then
@@ -8899,46 +8940,23 @@ local function RegisterExtraBarsWithUnlockMode()
     for idx, info in ipairs(EXTRA_BARS) do
         if not info.isDataBar and not info.isBlizzardMovable and info.frameName then
             local bk = info.key
+            -- MicroBar, BagBar, QueueStatus: Blizzard-owned frames that
+            -- can't participate in anchor chains (their position is shared
+            -- between our unlock mode and Blizzard Edit Mode).
+            local isBlizzOwned = (bk == "MicroBar" or bk == "BagBar" or bk == "QueueStatus")
             elements[#elements + 1] = MK({
                 key   = bk,
                 label = info.label,
                 group = "Action Bars",
                 order = orderBase + idx,
                 noResize = true,
+                noAnchorTo = isBlizzOwned,
+                noAnchorTarget = isBlizzOwned,
                 isHidden = function()
                     local s = EAB.db.profile.bars[bk]
                     return s and s.alwaysHidden
                 end,
-                getFrame = function()
-                    local h = extraBarHolders[bk]
-                    -- MicroBar: when unlock mode is active, flip the anchor
-                    -- so the holder can be dragged independently and
-                    -- MicroMenuContainer follows it.
-                    if bk == "MicroBar" and h and EllesmereUI._unlockActive then
-                        if h._eabMicroBlizzFrame and not h._eabMicroFlipped then
-                            h._eabMicroFlipped = true
-                            -- Break passive anchor, position holder at current blizz pos
-                            local bf = h._eabMicroBlizzFrame
-                            local bL, bR = bf:GetLeft(), bf:GetRight()
-                            local bT, bB = bf:GetTop(), bf:GetBottom()
-                            if bL and bR and bT and bB then
-                                local bS = bf:GetEffectiveScale()
-                                local uS = UIParent:GetEffectiveScale()
-                                local uiW, uiH = UIParent:GetSize()
-                                local cx = (bL + bR) * 0.5 * bS / uS - uiW / 2
-                                local cy = (bT + bB) * 0.5 * bS / uS - uiH / 2
-                                h:ClearAllPoints()
-                                h:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
-                            end
-                            -- Anchor MicroMenuContainer to follow holder
-                            h._eabMicroGuardSet(true)
-                            bf:ClearAllPoints()
-                            bf:SetPoint("CENTER", h, "CENTER", 0, 0)
-                            h._eabMicroGuardSet(false)
-                        end
-                    end
-                    return h
-                end,
+                getFrame = function() return extraBarHolders[bk] end,
                 getSize = function()
                     local holder = extraBarHolders[bk]
                     if holder then return holder:GetWidth(), holder:GetHeight() end

@@ -1054,6 +1054,12 @@ end
 local _presetFrames = {}
 ns._presetFrames = _presetFrames
 
+-- Guard: after ENCOUNTER_END clears item-preset caches, subsequent events
+-- fire before Blizzard has finished resetting potion CDs. Without this guard
+-- the update loop re-caches stale cooldown data from C_Item.GetItemCooldown.
+-- Uses a timestamp so the grace period works regardless of event ordering.
+local _encounterResetUntil = 0
+
 local _racialCdListener = CreateFrame("Frame")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
@@ -1080,13 +1086,18 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
     -- BAG_UPDATE_COOLDOWN fires once Blizzard finishes and picks up the
     -- fresh state.
     if event == "ENCOUNTER_END" then
-        for _, f in pairs(_presetFrames) do
-            if f._isItemPresetFrame then
-                f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
-                if f._cooldown then f._cooldown:Clear() end
-                if f._tex then f._tex:SetDesaturated(false) end
-                f._lastDesat = false
+        -- Potion CDs only reset on raid boss kills, not in M+.
+        local _, instanceType = GetInstanceInfo()
+        if instanceType == "raid" then
+            for _, f in pairs(_presetFrames) do
+                if f._isItemPresetFrame then
+                    f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
+                    if f._cooldown then f._cooldown:Clear() end
+                    if f._tex then f._tex:SetDesaturated(false) end
+                    f._lastDesat = false
+                end
             end
+            _encounterResetUntil = GetTime() + 3
         end
         return
     end
@@ -1127,7 +1138,7 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
                     end
                     ApplySpellDesaturation(f, durObj)
                 end
-            elseif f._isItemPresetFrame and f._presetItemID then
+            elseif f._isItemPresetFrame and f._presetItemID and GetTime() >= _encounterResetUntil then
                 local itemID = f._presetItemID
                 local getContainerCD = C_Container and C_Container.GetItemCooldown
                 local start, dur

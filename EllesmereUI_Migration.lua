@@ -1830,6 +1830,22 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "break_blizz_owned_anchors_v1",
+    scope       = "global",
+    description = "Remove anchor relationships involving MicroBar, BagBar, and QueueStatus (Blizzard-owned frames that cannot participate in anchor chains).",
+    body = function(ctx)
+        local anchors = ctx.db.unlockAnchors
+        if not anchors then return end
+        local BLIZZ_OWNED = { MicroBar = true, BagBar = true, QueueStatus = true }
+        for childKey, info in pairs(anchors) do
+            if BLIZZ_OWNED[childKey] or (info.target and BLIZZ_OWNED[info.target]) then
+                anchors[childKey] = nil
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

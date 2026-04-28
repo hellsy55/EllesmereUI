@@ -7053,6 +7053,9 @@ function EllesmereUI:Toggle()
         RefreshSidebarStates()
         mainFrame:Show()
         ShowSidebarUnlockTip()
+        -- Refresh widget disabled states (e.g. width-match may have
+        -- changed in unlock mode since the page was last shown).
+        if self.RefreshPage then self:RefreshPage() end
     end
 end
 function EllesmereUI:IsShown() return mainFrame and mainFrame:IsShown() end
@@ -7107,7 +7110,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.6"
+EllesmereUI.VERSION = "7.2.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

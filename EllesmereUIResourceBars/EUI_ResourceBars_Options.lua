@@ -2961,6 +2961,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         local function RefreshCast()
             if _G._ERB_Apply then _G._ERB_Apply() end
+            if EllesmereUI.NotifyElementResized then
+                EllesmereUI.NotifyElementResized("ERB_CastBar")
+            end
             UpdateCastBarPreview()
         end
 

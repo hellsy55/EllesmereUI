@@ -7738,7 +7738,7 @@ function SetupOptionsPanel()
                 end,
                 setWidth = function(k, w)
                     if k == "classPower" then return end
-                    if not EllesmereUI._unlockActive then Rebuild(); return end
+                    if not EllesmereUI._unlockActive and not EllesmereUI._propagatingMatch then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
@@ -7760,7 +7760,7 @@ function SetupOptionsPanel()
                 end,
                 setHeight = function(k, h)
                     if k == "classPower" then return end
-                    if not EllesmereUI._unlockActive then Rebuild(); return end
+                    if not EllesmereUI._unlockActive and not EllesmereUI._propagatingMatch then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end

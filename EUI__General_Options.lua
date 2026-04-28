@@ -387,7 +387,7 @@ initFrame:SetScript("OnEvent", function(self)
               min=0.40, max=1.00, step=0.01,
               tooltip="Sets the scale of the entire game UI. Lower values make everything smaller, higher values make everything larger.",
               disabled=function() return EllesmereUIDB and EllesmereUIDB.ppFixedScale end,
-              disabledTooltip="Set UI Scale to 0.5333",
+              disabledTooltip="This option requires Set UI Scale to 0.5333 to be disabled",
               getValue=function()
                 if EllesmereUI._uiScaleDragVal then
                     return EllesmereUI._uiScaleDragVal

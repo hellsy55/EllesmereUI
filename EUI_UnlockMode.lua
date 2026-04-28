@@ -232,25 +232,32 @@ if not EllesmereUI.IsUnlockAnchored then
     end
 end
 
--- Early anchor reapply on login: the full ApplySavedPositions lives in the
--- deferred block and only runs when EnsureLoaded() fires (options open, CDM
--- init, etc.). Without this, anchored action bars never resolve their chain
--- if the user doesn't open options and CDM is disabled.
+-- Authoritative position pass fallback: when CDM is loaded it owns this pass
+-- (fires from CollectAndReanchor after async icon population settles). When
+-- CDM is NOT loaded, nobody triggers EnsureLoaded or the final layout pass,
+-- so registered-element positions, width/height matches, and anchor chains
+-- never get applied. This fallback detects the missing CDM and fires the
+-- same pass from the parent addon instead.
 do
     local f = CreateFrame("Frame")
     f:RegisterEvent("PLAYER_ENTERING_WORLD")
     f:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
         C_Timer.After(1.5, function()
-            -- If the deferred block already ran, it handles everything
+            -- CDM already ran EnsureLoaded and will fire the authoritative
+            -- pass itself -- nothing to do here.
             if EllesmereUI._applySavedPositions then return end
-            -- Otherwise, use the lightweight stub to reapply all anchors
-            local adb = EllesmereUIDB and EllesmereUIDB.unlockAnchors
-            if not adb then return end
-            for childKey, info in pairs(adb) do
-                if info.target and EllesmereUI.ReapplyOwnAnchor then
-                    EllesmereUI.ReapplyOwnAnchor(childKey)
-                end
+            -- CDM is not loaded. Load the full deferred block and fire
+            -- the same authoritative pass CDM would have.
+            EllesmereUI:EnsureLoaded()
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
+            end
+            if EllesmereUI._applySavedPositions then
+                EllesmereUI._applySavedPositions()
+            end
+            if EllesmereUI.ReapplyAllUnlockAnchorsForced then
+                EllesmereUI.ReapplyAllUnlockAnchorsForced()
             end
         end)
     end)
@@ -929,7 +936,9 @@ end
 -- Apply width/height match: sync source size from target
 -- _propagatingMatch prevents re-entrant loops: setWidth triggers OnSizeChanged
 -- which calls NotifyElementResized which would call PropagateWidthMatch again.
+-- Exposed on EllesmereUI so child addons' setWidth can detect match propagation.
 local _propagatingMatch = false
+EllesmereUI._propagatingMatch = false
 
 function MatchH.ApplyWidthMatch(sourceKey, targetKey)
     local targetElem = registeredElements[targetKey]
@@ -965,9 +974,9 @@ function MatchH.ApplyWidthMatch(sourceKey, targetKey)
                 local sb = GetBarFrame(sourceKey)
                 local savedAlpha = sb and sb._euiRestoreAlpha
                 if sb and not savedAlpha then sb:SetAlpha(0) end
-                _propagatingMatch = true
+                _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setWidth, sourceKey, targetW)
-                _propagatingMatch = false
+                _propagatingMatch = false; EllesmereUI._propagatingMatch = false
                 EllesmereUI.RecenterBarAnchor(sourceKey)
                 if sb and not savedAlpha then
                     C_Timer.After(0, function() sb:SetAlpha(1) end)
@@ -975,9 +984,9 @@ function MatchH.ApplyWidthMatch(sourceKey, targetKey)
                 local m = movers[sourceKey]
                 if m then m:SyncSize() end
             else
-                _propagatingMatch = true
+                _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setWidth, sourceKey, targetW)
-                _propagatingMatch = false
+                _propagatingMatch = false; EllesmereUI._propagatingMatch = false
                 if sourceElem.loadPosition then
                     local pos = sourceElem.loadPosition(sourceKey)
                     if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
@@ -1011,9 +1020,9 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
                 local sb = GetBarFrame(sourceKey)
                 local savedAlpha = sb and sb._euiRestoreAlpha
                 if sb and not savedAlpha then sb:SetAlpha(0) end
-                _propagatingMatch = true
+                _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setHeight, sourceKey, targetH)
-                _propagatingMatch = false
+                _propagatingMatch = false; EllesmereUI._propagatingMatch = false
                 EllesmereUI.RecenterBarAnchor(sourceKey)
                 if sb and not savedAlpha then
                     C_Timer.After(0, function() sb:SetAlpha(1) end)
@@ -1021,9 +1030,9 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
                 local m = movers[sourceKey]
                 if m then m:SyncSize() end
             else
-                _propagatingMatch = true
+                _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setHeight, sourceKey, targetH)
-                _propagatingMatch = false
+                _propagatingMatch = false; EllesmereUI._propagatingMatch = false
                 if sourceElem.loadPosition then
                     local pos = sourceElem.loadPosition(sourceKey)
                     if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
@@ -7611,6 +7620,9 @@ local function DoClose()
     EllesmereUI._unlockActive = false
     EllesmereUI._unlockModeActive = false
 
+    -- Notify action bars to restore Blizzard-owned frame anchors
+    if _G._EAB_UnlockModeClose then pcall(_G._EAB_UnlockModeClose) end
+
     -- Recalculate action bar flyout directions after positions are finalized
     if _G._EAB_RecalcFlyouts then pcall(_G._EAB_RecalcFlyouts) end
 
@@ -8231,6 +8243,9 @@ function ns.OpenUnlockMode()
     isUnlocked = true
     EllesmereUI._unlockActive = true
     EllesmereUI._unlockModeActive = true
+
+    -- Notify action bars to flip Blizzard-owned frame anchors for drag
+    if _G._EAB_UnlockModeOpen then pcall(_G._EAB_UnlockModeOpen) end
 
     -- Remove any stale anchor/match relationships before entering unlock mode.
     -- By this point all elements are registered, so anything not in the registry
