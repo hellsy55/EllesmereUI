@@ -35,6 +35,7 @@ local defaults = {
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
             hideGreatVault       = false,
+            greatVaultExtraInfo  = true,
             hidePortals          = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
@@ -1042,6 +1043,135 @@ local function RegisterVaultEscClose()
     tinsert(UISpecialFrames, "WeeklyRewardsFrame")
 end
 
+local function GetGreatVaultAccentColor()
+    if EllesmereUI and EllesmereUI.GetAccentColor then
+        local r, g, b = EllesmereUI.GetAccentColor()
+        if r and g and b then
+            return r, g, b
+        end
+    end
+    return EG.r, EG.g, EG.b
+end
+
+local function ColorizeVaultText(text, r, g, b)
+    r = math.floor(math.max(0, math.min(1, r or 1)) * 255 + 0.5)
+    g = math.floor(math.max(0, math.min(1, g or 1)) * 255 + 0.5)
+    b = math.floor(math.max(0, math.min(1, b or 1)) * 255 + 0.5)
+    return ("|cff%02x%02x%02x%s|r"):format(r, g, b, tostring(text or ""))
+end
+
+local function GetOrderedWeeklyActivities(activityType)
+    if not C_WeeklyRewards or not C_WeeklyRewards.GetActivities then return nil end
+
+    local activities = C_WeeklyRewards.GetActivities(activityType)
+    if type(activities) ~= "table" or #activities == 0 then
+        return nil
+    end
+
+    local ordered = {}
+    for i = 1, #activities do
+        ordered[i] = activities[i]
+    end
+
+    table.sort(ordered, function(a, b)
+        local aIndex = a and a.index or 0
+        local bIndex = b and b.index or 0
+        if aIndex == bIndex then
+            return (a and a.threshold or 0) < (b and b.threshold or 0)
+        end
+        return aIndex < bIndex
+    end)
+
+    return ordered
+end
+
+local function GetVaultTokenColor(state)
+    if state == "done" then
+        return GetGreatVaultAccentColor()
+    elseif state == "partial" then
+        return 1.00, 0.66, 0.20
+    end
+
+    return 0.58, 0.58, 0.58
+end
+
+local function FormatVaultToken(text, state)
+    local r, g, b = GetVaultTokenColor(state)
+    return ColorizeVaultText(text, r, g, b)
+end
+
+local function BuildRaidVaultSummary()
+    local accentR, accentG, accentB = GetGreatVaultAccentColor()
+    local parts = { ColorizeVaultText("Raids", accentR, accentG, accentB) }
+    local activities = GetOrderedWeeklyActivities((Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Raid) or 3)
+
+    if not activities then
+        parts[#parts + 1] = FormatVaultToken("-", "empty")
+        return table.concat(parts, " ")
+    end
+
+    for i = 1, math.min(#activities, 3) do
+        local info = activities[i]
+        local progress = math.max(0, tonumber(info and info.progress) or 0)
+        local threshold = math.max(0, tonumber(info and info.threshold) or 0)
+        local state = "empty"
+        if threshold > 0 and progress >= threshold then
+            state = "done"
+        elseif progress > 0 then
+            state = "partial"
+        end
+        if threshold > 0 then
+            parts[#parts + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), state)
+        else
+            parts[#parts + 1] = FormatVaultToken("-", "empty")
+        end
+    end
+
+    return table.concat(parts, " ")
+end
+
+local function BuildTieredVaultSummary(label, activityType, completedPrefix)
+    local accentR, accentG, accentB = GetGreatVaultAccentColor()
+    local parts = { ColorizeVaultText(label, accentR, accentG, accentB) }
+    local activities = GetOrderedWeeklyActivities(activityType)
+
+    if not activities then
+        parts[#parts + 1] = FormatVaultToken("-", "empty")
+        return table.concat(parts, " ")
+    end
+
+    for i = 1, math.min(#activities, 3) do
+        local info = activities[i]
+        local progress = math.max(0, tonumber(info and info.progress) or 0)
+        local threshold = math.max(0, tonumber(info and info.threshold) or 0)
+        local level = math.max(0, tonumber(info and info.level) or 0)
+
+        if threshold > 0 and progress >= threshold and level > 0 then
+            parts[#parts + 1] = FormatVaultToken(completedPrefix .. level, "done")
+        else
+            local state = progress > 0 and "partial" or "empty"
+            if threshold > 0 then
+                parts[#parts + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), state)
+            else
+                parts[#parts + 1] = FormatVaultToken("-", "empty")
+            end
+        end
+    end
+
+    return table.concat(parts, " ")
+end
+
+local function BuildGreatVaultTooltipText()
+    local lines = {
+        "Great Vault",
+        BuildRaidVaultSummary(),
+        BuildTieredVaultSummary("Mythic+", (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Activities) or 1, "+"),
+        BuildTieredVaultSummary("World", (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.World) or 6, "T"),
+    }
+
+    return table.concat(lines, "\n")
+end
+
 local function ToggleGreatVault()
     local IsLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
     local Load     = (C_AddOns and C_AddOns.LoadAddOn)     or _G.LoadAddOn
@@ -1089,7 +1219,14 @@ local function CreateGreatVaultBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._whole:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault") end
+        if EllesmereUI.ShowWidgetTooltip then
+            local minimapCfg = EBS and EBS.db and EBS.db.profile and EBS.db.profile.minimap
+            if minimapCfg and minimapCfg.greatVaultExtraInfo == false then
+              EllesmereUI.ShowWidgetTooltip(self, "Great Vault")
+            else
+              EllesmereUI.ShowWidgetTooltip(self, BuildGreatVaultTooltipText())   
+            end         
+        end
     end)
     btn:SetScript("OnLeave", function(self)
         self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)

@@ -14,6 +14,7 @@ EllesmereUIBlizzardSkin.lua
 EllesmereUIBlizzardSkin_CharacterSheet.lua
 EllesmereUIBlizzardSkin_InspectSheet.lua
 EllesmereUIBlizzardSkin_DragonRiding.lua
+EllesmereUIBlizzardSkin_GreatVault.lua
 
 # Options
 EUI_BlizzardSkin_Options.lua
