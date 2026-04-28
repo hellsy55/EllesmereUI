@@ -275,7 +275,11 @@ local function MakeSnappers()
 
     local function snap(v)
         if type(v) ~= "number" or v == 0 then return v end
-        return floor(v / onePixel + 0.5) * onePixel
+        local result = floor(v / onePixel + 0.5) * onePixel
+        -- Clean floating point dust
+        local rounded = floor(result + 0.5)
+        if math.abs(result - rounded) < 0.001 then result = rounded end
+        return result
     end
     local function snapPos(tbl)
         if type(tbl) ~= "table" then return end
@@ -295,7 +299,7 @@ local function MakeSnappers()
             end
         end
     end
-    return snapPos, snapPosMap, snapAnchors
+    return snapPos, snapPosMap, snapAnchors, snap
 end
 
 -- Snap all positions in a single profile data table.
@@ -480,69 +484,143 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
-    id          = "position_snap_v3",
+    id          = "pixel_perfect_comprehensive_v11",
     scope       = "global",
-    description = "Re-snap all stored positions (unlock anchors + every profile's position fields) to the physical pixel grid.",
+    description = "Snap all stored positions and sizes to the physical pixel grid across all addons.",
     body = function(ctx)
-        -- Legacy bridge: skip if the old inline migration already ran.
-        -- Old flag location: EllesmereUIDB._positionSnapV3Done
-        -- Idempotence: snapping already-snapped positions is a fixpoint
-        -- (floor(n/onePixel + 0.5) * onePixel returns n for grid values),
-        -- so the bridge is belt-and-suspenders here, not strictly required.
-        if EllesmereUIDB and EllesmereUIDB._positionSnapV3Done then return end
+        local snapPos, snapPosMap, snapAnchors, snapVal = MakeSnappers()
+        -- Sizes: snap to pixel grid (not just integer rounding).
+        -- At PP.mult=1.0 this is equivalent to floor(v+0.5).
+        -- At other scales it produces grid-aligned coord values.
+        local function roundFields(tbl, keys)
+            if not tbl then return end
+            for _, key in ipairs(keys) do
+                if type(tbl[key]) == "number" then
+                    tbl[key] = snapVal(tbl[key])
+                end
+            end
+        end
+        local function snapSection(section, sizeKeys)
+            if not section then return end
+            roundFields(section, sizeKeys)
+            snapPos(section.unlockPos)
+        end
 
-        -- Mixed scope: one global thing (unlockAnchors) + one pass per
-        -- profile (via SnapProfilePositions). Registered as "global" so
-        -- the runner invokes the body exactly once; the body does its own
-        -- profile walk because the two operations are conceptually one
-        -- migration with a single flag.
-        local _, _, snapAnchors = MakeSnappers()
+        -- Global: unlock anchors
         snapAnchors(ctx.db.unlockAnchors)
 
-        if ctx.db.profiles then
-            for _, profData in pairs(ctx.db.profiles) do
-                SnapProfilePositions(profData)
+        -- Per-profile
+        if not ctx.db.profiles then return end
+        for _, profData in pairs(ctx.db.profiles) do
+          if type(profData) == "table" and profData.addons then
+            local addons = profData.addons
+
+            -- Action Bars: positions + icon sizes
+            local eab = addons.EllesmereUIActionBars
+            if eab then
+                snapPosMap(eab.barPositions)
+                if eab.bars then
+                    for _, bs in pairs(eab.bars) do
+                        if type(bs) == "table" then
+                            roundFields(bs, { "buttonWidth", "buttonHeight", "width", "height" })
+                        end
+                    end
+                end
+            end
+
+            -- Resource Bars: positions + bar sizes + pip sizes
+            local erb = addons.EllesmereUIResourceBars
+            if erb then
+                local erbSizeKeys = { "width", "height", "pipWidth", "pipHeight" }
+                snapSection(erb.primary, erbSizeKeys)
+                snapSection(erb.secondary, erbSizeKeys)
+                snapSection(erb.health, erbSizeKeys)
+                snapSection(erb.castBar or erb.castbar, erbSizeKeys)
+            end
+
+            -- Unit Frames: positions + frame/cast bar sizes
+            local uf = addons.EllesmereUIUnitFrames
+            if uf then
+                snapPosMap(uf.unlockPositions or uf.positions)
+                -- Frame sizes for all unit types
+                local ufSizeKeys = { "frameWidth", "healthHeight", "powerHeight",
+                    "castbarWidth", "castbarHeight", "playerCastbarWidth", "playerCastbarHeight",
+                    "bottomTextBarHeight" }
+                for _, unitKey in ipairs({ "player", "target", "focus", "boss" }) do
+                    if uf[unitKey] then
+                        roundFields(uf[unitKey], ufSizeKeys)
+                    end
+                end
+            end
+
+            -- CDM: bar positions + icon sizes
+            local cdm = addons.EllesmereUICooldownManager
+            if cdm then
+                snapPosMap(cdm.cdmBarPositions)
+                if cdm.cdmBars and cdm.cdmBars.bars then
+                    for _, bd in ipairs(cdm.cdmBars.bars) do
+                        roundFields(bd, { "iconSize", "spacing", "width", "height" })
+                    end
+                end
+            end
+
+            -- Damage Meters
+            local dm = addons.EllesmereUIDamageMeters
+            if dm then
+                snapPos(dm.unlockPos)
+                roundFields(dm, { "dmWidth", "dmHeight" })
+            end
+
+            -- Chat
+            local chat = addons.EllesmereUIChat
+            if chat then
+                snapPos(chat.unlockPos)
+                roundFields(chat, { "chatWidth", "chatHeight" })
+            end
+
+            -- ABR
+            local abr = addons.EllesmereUIAuraBuffReminders
+            if abr and abr.display then
+                snapPos(abr.display.unlockPos)
+                roundFields(abr.display, { "iconSize", "iconSpacing" })
+            end
+
+            -- Basics (minimap, quest tracker)
+            local basics = addons.EllesmereUIBasics
+            if basics then
+                if basics.questTracker then snapPos(basics.questTracker.pos) end
+                if basics.minimap then snapPos(basics.minimap.position) end
+                if basics.friends then snapPos(basics.friends.position) end
+            end
+          end -- if profData is table with addons
+        end
+
+        -- Spec profiles: TBB positions + bar sizes
+        local sa = ctx.db.spellAssignments
+        local sp = sa and sa.specProfiles
+        if sp then
+            for _, specData in pairs(sp) do
+                if type(specData) == "table" then
+                    -- TBB positions
+                    local tbbPos = specData.tbbPositions
+                    if tbbPos then
+                        for _, pos in pairs(tbbPos) do
+                            if type(pos) == "table" then snapPos(pos) end
+                        end
+                    end
+                    -- TBB bar sizes
+                    local tbb = specData.trackedBuffBars
+                    local tbbBars = tbb and tbb.bars
+                    if tbbBars then
+                        for _, bar in ipairs(tbbBars) do
+                            if type(bar) == "table" then
+                                roundFields(bar, { "width", "height" })
+                            end
+                        end
+                    end
+                end
             end
         end
-    end,
-})
-
-EllesmereUI.RegisterMigration({
-    id          = "eab_round_button_sizes",
-    scope       = "profile",
-    description = "Round EllesmereUIActionBars buttonWidth/buttonHeight to whole pixels.",
-    body = function(ctx)
-        -- No legacy flag to bridge: the old inline code had no gate and
-        -- ran every login. Migration is naturally idempotent (floor(x+0.5)
-        -- is a fixpoint on integers) so running it once per profile via
-        -- the runner's per-profile flag produces the same result.
-        local eab = ctx.profile.addons and ctx.profile.addons.EllesmereUIActionBars
-        local bars = eab and eab.bars
-        if type(bars) ~= "table" or not EllesmereUI.RoundSizeFields then return end
-
-        local sizeKeys = { "buttonWidth", "buttonHeight" }
-        for _, barSettings in pairs(bars) do
-            if type(barSettings) == "table" then
-                EllesmereUI.RoundSizeFields(sizeKeys, { barSettings })
-            end
-        end
-    end,
-})
-
-EllesmereUI.RegisterMigration({
-    id          = "erb_round_size_fields",
-    scope       = "profile",
-    description = "Round EllesmereUIResourceBars width/height/pipWidth/pipHeight on primary, secondary, health, and castBar tables to whole pixels.",
-    body = function(ctx)
-        -- No legacy flag to bridge: the old inline code had no gate and
-        -- ran every login. Migration is naturally idempotent.
-        local erb = ctx.profile.addons and ctx.profile.addons.EllesmereUIResourceBars
-        if type(erb) ~= "table" or not EllesmereUI.RoundSizeFields then return end
-
-        local sizeKeys = { "width", "height", "pipWidth", "pipHeight" }
-        EllesmereUI.RoundSizeFields(sizeKeys, {
-            erb.primary, erb.secondary, erb.health, erb.castBar,
-        })
     end,
 })
 
@@ -1653,6 +1731,63 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "uf_castbar_standalone_v1",
+    scope       = "profile",
+    description = "Resolve castbar width=0 to real frame width and set default unlock anchors for standalone cast bars.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if not uf then return end
+        local positions = uf.positions or uf.unlockPositions
+        local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
+
+        -- Resolve player castbar auto-width
+        local playerS = uf.player
+        if playerS then
+            local pw = playerS.playerCastbarWidth or 0
+            if pw == 0 then
+                playerS.playerCastbarWidth = playerS.frameWidth or 181
+            end
+            local ph = playerS.playerCastbarHeight or 0
+            if ph == 0 then
+                playerS.playerCastbarHeight = playerS.castbarHeight or 14
+            end
+        end
+
+        -- Resolve target/focus castbar auto-width
+        for _, unitKey in ipairs({ "target", "focus" }) do
+            local s = uf[unitKey]
+            if s then
+                local cw = s.castbarWidth or 0
+                if cw == 0 then
+                    s.castbarWidth = s.frameWidth or 181
+                end
+            end
+        end
+
+        -- Set default unlock anchors for cast bars that have no position and no anchor
+        if anchors then
+            local CASTBAR_DEFAULTS = {
+                { key = "playerCastbar", target = "player" },
+                { key = "targetCastbar", target = "target" },
+                { key = "focusCastbar",  target = "focus" },
+            }
+            for _, def in ipairs(CASTBAR_DEFAULTS) do
+                local hasPos = positions and positions[def.key]
+                local hasAnchor = anchors[def.key]
+                if not hasPos and not hasAnchor then
+                    anchors[def.key] = {
+                        target = def.target,
+                        side = "BOTTOM",
+                        offsetX = 0,
+                        offsetY = 0,
+                    }
+                end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "erb_disable_expand_if_height_matched_v1",
     scope       = "profile",
     description = "Disable expandIfNoResource on power bar if height match is active for ERB_Power.",
@@ -1677,6 +1812,20 @@ EllesmereUI.RegisterMigration({
         if pos.centerX and pos.centerY
            and math.abs(pos.centerX) < 3 and math.abs(pos.centerY) < 3 then
             emt.standalonePos = nil
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "np_stacking_spacing_50_to_75_v2",
+    scope       = "profile",
+    description = "Bump nameplate stacking spacing from old default 50 to 75 for better separation.",
+    body = function(ctx)
+        local np = ctx.profile.addons and ctx.profile.addons.EllesmereUINameplates
+        if not np then np = {}; ctx.profile.addons = ctx.profile.addons or {}; ctx.profile.addons.EllesmereUINameplates = np end
+        local cur = np.stackSpacingScale
+        if not cur or cur == 50 then
+            np.stackSpacingScale = 90
         end
     end,
 })

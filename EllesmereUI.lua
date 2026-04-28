@@ -843,6 +843,12 @@ do
         UIParent:SetScale(newScale)
         PP.UpdateMult()
         if scaleChanged then
+            -- Re-snap all stored values to the new pixel grid
+            if EllesmereUI.SnapProfilePositions then
+                local activeName = EllesmereUIDB.activeProfile or "Default"
+                local profData = EllesmereUIDB.profiles and EllesmereUIDB.profiles[activeName]
+                if profData then EllesmereUI.SnapProfilePositions(profData) end
+            end
             if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
             if _G._ERB_Apply then _G._ERB_Apply() end
             if _G._EAB_Apply then _G._EAB_Apply() end
@@ -868,6 +874,31 @@ do
         return pixels * m
     end
 
+    --- Snap a value to the nearest physical pixel at UIParent scale.
+    --- Convenience wrapper for save paths that don't have a frame reference.
+    function PP.Snap(x)
+        if x == 0 then return 0 end
+        local m = PP.mult
+        local result = math.floor(x / m + 0.5) * m
+        -- Clean floating point dust: if result is within 0.001 of an
+        -- integer, round to that integer to prevent drift accumulation.
+        local rounded = math.floor(result + 0.5)
+        if math.abs(result - rounded) < 0.001 then result = rounded end
+        return result
+    end
+
+    --- Convert a coord-space value to its physical pixel count (for display).
+    function PP.ToPixels(coord)
+        if coord == 0 then return 0 end
+        return math.floor(coord / PP.mult + 0.5)
+    end
+
+    --- Convert a physical pixel count to a grid-aligned coord value (for storage).
+    function PP.FromPixels(px)
+        if px == 0 then return 0 end
+        return px * PP.mult
+    end
+
     ---------------------------------------------------------------------------
     --  SnapForES(x, effectiveScale)
     --
@@ -884,7 +915,10 @@ do
         if x == 0 then return 0 end
         local onePixel = PP.perfect / es
         local physPixels = math.floor(x / onePixel + 0.5)
-        return physPixels * onePixel
+        local result = physPixels * onePixel
+        local rounded = math.floor(result + 0.5)
+        if math.abs(result - rounded) < 0.001 then result = rounded end
+        return result
     end
 
     ---------------------------------------------------------------------------
@@ -906,16 +940,24 @@ do
         es = es or (UIParent and UIParent:GetEffectiveScale() or 1)
         local onePixel = PP.perfect / es
         local valuePx = value / onePixel
+        local result
         if dim and dim > 0 then
             local dimPx = math.floor(dim / onePixel + 0.5)
             if dimPx % 2 == 1 then
                 -- Odd dimension: snap center to nearest half-pixel grid point
                 -- (integer + 0.5) so edges land on whole pixels.
-                return (math.floor(valuePx) + 0.5) * onePixel
+                result = (math.floor(valuePx) + 0.5) * onePixel
+                -- Clean floating point dust (half-pixel values)
+                local rounded = math.floor(result) + 0.5
+                if math.abs(result - rounded) < 0.001 then result = rounded end
+                return result
             end
         end
         -- Even dimension (or unknown): snap center to nearest whole pixel.
-        return math.floor(valuePx + 0.5) * onePixel
+        result = math.floor(valuePx + 0.5) * onePixel
+        local rounded = math.floor(result + 0.5)
+        if math.abs(result - rounded) < 0.001 then result = rounded end
+        return result
     end
 
     ---------------------------------------------------------------------------
@@ -7065,7 +7107,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.4"
+EllesmereUI.VERSION = "7.2.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7262,7 +7304,6 @@ EllesmereUI._RunConflictCheck = function()
             -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBags" } },
             -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBags" } },
             -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBags" } },
-            { addon = "FarmHud",                  label = "FarmHud",                    targets = { "EllesmereUIMinimap" }, },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUIQoL" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },

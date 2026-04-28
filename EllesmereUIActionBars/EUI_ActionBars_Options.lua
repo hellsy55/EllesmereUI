@@ -2727,7 +2727,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local BKP = EAB_VT.BAR_KEY_TO_PAGE or {}
 
                     -- Build dropdown values: None, Bar 1-8
-                    local pagingValues = { none = "None" }
+                    local pagingValues = { none = "Default" }
                     local pagingOrder = { "none" }
                     local barList = {
                         { key = "MainBar", label = "Action Bar 1 (Main)" },

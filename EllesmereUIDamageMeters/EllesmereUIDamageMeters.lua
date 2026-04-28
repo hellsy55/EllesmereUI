@@ -229,28 +229,34 @@ local function SetupDamageMeter()
                 noAnchorTo = true,
                 getFrame = function() return _G.DamageMeter end,
                 getSize  = function()
-                    local f = _G.DamageMeter
-                    if not f then return 300, 200 end
-                    return f:GetWidth(), f:GetHeight()
+                    local cfg = ns.EDM.DB()
+                    if cfg then
+                        return cfg.dmWidth or 300, cfg.dmHeight or 200
+                    end
+                    return 300, 200
                 end,
                 setWidth = function(_, newW)
                     if InCombatLockdown() then return end
                     local f = _G.DamageMeter
                     if not f then return end
-                    f:SetWidth(math.max(150, newW))
+                    local PPd = EllesmereUI and EllesmereUI.PP
+                    local snapW = PPd and PPd.Snap(math.max(150, newW)) or math.floor(math.max(150, newW) + 0.5)
+                    f:SetWidth(snapW)
                     if EllesmereUI._unlockActive then
                         local cfg = ns.EDM.DB()
-                        if cfg then cfg.dmWidth = f:GetWidth() end
+                        if cfg then cfg.dmWidth = snapW end
                     end
                 end,
                 setHeight = function(_, newH)
                     if InCombatLockdown() then return end
                     local f = _G.DamageMeter
                     if not f then return end
-                    f:SetHeight(math.max(80, newH))
+                    local PPd = EllesmereUI and EllesmereUI.PP
+                    local snapH = PPd and PPd.Snap(math.max(80, newH)) or math.floor(math.max(80, newH) + 0.5)
+                    f:SetHeight(snapH)
                     if EllesmereUI._unlockActive then
                         local cfg = ns.EDM.DB()
-                        if cfg then cfg.dmHeight = f:GetHeight() end
+                        if cfg then cfg.dmHeight = snapH end
                     end
                 end,
                 isHidden = function()

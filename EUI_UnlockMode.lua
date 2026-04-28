@@ -1634,29 +1634,32 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
             cx = tCX
             cy = tCY
         end
-        -- Store the computed offset as edge-to-edge
-        if ai then
+        -- Store the computed offset as edge-to-edge, snapped to pixel grid.
+        -- Skip if valid offsets already exist -- recomputing from live frame
+        -- bounds introduces floating point drift that accumulates on each login.
+        if ai and (ai.offsetX == nil or ai.offsetY == nil) then
+            local snap = (EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.Snap) or function(v) return math.floor(v + 0.5) end
             local edgeX, edgeY
             if side == "LEFT" then
                 edgeX = tL; edgeY = tCY
-                ai.offsetX = (cx + cW / 2) - edgeX
-                ai.offsetY = cy - edgeY
+                ai.offsetX = snap((cx + cW / 2) - edgeX)
+                ai.offsetY = snap(cy - edgeY)
             elseif side == "RIGHT" then
                 edgeX = tR; edgeY = tCY
-                ai.offsetX = (cx - cW / 2) - edgeX
-                ai.offsetY = cy - edgeY
+                ai.offsetX = snap((cx - cW / 2) - edgeX)
+                ai.offsetY = snap(cy - edgeY)
             elseif side == "TOP" then
                 edgeX = tCX; edgeY = tT
-                ai.offsetX = cx - edgeX
-                ai.offsetY = (cy - cH / 2) - edgeY
+                ai.offsetX = snap(cx - edgeX)
+                ai.offsetY = snap((cy - cH / 2) - edgeY)
             elseif side == "BOTTOM" then
                 edgeX = tCX; edgeY = tB
-                ai.offsetX = cx - edgeX
-                ai.offsetY = (cy + cH / 2) - edgeY
+                ai.offsetX = snap(cx - edgeX)
+                ai.offsetY = snap((cy + cH / 2) - edgeY)
             else
                 edgeX = tCX; edgeY = tCY
-                ai.offsetX = cx - edgeX
-                ai.offsetY = cy - edgeY
+                ai.offsetX = snap(cx - edgeX)
+                ai.offsetY = snap(cy - edgeY)
             end
         end
     end
@@ -1693,6 +1696,15 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
             end
         end
         if not skip then
+            -- Snap center to physical pixel grid (dim-aware for odd-pixel frames).
+            -- Use child's own coordinate-space dimensions, not UIParent-space cW/cH.
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapCenterForDim then
+                local childW = childBar:GetWidth() or 0
+                local childH = childBar:GetHeight() or 0
+                bCenterX = PPa.SnapCenterForDim(bCenterX, childW, cS)
+                bCenterY = PPa.SnapCenterForDim(bCenterY, childH, cS)
+            end
             pcall(function()
                 childBar:ClearAllPoints()
                 childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)
@@ -1715,25 +1727,27 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
         local bB = (childBar:GetBottom() or 0) * bS / uiS
         local actualCX = (bL + bR) / 2
         local actualCY = (bT + bB) / 2
-        if ai then
-            -- Store offset as edge-to-edge (child near edge to target edge)
+        -- Skip offset recomputation if valid offsets already exist --
+        -- recomputing from live bounds introduces floating point drift.
+        if ai and (ai.offsetX == nil or ai.offsetY == nil) then
             local actualHW = (bR - bL) / 2
             local actualHH = (bT - bB) / 2
+            local snap = (EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.Snap) or function(v) return math.floor(v + 0.5) end
             if side == "LEFT" then
-                ai.offsetX = (actualCX + actualHW) - tL
-                ai.offsetY = actualCY - tCY
+                ai.offsetX = snap((actualCX + actualHW) - tL)
+                ai.offsetY = snap(actualCY - tCY)
             elseif side == "RIGHT" then
-                ai.offsetX = (actualCX - actualHW) - tR
-                ai.offsetY = actualCY - tCY
+                ai.offsetX = snap((actualCX - actualHW) - tR)
+                ai.offsetY = snap(actualCY - tCY)
             elseif side == "TOP" then
-                ai.offsetX = actualCX - tCX
-                ai.offsetY = (actualCY - actualHH) - tT
+                ai.offsetX = snap(actualCX - tCX)
+                ai.offsetY = snap((actualCY - actualHH) - tT)
             elseif side == "BOTTOM" then
-                ai.offsetX = actualCX - tCX
-                ai.offsetY = (actualCY + actualHH) - tB
+                ai.offsetX = snap(actualCX - tCX)
+                ai.offsetY = snap((actualCY + actualHH) - tB)
             else
-                ai.offsetX = actualCX - tCX
-                ai.offsetY = actualCY - tCY
+                ai.offsetX = snap(actualCX - tCX)
+                ai.offsetY = snap(actualCY - tCY)
             end
         end
     end
@@ -2163,14 +2177,19 @@ ApplyCenterPosition = function(barKey, pos)
         end
     end
 
-    -- No explicit snap here. The stored CENTER values were computed from
-    -- pixel-aligned edges (via ConvertToCenterPos reading live frame bounds).
-    -- Deriving the edge back with cx +/- dim/2 reproduces the original edge
-    -- exactly (within floating-point epsilon, far below 0.5 px). Applying
-    -- SnapForES or SnapCenterForDim here would round-to-nearest, which can
-    -- shift a value like N - 0.0001 to N-1 instead of N, causing 1px drift
-    -- on every save/load cycle. The renderer handles sub-pixel epsilon
-    -- correctly without our help.
+    -- Snap the final position to the physical pixel grid, accounting for
+    -- odd-dimension frames that need half-pixel centering.
+    local PPap = EllesmereUI and EllesmereUI.PP
+    if PPap and PPap.SnapCenterForDim then
+        local es = frame:GetEffectiveScale()
+        if anchor == "CENTER" then
+            adjX = PPap.SnapCenterForDim(adjX, frame:GetWidth() or 0, es)
+            adjY = PPap.SnapCenterForDim(adjY, frame:GetHeight() or 0, es)
+        elseif PPap.SnapForES then
+            adjX = PPap.SnapForES(adjX, es)
+            adjY = PPap.SnapForES(adjY, es)
+        end
+    end
 
     pcall(function()
         if InCombatLockdown() and frame:IsProtected() then
@@ -6303,7 +6322,8 @@ local function CreateMover(barKey)
                 box:SetAutoFocus(false)
                 box:SetNumeric(true)
                 box:SetMaxLetters(5)
-                box:SetNumber(floor(initVal))
+                local PPcog = EllesmereUI and EllesmereUI.PP
+                box:SetNumber(PPcog and PPcog.ToPixels and PPcog.ToPixels(initVal) or floor(initVal))
 
                 -- Disable if this element is width/height matched
                 local isWidth = (axis == "Width")
@@ -6320,8 +6340,9 @@ local function CreateMover(barKey)
                 end
 
                 box:SetScript("OnEnterPressed", function(self)
-                    local val = self:GetNumber()
-                    if val < 1 then val = 1 end
+                    local PPi = EllesmereUI and EllesmereUI.PP
+                    local rawPx = math.max(1, math.floor(self:GetNumber() + 0.5))
+                    local val = PPi and PPi.FromPixels and PPi.FromPixels(rawPx) or rawPx
                     local sb = GetBarFrame(barKey)
                     local savedAlpha = sb and sb._euiRestoreAlpha
                     if sb and not savedAlpha then sb:SetAlpha(0) end
@@ -6356,8 +6377,10 @@ local function CreateMover(barKey)
                     -- Refresh both input boxes to reflect actual post-resize dimensions
                     if elem.getSize then
                         local nw, nh = elem.getSize(barKey)
-                        if wBox then wBox:SetNumber(floor(nw or 0)) end
-                        if hBox then hBox:SetNumber(floor(nh or 0)) end
+                        local PPr = EllesmereUI and EllesmereUI.PP
+                        local toP = PPr and PPr.ToPixels or floor
+                        if wBox then wBox:SetNumber(toP(nw or 0)) end
+                        if hBox then hBox:SetNumber(toP(nh or 0)) end
                     end
                     PropagateAnchorChain(barKey)
                 end)
@@ -6365,7 +6388,9 @@ local function CreateMover(barKey)
                     self:ClearFocus()
                     if elem.getSize then
                         local w2, h2 = elem.getSize(barKey)
-                        self:SetNumber(floor(axis == "Width" and (w2 or 0) or (h2 or 0)))
+                        local PPe = EllesmereUI and EllesmereUI.PP
+                        local toP = PPe and PPe.ToPixels or floor
+                        self:SetNumber(toP(axis == "Width" and (w2 or 0) or (h2 or 0)))
                     end
                 end)
                 yOff = yOff - ROW_H
@@ -6452,11 +6477,17 @@ local function CreateMover(barKey)
                                 pendingPositions[barKey] = { _anchored = true }
                             else
                                 -- Unanchored: absolute position
-                                local ratio = UIParent:GetEffectiveScale() / b:GetEffectiveScale()
+                                local bS = b:GetEffectiveScale()
+                                local ratio = UIParent:GetEffectiveScale() / bS
                                 local barHW = (b:GetWidth() or 0) * 0.5
                                 local barHH = (b:GetHeight() or 0) * 0.5
                                 local barX = newCX * ratio - barHW
                                 local barY = newCY * ratio + barHH
+                                local PPi = EllesmereUI and EllesmereUI.PP
+                                if PPi and PPi.SnapForES then
+                                    barX = PPi.SnapForES(barX, bS)
+                                    barY = PPi.SnapForES(barY, bS)
+                                end
                                 pcall(function()
                                     b:ClearAllPoints()
                                     b:SetPoint("TOPLEFT", UIParent, "TOPLEFT", barX, barY)
@@ -6616,6 +6647,11 @@ local function CreateMover(barKey)
                 end
                 local barX = cx * ratio - barHW
                 local barY = (cy - centerYOff) * ratio + barHH
+                local PPc = EllesmereUI and EllesmereUI.PP
+                if PPc and PPc.SnapForES then
+                    barX = PPc.SnapForES(barX, bS)
+                    barY = PPc.SnapForES(barY, bS)
+                end
                 pcall(function()
                     b:ClearAllPoints()
                     b:SetPoint("TOPLEFT", UIParent, "TOPLEFT", barX, barY)

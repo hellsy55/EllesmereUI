@@ -157,8 +157,8 @@ local defaults = {
     classPowerEmptyColor = { r = 0.2, g = 0.2, b = 0.2, a = 1.0 },
     classPowerGap = 2,
     healthBarWidth = 6,
-    nameplateOverlapV = 1.05,
-    stackSpacingScale = 50,
+    nameplateOverlapV = 1.10,
+    stackSpacingScale = 100,
     stackingEnabled = true,
     hitboxScaleX = 100,
     hitboxScaleY = 100,
@@ -229,6 +229,10 @@ local defaults = {
     questMobColor = { r = 0.157, g = 0.855, b = 0.475 },
     showCastIcon = true,
     castIconScale = 1,
+    bgAlpha = 1.0,
+    bgColor = { r = 0.12, g = 0.12, b = 0.12 },
+    castBgAlpha = 0.9,
+    castBgColor = { r = 0.1, g = 0.1, b = 0.1 },
     hashLineEnabled = false,
     hashLinePercent = 30,
     hashLineColor = { r = 1, g = 1, b = 1 },
@@ -1377,7 +1381,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.health:SetClipsChildren(false)
     plate.healthBG = plate.health:CreateTexture(nil, "BACKGROUND")
     plate.healthBG:SetAllPoints()
-    plate.healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)
+    local _bg = (p and p.bgColor) or defaults.bgColor
+    local _bga = (p and p.bgAlpha) or defaults.bgAlpha
+    plate.healthBG:SetColorTexture(_bg.r, _bg.g, _bg.b, _bga)
     -- Hash line: thin vertical marker at a configurable health percentage
     plate.hashLine = plate.health:CreateTexture(nil, "OVERLAY", nil, 3)
     plate.hashLine:SetColorTexture(1, 1, 1, 0.8)
@@ -1518,7 +1524,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.cast:Hide()
     plate.castBG = plate.cast:CreateTexture(nil, "BACKGROUND")
     plate.castBG:SetAllPoints()
-    plate.castBG:SetColorTexture(0.1, 0.1, 0.1, 0.9)
+    local _cbg = (p and p.castBgColor) or defaults.castBgColor
+    local _cba = (p and p.castBgAlpha) or defaults.castBgAlpha
+    plate.castBG:SetColorTexture(_cbg.r, _cbg.g, _cbg.b, _cba)
     plate.castLeftBorder = plate.cast:CreateTexture(nil, "OVERLAY", nil, 7)
     plate.castLeftBorder:SetColorTexture(0, 0, 0, 1)
     plate.castLeftBorder:SetWidth(1)
@@ -4511,6 +4519,7 @@ function NameplateFrame:UpdateCast()
             NotifyCastEnded()
         end
         self.isCasting = false
+        self._castTex = nil
         self:HideKickTick()
         self:ClearImportantCastGlow()
         self:ApplyScale()
@@ -4533,7 +4542,16 @@ function NameplateFrame:UpdateCast()
 
     self.cast:Show()
     if type(texture) ~= "nil" then
+        self._castTex = texture
         self.castIcon:SetTexture(texture)
+    elseif self._castTex then
+        self.castIcon:SetTexture(self._castTex)
+    elseif castSpellID then
+        local info = C_Spell.GetSpellInfo(castSpellID)
+        if info and info.iconID then
+            self._castTex = info.iconID
+            self.castIcon:SetTexture(info.iconID)
+        end
     end
     self.castName:SetText(type(name) ~= "nil" and name or "")
     

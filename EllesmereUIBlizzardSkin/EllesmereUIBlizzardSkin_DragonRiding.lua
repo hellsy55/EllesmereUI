@@ -602,7 +602,8 @@ function RegisterUnlockElements()
                 local p = db.profile
                 local totalH   = p.secondWindHeight + p.gap + p.skyridingHeight + p.gap + p.speedHeight
                 local iconSize = totalH
-                p.width = max(60, floor(w - p.gap - iconSize + 0.5))
+                local PPdr = EllesmereUI and EllesmereUI.PP
+                p.width = max(60, PPdr and PPdr.Snap(w - p.gap - iconSize) or floor(w - p.gap - iconSize + 0.5))
                 Rebuild()
             end,
             setHeight = function() end,

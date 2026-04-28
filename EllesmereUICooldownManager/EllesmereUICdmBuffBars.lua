@@ -525,15 +525,17 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     -- width/height are always visual dimensions (what you see on screen).
     -- Horizontal: width = long side, height = short side.
     -- Vertical: width = short side, height = long side.
-    local w = cfg.width or 200
-    local h = cfg.height or 24
+    local PPt = EllesmereUI and EllesmereUI.PP
+    local snap = PPt and PPt.Snap or function(v) return v end
+    local w = snap(cfg.width or 200)
+    local h = snap(cfg.height or 24)
     local isVert = cfg.verticalOrientation
     bar._lastVertical = isVert
     local iconMode = cfg.iconDisplay or "none"
     local hasIcon = iconMode ~= "none"
     local iSize = isVert and w or h
 
-    -- Size wrapFrame: always width x height as stored
+    -- Size wrapFrame: always width x height as stored, snapped to pixel grid
     if isVert then
         bar:SetSize(w, hasIcon and (h + iSize) or h)
     else
@@ -1542,6 +1544,7 @@ function ns.RegisterTBBUnlockElements()
                 group = "Cooldown Manager",
                 order = 650,
                 noAnchorTarget = true,
+                noResize = true,
                 isHidden = function()
                     local t = ns.GetTrackedBuffBars()
                     local b = t and t.bars
@@ -1552,9 +1555,23 @@ function ns.RegisterTBBUnlockElements()
                 end,
                 getFrame = function() return tbbFrames[idx] end,
                 getSize  = function()
-                    local f = tbbFrames[idx]
-                    if f then return f:GetWidth(), f:GetHeight() end
-                    return 200, 24
+                    -- Return total frame size (including icon) so width-
+                    -- matching reads the actual rendered dimensions.
+                    local t = ns.GetTrackedBuffBars()
+                    local c = t.bars and t.bars[idx]
+                    local PPg = EllesmereUI and EllesmereUI.PP
+                    local sn = PPg and PPg.Snap or function(v) return v end
+                    if c then
+                        local w = sn(c.width or 270)
+                        local h = sn(c.height or 24)
+                        local hasIcon = (c.iconDisplay or "none") ~= "none"
+                        local isVert = c.verticalOrientation
+                        if hasIcon then
+                            if isVert then h = h + w else w = w + h end
+                        end
+                        return w, h
+                    end
+                    return 270, 24
                 end,
                 setWidth = function(_, w)
                     local t = ns.GetTrackedBuffBars()
@@ -1567,6 +1584,8 @@ function ns.RegisterTBBUnlockElements()
                         w = w - (c.height or 24)
                     end
                     local f = tbbFrames[idx]
+                    local PPt = EllesmereUI and EllesmereUI.PP
+                    w = PPt and PPt.Snap(w) or math.floor(w + 0.5)
                     if EllesmereUI._unlockActive then
                         c.width = w
                     end
@@ -1585,6 +1604,8 @@ function ns.RegisterTBBUnlockElements()
                     if hasIcon and isVert then
                         h = h - (c.width or 200)
                     end
+                    local PPt = EllesmereUI and EllesmereUI.PP
+                    h = PPt and PPt.Snap(h) or math.floor(h + 0.5)
                     local f = tbbFrames[idx]
                     if EllesmereUI._unlockActive then
                         c.height = h

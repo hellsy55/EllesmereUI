@@ -899,7 +899,8 @@ local function RegisterUnlockElements()
             setWidth = function(_, w)
                 local p = ECL.db and ECL.db.profile
                 if not p or not p.gcd then return end
-                p.gcd.radius = math.max(math.floor(w / 2 + 0.5), 5)
+                local PPg = EllesmereUI and EllesmereUI.PP
+                p.gcd.radius = math.max(PPg and PPg.Snap(w / 2) or math.floor(w / 2 + 0.5), 5)
                 ApplyGCDCircle()
                 if EllesmereUI._unlockActive and EllesmereUI.RepositionBarToMover then
                     EllesmereUI.RepositionBarToMover("ECL_GCD")
@@ -908,7 +909,8 @@ local function RegisterUnlockElements()
             setHeight = function(_, h)
                 local p = ECL.db and ECL.db.profile
                 if not p or not p.gcd then return end
-                p.gcd.radius = math.max(math.floor(h / 2 + 0.5), 5)
+                local PPg = EllesmereUI and EllesmereUI.PP
+                p.gcd.radius = math.max(PPg and PPg.Snap(h / 2) or math.floor(h / 2 + 0.5), 5)
                 ApplyGCDCircle()
                 if EllesmereUI._unlockActive and EllesmereUI.RepositionBarToMover then
                     EllesmereUI.RepositionBarToMover("ECL_GCD")
@@ -953,14 +955,16 @@ local function RegisterUnlockElements()
             setWidth = function(_, w)
                 local p = ECL.db and ECL.db.profile
                 if not p or not p.castCircle then return end
-                p.castCircle.radius = math.max(math.floor(w / 2 + 0.5), 5)
+                local PPc = EllesmereUI and EllesmereUI.PP
+                p.castCircle.radius = math.max(PPc and PPc.Snap(w / 2) or math.floor(w / 2 + 0.5), 5)
                 ApplyCastCircle()
                 EllesmereUI.RepositionBarToMover("ECL_Cast")
             end,
             setHeight = function(_, h)
                 local p = ECL.db and ECL.db.profile
                 if not p or not p.castCircle then return end
-                p.castCircle.radius = math.max(math.floor(h / 2 + 0.5), 5)
+                local PPc = EllesmereUI and EllesmereUI.PP
+                p.castCircle.radius = math.max(PPc and PPc.Snap(h / 2) or math.floor(h / 2 + 0.5), 5)
                 ApplyCastCircle()
                 EllesmereUI.RepositionBarToMover("ECL_Cast")
             end,

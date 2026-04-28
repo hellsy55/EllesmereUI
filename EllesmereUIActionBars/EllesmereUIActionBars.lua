@@ -15,7 +15,6 @@ local ADDON_NAME, ns = ...
 local EAB = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 ns.EAB = EAB
 
-
 local PP = EllesmereUI.PP
 
 -- Cold-path helper table for module-level behavior that benefits from a
@@ -28,6 +27,7 @@ local EAB_VTABLE = {
 }
 ns.EAB_VTABLE = EAB_VTABLE
 EAB.VisibilityCompat = EAB.VisibilityCompat or {}
+
 
 -------------------------------------------------------------------------------
 --  Upvalues
@@ -184,68 +184,6 @@ function EAB.VisibilityCompat.Copy(dst, src)
     else
         dst.mouseoverAlpha = src.mouseoverAlpha
         dst._savedBarAlpha = nil
-    end
-end
-
-function EAB_VTABLE.ExtraBars.PatchDetachedQueueStatusLayout()
-    if not MicroMenuContainer or MicroMenuContainer._eabDetachedQueueLayout then return end
-    MicroMenuContainer._eabDetachedQueueLayout = true
-    MicroMenuContainer._eabOriginalLayout = MicroMenuContainer.Layout
-
-    function MicroMenuContainer:Layout()
-        if not QueueStatusButton or QueueStatusButton:GetParent() == self then
-            return self._eabOriginalLayout(self)
-        end
-
-        -- MicroMenu:Layout() calls MicroMenuContainer:GetPosition() which
-        -- needs valid GetCenter() coordinates. Skip the layout when the
-        -- container has just become visible and the layout system hasn't
-        -- resolved screen coordinates yet.
-        if not self:GetCenter() then return end
-
-        -- Once the queue eye lives in its own holder, fall back to the same
-        -- container sizing logic but exclude detached queue-eye geometry.
-        local isHorizontal = not MicroMenu or MicroMenu.isHorizontal
-
-        local width, height = 0, 0
-        local function AddFrameSize(frame, includeOffset)
-            local frameScale = frame:GetScale()
-
-            if isHorizontal then
-                width = width + frame:GetWidth() * frameScale
-                if includeOffset then
-                    local _, _, _, offsetX = frame:GetPoint(1)
-                    width = width + abs(offsetX * frameScale)
-                end
-
-                height = max(height, frame:GetHeight() * frameScale)
-            else
-                width = max(width, frame:GetWidth() * frameScale)
-
-                height = height + frame:GetHeight() * frameScale
-                if includeOffset then
-                    local _, _, _, _, offsetY = frame:GetPoint(1)
-                    height = height + abs(offsetY * frameScale)
-                end
-            end
-        end
-
-        if MicroMenu then
-            if MicroMenu:GetParent() ~= self then
-                -- Preserve Blizzard's temporary override path when the micro
-                -- menu is moved elsewhere (vehicle/pet battle/tutorial flows).
-                return
-            end
-
-            MicroMenu:Layout()
-            AddFrameSize(MicroMenu)
-        end
-
-        if QueueStatusButton and QueueStatusButton:GetParent() == self then
-            AddFrameSize(QueueStatusButton, true)
-        end
-
-        self:SetSize(max(width, 1), max(height, 1))
     end
 end
 
@@ -1242,7 +1180,6 @@ local function HideBlizzardBars()
             end
         end
     end
-
     -- Hide remaining stock frames not covered by the early file-load disposal.
     -- MainMenuBar, StanceBar, PetActionBar need EAB.db to be ready, so they
     -- are handled here rather than at file load time.
@@ -1265,12 +1202,8 @@ local function HideBlizzardBars()
             end
         end
     end
-    -- MainActionBar retains events so Blizzard's own grid helpers still fire,
-    -- even though the visible MainBar buttons are EAB-owned.
-    -- Do NOT call MainActionBarController:UnregisterAllEvents().
-    -- Disabling the controller taints the cast bar animation chain
-    -- (StopFinishAnims iterates a forbidden table in combat).
-    -- Stock bars are already dead via reparent + Show hooks.
+    -- ActionBarController retains all events so Blizzard's vehicle/override
+    -- transition system (ValidateActionBarTransition) works correctly.
     if MainMenuBarPageNumber then MainMenuBarPageNumber:Hide() end
 
     -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
@@ -1320,39 +1253,6 @@ local function HideBlizzardBars()
     -- No RegisterAttributeDriver calls on Blizzard-owned frames — those
     -- risk tainting protected state (actionpage, action attributes) that
     -- OverrideActionBar buttons inherit.
-    -- Debug: /eabdrag to check button state for drag issues
-    SLASH_EABDRAG1 = "/eabdrag"
-    SlashCmdList["EABDRAG"] = function(msg)
-        local target = msg and msg:match("%S+") or "MainBar"
-        for _, info in ipairs(BAR_CONFIG) do
-            if info.key == target and info.blizzBtnPrefix then
-                for i = 1, info.count do
-                    local btn = _G[info.blizzBtnPrefix .. i]
-                    if btn then
-                        local shown = btn:IsShown()
-                        local visible = btn:IsVisible()
-                        local alpha = btn:GetAlpha()
-                        local mouseClick = btn.IsMouseClickEnabled and btn:IsMouseClickEnabled()
-                        local mouseMotion = btn.IsMouseMotionEnabled and btn:IsMouseMotionEnabled()
-                        local parent = btn:GetParent() and btn:GetParent():GetName() or "nil"
-                        local owned = _ownedFrames[btn:GetParent()] and "yes" or "no"
-                        local clickTypes = btn.GetRegisteredClicks and table.concat({btn:GetRegisteredClicks()}, ",") or "?"
-                        local hasAction = btn.HasAction and btn:HasAction() and "yes" or "no"
-                        local toc = btn.TextOverlayContainer
-                        local tocMouse = toc and toc:IsMouseEnabled() and "ON" or "off"
-                        local tocClick = toc and toc.IsMouseClickEnabled and toc:IsMouseClickEnabled() and "ON" or "off"
-                        print(format("[%d] sh=%s vis=%s a=%.1f clk=%s mot=%s reg=%s act=%s toc=%s/%s",
-                            i, tostring(shown), tostring(visible), alpha,
-                            tostring(mouseClick), tostring(mouseMotion),
-                            clickTypes, hasAction, tocMouse, tocClick))
-                    end
-                end
-                return
-            end
-        end
-        print("Usage: /eabdrag MainBar|Bar2|Bar3|...|Bar8")
-    end
-
     -- Force all Blizzard action bars to be "enabled" via CVars so buttons work
     C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_1", "1")
     C_CVar.SetCVar("SHOW_MULTI_ACTIONBAR_2", "1")
@@ -1647,7 +1547,6 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
             if page then
                 parts[#parts + 1] = state.macro .. " " .. page
             elseif page == nil and defs and defs[state.id] then
-                -- Unconfigured: use class default (MainBar only)
                 parts[#parts + 1] = state.macro .. " " .. defs[state.id]
             end
             -- page == false: explicitly disabled, skip
@@ -1809,6 +1708,10 @@ local function SetupPagingFrame()
     f:SetScript("OnEvent", function(_, event)
         if event == "UPDATE_OVERRIDE_ACTIONBAR" or event == "UPDATE_VEHICLE_ACTIONBAR" then
             LayoutPagingFrame()
+            -- Trigger page sync (replaces CallMethod in _onstate-page).
+            -- During combat the Queue callback early-returns, so the sync
+            -- only runs out of combat -- same as the old CallMethod path.
+            EAB_VTABLE.MainBarPageSync.Queue()
             return
         end
         if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
@@ -1825,6 +1728,8 @@ local function SetupPagingFrame()
         end
         local page = EAB_VTABLE.GetActionBarPage()
         pageText:SetText(tostring(page))
+        -- Trigger page sync for manual page changes, form changes, etc.
+        EAB_VTABLE.MainBarPageSync.Queue()
     end)
 
     -- Initial text
@@ -1962,15 +1867,19 @@ local function CreateBarFrame(info)
         -- paging contract for our custom parent frame: each ActionButton gets an
         -- attribute change so its normal OnAttributeChanged -> UpdateAction path
         -- re-evaluates the derived slot even during combat.
+        -- CallMethod was removed to prevent taint: during vehicle/override
+        -- transitions, the macro conditional system evaluates all registered
+        -- state drivers in one pass. CallMethod exits to insecure Lua during
+        -- this secure pass, tainting the evaluation context. Blizzard's
+        -- ActionBarController state drivers fire in the same pass, inherit
+        -- the taint, and OverrideActionBar:Show() gets ADDON_ACTION_BLOCKED.
+        -- The page sync is now triggered by ACTIONBAR_PAGE_CHANGED events
+        -- instead (see paging frame OnEvent below).
         frame:SetAttributeNoHandler("_onstate-page", [[
             local page = tonumber(newstate) or 1
             self:SetAttribute("actionpage", page)
             self:ChildUpdate("eab-page", page)
-            self:CallMethod("OnEABPageChanged")
         ]])
-        frame.OnEABPageChanged = function()
-            EAB_VTABLE.MainBarPageSync.Queue()
-        end
 
         RegisterStateDriver(frame, "page", pagingConditions)
     end
@@ -3082,7 +2991,9 @@ local function MakeButtonSquare(btn)
         hooksecurefunc(btn, "UpdateButtonArt", function(self)
             if not self._eabArtFn then
                 self._eabArtFn = function()
-                    if self and not self:IsForbidden() then HideBorder(self) end
+                    if self and not self:IsForbidden() then
+                        HideBorder(self)
+                    end
                 end
             end
             C_Timer_After(0, self._eabArtFn)
@@ -5712,6 +5623,7 @@ local function ApplyButtonCooldownEdge(btn, edgeSize, cr, cg, cb, ca)
 end
 
 -- Hook to re-apply edge settings whenever Blizzard resets a cooldown.
+
 -- Per-button hooks avoid tainting the secure execution path.
 local _cdEdge = {
     hooked = false,
@@ -5927,7 +5839,7 @@ end
 --
 --  Stance and pet bars use override bindings directly to their buttons.
 -------------------------------------------------------------------------------
-local _bindState = { vehicleCleared = false, housingCleared = false }
+local _bindState = { housingCleared = false }
 
 local function UpdateKeybinds()
     if InCombatLockdown() then return end
@@ -5978,161 +5890,96 @@ local function ApplyKeyDownCVar()
     end
     UpdateKeybinds()
 end
+
+
 -------------------------------------------------------------------------------
---  Vehicle / Override Keybind Clearing
---  When the player enters a vehicle or override bar, clear our override
---  bindings so Blizzard's vehicle UI receives the keybinds.  Restore them
---  when the player exits.
+--  Vehicle Exit Button
+--  Reparent to UIParent so it stays visible when ActionBarParent is hidden.
+--  Position and visibility are fully Blizzard-owned (no unlock mode, no
+--  SetPoint hook). ActionBarController is disabled above, so Blizzard's
+--  transition system won't reposition it.
 -------------------------------------------------------------------------------
-local function ClearKeybindsForVehicle()
-    if _bindState.vehicleCleared then return end
-    _bindState.vehicleCleared = true
-    if InCombatLockdown() then return end
-    -- Only stance/pet bars use override bindings; action bars 1-8 use
-    -- native bindings that Blizzard manages during vehicle/override.
-    for _, info in ipairs(BAR_CONFIG) do
-        if info.isStance or info.isPetBar then
-            local btns = barButtons[info.key]
-            if btns then
-                for _, btn in ipairs(btns) do
-                    if btn then ClearOverrideBindings(btn) end
+do
+    local btn = MainMenuBarVehicleLeaveButton
+    if btn then
+        btn:SetParent(UIParent)
+        local vehVis = CreateFrame("Frame")
+        vehVis:RegisterEvent("UNIT_ENTERED_VEHICLE")
+        vehVis:RegisterEvent("UNIT_EXITED_VEHICLE")
+        vehVis:RegisterEvent("PLAYER_ENTERING_WORLD")
+        vehVis:SetScript("OnEvent", function(_, _, unit)
+            if unit and unit ~= "player" then return end
+            local show = CanExitVehicle and CanExitVehicle()
+            btn:SetShown(show or false)
+        end)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Vehicle Highlight Fix
+--  During vehicle/override paging, empty MainBar buttons can retain a stale
+--  "checked" state from the normal bar. The CheckedTexture uses the same
+--  texture as HighlightTexture, so it looks like a permanent highlight.
+--  The inverted mouseover behavior (hides on enter, returns on leave) is
+--  WoW's native CheckButton behavior when the button is checked.
+--
+--  Fix: after a page change, clear the checked state and hide the
+--  CheckedTexture on MainBar buttons that have no action on the new page.
+-------------------------------------------------------------------------------
+do
+    local _vehHighlightPending = false
+
+    local function FixVehicleHighlights()
+        _vehHighlightPending = false
+        local mainFrame = barFrames and barFrames["MainBar"]
+        if not mainFrame then return end
+        local page = tonumber(mainFrame:GetAttribute("actionpage")) or 1
+        local buttons = barButtons and barButtons["MainBar"]
+        if not buttons then return end
+
+        -- Only apply the alpha-0 fallback on vehicle/override/bonus pages
+        -- (page > 6). On normal pages (1-6), just restore alpha to 1 so
+        -- Blizzard's SetChecked/UpdateState manages checked visuals normally.
+        local isSpecialPage = (page > 6)
+
+        for i, btn in ipairs(buttons) do
+            if btn then
+                local ct = btn.CheckedTexture
+                if isSpecialPage then
+                    local slot = i + (page - 1) * NUM_ACTIONBAR_BUTTONS
+                    if not HasAction(slot) then
+                        -- SetChecked might be protected during combat; pcall.
+                        -- Also hide CheckedTexture as a visual fallback.
+                        pcall(btn.SetChecked, btn, false)
+                        if ct then ct:SetAlpha(0) end
+                    else
+                        -- Slot has an action; restore alpha so Blizzard's
+                        -- UpdateState manages checked visuals.
+                        if ct then ct:SetAlpha(1) end
+                    end
+                else
+                    -- Normal page: restore alpha on all buttons so checked
+                    -- state renders correctly when spells are dragged in.
+                    if ct then ct:SetAlpha(1) end
                 end
             end
         end
     end
+
+    local function QueueVehicleHighlightFix()
+        if _vehHighlightPending then return end
+        _vehHighlightPending = true
+        C_Timer_After(0, FixVehicleHighlights)
+    end
+
+    local vehHighlightFrame = CreateFrame("Frame")
+    vehHighlightFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
+    vehHighlightFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
+    vehHighlightFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+    vehHighlightFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    vehHighlightFrame:SetScript("OnEvent", QueueVehicleHighlightFix)
 end
 
-local function RestoreKeybindsAfterVehicle()
-    if not _bindState.vehicleCleared then return end
-    _bindState.vehicleCleared = false
-    if InCombatLockdown() then
-        -- Defer restore until combat drops
-        local f = CreateFrame("Frame")
-        f:RegisterEvent("PLAYER_REGEN_ENABLED")
-        f:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            -- Only restore if still out of vehicle state
-            if _bindState.vehicleCleared then return end
-            UpdateKeybinds()
-        end)
-        return
-    end
-    UpdateKeybinds()
-end
-
-local _vehicleStateFrame = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
-_vehicleStateFrame:SetAttribute("_onstate-vehicleui", [[
-    if newstate == "invehicle" then
-        self:CallMethod("OnVehicleEnter")
-    else
-        self:CallMethod("OnVehicleExit")
-    end
-]])
-_vehicleStateFrame.OnVehicleEnter = ClearKeybindsForVehicle
-_vehicleStateFrame.OnVehicleExit  = RestoreKeybindsAfterVehicle
-RegisterStateDriver(_vehicleStateFrame, "vehicleui", "[vehicleui] invehicle; novehicle")
-
--------------------------------------------------------------------------------
---  Vehicle Exit Button
---  Reparent Blizzard's MainMenuBarVehicleLeaveButton so it stays visible
---  when we hide the default action bars.  Strip taint-causing scripts,
---  reparent to UIParent, hook SetPoint to block Blizzard repositioning.
---  FinishSetup re-anchors to barFrames["MainBar"] once it exists, or to a
---  saved unlock-mode position if one is stored.
--------------------------------------------------------------------------------
-
--- Apply saved or default anchor for the vehicle exit button.
--- Shared by the SetPoint hook, unlock mode applyPosition, and FinishSetup.
--- Stored on EAB rather than a file-scope local to avoid hitting the 200
--- local/upvalue limit in this large file.
-function EAB.AnchorVehicleButton()
-    local btn = MainMenuBarVehicleLeaveButton
-    if not btn or InCombatLockdown() then return end
-    local pos = EAB.db and EAB.db.profile.barPositions
-                and EAB.db.profile.barPositions["VehicleExit"]
-    btn:ClearAllPoints()
-    if pos then
-        local pt = pos.point
-        local px, py = pos.x, pos.y
-        local PPa = EllesmereUI and EllesmereUI.PP
-        if PPa and px and py then
-            local es = btn:GetEffectiveScale()
-            local isCenterAnchor = (pt == "CENTER")
-                and (pos.relPoint == "CENTER" or pos.relPoint == nil)
-            if isCenterAnchor and PPa.SnapCenterForDim then
-                px = PPa.SnapCenterForDim(px, btn:GetWidth() or 0, es)
-                py = PPa.SnapCenterForDim(py, btn:GetHeight() or 0, es)
-            elseif PPa.SnapForES then
-                px = PPa.SnapForES(px, es)
-                py = PPa.SnapForES(py, es)
-            end
-        end
-        btn:SetPoint(pt, UIParent, pos.relPoint or pt, px, py)
-    else
-        local bar1 = barFrames["MainBar"]
-        if bar1 then
-            btn:SetPoint("BOTTOM", bar1, "TOPRIGHT", 0, 4)
-        else
-            btn:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 130)
-        end
-    end
-end
-
-do
-    local btn = MainMenuBarVehicleLeaveButton
-    if btn then
-        -- Prevent taint from EditModeManager's UpdateBottomActionBarPositions
-        btn:SetScript("OnShow", nil)
-        btn:SetScript("OnHide", nil)
-
-        btn:SetParent(UIParent)
-        btn:ClearAllPoints()
-        btn:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 130) -- temporary fallback
-
-        btn:SetFrameStrata("MEDIUM")
-        btn:SetFrameLevel(100)
-
-        -- Block Blizzard from repositioning the button.
-        -- Use a guard flag to prevent infinite recursion since our own
-        -- SetPoint calls inside the hook would re-trigger it.
-        -- Gate on InCombatLockdown: repositioning a secure frame from
-        -- addon code in combat taints the execution context, which
-        -- propagates through hooksecurefunc to ActionBarController and
-        -- blocks OverrideActionBar:Show() (infinite transition loop).
-        local hookGuard = false
-        hooksecurefunc(btn, "SetPoint", function(self, _, parent)
-            if hookGuard or InCombatLockdown() then return end
-            local bar1 = barFrames["MainBar"]
-            local anchor = bar1 or UIParent
-            if parent ~= anchor and parent ~= UIParent then
-                hookGuard = true
-                pcall(EAB.AnchorVehicleButton)
-                hookGuard = false
-            end
-        end)
-
-        -- Override visibility via our own event frame instead of
-        -- hooksecurefunc on UpdateShownState. Hooking UpdateShownState
-        -- taints Blizzard's secure vehicle transition path and causes
-        -- OverrideActionBar:Show() to be action-blocked in combat.
-        local vehVisFrame = CreateFrame("Frame")
-        vehVisFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
-        vehVisFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
-        vehVisFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
-        vehVisFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
-        vehVisFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        vehVisFrame:SetScript("OnEvent", function(_, event, unit)
-            if event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
-                if unit ~= "player" then return end
-            end
-            if InCombatLockdown() then return end
-            local shouldShow = CanExitVehicle()
-            if btn:IsShown() ~= shouldShow then
-                btn:SetShown(shouldShow)
-            end
-        end)
-    end
-end
 
 -------------------------------------------------------------------------------
 --  Housing Editor Keybind Clearing
@@ -6364,6 +6211,7 @@ local function RestoreBarPositions()
 end
 
 
+
 -------------------------------------------------------------------------------
 --  Unlock Mode Integration
 --  Register bars with EUI_UnlockMode for positioning.
@@ -6417,7 +6265,7 @@ local function RegisterWithUnlockMode()
                 end
                 if rawPhysBtn < 8 then rawPhysBtn = 8 end
                 local basePhysBtn = math.floor(rawPhysBtn)
-                s.buttonWidth  = math.floor(basePhysBtn * onePx + 0.5)
+                s.buttonWidth  = basePhysBtn * onePx
                 s.buttonHeight = s.buttonWidth
                 -- Compute remainder pixels to distribute across columns
                 local shapePhys = 0
@@ -6459,7 +6307,7 @@ local function RegisterWithUnlockMode()
                 end
                 if rawPhysBtn < 8 then rawPhysBtn = 8 end
                 local basePhysBtn = math.floor(rawPhysBtn)
-                s.buttonWidth  = math.floor(basePhysBtn * onePx + 0.5)
+                s.buttonWidth  = basePhysBtn * onePx
                 s.buttonHeight = s.buttonWidth
                 -- Compute remainder pixels to distribute across rows
                 local shapePhys = 0
@@ -6598,43 +6446,6 @@ local function RegisterWithUnlockMode()
         end
     end
 
-    -- Vehicle Exit Button
-    do
-        local vBtn = MainMenuBarVehicleLeaveButton
-        if vBtn then
-            blizzOrder = blizzOrder + 1
-            elements[#elements + 1] = MK({
-                key   = "VehicleExit",
-                label = "Vehicle Exit",
-                group = "Action Bars",
-                order = blizzOrder,
-                noResize = true,
-                getFrame = function() return vBtn end,
-                getSize = function() return vBtn:GetWidth(), vBtn:GetHeight() end,
-                savePos = function(_, point, relPoint, x, y)
-                    if point and x and y then
-                        EAB.db.profile.barPositions["VehicleExit"] = {
-                            point = point, relPoint = relPoint or point, x = x, y = y,
-                        }
-                    end
-                    if not EllesmereUI._unlockActive and not InCombatLockdown() then
-                        vBtn:ClearAllPoints()
-                        vBtn:SetPoint(point, UIParent, relPoint or point, x, y)
-                    end
-                end,
-                loadPos = function()
-                    local pos = EAB.db.profile.barPositions["VehicleExit"]
-                    if not pos then return nil end
-                    local pt = pos.point
-                    return { point = pt, relPoint = pos.relPoint or pt, x = pos.x, y = pos.y }
-                end,
-                clearPos = function()
-                    EAB.db.profile.barPositions["VehicleExit"] = nil
-                end,
-                applyPos = EAB.AnchorVehicleButton,
-            })
-        end
-    end
 
     EllesmereUI:RegisterUnlockElements(elements)
 end
@@ -6721,53 +6532,6 @@ function EAB:OnInitialize()
     SlashCmdList["ELLESMEREACTIONBARS"] = function(msg)
         if EllesmereUI and EllesmereUI.ShowModule then
             EllesmereUI:ShowModule("EllesmereUIActionBars")
-        end
-    end
-
-    -- Diagnostic: /eabmouse -- prints all frames under the cursor that have
-    -- mouse enabled, so we can identify what is eating clicks.
-    SLASH_EABMOUSE1 = "/eabmouse"
-    SlashCmdList["EABMOUSE"] = function()
-        local focus = GetMouseFoci and GetMouseFoci() or { GetMouseFocus and GetMouseFocus() }
-        print("|cff00ccff[EAB Mouse Debug]|r Frames under cursor:")
-        if not focus or #focus == 0 then
-            print("  (none)")
-            return
-        end
-        for i, f in ipairs(focus) do
-            local name = f:GetName() or tostring(f)
-            local pName = f:GetParent() and (f:GetParent():GetName() or tostring(f:GetParent())) or "nil"
-            local shown = f:IsShown() and "shown" or "hidden"
-            local mouse = f:IsMouseEnabled() and "mouse=ON" or "mouse=off"
-            local w, h = f:GetSize()
-            local strata = f:GetFrameStrata()
-            local level = f:GetFrameLevel()
-            print(("  %d: %s [%s, %s] size=%.0fx%.0f strata=%s level=%d parent=%s"):format(
-                i, name, shown, mouse, w or 0, h or 0, strata, level, pName))
-        end
-        -- Also check specific suspect frames
-        local suspects = {
-            { "ExtraAbilityContainer", ExtraAbilityContainer },
-            { "ExtraActionBarFrame", ExtraActionBarFrame },
-            { "ExtraActionButton1", _G["ExtraActionButton1"] },
-            { "PlayerPowerBarAlt", PlayerPowerBarAlt },
-            { "UIWidgetPowerBarContainerFrame", UIWidgetPowerBarContainerFrame },
-            { "UIParentBottomManagedFrameContainer", UIParentBottomManagedFrameContainer },
-        }
-        print("|cff00ccff[EAB Mouse Debug]|r Suspect frames:")
-        for _, s in ipairs(suspects) do
-            local sName, sFrame = s[1], s[2]
-            if sFrame then
-                local shown = sFrame:IsShown() and "shown" or "hidden"
-                local mouse = sFrame:IsMouseEnabled() and "mouse=ON" or "mouse=off"
-                local pName = sFrame:GetParent() and (sFrame:GetParent():GetName() or tostring(sFrame:GetParent())) or "nil"
-                local vis = sFrame:IsVisible() and "visible" or "not-visible"
-                local w, h = sFrame:GetSize()
-                print(("  %s: [%s, %s, %s] size=%.0fx%.0f parent=%s"):format(
-                    sName, shown, vis, mouse, w or 0, h or 0, pName))
-            else
-                print(("  %s: nil"):format(sName))
-            end
         end
     end
 
@@ -6962,7 +6726,12 @@ function EAB:FinishSetup()
                 LayoutBar(info.key)
             end
             RestoreBarPositions()
-            EAB.AnchorVehicleButton()
+            -- Anchor vehicle exit button to MainBar
+            local vBtn = MainMenuBarVehicleLeaveButton
+            if vBtn and barFrames["MainBar"] then
+                vBtn:ClearAllPoints()
+                vBtn:SetPoint("BOTTOM", barFrames["MainBar"], "TOPRIGHT", -15, 2)
+            end
             -- MainBar paging: ActionButton1-12 keep their IDs and derive action
             -- via CalculateAction path 1. The _onstate-page handler on the bar
             -- frame sets actionpage from the restricted env for form/vehicle/override.
@@ -7048,7 +6817,6 @@ function EAB:FinishSetup()
             self:ScanExistingProcs()
             -- Re-scan after a delay to catch procs that Blizzard populates late
             C_Timer_After(2, function() self:ScanExistingProcs() end)
-            EAB.AnchorVehicleButton()
             -- Our fresh EABButton frames are not registered with
             -- ActionBarButtonEventsFrame (doing so causes taint), so
             -- the mixin's OnEvent never fires on them. Register our
@@ -7403,37 +7171,12 @@ function EAB:FinishSetup()
             local inVehicle = (UnitInVehicle and UnitInVehicle("player"))
                               or EAB_VTABLE.HasVehicleActionBar()
 
-            if not inVehicle and _bindState.vehicleCleared then
-                _bindState.vehicleCleared = false
-            end
             local inHousing = IsHouseEditorActive and IsHouseEditorActive()
             if not inHousing and _bindState.housingCleared then
                 _bindState.housingCleared = false
             end
             UpdateKeybinds()
         end)
-    end)
-
-    -- Vehicle enter/exit: clear our override bindings so Blizzard's vehicle bar
-    -- receives keybinds. Restore them when the player exits the vehicle.
-    -- Use a raw frame for unit events since Ace3 RegisterEvent doesn't support them.
-    local _vehicleEventFrame = CreateFrame("Frame")
-    _vehicleEventFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
-    _vehicleEventFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
-    _vehicleEventFrame:SetScript("OnEvent", function(self, event)
-        if event == "UNIT_ENTERED_VEHICLE" then
-            ClearKeybindsForVehicle()
-            -- Block Edit Mode while on a vehicle to avoid taint from our
-            -- hidden/reparented Blizzard bars causing it to silently close.
-            if EditModeManagerFrame then
-                EditModeManagerFrame:BlockEnteringEditMode(self)
-            end
-        elseif event == "UNIT_EXITED_VEHICLE" then
-            RestoreKeybindsAfterVehicle()
-            if EditModeManagerFrame then
-                EditModeManagerFrame:UnblockEnteringEditMode(self)
-            end
-        end
     end)
 
     local function QueueAlwaysShowButtonsRefresh()
@@ -7706,57 +7449,36 @@ function EAB:FinishSetup()
         end
         -- Silence ActionBarButtonEventsFrame to prevent taint from
         -- BlizzardSkin propagating to MultiBar buttons during combat.
-        -- PlayerCastingBarFrame is independent (CastingBarMixin registers its
-        -- own UNIT_SPELLCAST_* events), so this is safe unconditionally.
-        -- Only UpdatePressAndHoldAction (press-and-hold input) is lost for
-        -- EAB-owned buttons; ExtraActionButton and OverrideActionBar buttons
-        -- are preserved in abef.frames so they keep full Blizzard behavior.
+        -- Unregistering the dangerous events (everything except slot/cooldown)
+        -- prevents UpdatePressAndHoldAction/UpdateShownButtons from firing.
+        -- The frames table is intentionally LEFT UNTOUCHED: writing nil to
+        -- entries in this Blizzard-owned table from insecure code permanently
+        -- taints it, which poisons ActionBarController_UpdateAll during
+        -- vehicle exit and blocks OverrideActionBar:Show().
+        -- The two remaining events (ACTIONBAR_SLOT_CHANGED, UPDATE_COOLDOWN)
+        -- dispatch to all buttons via the untainted table but don't trigger
+        -- the dangerous SetShown/SetAttribute code paths.
         local abef = _G.ActionBarButtonEventsFrame
         if abef then
             abef:UnregisterAllEvents()
             abef:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
             abef:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
-            -- Keep only Blizzard-owned buttons that we don't replace:
-            -- ExtraActionButton (zone ability) and OverrideActionBarButton
-            -- (vehicle/override abilities).
-            local function IsBlizzardKeepButton(name)
-                if not name then return false end
-                return name:match("^ExtraActionButton%d")
-                    or name:match("^OverrideActionBarButton%d")
-            end
-            if abef.frames then
-                for i = #abef.frames, 1, -1 do
-                    local f = abef.frames[i]
-                    local n = f and f.GetName and f:GetName()
-                    if not IsBlizzardKeepButton(n) then
-                        abef.frames[i] = nil
-                    end
-                end
-            end
-            hooksecurefunc(abef, "RegisterFrame", function(_, added)
-                local frames = abef.frames
-                if not frames then return end
-                for idx = #frames, 1, -1 do
-                    local f = frames[idx]
-                    if f == added then
-                        local n = f and f.GetName and f:GetName()
-                        if not IsBlizzardKeepButton(n) then
-                            frames[idx] = nil
-                        end
-                        break
-                    end
-                end
-            end)
         end
     end)
 
     -- Hook Show on stock bars so they can never re-appear regardless
     -- of what fires them (talent changes, spec swaps, zone transitions, etc.)
+    -- Guarded with InCombatLockdown: calling Hide() on a protected frame
+    -- from addon code during combat is blocked (ADDON_ACTION_BLOCKED).
+    -- Since these bars are reparented to hiddenParent, they are invisible
+    -- regardless of their shown state, so skipping Hide() in combat is safe.
     for _, entry in ipairs(STOCK_BAR_DISPOSAL) do
         local bar = _G[entry.name]
         if bar then
             bar:HookScript("OnShow", function(self)
-                self:Hide()
+                if not InCombatLockdown() then
+                    self:Hide()
+                end
             end)
         end
     end
@@ -8014,6 +7736,7 @@ local function CreateXPBar()
     UpdateXPBar()
 end
 
+
 -------------------------------------------------------------------------------
 --  Reputation Bar
 -------------------------------------------------------------------------------
@@ -8173,18 +7896,22 @@ local function RegisterDataBarsWithUnlockMode()
                 order = orderBase + idx,
                 getFrame = function() return dataBarFrames[bk] end,
                 getSize = function()
-                    local frame = dataBarFrames[bk]
-                    if frame then return frame:GetWidth(), frame:GetHeight() end
+                    -- Return stored DB values so cog menu shows what the
+                    -- user typed, not the pixel-snapped frame size.
+                    local s = EAB.db.profile.bars[bk]
+                    if s then return s.width or 400, s.height or 18 end
                     return 400, 18
                 end,
                 setWidth = function(_, w)
                     local s = EAB.db.profile.bars[bk]
-                    if s then s.width = math.floor(w + 0.5) end
+                    local PPab = EllesmereUI and EllesmereUI.PP
+                    if s then s.width = PPab and PPab.Snap(w) or math.floor(w + 0.5) end
                     ApplyDataBarLayout(bk)
                 end,
                 setHeight = function(_, h)
                     local s = EAB.db.profile.bars[bk]
-                    if s then s.height = math.floor(h + 0.5) end
+                    local PPab = EllesmereUI and EllesmereUI.PP
+                    if s then s.height = PPab and PPab.Snap(h) or math.floor(h + 0.5) end
                     ApplyDataBarLayout(bk)
                 end,
                 savePos = function(_, point, relPoint, x, y)
@@ -8216,7 +7943,21 @@ local function RegisterDataBarsWithUnlockMode()
                     if not frame then return end
                     frame:ClearAllPoints()
                     if pos and pos.point then
-                        frame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                        local pt, rpt = pos.point, pos.relPoint or pos.point
+                        local px, py = pos.x, pos.y
+                        local PPa = EllesmereUI and EllesmereUI.PP
+                        if PPa and px and py then
+                            local es = frame:GetEffectiveScale()
+                            local isCenterAnchor = (pt == "CENTER") and (rpt == "CENTER")
+                            if isCenterAnchor and PPa.SnapCenterForDim then
+                                px = PPa.SnapCenterForDim(px, frame:GetWidth() or 0, es)
+                                py = PPa.SnapCenterForDim(py, frame:GetHeight() or 0, es)
+                            elseif PPa.SnapForES then
+                                px = PPa.SnapForES(px, es)
+                                py = PPa.SnapForES(py, es)
+                            end
+                        end
+                        frame:SetPoint(pt, UIParent, rpt, px or 0, py or 0)
                     else
                         if bk == "XPBar" then
                             frame:SetPoint("TOP", UIParent, "TOP", 0, -100)
@@ -8633,6 +8374,7 @@ _blizzMovableCombatFrame:SetScript("OnEvent", function()
     end
 end)
 
+
 -- Revert UserPlaced on logout so Blizzard doesn't persist our stale position.
 local _blizzMovableLogoutFrame = CreateFrame("Frame")
 _blizzMovableLogoutFrame:RegisterEvent("PLAYER_LOGOUT")
@@ -8872,38 +8614,270 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
     -- QueueStatusButton starts as a child of `MicroMenuContainer`. Reparent it
     -- so its mouseover/hidden state can diverge from the micro menu while we
     -- continue using Blizzard's own button logic and animations.
+    --
+    -- TAINT FIX: Do NOT use AttachFrameToHolder here. It hooks SetParent/
+    -- SetPoint on QueueStatusButton, which fires insecure addon code inside
+    -- ActionBarController_UpdateAll during vehicle exit, tainting the context
+    -- and blocking OverrideActionBar:Show(). Instead, reparent once at init
+    -- and re-acquire via UpdatePosition hook only.
     if barInfo and barInfo.blizzOwnedVisibility then
-        EAB_VTABLE.ExtraBars.PatchDetachedQueueStatusLayout()
-
+        -- QueueStatusButton: reparent once into our holder so unlock mode
+        -- can position it independently. Do NOT hook SetParent/SetPoint
+        -- (those fire inside ActionBarController_UpdateAll and taint).
+        -- Do NOT replace MicroMenuContainer.Layout. Do NOT call
+        -- SetFrameStrata/SetFrameLevel/EnableMouse on the Blizzard frame.
+        -- Reclaim via UpdatePosition hook only.
         SafeEnableMouse(holder, false)
 
-        SafeEnableMouse(blizzFrame, true)
-        blizzFrame:SetFrameStrata("MEDIUM")
-        blizzFrame:SetFrameLevel(100)
+        local function ReparentQueueIntoHolder()
+            if InCombatLockdown() then return end
+            blizzFrame:ClearAllPoints()
+            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+            blizzFrame:SetParent(holder)
+        end
 
-        EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
-            repairOnShow = true,
-            hookUpdatePosition = true,
-        })
+        local function SyncQueueHolderSize()
+            local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+            if fw and fw > 1 and fh and fh > 1 then
+                holder:SetSize(fw, fh)
+            end
+        end
+
+        ReparentQueueIntoHolder()
+        SyncQueueHolderSize()
+        blizzFrame:HookScript("OnSizeChanged", SyncQueueHolderSize)
+
+        -- Reclaim after Blizzard repositions the button (queue pop, etc.)
+        -- UpdatePosition calls SetPoint relative to MicroMenuContainer.
+        -- Re-center synchronously in the post-hook so there is no frame
+        -- gap where the button renders at MicroMenuContainer's position.
+        if type(blizzFrame.UpdatePosition) == "function" then
+            local _upGuard = false
+            hooksecurefunc(blizzFrame, "UpdatePosition", function()
+                if _upGuard then return end
+                _upGuard = true
+                blizzFrame:ClearAllPoints()
+                blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+                if blizzFrame:GetParent() ~= holder and not InCombatLockdown() then
+                    blizzFrame:SetParent(holder)
+                end
+                _upGuard = false
+            end)
+        end
 
         return holder
     end
 
-    local syncFn = EAB_VTABLE.ExtraBars.AttachFrameToHolder(barKey, blizzFrame, holder, {
-        disableLayoutFrame = true,
-        recenterOnlyWhenMoved = true,
-        hookUpdatePosition = true,
-    })
-    -- Deferred re-layout: the patched MicroMenuContainer:Layout() bails
-    -- via `if not self:GetCenter() then return end` when the holder hasn't
-    -- resolved screen coordinates yet (same frame as SetPoint). By end of
-    -- frame the position has resolved, so a deferred Layout + SyncHolderSize
-    -- picks up the correct container width. Without this, the holder keeps
-    -- a stale size until something else triggers Layout (e.g. Edit Mode).
+    -- MicroBar: use a dedicated setup path that avoids hooksecurefunc on
+    -- SetParent/SetPoint on MicroMenuContainer. During vehicle transitions,
+    -- Blizzard's ActionBarController_UpdateAll reparents MicroMenuContainer.
+    -- Generic AttachFrameToHolder hooks SetParent/SetPoint which fires
+    -- insecure addon code inside that secure call chain, tainting the context
+    -- and blocking OverrideActionBar:Show(). Instead, re-acquire the micro
+    -- menu via the higher-level ActionBarController_UpdateAll hook and event listeners.
+    -- MicroBar: skip reparenting MicroMenuContainer entirely.
+    -- Reparenting from insecure code taints the parent chain, which
+    -- poisons ActionBarController_UpdateAll during vehicle exit.
+    if barKey == "MicroBar" then
+        -- MicroMenuContainer is NOT reparented (causes vehicle taint).
+        -- Normal: holder follows MicroMenuContainer (passive anchor).
+        -- Unlock mode: anchor flips so MicroMenuContainer follows holder.
+        -- Blizzard Edit Mode: fully Blizzard-owned, no interference.
+        local _microGuard = false
+
+        blizzFrame:HookScript("OnSizeChanged", function()
+            local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+            if fw and fw > 1 and fh and fh > 1 then
+                holder:SetSize(fw, fh)
+            end
+        end)
+
+        -- Passive follow: holder tracks MicroMenuContainer
+        local function PassiveFollow()
+            local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+            if fw and fw > 1 and fh and fh > 1 then
+                holder:SetSize(fw, fh)
+            end
+            holder:ClearAllPoints()
+            holder:SetPoint("CENTER", blizzFrame, "CENTER", 0, 0)
+        end
+        PassiveFollow()
+
+        -- Store on holder so unlock mode system can call them
+        holder._eabMicroPassiveFollow = PassiveFollow
+        holder._eabMicroGuardSet = function(v) _microGuard = v end
+        holder._eabMicroBlizzFrame = blizzFrame
+
+        -- Track Blizzard's Edit Mode position. Seed at init so the first
+        -- ApplySystemAnchor has something to compare against. If Blizzard's
+        -- position changed between calls, user dragged in Edit Mode and we
+        -- adopt the new position. If same, force back to ours.
+        local _lastBlizzAnchorPos = nil
+        C_Timer_After(1, function()
+            local cx, cy = blizzFrame:GetCenter()
+            if cx and cy then
+                _lastBlizzAnchorPos = { x = cx, y = cy }
+            end
+        end)
+
+        if blizzFrame.ApplySystemAnchor then
+            hooksecurefunc(blizzFrame, "ApplySystemAnchor", function()
+                C_Timer_After(0, function()
+                    if InCombatLockdown() or EllesmereUI._unlockActive then return end
+                    local cx, cy = blizzFrame:GetCenter()
+                    if not cx or not cy then return end
+
+                    if _lastBlizzAnchorPos then
+                        local dx = math.abs(cx - _lastBlizzAnchorPos.x)
+                        local dy = math.abs(cy - _lastBlizzAnchorPos.y)
+                        if dx > 2 or dy > 2 then
+                            -- Blizzard position changed: user dragged in Edit Mode
+                            local pt, rel, rpt, ox, oy = blizzFrame:GetPoint(1)
+                            if pt and rel == UIParent then
+                                EAB.db.profile.barPositions[barKey] = {
+                                    point = pt, relPoint = rpt, x = ox, y = oy,
+                                }
+                            end
+                            _lastBlizzAnchorPos = { x = cx, y = cy }
+                            PassiveFollow()
+                            return
+                        end
+                    end
+
+                    -- Same position or not yet seeded: force back to ours
+                    _lastBlizzAnchorPos = { x = cx, y = cy }
+                    local pos = EAB.db.profile.barPositions[barKey]
+                    if pos and pos.point then
+                        _microGuard = true
+                        blizzFrame:ClearAllPoints()
+                        blizzFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                        _microGuard = false
+                    end
+                    PassiveFollow()
+                end)
+            end)
+        end
+
+        return holder
+    end
+
+    -- All other extra bars (BagBar): reparent once at init, re-acquire
+    -- via UpdatePosition hook only. Do NOT use AttachFrameToHolder -- its
+    -- hooksecurefunc on SetParent/SetPoint fires insecure code inside
+    -- ActionBarController_UpdateAll during vehicle exit, tainting the
+    -- context and blocking OverrideActionBar:Show().
+    local recentering = false
+
+    local function SyncSize()
+        local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+        if fw and fw > 1 and fh and fh > 1 then
+            holder:SetSize(fw, fh)
+        end
+    end
+
+    local function ReparentInto()
+        if InCombatLockdown() then return end
+        recentering = true
+        blizzFrame:SetParent(holder)
+        blizzFrame:ClearAllPoints()
+        blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        recentering = false
+        SyncSize()
+    end
+
+    blizzFrame.ignoreInLayout = true
+    if blizzFrame.SetIsLayoutFrame then
+        blizzFrame:SetIsLayoutFrame(false)
+    end
+    blizzFrame.IsLayoutFrame = nil
+
+    ReparentInto()
+    blizzFrame:HookScript("OnSizeChanged", SyncSize)
+
+    -- Track Blizzard's Edit Mode position for this bar. Seed at init
+    -- so the first ApplySystemAnchor has something to compare against.
+    -- If Blizzard's position changed, user dragged in Edit Mode -- adopt.
+    -- If same, re-reparent back into our holder at our saved position.
+    local _lastBlizzPos = nil
+    C_Timer_After(1, function()
+        local cx, cy = blizzFrame:GetCenter()
+        if cx and cy then
+            _lastBlizzPos = { x = cx, y = cy }
+        end
+    end)
+
+    if blizzFrame.ApplySystemAnchor then
+        hooksecurefunc(blizzFrame, "ApplySystemAnchor", function()
+            -- Capture Blizzard's position synchronously before re-reparenting
+            local cx, cy = blizzFrame:GetCenter()
+            -- Re-reparent immediately so there's no frame gap (no blink)
+            if not recentering and not InCombatLockdown() then
+                ReparentInto()
+            end
+            -- Deferred: compare positions and adopt or force back
+            C_Timer_After(0, function()
+                if InCombatLockdown() or EllesmereUI._unlockActive then return end
+                if not cx or not cy then return end
+
+                if _lastBlizzPos then
+                    local dx = math.abs(cx - _lastBlizzPos.x)
+                    local dy = math.abs(cy - _lastBlizzPos.y)
+                    if dx > 2 or dy > 2 then
+                        -- Blizzard position changed: user dragged in Edit Mode
+                        -- Convert captured center to UIParent CENTER offset
+                        local bS = blizzFrame:GetEffectiveScale()
+                        local uS = UIParent:GetEffectiveScale()
+                        local uiW, uiH = UIParent:GetSize()
+                        local ox = cx * bS / uS - uiW / 2
+                        local oy = cy * bS / uS - uiH / 2
+                        EAB.db.profile.barPositions[barKey] = {
+                            point = "CENTER", relPoint = "CENTER", x = ox, y = oy,
+                        }
+                        holder:ClearAllPoints()
+                        holder:SetPoint("CENTER", UIParent, "CENTER", ox, oy)
+                        _lastBlizzPos = { x = cx, y = cy }
+                        ReparentInto()
+                        return
+                    end
+                end
+
+                _lastBlizzPos = { x = cx, y = cy }
+            end)
+        end)
+    end
+
+    -- Re-acquire via UpdatePosition hook only (if the frame has one).
+    if type(blizzFrame.UpdatePosition) == "function" then
+        hooksecurefunc(blizzFrame, "UpdatePosition", function()
+            if recentering then return end
+            C_Timer_After(0, function()
+                if recentering or InCombatLockdown() then return end
+                if blizzFrame:GetParent() ~= holder then
+                    ReparentInto()
+                else
+                    blizzFrame:ClearAllPoints()
+                    blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+                end
+            end)
+        end)
+    end
+
+    -- Re-acquire after vehicle/override via ActionBarController_UpdateAll.
+    hooksecurefunc("ActionBarController_UpdateAll", function()
+        if recentering then return end
+        if blizzFrame:GetParent() ~= holder then
+            C_Timer_After(0, function()
+                if blizzFrame:GetParent() ~= holder then
+                    ReparentInto()
+                end
+            end)
+        end
+    end)
+
     if blizzFrame.Layout then
         C_Timer_After(0, function()
             if blizzFrame.Layout then blizzFrame:Layout() end
-            if syncFn then syncFn() end
+            SyncSize()
         end)
     end
     return holder
@@ -8935,7 +8909,36 @@ local function RegisterExtraBarsWithUnlockMode()
                     local s = EAB.db.profile.bars[bk]
                     return s and s.alwaysHidden
                 end,
-                getFrame = function() return extraBarHolders[bk] end,
+                getFrame = function()
+                    local h = extraBarHolders[bk]
+                    -- MicroBar: when unlock mode is active, flip the anchor
+                    -- so the holder can be dragged independently and
+                    -- MicroMenuContainer follows it.
+                    if bk == "MicroBar" and h and EllesmereUI._unlockActive then
+                        if h._eabMicroBlizzFrame and not h._eabMicroFlipped then
+                            h._eabMicroFlipped = true
+                            -- Break passive anchor, position holder at current blizz pos
+                            local bf = h._eabMicroBlizzFrame
+                            local bL, bR = bf:GetLeft(), bf:GetRight()
+                            local bT, bB = bf:GetTop(), bf:GetBottom()
+                            if bL and bR and bT and bB then
+                                local bS = bf:GetEffectiveScale()
+                                local uS = UIParent:GetEffectiveScale()
+                                local uiW, uiH = UIParent:GetSize()
+                                local cx = (bL + bR) * 0.5 * bS / uS - uiW / 2
+                                local cy = (bT + bB) * 0.5 * bS / uS - uiH / 2
+                                h:ClearAllPoints()
+                                h:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
+                            end
+                            -- Anchor MicroMenuContainer to follow holder
+                            h._eabMicroGuardSet(true)
+                            bf:ClearAllPoints()
+                            bf:SetPoint("CENTER", h, "CENTER", 0, 0)
+                            h._eabMicroGuardSet(false)
+                        end
+                    end
+                    return h
+                end,
                 getSize = function()
                     local holder = extraBarHolders[bk]
                     if holder then return holder:GetWidth(), holder:GetHeight() end
@@ -8967,6 +8970,19 @@ local function RegisterExtraBarsWithUnlockMode()
                     local pos = EAB.db.profile.barPositions[bk]
                     local holder = extraBarHolders[bk]
                     if not holder then return end
+                    if bk == "MicroBar" then
+                        local bf = holder._eabMicroBlizzFrame
+                        if not bf or InCombatLockdown() then return end
+                        -- Move MicroMenuContainer to saved position
+                        if pos and pos.point then
+                            bf:ClearAllPoints()
+                            bf:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+                        end
+                        -- Restore passive follow (holder tracks blizzFrame)
+                        holder._eabMicroFlipped = false
+                        holder._eabMicroPassiveFollow()
+                        return
+                    end
                     holder:ClearAllPoints()
                     if pos and pos.point then
                         holder:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
@@ -8979,6 +8995,7 @@ local function RegisterExtraBarsWithUnlockMode()
     end
     EllesmereUI:RegisterUnlockElements(elements)
 end
+
 
 -------------------------------------------------------------------------------
 --  Extra Bars (MicroBar, BagBar) visibility-only management
@@ -9039,6 +9056,7 @@ extraBarFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     C_Timer_After(0.5, SetupExtraBars)
 end)
+
 
 -------------------------------------------------------------------------------
 --  QuickKeybind compatibility

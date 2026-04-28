@@ -194,12 +194,22 @@ local ADDON_NAME = ...
 
     local function _menuOnOpen(manager, _, menuDescription)
         if not _enabled() then return end
-        local menu = manager.GetOpenMenu and manager:GetOpenMenu()
-        if menu then
-            _menuSkinFrame(menu)
-        end
+        -- Defer skinning out of the secure context. OpenMenu post-hooks
+        -- run inside Blizzard's protected menu pipeline; modifying frame
+        -- regions here taints the execution chain and causes
+        -- ADDON_ACTION_BLOCKED on action bar buttons.
+        C_Timer.After(0, function()
+            local menu = manager.GetOpenMenu and manager:GetOpenMenu()
+            if menu then
+                _menuSkinFrame(menu)
+            end
+        end)
         if menuDescription and menuDescription.AddMenuAcquiredCallback then
-            menuDescription:AddMenuAcquiredCallback(_menuSkinFrame)
+            menuDescription:AddMenuAcquiredCallback(function(frame)
+                C_Timer.After(0, function()
+                    _menuSkinFrame(frame)
+                end)
+            end)
         end
     end
 

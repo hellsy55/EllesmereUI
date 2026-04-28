@@ -2726,8 +2726,8 @@ initFrame:SetScript("OnEvent", function(self)
                     _tbbPvIcon = pvIconTex
                 end
 
-                -- Border preview: parented to hdr so it can span bar + icon.
-                -- Reflects the actual borderSize/borderR/G/B settings.
+                -- Border preview: anchored to pvBar (not pvFrame which is
+                -- full-width container). Spans bar + icon like the highlight.
                 local bSz = bd.borderSize or 0
                 if bSz > 0 then
                     local pvBorderFrame = CreateFrame("Frame", nil, hdr)
@@ -2737,13 +2737,13 @@ initFrame:SetScript("OnEvent", function(self)
                         if pvIconMode ~= "none" and pvIconFrame then
                             if pvIconMode == "left" then
                                 pvBorderFrame:SetPoint("TOPLEFT",     pvIconFrame, "TOPLEFT",     -bSz,  bSz)
-                                pvBorderFrame:SetPoint("BOTTOMRIGHT", pvFrame,     "BOTTOMRIGHT",  bSz, -bSz)
+                                pvBorderFrame:SetPoint("BOTTOMRIGHT", pvBar,       "BOTTOMRIGHT",  bSz, -bSz)
                             else
-                                pvBorderFrame:SetPoint("TOPLEFT",     pvFrame,     "TOPLEFT",     -bSz,  bSz)
+                                pvBorderFrame:SetPoint("TOPLEFT",     pvBar,       "TOPLEFT",     -bSz,  bSz)
                                 pvBorderFrame:SetPoint("BOTTOMRIGHT", pvIconFrame, "BOTTOMRIGHT",  bSz, -bSz)
                             end
                         else
-                            PP2.SetOutside(pvBorderFrame, pvFrame, bSz, bSz)
+                            PP2.SetOutside(pvBorderFrame, pvBar, bSz, bSz)
                         end
                         PP2.CreateBorder(pvBorderFrame,
                             bd.borderR or 0, bd.borderG or 0, bd.borderB or 0, 1, bSz)
@@ -8350,7 +8350,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Focus Text Reminders",
-                  tooltip = "This will display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus.",
+                  tooltip = "This will display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus. Disabled for specs with no kick.",
                   getValue = function()
                       local bd = BD()
                       return bd.focusReminderEnabled == true

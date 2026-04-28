@@ -984,18 +984,10 @@ local function RegisterUnlockElements()
             key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
             getFrame = function() return healthBar end,
             getSize  = function()
-                -- Return actual frame dimensions (post-PP.Scale snap in Rebuild)
-                -- so width-matching reads the real rendered size, not the raw
-                -- setting which may differ from the pixel-snapped value.
-                if healthBar then
-                    local w = healthBar:GetWidth()
-                    local h = healthBar:GetHeight()
-                    if w and w > 1 and h and h > 1 then return w, h end
-                end
                 local s = S(); return s.width, s.height
             end,
-            setWidth = function(_, w) S().width = w; Rebuild() end,
-            setHeight = function(_, h) S().height = h; Rebuild() end,
+            setWidth = function(_, w) S().width = PP.Snap(w); Rebuild() end,
+            setHeight = function(_, h) S().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -1010,18 +1002,10 @@ local function RegisterUnlockElements()
             key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
             getFrame = function() return primaryBar end,
             getSize  = function()
-                -- Return actual frame dimensions (post-PP.Scale snap in Rebuild)
-                -- so width-matching reads the real rendered size, not the raw
-                -- setting which may differ from the pixel-snapped value.
-                if primaryBar then
-                    local w = primaryBar:GetWidth()
-                    local h = primaryBar:GetHeight()
-                    if w and w > 1 and h and h > 1 then return w, h end
-                end
-                local s = S(); return s.width, s.height
+                local s = S(); return s.width or 214, s.height or 14
             end,
-            setWidth = function(_, w) S().width = w; Rebuild() end,
-            setHeight = function(_, h) S().height = h; Rebuild() end,
+            setWidth = function(_, w) S().width = PP.Snap(w); Rebuild() end,
+            setHeight = function(_, h) S().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -1036,14 +1020,6 @@ local function RegisterUnlockElements()
             key = "ERB_ClassResource", label = "Class Resource", group = "Resource Bars", order = 502,
             getFrame = function() return secondaryFrame end,
             getSize  = function()
-                -- Return actual frame dimensions (post-CalcPipGeometry snap)
-                -- so width-matching reads the real rendered size, not the
-                -- raw setting which may differ after physical pixel snapping.
-                if secondaryFrame then
-                    local w = secondaryFrame:GetWidth()
-                    local h = secondaryFrame:GetHeight()
-                    if w and w > 1 and h and h > 1 then return w, h end
-                end
                 local s = S()
                 if cachedSecondary and cachedSecondary.type == "bar" then
                     return (ERB.db.profile.primary.width or 214), s.pipHeight
@@ -1053,16 +1029,13 @@ local function RegisterUnlockElements()
             setWidth = function(_, w)
                 local s = S()
                 if cachedSecondary and cachedSecondary.type == "bar" then
-                    -- Bar types use primary width (integer is fine)
-                    ERB.db.profile.primary.width = floor(w + 0.5)
+                    ERB.db.profile.primary.width = PP.Snap(w)
                 else
-                    -- Pip types: store raw value so CalcPipGeometry can do
-                    -- accurate physical pixel conversion without double rounding
-                    s.pipWidth = w
+                    s.pipWidth = PP.Snap(w)
                 end
                 Rebuild()
             end,
-            setHeight = function(_, h) S().pipHeight = floor(h + 0.5); Rebuild() end,
+            setHeight = function(_, h) S().pipHeight = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -1114,10 +1087,10 @@ local function RegisterUnlockElements()
             setWidth = function(_, w)
                 local cb = S()
                 local iconW = (cb.showIcon ~= false) and cb.height or 0
-                cb.width = math.max(w - iconW, 10)
+                cb.width = PP.Snap(math.max(w - iconW, 10))
                 Rebuild()
             end,
-            setHeight = function(_, h) S().height = h; Rebuild() end,
+            setHeight = function(_, h) S().height = PP.Snap(h); Rebuild() end,
             savePos = castSave, loadPos = castLoad, clearPos = castClear, applyPos = castApply,
         })
     end
@@ -1764,7 +1737,6 @@ local function BuildBars()
         local heightSnapped = PP.SnapForES(pipH,   _crEs)
         local frameW = isVertical and heightSnapped or widthSnapped
         local frameH = isVertical and widthSnapped  or heightSnapped
-
         local secondaryAnchorKey = NormalizeAnchorKey(sp.anchorTo)
         local secondaryUnlockAnchored = EllesmereUI.IsUnlockAnchored("ERB_ClassResource")
         if secondaryUnlockAnchored then
@@ -3202,6 +3174,8 @@ BuildCastBar = function()
         SetRBFont(nameText, GetRBFont(), 11)
         nameText:SetPoint("LEFT", bar, "LEFT", 4, 0)
         nameText:SetJustifyH("LEFT")
+        nameText:SetWordWrap(false)
+        nameText:SetNonSpaceWrap(false)
         castBarFrame._nameText = nameText
 
         -- Timer text
@@ -3209,6 +3183,8 @@ BuildCastBar = function()
         SetRBFont(timerText, GetRBFont(), 11)
         timerText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
         timerText:SetJustifyH("RIGHT")
+        timerText:SetWordWrap(false)
+        timerText:SetNonSpaceWrap(false)
         castBarFrame._timerText = timerText
 
         -- Casting state
@@ -3369,6 +3345,12 @@ end
         spark:Hide()
     end
 
+    -- Text width cap: use the bar's rendered width so width-matching
+    -- and border insets are accounted for. Falls back to cb.width if
+    -- the bar hasn't been laid out yet.
+    local barW = bar:GetWidth()
+    if not barW or barW < 10 then barW = cb.width end
+
     -- Timer text
     local timerText = castBarFrame._timerText
     if cb.showTimer then
@@ -3386,7 +3368,7 @@ end
         SetRBFont(nameText, GetRBFont(), cb.spellTextSize or 11)
         nameText:ClearAllPoints()
         nameText:SetPoint("LEFT", bar, "LEFT", 4 + (cb.spellTextX or 0), cb.spellTextY or 0)
-        nameText:SetWidth(cb.width * 0.9)
+        nameText:SetWidth(barW * (cb.showTimer and 0.88 or 0.95))
         nameText:Show()
     else
         nameText:Hide()

@@ -3638,7 +3638,7 @@ local _focusKickHasFocus = false
 -- Context flags updated only on world/zone/spec events. Cached so the
 -- per-nameplate hot path is one local read instead of repeated API calls.
 local _focusKickInDungeon = false
-local _focusKickIsHealer  = false
+local _focusKickNoKick    = false
 local _FOCUS_TEXT = "F O C U S"
 local _FR_FALLBACK_FONT = "Fonts/FRIZQT__.TTF"
 
@@ -3722,7 +3722,7 @@ local function ShowFocusReminder(token)
     -- Cheap rejects first
     if _focusKickHasFocus then HideFocusReminder(token); return end
     if not _focusKickInDungeon then HideFocusReminder(token); return end
-    if _focusKickIsHealer then HideFocusReminder(token); return end
+    if _focusKickNoKick then HideFocusReminder(token); return end
     local bd = GetFocusKickBarData()
     if not bd or bd.focusReminderEnabled ~= true then
         HideFocusReminder(token); return
@@ -3812,7 +3812,7 @@ local function RefreshFocusReminders()
     HideAllFocusReminders()
     if _focusKickHasFocus then return end
     if not _focusKickInDungeon then return end
-    if _focusKickIsHealer then return end
+    if _focusKickNoKick then return end
     local bd = GetFocusKickBarData()
     if not bd or bd.focusReminderEnabled ~= true then return end
     for i = 1, 40 do
@@ -3828,15 +3828,25 @@ _G._ECME_RefreshFocusReminders = RefreshFocusReminders
 -- Refresh the cached context flags (instance type + role) and trigger a
 -- visual refresh if either flag transitioned. Called on PLAYER_ENTERING_WORLD,
 -- ZONE_CHANGED_NEW_AREA, and PLAYER_SPECIALIZATION_CHANGED.
+-- Healer specs that have no kick (Resto Shaman has Wind Shear, so excluded)
+local _HEALER_NO_KICK = {
+    [65]  = true, -- Holy Paladin
+    [256] = true, -- Discipline Priest
+    [257] = true, -- Holy Priest
+    [105] = true, -- Restoration Druid
+    [270] = true, -- Mistweaver Monk
+    [1468] = true, -- Preservation Evoker
+}
+
 local function UpdateFocusKickContext()
     local _, instanceType = IsInInstance()
     local nowInDungeon = (instanceType == "party")
-    local role = GetSpecialization and GetSpecializationRole
-        and GetSpecialization() and GetSpecializationRole(GetSpecialization())
-    local nowIsHealer = (role == "HEALER")
-    local changed = (nowInDungeon ~= _focusKickInDungeon) or (nowIsHealer ~= _focusKickIsHealer)
+    local specID = GetSpecializationInfo and GetSpecialization
+        and GetSpecialization() and GetSpecializationInfo(GetSpecialization())
+    local nowNoKick = specID and _HEALER_NO_KICK[specID] or false
+    local changed = (nowInDungeon ~= _focusKickInDungeon) or (nowNoKick ~= _focusKickNoKick)
     _focusKickInDungeon = nowInDungeon
-    _focusKickIsHealer  = nowIsHealer
+    _focusKickNoKick    = nowNoKick
     if changed then
         RefreshFocusReminders()
     end

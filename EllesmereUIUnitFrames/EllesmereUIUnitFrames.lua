@@ -1834,6 +1834,9 @@ local function GetFrameDimensions(unit)
     local powerExtra = powerIsAtt and (settings.powerHeight or 6) or 0
 
     if not isAttached then pSizeAdj = pSizeAdj + 10 end
+    -- Snap returned dimensions to the physical pixel grid so width-
+    -- matching and cog display always agree with the rendered frame size.
+    local snap = PP.Snap
     if unit == "player" or unit == "target" then
         local ptH = settings.healthHeight + powerExtra
         local adjPH = ptH + pSizeAdj
@@ -1841,23 +1844,23 @@ local function GetFrameDimensions(unit)
         local pSide = settings.portraitSide or (unit == "player" and "left" or "right")
         if isAttached and pSide == "top" then pSide = (unit == "player") and "left" or "right" end
         local w = (showPortrait and isAttached) and (adjPH + settings.frameWidth) or settings.frameWidth
-        return w, ptH + btbExtra
+        return snap(w), snap(ptH + btbExtra)
     elseif unit == "focus" then
         local pH = powerIsAtt and (settings.powerHeight or 6) or 0
         local barH = settings.healthHeight + pH
         local adjPH = barH + pSizeAdj
         if adjPH < 8 then adjPH = 8 end
         local w = (showPortrait and isAttached) and (adjPH + settings.frameWidth) or settings.frameWidth
-        return w, barH + btbExtra
+        return snap(w), snap(barH + btbExtra)
     elseif unit == "pet" or unit == "targettarget" or unit == "focustarget" then
-        return settings.frameWidth, settings.healthHeight
+        return snap(settings.frameWidth), snap(settings.healthHeight)
     elseif unit:match("^boss") then
         local pH = powerIsAtt and (settings.powerHeight or 6) or 0
         local barH = settings.healthHeight + pH
         local adjPH = barH + pSizeAdj
         if adjPH < 8 then adjPH = 8 end
         local w = (showPortrait and isAttached) and (adjPH + settings.frameWidth) or settings.frameWidth
-        return w, barH
+        return snap(w), snap(barH)
     end
     return 150, 30
 end
@@ -2548,37 +2551,8 @@ local function CastbarUnlockKey(unit)
     end
 end
 
--- If a saved unlock position exists for this unit's castbar, apply it
--- and return true. Otherwise return false so the caller can fall back
--- to the default relative anchor.
-local function ApplyCastbarUnlockPos(castbarBg, unit)
-    local key = CastbarUnlockKey(unit)
-    if not key then return false end
-    -- If the castbar is anchored to another element via the unlock system,
-    -- apply immediately via ReapplyOwnAnchor so there's no positioning gap
-    -- between ReloadFrames and the deferred ApplySavedPositions.
-    local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors
-    if anchors and anchors[key] and anchors[key].target then
-        -- Only use the anchor if the target element is actually available
-        local targetKey = anchors[key].target
-        local elems = EllesmereUI._unlockRegisteredElements
-        local targetElem = elems and elems[targetKey]
-        local targetFrame = targetElem and targetElem.getFrame and targetElem.getFrame(targetKey)
-        if targetFrame then
-            if EllesmereUI.ReapplyOwnAnchor then
-                EllesmereUI.ReapplyOwnAnchor(key)
-            end
-            return true
-        end
-        -- Target element missing (addon disabled) -- fall through to saved position
-    end
-    local pos = db and db.profile and db.profile.positions and db.profile.positions[key]
-    if not pos then return false end
-    if not pos.x and not pos.y then return false end
-    castbarBg:ClearAllPoints()
-    castbarBg:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-    return true
-end
+-- ApplyCastbarUnlockPos removed: cast bar positioning is now fully owned
+-- by the centralized unlock/anchor system (ApplySavedPositions).
 
 local function CreateCastBar(frame, unit, settings)
     local settings = GetSettingsForUnit(unit)
@@ -2587,26 +2561,22 @@ local function CreateCastBar(frame, unit, settings)
     -- compatibility, but sized and positioned independently.
     local castbarBg = CreateFrame("Frame", nil, frame)
 
-    -- Determine width and height from settings
+    -- Determine width and height from settings (no auto-derive, always stored)
     local cbWidth, cbHeight
     if unit == "player" then
-        local owW = db.profile.player.playerCastbarWidth or 0
-        local owH = db.profile.player.playerCastbarHeight or 0
-        cbHeight = (owH > 0) and owH or (settings.castbarHeight or 14)
-        -- Width 0 means "match frame width" -- resolved at position time
-        cbWidth = (owW > 0) and owW or frame:GetWidth()
+        cbWidth = db.profile.player.playerCastbarWidth or 181
+        cbHeight = db.profile.player.playerCastbarHeight or 14
     else
+        cbWidth = settings.castbarWidth or 181
         cbHeight = settings.castbarHeight or 14
-        local owW = settings.castbarWidth or 0
-        cbWidth = (owW > 0) and owW or frame:GetWidth()
     end
     PP.Size(castbarBg, cbWidth, cbHeight)
 
-    -- Use saved unlock position if available, otherwise default below parent
-    if not ApplyCastbarUnlockPos(castbarBg, unit) or castbarBg:GetNumPoints() == 0 then
-        castbarBg:ClearAllPoints()
-        castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, 0)
-    end
+    -- Position is fully owned by the centralized unlock system.
+    -- Set a temporary anchor so the frame has valid bounds until
+    -- ApplySavedPositions runs. The unlock anchor (default: BOTTOM
+    -- of parent unit frame) takes over at login.
+    castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, 0)
 
     local bgTex = castbarBg:CreateTexture(nil, "BACKGROUND")
     PP.Point(bgTex, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
@@ -3278,17 +3248,7 @@ local function StyleFullFrame(frame, unit)
         end
         frame.BottomTextBar = CreateBottomTextBar(frame, unit, settings, anchorFrame, btbXOff, totalWidth)
         frame._btb = frame.BottomTextBar
-        -- Re-anchor cast bar below BTB only when BTB is attached at bottom
-        -- and no saved unlock position exists
-        if btbPos == "bottom" and frame.Castbar then
-            local castbarBg = frame.Castbar:GetParent()
-            if castbarBg and castbarBg:GetParent() == frame then
-                if not ApplyCastbarUnlockPos(castbarBg, unit) then
-                    castbarBg:ClearAllPoints()
-                    castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
-                end
-            end
-        end
+        -- Cast bar positioning owned by centralized unlock system
     end
 end
 
@@ -3512,17 +3472,7 @@ local function StyleFocusFrame(frame, unit)
         end
         frame.BottomTextBar = CreateBottomTextBar(frame, unit, settings, anchorFrame, btbXOff, totalWidth)
         frame._btb = frame.BottomTextBar
-        -- Re-anchor cast bar below BTB only when BTB is attached at bottom
-        -- and no saved unlock position exists
-        if btbPos == "bottom" and frame.Castbar then
-            local castbarBg = frame.Castbar:GetParent()
-            if castbarBg and castbarBg:GetParent() == frame then
-                if not ApplyCastbarUnlockPos(castbarBg, unit) then
-                    castbarBg:ClearAllPoints()
-                    castbarBg:SetPoint("TOP", frame.BottomTextBar, "BOTTOM", 0, 0)
-                end
-            end
-        end
+        -- Cast bar positioning owned by centralized unlock system
     end
 end
 
@@ -5032,32 +4982,17 @@ local function ReloadFrames()
                                 frame:EnableElement("Castbar")
                             end
                             if castbarBg then
-                                local castBarOffset = 0
-                                if showPortrait and isAttached then
-                                    castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
-                                end
-                                local owW = db.profile.player.playerCastbarWidth or 0
-                                local cbW = (owW > 0) and owW or totalWidth
-                                local cbH = settings.castbarHeight or 14
-                                local owH = settings.playerCastbarHeight or 0
-                                if owH > 0 then cbH = owH end
+                                local cbW = db.profile.player.playerCastbarWidth or 181
+                                local cbH = db.profile.player.playerCastbarHeight or 14
                                 castbarBg:SetSize(cbW, cbH)
                                 -- Resize cast icon to match castbar height
                                 if frame.Castbar._iconFrame then
                                     frame.Castbar._iconFrame:SetSize(cbH, cbH)
-                                    -- Icon only visible during active cast AND if showPlayerCastIcon is enabled
                                     if not frame.Castbar:IsShown() or settings.showPlayerCastIcon == false then
                                         frame.Castbar._iconFrame:Hide()
                                     end
                                 end
-                                if not ApplyCastbarUnlockPos(castbarBg, unit) then
-                                castbarBg:ClearAllPoints()
-                                local pBtbPos = settings.btbPosition or "bottom"
-                                local pBtbVisible = (settings.bottomTextBar and pBtbPos == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
-                                local anchorFrame = pBtbVisible and frame.BottomTextBar or (ppIsAtt and (settings.powerHeight or 0) > 0 and frame.Power) or frame.Health
-                                local pCbXOff = pBtbVisible and 0 or castBarOffset
-                                castbarBg:SetPoint("TOP", anchorFrame, "BOTTOM", pCbXOff, 0)
-                                end
+                                -- Position owned by centralized unlock system (no manual anchor)
                                 -- Respect hide-while-not-casting
                                 if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                     castbarBg:Hide()
@@ -5114,6 +5049,11 @@ local function ReloadFrames()
                         if absStyle and absStyle ~= "none" then
                             ApplyAbsorbStyle(frame.HealthPrediction.damageAbsorb, absStyle, settings)
                             frame.HealthPrediction.damageAbsorb:Show()
+                            -- Force an immediate value update so the bar doesn't
+                            -- show stale/uninitialized fill covering the full frame.
+                            if frame.HealthPrediction.Override then
+                                frame.HealthPrediction.Override(frame, "UNIT_ABSORB_AMOUNT_CHANGED", unit)
+                            end
                         else
                             frame.HealthPrediction.damageAbsorb:Hide()
                         end
@@ -5441,7 +5381,7 @@ local function ReloadFrames()
                         frame.BottomTextBar:Hide()
                     end
 
-                    -- Castbar (target) ? anchors to BTB when BTB is bottom, otherwise to power/health
+                    -- Castbar (target)
                     if frame.Castbar then
                         local castbarBg = frame.Castbar:GetParent()
                         if castbarBg then
@@ -5449,17 +5389,11 @@ local function ReloadFrames()
                                 if not frame:IsElementEnabled("Castbar") then
                                     frame:EnableElement("Castbar")
                                 end
-                                local castBarOffset = 0
-                                if showPortrait and isAttached then
-                                    castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
-                                end
-                                local owW2 = settings.castbarWidth or 0
-                                local cbW2 = (owW2 > 0) and owW2 or totalWidth
+                                local cbW2 = settings.castbarWidth or 181
                                 local cbH2 = settings.castbarHeight or 14
                                 castbarBg:SetSize(cbW2, cbH2)
                                 if frame.Castbar._iconFrame then
                                     frame.Castbar._iconFrame:SetSize(cbH2, cbH2)
-                                    -- Icon only visible during active cast, always hide on settings update
                                     if not frame.Castbar:IsShown() then
                                         frame.Castbar._iconFrame:Hide()
                                     elseif settings.showCastIcon == false then
@@ -5468,14 +5402,7 @@ local function ReloadFrames()
                                         frame.Castbar._iconFrame:Show()
                                     end
                                 end
-                                if not ApplyCastbarUnlockPos(castbarBg, unit) then
-                                castbarBg:ClearAllPoints()
-                                local tBtbPos = settings.btbPosition or "bottom"
-                                local btbVisible = (settings.bottomTextBar and tBtbPos == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
-                                local cbAnchor = btbVisible and frame.BottomTextBar or tPpBtbAnchor
-                                local cbXOff = btbVisible and 0 or castBarOffset
-                                castbarBg:SetPoint("TOP", cbAnchor, "BOTTOM", cbXOff, 0)
-                                end
+                                -- Position owned by centralized unlock system
                                 -- Respect hide-while-not-casting: only show bg if inactive hiding is off or cast is active
                                 if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                     castbarBg:Hide()
@@ -5777,7 +5704,7 @@ local function ReloadFrames()
                     frame.BottomTextBar:Hide()
                 end
 
-                -- Castbar (focus) ? anchors to BTB when BTB is bottom, otherwise to power/health
+                -- Castbar (focus)
                 if frame.Castbar then
                     local castbarBg = frame.Castbar:GetParent()
                     if castbarBg then
@@ -5785,17 +5712,11 @@ local function ReloadFrames()
                             if not frame:IsElementEnabled("Castbar") then
                                 frame:EnableElement("Castbar")
                             end
-                            local castBarOffset = 0
-                            if showPortrait and isAttached then
-                                castBarOffset = (effectiveSide == "left") and -(adjPortraitH / 2) or (adjPortraitH / 2)
-                            end
-                            local owW3 = settings.castbarWidth or 0
-                            local cbW3 = (owW3 > 0) and owW3 or totalWidth
+                            local cbW3 = settings.castbarWidth or 181
                             local cbH3 = settings.castbarHeight or 14
                             castbarBg:SetSize(cbW3, cbH3)
                             if frame.Castbar._iconFrame then
                                 frame.Castbar._iconFrame:SetSize(cbH3, cbH3)
-                                -- Icon only visible during active cast, always hide on settings update
                                 if not frame.Castbar:IsShown() then
                                     frame.Castbar._iconFrame:Hide()
                                 elseif settings.showCastIcon == false then
@@ -5804,14 +5725,7 @@ local function ReloadFrames()
                                     frame.Castbar._iconFrame:Show()
                                 end
                             end
-                            if not ApplyCastbarUnlockPos(castbarBg, unit) then
-                            castbarBg:ClearAllPoints()
-                            local fBtbPos2 = settings.btbPosition or "bottom"
-                            local btbVisible = (settings.bottomTextBar and fBtbPos2 == "bottom" and frame.BottomTextBar and frame.BottomTextBar:IsShown())
-                            local cbAnchor = btbVisible and frame.BottomTextBar or fPpBtbAnchor
-                            local cbXOff = btbVisible and 0 or castBarOffset
-                            castbarBg:SetPoint("TOP", cbAnchor, "BOTTOM", cbXOff, 0)
-                            end
+                            -- Position owned by centralized unlock system
                             -- Respect hide-while-not-casting: only show bg if inactive hiding is off or cast is active
                             if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                 castbarBg:Hide()
@@ -7805,32 +7719,10 @@ function SetupOptionsPanel()
                 order = orderBase + order,
                 getFrame = function(k)
                     if k == "boss" then return frames["boss1"] end
-                    -- Castbar elements: return the castbarBg frame
-                    if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
-                        local cbUnit = k:gsub("Castbar", "")
-                        if frames[cbUnit] and frames[cbUnit].Castbar then
-                            return frames[cbUnit].Castbar:GetParent()
-                        end
-                        return nil
-                    end
                     if k == "classPower" then return frames._classPowerBar end
                     return frames[k]
                 end,
                 getSize = function(k)
-                    if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
-                        local cbUnit = k:gsub("Castbar", "")
-                        if frames[cbUnit] and frames[cbUnit].Castbar then
-                            local cbBg = frames[cbUnit].Castbar:GetParent()
-                            if cbBg then
-                                local w = cbBg:GetWidth()
-                                local h = cbBg:GetHeight()
-                                if w < 10 then w = 100 end
-                                if h < 5 then h = 14 end
-                                return w, h
-                            end
-                        end
-                        return 100, 14
-                    end
                     if k == "classPower" then
                         if frames._classPowerBar then
                             local w = frames._classPowerBar:GetWidth()
@@ -7845,20 +7737,6 @@ function SetupOptionsPanel()
                     return GetFrameDimensions(k)
                 end,
                 setWidth = function(k, w)
-                    if k == "playerCastbar" then
-                        db.profile.player.playerCastbarWidth = math.max(math.floor(w + 0.5), 30)
-                        local cbBg = frames.player and frames.player.Castbar and frames.player.Castbar:GetParent()
-                        if cbBg then PP.Size(cbBg, db.profile.player.playerCastbarWidth, cbBg:GetHeight()) end
-                        return
-                    end
-                    if k == "targetCastbar" or k == "focusCastbar" then
-                        local cbUnit = k:gsub("Castbar", "")
-                        local s = GetSettingsForUnit(cbUnit)
-                        s.castbarWidth = math.max(math.floor(w + 0.5), 30)
-                        local cbBg = frames[cbUnit] and frames[cbUnit].Castbar and frames[cbUnit].Castbar:GetParent()
-                        if cbBg then PP.Size(cbBg, s.castbarWidth, cbBg:GetHeight()) end
-                        return
-                    end
                     if k == "classPower" then return end
                     if not EllesmereUI._unlockActive then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
@@ -7874,35 +7752,13 @@ function SetupOptionsPanel()
                         local ptH = s.healthHeight + (powerIsAtt and (s.powerHeight or 6) or 0)
                         local adjPH = ptH + pSizeAdj
                         if adjPH < 8 then adjPH = 8 end
-                        s.frameWidth = math.max(math.floor(w - adjPH + 0.5), 50)
+                        s.frameWidth = math.max(PP.Snap(w - adjPH), 50)
                     else
-                        s.frameWidth = math.max(math.floor(w + 0.5), 50)
+                        s.frameWidth = math.max(PP.Snap(w), 50)
                     end
                     Rebuild()
                 end,
                 setHeight = function(k, h)
-                    if k == "playerCastbar" then
-                        if not EllesmereUI._unlockActive then return end
-                        local newH = math.max(math.floor(h + 0.5), 5)
-                        db.profile.player.playerCastbarHeight = newH
-                        local cbBg = frames.player and frames.player.Castbar and frames.player.Castbar:GetParent()
-                        if cbBg then PP.Size(cbBg, cbBg:GetWidth(), newH) end
-                        local ico = frames.player and frames.player.Castbar and frames.player.Castbar._iconFrame
-                        if ico then ico:SetSize(newH, newH) end
-                        return
-                    end
-                    if k == "targetCastbar" or k == "focusCastbar" then
-                        if not EllesmereUI._unlockActive then return end
-                        local cbUnit = k:gsub("Castbar", "")
-                        local s = GetSettingsForUnit(cbUnit)
-                        local newH = math.max(math.floor(h + 0.5), 5)
-                        s.castbarHeight = newH
-                        local cbBg = frames[cbUnit] and frames[cbUnit].Castbar and frames[cbUnit].Castbar:GetParent()
-                        if cbBg then PP.Size(cbBg, cbBg:GetWidth(), newH) end
-                        local ico = frames[cbUnit] and frames[cbUnit].Castbar and frames[cbUnit].Castbar._iconFrame
-                        if ico then ico:SetSize(newH, newH) end
-                        return
-                    end
                     if k == "classPower" then return end
                     if not EllesmereUI._unlockActive then Rebuild(); return end
                     local unit = (k == "boss") and "boss1" or k
@@ -7914,7 +7770,7 @@ function SetupOptionsPanel()
                     local btbPos = s.btbPosition or "bottom"
                     local btbIsAtt = (btbPos == "top" or btbPos == "bottom")
                     local btbH = (s.bottomTextBar and btbIsAtt) and (s.bottomTextBarHeight or 16) or 0
-                    s.healthHeight = math.max(math.floor(h - powerH - btbH + 0.5), 8)
+                    s.healthHeight = math.max(PP.Snap(h - powerH - btbH), 8)
                     Rebuild()
                 end,
                 loadPos = function(k)
@@ -7925,17 +7781,7 @@ function SetupOptionsPanel()
                 savePos = function(k, point, relPoint, x, y)
                     db.profile.positions[k] = { point = point, relPoint = relPoint, x = x, y = y }
                     if EllesmereUI._unlockActive then return end
-                    -- Castbar elements: reposition the castbarBg
-                    if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
-                        local cbUnit = k:gsub("Castbar", "")
-                        if frames[cbUnit] and frames[cbUnit].Castbar then
-                            local cbBg = frames[cbUnit].Castbar:GetParent()
-                            if cbBg then
-                                cbBg:ClearAllPoints()
-                                cbBg:SetPoint(point, UIParent, relPoint, x, y)
-                            end
-                        end
-                    elseif k == "boss" then
+                    if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
                         -- boss1 to UIParent; chain 2..5 from the previous boss.
                         if frames.boss1 then
@@ -7990,18 +7836,7 @@ function SetupOptionsPanel()
                         end
                         return x, y
                     end
-                    -- Castbar elements: reposition the castbarBg
-                    if k == "playerCastbar" or k == "targetCastbar" or k == "focusCastbar" then
-                        local cbUnit = k:gsub("Castbar", "")
-                        if frames[cbUnit] and frames[cbUnit].Castbar then
-                            local cbBg = frames[cbUnit].Castbar:GetParent()
-                            if cbBg then
-                                px, py = SnapForFrame(cbBg, px, py)
-                                cbBg:ClearAllPoints()
-                                cbBg:SetPoint(pt, UIParent, rpt, px, py)
-                            end
-                        end
-                    elseif k == "boss" then
+                    if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
                         if frames.boss1 then
                             local bx, by = SnapForFrame(frames.boss1, pos.x, pos.y)
@@ -8057,15 +7892,110 @@ function SetupOptionsPanel()
             elements[#elements + 1] = MakeUFElement("classPower", 9)
         end
 
-        -- Castbar elements (registered when their castbar is enabled)
+        -- Cast bar elements: standalone registration, no special-case branching
+        local function MakeCastBarElement(cbKey, unitKey, order)
+            local function GetCBFrame()
+                local uf = frames[unitKey]
+                return uf and uf.Castbar and uf.Castbar:GetParent()
+            end
+            local function GetCBSettings()
+                if unitKey == "player" then return db.profile.player end
+                return GetSettingsForUnit(unitKey)
+            end
+            local function GetWidthKey()
+                return unitKey == "player" and "playerCastbarWidth" or "castbarWidth"
+            end
+            local function GetHeightKey()
+                return unitKey == "player" and "playerCastbarHeight" or "castbarHeight"
+            end
+            return MK({
+                key = cbKey,
+                label = UNIT_LABELS[cbKey] or cbKey,
+                group = "Unit Frames",
+                order = orderBase + order,
+                getFrame = function() return GetCBFrame() end,
+                getSize = function()
+                    -- Return stored DB values so cog menu shows what the
+                    -- user typed, not the pixel-snapped frame size.
+                    local s = GetCBSettings()
+                    if s then
+                        local w = s[GetWidthKey()] or 181
+                        local h = s[GetHeightKey()] or 14
+                        return w, h
+                    end
+                    return 100, 14
+                end,
+                setWidth = function(_, w)
+                    if not EllesmereUI._unlockActive then return end
+                    local s = GetCBSettings()
+                    if not s then return end
+                    local newW = math.max(PP.Snap(w), 30)
+                    s[GetWidthKey()] = newW
+                    local f = GetCBFrame()
+                    if f then PP.Size(f, newW, f:GetHeight()) end
+                end,
+                setHeight = function(_, h)
+                    if not EllesmereUI._unlockActive then return end
+                    local s = GetCBSettings()
+                    if not s then return end
+                    local newH = math.max(PP.Snap(h), 5)
+                    s[GetHeightKey()] = newH
+                    local f = GetCBFrame()
+                    if f then PP.Size(f, f:GetWidth(), newH) end
+                    local uf = frames[unitKey]
+                    local ico = uf and uf.Castbar and uf.Castbar._iconFrame
+                    if ico then ico:SetSize(newH, newH) end
+                end,
+                loadPos = function()
+                    local pos = db.profile.positions[cbKey]
+                    if not pos then return nil end
+                    return { point = pos.point, relPoint = pos.relPoint or pos.point, x = pos.x, y = pos.y }
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    db.profile.positions[cbKey] = { point = point, relPoint = relPoint, x = x, y = y }
+                    if EllesmereUI._unlockActive then return end
+                    local f = GetCBFrame()
+                    if f then
+                        f:ClearAllPoints()
+                        f:SetPoint(point, UIParent, relPoint, x, y)
+                    end
+                end,
+                clearPos = function()
+                    db.profile.positions[cbKey] = nil
+                end,
+                applyPos = function()
+                    local pos = db.profile.positions[cbKey]
+                    if not pos then return end
+                    local f = GetCBFrame()
+                    if not f then return end
+                    local pt, rpt = pos.point, pos.relPoint or pos.point
+                    local px, py = pos.x, pos.y
+                    local PPa = EllesmereUI and EllesmereUI.PP
+                    if PPa and px and py then
+                        local es = f:GetEffectiveScale()
+                        local isCenterAnchor = (pt == "CENTER") and (rpt == "CENTER")
+                        if isCenterAnchor and PPa.SnapCenterForDim then
+                            px = PPa.SnapCenterForDim(px, f:GetWidth() or 0, es)
+                            py = PPa.SnapCenterForDim(py, f:GetHeight() or 0, es)
+                        elseif PPa.SnapForES then
+                            px = PPa.SnapForES(px, es)
+                            py = PPa.SnapForES(py, es)
+                        end
+                    end
+                    f:ClearAllPoints()
+                    f:SetPoint(pt, UIParent, rpt, px or 0, py or 0)
+                end,
+            })
+        end
+
         if db.profile.player.showPlayerCastbar then
-            elements[#elements + 1] = MakeUFElement("playerCastbar", 10)
+            elements[#elements + 1] = MakeCastBarElement("playerCastbar", "player", 10)
         end
         if db.profile.target and db.profile.target.showCastbar ~= false then
-            elements[#elements + 1] = MakeUFElement("targetCastbar", 11)
+            elements[#elements + 1] = MakeCastBarElement("targetCastbar", "target", 11)
         end
         if db.profile.focus and db.profile.focus.showCastbar ~= false then
-            elements[#elements + 1] = MakeUFElement("focusCastbar", 12)
+            elements[#elements + 1] = MakeCastBarElement("focusCastbar", "focus", 12)
         end
 
         EllesmereUI:RegisterUnlockElements(elements)
@@ -8084,13 +8014,19 @@ function SetupOptionsPanel()
                 { cb = "targetCastbar", parent = "target" },
                 { cb = "focusCastbar",  parent = "focus" },
             }
+            local cbPositions = db and db.profile and db.profile.positions
             for _, def in ipairs(CB_DEFAULTS) do
                 if not EllesmereUIDB._castbarUnlockSeeded[def.cb] then
-                    if not EllesmereUIDB.unlockAnchors[def.cb] then
-                        EllesmereUIDB.unlockAnchors[def.cb] = { target = def.parent, side = "BOTTOM" }
-                    end
-                    if not EllesmereUIDB.unlockWidthMatch[def.cb] then
-                        EllesmereUIDB.unlockWidthMatch[def.cb] = def.parent
+                    -- Skip seeding if the user already has a saved position
+                    -- (they moved the cast bar freely without anchoring)
+                    local hasPos = cbPositions and cbPositions[def.cb]
+                    if not hasPos then
+                        if not EllesmereUIDB.unlockAnchors[def.cb] then
+                            EllesmereUIDB.unlockAnchors[def.cb] = { target = def.parent, side = "BOTTOM" }
+                        end
+                        if not EllesmereUIDB.unlockWidthMatch[def.cb] then
+                            EllesmereUIDB.unlockWidthMatch[def.cb] = def.parent
+                        end
                     end
                     -- Mark as seeded so we never overwrite user changes
                     EllesmereUIDB._castbarUnlockSeeded[def.cb] = true

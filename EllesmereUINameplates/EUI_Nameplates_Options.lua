@@ -316,7 +316,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         local healthBG = health:CreateTexture(nil, "BACKGROUND")
         healthBG:SetAllPoints()
-        healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)
+        local _hbg = (DB() and DB().bgColor) or defaults.bgColor
+        local _hba = (DBVal("bgAlpha") or defaults.bgAlpha)
+        healthBG:SetColorTexture(_hbg.r, _hbg.g, _hbg.b, _hba)
         UnsnapTex(healthBG)
 
         -- Hash line on preview health bar
@@ -550,11 +552,14 @@ initFrame:SetScript("OnEvent", function(self)
 
         local castBG = cast:CreateTexture(nil, "BACKGROUND")
         castBG:SetAllPoints()
-        castBG:SetColorTexture(0.1, 0.1, 0.1, 0.9)
+        local _pcbg = (DB() and DB().castBgColor) or defaults.castBgColor
+        local _pcba = (DBVal("castBgAlpha") or defaults.castBgAlpha)
+        castBG:SetColorTexture(_pcbg.r, _pcbg.g, _pcbg.b, _pcba)
         UnsnapTex(castBG)
 
         -- Cast bar parts packed into a table to reduce upvalue count
         local castParts = {}
+        castParts.bg = castBG
 
         -- Cast icon (flush to the left of the cast bar)
         castParts.iconFrame = CreateFrame("Frame", nil, cast)
@@ -812,6 +817,14 @@ initFrame:SetScript("OnEvent", function(self)
             -- Text on hpText/hpNumber is set later by the slot-based positioning logic
             cast:SetValue(_previewCastFill or 0.60)
             castParts.icon:SetTexture(displayCastIcons[_previewCastIconIdx or 1])
+            do
+                local hbgC = (DB() and DB().bgColor) or defaults.bgColor
+                local hbgA = DBVal("bgAlpha") or defaults.bgAlpha
+                healthBG:SetColorTexture(hbgC.r, hbgC.g, hbgC.b, hbgA)
+                local cbgC = (DB() and DB().castBgColor) or defaults.castBgColor
+                local cbgA = DBVal("castBgAlpha") or defaults.castBgAlpha
+                castParts.bg:SetColorTexture(cbgC.r, cbgC.g, cbgC.b, cbgA)
+            end
 
             -- Border style toggle
             local bOn = DBVal("showBorder")
@@ -3282,6 +3295,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Row 1: Show Border | Background Opacity (+ inline color swatch)
         local borderStyleRow
         borderStyleRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Border",
@@ -3296,31 +3310,63 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
                 EllesmereUI:RefreshPage()
               end },
-            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
-              getValue=function() return DBVal("healthBarTexture") or "none" end,
+            { type="slider", text="Background Opacity", min=0, max=100, step=1,
+              getValue=function()
+                return math.floor(((DBVal("bgAlpha") or defaults.bgAlpha) * 100) + 0.5)
+              end,
               setValue=function(v)
-                DB().healthBarTexture = v
-                RefreshAllTextures()
+                DB().bgAlpha = v / 100
+                local c = (DB() and DB().bgColor) or defaults.bgColor
+                for _, plate in pairs(plates) do
+                    plate.healthBG:SetColorTexture(c.r, c.g, c.b, v / 100)
+                end
                 UpdatePreview()
               end })
         y = y - h
+        -- Inline color swatch on Background Opacity (right region)
+        do
+            local rightRgn = borderStyleRow._rightRegion
+            local cbColorGet = function()
+                local c = (DB() and DB().bgColor) or defaults.bgColor
+                return c.r, c.g, c.b
+            end
+            local cbColorSet = function(r, g, b)
+                DB().bgColor = { r = r, g = g, b = b }
+                local a = DBVal("bgAlpha") or defaults.bgAlpha
+                for _, plate in pairs(plates) do
+                    plate.healthBG:SetColorTexture(r, g, b, a)
+                end
+                UpdatePreview()
+            end
+            local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, cbColorGet, cbColorSet, nil, 20)
+            PP.Point(cbSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            rightRgn._lastInline = cbSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
+        end
 
+        -- Row 2: Bar Texture | Absorb Style
         local absorbStyleValues = {
             ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
         }
         local absorbStyleOrder = { "blizzard", "striped", "clean" }
         local absorbStyleRow
         absorbStyleRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
+              getValue=function() return DBVal("healthBarTexture") or "none" end,
+              setValue=function(v)
+                DB().healthBarTexture = v
+                RefreshAllTextures()
+                UpdatePreview()
+              end },
             { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
               getValue=function() return DBVal("absorbStyle") or "blizzard" end,
               setValue=function(v)
                 DB().absorbStyle = v
                 ns.ApplyAbsorbStyleAll()
                 UpdatePreview()
-              end },
-            { type="label", text="" });  y = y - h
+              end });  y = y - h
         do
-            local rgn = absorbStyleRow._leftRegion
+            local rgn = absorbStyleRow._rightRegion
             local _, absorbCogShow = EllesmereUI.BuildCogPopup({
                 title = "Absorb Settings",
                 rows = {
@@ -3350,7 +3396,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
             local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
-            local rgn = absorbStyleRow._leftRegion
+            local rgn = absorbStyleRow._rightRegion
             local eyeBtn = CreateFrame("Button", nil, rgn)
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -4419,6 +4465,42 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function()
                 tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
             end)
+        end
+
+        -- Row 4: Cast Bar Background Opacity (+ inline color swatch) | (empty)
+        local castBgRow
+        castBgRow, h = W:DualRow(parent, y,
+            { type="slider", text="Cast Background", min=0, max=100, step=1,
+              getValue=function()
+                return math.floor(((DBVal("castBgAlpha") or defaults.castBgAlpha) * 100) + 0.5)
+              end,
+              setValue=function(v)
+                DB().castBgAlpha = v / 100
+                local c = (DB() and DB().castBgColor) or defaults.castBgColor
+                for _, plate in pairs(plates) do
+                    plate.castBG:SetColorTexture(c.r, c.g, c.b, v / 100)
+                end
+                UpdatePreview()
+              end },
+            { type="label", text="" });  y = y - h
+        do
+            local leftRgn = castBgRow._leftRegion
+            local castBgColorGet = function()
+                local c = (DB() and DB().castBgColor) or defaults.castBgColor
+                return c.r, c.g, c.b
+            end
+            local castBgColorSet = function(r, g, b)
+                DB().castBgColor = { r = r, g = g, b = b }
+                local a = DBVal("castBgAlpha") or defaults.castBgAlpha
+                for _, plate in pairs(plates) do
+                    plate.castBG:SetColorTexture(r, g, b, a)
+                end
+                UpdatePreview()
+            end
+            local castBgSwatch, castBgUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, castBgColorGet, castBgColorSet, nil, 20)
+            PP.Point(castBgSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            leftRgn._lastInline = castBgSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() castBgUpdateSwatch() end)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -6549,7 +6631,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Focus Text Reminders",
-                  tooltip = "Display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus. This is the same setting as in the FocusKick bar options.",
+                  tooltip = "Display the word \"FOCUS\" below caster/miniboss mobs in M+ if you have not set your focus. This is the same setting as in the FocusKick bar options. Disabled for specs with no kick.",
                   getValue = function()
                       local fk = GetFocusKickBar()
                       return fk and fk.focusReminderEnabled == true

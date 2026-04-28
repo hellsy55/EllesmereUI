@@ -482,7 +482,8 @@ local function RegisterUnlock()
             linkedDimensions = true,  -- always square; one slider drives both
             setWidth = function(_, w)
                 local p = P(); if not p then return end
-                p.iconSize = math.max(16, math.floor(w + 0.5))
+                local PPb = EllesmereUI and EllesmereUI.PP
+                p.iconSize = math.max(16, PPb and PPb.Snap(w) or math.floor(w + 0.5))
                 Apply()
                 if EllesmereUI._unlockActive and EllesmereUI.RepositionBarToMover then
                     EllesmereUI.RepositionBarToMover("EUI_BattleRes")
@@ -490,7 +491,8 @@ local function RegisterUnlock()
             end,
             setHeight = function(_, h)
                 local p = P(); if not p then return end
-                p.iconSize = math.max(16, math.floor(h + 0.5))
+                local PPb = EllesmereUI and EllesmereUI.PP
+                p.iconSize = math.max(16, PPb and PPb.Snap(h) or math.floor(h + 0.5))
                 Apply()
                 if EllesmereUI._unlockActive and EllesmereUI.RepositionBarToMover then
                     EllesmereUI.RepositionBarToMover("EUI_BattleRes")

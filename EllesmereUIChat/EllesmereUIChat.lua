@@ -3327,28 +3327,34 @@ initFrame:SetScript("OnEvent", function(self)
                 noInitHook = true,
                 getFrame = function() return ChatFrame1 end,
                 getSize  = function()
-                    local cf1 = _G.ChatFrame1
-                    if not cf1 then return 400, 200 end
-                    return cf1:GetWidth(), cf1:GetHeight()
+                    local cfg = ECHAT.DB()
+                    if cfg then
+                        return cfg.chatWidth or 400, cfg.chatHeight or 200
+                    end
+                    return 400, 200
                 end,
                 setWidth = function(_, newW)
                     if InCombatLockdown() then return end
                     local cf1 = _G.ChatFrame1
                     if not cf1 then return end
-                    cf1:SetWidth(max(200, newW))
+                    local PPc = EllesmereUI and EllesmereUI.PP
+                    local snapW = PPc and PPc.Snap(max(200, newW)) or math.floor(max(200, newW) + 0.5)
+                    cf1:SetWidth(snapW)
                     if EllesmereUI._unlockActive then
                         local cfg = ECHAT.DB()
-                        if cfg then cfg.chatWidth = cf1:GetWidth() end
+                        if cfg then cfg.chatWidth = snapW end
                     end
                 end,
                 setHeight = function(_, newH)
                     if InCombatLockdown() then return end
                     local cf1 = _G.ChatFrame1
                     if not cf1 then return end
-                    cf1:SetHeight(max(100, newH))
+                    local PPc = EllesmereUI and EllesmereUI.PP
+                    local snapH = PPc and PPc.Snap(max(100, newH)) or math.floor(max(100, newH) + 0.5)
+                    cf1:SetHeight(snapH)
                     if EllesmereUI._unlockActive then
                         local cfg = ECHAT.DB()
-                        if cfg then cfg.chatHeight = cf1:GetHeight() end
+                        if cfg then cfg.chatHeight = snapH end
                     end
                 end,
                 isHidden = function()
