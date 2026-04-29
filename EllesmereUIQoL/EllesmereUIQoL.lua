@@ -334,24 +334,23 @@ qolFrame:SetScript("OnEvent", function(self)
             return false
         end
 
-        -- Secure button for taint-free container item usage.
-        -- Direct C_Container.UseContainerItem() taints the function
-        -- for the rest of the session, breaking bag item clicks.
-        -- A /use macro through SecureActionButtonTemplate is clean.
-        local openBtn = CreateFrame("Button", "EUI_AutoOpenBtn", UIParent, "SecureActionButtonTemplate")
-        openBtn:SetSize(1, 1)
-        openBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 100)
-        openBtn:Hide()
-        openBtn:SetAttribute("type", "macro")
+        local function AnyBagOpen()
+            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                if IsBagOpen(bag) then return true end
+            end
+            return false
+        end
 
         local containerFrame = CreateFrame("Frame")
         containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         containerFrame:SetScript("OnEvent", function()
             if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false then return end
             if InCombatLockdown() then return end
+            if AnyBagOpen() then return end
             if not pendingOpen then
                 pendingOpen = true
                 C_Timer.After(0.3, function()
+                    if AnyBagOpen() then pendingOpen = false; return end
                     local itemsToOpen = {}
                     for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -366,13 +365,10 @@ qolFrame:SetScript("OnEvent", function(self)
                             pendingOpen = false
                             return
                         end
-                        if InCombatLockdown() then pendingOpen = false; return end
+                        if InCombatLockdown() or AnyBagOpen() then pendingOpen = false; return end
                         local item = itemsToOpen[index]
                         if IsOpenable(item.bag, item.slot) then
-                            openBtn:SetAttribute("macrotext", "/use " .. item.bag .. " " .. item.slot)
-                            openBtn:Show()
-                            openBtn:Click()
-                            openBtn:Hide()
+                            C_Container.UseContainerItem(item.bag, item.slot)
                         end
                         C_Timer.After(0.15, function() OpenNext(index + 1) end)
                     end
@@ -1241,8 +1237,8 @@ do
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
         fpsFrame:SetSize(60, 20)
         fpsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 10, -10)
-        fpsFrame:SetFrameStrata("HIGH")
-        fpsFrame:SetFrameLevel(100)
+        fpsFrame:SetFrameStrata("MEDIUM")
+        fpsFrame:SetFrameLevel(10)
         fpsFrame:EnableMouse(false)
 
         local function MakeFS(size)

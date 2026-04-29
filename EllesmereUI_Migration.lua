@@ -1713,9 +1713,16 @@ EllesmereUI.RegisterMigration({
 EllesmereUI.RegisterMigration({
     id          = "cdm_remove_ghost_buff_bar_v1",
     scope       = "profile",
-    description = "Remove __ghost_buffs bar entry from cdmBars.bars array.",
+    description = "Remove __ghost_buffs bar entry from cdmBars.bars array (original, wrong path).",
+    body = function() end,
+})
+EllesmereUI.RegisterMigration({
+    id          = "cdm_remove_ghost_buff_bar_v2",
+    scope       = "profile",
+    description = "Remove __ghost_buffs bar entry from cdmBars.bars array (correct path).",
     body = function(ctx)
-        local bars = ctx.profile.cdmBars and ctx.profile.cdmBars.bars
+        local cdm = ctx.profile.addons and ctx.profile.addons.EllesmereUICooldownManager
+        local bars = cdm and cdm.cdmBars and cdm.cdmBars.bars
         if not bars then return end
         for i = #bars, 1, -1 do
             if bars[i].key == "__ghost_buffs" then
@@ -1856,6 +1863,23 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "uf_per_unit_portrait_style_v1",
+    scope       = "profile",
+    description = "Copy global portraitStyle into player/target/focus per-unit tables.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if not uf then return end
+        local global = uf.portraitStyle or "attached"
+        for _, unitKey in ipairs({ "player", "target", "focus" }) do
+            local s = uf[unitKey]
+            if s and s.portraitStyle == nil then
+                s.portraitStyle = global
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
@@ -1898,5 +1922,32 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
     -- appropriate scope (global/profile/specProfile), pcall-wrapping
     -- each body and stamping per-scope flags on success.
     EllesmereUI.RunRegisteredMigrations()
+
+    -- Unconditional ghost buff purge: catches imported profiles that
+    -- bypass migration flags. Cheap scan, runs once at login.
+    if EllesmereUIDB and EllesmereUIDB.profiles then
+        for _, profData in pairs(EllesmereUIDB.profiles) do
+            local bars = profData.addons
+                and profData.addons.EllesmereUICooldownManager
+                and profData.addons.EllesmereUICooldownManager.cdmBars
+                and profData.addons.EllesmereUICooldownManager.cdmBars.bars
+            if bars then
+                for i = #bars, 1, -1 do
+                    if bars[i].key == "__ghost_buffs" then
+                        table.remove(bars, i)
+                    end
+                end
+            end
+        end
+        local sa = EllesmereUIDB.spellAssignments
+        local sp = sa and sa.specProfiles
+        if sp then
+            for _, specData in pairs(sp) do
+                if specData.barSpells then
+                    specData.barSpells["__ghost_buffs"] = nil
+                end
+            end
+        end
+    end
 
 end)

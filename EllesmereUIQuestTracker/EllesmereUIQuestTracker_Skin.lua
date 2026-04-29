@@ -364,19 +364,35 @@ end
 -- FontString according to its completion state each refresh via a hook on
 -- the block's GetLine / AddObjective path where available.
 -------------------------------------------------------------------------------
+local function ApplyObjectiveLineColor(line)
+    if not line or not line.Text then return end
+    local completed = line.state == "completed" or line.Dash and line.Dash:GetAlpha() == 0
+    if completed then
+        local r, g, b = GetCompletedRGB()
+        line.Text:SetTextColor(r, g, b)
+        if line.Dash then line.Dash:SetTextColor(r, g, b) end
+    else
+        local r, g, b = GetQuestRGB()
+        line.Text:SetTextColor(r, g, b)
+        if line.Dash then line.Dash:SetTextColor(r, g, b) end
+    end
+end
+
 local function StyleObjectiveLine(line)
     if not line or not line.Text then return end
     StyleObjectiveFS(line.Text)
     if line.Dash then StyleObjectiveFS(line.Dash) end
     if line.GetRegions then StyleAllFontStrings(line) end
 
-    -- Blizzard sets line.Text color via line:SetState; our hook re-tints
-    -- after their call. Completed lines expose a `state` field we read.
-    local completed = line.state == "completed" or line.Dash and line.Dash:GetAlpha() == 0
-    if completed then
-        line.Text:SetTextColor(GetCompletedRGB())
-    else
-        line.Text:SetTextColor(GetQuestRGB())
+    ApplyObjectiveLineColor(line)
+
+    -- Blizzard calls line:SetState after AddObjective, overwriting our
+    -- color. Hook it so we re-tint every time Blizzard changes state.
+    if line.SetState and not line._eqtSetStateHooked then
+        line._eqtSetStateHooked = true
+        hooksecurefunc(line, "SetState", function(self)
+            ApplyObjectiveLineColor(self)
+        end)
     end
 end
 

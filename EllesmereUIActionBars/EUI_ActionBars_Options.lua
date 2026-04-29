@@ -1458,6 +1458,23 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
             end
+            -- Inline cog: Visibility settings (left region)
+            do
+                local rgn = visRow1._leftRegion
+                local _, visCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Visibility",
+                    rows = {
+                        { type="toggle", label="Show All on Mouseover",
+                          tooltip="When hovering any action bar set to Mouseover, all Mouseover bars will appear.",
+                          get=function() return EAB.db.profile.mouseoverShowAll or false end,
+                          set=function(v)
+                              EAB.db.profile.mouseoverShowAll = v
+                          end },
+                    },
+                })
+                local visCtrl = rgn._control
+                local visCogBtn = MakeCogBtn(rgn, visCogShow, visCtrl, EllesmereUI.COGS_ICON)
+            end
         end
 
         -- Row 2: Always Show Buttons | Bar Opacity

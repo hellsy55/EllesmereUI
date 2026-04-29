@@ -405,7 +405,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- s: per-unit settings table
     local function ApplyPreviewPortraitShape(pFrame, s)
         if not pFrame then return end
-        local isDetached = (db.profile.portraitStyle or "attached") == "detached"
+        local isDetached = (s.portraitStyle or db.profile.portraitStyle or "attached") == "detached"
         local shape = s.detachedPortraitShape or "portrait"
         local showBorder = true
         local borderOpacity = (s.detachedPortraitBorderOpacity or 100) / 100
@@ -725,7 +725,7 @@ initFrame:SetScript("OnEvent", function(self)
         local hasPortraitSupport = (settings.showPortrait ~= nil or settings.portraitMode ~= nil)
         local portraitShownByUser = settings.showPortrait ~= false
         local showPortrait = hasPortraitSupport
-                         and (db.profile.portraitStyle or "attached") ~= "none"
+                         and (settings.portraitStyle or db.profile.portraitStyle or "attached") ~= "none"
                          and portraitShownByUser
         local frameW = settings.frameWidth or 181
         local healthH = settings.healthHeight or 46
@@ -746,7 +746,7 @@ initFrame:SetScript("OnEvent", function(self)
             castbarH = (settings.showCastbar ~= false) and (settings.castbarHeight or 14) or 0
         end
         local barH = healthH + initPpExtra
-        local isAttachedInit = (db.profile.portraitStyle or "attached") == "attached"
+        local isAttachedInit = (settings.portraitStyle or db.profile.portraitStyle or "attached") == "attached"
         local portraitW = (showPortrait and isAttachedInit) and barH or 0
         local totalW = frameW + portraitW
         local totalH = barH
@@ -1736,10 +1736,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Reposition name and health text based on settings
             side = s.portraitSide or unitSide[unitKey] or "left"
+            local pvPStyle = s.portraitStyle or db.profile.portraitStyle or "attached"
             local sp = hasPortraitSupport
-                   and (db.profile.portraitStyle or "attached") ~= "none"
+                   and pvPStyle ~= "none"
                    and s.showPortrait ~= false
-            local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+            local isAttached = pvPStyle == "attached"
             local fw = s.frameWidth or 181
             local hh = s.healthHeight or 46
             local ph = noPowerPreview and 0 or (s.powerHeight or 6)
@@ -3413,20 +3414,20 @@ initFrame:SetScript("OnEvent", function(self)
         sharedPortraitModeRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Portrait Mode", values=portraitModeValues2, order=portraitModeOrder2,
               getValue=function()
-                  return db.profile.portraitStyle or "attached"
+                  return SVal("portraitStyle", "attached")
               end,
               setValue=function(v)
-                  db.profile.portraitStyle = v
+                  SSet("portraitStyle", v)
                   -- Reset detached-only settings when leaving detached mode
                   if v ~= "detached" then
                       UNIT_DB_MAP[selectedUnit]().portraitSize = 0
                   end
                   UNIT_DB_MAP[selectedUnit]().showPortrait = (v ~= "none")
-                  ReloadAndUpdate(); UpdatePreview()
+                  UpdatePreview()
                   C_Timer.After(0, function() local rl = EllesmereUI._widgetRefreshList; if rl then for i = 1, #rl do rl[i]() end end end)
               end },
             { type="dropdown", text="Art Style", values=portraitArtValues, order=portraitArtOrder,
-              disabled=function() return (db.profile.portraitStyle or "attached") == "none" end,
+              disabled=function() return SVal("portraitStyle", "attached") == "none" end,
               disabledTooltip="Portrait Mode is set to None",
               getValue=function()
                   local v = SGet("portraitMode")
@@ -3461,6 +3462,45 @@ initFrame:SetScript("OnEvent", function(self)
                   UNIT_DB_MAP[selectedUnit]().showPortrait = true
                   ReloadAndUpdate(); UpdatePreview()
               end });  y = y - h
+        -- Sync icon: Portrait Mode (Style)
+        do
+            local rgn = sharedPortraitModeRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Portrait Mode to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().portraitStyle or "attached"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then
+                            UNIT_DB_MAP[key]().portraitStyle = v
+                            UNIT_DB_MAP[key]().showPortrait = (v ~= "none")
+                        end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().portraitStyle or "attached"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().portraitStyle or "attached") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().portraitStyle or "attached"
+                        for _, key in ipairs(checkedKeys) do
+                            UNIT_DB_MAP[key]().portraitStyle = v
+                            UNIT_DB_MAP[key]().showPortrait = (v ~= "none")
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
         -- Sync icon: Portrait Mode (Art Style)
         do
             local rgn = sharedPortraitModeRow._rightRegion
@@ -3501,14 +3541,14 @@ initFrame:SetScript("OnEvent", function(self)
         local sharedSizePosRow
         sharedSizePosRow, h = W:DualRow(parent, y,
             { type="slider", text="Size", min=-20, max=40, step=1,
-              disabled=function() return (db.profile.portraitStyle or "attached") ~= "detached" end,
+              disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
               disabledTooltip="Only available when Portrait Mode is Detached",
               getValue=function() return SVal("portraitSize", 0) end,
               setValue=function(v) SSet("portraitSize", v); UpdatePreview() end },
             { type="dropdown", text="Position", values=portraitLocationValues, order=portraitLocationOrder,
-              disabled=function() return (db.profile.portraitStyle or "attached") == "none" end,
+              disabled=function() return SVal("portraitStyle", "attached") == "none" end,
               disabledTooltip="Portrait Mode is set to None",
-              itemDisabled=function(v) return v == "top" and (db.profile.portraitStyle or "attached") == "attached" end,
+              itemDisabled=function(v) return v == "top" and SVal("portraitStyle", "attached") == "attached" end,
               itemDisabledTooltip=function(v) if v == "top" then return "Top position is only available in Detached mode" end end,
               getValue=function() return SVal("portraitSide", "left") end,
               setValue=function(v) SSet("portraitSide", v); UpdatePreview() end });  y = y - h
@@ -3598,12 +3638,12 @@ initFrame:SetScript("OnEvent", function(self)
             local posCogShow = posCogShowRaw
             local cogBtn = MakeCogBtn(posRgn, posCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
             local function UpdatePosCogState()
-                local pStyle = db.profile.portraitStyle or "attached"
+                local pStyle = SVal("portraitStyle", "attached")
                 if pStyle == "detached" then cogBtn:SetAlpha(0.4); cogBtn:Enable()
                 else cogBtn:SetAlpha(0.15); cogBtn:Disable() end
             end
             cogBtn:SetScript("OnEnter", function(self)
-                if (db.profile.portraitStyle or "attached") == "detached" then
+                if SVal("portraitStyle", "attached") == "detached" then
                     self:SetAlpha(0.7)
                 else
                     EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Portrait Mode is set to Detached"))
@@ -3619,14 +3659,14 @@ initFrame:SetScript("OnEvent", function(self)
         local sharedShapeBorderRow
         sharedShapeBorderRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Shape", values=detPortraitShapeValues, order=detPortraitShapeOrder,
-              disabled=function() return (db.profile.portraitStyle or "attached") ~= "detached" end,
+              disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
               disabledTooltip="This option is only available when Portrait Mode is Detached.",
               getValue=function() return SVal("detachedPortraitShape", "portrait") end,
               setValue=function(v)
                   SSet("detachedPortraitShape", v); UpdatePreview()
               end },
             { type="colorpicker", text="Shape Border",
-              disabled=function() return (db.profile.portraitStyle or "attached") ~= "detached" end,
+              disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
               disabledTooltip="Only available when Portrait Mode is Detached",
               getValue=function()
                   local c = SGet("detachedPortraitBorderColor")
@@ -3645,7 +3685,7 @@ initFrame:SetScript("OnEvent", function(self)
             local borderRgn = sharedShapeBorderRow._rightRegion
             local sw = borderRgn._control
             local function UpdateSwatchState()
-                local pStyle = db.profile.portraitStyle or "attached"
+                local pStyle = SVal("portraitStyle", "attached")
                 if pStyle ~= "detached" then
                     sw:SetAlpha(0.15); sw:Disable()
                     sw._disabledTooltip = "Only available when Portrait Mode is Detached"
@@ -3691,12 +3731,12 @@ initFrame:SetScript("OnEvent", function(self)
             local detShapeCogShow = detShapeCogShowRaw
             local cogBtn = MakeCogBtn(borderRgn, detShapeCogShow)
             local function UpdateDetShapeCogState()
-                local pStyle = db.profile.portraitStyle or "attached"
+                local pStyle = SVal("portraitStyle", "attached")
                 if pStyle == "detached" then cogBtn:SetAlpha(0.4); cogBtn:Enable()
                 else cogBtn:SetAlpha(0.15); cogBtn:Disable() end
             end
             cogBtn:SetScript("OnEnter", function(self)
-                if (db.profile.portraitStyle or "attached") == "detached" then
+                if SVal("portraitStyle", "attached") == "detached" then
                     self:SetAlpha(0.7)
                 else
                     EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Only available when Portrait Mode is Detached"))

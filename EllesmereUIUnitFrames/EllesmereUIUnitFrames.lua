@@ -101,6 +101,7 @@ local defaults = {
             btbClassIconX = 0,
             btbClassIconY = 0,
             showPortrait = true,
+            portraitStyle = "attached",
             portraitMode = "2d",
             classThemeStyle = "modern",
             portraitSide = "left",
@@ -124,8 +125,8 @@ local defaults = {
             lockCastbarToFrame = true,
             playerCastbarX = 0,
             playerCastbarY = 0,
-            playerCastbarWidth = 0,
-            playerCastbarHeight = 0,
+            playerCastbarWidth = 181,
+            playerCastbarHeight = 14,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
             castDurationSize = 10,
@@ -206,7 +207,7 @@ local defaults = {
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
-            castbarWidth = 0,
+            castbarWidth = 181,
             showCastbar = true,
             showCastIcon = true,
             castReverseFill = false,
@@ -291,6 +292,7 @@ local defaults = {
             btbClassIconX = 0,
             btbClassIconY = 0,
             showPortrait = true,
+            portraitStyle = "attached",
             portraitMode = "2d",
             classThemeStyle = "modern",
             portraitSide = "right",
@@ -365,8 +367,8 @@ local defaults = {
             classPowerBarY = 0,
             playerCastbarX = 0,
             playerCastbarY = 0,
-            playerCastbarWidth = 0,
-            playerCastbarHeight = 0,
+            playerCastbarWidth = 181,
+            playerCastbarHeight = 14,
             healthReverseFill = false,
             powerReverseFill = false,
         },
@@ -425,7 +427,7 @@ local defaults = {
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             castbarHeight = 14,
-            castbarWidth = 0,
+            castbarWidth = 160,
             showCastbar = true,
             showCastIcon = true,
             castReverseFill = false,
@@ -492,6 +494,7 @@ local defaults = {
             btbClassIconX = 0,
             btbClassIconY = 0,
             showPortrait = true,
+            portraitStyle = "attached",
             portraitMode = "2d",
             classThemeStyle = "modern",
             portraitSide = "right",
@@ -1254,7 +1257,7 @@ local MASK_INSETS = {
 -- uSettings: per-unit DB table
 -- unitToken: the unit this portrait belongs to (e.g. "player", "target")
 local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
-    local isDetached = (db.profile.portraitStyle or "attached") == "detached"
+    local isDetached = ((uSettings and uSettings.portraitStyle) or db.profile.portraitStyle or "attached") == "detached"
     local shape = (uSettings and uSettings.detachedPortraitShape) or "portrait"
     local showBorder = true
     local borderOpacity = ((uSettings and uSettings.detachedPortraitBorderOpacity) or 100) / 100
@@ -1689,8 +1692,9 @@ local function UpdateBordersForScale(frame, unit)
     local btbIsAtt = (btbPos == "top" or btbPos == "bottom")
     local btbH = (settings.bottomTextBar and btbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
 
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
+    local isAttached = pStyle == "attached"
     -- Use the actual side the frame was built with (stored on the frame) so that
     -- frames like the pet which hard-code "left" don't get treated as "right".
     local pSide = frame._portraitSide or settings.portraitSide or "right"
@@ -1863,8 +1867,9 @@ end
 
 local function GetFrameDimensions(unit)
     local settings = GetSettingsForUnit(unit)
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
+    local isAttached = pStyle == "attached"
     local pSizeAdj = settings.portraitSize or 0
     local btbPos = settings.btbPosition or "bottom"
     local btbIsAtt = (btbPos == "top" or btbPos == "bottom")
@@ -2432,12 +2437,12 @@ end
 
 local function CreatePortrait(frame, side, frameHeight, unit)
     local portraitHeight = frameHeight or 46
-    local portraitStyle = db.profile.portraitStyle or "attached"
+    local uKey = UnitToSettingsKey(unit)
+    local uSettings = uKey and db.profile[uKey]
+    local portraitStyle = (uSettings and uSettings.portraitStyle) or db.profile.portraitStyle or "attached"
     local isAttached = (portraitStyle == "attached")
 
     -- Per-unit size/offset adjustments
-    local uKey = UnitToSettingsKey(unit)
-    local uSettings = uKey and db.profile[uKey]
     local pSizeAdj = (uSettings and uSettings.portraitSize) or 0
     local pXOff = (uSettings and uSettings.portraitX) or 0
     local pYOff = (uSettings and uSettings.portraitY) or 0
@@ -2576,10 +2581,10 @@ local function CreatePortrait(frame, side, frameHeight, unit)
         self:ClearAllPoints()
         -- When detached, ApplyDetachedPortraitShape sets expanded offsets for mask fill.
         -- Re-apply those offsets instead of resetting to default.
-        local isDetNow = (db.profile.portraitStyle or "attached") == "detached"
+        local uKey2 = UnitToSettingsKey(unit)
+        local uS2 = uKey2 and db.profile[uKey2]
+        local isDetNow = ((uS2 and uS2.portraitStyle) or db.profile.portraitStyle or "attached") == "detached"
         if isDetNow and backdrop then
-            local uKey2 = UnitToSettingsKey(unit)
-            local uS2 = uKey2 and db.profile[uKey2]
             local shape2 = (uS2 and uS2.detachedPortraitShape) or "portrait"
             local insetPx2 = MASK_INSETS[shape2] or 17
             local bw2 = backdrop:GetWidth()
@@ -3120,8 +3125,9 @@ local function StyleFullFrame(frame, unit)
     local targetFrameHeight = playerTargetHeight + btbExtra
     local totalWidth = 0
     local portraitHeight = playerTargetHeight
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
+    local isAttached = pStyle == "attached"
 
     if unit == "player" then
         local pSide = settings.portraitSide or "left"
@@ -3424,8 +3430,9 @@ local function StyleFocusFrame(frame, unit)
     local focusFrameHeight = focusBarHeight + btbExtra
     local totalWidth = 0
     local portraitHeight = 0
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
+    local isAttached = pStyle == "attached"
     local pSide = settings.portraitSide or "right"
     -- For attached, "top" falls back to default side
     local effectiveSide = pSide
@@ -3637,8 +3644,8 @@ end
 
 local function StyleSimpleFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none"
-                         and settings.showPortrait ~= false
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local pSide = settings.portraitSide or "left"
     local totalWidth = settings.frameWidth
     local portraitOffset = 0  -- applied to Health TOPLEFT when portrait on left
@@ -3808,7 +3815,8 @@ end
 
 local function StylePetFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local pSide = settings.portraitSide or "left"
     local totalWidth = settings.frameWidth
     local portraitOffset = 0
@@ -3985,7 +3993,8 @@ local function StyleBossFrame(frame, unit)
     local bossBarHeight = settings.healthHeight + powerHeight
     local totalWidth = 0
     local portraitHeight = 0
-    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
+    local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     if not showPortrait then
         totalWidth = settings.frameWidth
     else
@@ -4912,7 +4921,8 @@ local function ReloadFrames()
                 end
             end
             local settings = GetSettingsForUnit(unit)
-            local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
+            local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+            local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
 
             -- Keep the cached portrait side in sync with user-edited settings.
             -- Downstream re-snap code (SnapLayout, health anchor math) reads
@@ -4925,7 +4935,7 @@ local function ReloadFrames()
             -- Re-anchor the attached-mode portrait backdrop when the side
             -- flips. Detached mode is re-anchored further below.
             if frame.Portrait and frame.Portrait.backdrop
-               and (db.profile.portraitStyle or "attached") == "attached"
+               and pStyle == "attached"
                and settings.portraitSide then
                 local bd = frame.Portrait.backdrop
                 bd:ClearAllPoints()
@@ -4973,7 +4983,7 @@ local function ReloadFrames()
                 -- Live-update detached portrait shape/mask/border
                 ApplyDetachedPortraitShape(frame.Portrait.backdrop, uSettings, unit)
                 -- Raise detached portrait above border/text/power
-                local isDetachedNow = (db.profile.portraitStyle or "attached") == "detached"
+                local isDetachedNow = pStyle == "detached"
                 if isDetachedNow then
                     frame.Portrait.backdrop:SetFrameLevel(frame:GetFrameLevel() + 15)
                 else
@@ -5004,7 +5014,7 @@ local function ReloadFrames()
                 local targetFrameHeight = playerTargetHeight + btbExtra
                 local portraitHeight = 0
                 local totalWidth = 0
-                local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+                local isAttached = pStyle == "attached"
                 local pSizeAdj = settings.portraitSize or 0
                 local pXOff = settings.portraitX or 0
                 local pYOff = settings.portraitY or 0
@@ -5741,7 +5751,8 @@ local function ReloadFrames()
                 local fBtbIsAtt = (fBtbPos == "top" or fBtbPos == "bottom")
                 local fBtbExtra = (settings.bottomTextBar and fBtbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
                 local totalWidth = 0
-                local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+                local focusPStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+                local isAttached = focusPStyle == "attached"
                 local pSide = settings.portraitSide or "right"
                 local effectiveSide = pSide
                 if isAttached and pSide == "top" then effectiveSide = "right" end
@@ -6075,8 +6086,8 @@ local function ReloadFrames()
             elseif unit == "pet" or unit == "targettarget" or unit == "focustarget" then
                 -- Pet, ToT and FoT all share the same simple-frame layout:
                 -- optional portrait on either side, health bar filling the rest.
-                local showMiniPortrait = (db.profile.portraitStyle or "attached") ~= "none"
-                                     and settings.showPortrait ~= false
+                local miniPStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+                local showMiniPortrait = miniPStyle ~= "none" and settings.showPortrait ~= false
                 local miniSide = settings.portraitSide or "left"
                 local miniW = settings.frameWidth
                 local miniLeftOff = 0
@@ -6898,8 +6909,9 @@ function InitializeFrames()
         local btbExtra = (settings.bottomTextBar and btbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
         local totalH = baseH + cpAboveH + btbExtra
 
-        local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and settings.showPortrait ~= false
-        local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+        local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+        local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
+        local isAttached = pStyle == "attached"
         local pSizeAdj = settings.portraitSize or 0
         if not isAttached then pSizeAdj = pSizeAdj + 10 end
         local adjPortraitH = baseH + cpAboveH + pSizeAdj
@@ -7378,7 +7390,7 @@ function InitializeFrames()
         if type(frame) ~= "table" or not frame.Portrait then -- skip non-frame entries
         elseif frame.Portrait.backdrop then
             local settings = GetSettingsForUnit(unit)
-            if settings.showPortrait == false or (db.profile.portraitStyle or "attached") == "none" then
+            if settings.showPortrait == false or (settings.portraitStyle or db.profile.portraitStyle or "attached") == "none" then
                 if frame:IsElementEnabled("Portrait") then
                     frame:DisableElement("Portrait")
                 end
@@ -7999,8 +8011,9 @@ function SetupOptionsPanel()
                     local unit = (k == "boss") and "boss1" or k
                     local s = GetSettingsForUnit(unit)
                     if not s then return end
-                    local showPortrait = (db.profile.portraitStyle or "attached") ~= "none" and s.showPortrait ~= false
-                    local isAttached = (db.profile.portraitStyle or "attached") == "attached"
+                    local wPStyle = s.portraitStyle or db.profile.portraitStyle or "attached"
+                    local showPortrait = wPStyle ~= "none" and s.showPortrait ~= false
+                    local isAttached = wPStyle == "attached"
                     if showPortrait and isAttached then
                         local pSizeAdj = s.portraitSize or 0
                         if not isAttached then pSizeAdj = pSizeAdj + 10 end
@@ -8183,7 +8196,6 @@ function SetupOptionsPanel()
                     return 100, 14
                 end,
                 setWidth = function(_, w)
-                    if not EllesmereUI._unlockActive then return end
                     local s = GetCBSettings()
                     if not s then return end
                     local newW = math.max(PP.Snap(w), 30)

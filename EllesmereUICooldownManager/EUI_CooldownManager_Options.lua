@@ -7502,6 +7502,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 clickFS:SetTextColor(ar, ag, ab, 1)
                 clickFS:SetText("Manage shown buffs through Blizzard CDM Settings")
+                clickBtn._fs = clickFS
                 clickBtn:SetScript("OnEnter", function() clickFS:SetTextColor(1, 1, 1, 1) end)
                 clickBtn:SetScript("OnLeave", function()
                     local r, g, b = EllesmereUI.GetAccentColor()
@@ -7514,7 +7515,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local clickBtn = self._buffInfoClick
                 clickBtn:ClearAllPoints()
                 clickBtn:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
-                clickBtn:SetWidth(self:GetWidth() - 20)
+                local fs = clickBtn._fs
+                local textW = fs and fs:GetStringWidth() or 0
+                clickBtn:SetWidth(math.max(textW + 4, 30))
                 clickBtn:Show()
                 -- Clean up hidden rows from previous implementation
                 if self._hiddenRows then

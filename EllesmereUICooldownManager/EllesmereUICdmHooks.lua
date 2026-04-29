@@ -1477,6 +1477,11 @@ local function CollectAndReanchor()
                             frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
                         end
                     end
+                    -- Ensure stack/charge text stays above our border overlay.
+                    -- Blizzard resets frame levels on pooled frames during zone
+                    -- transitions; re-raise cheaply here every collect pass.
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, 25) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, 25) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
@@ -1887,6 +1892,8 @@ local function CollectAndReanchor()
                     end
                     end
                     frame:Show()
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, 25) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, 25) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)

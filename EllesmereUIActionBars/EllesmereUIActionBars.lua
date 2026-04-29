@@ -294,6 +294,7 @@ local defaults = {
         showBlizzIconBg = false,
         blizzIconBgAlpha = 1,
         hideCastingAnimations = true,
+        mouseoverShowAll = false,
         barPositions = {},
         bars = {},
     },
@@ -1414,28 +1415,9 @@ end
 
 local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
 
--- Press-and-hold snippet: inlined into _childupdate-eab-page handlers.
--- Checks if the current action slot's spell supports press-and-hold casting
--- (channeled abilities, Evoker empowered spells) and sets the secure
--- attributes that SecureActionButtonTemplate needs for release-casting.
-local RELEASE_CASTING_SNIPPET = [[
-    do
-        local _act = self:GetAttribute("action")
-        if _act and _act > 0 then
-            local _aType, _id, _sub = GetActionInfo(_act)
-            local _sid
-            if _aType == "spell" then _sid = _id
-            elseif _aType == "macro" and _sub == "spell" then _sid = _id end
-            if _sid and IsPressHoldReleaseSpell and IsPressHoldReleaseSpell(_sid) then
-                self:SetAttribute("pressAndHoldAction", true)
-                self:SetAttribute("typerelease", "actionrelease")
-            elseif self:GetAttribute("typerelease") then
-                self:SetAttribute("pressAndHoldAction", nil)
-                self:SetAttribute("typerelease", nil)
-            end
-        end
-    end
-]]
+-- Keybinds now route to native ACTIONBUTTON commands via SetOverrideBinding,
+-- so the engine handles press-and-hold/empowered spells natively. No need
+-- for pressAndHoldAction/typerelease attribute management on our buttons.
 
 -- Safe API wrappers: 12.0.5 may move these globals to C_ActionBar.
 -- Stored on EAB_VTABLE to avoid 200-local Lua 5.1 limit.
@@ -2093,14 +2075,13 @@ local function SetupBar(info, skipProtected)
                 end
                 -- Install childupdate so the action attr recalculates on
                 -- page changes. Base index baked into the snippet.
-                -- Also runs UpdateReleaseCasting after the action changes.
                 if key == "MainBar" and not btn:GetAttribute("_childupdate-eab-page") then
                     btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. RELEASE_CASTING_SNIPPET)
+                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i))
                 elseif frame._eabPagingInstalled
                        and not btn:GetAttribute("_childupdate-eab-page") then
                     btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. RELEASE_CASTING_SNIPPET)
+                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i))
                 end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
@@ -4039,7 +4020,6 @@ function EAB_VTABLE.MainBarPageSync.InstallButton(btn)
         local page = tonumber(message) or 1
         local slot = %d + (page - 1) * %d
         self:SetAttribute("action", slot)
-        ]] .. RELEASE_CASTING_SNIPPET .. [[
         local visible = self:GetAttribute("eab-withincutoff") ~= 0
 
         if visible and self:GetAttribute("eab-showempty") == 0 then
@@ -4405,6 +4385,8 @@ function EAB_VTABLE.Hover.GetState(barKey, frame)
     return state
 end
 
+ns._broadcastingMouseover = false
+
 function EAB_VTABLE.Hover.FadeIn(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
@@ -4413,6 +4395,16 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
         StopFade(state.frame)
         FadeTo(state.frame, targetAlpha, s.mouseoverSpeed or 0.15)
         if barKey == "MainBar" then SyncPagingAlpha(targetAlpha) end
+        -- Broadcast to all other mouseover-enabled bars
+        if not ns._broadcastingMouseover and EAB.db.profile.mouseoverShowAll then
+            ns._broadcastingMouseover = true
+            for otherKey, otherState in pairs(hoverStates) do
+                if otherKey ~= barKey then
+                    EAB_VTABLE.Hover.FadeIn(otherKey, otherState)
+                end
+            end
+            ns._broadcastingMouseover = false
+        end
     end
 end
 
@@ -4428,6 +4420,17 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     end
 end
 
+-- Check if any mouseover-enabled bar is currently hovered.
+function ns.AnyMouseoverBarHovered()
+    for otherKey, otherState in pairs(hoverStates) do
+        if otherState.isHovered then
+            local os = EAB_VTABLE.Hover.GetSettings(otherKey)
+            if os and os.mouseoverEnabled then return true end
+        end
+    end
+    return false
+end
+
 function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
     opts = opts or {}
 
@@ -4441,7 +4444,17 @@ function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
         if state.isHovered then return end
         if _quickKeybindState.open then return end
         if opts.blockFadeOut and opts.blockFadeOut(state) then return end
+        -- When showing all bars together, keep visible while any bar is hovered
+        if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then return end
         EAB_VTABLE.Hover.FadeOut(barKey, state)
+        -- Broadcast fade-out to all other mouseover bars
+        if EAB.db.profile.mouseoverShowAll then
+            for otherKey, otherState in pairs(hoverStates) do
+                if otherKey ~= barKey and not otherState.isHovered then
+                    EAB_VTABLE.Hover.FadeOut(otherKey, otherState)
+                end
+            end
+        end
     end)
 end
 
@@ -4952,6 +4965,8 @@ function EAB:RefreshRuntimeVisibility()
                     end
                     if barFrames[key] and frame == barFrames[key] then
                         SafeEnableMouseMotionOnly(frame, not s.clickThrough or s.mouseoverEnabled)
+                    elseif info.noManagedVisibility then
+                        -- skip: Blizzard owns mouse state (e.g. QueueStatusButton)
                     elseif info.isBlizzardMovable or info.blizzOwnedVisibility then
                         SafeEnableMouse(frame, false)
                     else
@@ -5942,22 +5957,28 @@ end
 -------------------------------------------------------------------------------
 local _bindState = { housingCleared = false }
 
+-- Binding owner frame: single frame owns all override bindings so they
+-- can be cleared/reapplied as a unit. Bindings route to native commands
+-- (ACTIONBUTTON1, etc.) so the engine's hold-to-cast and empowered spell
+-- systems work natively without pressAndHoldAction/typerelease attrs.
+local _eabBindOwner = CreateFrame("Frame", "EAB_BindOwner", UIParent)
+
 local function UpdateKeybinds()
     if InCombatLockdown() then return end
+    ClearOverrideBindings(_eabBindOwner)
     for _, info in ipairs(BAR_CONFIG) do
         local prefix = BINDING_MAP[info.key]
         local btns = barButtons[info.key]
         if prefix and btns then
             for i, btn in ipairs(btns) do
                 if btn then
-                    ClearOverrideBindings(btn)
                     local cmd = prefix .. i
                     local k1, k2 = GetBindingKey(cmd)
                     if k1 then
-                        SetOverrideBindingClick(btn, false, k1, btn:GetName(), "LeftButton")
+                        SetOverrideBinding(_eabBindOwner, false, k1, cmd)
                     end
                     if k2 then
-                        SetOverrideBindingClick(btn, false, k2, btn:GetName(), "LeftButton")
+                        SetOverrideBinding(_eabBindOwner, false, k2, cmd)
                     end
                 end
             end
@@ -6112,14 +6133,7 @@ if IsHouseEditorActive then
             if _bindState.housingCleared then return end
             _bindState.housingCleared = true
             if not InCombatLockdown() then
-                for _, info in ipairs(BAR_CONFIG) do
-                    local btns = barButtons[info.key]
-                    if btns then
-                        for _, btn in ipairs(btns) do
-                            if btn then ClearOverrideBindings(btn) end
-                        end
-                    end
-                end
+                ClearOverrideBindings(_eabBindOwner)
             end
         else
             -- House editor closed restore our override bindings
@@ -6900,28 +6914,6 @@ function EAB:FinishSetup()
                 if mbBtns then
                     for i, btn in ipairs(mbBtns) do
                         btn:SetAttribute("action", i + (curPage - 1) * 12)
-                    end
-                end
-            end
-            -- Set initial press-and-hold state for all action buttons
-            for _, info in ipairs(BAR_CONFIG) do
-                if not info.isStance and not info.isPetBar then
-                    local btns = barButtons[info.key]
-                    if btns then
-                        for _, btn in ipairs(btns) do
-                            local act = btn:GetAttribute("action")
-                            if act and act > 0 then
-                                local aType, id, sub = GetActionInfo(act)
-                                local sid
-                                if aType == "spell" then sid = id
-                                elseif aType == "macro" and sub == "spell" then sid = id end
-                                local isPH = sid and C_Spell and C_Spell.IsPressHoldReleaseSpell and C_Spell.IsPressHoldReleaseSpell(sid)
-                                if isPH then
-                                    btn:SetAttribute("pressAndHoldAction", true)
-                                    btn:SetAttribute("typerelease", "actionrelease")
-                                end
-                            end
-                        end
                     end
                 end
             end

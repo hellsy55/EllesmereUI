@@ -2081,6 +2081,15 @@ BuildCDMBar = function(barIndex)
         return
     end
 
+    -- Cursor-anchored bar: if already tracking and still configured for
+    -- mouse, skip the teardown+rebuild cycle. The OnUpdate is already
+    -- running and repositioning correctly; tearing it down causes a
+    -- 1-frame blink to BOTTOMLEFT 0,0 on every FullCDMRebuild.
+    if frame._mouseTrack and barData.anchorTo == "mouse" then
+        frame:Show()
+        return
+    end
+
     -- Position
     local anchorKey = barData.anchorTo
     if anchorKey == "mouse" then

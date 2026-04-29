@@ -1236,7 +1236,8 @@ do
         -- with a wrapper that skips the call when size is restricted.
         if container.SetupTextureCoordinates then
             container.SetupTextureCoordinates = function(self)
-                local w, h = self:GetSize()
+                local ok, w, h = pcall(self.GetSize, self)
+                if not ok then return end
                 if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return end
                 BackdropTemplateMixin.SetupTextureCoordinates(self)
             end
@@ -7181,7 +7182,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.8"
+EllesmereUI.VERSION = "7.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
