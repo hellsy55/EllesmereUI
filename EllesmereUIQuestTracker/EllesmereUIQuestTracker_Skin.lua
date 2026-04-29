@@ -27,10 +27,6 @@ local function GetTitleRGB()
     local c = EQT.DB()
     return c.titleR or 1.0, c.titleG or 0.910, c.titleB or 0.471
 end
-local function GetQuestRGB()
-    local c = EQT.DB()
-    return c.questR or 0.722, c.questG or 0.722, c.questB or 0.722
-end
 local function GetCompletedRGB()
     local c = EQT.DB()
     return c.completedR or 0.251, c.completedG or 1.0, c.completedB or 0.349
@@ -122,8 +118,6 @@ local _eqtFontRegistry = setmetatable({}, { __mode = "k" })
 
 -- Reapplies EUI font path with explicit size + outline + shadow.
 -- If `size` is nil, preserves Blizzard's current size.
-local _eqtSetStateHooked = setmetatable({}, { __mode = "k" })
-
 local function StyleFontStringSized(fs, size)
     if not fs or not fs.GetFont then return end
     if not size then
@@ -366,37 +360,11 @@ end
 -- FontString according to its completion state each refresh via a hook on
 -- the block's GetLine / AddObjective path where available.
 -------------------------------------------------------------------------------
-local function ApplyObjectiveLineColor(line)
-    if not line or not line.Text then return end
-    local completed = line.state == "completed" or line.Dash and line.Dash:GetAlpha() == 0
-    if completed then
-        local r, g, b = GetCompletedRGB()
-        line.Text:SetTextColor(r, g, b)
-        if line.Dash then line.Dash:SetTextColor(r, g, b) end
-    else
-        local r, g, b = GetQuestRGB()
-        line.Text:SetTextColor(r, g, b)
-        if line.Dash then line.Dash:SetTextColor(r, g, b) end
-    end
-end
-
 local function StyleObjectiveLine(line)
     if not line or not line.Text then return end
     StyleObjectiveFS(line.Text)
     if line.Dash then StyleObjectiveFS(line.Dash) end
     if line.GetRegions then StyleAllFontStrings(line) end
-
-    ApplyObjectiveLineColor(line)
-
-    -- Blizzard calls line:SetState after AddObjective, overwriting our
-    -- color. Hook it so we re-tint every time Blizzard changes state.
-    -- Guard uses external table to avoid writing properties onto Blizzard frames.
-    if line.SetState and not _eqtSetStateHooked[line] then
-        _eqtSetStateHooked[line] = true
-        hooksecurefunc(line, "SetState", function(self)
-            ApplyObjectiveLineColor(self)
-        end)
-    end
 end
 
 -------------------------------------------------------------------------------
