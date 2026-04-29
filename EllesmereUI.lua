@@ -1638,37 +1638,108 @@ local function ResolveFontName(fontName)
 end
 EllesmereUI.ResolveFontName = ResolveFontName
 
--- Get the resolved font path for an addon key (addonKey is ignored — always uses global font)
+-- Per-module font overrides: all state stored on the EllesmereUI table
+-- to stay under the 200-local / 60-upvalue Lua 5.1 caps.
+EllesmereUI._addonKeyToFolder = {
+    actionBars   = "EllesmereUIActionBars",
+    nameplates   = "EllesmereUINameplates",
+    unitFrames   = "EllesmereUIUnitFrames",
+    cdm          = "EllesmereUICooldownManager",
+    resourceBars = "EllesmereUIResourceBars",
+    auraBuff     = "EllesmereUIAuraBuffReminders",
+    extras       = "EllesmereUIQoL",
+    friends      = "EllesmereUIFriends",
+    minimap      = "EllesmereUIMinimap",
+    chat         = "EllesmereUIChat",
+    questTracker = "EllesmereUIQuestTracker",
+    mythicTimer  = "EllesmereUIMythicTimer",
+    blizzardSkin = "EllesmereUIBlizzardSkin",
+    damageMeters = "EllesmereUIDamageMeters",
+}
+EllesmereUI._moduleFontCache = {}
+EllesmereUI._moduleFontCacheVer = 0
+
+-- Resolve an addonKey to a moduleFonts entry (or nil for global).
+-- Cached per-key for zero-alloc repeated lookups.
+function EllesmereUI.GetModuleFontEntry(addonKey)
+    if not addonKey then return nil end
+    local db = EllesmereUI.GetFontsDB()
+    local mfList = db.moduleFonts
+    if not mfList or #mfList == 0 then return nil end
+
+    local cache = EllesmereUI._moduleFontCache
+    local ver = #mfList
+    if ver ~= EllesmereUI._moduleFontCacheVer then
+        wipe(cache)
+        EllesmereUI._moduleFontCacheVer = ver
+    end
+
+    local cached = cache[addonKey]
+    if cached ~= nil then
+        return cached ~= false and cached or nil
+    end
+
+    local folder = EllesmereUI._addonKeyToFolder[addonKey] or addonKey
+
+    for _, entry in ipairs(mfList) do
+        if entry.folder == folder then
+            cache[addonKey] = entry
+            return entry
+        end
+    end
+    cache[addonKey] = false
+    return nil
+end
+
+-- Get the resolved font path for an addon key.
+-- Falls back to the global font when no per-module override is configured.
 function EllesmereUI.GetFontPath(addonKey)
     local db = EllesmereUI.GetFontsDB()
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    if override and override.font and override.font ~= "__global" then
+        return ResolveFontName(override.font)
+    end
     return ResolveFontName(db.global or "Expressway")
 end
 
--- Get the font name (not path) for an addon key (addonKey is ignored — always uses global font)
+-- Get the font name (not path) for an addon key.
 function EllesmereUI.GetFontName(addonKey)
     local db = EllesmereUI.GetFontsDB()
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    if override and override.font and override.font ~= "__global" then
+        return override.font
+    end
     return db.global or "Expressway"
 end
 
--- Get the WoW font flag string for the current global outline mode.
--- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow — caller should set shadow offset)
-function EllesmereUI.GetFontOutlineFlag()
+-- Get the WoW font flag string for the outline mode.
+-- Pass an addonKey to get per-module override; nil returns the global setting.
+-- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow)
+function EllesmereUI.GetFontOutlineFlag(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    local mode = db.outlineMode or "none"
-    if mode == "outline" then
-        return "OUTLINE"
-    elseif mode == "thick" then
-        return "THICKOUTLINE"
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local mode
+    if override and override.outline and override.outline ~= "__global" then
+        mode = override.outline
     else
-        return ""
+        mode = db.outlineMode or "none"
     end
+    if mode == "outline" then return "OUTLINE"
+    elseif mode == "thick" then return "THICKOUTLINE"
+    else return "" end
 end
 
--- Returns true when the current outline mode uses drop shadow instead of outline.
--- Callers that set SetShadowOffset should check this to decide whether to show shadow.
-function EllesmereUI.GetFontUseShadow()
+-- Returns true when the outline mode uses drop shadow instead of outline.
+-- Pass an addonKey to get per-module override; nil returns the global setting.
+function EllesmereUI.GetFontUseShadow(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    local mode = db.outlineMode or "none"
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local mode
+    if override and override.outline and override.outline ~= "__global" then
+        mode = override.outline
+    else
+        mode = db.outlineMode or "none"
+    end
     return mode == "none" or mode == "shadow"
 end
 
@@ -7110,7 +7181,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.7"
+EllesmereUI.VERSION = "7.2.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

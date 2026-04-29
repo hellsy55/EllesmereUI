@@ -1229,7 +1229,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Castbar -- always created for player (toggled in Update); conditional for others
         local castbar, castFill, castNameFS2, castIconFrame
         local shouldCreateCastbar = (unitKey == "player") or (castbarH > 0)
-        local castTimeFS
+        local castTimeFS, castTargetFS
         if shouldCreateCastbar then
             local initCH = (unitKey == "player") and (castbarH > 0 and castbarH or 14) or castbarH
             castbar = CreateFrame("Frame", nil, pf)
@@ -1271,21 +1271,53 @@ initFrame:SetScript("OnEvent", function(self)
                 castSpellIcon = 136197  -- Shadow Bolt icon as generic
             end
 
+            -- Three-zone layout: all zones truncate (no word wrap)
             castNameFS2 = castbar:CreateFontString(nil, "OVERLAY")
             SetPVFont(castNameFS2, PREVIEW_FONT, 11)
-            PP.Point(castNameFS2, "LEFT", castbar, "LEFT", 5, 1)
             castNameFS2:SetJustifyH("LEFT")
+            castNameFS2:SetWordWrap(false)
+            castNameFS2:SetMaxLines(1)
             castNameFS2:SetTextColor(1, 1, 1)
             castNameFS2:SetText(castSpellName)
 
-            -- Cast timer text on the right (matching real castbar.Time)
             castTimeFS = castbar:CreateFontString(nil, "OVERLAY")
             SetPVFont(castTimeFS, PREVIEW_FONT, 11)
-            PP.Point(castTimeFS, "RIGHT", castbar, "RIGHT", -5, 0)
             castTimeFS:SetJustifyH("RIGHT")
+            castTimeFS:SetWordWrap(false)
+            castTimeFS:SetMaxLines(1)
             castTimeFS:SetTextColor(1, 1, 1)
             local spellCastTime = (_previewCastSpell and _previewCastSpell.castTime) or 3.0
             castTimeFS:SetText(string.format("%.1f", spellCastTime * (1 - (_previewCastFill or 0.6))))
+
+            if unitKey ~= "player" then
+                castTargetFS = castbar:CreateFontString(nil, "OVERLAY")
+                SetPVFont(castTargetFS, PREVIEW_FONT, 10)
+                castTargetFS:SetJustifyH("RIGHT")
+                castTargetFS:SetWordWrap(false)
+                castTargetFS:SetMaxLines(1)
+                castTargetFS:SetText(UnitName("player") or "Player")
+                local _, ct = UnitClass("player")
+                local cc = ct and RAID_CLASS_COLORS and RAID_CLASS_COLORS[ct]
+                if cc then
+                    castTargetFS:SetTextColor(cc.r, cc.g, cc.b)
+                else
+                    castTargetFS:SetTextColor(1, 1, 1)
+                end
+            end
+
+            -- Initial three-zone positioning
+            do
+                local barW = castbar:GetWidth() or totalW
+                local timerW = 11 * 2.2
+                castNameFS2:SetWidth(barW * 0.42)
+                castNameFS2:SetPoint("LEFT", castbar, "LEFT", 5, 1)
+                castTimeFS:SetWidth(timerW)
+                castTimeFS:SetPoint("RIGHT", castbar, "RIGHT", -3, 0)
+                if castTargetFS then
+                    castTargetFS:SetWidth(barW * 0.42)
+                    castTargetFS:SetPoint("RIGHT", castbar, "RIGHT", -3 - timerW, 0)
+                end
+            end
 
             -- Cast spell icon -- always on the LEFT side of the castbar (matches real addon)
             -- Uses plain frame + edge textures instead of BackdropTemplate for pixel-perfect rendering
@@ -2149,13 +2181,43 @@ initFrame:SetScript("OnEvent", function(self)
                         local snC = s.castSpellNameColor or { r=1, g=1, b=1 }
                         castNameFS2:SetTextColor(snC.r, snC.g, snC.b)
                     end
+                    local showDur = s.showCastDuration ~= false
                     if castTimeFS then
                         local spCastTime = (_previewCastSpell and _previewCastSpell.castTime) or 3.0
                         castTimeFS:SetText(string.format("%.1f", spCastTime * (1 - (_previewCastFill or 0.6))))
-                        local dtSz = s.castDurationSize or 11
+                        local dtSz = s.castDurationSize or 10
                         castTimeFS:SetFont(PREVIEW_FONT, dtSz, GetUFOptOutline())
                         local dtC = s.castDurationColor or { r=1, g=1, b=1 }
                         castTimeFS:SetTextColor(dtC.r, dtC.g, dtC.b)
+                        castTimeFS:SetShown(showDur)
+                    end
+                    local showTgt = s.showCastTarget ~= false
+                    if castTargetFS then
+                        local tsSz = s.castSpellTargetSize or 11
+                        castTargetFS:SetFont(PREVIEW_FONT, tsSz, GetUFOptOutline())
+                        local tsC = s.castSpellTargetColor or { r=1, g=1, b=1 }
+                        castTargetFS:SetTextColor(tsC.r, tsC.g, tsC.b)
+                        castTargetFS:SetShown(showTgt)
+                        -- Three-zone layout with offsets
+                        local barW = castbar:GetWidth()
+                        if barW and barW > 0 then
+                            local timerW = (s.castDurationSize or 10) * 2.2
+                            local snX = s.castSpellNameX or 0
+                            local snY = s.castSpellNameY or 0
+                            local dtX = s.castDurationX or 0
+                            local dtY = s.castDurationY or 0
+                            local tgX = s.castSpellTargetX or 0
+                            local tgY = s.castSpellTargetY or 0
+                            castNameFS2:SetWidth(barW * 0.42)
+                            castTargetFS:SetWidth(barW * 0.42)
+                            castTimeFS:SetWidth(timerW)
+                            castNameFS2:ClearAllPoints()
+                            castNameFS2:SetPoint("LEFT", castbar, "LEFT", 5 + snX, 1 + snY)
+                            castTargetFS:ClearAllPoints()
+                            castTargetFS:SetPoint("RIGHT", castbar, "RIGHT", -3 - timerW + tgX, tgY)
+                            castTimeFS:ClearAllPoints()
+                            castTimeFS:SetPoint("RIGHT", castbar, "RIGHT", -3 + dtX, dtY)
+                        end
                     end
                     castbar:ClearAllPoints()
                     local pvBtbVisible = (btbFrame and s.bottomTextBar and btbPos == "bottom")
@@ -2905,6 +2967,10 @@ initFrame:SetScript("OnEvent", function(self)
         castSpellNameColor   = { player=true, target=true, focus=true },
         castDurationSize     = { player=true, target=true, focus=true },
         castDurationColor    = { player=true, target=true, focus=true },
+        castSpellTargetSize  = { player=true, target=true, focus=true },
+        castSpellTargetColor = { player=true, target=true, focus=true },
+        showCastDuration     = { player=true, target=true, focus=true },
+        showCastTarget       = { player=true, target=true, focus=true },
         castbarFillColor     = { player=true, target=true, focus=true },
         showClassPowerBar    = { player=true },
         lockClassPowerToFrame= { player=true },
@@ -4835,6 +4901,74 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
+        -- Row 5: Power Type override (player-only, spec-dependent)
+        do
+            local _, playerClass = UnitClass("player")
+            -- Specs that offer an alternative power type on the player power bar.
+            -- { defaultLabel, altLabel, altPowerType (Enum.PowerType value to force) }
+            -- For Shadow Priest the alt is "no override" (nil) so UnitPowerType returns Insanity.
+            local SPEC_POWER_ALTS = {
+                DRUID  = {
+                    [1] = { "Astral Power", "Mana",     0 },   -- Balance
+                    [2] = { "Energy",       "Mana",     0 },   -- Feral
+                    [3] = { "Rage",         "Mana",     0 },   -- Guardian
+                },
+                PRIEST = {
+                    [3] = { "Mana",         "Insanity", nil },  -- Shadow (default is our Mana override)
+                },
+                SHAMAN = {
+                    [1] = { "Maelstrom",    "Mana",     0 },   -- Elemental
+                },
+            }
+            local classAlts = SPEC_POWER_ALTS[playerClass]
+            if classAlts then
+                local spec = GetSpecialization and GetSpecialization()
+                local data = spec and classAlts[spec]
+                local ptValues = {}
+                local ptOrder  = { "default", "alt" }
+                if data then
+                    ptValues["default"] = data[1]
+                    ptValues["alt"]     = data[2]
+                end
+
+                local sharedPowerRow5
+                sharedPowerRow5, h = W:DualRow(parent, y,
+                    { type="dropdown", text="Power Type",
+                      values = ptValues, order = ptOrder,
+                      getValue = function()
+                          local s = GetSpecialization and GetSpecialization()
+                          if not s or not classAlts[s] then return "default" end
+                          local ov = UNIT_DB_MAP["player"]().powerTypeOverride
+                          if ov and ov[s] then return "alt" end
+                          return "default"
+                      end,
+                      setValue = function(v)
+                          local s = GetSpecialization and GetSpecialization()
+                          if not s then return end
+                          local pdb = UNIT_DB_MAP["player"]()
+                          if v == "alt" then
+                              if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
+                              pdb.powerTypeOverride[s] = true
+                          else
+                              if pdb.powerTypeOverride then pdb.powerTypeOverride[s] = nil end
+                          end
+                          ReloadAndUpdate()
+                      end },
+                    { type="label", text="" }); y = y - h
+
+                local function UpdatePowerTypeRow()
+                    local s = GetSpecialization and GetSpecialization()
+                    if selectedUnit == "player" and s and classAlts[s] then
+                        sharedPowerRow5:Show()
+                    else
+                        sharedPowerRow5:Hide()
+                    end
+                end
+                RegisterWidgetRefresh(UpdatePowerTypeRow)
+                UpdatePowerTypeRow()
+            end
+        end
+
         _, h = W:Spacer(parent, y, 20); y = y - h
 
         -------------------------------------------------------------------
@@ -5133,6 +5267,25 @@ initFrame:SetScript("OnEvent", function(self)
             snSw:SetPoint("RIGHT", snRgn._lastInline or snRgn._control, "LEFT", -12, 0)
             snRgn._lastInline = snSw
         end
+        -- Inline cog on Spell Name Size: X/Y offsets
+        do
+            local snCogRgn = castTextRow._leftRegion
+            local _, snCogShowRaw = EllesmereUI.BuildCogPopup({
+                title = "Spell Name Position",
+                rows = {
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castSpellNameX", 0) end,
+                      set=function(v) SSetSupported("castSpellNameX", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castSpellNameY", 0) end,
+                      set=function(v) SSetSupported("castSpellNameY", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            local snCogBtn = MakeCogBtn(snCogRgn, snCogShowRaw)
+            snCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            snCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            snCogBtn:SetScript("OnClick", function(self) snCogShowRaw(self) end)
+        end
         -- Inline color swatch on Duration Size
         do
             local dtRgn = castTextRow._rightRegion
@@ -5149,6 +5302,32 @@ initFrame:SetScript("OnEvent", function(self)
             dtSw:SetPoint("RIGHT", dtRgn._lastInline or dtRgn._control, "LEFT", -12, 0)
             dtRgn._lastInline = dtSw
         end
+        -- Inline cog on Duration Size: toggle + X/Y offsets
+        do
+            local dtCogRgn = castTextRow._rightRegion
+            local _, dtCogShowRaw = EllesmereUI.BuildCogPopup({
+                title = "Duration",
+                rows = {
+                    { type="toggle", label="Show Duration",
+                      get=function() return SValSupported("showCastDuration", true) ~= false end,
+                      set=function(v)
+                          SSetSupported("showCastDuration", v)
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castDurationX", 0) end,
+                      set=function(v) SSetSupported("castDurationX", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castDurationY", 0) end,
+                      set=function(v) SSetSupported("castDurationY", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            local dtCogBtn = MakeCogBtn(dtCogRgn, dtCogShowRaw)
+            dtCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            dtCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            dtCogBtn:SetScript("OnClick", function(self) dtCogShowRaw(self) end)
+        end
+
         -- Sync icons: Spell Name Size + Color (left) and Duration Size + Color (right)
         do
             local rgn = castTextRow._leftRegion
@@ -5199,7 +5378,7 @@ initFrame:SetScript("OnEvent", function(self)
                 region  = rgn,
                 tooltip = "Apply Duration Size and Color to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 11
+                    local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 10
                     local c = UNIT_DB_MAP[selectedUnit]().castDurationColor
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         UNIT_DB_MAP[key]().castDurationSize = v
@@ -5208,10 +5387,10 @@ initFrame:SetScript("OnEvent", function(self)
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 11
+                    local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 10
                     local c = UNIT_DB_MAP[selectedUnit]().castDurationColor
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().castDurationSize or 11) ~= v then return false end
+                        if (UNIT_DB_MAP[key]().castDurationSize or 10) ~= v then return false end
                         local kc = UNIT_DB_MAP[key]().castDurationColor
                         if c and kc then
                             if kc.r ~= c.r or kc.g ~= c.g or kc.b ~= c.b then return false end
@@ -5225,7 +5404,7 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 11
+                        local v = UNIT_DB_MAP[selectedUnit]().castDurationSize or 10
                         local c = UNIT_DB_MAP[selectedUnit]().castDurationColor
                         for _, key in ipairs(checkedKeys) do
                             UNIT_DB_MAP[key]().castDurationSize = v
@@ -5237,12 +5416,101 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 4: Reverse Fill + empty
-        _, h = W:DualRow(parent, y,
+        -- Row 4: Spell Target Size (with inline color swatch) | Reverse Fill
+        local castTargetRow
+        castTargetRow, h = W:DualRow(parent, y,
+            { type="slider", text="Spell Target Size", min=6, max=20, step=1,
+              getValue=function() return SValSupported("castSpellTargetSize", 10) end,
+              setValue=function(v) SSetSupported("castSpellTargetSize", v); ReloadAndUpdate(); UpdatePreview() end },
             { type="toggle", text="Reverse Fill",
               getValue=function() return SValSupported("castReverseFill", false) end,
-              setValue=function(v) SSetSupported("castReverseFill", v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="label", text="" });  y = y - h
+              setValue=function(v) SSetSupported("castReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+        -- Inline color swatch on Spell Target Size
+        do
+            local trgRgn = castTargetRow._leftRegion
+            local trgSw = EllesmereUI.BuildColorSwatch(trgRgn, trgRgn:GetFrameLevel() + 5,
+                function()
+                    local c = SGetSupported("castSpellTargetColor")
+                    c = c or { r=1, g=1, b=1 }
+                    return c.r, c.g, c.b, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().castSpellTargetColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            trgSw:SetPoint("RIGHT", trgRgn._lastInline or trgRgn._control, "LEFT", -12, 0)
+            trgRgn._lastInline = trgSw
+        end
+        -- Inline cog on Spell Target Size: toggle + X/Y offsets
+        do
+            local tgCogRgn = castTargetRow._leftRegion
+            local _, tgCogShowRaw = EllesmereUI.BuildCogPopup({
+                title = "Spell Target",
+                rows = {
+                    { type="toggle", label="Show Spell Target",
+                      get=function() return SValSupported("showCastTarget", true) ~= false end,
+                      set=function(v)
+                          SSetSupported("showCastTarget", v)
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castSpellTargetX", 0) end,
+                      set=function(v) SSetSupported("castSpellTargetX", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return SValSupported("castSpellTargetY", 0) end,
+                      set=function(v) SSetSupported("castSpellTargetY", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            local tgCogBtn = MakeCogBtn(tgCogRgn, tgCogShowRaw)
+            tgCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            tgCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            tgCogBtn:SetScript("OnClick", function(self) tgCogShowRaw(self) end)
+        end
+
+        -- Sync icons: Spell Target Size + Color (left)
+        do
+            local rgn = castTargetRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Spell Target Size and Color to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().castSpellTargetSize or 11
+                    local c = UNIT_DB_MAP[selectedUnit]().castSpellTargetColor
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        UNIT_DB_MAP[key]().castSpellTargetSize = v
+                        if c then UNIT_DB_MAP[key]().castSpellTargetColor = { r=c.r, g=c.g, b=c.b } end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().castSpellTargetSize or 11
+                    local c = UNIT_DB_MAP[selectedUnit]().castSpellTargetColor
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().castSpellTargetSize or 11) ~= v then return false end
+                        local kc = UNIT_DB_MAP[key]().castSpellTargetColor
+                        if c and kc then
+                            if kc.r ~= c.r or kc.g ~= c.g or kc.b ~= c.b then return false end
+                        elseif c ~= kc then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().castSpellTargetSize or 11
+                        local c = UNIT_DB_MAP[selectedUnit]().castSpellTargetColor
+                        for _, key in ipairs(checkedKeys) do
+                            UNIT_DB_MAP[key]().castSpellTargetSize = v
+                            if c then UNIT_DB_MAP[key]().castSpellTargetColor = { r=c.r, g=c.g, b=c.b } end
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -5970,8 +6238,8 @@ initFrame:SetScript("OnEvent", function(self)
                   C_Timer.After(0, function() local rl = EllesmereUI._widgetRefreshList; if rl then for i = 1, #rl do rl[i]() end end end)
               end },
             { type="multiSwatch", text="Fill Color",
-              disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
-              disabledTooltip="Enable Class Resource is set to None",
+              disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
+              disabledTooltip="Class Resource must be set to Modern",
               swatches = {
                 { tooltip = "Custom Colored",
                   hasAlpha = false,
@@ -6032,7 +6300,7 @@ initFrame:SetScript("OnEvent", function(self)
             emptySwatch:SetPoint("RIGHT", ccRgn._lastInline or ccRgn._control, "LEFT", -6, 0)
             ccRgn._lastInline = emptySwatch
             local function UpdateEmptySwatch()
-                local crOff = SValSupported("classPowerStyle", "none") == "none"
+                local crOff = SValSupported("classPowerStyle", "none") ~= "modern"
                 if crOff then
                     emptySwatch:SetAlpha(0.15); emptySwatch:Disable()
                 else
@@ -6042,8 +6310,8 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateEmptySwatch()
             RegisterWidgetRefresh(UpdateEmptySwatch)
             emptySwatch:HookScript("OnEnter", function(self)
-                if SValSupported("classPowerStyle", "none") == "none" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Class Resource is set to None"))
+                if SValSupported("classPowerStyle", "none") ~= "modern" then
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Resource must be set to Modern"))
                 else
                     EllesmereUI.ShowWidgetTooltip(self, "Empty Bar Color")
                 end
@@ -6126,8 +6394,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 2: Position (with cog for x/y) + Size
         row, h = W:DualRow(parent, y,
             { type="dropdown", text="Position", values=classPowerPosValues, order=classPowerPosOrder,
-              disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
-              disabledTooltip="Enable Class Resource is set to None",
+              disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
+              disabledTooltip="Class Resource must be set to Modern",
               getValue=function() return SValSupported("classPowerPosition", "top") end,
               setValue=function(v)
                   SSetSupported("classPowerPosition", v)
@@ -6137,8 +6405,8 @@ initFrame:SetScript("OnEvent", function(self)
                   UpdatePreview(); UpdatePreview()
               end },
             { type="slider", text="Size", min=4, max=30, step=1,
-              disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
-              disabledTooltip="Enable Class Resource is set to None",
+              disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
+              disabledTooltip="Class Resource must be set to Modern",
               getValue=function() return SValSupported("classPowerSize", 8) end,
               setValue=function(v)
                   SSetSupported("classPowerSize", v)
@@ -6170,15 +6438,15 @@ initFrame:SetScript("OnEvent", function(self)
             local cpPosCogShow = cpPosCogShowRaw
             local cpPosCogBtn = MakeCogBtn(posRgn, cpPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
             local function UpdateCpPosCogState()
-                local crOff = SValSupported("classPowerStyle", "none") == "none"
+                local crOff = SValSupported("classPowerStyle", "none") ~= "modern"
                 local isAbove = SValSupported("classPowerPosition", "top") == "above"
                 local disabled = crOff or isAbove
                 cpPosCogBtn:SetAlpha(disabled and 0.15 or 0.4)
                 cpPosCogBtn:SetEnabled(not disabled)
             end
             cpPosCogBtn:SetScript("OnEnter", function(self)
-                if SValSupported("classPowerStyle", "none") == "none" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Class Resource is set to None"))
+                if SValSupported("classPowerStyle", "none") ~= "modern" then
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Resource must be set to Modern"))
                 elseif SValSupported("classPowerPosition", "top") == "above" then
                     EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a dropdown selection other than Above Health Bar"))
                 else self:SetAlpha(0.7) end
@@ -6254,8 +6522,8 @@ initFrame:SetScript("OnEvent", function(self)
         local sharedClassResRow3
         sharedClassResRow3, h = W:DualRow(parent, y,
             { type="slider", text="Bar Spacing", min=0, max=10, step=1,
-              disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
-              disabledTooltip="Enable Class Resource is set to None",
+              disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
+              disabledTooltip="Class Resource must be set to Modern",
               getValue=function() return SValSupported("classPowerSpacing", 2) end,
               setValue=function(v)
                   SSetSupported("classPowerSpacing", v)
@@ -6263,8 +6531,8 @@ initFrame:SetScript("OnEvent", function(self)
                   UpdatePreview(); UpdatePreview()
               end },
             { type="colorpicker", text="Background Color", hasAlpha=true,
-              disabled=function() return SValSupported("classPowerStyle", "none") == "none" end,
-              disabledTooltip="Enable Class Resource is set to None",
+              disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
+              disabledTooltip="Class Resource must be set to Modern",
               getValue=function()
                   local c = SGetSupported("classPowerBgColor")
                   c = c or { r=0.082, g=0.082, b=0.082, a=1.0 }
@@ -7552,7 +7820,13 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" });  yy = yy - hh
+                { type="toggle", text="Spell Target",
+                  tooltip = "Show the name of who the boss is casting on.",
+                  getValue=function() return db.profile.boss.showCastTarget == true end,
+                  setValue=function(v)
+                      db.profile.boss.showCastTarget = v
+                      ReloadAndUpdate()
+                  end });  yy = yy - hh
 
             local bossAuraRow
             bossAuraRow, hh = Ww:DualRow(pp, yy,

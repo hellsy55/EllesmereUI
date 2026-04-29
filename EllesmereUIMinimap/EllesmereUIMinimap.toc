@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Minimap
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Custom Minimap skin and layout
+## Notes: A modern, light minimap reskin with improved functionality
 ## Author: Ellesmere
-## Version: 7.2.7
+## Version: 7.2.8
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIMinimapDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

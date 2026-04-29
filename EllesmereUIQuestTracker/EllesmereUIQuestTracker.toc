@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Quest Tracker
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Skin + QoL layer over Blizzard's ObjectiveTrackerFrame
+## Notes: A modern, light quest tracker reskin with improved functionality
 ## Author: Ellesmere
-## Version: 7.2.7
+## Version: 7.2.8
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQuestTrackerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

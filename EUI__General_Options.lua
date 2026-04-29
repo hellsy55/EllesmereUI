@@ -545,6 +545,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return GetCVarBool("ActionButtonUseKeyDown") end,
               setValue=function(v)
                 SetCVarSafe("ActionButtonUseKeyDown", v and "1" or "0")
+                if _G._EAB_ApplyKeyDown then _G._EAB_ApplyKeyDown() end
               end },
             { type="slider", text="Lag Tolerance",
               tooltip="This is the Spell Queue Window, it helps with making sure you can't queue up too many spells at once which makes the game feel laggy. Recommended settings are generally ~150 for melee and ~300 for casters. Higher if you have high local ping.",
@@ -1142,9 +1143,9 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -------------------------------------------------------------------
-        --  FONTS section
+        --  GLOBAL FONT section
         -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "FONTS", y);  y = y - h
+        _, h = W:SectionHeader(parent, "GLOBAL FONT", y);  y = y - h
 
         -- For locales that require system fonts (CJK, Cyrillic), the font
         -- selection dropdowns are not applicable -- the system font is used
@@ -1235,6 +1236,539 @@ initFrame:SetScript("OnEvent", function(self)
                   if rl then for i2 = 1, #rl do rl[i2]() end end
                   FontReload()
               end });  y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        -------------------------------------------------------------------
+        --  PER ADDON FONTS section
+        -------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "PER ADDON FONTS", y);  y = y - h
+
+        do
+            local eg = EllesmereUI.ELLESMERE_GREEN or {r=0.047, g=0.824, b=0.624}
+            local fontPath = EllesmereUI.EXPRESSWAY
+            local outlineFlag = EllesmereUI.GetFontOutlineFlag()
+            local RebuildModuleFontList  -- forward declaration
+
+            -- Build module list from ADDON_ROSTER (exclude comingSoon)
+            local moduleEntries = {}
+            for _, entry in ipairs(EllesmereUI.ADDON_ROSTER) do
+                if not entry.comingSoon then
+                    moduleEntries[#moduleEntries + 1] = {
+                        folder  = entry.folder,
+                        display = entry.display,
+                    }
+                end
+            end
+
+            ---------------------------------------------------------------
+            --  Row: Module checkbox dropdown + "Add Module Font" button
+            ---------------------------------------------------------------
+            local ROW_H    = 50
+            local ITEM_H   = 30
+            local GAP      = 15
+            local BTN_W    = 160
+            local DD_W     = 250
+            local totalW   = parent:GetWidth() - CONTENT_PAD * 2
+
+            local mfRow = CreateFrame("Frame", nil, parent)
+            PP.Size(mfRow, totalW, ROW_H)
+            PP.Point(mfRow, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, y)
+
+            local groupW = DD_W + GAP + BTN_W
+            local startX = math.floor((totalW - groupW) / 2)
+            local offsetY = -math.floor((ROW_H - ITEM_H) / 2)
+
+            -- Dropdown button (checkbox multi-select)
+            local ddBtn = CreateFrame("Button", nil, mfRow)
+            PP.Size(ddBtn, DD_W, ITEM_H)
+            PP.Point(ddBtn, "TOPLEFT", mfRow, "TOPLEFT", startX, offsetY)
+            ddBtn:SetFrameLevel(mfRow:GetFrameLevel() + 2)
+
+            local ddBg = ddBtn:CreateTexture(nil, "BACKGROUND")
+            ddBg:SetAllPoints()
+            ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+            EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+
+            local ddLbl = ddBtn:CreateFontString(nil, "OVERLAY")
+            ddLbl:SetFont(fontPath, 13, outlineFlag)
+            ddLbl:SetTextColor(1, 1, 1, 0.50)
+            ddLbl:SetMaxLines(1)
+            ddLbl:SetJustifyH("LEFT")
+            ddLbl:SetWordWrap(false)
+            ddLbl:SetText("Select Module")
+
+            local ddArrow = EllesmereUI.MakeDropdownArrow(ddBtn, 12, PP)
+            ddLbl:SetPoint("LEFT", ddBtn, "LEFT", 14, 0)
+            ddLbl:SetPoint("RIGHT", ddArrow, "LEFT", -5, 0)
+
+            -- Selected modules map (indexed by moduleEntries index)
+            local selectedModuleMap = {}
+
+            local function GetSelectedLabel()
+                local names = {}
+                for i, me in ipairs(moduleEntries) do
+                    if selectedModuleMap[i] then
+                        names[#names + 1] = me.display
+                    end
+                end
+                if #names == 0 then return "Select Module" end
+                return table.concat(names, ", ")
+            end
+
+            -----------------------------------------------------------
+            --  Checkbox popup (matches ABR zone dropdown pattern)
+            -----------------------------------------------------------
+            local SEARCH_H = 26
+            local POPUP_ITEM_H = 28
+            local popupH = math.min(#moduleEntries * POPUP_ITEM_H + 8, 300) + SEARCH_H + 10
+            local popup = CreateFrame("Frame", nil, UIParent)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(200)
+            popup:SetClampedToScreen(true)
+            popup:SetSize(DD_W, popupH)
+            popup:Hide()
+
+            local popupBg = popup:CreateTexture(nil, "BACKGROUND")
+            popupBg:SetAllPoints()
+            popupBg:SetColorTexture(0.10, 0.10, 0.12, 0.97)
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.12, PP)
+
+            -- Search box
+            local searchBox = CreateFrame("EditBox", nil, popup)
+            searchBox:SetSize(DD_W - 16, SEARCH_H)
+            searchBox:SetPoint("TOP", popup, "TOP", 0, -6)
+            searchBox:SetFrameLevel(popup:GetFrameLevel() + 3)
+            searchBox:SetFont(fontPath, 11, "")
+            searchBox:SetTextColor(1, 1, 1, 0.9)
+            searchBox:SetJustifyH("LEFT")
+            searchBox:SetAutoFocus(false)
+            searchBox:SetMaxLetters(30)
+            searchBox:SetTextInsets(4, 4, 0, 0)
+            local sBg = searchBox:CreateTexture(nil, "BACKGROUND")
+            sBg:SetAllPoints()
+            sBg:SetColorTexture(0, 0, 0, 0.4)
+            local sPlaceholder = searchBox:CreateFontString(nil, "OVERLAY")
+            sPlaceholder:SetFont(fontPath, 11, "")
+            sPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.6)
+            sPlaceholder:SetPoint("LEFT", searchBox, "LEFT", 4, 0)
+            sPlaceholder:SetText("Search...")
+            searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+            -- Scroll frame
+            local sf = CreateFrame("ScrollFrame", nil, popup)
+            sf:SetPoint("TOPLEFT", popup, "TOPLEFT", 0, -(SEARCH_H + 10))
+            sf:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", 0, 4)
+            sf:SetFrameLevel(popup:GetFrameLevel() + 1)
+            sf:EnableMouseWheel(true)
+            local sfChild = CreateFrame("Frame", nil, sf)
+            sfChild:SetWidth(DD_W)
+            sf:SetScrollChild(sfChild)
+
+            -- Thin scrollbar track
+            local sTrack = CreateFrame("Frame", nil, sf)
+            sTrack:SetWidth(4)
+            sTrack:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -4, -4)
+            sTrack:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", -4, 4)
+            sTrack:SetFrameLevel(sf:GetFrameLevel() + 2)
+            do local t = sTrack:CreateTexture(nil, "BACKGROUND"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.02) end
+
+            local sThumb = CreateFrame("Button", nil, sTrack)
+            sThumb:SetWidth(4)
+            sThumb:SetFrameLevel(sTrack:GetFrameLevel() + 1)
+            sThumb:EnableMouse(true)
+            sThumb:RegisterForDrag("LeftButton")
+            sThumb:SetScript("OnDragStart", function() end)
+            sThumb:SetScript("OnDragStop", function() end)
+            do local t = sThumb:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetColorTexture(1, 1, 1, 0.27) end
+
+            local sScrollTarget = 0
+            local sSmoothing = false
+            local S_SCROLL_STEP = 40
+            local S_SMOOTH_SPEED = 12
+            local sSmoothFrame = CreateFrame("Frame")
+            sSmoothFrame:Hide()
+
+            local function UpdateSThumb()
+                local maxScroll = math.max(0, sfChild:GetHeight() - sf:GetHeight())
+                if maxScroll <= 0 then sTrack:Hide(); return end
+                sTrack:Show()
+                local trackH = sTrack:GetHeight()
+                local visH = sf:GetHeight()
+                local ratio = visH / (visH + maxScroll)
+                local thumbH = math.max(20, trackH * ratio)
+                sThumb:SetHeight(thumbH)
+                local scrollRatio = (tonumber(sf:GetVerticalScroll()) or 0) / maxScroll
+                local maxTravel = trackH - thumbH
+                sThumb:ClearAllPoints()
+                sThumb:SetPoint("TOP", sTrack, "TOP", 0, -(scrollRatio * maxTravel))
+            end
+
+            sSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = sf:GetVerticalScroll()
+                local maxScroll = math.max(0, sfChild:GetHeight() - sf:GetHeight())
+                sScrollTarget = math.max(0, math.min(maxScroll, sScrollTarget))
+                local diff = sScrollTarget - cur
+                if math.abs(diff) < 0.3 then
+                    sf:SetVerticalScroll(sScrollTarget)
+                    UpdateSThumb()
+                    sSmoothing = false
+                    sSmoothFrame:Hide()
+                    return
+                end
+                local newScroll = cur + diff * math.min(1, S_SMOOTH_SPEED * elapsed)
+                newScroll = math.max(0, math.min(maxScroll, newScroll))
+                sf:SetVerticalScroll(newScroll)
+                UpdateSThumb()
+            end)
+
+            local function SSmoothScrollTo(target)
+                local maxScroll = math.max(0, sfChild:GetHeight() - sf:GetHeight())
+                sScrollTarget = math.max(0, math.min(maxScroll, target))
+                if not sSmoothing then
+                    sSmoothing = true
+                    sSmoothFrame:Show()
+                end
+            end
+
+            sf:SetScript("OnMouseWheel", function(self, delta)
+                local maxScroll = math.max(0, sfChild:GetHeight() - self:GetHeight())
+                if maxScroll <= 0 then return end
+                local base = sSmoothing and sScrollTarget or self:GetVerticalScroll()
+                SSmoothScrollTo(base - delta * S_SCROLL_STEP)
+            end)
+            popup:SetScript("OnMouseWheel", function(_, delta)
+                sf:GetScript("OnMouseWheel")(sf, delta)
+            end)
+
+            -- Thumb drag
+            local sDragging = false
+            local sDragStartY, sDragStartScroll
+            sThumb:SetScript("OnMouseDown", function(self, button)
+                if button ~= "LeftButton" then return end
+                sDragging = true
+                sSmoothing = false
+                sSmoothFrame:Hide()
+                local _, cursorY = GetCursorPosition()
+                sDragStartY = cursorY / self:GetEffectiveScale()
+                sDragStartScroll = sf:GetVerticalScroll()
+            end)
+            sThumb:SetScript("OnMouseUp", function(_, button)
+                if button == "LeftButton" then sDragging = false end
+            end)
+            sThumb:SetScript("OnUpdate", function(self)
+                if not sDragging then return end
+                local _, cursorY = GetCursorPosition()
+                cursorY = cursorY / self:GetEffectiveScale()
+                local dy = sDragStartY - cursorY
+                local trackH = sTrack:GetHeight()
+                local thumbH = sThumb:GetHeight()
+                local maxTravel = trackH - thumbH
+                if maxTravel <= 0 then return end
+                local maxScroll = math.max(0, sfChild:GetHeight() - sf:GetHeight())
+                local newScroll = sDragStartScroll + (dy / maxTravel) * maxScroll
+                newScroll = math.max(0, math.min(maxScroll, newScroll))
+                sf:SetVerticalScroll(newScroll)
+                UpdateSThumb()
+            end)
+
+            -- Create checkbox items
+            local checkItems = {}
+            for i, me in ipairs(moduleEntries) do
+                local item = CreateFrame("Button", nil, sfChild)
+                item:SetHeight(POPUP_ITEM_H)
+                item:SetPoint("TOPLEFT", sfChild, "TOPLEFT", 1, -(i - 1) * POPUP_ITEM_H)
+                item:SetPoint("TOPRIGHT", sfChild, "TOPRIGHT", -1, -(i - 1) * POPUP_ITEM_H)
+
+                local hl = item:CreateTexture(nil, "ARTWORK")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0)
+
+                local cb = CreateFrame("Frame", nil, item)
+                cb:SetSize(14, 14)
+                cb:SetPoint("LEFT", item, "LEFT", 10, 0)
+                local cbBg = cb:CreateTexture(nil, "BACKGROUND")
+                cbBg:SetAllPoints()
+                cbBg:SetColorTexture(0.06, 0.06, 0.08, 1)
+                EllesmereUI.MakeBorder(cb, 1, 1, 1, 0.12, PP)
+                local cbCheck = cb:CreateTexture(nil, "OVERLAY")
+                cbCheck:SetSize(10, 10)
+                cbCheck:SetPoint("CENTER")
+                cbCheck:SetColorTexture(eg.r, eg.g, eg.b, 1)
+                cbCheck:Hide()
+                item._cbCheck = cbCheck
+
+                local lbl2 = item:CreateFontString(nil, "OVERLAY")
+                lbl2:SetFont(fontPath, 11, outlineFlag)
+                lbl2:SetTextColor(0.75, 0.75, 0.78, 1)
+                lbl2:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+                lbl2:SetPoint("RIGHT", item, "RIGHT", -8, 0)
+                lbl2:SetJustifyH("LEFT")
+                lbl2:SetWordWrap(false)
+                lbl2:SetText(me.display)
+
+                item:SetScript("OnClick", function()
+                    selectedModuleMap[i] = not selectedModuleMap[i]
+                    cbCheck:SetShown(selectedModuleMap[i] == true)
+                    ddLbl:SetText(GetSelectedLabel())
+                end)
+                item:SetScript("OnEnter", function()
+                    lbl2:SetTextColor(1, 1, 1, 1)
+                    hl:SetColorTexture(1, 1, 1, 0.08)
+                end)
+                item:SetScript("OnLeave", function()
+                    lbl2:SetTextColor(0.75, 0.75, 0.78, 1)
+                    hl:SetColorTexture(1, 1, 1, 0)
+                end)
+                checkItems[i] = item
+                item._moduleName = me.display
+            end
+            sfChild:SetHeight(math.max(1, #moduleEntries * POPUP_ITEM_H))
+
+            -- Search filtering
+            searchBox:SetScript("OnTextChanged", function(self)
+                local t = strlower(strtrim(self:GetText()))
+                sPlaceholder:SetShown(t == "")
+                local visIdx = 0
+                for idx, item in ipairs(checkItems) do
+                    if t == "" or strfind(strlower(item._moduleName), t, 1, true) then
+                        item:Show()
+                        item:ClearAllPoints()
+                        item:SetPoint("TOPLEFT", sfChild, "TOPLEFT", 1, -visIdx * POPUP_ITEM_H)
+                        item:SetPoint("TOPRIGHT", sfChild, "TOPRIGHT", -1, -visIdx * POPUP_ITEM_H)
+                        visIdx = visIdx + 1
+                    else
+                        item:Hide()
+                    end
+                end
+                sfChild:SetHeight(math.max(1, visIdx * POPUP_ITEM_H))
+                sf:SetVerticalScroll(0)
+                sScrollTarget = 0
+            end)
+
+            popup:SetScript("OnShow", function()
+                popup:ClearAllPoints()
+                popup:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+                searchBox:SetText("")
+                searchBox:SetFocus()
+                sScrollTarget = 0
+                sSmoothing = false
+                sSmoothFrame:Hide()
+                sf:SetVerticalScroll(0)
+                UpdateSThumb()
+                for i, item in ipairs(checkItems) do
+                    item._cbCheck:SetShown(selectedModuleMap[i] == true)
+                end
+            end)
+            popup:SetScript("OnUpdate", function()
+                if not popup:IsMouseOver() and not ddBtn:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                    popup:Hide()
+                end
+            end)
+
+            ddBtn:SetScript("OnClick", function()
+                if popup:IsShown() then popup:Hide() else popup:Show() end
+            end)
+            ddBtn:SetScript("OnEnter", function()
+                ddBg:SetColorTexture(0.095, 0.143, 0.181, 1)
+            end)
+            ddBtn:SetScript("OnLeave", function()
+                ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+            end)
+
+            -----------------------------------------------------------
+            --  "Add Module Font" button (profile-row style)
+            -----------------------------------------------------------
+            local _c = EllesmereUI.WB_COLOURS
+            local MF_BTN_COLOURS = {
+                _c[1],  _c[2],  _c[3],  _c[4],   _c[5],  _c[6],  _c[7],  _c[8],
+                1, 1, 1, EllesmereUI.DD_BRD_A,   1, 1, 1, EllesmereUI.DD_BRD_HA,
+                _c[17], _c[18], _c[19], _c[20],  _c[21], _c[22], _c[23], _c[24],
+            }
+
+            local addBtn = CreateFrame("Button", nil, mfRow)
+            PP.Size(addBtn, BTN_W, ITEM_H)
+            PP.Point(addBtn, "LEFT", ddBtn, "RIGHT", GAP, 0)
+            addBtn:SetFrameLevel(mfRow:GetFrameLevel() + 2)
+            EllesmereUI.MakeStyledButton(addBtn, "Add Module Font", 11, MF_BTN_COLOURS, function()
+                -- Collect selected modules
+                local toAdd = {}
+                for i, me in ipairs(moduleEntries) do
+                    if selectedModuleMap[i] then
+                        toAdd[#toAdd + 1] = { folder = me.folder, display = me.display }
+                    end
+                end
+                if #toAdd == 0 then
+                    -- Pulse red border on dropdown to indicate nothing selected
+                    if not ddBtn._redPulse then
+                        local rf = CreateFrame("Frame", nil, ddBtn)
+                        rf:SetAllPoints()
+                        rf:SetFrameLevel(ddBtn:GetFrameLevel() + 10)
+                        local border = EllesmereUI.MakeBorder(rf, 1, 0.2, 0.2, 1, PP)
+                        rf._border = border
+                        ddBtn._redPulse = rf
+                    end
+                    local rf = ddBtn._redPulse
+                    rf:Show()
+                    rf:SetAlpha(1)
+                    local elapsed2 = 0
+                    rf:SetScript("OnUpdate", function(self, dt)
+                        elapsed2 = elapsed2 + dt
+                        if elapsed2 < 0.8 then
+                            self:SetAlpha(0.5 + 0.5 * math.sin(elapsed2 * 10))
+                        elseif elapsed2 < 1.5 then
+                            self:SetAlpha(math.max(0, 1 - (elapsed2 - 0.8) / 0.7))
+                        else
+                            self:SetScript("OnUpdate", nil)
+                            self:Hide()
+                        end
+                    end)
+                    return
+                end
+
+                -- Add each selected module (skip duplicates)
+                local fontsDB = EllesmereUI.GetFontsDB()
+                if not fontsDB.moduleFonts then fontsDB.moduleFonts = {} end
+                for _, info in ipairs(toAdd) do
+                    local exists = false
+                    for _, existing in ipairs(fontsDB.moduleFonts) do
+                        if existing.folder == info.folder then exists = true; break end
+                    end
+                    if not exists then
+                        fontsDB.moduleFonts[#fontsDB.moduleFonts + 1] = {
+                            folder  = info.folder,
+                            display = info.display,
+                            font    = "__global",
+                            outline = "__global",
+                        }
+                    end
+                end
+
+                -- Reset selection
+                wipe(selectedModuleMap)
+                ddLbl:SetText("Select Module")
+                popup:Hide()
+
+                -- Full page rebuild so content height updates
+                EllesmereUI:RefreshPage(true)
+            end)
+
+            y = y - ROW_H
+
+            -----------------------------------------------------------
+            --  Module font override list (dynamic, rebuilt on add/remove)
+            -----------------------------------------------------------
+            local listContainer = CreateFrame("Frame", nil, parent)
+            listContainer:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
+            listContainer:SetSize(parent:GetWidth() or 400, 1)
+
+            local listRows = {}
+
+            -- Assigned to forward-declared local above
+            RebuildModuleFontList = function()
+                for _, row in ipairs(listRows) do row:Hide() end
+                wipe(listRows)
+
+                local fontsDB = EllesmereUI.GetFontsDB()
+                local mfList = fontsDB.moduleFonts or {}
+
+                if #mfList == 0 then
+                    listContainer:SetHeight(1)
+                    return 0
+                end
+
+                local totalH = 0
+
+                -- Font dropdown values/order (shared across all rows)
+                local mfFontValues, mfFontOrder = EllesmereUI.BuildFontDropdownData()
+
+                -- Outline dropdown values/order
+                local outlineValues = {
+                    ["__global"] = { text = "EUI Global Outline" },
+                    ["none"]     = { text = "Drop Shadow" },
+                    ["outline"]  = { text = "Outline" },
+                    ["thick"]    = { text = "Thick Outline" },
+                }
+                local outlineOrder = { "__global", "none", "outline", "thick" }
+
+                for idx, entry in ipairs(mfList) do
+                    local capturedIdx = idx
+
+                    -- Use W:DualRow for the standard label-left / dropdown-right layout
+                    local dualRow, dualH
+                    dualRow, dualH = W:DualRow(listContainer, -totalH,
+                        { type = "dropdown", text = entry.display .. " Font",
+                          values = mfFontValues, order = mfFontOrder,
+                          getValue = function()
+                              local fdb = EllesmereUI.GetFontsDB()
+                              if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
+                                  return fdb.moduleFonts[capturedIdx].font or "__global"
+                              end
+                              return "__global"
+                          end,
+                          setValue = function(v)
+                              local fdb = EllesmereUI.GetFontsDB()
+                              if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
+                                  fdb.moduleFonts[capturedIdx].font = v
+                              end
+                          end },
+                        { type = "dropdown", text = entry.display .. " Outline",
+                          values = outlineValues, order = outlineOrder,
+                          getValue = function()
+                              local fdb = EllesmereUI.GetFontsDB()
+                              if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
+                                  return fdb.moduleFonts[capturedIdx].outline or "__global"
+                              end
+                              return "__global"
+                          end,
+                          setValue = function(v)
+                              local fdb = EllesmereUI.GetFontsDB()
+                              if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
+                                  fdb.moduleFonts[capturedIdx].outline = v
+                              end
+                          end })
+
+                    -- Add delete X button on the far left of the row
+                    local ICON_SIZE = 14
+                    local delBtn = CreateFrame("Button", nil, dualRow)
+                    delBtn:SetSize(ICON_SIZE + 6, ICON_SIZE + 6)
+                    PP.Point(delBtn, "LEFT", dualRow, "LEFT", 14, 0)
+                    delBtn:SetFrameLevel(dualRow:GetFrameLevel() + 5)
+                    local delIcon = delBtn:CreateTexture(nil, "OVERLAY")
+                    PP.Size(delIcon, ICON_SIZE, ICON_SIZE)
+                    PP.Point(delIcon, "CENTER", delBtn, "CENTER", 0, 0)
+                    if delIcon.SetSnapToPixelGrid then delIcon:SetSnapToPixelGrid(false); delIcon:SetTexelSnappingBias(0) end
+                    delIcon:SetTexture(EllesmereUI.MEDIA_PATH .. "icons\\eui-close.png")
+                    delBtn:SetAlpha(0.75)
+                    delBtn:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
+                    delBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.75) end)
+                    delBtn:SetScript("OnClick", function()
+                        local fdb = EllesmereUI.GetFontsDB()
+                        if fdb.moduleFonts then
+                            table.remove(fdb.moduleFonts, capturedIdx)
+                        end
+                        EllesmereUI:RefreshPage(true)
+                    end)
+
+                    -- Shift left-half label right so it clears the X button
+                    local leftLabel = dualRow._leftRegion and dualRow._leftRegion._label
+                    if leftLabel then
+                        leftLabel:ClearAllPoints()
+                        PP.Point(leftLabel, "LEFT", delBtn, "RIGHT", 4, 0)
+                    end
+
+                    listRows[#listRows + 1] = dualRow
+                    totalH = totalH + dualH
+                end
+
+                listContainer:SetHeight(totalH)
+                return totalH
+            end
+
+            -- Initial build
+            local listH = RebuildModuleFontList()
+            y = y - (listH or 0)
+        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 

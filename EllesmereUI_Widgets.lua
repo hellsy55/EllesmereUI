@@ -3062,6 +3062,10 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
         div:SetPoint("BOTTOM", frame, "BOTTOM", 0, 0)
     end
 
+    -- Store widget config on regions so sync icons can check disabled state
+    leftRegion._widgetCfg = leftCfg
+    rightRegion._widgetCfg = rightCfg
+
     -- Expose half regions so callers can anchor child elements to them
     frame._leftRegion  = leftRegion
     frame._rightRegion = rightRegion
@@ -3368,6 +3372,10 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
         PP.Point(div, "TOP", rgn, "TOPRIGHT", 0, 0)
         PP.Point(div, "BOTTOM", rgn, "BOTTOMRIGHT", 0, 0)
     end
+
+    leftRegion._widgetCfg = leftCfg
+    if midRegion then midRegion._widgetCfg = midCfg end
+    rightRegion._widgetCfg = rightCfg
 
     frame._leftRegion  = leftRegion
     frame._midRegion   = midRegion
@@ -5129,6 +5137,9 @@ local function BuildSyncIcon(opts)
     local animState = opts.isSynced() and 0 or 1  -- start at correct state
 
     local function ApplyState(s)
+        -- Force hidden when the parent widget is disabled
+        local parentCfg = region._widgetCfg
+        if parentCfg and parentCfg.disabled and parentCfg.disabled() then s = 0 end
         -- s: 0 = synced (label centered, subtext hidden), 1 = desynced (label up, subtext visible)
         local labelY = LABEL_Y_NORMAL + s * (LABEL_Y_SHIFTED - LABEL_Y_NORMAL)
         label:ClearAllPoints()
@@ -5202,6 +5213,7 @@ local function BuildSyncIcon(opts)
         allText:SetTextColor(r, g, b, 0.65)
         if multiText then multiText:SetTextColor(r, g, b, 0.65) end
         ResizeBtn()
+
 
         local synced = opts.isSynced()
         local target = synced and 0 or 1

@@ -667,14 +667,14 @@ local FONT_OPTIONS = {
 }
 local function SFont()
     if EllesmereUI and EllesmereUI.GetFontPath then
-        local p = EllesmereUI.GetFontPath("unitFrames")
+        local p = EllesmereUI.GetFontPath("mythicTimer")
         if p and p ~= "" then return p end
     end
     return FALLBACK_FONT
 end
 -- _EMT_GetFontOptions removed: font dropdown deleted from options page.
 local function SOutline()
-    if EllesmereUI.GetFontOutlineFlag then return EllesmereUI.GetFontOutlineFlag() end
+    if EllesmereUI.GetFontOutlineFlag then return EllesmereUI.GetFontOutlineFlag("mythicTimer") end
     return ""
 end
 local function SetFS(fs, size, flags)
@@ -686,7 +686,7 @@ local function SetFS(fs, size, flags)
 end
 local function ApplyShadow(fs)
     if not fs then return end
-    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("mythicTimer") then
         fs:SetShadowColor(0, 0, 0, 0.8); fs:SetShadowOffset(1, -1)
     else
         fs:SetShadowOffset(0, 0)

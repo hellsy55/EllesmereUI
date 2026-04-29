@@ -128,8 +128,18 @@ local defaults = {
             playerCastbarHeight = 0,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
-            castDurationSize = 11,
+            castDurationSize = 10,
             castDurationColor = { r = 1, g = 1, b = 1 },
+            castSpellNameX = 0,
+            castSpellNameY = 0,
+            castSpellTargetSize = 11,
+            castSpellTargetColor = { r = 1, g = 1, b = 1 },
+            castSpellTargetX = 0,
+            castSpellTargetY = 0,
+            castDurationX = 0,
+            castDurationY = 0,
+            showCastDuration = true,
+            showCastTarget = true,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
             showClassPowerBar = false,
@@ -203,8 +213,18 @@ local defaults = {
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
-            castDurationSize = 11,
+            castDurationSize = 10,
             castDurationColor = { r = 1, g = 1, b = 1 },
+            castSpellNameX = 0,
+            castSpellNameY = 0,
+            castSpellTargetSize = 11,
+            castSpellTargetColor = { r = 1, g = 1, b = 1 },
+            castSpellTargetX = 0,
+            castSpellTargetY = 0,
+            castDurationX = 0,
+            castDurationY = 0,
+            showCastDuration = true,
+            showCastTarget = true,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
             healthDisplay = "both",
@@ -412,8 +432,18 @@ local defaults = {
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
-            castDurationSize = 11,
+            castDurationSize = 10,
             castDurationColor = { r = 1, g = 1, b = 1 },
+            castSpellNameX = 0,
+            castSpellNameY = 0,
+            castSpellTargetSize = 11,
+            castSpellTargetColor = { r = 1, g = 1, b = 1 },
+            castSpellTargetX = 0,
+            castSpellTargetY = 0,
+            castDurationX = 0,
+            castDurationY = 0,
+            showCastDuration = true,
+            showCastTarget = true,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
             healthDisplay = "perhp",
@@ -540,8 +570,18 @@ local defaults = {
             castbarHideWhenInactive = false,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
-            castDurationSize = 11,
+            castDurationSize = 10,
             castDurationColor = { r = 1, g = 1, b = 1 },
+            castSpellNameX = 0,
+            castSpellNameY = 0,
+            castSpellTargetSize = 11,
+            castSpellTargetColor = { r = 1, g = 1, b = 1 },
+            castSpellTargetX = 0,
+            castSpellTargetY = 0,
+            castDurationX = 0,
+            castDurationY = 0,
+            showCastDuration = true,
+            showCastTarget = false,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
             healthDisplay = "perhp",
@@ -646,12 +686,12 @@ local function GetSelectedFont(unitKey)
 end
 
 local function GetUFUseShadow()
-    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("unitFrames")
 end
 
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
-  local f = flags or (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+  local f = flags or (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("unitFrames")) or ""
   fs:SetFont(GetSelectedFont(), size or 12, f)
   if f == "" then
     fs:SetShadowOffset(1, -1)
@@ -2349,16 +2389,38 @@ local function CreatePowerBar(frame, unit, settings)
         end
     end
 
-    -- Shadow Priest: show Mana on the power bar
-    -- (Insanity is shown as class resource on Resource Bars)
+    -- Per-spec power type override: lets users choose an alternate power type
+    -- on the player power bar (e.g. Balance Druid: Astral Power vs Mana).
+    -- Shadow Priest defaults to Mana; other specs default to UnitPowerType.
     if unit == "player" then
         local _, classFile = UnitClass("player")
-        if classFile == "PRIEST" then
+        -- Specs whose addon default differs from UnitPowerType (forced value)
+        local SPEC_DEFAULT_POWER = {
+            PRIEST = { [3] = 0 },   -- Shadow: default to Mana
+        }
+        -- Specs that have an alternative choice; value = powerType to force
+        -- (nil means "remove override, let UnitPowerType decide")
+        local SPEC_ALT_POWER = {
+            DRUID  = { [1] = 0, [2] = 0, [3] = 0 },  -- Balance/Feral/Guardian -> Mana
+            PRIEST = { [3] = nil },                     -- Shadow alt -> Insanity (UnitPowerType)
+            SHAMAN = { [1] = 0 },                       -- Elemental -> Mana
+        }
+        local classDef = SPEC_DEFAULT_POWER[classFile]
+        local classAlt = SPEC_ALT_POWER[classFile]
+        if classDef or classAlt then
             power.displayAltPower = true
             power.GetDisplayPower = function(self, u)
                 local spec = GetSpecialization and GetSpecialization()
-                if classFile == "PRIEST" and spec == 3 then -- Shadow
-                    return 0 -- Enum.PowerType.Mana
+                if not spec then return nil end
+                -- Check user override
+                local ps = GetSettingsForUnit("player")
+                local ov = ps and ps.powerTypeOverride
+                if ov and ov[spec] and classAlt then
+                    return classAlt[spec]  -- nil = UnitPowerType, number = forced
+                end
+                -- Addon default for this spec
+                if classDef and classDef[spec] ~= nil then
+                    return classDef[spec]
                 end
                 return nil
             end
@@ -2597,19 +2659,79 @@ local function CreateCastBar(frame, unit, settings)
     PP.CreateBorder(castbar, 0, 0, 0, 1, 1, "OVERLAY", 0)
 
 
+    -- Three-zone cast bar text layout matching nameplates:
+    -- [spell name LEFT 42%] [target RIGHT-of-center 42%] [timer RIGHT]
+    -- All zones truncate with ellipsis (WordWrap off, MaxLines 1).
     local text = castbar:CreateFontString(nil, "OVERLAY")
     SetFSFont(text, settings.castSpellNameSize or 11)
-    text:SetPoint("LEFT", castbar, "LEFT", 5, 1)
     text:SetJustifyH("LEFT")
+    text:SetWordWrap(false)
+    text:SetMaxLines(1)
     text:SetTextColor(1, 1, 1)
     castbar.Text = text
 
     local time = castbar:CreateFontString(nil, "OVERLAY")
-    SetFSFont(time, settings.castDurationSize or 11)
-    time:SetPoint("RIGHT", castbar, "RIGHT", -5, 0)
+    SetFSFont(time, settings.castDurationSize or 10)
     time:SetJustifyH("RIGHT")
+    time:SetWordWrap(false)
+    time:SetMaxLines(1)
     time:SetTextColor(1, 1, 1)
     castbar.Time = time
+
+    local target = castbar:CreateFontString(nil, "OVERLAY")
+    SetFSFont(target, settings.castSpellTargetSize or 11)
+    target:SetJustifyH("RIGHT")
+    target:SetWordWrap(false)
+    target:SetMaxLines(1)
+    target:SetTextColor(1, 1, 1)
+    target:Hide()
+    castbar.Target = target
+
+    -- Layout: spell name 42% LEFT, timer RIGHT (sized to font), target 42% between them.
+    -- Matches nameplate RefreshNamePosition exactly. Offsets from settings.
+    local function LayoutCastTextZones(cb)
+        local barW = cb:GetWidth()
+        if not barW or barW <= 0 then return end
+        local timerSz = cb._durationSize or 10
+        local timerW = timerSz * 2.2
+        local snX = cb._nameOX or 0
+        local snY = cb._nameOY or 0
+        local dtX = cb._durOX or 0
+        local dtY = cb._durOY or 0
+        local tgX = cb._tgtOX or 0
+        local tgY = cb._tgtOY or 0
+        cb.Text:ClearAllPoints()
+        cb.Text:SetWidth(barW * 0.42)
+        cb.Text:SetPoint("LEFT", cb, "LEFT", 5 + snX, 1 + snY)
+        cb.Time:ClearAllPoints()
+        cb.Time:SetWidth(timerW)
+        cb.Time:SetPoint("RIGHT", cb, "RIGHT", -3 + dtX, dtY)
+        cb.Target:ClearAllPoints()
+        cb.Target:SetWidth(barW * 0.42)
+        cb.Target:SetPoint("RIGHT", cb, "RIGHT", -3 - timerW + tgX, tgY)
+    end
+    castbar._durationSize = settings.castDurationSize or 10
+    castbar._nameOX = settings.castSpellNameX or 0
+    castbar._nameOY = settings.castSpellNameY or 0
+    castbar._durOX = settings.castDurationX or 0
+    castbar._durOY = settings.castDurationY or 0
+    castbar._tgtOX = settings.castSpellTargetX or 0
+    castbar._tgtOY = settings.castSpellTargetY or 0
+    castbar._layoutTextZones = LayoutCastTextZones
+    LayoutCastTextZones(castbar)
+
+    -- Helper: sync all offset/size cache values from settings onto
+    -- the castbar, then re-layout. Called from live refresh paths.
+    castbar._syncOffsetsAndLayout = function(self, s)
+        self._durationSize = s.castDurationSize or 10
+        self._nameOX = s.castSpellNameX or 0
+        self._nameOY = s.castSpellNameY or 0
+        self._durOX  = s.castDurationX or 0
+        self._durOY  = s.castDurationY or 0
+        self._tgtOX  = s.castSpellTargetX or 0
+        self._tgtOY  = s.castSpellTargetY or 0
+        if self._layoutTextZones then self:_layoutTextZones() end
+    end
 
     local shield = castbar:CreateTexture(nil, "OVERLAY")
     shield:SetSize(1, 1)
@@ -2663,6 +2785,12 @@ local function CreateCastBar(frame, unit, settings)
     castbar.PostCastInterruptible = castbar.PostCastStart
 
     castbar.CustomTimeText = function(self, durationObject)
+        if self._showDuration == false then
+            self.Time:SetText("")
+            self.Time:Hide()
+            return
+        end
+        self.Time:Show()
         if durationObject then
             local duration = durationObject:GetRemainingDuration()
             if self.delay and self.delay ~= 0 then
@@ -2728,7 +2856,6 @@ local function SetupShowOnCastBar(frame, unit)
         if bg then bg:Show() end
         self:Show()
         if self._iconFrame then
-            -- Respect per-unit showCastIcon / showPlayerCastIcon setting
             local s = db and db.profile and GetSettingsForUnit(unit)
             local showIcon
             if unit == "player" then
@@ -2741,6 +2868,38 @@ local function SetupShowOnCastBar(frame, unit)
             else
                 self._iconFrame:Hide()
             end
+        end
+        -- Spell target text (who the unit is casting on)
+        if self.Target then
+            local spellTarget, spellTargetClass
+            local ownerUnit = self.__owner and self.__owner.unit
+            if ownerUnit and ownerUnit ~= "player"
+               and UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(ownerUnit) then
+                local rawTarget = UnitSpellTargetName and UnitSpellTargetName(ownerUnit)
+                if rawTarget then
+                    spellTarget = rawTarget
+                    spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(ownerUnit)
+                end
+            end
+            local hasTarget = spellTarget and true or false
+            self.Target:SetText(spellTarget or "")
+            self.Target:SetShown(hasTarget and self._showTarget ~= false)
+            -- Class color the target name
+            if hasTarget and spellTargetClass and C_ClassColor then
+                local c = C_ClassColor.GetClassColor(spellTargetClass)
+                if c then
+                    self.Target:SetTextColor(c:GetRGB())
+                else
+                    local s2 = db and db.profile and GetSettingsForUnit(ownerUnit)
+                    local tc = (s2 and s2.castSpellTargetColor) or { r=1, g=1, b=1 }
+                    self.Target:SetTextColor(tc.r, tc.g, tc.b)
+                end
+            elseif hasTarget then
+                local s2 = db and db.profile and GetSettingsForUnit(ownerUnit)
+                local tc = (s2 and s2.castSpellTargetColor) or { r=1, g=1, b=1 }
+                self.Target:SetTextColor(tc.r, tc.g, tc.b)
+            end
+            if self._layoutTextZones then self:_layoutTextZones() end
         end
         if savedCastHook then savedCastHook(self, ...) end
     end
@@ -5021,10 +5180,31 @@ local function ReloadFrames()
                                 frame.Castbar.Text:SetTextColor(snC.r, snC.g, snC.b)
                             end
                             if frame.Castbar.Time then
-                                local dtSz = settings.castDurationSize or 11
+                                local dtSz = settings.castDurationSize or 10
                                 SetFSFont(frame.Castbar.Time, dtSz)
                                 local dtC = settings.castDurationColor or { r=1, g=1, b=1 }
                                 frame.Castbar.Time:SetTextColor(dtC.r, dtC.g, dtC.b)
+                                frame.Castbar._showDuration = settings.showCastDuration ~= false
+                                frame.Castbar._durationSize = dtSz
+                                -- Show/hide immediately (covers both toggle directions)
+                                if frame.Castbar._showDuration and frame.Castbar:IsShown() then
+                                    frame.Castbar.Time:Show()
+                                elseif not frame.Castbar._showDuration then
+                                    frame.Castbar.Time:Hide()
+                                end
+                            end
+                            if frame.Castbar.Target then
+                                local tsSz = settings.castSpellTargetSize or 11
+                                SetFSFont(frame.Castbar.Target, tsSz)
+                                local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
+                                frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
+                                frame.Castbar._showTarget = settings.showCastTarget ~= false
+                                if not frame.Castbar._showTarget then
+                                    frame.Castbar.Target:Hide()
+                                end
+                                if frame.Castbar._layoutTextZones then
+                                    frame.Castbar:_layoutTextZones()
+                                end
                             end
                         else
                             if frame:IsElementEnabled("Castbar") then
@@ -5433,10 +5613,30 @@ local function ReloadFrames()
                             frame.Castbar.Text:SetTextColor(snC.r, snC.g, snC.b)
                         end
                         if frame.Castbar.Time then
-                            local dtSz = settings.castDurationSize or 11
+                            local dtSz = settings.castDurationSize or 10
                             SetFSFont(frame.Castbar.Time, dtSz)
                             local dtC = settings.castDurationColor or { r=1, g=1, b=1 }
                             frame.Castbar.Time:SetTextColor(dtC.r, dtC.g, dtC.b)
+                            frame.Castbar._showDuration = settings.showCastDuration ~= false
+                            frame.Castbar._durationSize = dtSz
+                            if frame.Castbar._showDuration and frame.Castbar:IsShown() then
+                                frame.Castbar.Time:Show()
+                            elseif not frame.Castbar._showDuration then
+                                frame.Castbar.Time:Hide()
+                            end
+                        end
+                        if frame.Castbar.Target then
+                            local tsSz = settings.castSpellTargetSize or 11
+                            SetFSFont(frame.Castbar.Target, tsSz)
+                            local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
+                            frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
+                            frame.Castbar._showTarget = settings.showCastTarget ~= false
+                            if not frame.Castbar._showTarget then
+                                frame.Castbar.Target:Hide()
+                            end
+                            if frame.Castbar._syncOffsetsAndLayout then
+                                frame.Castbar:_syncOffsetsAndLayout(settings)
+                            end
                         end
                     end
 
@@ -5756,10 +5956,30 @@ local function ReloadFrames()
                         frame.Castbar.Text:SetTextColor(snC.r, snC.g, snC.b)
                     end
                     if frame.Castbar.Time then
-                        local dtSz = settings.castDurationSize or 11
+                        local dtSz = settings.castDurationSize or 10
                         SetFSFont(frame.Castbar.Time, dtSz)
                         local dtC = settings.castDurationColor or { r=1, g=1, b=1 }
                         frame.Castbar.Time:SetTextColor(dtC.r, dtC.g, dtC.b)
+                        frame.Castbar._showDuration = settings.showCastDuration ~= false
+                        frame.Castbar._durationSize = dtSz
+                        if frame.Castbar._showDuration and frame.Castbar:IsShown() then
+                            frame.Castbar.Time:Show()
+                        elseif not frame.Castbar._showDuration then
+                            frame.Castbar.Time:Hide()
+                        end
+                    end
+                    if frame.Castbar.Target then
+                        local tsSz = settings.castSpellTargetSize or 11
+                        SetFSFont(frame.Castbar.Target, tsSz)
+                        local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
+                        frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
+                        frame.Castbar._showTarget = settings.showCastTarget ~= false
+                        if not frame.Castbar._showTarget then
+                            frame.Castbar.Target:Hide()
+                        end
+                        if frame.Castbar._layoutTextZones then
+                            frame.Castbar:_layoutTextZones()
+                        end
                     end
                 end
 
@@ -6040,10 +6260,30 @@ local function ReloadFrames()
                         frame.Castbar.Text:SetTextColor(snC.r, snC.g, snC.b)
                     end
                     if frame.Castbar.Time then
-                        local dtSz = settings.castDurationSize or 11
+                        local dtSz = settings.castDurationSize or 10
                         SetFSFont(frame.Castbar.Time, dtSz)
                         local dtC = settings.castDurationColor or { r=1, g=1, b=1 }
                         frame.Castbar.Time:SetTextColor(dtC.r, dtC.g, dtC.b)
+                        frame.Castbar._showDuration = settings.showCastDuration ~= false
+                        frame.Castbar._durationSize = dtSz
+                        if frame.Castbar._showDuration and frame.Castbar:IsShown() then
+                            frame.Castbar.Time:Show()
+                        elseif not frame.Castbar._showDuration then
+                            frame.Castbar.Time:Hide()
+                        end
+                    end
+                    if frame.Castbar.Target then
+                        local tsSz = settings.castSpellTargetSize or 11
+                        SetFSFont(frame.Castbar.Target, tsSz)
+                        local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
+                        frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
+                        frame.Castbar._showTarget = settings.showCastTarget ~= false
+                        if not frame.Castbar._showTarget then
+                            frame.Castbar.Target:Hide()
+                        end
+                        if frame.Castbar._layoutTextZones then
+                            frame.Castbar:_layoutTextZones()
+                        end
                     end
                 end
 
@@ -6072,6 +6312,8 @@ local function ReloadFrames()
                         frame.Debuffs:Show()
                         frame.Debuffs.num = settings.maxDebuffs or 10
                         frame.Debuffs.onlyShowPlayer = settings.onlyPlayerDebuffs and true or nil
+                        -- Boss frames: only show important debuffs unless the
+                        -- user explicitly enabled onlyPlayerDebuffs.
                         local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(dAnc, settings.debuffGrowth or "auto")
                         local liveDbCbOff = 0
                         if settings.showCastbar ~= false then
@@ -6241,7 +6483,7 @@ local function ReloadFrames()
             local function SetMiniFont(fs, sz)
                 if not fs or not fs.SetFont then return end
                 if isMiniFrame then
-                    local f = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+                    local f = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("unitFrames")) or ""
                     fs:SetFont(donorFontPath, sz or 12, f)
                     if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
                     else fs:SetShadowOffset(0, 0) end
@@ -6284,7 +6526,7 @@ local function ReloadFrames()
                     SetMiniFont(frame.Castbar.Text, snSz)
                 end
                 if frame.Castbar.Time then
-                    local dtSz = s.castDurationSize or 11
+                    local dtSz = s.castDurationSize or 10
                     SetMiniFont(frame.Castbar.Time, dtSz)
                 end
             end
@@ -6419,11 +6661,25 @@ function InitializeFrames()
     end
 
     local classPowerStyle = db.profile.player.classPowerStyle or "none"
+    -- Per-class Blizzard class power bar frame names
+    local BLIZZARD_CP_FRAMES = {
+        DEATHKNIGHT = "RuneFrame",
+        DRUID       = "DruidComboPointBarFrame",
+        EVOKER      = "EssencePlayerFrame",
+        MAGE        = "MageArcaneChargesFrame",
+        MONK        = "MonkHarmonyBarFrame",
+        PALADIN     = "PaladinPowerBarFrame",
+        ROGUE       = "RogueComboPointBarFrame",
+        WARLOCK     = "WarlockPowerFrame",
+    }
     local savedClassPowerBar = nil
     if classPowerStyle == "blizzard" then
-        if PlayerFrame and PlayerFrame.classPowerBar then
-            savedClassPowerBar = PlayerFrame.classPowerBar
-            PlayerFrame.classPowerBar = nil
+        local _, classFile = UnitClass("player")
+        local frameName = BLIZZARD_CP_FRAMES[classFile]
+        local cpFrame = frameName and _G[frameName]
+        if cpFrame then
+            savedClassPowerBar = cpFrame
+            savedClassPowerBar._origParent = cpFrame:GetParent()
             savedClassPowerBar:SetParent(UIParent)
         end
     end
@@ -6882,10 +7138,9 @@ function InitializeFrames()
         elseif frames._classPowerBar then
             frames._classPowerBar:Hide()
             frames._classPowerBar:ClearAllPoints()
-            frames._classPowerBar:SetParent(PlayerFrame or UIParent)
-            if PlayerFrame then
-                PlayerFrame.classPowerBar = frames._classPowerBar
-            end
+            local origParent = frames._classPowerBar._origParent or PlayerFrame or UIParent
+            frames._classPowerBar:SetParent(origParent)
+            frames._classPowerBar._origParent = nil
             frames._classPowerBar = nil
         end
 
@@ -6906,11 +7161,13 @@ function InitializeFrames()
         end
 
         if style == "blizzard" then
-            if PlayerFrame and PlayerFrame.classPowerBar then
-                local cpb = PlayerFrame.classPowerBar
-                PlayerFrame.classPowerBar = nil
-                cpb:SetParent(UIParent)
-                frames._classPowerBar = cpb
+            local _, classFile = UnitClass("player")
+            local frameName = BLIZZARD_CP_FRAMES[classFile]
+            local cpFrame = frameName and _G[frameName]
+            if cpFrame then
+                cpFrame._origParent = cpFrame:GetParent()
+                cpFrame:SetParent(UIParent)
+                frames._classPowerBar = cpFrame
             end
             if frames._classPowerBar and frames.player then
                 PositionClassPowerBar(frames._classPowerBar)

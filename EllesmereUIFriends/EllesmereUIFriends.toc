@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Friends
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Custom Friends List with groups, notes, and realm grouping
+## Notes: A modern, light friends list reskin with improved functionality
 ## Author: Ellesmere
-## Version: 7.2.7
+## Version: 7.2.8
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIFriendsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

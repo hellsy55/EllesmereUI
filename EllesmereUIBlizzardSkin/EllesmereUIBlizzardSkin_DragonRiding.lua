@@ -319,8 +319,8 @@ end
 -------------------------------------------------------------------------------
 local function ApplyFont(fs, size)
     if not fs then return end
-    local font = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts/FRIZQT__.TTF"
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
+    local font = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or "Fonts/FRIZQT__.TTF"
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("blizzardSkin") or ""
     fs:SetFont(font, size or 12, flag)
     if flag == "" then
         fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)

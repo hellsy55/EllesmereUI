@@ -483,15 +483,61 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Pixel-perfect snapping split into global (unlock anchors, spec profiles) and
+-- per-profile (positions + sizes). The per-profile half runs on every profile
+-- including future imports (flag is per-profile so the runner catches new ones).
+-- The global half keeps the original flag so existing users don't re-run it.
 EllesmereUI.RegisterMigration({
     id          = "pixel_perfect_comprehensive_v11",
     scope       = "global",
-    description = "Snap all stored positions and sizes to the physical pixel grid across all addons.",
+    description = "Snap global unlock anchors and spec-profile TBB positions/sizes to the physical pixel grid.",
     body = function(ctx)
         local snapPos, snapPosMap, snapAnchors, snapVal = MakeSnappers()
-        -- Sizes: snap to pixel grid (not just integer rounding).
-        -- At PP.mult=1.0 this is equivalent to floor(v+0.5).
-        -- At other scales it produces grid-aligned coord values.
+        local function roundFields(tbl, keys)
+            if not tbl then return end
+            for _, key in ipairs(keys) do
+                if type(tbl[key]) == "number" then
+                    tbl[key] = snapVal(tbl[key])
+                end
+            end
+        end
+
+        -- Global: unlock anchors
+        snapAnchors(ctx.db.unlockAnchors)
+
+        -- Spec profiles: TBB positions + bar sizes
+        local sa = ctx.db.spellAssignments
+        local sp = sa and sa.specProfiles
+        if sp then
+            for _, specData in pairs(sp) do
+                if type(specData) == "table" then
+                    local tbbPos = specData.tbbPositions
+                    if tbbPos then
+                        for _, pos in pairs(tbbPos) do
+                            if type(pos) == "table" then snapPos(pos) end
+                        end
+                    end
+                    local tbb = specData.trackedBuffBars
+                    local tbbBars = tbb and tbb.bars
+                    if tbbBars then
+                        for _, bar in ipairs(tbbBars) do
+                            if type(bar) == "table" then
+                                roundFields(bar, { "width", "height" })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "pixel_perfect_profile_v1",
+    scope       = "profile",
+    description = "Snap all per-profile positions and sizes to the physical pixel grid. Runs on each profile individually so imported profiles are covered.",
+    body = function(ctx)
+        local snapPos, snapPosMap, _, snapVal = MakeSnappers()
         local function roundFields(tbl, keys)
             if not tbl then return end
             for _, key in ipairs(keys) do
@@ -506,120 +552,84 @@ EllesmereUI.RegisterMigration({
             snapPos(section.unlockPos)
         end
 
-        -- Global: unlock anchors
-        snapAnchors(ctx.db.unlockAnchors)
+        local addons = ctx.profile.addons
+        if type(addons) ~= "table" then return end
 
-        -- Per-profile
-        if not ctx.db.profiles then return end
-        for _, profData in pairs(ctx.db.profiles) do
-          if type(profData) == "table" and profData.addons then
-            local addons = profData.addons
-
-            -- Action Bars: positions + icon sizes
-            local eab = addons.EllesmereUIActionBars
-            if eab then
-                snapPosMap(eab.barPositions)
-                if eab.bars then
-                    for _, bs in pairs(eab.bars) do
-                        if type(bs) == "table" then
-                            roundFields(bs, { "buttonWidth", "buttonHeight", "width", "height" })
-                        end
+        -- Action Bars: positions + icon sizes
+        local eab = addons.EllesmereUIActionBars
+        if eab then
+            snapPosMap(eab.barPositions)
+            if eab.bars then
+                for _, bs in pairs(eab.bars) do
+                    if type(bs) == "table" then
+                        roundFields(bs, { "buttonWidth", "buttonHeight", "width", "height" })
                     end
                 end
             end
-
-            -- Resource Bars: positions + bar sizes + pip sizes
-            local erb = addons.EllesmereUIResourceBars
-            if erb then
-                local erbSizeKeys = { "width", "height", "pipWidth", "pipHeight" }
-                snapSection(erb.primary, erbSizeKeys)
-                snapSection(erb.secondary, erbSizeKeys)
-                snapSection(erb.health, erbSizeKeys)
-                snapSection(erb.castBar or erb.castbar, erbSizeKeys)
-            end
-
-            -- Unit Frames: positions + frame/cast bar sizes
-            local uf = addons.EllesmereUIUnitFrames
-            if uf then
-                snapPosMap(uf.unlockPositions or uf.positions)
-                -- Frame sizes for all unit types
-                local ufSizeKeys = { "frameWidth", "healthHeight", "powerHeight",
-                    "castbarWidth", "castbarHeight", "playerCastbarWidth", "playerCastbarHeight",
-                    "bottomTextBarHeight" }
-                for _, unitKey in ipairs({ "player", "target", "focus", "boss" }) do
-                    if uf[unitKey] then
-                        roundFields(uf[unitKey], ufSizeKeys)
-                    end
-                end
-            end
-
-            -- CDM: bar positions + icon sizes
-            local cdm = addons.EllesmereUICooldownManager
-            if cdm then
-                snapPosMap(cdm.cdmBarPositions)
-                if cdm.cdmBars and cdm.cdmBars.bars then
-                    for _, bd in ipairs(cdm.cdmBars.bars) do
-                        roundFields(bd, { "iconSize", "spacing", "width", "height" })
-                    end
-                end
-            end
-
-            -- Damage Meters
-            local dm = addons.EllesmereUIDamageMeters
-            if dm then
-                snapPos(dm.unlockPos)
-                roundFields(dm, { "dmWidth", "dmHeight" })
-            end
-
-            -- Chat
-            local chat = addons.EllesmereUIChat
-            if chat then
-                snapPos(chat.unlockPos)
-                roundFields(chat, { "chatWidth", "chatHeight" })
-            end
-
-            -- ABR
-            local abr = addons.EllesmereUIAuraBuffReminders
-            if abr and abr.display then
-                snapPos(abr.display.unlockPos)
-                roundFields(abr.display, { "iconSize", "iconSpacing" })
-            end
-
-            -- Basics (minimap, quest tracker)
-            local basics = addons.EllesmereUIBasics
-            if basics then
-                if basics.questTracker then snapPos(basics.questTracker.pos) end
-                if basics.minimap then snapPos(basics.minimap.position) end
-                if basics.friends then snapPos(basics.friends.position) end
-            end
-          end -- if profData is table with addons
         end
 
-        -- Spec profiles: TBB positions + bar sizes
-        local sa = ctx.db.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for _, specData in pairs(sp) do
-                if type(specData) == "table" then
-                    -- TBB positions
-                    local tbbPos = specData.tbbPositions
-                    if tbbPos then
-                        for _, pos in pairs(tbbPos) do
-                            if type(pos) == "table" then snapPos(pos) end
-                        end
-                    end
-                    -- TBB bar sizes
-                    local tbb = specData.trackedBuffBars
-                    local tbbBars = tbb and tbb.bars
-                    if tbbBars then
-                        for _, bar in ipairs(tbbBars) do
-                            if type(bar) == "table" then
-                                roundFields(bar, { "width", "height" })
-                            end
-                        end
-                    end
+        -- Resource Bars: positions + bar sizes + pip sizes
+        local erb = addons.EllesmereUIResourceBars
+        if erb then
+            local erbSizeKeys = { "width", "height", "pipWidth", "pipHeight" }
+            snapSection(erb.primary, erbSizeKeys)
+            snapSection(erb.secondary, erbSizeKeys)
+            snapSection(erb.health, erbSizeKeys)
+            snapSection(erb.castBar or erb.castbar, erbSizeKeys)
+        end
+
+        -- Unit Frames: positions + frame/cast bar sizes
+        local uf = addons.EllesmereUIUnitFrames
+        if uf then
+            snapPosMap(uf.unlockPositions or uf.positions)
+            local ufSizeKeys = { "frameWidth", "healthHeight", "powerHeight",
+                "castbarWidth", "castbarHeight", "playerCastbarWidth", "playerCastbarHeight",
+                "bottomTextBarHeight" }
+            for _, unitKey in ipairs({ "player", "target", "focus", "boss" }) do
+                if uf[unitKey] then
+                    roundFields(uf[unitKey], ufSizeKeys)
                 end
             end
+        end
+
+        -- CDM: bar positions + icon sizes
+        local cdm = addons.EllesmereUICooldownManager
+        if cdm then
+            snapPosMap(cdm.cdmBarPositions)
+            if cdm.cdmBars and cdm.cdmBars.bars then
+                for _, bd in ipairs(cdm.cdmBars.bars) do
+                    roundFields(bd, { "iconSize", "spacing", "width", "height" })
+                end
+            end
+        end
+
+        -- Damage Meters
+        local dm = addons.EllesmereUIDamageMeters
+        if dm then
+            snapPos(dm.unlockPos)
+            roundFields(dm, { "dmWidth", "dmHeight" })
+        end
+
+        -- Chat
+        local chat = addons.EllesmereUIChat
+        if chat then
+            snapPos(chat.unlockPos)
+            roundFields(chat, { "chatWidth", "chatHeight" })
+        end
+
+        -- ABR
+        local abr = addons.EllesmereUIAuraBuffReminders
+        if abr and abr.display then
+            snapPos(abr.display.unlockPos)
+            roundFields(abr.display, { "iconSize", "iconSpacing" })
+        end
+
+        -- Basics (minimap, quest tracker)
+        local basics = addons.EllesmereUIBasics
+        if basics then
+            if basics.questTracker then snapPos(basics.questTracker.pos) end
+            if basics.minimap then snapPos(basics.minimap.position) end
+            if basics.friends then snapPos(basics.friends.position) end
         end
     end,
 })

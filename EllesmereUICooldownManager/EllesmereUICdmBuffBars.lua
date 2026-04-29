@@ -87,14 +87,14 @@ local function GetFont()
 end
 local function GetOutline()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        return EllesmereUI.GetFontOutlineFlag()
+        return EllesmereUI.GetFontOutlineFlag("cdm")
     end
     return "OUTLINE"
 end
 local function SetFont(fs, size)
     if not (fs and fs.SetFont) then return end
     fs:SetFont(GetFont(), size, GetOutline())
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
         fs:SetShadowColor(0, 0, 0, 1)
         fs:SetShadowOffset(1, -1)
     else
@@ -1211,17 +1211,35 @@ function ns.UpdateTrackedBuffBarTimers()
                         end
                     end
 
-                    -- Name + timer from Blizzard's FontStrings (passthrough)
-                    local blizzNameFS, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
-                    -- Name: passthrough every tick so dynamic buffs (Roll the
-                    -- Bones → Broadside/True Bearing/etc.) update live.
-                    if bar._nameText and bar._nameText:IsShown() and blizzNameFS then
-                        local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
-                        if ok and txt then
-                            bar._nameText:SetText(txt)
+                    -- Name: read from aura data (same source as icon) so the
+                    -- name always matches the actual buff, not the Blizzard
+                    -- frame's font string which can be stale after pool
+                    -- recycling. Falls back to C_Spell for the config spell ID.
+                    if bar._nameText and bar._nameText:IsShown() then
+                        local nameStr
+                        if blzChild and blzChild.auraInstanceID and blzChild.auraDataUnit then
+                            local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID,
+                                blzChild.auraDataUnit, blzChild.auraInstanceID)
+                            if ok and ad and ad.name then nameStr = ad.name end
+                        end
+                        if not nameStr then
+                            local blizzNameFS = GetBlizzBarFontStrings(blizzBar)
+                            if blizzNameFS then
+                                local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
+                                if ok and txt then nameStr = txt end
+                            end
+                        end
+                        if not nameStr and cfg.spellID and cfg.spellID > 0 then
+                            local spInfo = C_Spell.GetSpellInfo(cfg.spellID)
+                            if spInfo then nameStr = spInfo.name end
+                        end
+                        if nameStr then
+                            bar._nameText:SetText(nameStr)
                             bar._nameSet = true
                         end
                     end
+                    -- Timer: passthrough from Blizzard's FontString (changes constantly)
+                    local _, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
                     -- Timer: passthrough every frame (changes constantly)
                     if cfg.showTimer and bar._timerText and blizzTimerFS then
                         bar._timerText:SetText(blizzTimerFS:GetText())

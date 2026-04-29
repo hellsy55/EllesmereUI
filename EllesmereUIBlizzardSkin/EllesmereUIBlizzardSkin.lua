@@ -49,8 +49,8 @@ local ADDON_NAME = ...
 
     local function _ttFonts(tt)
         if not tt or tt:IsForbidden() or not _enabled() then return end
-        local fp = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-        local ol = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
+        local fp = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
+        local ol = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("blizzardSkin") or ""
         local scale = EllesmereUIDB and EllesmereUIDB.tooltipFontScale or 1.0
         local titleSize = math.floor(13 * scale + 0.5)
         local bodySize  = math.floor(11 * scale + 0.5)
@@ -194,23 +194,24 @@ local ADDON_NAME = ...
 
     local function _menuOnOpen(manager, _, menuDescription)
         if not _enabled() then return end
-        -- Defer skinning out of the secure context. OpenMenu post-hooks
-        -- run inside Blizzard's protected menu pipeline; modifying frame
-        -- regions here taints the execution chain and causes
-        -- ADDON_ACTION_BLOCKED on action bar buttons.
+        -- Defer out of the secure context. The post-hook runs inside
+        -- Blizzard's protected menu pipeline; touching Blizzard objects
+        -- here propagates taint to action bar buttons. 
+        -- By the next frame the secure execution
+        -- has finished so AddMenuAcquiredCallback is safe.
         C_Timer.After(0, function()
             local menu = manager.GetOpenMenu and manager:GetOpenMenu()
             if menu then
                 _menuSkinFrame(menu)
             end
-        end)
-        if menuDescription and menuDescription.AddMenuAcquiredCallback then
-            menuDescription:AddMenuAcquiredCallback(function(frame)
-                C_Timer.After(0, function()
-                    _menuSkinFrame(frame)
+            if menuDescription and menuDescription.AddMenuAcquiredCallback then
+                menuDescription:AddMenuAcquiredCallback(function(frame)
+                    C_Timer.After(0, function()
+                        _menuSkinFrame(frame)
+                    end)
                 end)
-            end)
-        end
+            end
+        end)
     end
 
     local function _menuInit()
@@ -435,19 +436,16 @@ local ADDON_NAME = ...
             end
 
             -- Our dark background + border (create once).
-            -- Keep frame levels as low as possible so the popup doesn't
-            -- render over unrelated UI elements it shouldn't overlap.
+            -- Anchored to the dialog (not the popup wrapper) so the skin
+            -- follows the dialog when a mover addon (DeModal, BlizzMove)
+            -- lets the user drag LFGDungeonReadyDialog independently.
             if not popup._euiBg then
                 local RS = EllesmereUI.RESKIN
                 if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
-                -- Child frame parented to dialog so it inherits the dialog's
-                -- strata, but at frame level dialog-1 so it renders BELOW the
-                -- dialog's own textures (dungeon art, buttons) but ABOVE
-                -- external UI (options panel) that sits at the popup's lower
-                -- frame level. Anchored to the popup for full coverage.
-                local bgFrame = CreateFrame("Frame", nil, dialog or popup)
-                bgFrame:SetAllPoints(popup)
-                bgFrame:SetFrameLevel(math.max(1, (dialog or popup):GetFrameLevel() - 1))
+                local anchor = dialog or popup
+                local bgFrame = CreateFrame("Frame", nil, anchor)
+                bgFrame:SetAllPoints(anchor)
+                bgFrame:SetFrameLevel(math.max(1, anchor:GetFrameLevel() - 1))
                 popup._euiBgFrame = bgFrame
                 popup._euiBg = bgFrame:CreateTexture(nil, "ARTWORK")
                 popup._euiBg:SetAllPoints()
@@ -552,11 +550,10 @@ local ADDON_NAME = ...
                 end
             end
 
-            -- Anchor target: use dialog when a third-party mover (EnhanceQoL)
-            -- manages the dialog position, since the popup wrapper stays put.
+            -- Anchor to the dialog (not the popup wrapper) so the timer
+            -- follows the dialog when a mover addon drags it independently.
             local dialog = LFGDungeonReadyDialog
-            local anchorFrame = popup
-            if dialog and dialog._eqolLayoutHooks then anchorFrame = dialog end
+            local anchorFrame = dialog or popup
 
             -- Switch style based on whether the popup reskin is active
             timerBar:ClearAllPoints()
@@ -663,12 +660,7 @@ local ADDON_NAME = ...
         lfgFrame:SetScript("OnEvent", function(_, event)
             if not EllesmereUIDB then return end
             if event == "LFG_PROPOSAL_SHOW" then
-                -- Skip reskin when a third-party mover (EnhanceQoL) manages
-                -- the dialog position. Our skin elements are on the popup
-                -- wrapper and won't follow when the dialog is moved.
-                local dialog = LFGDungeonReadyDialog
-                local thirdPartyMover = dialog and dialog._eqolLayoutHooks
-                local reskinOn = IsQueueReskinOn() and not thirdPartyMover
+                local reskinOn = IsQueueReskinOn()
                 if reskinOn then
                     SkinQueuePopup()
                     HookStatusOnShow()
@@ -917,7 +909,7 @@ do
             local headerText = header.Text or (header.GetRegions and select(1, header:GetRegions()))
             if headerText and headerText.SetTextColor then
                 headerText:SetTextColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
-                local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
+                local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or "Fonts\\FRIZQT__.TTF"
                 local _, hSize = headerText:GetFont()
                 headerText:SetFont(euiFont, hSize or 16, "")
             end
@@ -971,7 +963,7 @@ do
                     hl:SetColorTexture(1, 1, 1, 0.1)
                     local fs = menuBtn:GetFontString()
                     if fs then
-                        local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
+                        local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or nil
                         local _, size, flags = fs:GetFont()
                         fs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
                     end

@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Blizz UI Enhanced
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Custom Blizzard UI Elements: Character Sheet, Tooltips, Menus, Popups, Dragon Riding and more!
+## Notes: A modern, light reskin of Blizzard UI elements with improved functionality
 ## Author: Ellesmere
-## Version: 7.2.7
+## Version: 7.2.8
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBlizzardSkinDB, EllesmereUIDragonRidingDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

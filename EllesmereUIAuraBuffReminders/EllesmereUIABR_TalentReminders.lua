@@ -32,7 +32,7 @@ end
 
 local function SetTRFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    local outline = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    local outline = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("extras")) or ""
     fs:SetFont(font, size, outline)
     if outline == "" then
         fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)

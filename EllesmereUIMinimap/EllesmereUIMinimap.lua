@@ -554,15 +554,15 @@ local clockFrame, clockTicker, clockBg
 local locationFrame, locationBg
 
 local function GetMinimapFont()
-    local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
+    local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap") or STANDARD_TEXT_FONT
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap") or "OUTLINE"
     return path, flag
 end
 
 local function ApplyMinimapFont(fs, size)
     local path, flag = GetMinimapFont()
     fs:SetFont(path, size, flag)
-    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("minimap") then
         fs:SetShadowOffset(1, -1)
         fs:SetShadowColor(0, 0, 0, 0.8)
     else
@@ -962,7 +962,7 @@ local INDICATOR_ATLAS_OFFSET = {
 local function CreateIndicatorBtn(name, parent, upAtlas, overAtlas, downAtlas, onClick)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(GetInteractableBtnSize(), GetInteractableBtnSize())
-    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:SetFrameLevel(parent:GetFrameLevel() + 20)
     btn:EnableMouse(true)
 
     -- Black background
@@ -1223,7 +1223,7 @@ local function CreateMinimapPortalFlyout()
 
         local short = PORTAL_SHORT[spellID]
         if short then
-            local fontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+            local fontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap")) or "Fonts\\FRIZQT__.TTF"
             local labelFrame = CreateFrame("Frame", nil, btn)
             labelFrame:SetAllPoints()
             labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)

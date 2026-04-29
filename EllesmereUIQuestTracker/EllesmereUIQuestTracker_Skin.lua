@@ -94,21 +94,21 @@ local function GetFont()
         end
     end
     if EllesmereUI and EllesmereUI.GetFontPath then
-        return EllesmereUI.GetFontPath() or "Fonts/FRIZQT__.TTF"
+        return EllesmereUI.GetFontPath("questTracker") or "Fonts/FRIZQT__.TTF"
     end
     return "Fonts/FRIZQT__.TTF"
 end
 
 local function GetOutline()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        return EllesmereUI.GetFontOutlineFlag() or ""
+        return EllesmereUI.GetFontOutlineFlag("questTracker") or ""
     end
     return ""
 end
 
 local function ApplyShadow(fs)
     if not fs then return end
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("questTracker") then
         fs:SetShadowColor(0, 0, 0, 0.8)
         fs:SetShadowOffset(1, -1)
     else

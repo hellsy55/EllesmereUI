@@ -8327,6 +8327,7 @@ initFrame:SetScript("OnEvent", function(self)
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
             -- Hide Buffs When Inactive toggle removed: always forced ON.
         end
+
         end -- not isFocusKick (Bar Layout section)
 
         -------------------------------------------------------------------
@@ -9007,6 +9008,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
             UpdateBorderSwatchState()
+
         end
 
         -- (Active Animation UI removed -- active state is now per-icon via spell picker dropdown)

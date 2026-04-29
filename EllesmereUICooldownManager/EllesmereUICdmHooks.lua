@@ -466,7 +466,7 @@ local function DecorateFrame(frame, barData)
     if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
-        go:SetFrameLevel(frame:GetFrameLevel() + 6)
+        go:SetFrameLevel(21)
         go:SetAlpha(0)
         go:EnableMouse(false)
         fd.glowOverlay = go
@@ -515,7 +515,7 @@ local function DecorateFrame(frame, barData)
     if not fd.borderFrame then
         local bf = CreateFrame("Frame", nil, frame)
         bf:SetAllPoints(frame)
-        bf:SetFrameLevel(frame:GetFrameLevel() + 5)
+        bf:SetFrameLevel(20)
         fd.borderFrame = bf
         EllesmereUI.PP.CreateBorder(bf,
             barData.borderR or 0, barData.borderG or 0,
@@ -567,6 +567,28 @@ local function DecorateFrame(frame, barData)
                 if sid2 and bk2 then
                     local sd2 = ns.GetBarSpellData(bk2)
                     ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
+                    -- Fallback: sid2 may be a base/override variant while
+                    -- settings are stored under the assigned spell ID.
+                    if not ss2 and sd2 and sd2.spellSettings and sd2.assignedSpells then
+                        local fc2 = _ecmeFC[frame]
+                        -- Try linkedSpellIDs
+                        if fc2 and fc2.linkedSpellIDs then
+                            for _, lid in ipairs(fc2.linkedSpellIDs) do
+                                if sd2.spellSettings[lid] then ss2 = sd2.spellSettings[lid]; break end
+                            end
+                        end
+                        -- Try override resolution
+                        if not ss2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            for _, asid in ipairs(sd2.assignedSpells) do
+                                if asid and asid > 0 and asid ~= sid2
+                                   and sd2.spellSettings[asid] then
+                                    if C_SpellBook.FindSpellOverrideByID(asid) == sid2 then
+                                        ss2 = sd2.spellSettings[asid]; break
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
                 -- Detect active state from swipe color
                 local swipeColor = frame.cooldownSwipeColor
@@ -754,6 +776,8 @@ local function DecorateFrame(frame, barData)
                 local bk2 = fc2 and fc2.barKey
                 if not sid2 or not bk2 then return end
                 if bk2:sub(1, 7) == "__ghost" then return end
+                -- FocusKick icon alpha is owned by SetFocusKickAlpha only.
+                if bk2 == ns.FOCUSKICK_BAR_KEY then return end
                 local sd2 = ns.GetBarSpellData(bk2)
                 local ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
                 -- Fallback: sid2 may be a spell override while settings are
@@ -1428,6 +1452,12 @@ local function CollectAndReanchor()
                 local count = 0
 
                 local hideCD = not barData.showCooldownText
+                -- FocusKick icon alpha is owned exclusively by
+                -- SetFocusKickAlpha; skip the per-icon alpha override here
+                -- so CollectAndReanchor doesn't clobber the nameplate-driven
+                -- visibility state with a stale _visHidden flag.
+                local isFocusKickBar = (barKey == ns.FOCUSKICK_BAR_KEY)
+
                 for _, entry in ipairs(list) do
                     count = count + 1
                     local frame = entry.frame
@@ -1440,7 +1470,7 @@ local function CollectAndReanchor()
                     -- Hidden frames are collected for data (assignedSpells)
                     -- but left visually untouched so we don't override
                     -- Blizzard's "hide when inactive" state machine.
-                    if frame:IsShown() then
+                    if frame:IsShown() and not isFocusKickBar then
                         local barHidden = container and container._visHidden
                         local fcH = _ecmeFC[frame]
                         if not (fcH and fcH._cdStateHidden) then
@@ -1843,15 +1873,18 @@ local function CollectAndReanchor()
                 local icons = cdmBarIcons[barKey]
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local barHidden = container._visHidden
+                local isFKBar = (barKey == ns.FOCUSKICK_BAR_KEY)
 
                 local hideCDText = not barData.showCooldownText
                 for i, frame in ipairs(frames) do
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
                     icons[i] = frame
+                    if not isFKBar then
                     local fcH = _ecmeFC[frame]
                     if not (fcH and fcH._cdStateHidden) then
                         frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                    end
                     end
                     frame:Show()
                     if frame.Cooldown then
@@ -2504,14 +2537,22 @@ function ns.SetupViewerHooks()
                 -- icons get collected and centered. Batched via C_Timer to
                 -- collapse the spam (fires many times per frame).
                 if frame.OnActiveStateChanged then
+                    local _asDeferFrame = CreateFrame("Frame")
+                    _asDeferFrame:Hide()
+                    local _asDeferTicks = 0
+                    _asDeferFrame:SetScript("OnUpdate", function(self)
+                        _asDeferTicks = _asDeferTicks + 1
+                        if _asDeferTicks < 2 then return end
+                        self:Hide()
+                        _activeStateReanchorPending = false
+                        CollectAndReanchor()
+                    end)
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
                         ReapplyPositions()
                         if _activeStateReanchorPending then return end
                         _activeStateReanchorPending = true
-                        C_Timer.After(0, function()
-                            _activeStateReanchorPending = false
-                            CollectAndReanchor()
-                        end)
+                        _asDeferTicks = 0
+                        _asDeferFrame:Show()
                     end)
                 end
             end
@@ -2688,7 +2729,7 @@ function ns.SetupViewerHooks()
                                         if not fd.buffGlowOverlay then
                                             local ov = CreateFrame("Frame", nil, frame)
                                             ov:SetAllPoints(frame)
-                                            ov:SetFrameLevel(frame:GetFrameLevel() + 7)
+                                            ov:SetFrameLevel(22)
                                             ov:EnableMouse(false)
                                             fd.buffGlowOverlay = ov
                                         end
@@ -2720,7 +2761,7 @@ function ns.SetupViewerHooks()
                                             if not fd.pandemicOverlay then
                                                 local ov = CreateFrame("Frame", nil, frame)
                                                 ov:SetAllPoints(frame)
-                                                ov:SetFrameLevel(frame:GetFrameLevel() + 8)
+                                                ov:SetFrameLevel(23)
                                                 ov:EnableMouse(false)
                                                 fd.pandemicOverlay = ov
                                             end

@@ -200,7 +200,7 @@ end
 local function SkinRaidRoleCount(frame)
     if not frame or frame._ebsSkinned then return end
     frame._ebsSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", frame:GetRegions()) do
         local region = select(i, frame:GetRegions())
         if region:IsObjectType("FontString") then
@@ -213,7 +213,7 @@ end
 local function SkinRaidTabButton(btn)
     if not btn or btn._ebsBtnSkinned then return end
     btn._ebsBtnSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     StripTextures(btn)
     btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
     btn._ebsBg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
@@ -255,7 +255,7 @@ local RAID_TAB_BUTTONS = {
 local function SkinCheckbox(checkbox)
     if not checkbox or checkbox._ebsSkinned then return end
     checkbox._ebsSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     local ar, ag, ab = EG.r, EG.g, EG.b
     if checkbox.SetNormalTexture then checkbox:SetNormalTexture("") end
     if checkbox.SetPushedTexture then checkbox:SetPushedTexture("") end
@@ -308,7 +308,7 @@ end
 local function SkinRaidGroup(group)
     if not group or group._ebsSkinned then return end
     group._ebsSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     local ar, ag, ab = EG.r, EG.g, EG.b
     local groupName = group:GetName()
     for i = 1, select("#", group:GetRegions()) do
@@ -347,7 +347,7 @@ end
 local function SkinRaidSlot(slot)
     if not slot or slot._ebsSkinned then return end
     slot._ebsSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", slot:GetRegions()) do
         local region = select(i, slot:GetRegions())
         if region and region:IsObjectType("Texture") then
@@ -380,7 +380,7 @@ end
 local function SkinRaidGroupButton(btn)
     if not btn or btn._ebsSkinned then return end
     btn._ebsSkinned = true
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", btn:GetRegions()) do
         local region = select(i, btn:GetRegions())
         if region and region:IsObjectType("Texture") then
@@ -944,7 +944,7 @@ local function SkinFriendButton(button)
     if button._ebsSkinned then return end
     button._ebsSkinned = true
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
     local function ApplyFont(fs, size)
         if not fs or not fs.SetFont then return end
@@ -1200,7 +1200,7 @@ local function SkinBottomButton(btn)
     if not btn or btn._ebsBtnSkinned then return end
     btn._ebsBtnSkinned = true
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
     StripTextures(btn)
 
@@ -1557,7 +1557,7 @@ local function SkinFriendsFrame()
     friendsSkinned = true
 
     local p = EBS.db.profile.friends
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
     -- Hide Blizzard decorations
     if frame.NineSlice then frame.NineSlice:Hide() end
@@ -2416,7 +2416,7 @@ local function SkinFriendsFrame()
 
             -- Orb atlas info: uses file-scope _orbFile, _orbL, _orbR, _orbT, _orbB
 
-            local raFontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local raFontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
             local _raSelectedGUID = nil
 
             -- Element initializer: fully style a plain Button as an RA entry
@@ -4541,7 +4541,7 @@ local function SkinFriendsFrame()
             offBtn:SetPoint("BOTTOM", scrollBox or frame, "BOTTOM", 0, btnY)
 
             local offLabel = offBtn:CreateFontString(nil, "OVERLAY")
-            local offFontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+            local offFontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
             offLabel:SetFont(offFontPath, 9, "")
             offLabel:SetPoint("CENTER", 0, 0)
             offBtn:SetFontString(offLabel)

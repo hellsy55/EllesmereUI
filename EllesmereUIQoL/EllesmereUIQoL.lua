@@ -334,6 +334,16 @@ qolFrame:SetScript("OnEvent", function(self)
             return false
         end
 
+        -- Secure button for taint-free container item usage.
+        -- Direct C_Container.UseContainerItem() taints the function
+        -- for the rest of the session, breaking bag item clicks.
+        -- A /use macro through SecureActionButtonTemplate is clean.
+        local openBtn = CreateFrame("Button", "EUI_AutoOpenBtn", UIParent, "SecureActionButtonTemplate")
+        openBtn:SetSize(1, 1)
+        openBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 100)
+        openBtn:Hide()
+        openBtn:SetAttribute("type", "macro")
+
         local containerFrame = CreateFrame("Frame")
         containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         containerFrame:SetScript("OnEvent", function()
@@ -342,7 +352,6 @@ qolFrame:SetScript("OnEvent", function(self)
             if not pendingOpen then
                 pendingOpen = true
                 C_Timer.After(0.3, function()
-                    -- Collect all openable items first
                     local itemsToOpen = {}
                     for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -352,15 +361,18 @@ qolFrame:SetScript("OnEvent", function(self)
                         end
                     end
 
-                    -- Open them one by one with delay between each
                     local function OpenNext(index)
                         if index > #itemsToOpen then
                             pendingOpen = false
                             return
                         end
+                        if InCombatLockdown() then pendingOpen = false; return end
                         local item = itemsToOpen[index]
                         if IsOpenable(item.bag, item.slot) then
-                            C_Container.UseContainerItem(item.bag, item.slot)
+                            openBtn:SetAttribute("macrotext", "/use " .. item.bag .. " " .. item.slot)
+                            openBtn:Show()
+                            openBtn:Click()
+                            openBtn:Hide()
                         end
                         C_Timer.After(0.15, function() OpenNext(index + 1) end)
                     end
@@ -1095,7 +1107,9 @@ do
         local crit = GetCritChance("player")
         local haste = UnitSpellHaste("player")
         local mastery = GetMasteryEffect()
-        local vers = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE)
+        local versRating = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
+        local versBase = GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
+        local vers = (issecretvalue(versRating) or issecretvalue(versBase)) and versRating or (versRating + versBase)
 
         local txt =
             format("|cff%sCrit:|r  |cffffffff%.2f%%|r", labelHex, crit) .. "\n" ..
@@ -1145,8 +1159,8 @@ do
         end
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
-            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag())
-            if EllesmereUI.GetFontUseShadow() then
+            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
+            if EllesmereUI.GetFontUseShadow("extras") then
                 statsText:SetShadowOffset(1, -1)
             else
                 statsText:SetShadowOffset(0, 0)
@@ -1166,8 +1180,8 @@ do
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
             local fontSize = math.floor(12 * scale + 0.5)
-            statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag())
-            if EllesmereUI.GetFontUseShadow() then
+            statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
+            if EllesmereUI.GetFontUseShadow("extras") then
                 statsText:SetShadowOffset(1, -1)
             else
                 statsText:SetShadowOffset(0, 0)
@@ -1233,8 +1247,8 @@ do
 
         local function MakeFS(size)
             local f = fpsFrame:CreateFontString(nil, "OVERLAY")
-            f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag())
-            if EllesmereUI.GetFontUseShadow() then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
+            f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag("extras"))
+            if EllesmereUI.GetFontUseShadow("extras") then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
             f:SetTextColor(1, 1, 1, 1)
             return f
         end
@@ -1347,7 +1361,7 @@ do
             local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
             local lblSz = sz - 2
             local fp = EllesmereUI.GetFontPath("extras")
-            local outF = EllesmereUI.GetFontOutlineFlag()
+            local outF = EllesmereUI.GetFontOutlineFlag("extras")
             if fpsFrame._text then fpsFrame._text:SetFont(fp, sz, outF) end
             if fpsFrame._textWorld then fpsFrame._textWorld:SetFont(fp, sz, outF) end
             if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
@@ -1506,7 +1520,7 @@ do
         durWarnOverlay:EnableMouse(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag())
+        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag("extras"))
         fs:SetPoint("CENTER")
         fs:SetText("Low Durability")
         durWarnOverlay._text = fs
@@ -1524,7 +1538,7 @@ do
 
             local fontPath = EllesmereUI.GetFontPath("extras")
             local durSz = (EllesmereUIDB and EllesmereUIDB.durWarnTextSize) or 30
-            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag())
+            fs:SetFont(fontPath, durSz, EllesmereUI.GetFontOutlineFlag("extras"))
 
             local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
             if c then

@@ -52,13 +52,13 @@ do
             end
 
             local title = popup:CreateFontString(nil, "OVERLAY")
-            title:SetFont(FONT, 16, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            title:SetFont(FONT, 16, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             title:SetTextColor(1, 1, 1)
             title:SetPoint("TOP", popup, "TOP", 0, -20)
             title:SetText("CDM Addon Conflict")
 
             local msg = popup:CreateFontString(nil, "OVERLAY")
-            msg:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            msg:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             msg:SetTextColor(1, 1, 1, 0.75)
             msg:SetPoint("TOP", title, "BOTTOM", 0, -14)
             msg:SetWidth(POPUP_W - 60)
@@ -80,7 +80,7 @@ do
             btnBg:SetPoint("BOTTOMRIGHT", -1, 1)
             btnBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
             local btnLbl = btn:CreateFontString(nil, "OVERLAY")
-            btnLbl:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            btnLbl:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             btnLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
             btnLbl:SetPoint("CENTER")
             btnLbl:SetText("Disable & Reload")
@@ -1327,6 +1327,25 @@ local function ShowProcGlow(icon, cr, cg, cb)
         local bk = fc and fc.barKey
         local sd = bk and ns.GetBarSpellData(bk)
         local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+        -- Fallback: sid may be a base/override variant while settings
+        -- are stored under the assigned spell ID.
+        if not ss and sd and sd.spellSettings and sd.assignedSpells then
+            if fc.linkedSpellIDs then
+                for _, lid in ipairs(fc.linkedSpellIDs) do
+                    if sd.spellSettings[lid] then ss = sd.spellSettings[lid]; break end
+                end
+            end
+            if not ss and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                for _, asid in ipairs(sd.assignedSpells) do
+                    if asid and asid > 0 and asid ~= sid
+                       and sd.spellSettings[asid] then
+                        if C_SpellBook.FindSpellOverrideByID(asid) == sid then
+                            ss = sd.spellSettings[asid]; break
+                        end
+                    end
+                end
+            end
+        end
         if ss then
             if ss.procGlow == 0 then return end -- proc glow disabled
             if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
@@ -2026,6 +2045,12 @@ BuildCDMBar = function(barIndex)
     -- Scale removed -- all sizing is width/height based now
     if not InCombatLockdown() then frame:SetScale(1) end
 
+    -- Restore default strata/level (skip if cursor-anchored; that path uses TOOLTIP/9980)
+    if not frame._mouseTrack then
+        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameLevel(5)
+    end
+
     -- Clear any previous mouse-tracking OnUpdate
     if frame._mouseTrack then
         frame:SetScript("OnUpdate", nil)
@@ -2035,7 +2060,7 @@ BuildCDMBar = function(barIndex)
             p.cdmBarPositions[key] = frame._preMousePos
         end
         frame._preMousePos = nil
-        -- Restore default strata when leaving cursor anchor
+        -- Restore saved frame level when leaving cursor anchor
         frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
@@ -3493,10 +3518,15 @@ local function EnsureFocusKickProxy()
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
-            _focusKickLastPlateVisible = nil
-            ApplyFocusKickAnchor()
+            -- Only react when the tracked unit's plate is removed.
+            -- Reacting to every plate removal caused the bar to flicker
+            -- off during AoE when unrelated mobs died or faded.
+            if unit and (unit == fkUnit or UnitIsUnit(unit, fkUnit)) then
+                _focusKickLastPlateVisible = nil
+                ApplyFocusKickAnchor()
+            end
         elseif event == "NAME_PLATE_UNIT_ADDED" then
-            if unit == fkUnit or UnitIsUnit(unit or "none", fkUnit) then
+            if unit and (unit == fkUnit or UnitIsUnit(unit, fkUnit)) then
                 _focusKickLastPlateVisible = nil
                 ApplyFocusKickAnchor()
             end
@@ -3659,7 +3689,7 @@ local function FRGlobalFont()
 end
 local function FROutlineFlag()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        local f = EllesmereUI.GetFontOutlineFlag()
+        local f = EllesmereUI.GetFontOutlineFlag("cdm")
         if f and f ~= "" then return f end
     end
     return "NONE"
@@ -3682,7 +3712,7 @@ local function FRSetFontSafe(fs, path, size, flags)
 end
 local function FRApplyFontShadow(fs)
     if not fs then return end
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
         fs:SetShadowColor(0, 0, 0, 0.8)
         fs:SetShadowOffset(1, -1)
     else

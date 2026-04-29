@@ -75,7 +75,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
     local inspectUnit = InspectFrame and InspectFrame.unit
     if not inspectUnit then return end
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local itemLink = GetInventoryItemLink(inspectUnit, slotID)
     slot._euiItemLink = itemLink
 
@@ -487,7 +487,7 @@ local function SkinInspectSheet()
             end
         end
 
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
         if not closeBtn._ebsX then
             closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
@@ -509,7 +509,7 @@ local function SkinInspectSheet()
     -- with our own matching pair at the bottom of the frame.
     -- Both are non-secure; alpha+mouse suppression is taint-free.
     do
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
         local BTN_W, BTN_H = 90, 21
         local BTN_Y = 8
 
@@ -700,7 +700,7 @@ local function SkinInspectSheet()
     -- Average item level + M+ score, centered below the title/level text.
     -- Anchored to frame TOP so they sit below the character info header.
     do
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
         if not frame._euiAvgIlvlText then
             local ilvlFS = frame:CreateFontString(nil, "OVERLAY")
@@ -751,7 +751,7 @@ local function SkinInspectSheet()
     end
 
     -- Style Tabs (InspectFrameTab1, 2, 3)
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 

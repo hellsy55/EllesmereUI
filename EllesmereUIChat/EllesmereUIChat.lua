@@ -104,7 +104,7 @@ local function GetFont()
     local cfg = ECHAT.DB()
     local fontKey = cfg.font or "__global"
     if fontKey == "__global" then
-        return (EUI.GetFontPath and EUI.GetFontPath()) or STANDARD_TEXT_FONT
+        return (EUI.GetFontPath and EUI.GetFontPath("chat")) or STANDARD_TEXT_FONT
     end
     return (EUI.ResolveFontName and EUI.ResolveFontName(fontKey)) or STANDARD_TEXT_FONT
 end
@@ -113,7 +113,7 @@ local function GetOutlineFlag()
     local cfg = ECHAT.DB()
     local mode = cfg.outlineMode or "__global"
     if mode == "__global" then
-        return (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+        return (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("chat")) or ""
     end
     if mode == "outline" then return "OUTLINE" end
     if mode == "thick" then return "THICKOUTLINE" end
@@ -1321,7 +1321,7 @@ local function ShowCopyPopup(text)
         textBox:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -20, 60)
 
         local editBox = textBox:GetEditBox()
-        editBox:SetFont(GetFont(), 12, EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag() or "")
+        editBox:SetFont(GetFont(), 12, EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("chat") or "")
         editBox:SetTextColor(1, 1, 1, 0.75)
         editBox:SetScript("OnEscapePressed", function(self)
             self:ClearFocus()

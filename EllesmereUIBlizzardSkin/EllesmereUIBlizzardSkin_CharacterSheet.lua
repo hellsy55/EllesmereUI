@@ -735,7 +735,7 @@ local function SkinCharacterSheet()
             end
         end
 
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
         closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
         closeBtn._ebsX:SetFont(fontPath, 16, "")
@@ -751,7 +751,7 @@ local function SkinCharacterSheet()
         end)
     end
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
 
     for i = 1, 3 do
@@ -1699,7 +1699,12 @@ local function SkinCharacterSheet()
                     { name = "Crit", func = function() return GetCritChance("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_CRIT_MELEE) or 0 end },
                     { name = "Haste", func = function() return UnitSpellHaste("player") or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_HASTE_MELEE) or 0 end },
                     { name = "Mastery", func = function() return GetMasteryEffect() or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_MASTERY) or 0 end },
-                    { name = "Versatility", func = function() return GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0 end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0 end },
+                    { name = "Versatility", func = function()
+                        local rating = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
+                        local base = GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
+                        if issecretvalue(rating) or issecretvalue(base) then return rating end
+                        return rating + base
+                    end, format = "%.2f%%", rawFunc = function() return GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0 end },
                 }
             },
             {
@@ -1733,7 +1738,8 @@ local function SkinCharacterSheet()
                 stats = {
                     { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end, tooltip = "Reduces physical damage taken" },
                     { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%", tooltip = "Chance to avoid melee attacks" },
-                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%", tooltip = "Chance to block melee attacks" },
+                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%", tooltip = "Chance to deflect melee attacks" },
+                    { name = "Block", func = function() return GetBlockChance() or 0 end, format = "%.2f%%", tooltip = "Chance to block incoming attacks with a shield" },
                     { name = "Stagger Effect", func = function() return C_PaperDollInfo.GetStaggerPercentage("player") or 0 end, format = "%.2f%%", showWhen = "brewmaster", tooltip = "Converts damage into a delayed effect" },
                 }
             },
@@ -3492,7 +3498,7 @@ local function SkinCharacterSheet()
         "CharacterTrinket0Slot", "CharacterTrinket1Slot"
     }
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
     -- Create global socket container for all slot icons
     local globalSocketContainer = CreateFrame("Frame", "EUI_CharSheet_SocketContainer", frame)
@@ -4384,7 +4390,7 @@ function EllesmereUI._applyCharSheetTextSizes()
     local enchantShadow = EllesmereUIDB and EllesmereUIDB.charSheetEnchantShadow or false
     local enchantOutline = EllesmereUIDB and EllesmereUIDB.charSheetEnchantOutline or false
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
     -- Update all slot labels
     local itemSlots = EUI_GEAR_SLOTS
