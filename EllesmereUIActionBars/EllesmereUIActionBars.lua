@@ -24,6 +24,7 @@ local EAB_VTABLE = {
     MainBarPageSync = {},
 }
 ns.EAB_VTABLE = EAB_VTABLE
+
 EAB.VisibilityCompat = EAB.VisibilityCompat or {}
 
 
@@ -1330,13 +1331,7 @@ local function ReRegisterButtonEvents(btn, listKey)
     for _, event in ipairs(BUTTON_EVENT_LISTS[listKey]) do
         btn:RegisterEvent(event)
     end
-    if listKey == "action" then
-        btn:RegisterUnitEvent("UNIT_AURA", "player")
-        -- Player-only power filter so this fires once per power tick, not
-        -- per group member. Per-button registration replaces the old
-        -- usableFrame polling; Blizzard's native OnEvent calls UpdateUsable.
-        btn:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
-    elseif listKey == "pet" then
+    if listKey == "pet" then
         btn:RegisterUnitEvent("UNIT_PET", "player")
         btn:RegisterUnitEvent("UNIT_FLAGS", "pet")
     end
@@ -3724,14 +3719,24 @@ end
 function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, cdOY, cdColor)
     if not cdFrame then return false end
 
+    -- Skip if these exact settings were already applied to this frame
+    local stamp = cdFrame._eabCDFontStamp
+    local cr, cg, cb = cdColor.r, cdColor.g, cdColor.b
+    if stamp and stamp[1] == fontPath and stamp[2] == cdSize
+       and stamp[3] == cdOX and stamp[4] == cdOY
+       and stamp[5] == cr and stamp[6] == cg and stamp[7] == cb then
+        return true
+    end
+
     for ri = 1, cdFrame:GetNumRegions() do
         local region = select(ri, cdFrame:GetRegions())
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
             region:SetFont(fontPath, cdSize, "OUTLINE")
             region:SetShadowOffset(0, 0)
-            region:SetTextColor(cdColor.r, cdColor.g, cdColor.b)
+            region:SetTextColor(cr, cg, cb)
             region:ClearAllPoints()
             region:SetPoint("CENTER", cdFrame, "CENTER", cdOX, cdOY)
+            cdFrame._eabCDFontStamp = { fontPath, cdSize, cdOX, cdOY, cr, cg, cb }
             return true
         end
     end
@@ -4279,13 +4284,14 @@ function EAB:ApplyRangeColoring()
             elseif event == "ACTION_USABLE_CHANGED" then
                 -- Blizzard resets icon vertex colors on usability changes;
                 -- re-apply range tint on any out-of-range buttons.
+                -- Bail fast when nothing is out of range (common case).
+                if not next(_range.outOfRange) then return end
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
                     local s = EAB.db.profile.bars[info.key]
                     if btns and s and s.outOfRangeColoring then
                         for _, btn in ipairs(btns) do
-                            local bSlot = GetButtonActionSlot(btn)
-                            if bSlot and _range.outOfRange[bSlot] then
+                            if btn._eabRangeTinted then
                                 ApplyRangeTint(btn, true, s)
                             end
                         end
@@ -4339,16 +4345,8 @@ function EAB:ApplyRangeColoring()
                         if not self._eabRangeTinted then return end
                         local slot = GetButtonActionSlot(self)
                         if slot and _range.outOfRange[slot] then
-                            local s
-                            for _, inf in ipairs(BAR_CONFIG) do
-                                local bs = barButtons[inf.key]
-                                if bs then
-                                    for _, b in ipairs(bs) do
-                                        if b == self then s = EAB.db.profile.bars[inf.key]; break end
-                                    end
-                                end
-                                if s then break end
-                            end
+                            local bInfo = buttonToBar[self]
+                            local s = bInfo and EAB.db.profile.bars[bInfo.barKey]
                             if s and s.outOfRangeColoring then
                                 ApplyRangeTint(self, true, s)
                             end
@@ -5585,20 +5583,30 @@ function EAB:HookProcGlow()
             return
         end
         local isShow = (event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
-        for _, info in ipairs(BAR_CONFIG) do
-            local buttons = barButtons[info.key]
-            if buttons then
-                for _, btn in ipairs(buttons) do
-                    if btn and btn._eabSquared then
-                        local id = GetButtonSpellID(btn)
-                        if id and id == arg1 then
-                            if isShow then ShowGlow(btn) else HideGlow(btn) end
-                        elseif not isShow and _procState.active[btn] then
-                            -- Spell on this button changed (transform/override)
-                            -- since the glow was shown. The HIDE event carries
-                            -- the old spellID which no longer matches. Clear it.
-                            if not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
-                                HideGlow(btn)
+        if not isShow then
+            -- HIDE: only need to check buttons with active glows (small set).
+            -- Collect first to avoid modifying _procState.active during iteration.
+            local toHide
+            for btn in pairs(_procState.active) do
+                local id = GetButtonSpellID(btn)
+                if (id and id == arg1) or not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
+                    if not toHide then toHide = {} end
+                    toHide[#toHide + 1] = btn
+                end
+            end
+            if toHide then
+                for i = 1, #toHide do HideGlow(toHide[i]) end
+            end
+        else
+            -- SHOW: scan all buttons for the matching spellID
+            for _, info in ipairs(BAR_CONFIG) do
+                local buttons = barButtons[info.key]
+                if buttons then
+                    for _, btn in ipairs(buttons) do
+                        if btn and btn._eabSquared then
+                            local id = GetButtonSpellID(btn)
+                            if id and id == arg1 then
+                                ShowGlow(btn)
                             end
                         end
                     end
@@ -5777,6 +5785,7 @@ local function _FlushCDPatch()
                 end
             end
             EnforceShapeEdge(btn)
+            cdFrame._eabEdgeDone = true
         end
     end
     wipe(_cdEdge.pending)
@@ -5789,8 +5798,8 @@ local function HookButtonCooldownEdge(btn)
     btn._eabCDEdgeHooked = true
 
     local function OnSetCooldown(cdFrame)
-        -- Cooldown edge patch
-        if cdFrame then
+        -- Cooldown edge patch (skip if edge was already applied to this frame)
+        if cdFrame and not cdFrame._eabEdgeDone then
             if not _cdEdge.pending[cdFrame] then
                 _cdEdge.pendingCount = _cdEdge.pendingCount + 1
             end
@@ -5800,11 +5809,15 @@ local function HookButtonCooldownEdge(btn)
                 C_Timer_After(0, _FlushCDPatch)
             end
         end
-        -- Cooldown font patch (shared hook to avoid double hooksecurefunc)
-        EAB_VTABLE.CooldownFonts.pending[btn] = true
-        if not EAB_VTABLE.CooldownFonts.timerScheduled then
-            EAB_VTABLE.CooldownFonts.timerScheduled = true
-            C_Timer_After(0, EAB_VTABLE.CooldownFonts.FlushPatch)
+        -- Cooldown font patch (shared hook to avoid double hooksecurefunc).
+        -- Skip if fonts were already applied to this button's cooldown frame
+        -- (stamp is set by ApplyToFrame and cleared on settings change).
+        if not (btn.cooldown and btn.cooldown._eabCDFontStamp) then
+            EAB_VTABLE.CooldownFonts.pending[btn] = true
+            if not EAB_VTABLE.CooldownFonts.timerScheduled then
+                EAB_VTABLE.CooldownFonts.timerScheduled = true
+                C_Timer_After(0, EAB_VTABLE.CooldownFonts.FlushPatch)
+            end
         end
     end
 
@@ -5872,6 +5885,9 @@ function EAB:ApplyCooldownEdge()
             for i = 1, #buttons do
                 local btn = buttons[i]
                 if btn and btn._eabSquared then
+                    -- Clear edge cache so the hook re-applies on next cooldown
+                    if btn.cooldown then btn.cooldown._eabEdgeDone = nil end
+                    if btn.chargeCooldown then btn.chargeCooldown._eabEdgeDone = nil end
                     ApplyButtonCooldownEdge(btn, sz, cr, cg, cb, ca)
                 end
             end
@@ -8592,11 +8608,6 @@ _blizzMovableCombatFrame:SetScript("OnEvent", function()
         end
     end
     wipe(_blizzMovablePendingOOC)
-
-    -- Reapply all unlock-mode anchors now that protected frames can be moved.
-    if EllesmereUI.ReapplyAllUnlockAnchors then
-        EllesmereUI.ReapplyAllUnlockAnchors()
-    end
 
     -- Re-disable mouse on ExtraActionBarFrame after combat ends.
     -- Blizzard's secure code re-enables mouse on protected frames during combat.

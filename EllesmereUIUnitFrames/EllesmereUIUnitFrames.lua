@@ -11,6 +11,10 @@ if not oUF then
     return
 end
 
+-- External lookup for portrait side per frame. Avoids writing custom
+-- properties onto oUF frames which taints their secure execution chain.
+EllesmereUI._ufPortraitSide = EllesmereUI._ufPortraitSide or setmetatable({}, { __mode = "k" })
+
 local db
 local defaults = {
     profile = {
@@ -1697,7 +1701,7 @@ local function UpdateBordersForScale(frame, unit)
     local isAttached = pStyle == "attached"
     -- Use the actual side the frame was built with (stored on the frame) so that
     -- frames like the pet which hard-code "left" don't get treated as "right".
-    local pSide = frame._portraitSide or settings.portraitSide or "right"
+    local pSide = EllesmereUI._ufPortraitSide[frame] or settings.portraitSide or "right"
     local effectiveSide = pSide
     if isAttached and pSide == "top" then effectiveSide = "right" end
 
@@ -3171,7 +3175,7 @@ local function StyleFullFrame(frame, unit)
         CreateAbsorbBar(frame, unit, settings)
         -- Always create portrait; hide backdrop when disabled
         frame.Portrait = CreatePortrait(frame, pSide, playerHeightWithCp, unit)
-        frame._portraitSide = pSide
+        EllesmereUI._ufPortraitSide[frame] = pSide
         if frame.Portrait and not showPortrait then
             frame.Portrait.backdrop:Hide()
         end
@@ -3222,7 +3226,7 @@ local function StyleFullFrame(frame, unit)
         frame.Castbar = CreateCastBar(frame, unit, settings)
         SetupShowOnCastBar(frame, unit)
         frame.Portrait = CreatePortrait(frame, pSide, playerTargetHeight, unit)
-        frame._portraitSide = pSide
+        EllesmereUI._ufPortraitSide[frame] = pSide
         if frame.Portrait and not showPortrait then
             frame.Portrait.backdrop:Hide()
         end
@@ -3459,7 +3463,7 @@ local function StyleFocusFrame(frame, unit)
     frame.Castbar = CreateCastBar(frame, unit, settings)
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, pSide, focusBarHeight, unit)
-    frame._portraitSide = pSide
+    EllesmereUI._ufPortraitSide[frame] = pSide
     if frame.Portrait and not showPortrait then
         frame.Portrait.backdrop:Hide()
     end
@@ -3695,7 +3699,7 @@ local function StyleSimpleFrame(frame, unit)
 
     -- Always create portrait; hide backdrop when disabled. Mirrors StylePetFrame.
     frame.Portrait = CreatePortrait(frame, pSide, settings.healthHeight, unit)
-    frame._portraitSide = pSide
+    EllesmereUI._ufPortraitSide[frame] = pSide
     if frame.Portrait and not showPortrait then
         frame.Portrait.backdrop:Hide()
     end
@@ -3867,7 +3871,7 @@ local function StylePetFrame(frame, unit)
 
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, pSide, settings.healthHeight, unit)
-    frame._portraitSide = pSide
+    EllesmereUI._ufPortraitSide[frame] = pSide
     if frame.Portrait and not showPortrait then        frame.Portrait.backdrop:Hide()
     end
     -- Re-anchor health bar using healthHeight as the portrait width to avoid
@@ -4008,7 +4012,7 @@ local function StyleBossFrame(frame, unit)
     frame.Power = CreatePowerBar(frame, unit, settings)
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, pSide, bossBarHeight, unit)
-    frame._portraitSide = pSide
+    EllesmereUI._ufPortraitSide[frame] = pSide
     if frame.Portrait and not showPortrait then
         frame.Portrait.backdrop:Hide()
     end
@@ -4926,10 +4930,10 @@ local function ReloadFrames()
 
             -- Keep the cached portrait side in sync with user-edited settings.
             -- Downstream re-snap code (SnapLayout, health anchor math) reads
-            -- frame._portraitSide, so without this update the side toggle
-            -- wouldn't flip until a full UI reload.
+            -- the portrait side lookup, so without this update the side
+            -- toggle wouldn't flip until a full UI reload.
             if settings.portraitSide then
-                frame._portraitSide = settings.portraitSide
+                EllesmereUI._ufPortraitSide[frame] = settings.portraitSide
             end
 
             -- Re-anchor the attached-mode portrait backdrop when the side
@@ -6141,7 +6145,7 @@ local function ReloadFrames()
                     else
                         PP.Point(frame.Portrait.backdrop, "TOPRIGHT", frame, "TOPRIGHT", 0, 0)
                     end
-                    frame._portraitSide = bossPSide
+                    EllesmereUI._ufPortraitSide[frame] = bossPSide
                 end
                 if frame.Health then
                     frame.Health:ClearAllPoints()
@@ -6887,8 +6891,8 @@ function InitializeFrames()
         end)
         -- Edit Mode exit reparents the cast bar back into its layout frame
         -- (which gets hidden), so re-apply our state when the panel closes.
-        if EditModeManagerFrame and not EditModeManagerFrame._euiCastbarHooked then
-            EditModeManagerFrame._euiCastbarHooked = true
+        if EditModeManagerFrame and not EllesmereUI._GetFFD(EditModeManagerFrame).castbarHooked then
+            EllesmereUI._GetFFD(EditModeManagerFrame).castbarHooked = true
             hooksecurefunc(EditModeManagerFrame, "Hide", function()
                 C_Timer.After(0, ApplyBlizzCastbarState)
             end)

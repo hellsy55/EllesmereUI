@@ -888,8 +888,8 @@ qolFrame:SetScript("OnEvent", function(self)
     do
         local function HookTalkingHead()
             local thf = _G.TalkingHeadFrame
-            if not thf or thf._euiHooked then return end
-            thf._euiHooked = true
+            if not thf or EllesmereUI._GetFFD(thf).hooked then return end
+            EllesmereUI._GetFFD(thf).hooked = true
             hooksecurefunc(thf, "PlayCurrent", function(self)
                 if EllesmereUIDB and EllesmereUIDB.hideTalkingHead then
                     self:Hide()

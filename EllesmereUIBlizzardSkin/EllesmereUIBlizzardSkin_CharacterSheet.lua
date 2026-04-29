@@ -6,6 +6,14 @@ local skinned = false
 local issecretvalue = issecretvalue or function() return false end
 local activeEquipmentSetID = nil
 
+-- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
+local FFD = setmetatable({}, { __mode = "k" })
+local function GetFFD(frame)
+    local d = FFD[frame]
+    if not d then d = {}; FFD[frame] = d end
+    return d
+end
+
 -- "gear" = the 16 slots with ilvl/enchants/sockets.
 -- "all"  = gear + shirt + tabard (cosmetic), for full-character loops.
 local EUI_GEAR_SLOTS = {
@@ -316,7 +324,7 @@ local function SkinCharacterSheet()
     -- PlayerModel widget. SetUnit("player") natively follows shapeshift forms
     -- (Bear/Cat/Travel/Moonkin/Tree) and Dracthyr Visage -- no preset tricks
     -- needed. Backdrop + hover glow live on a sibling frame (3D model draws on top).
-    if not frame._euiModelScene then
+    if not GetFFD(frame).modelScene then
         local myModel = CreateFrame("PlayerModel", "EUI_CharSheet_ModelScene", frame)
         myModel:SetFrameLevel(2)
         if CharacterHeadSlot then
@@ -351,16 +359,16 @@ local function SkinCharacterSheet()
             bgGlowTex:SetHeight(math.max(1, (h or 0) * GLOW_HEIGHT_RATIO))
         end)
 
-        frame._euiModelBg      = bgTex
-        frame._euiModelBgGlow  = bgGlowTex
-        frame._euiModelBgFrame = bgFrame
+        GetFFD(frame).modelBg      = bgTex
+        GetFFD(frame).modelBgGlow  = bgGlowTex
+        GetFFD(frame).modelBgFrame = bgFrame
 
         myModel:SetUnit("player")
         local zoomLevel = 0  -- 0 = full body, 1 = tight portrait
         myModel:SetPortraitZoom(zoomLevel)
 
-        frame._euiModelScene = myModel  -- name retained for back-compat with older refs
-        frame._euiModelActor = myModel
+        GetFFD(frame).modelScene = myModel  -- name retained for back-compat with older refs
+        GetFFD(frame).modelActor = myModel
 
         -- LMB drag rotates, RMB drag pans, wheel zooms.
         local ROTATE_SPEED = 0.012
@@ -438,7 +446,7 @@ local function SkinCharacterSheet()
         local glowFader = CreateFrame("Frame")
         glowFader:Hide()
         glowFader:SetScript("OnUpdate", function(self, elapsed)
-            local tex = frame._euiModelBgGlow
+            local tex = GetFFD(frame).modelBgGlow
             if not tex then self:Hide(); return end
             local cur = tex:GetAlpha() or GLOW_IDLE
             local diff = glowTarget - cur
@@ -463,11 +471,11 @@ local function SkinCharacterSheet()
         -- SetUnit handles form transitions natively; re-bind on equipment
         -- changes so newly-equipped gear shows up on the model.
         local function _refreshPlayerModel()
-            if frame._euiModelScene and frame._euiModelScene.SetUnit then
-                frame._euiModelScene:SetUnit("player")
+            if GetFFD(frame).modelScene and GetFFD(frame).modelScene.SetUnit then
+                GetFFD(frame).modelScene:SetUnit("player")
             end
         end
-        frame._euiRefreshPlayerModel = _refreshPlayerModel
+        GetFFD(frame).refreshPlayerModel = _refreshPlayerModel
 
         local refresh = CreateFrame("Frame")
         refresh:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
@@ -482,7 +490,7 @@ local function SkinCharacterSheet()
 
         if frame.HookScript then
             frame:HookScript("OnShow", function()
-                if frame._euiRefreshPlayerModel then frame._euiRefreshPlayerModel() end
+                if GetFFD(frame).refreshPlayerModel then GetFFD(frame).refreshPlayerModel() end
             end)
         end
     end
@@ -712,10 +720,10 @@ local function SkinCharacterSheet()
 
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 
-    frame._ebsBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-    frame._ebsBg:SetAllPoints(frame)
-    frame._ebsBg:SetAlpha(1)
+    GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+    GetFFD(frame).bg:SetAllPoints(frame)
+    GetFFD(frame).bg:SetAlpha(1)
 
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
@@ -737,17 +745,17 @@ local function SkinCharacterSheet()
 
         local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
-        closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
-        closeBtn._ebsX:SetFont(fontPath, 16, "")
-        closeBtn._ebsX:SetText("x")
-        closeBtn._ebsX:SetTextColor(1, 1, 1, 0.75)
-        closeBtn._ebsX:SetPoint("CENTER", -2, -3)
+        GetFFD(closeBtn).x = closeBtn:CreateFontString(nil, "OVERLAY")
+        GetFFD(closeBtn).x:SetFont(fontPath, 16, "")
+        GetFFD(closeBtn).x:SetText("x")
+        GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.75)
+        GetFFD(closeBtn).x:SetPoint("CENTER", -2, -3)
 
         closeBtn:HookScript("OnEnter", function()
-            if closeBtn._ebsX then closeBtn._ebsX:SetTextColor(1, 1, 1, 1) end
+            if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 1) end
         end)
         closeBtn:HookScript("OnLeave", function()
-            if closeBtn._ebsX then closeBtn._ebsX:SetTextColor(1, 1, 1, 0.75) end
+            if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.75) end
         end)
     end
 
@@ -773,10 +781,10 @@ local function SkinCharacterSheet()
             local hl = tab:GetHighlightTexture()
             if hl then hl:SetTexture("") end
 
-            if not tab._ebsBg then
-                tab._ebsBg = tab:CreateTexture(nil, "BACKGROUND")
-                tab._ebsBg:SetAllPoints()
-                tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+            if not GetFFD(tab).bg then
+                GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND")
+                GetFFD(tab).bg:SetAllPoints()
+                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             end
 
             if not tab._activeHL then
@@ -883,14 +891,14 @@ local function SkinCharacterSheet()
     -- _euiBg tag. Anchors to the inner ScrollBox so the texture stays inside
     -- the list area and doesn't bleed over the tab chrome.
     local function _ensureTabBg(pane)
-        if not pane or pane._euiBg then return end
+        if not pane or GetFFD(pane).bg then return end
         local anchor = pane.ScrollBox or pane.scrollFrame or pane
         local tex = pane:CreateTexture(nil, "BACKGROUND", nil, -7)
         tex:SetTexture("Interface\\Credits\\CreditsScreenBackground11Midnight")
         tex:SetPoint("TOPLEFT",     anchor, "TOPLEFT",     10, -10)
         tex:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -10,  0)
         tex:SetAlpha(0.25)
-        pane._euiBg = tex
+        GetFFD(pane).bg = tex
     end
     _ensureTabBg(_G.ReputationFrame)
     _ensureTabBg(_G.TokenFrame)
@@ -948,8 +956,8 @@ local function SkinCharacterSheet()
             if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
         end
 
-        if frame._euiModelScene   then frame._euiModelScene:SetShown(isCharacterTab)   end
-        if frame._euiModelBgFrame then frame._euiModelBgFrame:SetShown(isCharacterTab) end
+        if GetFFD(frame).modelScene   then GetFFD(frame).modelScene:SetShown(isCharacterTab)   end
+        if GetFFD(frame).modelBgFrame then GetFFD(frame).modelBgFrame:SetShown(isCharacterTab) end
     end
 
     local function _hookPaneOnShow(pane, isChar)
@@ -3684,33 +3692,33 @@ local function SkinCharacterSheet()
         local t = GetTime()
         local alpha = 0.25 + 0.75 * (0.5 + 0.5 * math.sin(t * math.pi / 0.75))
         for slot in pairs(missingEnchantSlots) do
-            local ov = slot._euiMissingEnchBorder
+            local ov = GetFFD(slot).missingEnchBorder
             if ov then ov:SetAlpha(alpha) end
         end
     end)
 
     local function SetSlotMissingEnchant(slot, missing)
         if missing then
-            if not slot._euiMissingEnchBorder then
+            if not GetFFD(slot).missingEnchBorder then
                 local overlay = CreateFrame("Frame", nil, slot)
                 overlay:SetAllPoints(slot)
                 overlay:SetFrameLevel(slot:GetFrameLevel() + 2)
                 if EllesmereUI and EllesmereUI.PanelPP then
                     EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 7)  -- #e54949
                 end
-                slot._euiMissingEnchBorder = overlay
+                GetFFD(slot).missingEnchBorder = overlay
             end
-            slot._euiMissingEnchBorder:Show()
+            GetFFD(slot).missingEnchBorder:Show()
             missingEnchantSlots[slot] = true
             if not pulseTicker:IsShown() then pulseTicker:Show() end
         else
-            if slot._euiMissingEnchBorder then slot._euiMissingEnchBorder:Hide() end
+            if GetFFD(slot).missingEnchBorder then GetFFD(slot).missingEnchBorder:Hide() end
             missingEnchantSlots[slot] = nil
             if not next(missingEnchantSlots) then pulseTicker:Hide() end
         end
     end
     -- Expose so UpdateSlotInfo can drive it from the existing isMissing flag.
-    frame._euiSetSlotMissingEnchant = SetSlotMissingEnchant
+    GetFFD(frame).setSlotMissingEnchant = SetSlotMissingEnchant
 
     -- Listen for inventory / equipment / item-load changes and update borders.
     -- GetItemInfo can return nil on freshly-linked items; GET_ITEM_INFO_RECEIVED
@@ -3750,12 +3758,12 @@ local function SkinCharacterSheet()
     -- Socket icon creation and display logic. Each socket is a small Frame
     -- (not a raw texture) so we can put a 1px pixel-perfect border on it.
     local function GetOrCreateSocketIcons(slot, side, slotIndex)
-        if slot._euiCharSocketsIcons then return slot._euiCharSocketsIcons end
+        if GetFFD(slot).charSocketsIcons then return GetFFD(slot).charSocketsIcons end
 
-        slot._euiCharSocketsIcons = {}   -- list of icon textures (gem art)
-        slot._euiCharSocketsFrames = {}  -- list of parent frames (borders live here)
-        slot._euiCharSocketsBtns = slot._euiCharSocketsIcons  -- alias for callers
-        slot._gemLinks = {}
+        GetFFD(slot).charSocketsIcons = {}   -- list of icon textures (gem art)
+        GetFFD(slot).charSocketsFrames = {}  -- list of parent frames (borders live here)
+        GetFFD(slot).charSocketsBtns = GetFFD(slot).charSocketsIcons  -- alias for callers
+        GetFFD(slot).gemLinks = {}
 
         for i = 1, 2 do  -- max 2 gems displayed per slot
             local gemFrame = CreateFrame("Frame", nil, globalSocketContainer)
@@ -3769,14 +3777,14 @@ local function SkinCharacterSheet()
             -- 2px pixel-perfect border, recolored per-gem in UpdateSocketIcons.
             PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 2)
 
-            slot._euiCharSocketsFrames[i] = gemFrame
-            slot._euiCharSocketsIcons[i]  = icon
+            GetFFD(slot).charSocketsFrames[i] = gemFrame
+            GetFFD(slot).charSocketsIcons[i]  = icon
         end
 
-        slot._euiCharSocketsSide = side
-        slot._euiCharSocketsSlotIndex = slotIndex
+        GetFFD(slot).charSocketsSide = side
+        GetFFD(slot).charSocketsSlotIndex = slotIndex
 
-        return slot._euiCharSocketsIcons
+        return GetFFD(slot).charSocketsIcons
     end
 
     -- Update socket icons for all slots
@@ -3792,7 +3800,7 @@ local function SkinCharacterSheet()
         local link = GetInventoryItemLink("player", slotIndex)
         local gemsEnabled = not (EllesmereUIDB and EllesmereUIDB.showGems == false)
         if not link or not gemsEnabled then
-            for _, gemFrame in ipairs(slot._euiCharSocketsFrames or {}) do
+            for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
                 gemFrame:Hide()
             end
             return
@@ -3808,12 +3816,12 @@ local function SkinCharacterSheet()
 
         -- Build gem links directly from the item link for tooltip-on-hover.
         -- Gem links via C_Item.GetItemGem (no link-parsing required).
-        slot._gemLinks = {}
+        GetFFD(slot).gemLinks = {}
         if link and C_Item and C_Item.GetItemGem then
             for i = 1, 4 do
                 local _, gemLink = C_Item.GetItemGem(link, i)
                 if gemLink then
-                    table.insert(slot._gemLinks, gemLink)
+                    table.insert(GetFFD(slot).gemLinks, gemLink)
                 end
             end
         end
@@ -3822,7 +3830,7 @@ local function SkinCharacterSheet()
         -- extra gems stacking leftward. Border color reflects gem rank:
         -- Rank 2+ (rare+) = gold, Rank 1 (uncommon) = silver.
         if #socketTextures > 0 then
-            local gemFrames = slot._euiCharSocketsFrames or {}
+            local gemFrames = GetFFD(slot).charSocketsFrames or {}
             for i, icon in ipairs(socketIcons) do
                 local gemFrame = gemFrames[i]
                 if socketTextures[i] and gemFrame then
@@ -3845,7 +3853,7 @@ local function SkinCharacterSheet()
                         GEM_INSET_Y + (i - 1) * (GEM_SIZE + GEM_PAD))
 
                     -- Resolve gem rarity for border color.
-                    local gemLink = slot._gemLinks and slot._gemLinks[i]
+                    local gemLink = GetFFD(slot).gemLinks and GetFFD(slot).gemLinks[i]
                     local rarity = 2
                     if gemLink then
                         local _, _, r = GetItemInfo(gemLink)
@@ -3858,9 +3866,9 @@ local function SkinCharacterSheet()
 
                     -- Tooltip on hover
                     gemFrame:SetScript("OnEnter", function(self)
-                        if slot._gemLinks[i] then
+                        if GetFFD(slot).gemLinks[i] then
                             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                            GameTooltip:SetHyperlink(slot._gemLinks[i])
+                            GameTooltip:SetHyperlink(GetFFD(slot).gemLinks[i])
                             GameTooltip:Show()
                         end
                     end)
@@ -3872,7 +3880,7 @@ local function SkinCharacterSheet()
                 end
             end
         else
-            for _, gemFrame in ipairs(slot._euiCharSocketsFrames or {}) do
+            for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
                 gemFrame:Hide()
             end
         end
@@ -3892,14 +3900,14 @@ local function SkinCharacterSheet()
     -- with an empty socket previously left the old gem icon until /reload).
     local function ClearSlotGems(slot)
         if not slot then return end
-        slot._gemLinks = {}
-        if slot._euiCharSocketsFrames then
-            for _, gemFrame in ipairs(slot._euiCharSocketsFrames) do
+        GetFFD(slot).gemLinks = {}
+        if GetFFD(slot).charSocketsFrames then
+            for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames) do
                 gemFrame:Hide()
             end
         end
-        if slot._euiCharSocketsIcons then
-            for _, icon in ipairs(slot._euiCharSocketsIcons) do
+        if GetFFD(slot).charSocketsIcons then
+            for _, icon in ipairs(GetFFD(slot).charSocketsIcons) do
                 icon:SetTexture(nil)
                 if icon.SetAtlas then icon:SetAtlas(nil) end
             end
@@ -4122,8 +4130,8 @@ local function SkinCharacterSheet()
 
             -- Pulsing red border overlay for missing enchants. Driven by the
             -- same isMissing flag so it stays in sync with the icon swap.
-            if frame._euiSetSlotMissingEnchant then
-                frame._euiSetSlotMissingEnchant(slot, isMissing == true)
+            if GetFFD(frame).setSlotMissingEnchant then
+                GetFFD(frame).setSlotMissingEnchant(slot, isMissing == true)
             end
         end
 
@@ -4219,8 +4227,8 @@ end
 -- Style a character slot with rarity-based border
 local function SkinCharacterSlot(slotName, slotID)
     local slot = _G[slotName]
-    if not slot or slot._ebsSkinned then return end
-    slot._ebsSkinned = true
+    if not slot or GetFFD(slot).skinned then return end
+    GetFFD(slot).skinned = true
 
     -- Hide Blizzard IconBorder
     if slot.IconBorder then

@@ -972,7 +972,7 @@ function MatchH.ApplyWidthMatch(sourceKey, targetKey)
         if sourceElem and sourceElem.setWidth then
             if isUnlocked then
                 local sb = GetBarFrame(sourceKey)
-                local savedAlpha = sb and sb._euiRestoreAlpha
+                local savedAlpha = sb and EllesmereUI._GetFFD(sb).restoreAlpha
                 if sb and not savedAlpha then sb:SetAlpha(0) end
                 _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setWidth, sourceKey, targetW)
@@ -1018,7 +1018,7 @@ function MatchH.ApplyHeightMatch(sourceKey, targetKey)
         if sourceElem and sourceElem.setHeight then
             if isUnlocked then
                 local sb = GetBarFrame(sourceKey)
-                local savedAlpha = sb and sb._euiRestoreAlpha
+                local savedAlpha = sb and EllesmereUI._GetFFD(sb).restoreAlpha
                 if sb and not savedAlpha then sb:SetAlpha(0) end
                 _propagatingMatch = true; EllesmereUI._propagatingMatch = true
                 pcall(sourceElem.setHeight, sourceKey, targetH)
@@ -2203,10 +2203,11 @@ ApplyCenterPosition = function(barKey, pos)
     pcall(function()
         if InCombatLockdown() and frame:IsProtected() then
             -- Store on the frame so repeated calls overwrite instead of stacking
-            if not frame._euiCombatDefer then
-                frame._euiCombatDefer = CreateFrame("Frame")
-                frame._euiCombatDefer:RegisterEvent("PLAYER_REGEN_ENABLED")
-                frame._euiCombatDefer:SetScript("OnEvent", function(self)
+            local ffd = EllesmereUI._GetFFD(frame)
+            if not ffd.combatDefer then
+                ffd.combatDefer = CreateFrame("Frame")
+                ffd.combatDefer:RegisterEvent("PLAYER_REGEN_ENABLED")
+                ffd.combatDefer:SetScript("OnEvent", function(self)
                     self:UnregisterAllEvents()
                     local args = self._args
                     if args then
@@ -2218,7 +2219,7 @@ ApplyCenterPosition = function(barKey, pos)
                     self._args = nil
                 end)
             end
-            frame._euiCombatDefer._args = { f = frame, a = anchor, x = adjX, y = adjY }
+            ffd.combatDefer._args = { f = frame, a = anchor, x = adjX, y = adjY }
             return
         end
         frame:ClearAllPoints()
@@ -6353,7 +6354,7 @@ local function CreateMover(barKey)
                     local rawPx = math.max(1, math.floor(self:GetNumber() + 0.5))
                     local val = PPi and PPi.FromPixels and PPi.FromPixels(rawPx) or rawPx
                     local sb = GetBarFrame(barKey)
-                    local savedAlpha = sb and sb._euiRestoreAlpha
+                    local savedAlpha = sb and EllesmereUI._GetFFD(sb).restoreAlpha
                     if sb and not savedAlpha then sb:SetAlpha(0) end
                     if axis == "Width" then
                         if elem.setWidth then elem.setWidth(barKey, val) end

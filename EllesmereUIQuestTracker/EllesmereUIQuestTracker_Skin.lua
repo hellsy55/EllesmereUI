@@ -744,8 +744,8 @@ _poiHiddenParent:Hide()
 
 local function SuppressPOI(block)
     local pb = block and block.poiButton
-    if not pb or pb._euiSuppressed then return end
-    pb._euiSuppressed = true
+    if not pb or EllesmereUI._GetFFD(pb).suppressed then return end
+    EllesmereUI._GetFFD(pb).suppressed = true
     pb:SetParent(_poiHiddenParent)
     pb:EnableMouse(false)
     hooksecurefunc(pb, "SetParent", function(self, parent)

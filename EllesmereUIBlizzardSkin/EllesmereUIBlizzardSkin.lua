@@ -6,6 +6,14 @@
 -------------------------------------------------------------------------------
 local ADDON_NAME = ...
 
+-- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
+local FFD = setmetatable({}, { __mode = "k" })
+local function GetFFD(frame)
+    local d = FFD[frame]
+    if not d then d = {}; FFD[frame] = d end
+    return d
+end
+
 -------------------------------------------------------------------------------
 --  Tooltip / Context Menu / Static Popup Skinning
 --  Restyles Blizzard's GameTooltip and related frames with EUI's dark style.
@@ -35,16 +43,16 @@ local ADDON_NAME = ...
         if _isSecret and _isSecret(tt:GetWidth()) then return end
         if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
         if tt.NineSlice then tt.NineSlice:SetAlpha(0) end
-        if not tt._euiBg then
-            tt._euiBg = tt:CreateTexture(nil, "BACKGROUND", nil, -8)
-            tt._euiBg:SetAllPoints()
+        if not GetFFD(tt).bg then
+            GetFFD(tt).bg = tt:CreateTexture(nil, "BACKGROUND", nil, -8)
+            GetFFD(tt).bg:SetAllPoints()
             local RS = EllesmereUI.RESKIN
-            tt._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.TT_ALPHA)
+            GetFFD(tt).bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.TT_ALPHA)
             if _PP and _PP.CreateBorder then
                 _PP.CreateBorder(tt, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
             end
         end
-        tt._euiBg:Show()
+        GetFFD(tt).bg:Show()
     end
 
     local function _ttFonts(tt)
@@ -174,7 +182,7 @@ local ADDON_NAME = ...
         if not frame or frame:IsForbidden() or not _enabled() then return end
         for i = 1, _select("#", frame:GetRegions()) do
             local region = _select(i, frame:GetRegions())
-            if region and region:IsObjectType("Texture") and not region._euiOwned then
+            if region and region:IsObjectType("Texture") and not GetFFD(region).owned then
                 local RS = EllesmereUI.RESKIN
                 region:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, 1)
                 region:SetAlpha(RS.CTX_ALPHA)
@@ -233,7 +241,7 @@ local ADDON_NAME = ...
         -- Strip textures on the popup frame itself
         for i = 1, _select("#", popup:GetRegions()) do
             local r = _select(i, popup:GetRegions())
-            if r and r:IsObjectType("Texture") and not r._euiOwned then
+            if r and r:IsObjectType("Texture") and not GetFFD(r).owned then
                 r:SetTexture(nil)
                 if r.SetAtlas then r:SetAtlas("") end
             end
@@ -242,23 +250,23 @@ local ADDON_NAME = ...
         if popup.BG then popup.BG:SetAlpha(0) end
         if popup.NineSlice then popup.NineSlice:SetAlpha(0) end
         -- Our dark background + border (once)
-        if not popup._euiBg then
+        if not GetFFD(popup).bg then
             local RS = EllesmereUI.RESKIN
-            popup._euiBg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
-            popup._euiBg:SetAllPoints()
-            popup._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-            popup._euiBg._euiOwned = true
+            GetFFD(popup).bg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
+            GetFFD(popup).bg:SetAllPoints()
+            GetFFD(popup).bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+            GetFFD(GetFFD(popup).bg).owned = true
             if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
             if _PP and _PP.CreateBorder then
                 _PP.CreateBorder(popup, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
             end
         end
-        popup._euiBg:Show()
+        GetFFD(popup).bg:Show()
         -- Skin buttons
         for i = 1, 4 do
             local btn = popup["button" .. i] or _G[popup:GetName() and (popup:GetName() .. "Button" .. i)]
-            if btn and not btn._euiSkinned then
-                btn._euiSkinned = true
+            if btn and not GetFFD(btn).skinned then
+                GetFFD(btn).skinned = true
                 for j = 1, select("#", btn:GetRegions()) do
                     local r = select(j, btn:GetRegions())
                     if r and r:IsObjectType("Texture") and r ~= btn:GetFontString() then
@@ -272,8 +280,8 @@ local ADDON_NAME = ...
                 local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
                 btnBg:SetAllPoints()
                 btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                btnBg._euiOwned = true
-                btn._euiBg = btnBg
+                GetFFD(btnBg).owned = true
+                GetFFD(btn).bg = btnBg
                 if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
                 if _PP and _PP.CreateBorder then
                     if useAccent then
@@ -300,11 +308,11 @@ local ADDON_NAME = ...
                             fs:SetTextColor(0.4, 0.4, 0.4, 1)
                         end
                     end
-                    if self._euiBg then
-                        self._euiBg:SetAlpha(enabled and 1 or 0.5)
+                    if GetFFD(self).bg then
+                        GetFFD(self).bg:SetAlpha(enabled and 1 or 0.5)
                     end
                 end
-                btn._euiRefreshEnabled = _euiRefreshEnabled
+                GetFFD(btn).refreshEnabled = _euiRefreshEnabled
                 btn:HookScript("OnEnable",  _euiRefreshEnabled)
                 btn:HookScript("OnDisable", _euiRefreshEnabled)
                 _euiRefreshEnabled(btn)
@@ -313,12 +321,12 @@ local ADDON_NAME = ...
 
         -- Hook UpdateRecapButton once per popup so our per-button enabled
         -- visual stays in sync with Blizzard's enable/disable state swaps.
-        if popup.UpdateRecapButton and not popup._euiRecapHooked then
-            popup._euiRecapHooked = true
+        if popup.UpdateRecapButton and not GetFFD(popup).recapHooked then
+            GetFFD(popup).recapHooked = true
             hooksecurefunc(popup, "UpdateRecapButton", function(self)
                 for i = 1, 4 do
                     local b = self["button" .. i]
-                    if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
+                    if b and GetFFD(b).refreshEnabled then b:_euiRefreshEnabled() end
                 end
             end)
         end
@@ -326,12 +334,12 @@ local ADDON_NAME = ...
         -- Re-sync state for popups shown already-disabled
         for i = 1, 4 do
             local b = popup["button" .. i]
-            if b and b._euiRefreshEnabled then b:_euiRefreshEnabled() end
+            if b and GetFFD(b).refreshEnabled then b:_euiRefreshEnabled() end
         end
         -- Skin edit box if present
         local eb = popup.editBox or (popup.GetName and _G[popup:GetName() .. "EditBox"])
-        if eb and not eb._euiSkinned then
-            eb._euiSkinned = true
+        if eb and not GetFFD(eb).skinned then
+            GetFFD(eb).skinned = true
             for j = 1, select("#", eb:GetRegions()) do
                 local r = select(j, eb:GetRegions())
                 if r and r:IsObjectType("Texture") then
@@ -342,7 +350,7 @@ local ADDON_NAME = ...
             local ebBg = eb:CreateTexture(nil, "BACKGROUND", nil, -6)
             ebBg:SetAllPoints()
             ebBg:SetColorTexture(0.05, 0.05, 0.05, 0.9)
-            ebBg._euiOwned = true
+            GetFFD(ebBg).owned = true
         end
     end
 
@@ -403,7 +411,7 @@ local ADDON_NAME = ...
                 if frame then
                     for i = 1, _select("#", frame:GetRegions()) do
                         local r = _select(i, frame:GetRegions())
-                        if r and r:IsObjectType("Texture") and not r._euiOwned and not keepTextures[r] then
+                        if r and r:IsObjectType("Texture") and not GetFFD(r).owned and not keepTextures[r] then
                             r:SetTexture(nil)
                             if r.SetAtlas then r:SetAtlas("") end
                         end
@@ -419,38 +427,38 @@ local ADDON_NAME = ...
             if closeBtn then
                 for i = 1, _select("#", closeBtn:GetRegions()) do
                     local r = _select(i, closeBtn:GetRegions())
-                    if r and r:IsObjectType("Texture") and not r._euiOwned then
+                    if r and r:IsObjectType("Texture") and not GetFFD(r).owned then
                         r:SetAlpha(0)
                     end
                 end
-                if not closeBtn._euiIcon then
+                if not GetFFD(closeBtn).icon then
                     local icoW, icoH = closeBtn:GetSize()
                     local ico = closeBtn:CreateTexture(nil, "OVERLAY", nil, 7)
                     ico:SetSize((icoW or 16) - 2, (icoH or 16) - 2)
                     ico:SetPoint("CENTER", closeBtn, "CENTER", -4, 4)
                     ico:SetAtlas("UI-QuestTrackerButton-Secondary-Collapse-Pressed")
-                    ico._euiOwned = true
-                    closeBtn._euiIcon = ico
+                    GetFFD(ico).owned = true
+                    GetFFD(closeBtn).icon = ico
                 end
-                closeBtn._euiIcon:Show()
+                GetFFD(closeBtn).icon:Show()
             end
 
             -- Our dark background + border (create once).
             -- Anchored to the dialog (not the popup wrapper) so the skin
             -- follows the dialog when a mover addon (DeModal, BlizzMove)
             -- lets the user drag LFGDungeonReadyDialog independently.
-            if not popup._euiBg then
+            if not GetFFD(popup).bg then
                 local RS = EllesmereUI.RESKIN
                 if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
                 local anchor = dialog or popup
                 local bgFrame = CreateFrame("Frame", nil, anchor)
                 bgFrame:SetAllPoints(anchor)
                 bgFrame:SetFrameLevel(math.max(1, anchor:GetFrameLevel() - 1))
-                popup._euiBgFrame = bgFrame
-                popup._euiBg = bgFrame:CreateTexture(nil, "ARTWORK")
-                popup._euiBg:SetAllPoints()
-                popup._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-                popup._euiBg._euiOwned = true
+                GetFFD(popup).bgFrame = bgFrame
+                GetFFD(popup).bg = bgFrame:CreateTexture(nil, "ARTWORK")
+                GetFFD(popup).bg:SetAllPoints()
+                GetFFD(popup).bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+                GetFFD(GetFFD(popup).bg).owned = true
                 if _PP and _PP.CreateBorder then
                     _PP.CreateBorder(bgFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
                 end
@@ -468,7 +476,7 @@ local ADDON_NAME = ...
                         -- mouse down so SetTexture alone doesn't stick.
                         for j = 1, select("#", btn:GetRegions()) do
                             local r = select(j, btn:GetRegions())
-                            if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                            if r and r:IsObjectType("Texture") and not GetFFD(r).owned and r ~= btn:GetFontString() then
                                 r:SetAlpha(0)
                             end
                         end
@@ -477,8 +485,8 @@ local ADDON_NAME = ...
                         if btn.Middle then btn.Middle:SetAlpha(0) end
                         if btn.Right then btn.Right:SetAlpha(0) end
                         -- Create our bg/border + hook texture suppression once
-                        if not btn._euiSkinned then
-                            btn._euiSkinned = true
+                        if not GetFFD(btn).skinned then
+                            GetFFD(btn).skinned = true
                             -- Hook SetAlpha on named textures so C++ press
                             -- state changes can't make them visible again
                             for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
@@ -495,7 +503,7 @@ local ADDON_NAME = ...
                             local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
                             btnBg:SetAllPoints()
                             btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                            btnBg._euiOwned = true
+                            GetFFD(btnBg).owned = true
                             if _PP and _PP.CreateBorder then
                                 if useAccent then
                                     _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
@@ -523,7 +531,7 @@ local ADDON_NAME = ...
             if not popup then return end
 
             if not timerBar then
-                local timerParent = popup._euiBgFrame or dialog or popup
+                local timerParent = GetFFD(popup).bgFrame or dialog or popup
                 timerBar = CreateFrame("StatusBar", nil, timerParent)
                 timerBar:SetMinMaxValues(0, TIMER_DURATION)
 
@@ -542,7 +550,7 @@ local ADDON_NAME = ...
 
                 if EllesmereUI.RegAccent then
                     EllesmereUI.RegAccent({ type = "callback", fn = function()
-                        if timerBar._euiStyle then
+                        if GetFFD(timerBar).style then
                             local r, g, b = EllesmereUI.GetAccentColor()
                             timerBar:SetStatusBarColor(r, g, b, 0.75)
                         end
@@ -575,7 +583,7 @@ local ADDON_NAME = ...
                 timerText:SetTextColor(1, 0.831, 0, 1) -- #ffd400
                 timerText:SetShadowOffset(1, -1)
                 timerText:SetShadowColor(0, 0, 0, 0.8)
-                timerBar._euiStyle = true
+                GetFFD(timerBar).style = true
             else
                 -- Blizzard style (matches BigWigs look)
                 timerBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -585,7 +593,7 @@ local ADDON_NAME = ...
                 timerBorder:Show()
                 timerBg:Show()
                 timerText:SetFontObject("GameFontHighlight")
-                timerBar._euiStyle = false
+                GetFFD(timerBar).style = false
             end
 
             -- Hide other addons' timer bars (BigWigs etc.)
@@ -620,7 +628,7 @@ local ADDON_NAME = ...
             -- Strip textures (every show)
             for i = 1, _select("#", status:GetRegions()) do
                 local r = _select(i, status:GetRegions())
-                if r and r:IsObjectType("Texture") and not r._euiOwned then
+                if r and r:IsObjectType("Texture") and not GetFFD(r).owned then
                     r:SetTexture(nil)
                     if r.SetAtlas then r:SetAtlas("") end
                 end
@@ -629,12 +637,12 @@ local ADDON_NAME = ...
             if status.NineSlice then status.NineSlice:SetAlpha(0) end
             if status.Border then status.Border:SetAlpha(0) end
             -- Our bg + border (once)
-            if not status._euiBg then
+            if not GetFFD(status).bg then
                 local RS = EllesmereUI.RESKIN
-                status._euiBg = status:CreateTexture(nil, "BACKGROUND", nil, -8)
-                status._euiBg:SetAllPoints()
-                status._euiBg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-                status._euiBg._euiOwned = true
+                GetFFD(status).bg = status:CreateTexture(nil, "BACKGROUND", nil, -8)
+                GetFFD(status).bg:SetAllPoints()
+                GetFFD(status).bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+                GetFFD(GetFFD(status).bg).owned = true
                 if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
                 if _PP and _PP.CreateBorder then
                     _PP.CreateBorder(status, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
@@ -685,8 +693,8 @@ do
         local dialog = _G.LFGListInviteDialog
         if not dialog then return end
         if not EllesmereUIDB or not EllesmereUIDB.reskinQueuePopup then return end
-        if dialog._euiSkinned then return end
-        dialog._euiSkinned = true
+        if GetFFD(dialog).skinned then return end
+        GetFFD(dialog).skinned = true
 
         local RS = EllesmereUI.RESKIN
         local _PP = EllesmereUI and EllesmereUI.PP
@@ -701,7 +709,7 @@ do
         local bg = dialog:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-        bg._euiOwned = true
+        GetFFD(bg).owned = true
         if _PP and _PP.CreateBorder then
             _PP.CreateBorder(dialog, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
         end
@@ -716,15 +724,15 @@ do
                 -- Strip all texture regions (every show, Blizzard re-applies)
                 for j = 1, select("#", btn:GetRegions()) do
                     local r = select(j, btn:GetRegions())
-                    if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                    if r and r:IsObjectType("Texture") and not GetFFD(r).owned and r ~= btn:GetFontString() then
                         r:SetAlpha(0)
                     end
                 end
                 if btn.Left then btn.Left:SetAlpha(0) end
                 if btn.Middle then btn.Middle:SetAlpha(0) end
                 if btn.Right then btn.Right:SetAlpha(0) end
-                if not btn._euiSkinned then
-                    btn._euiSkinned = true
+                if not GetFFD(btn).skinned then
+                    GetFFD(btn).skinned = true
                     for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
                         local tex = btn[texKey]
                         if tex and tex.SetAlpha then
@@ -738,7 +746,7 @@ do
                     local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
                     btnBg:SetAllPoints()
                     btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                    btnBg._euiOwned = true
+                    GetFFD(btnBg).owned = true
                     if _PP and _PP.CreateBorder then
                         if useAccent then
                             _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
@@ -776,8 +784,8 @@ do
         local dialog = _G.LFGListApplicationDialog
         if not dialog then return end
         if not EllesmereUIDB or not EllesmereUIDB.reskinQueuePopup then return end
-        if dialog._euiSkinned then return end
-        dialog._euiSkinned = true
+        if GetFFD(dialog).skinned then return end
+        GetFFD(dialog).skinned = true
 
         local RS = EllesmereUI.RESKIN
         local _PP = EllesmereUI and EllesmereUI.PP
@@ -792,7 +800,7 @@ do
         local bg = dialog:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
-        bg._euiOwned = true
+        GetFFD(bg).owned = true
         if _PP and _PP.CreateBorder then
             _PP.CreateBorder(dialog, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
         end
@@ -803,7 +811,7 @@ do
             -- Strip all texture regions (edge textures, bg, etc.)
             for i = 1, select("#", desc:GetRegions()) do
                 local r = select(i, desc:GetRegions())
-                if r and r:IsObjectType("Texture") and not r._euiOwned then
+                if r and r:IsObjectType("Texture") and not GetFFD(r).owned then
                     r:SetAlpha(0)
                 end
             end
@@ -811,7 +819,7 @@ do
             local descBg = desc:CreateTexture(nil, "BACKGROUND")
             descBg:SetAllPoints()
             descBg:SetColorTexture(0.06, 0.06, 0.06, 0.8)
-            descBg._euiOwned = true
+            GetFFD(descBg).owned = true
             if _PP and _PP.CreateBorder then
                 _PP.CreateBorder(desc, 1, 1, 1, 0.08, 1, "OVERLAY", 7)
             end
@@ -822,11 +830,11 @@ do
         end
         for _, btnName in ipairs({ "SignUpButton", "CancelButton" }) do
             local btn = dialog[btnName]
-            if btn and not btn._euiSkinned then
-                btn._euiSkinned = true
+            if btn and not GetFFD(btn).skinned then
+                GetFFD(btn).skinned = true
                 for j = 1, select("#", btn:GetRegions()) do
                     local r = select(j, btn:GetRegions())
-                    if r and r:IsObjectType("Texture") and not r._euiOwned and r ~= btn:GetFontString() then
+                    if r and r:IsObjectType("Texture") and not GetFFD(r).owned and r ~= btn:GetFontString() then
                         r:SetAlpha(0)
                     end
                 end
@@ -846,7 +854,7 @@ do
                 local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
                 btnBg:SetAllPoints()
                 btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                btnBg._euiOwned = true
+                GetFFD(btnBg).owned = true
                 if _PP and _PP.CreateBorder then
                     if useAccent then
                         _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
@@ -927,8 +935,8 @@ do
         hooksecurefunc(GameMenuFrame, "InitButtons", function(menu)
             if not menu.buttonPool then return end
             for menuBtn in menu.buttonPool:EnumerateActive() do
-                if not menuBtn._euiSkinned then
-                    menuBtn._euiSkinned = true
+                if not GetFFD(menuBtn).skinned then
+                    GetFFD(menuBtn).skinned = true
                     for j = 1, select("#", menuBtn:GetRegions()) do
                         local r = select(j, menuBtn:GetRegions())
                         if r and r:IsObjectType("Texture") and r ~= menuBtn:GetFontString() then

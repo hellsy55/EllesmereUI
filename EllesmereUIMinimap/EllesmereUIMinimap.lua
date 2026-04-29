@@ -10,6 +10,14 @@ local PP = EllesmereUI.PP
 
 local EG = EllesmereUI.ELLESMERE_GREEN
 
+-- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
+local FFD = setmetatable({}, { __mode = "k" })
+local function GetFFD(frame)
+    local d = FFD[frame]
+    if not d then d = {}; FFD[frame] = d end
+    return d
+end
+
 -- TEMP_DISABLED kept for call-site compat with helper functions that still
 -- reference it. Minimap module is never force-disabled here.
 local TEMP_DISABLED = {}
@@ -532,7 +540,7 @@ local function CreateFlyoutToggle()
     btn._bg = bg
 
     btn:SetScript("OnClick", function(self)
-        if self._ebsFreeMoveJustDragged then return end
+        if GetFFD(self).freeMoveJustDragged then return end
         ToggleFlyoutPanel()
     end)
 
@@ -677,7 +685,7 @@ local function EnableFreeMove(frame)
         local origClick = frame:GetScript("OnClick")
         if origClick then
             frame:SetScript("OnClick", function(self, ...)
-                if self._ebsFreeMoveJustDragged then return end
+                if GetFFD(self).freeMoveJustDragged then return end
                 origClick(self, ...)
             end)
         end
@@ -693,7 +701,7 @@ local function EnableFreeMove(frame)
             isDragging = false
             self:SetScript("OnUpdate", nil)
             -- Clear the drag flag on the next frame (set in OnMouseDown)
-            C_Timer.After(0, function() self._ebsFreeMoveJustDragged = nil end)
+            C_Timer.After(0, function() GetFFD(self).freeMoveJustDragged = nil end)
             -- Save final offset and re-layout once on release
             local es = self:GetEffectiveScale()
             local cx, cy = GetCursorPosition()
@@ -722,7 +730,7 @@ local function EnableFreeMove(frame)
         isDragging = true
         -- Block click actions immediately so OnClick can never fire during a drag,
         -- regardless of WoW's event ordering. Cleared on the frame after release.
-        self._ebsFreeMoveJustDragged = true
+        GetFFD(self).freeMoveJustDragged = true
         local es = self:GetEffectiveScale()
         startX, startY = GetCursorPosition()
         startX, startY = startX / es, startY / es
@@ -745,7 +753,7 @@ local function EnableFreeMove(frame)
         local dx, dy = cx - startX, cy - startY
         SaveBtnOffset(key, origOffX + dx, origOffY + dy)
         -- Clear the drag flag on the next frame (set in OnMouseDown)
-        C_Timer.After(0, function() frame._ebsFreeMoveJustDragged = nil end)
+        C_Timer.After(0, function() GetFFD(frame).freeMoveJustDragged = nil end)
         if ApplyMinimap then ApplyMinimap() end
     end)
 
@@ -1021,7 +1029,7 @@ local function CreateIndicatorBtn(name, parent, upAtlas, overAtlas, downAtlas, o
 
     if onClick then
         btn:SetScript("OnClick", function(self)
-            if self._ebsFreeMoveJustDragged then return end
+            if GetFFD(self).freeMoveJustDragged then return end
             onClick(self)
         end)
     end
@@ -1104,7 +1112,7 @@ local function CreateGreatVaultBtn(parent)
         self._whole:SetVertexColor(v, v, v, 1)
     end)
     btn:SetScript("OnClick", function(self)
-        if self._ebsFreeMoveJustDragged then return end
+        if GetFFD(self).freeMoveJustDragged then return end
         ToggleGreatVault()
     end)
 
@@ -1502,7 +1510,7 @@ local function CreatePortalBtn(parent)
         self._icon:SetVertexColor(v, v, v, 1)
     end)
     btn:SetScript("OnClick", function(self)
-        if self._ebsFreeMoveJustDragged then return end
+        if GetFFD(self).freeMoveJustDragged then return end
         ToggleMinimapPortalFlyout(self)
     end)
 
@@ -1560,7 +1568,7 @@ local function BuildCustomIndicators(minimap)
     local mailBaseLeave = _customIndicators.mail:GetScript("OnLeave")
     _customIndicators.mail:SetScript("OnEnter", function(self)
         if mailBaseEnter then mailBaseEnter(self) end
-        if not self._ebsFreeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail")
         end
     end)
@@ -1576,7 +1584,7 @@ local function BuildCustomIndicators(minimap)
     local craftBaseLeave = _customIndicators.crafting:GetScript("OnLeave")
     _customIndicators.crafting:SetScript("OnEnter", function(self)
         if craftBaseEnter then craftBaseEnter(self) end
-        if not self._ebsFreeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(self, PROFESSIONS_CRAFTING_ORDERS or "Crafting Orders")
         end
     end)
@@ -2004,7 +2012,7 @@ local function ApplyMinimap()
     if not p.enabled then
         -- If we never touched the minimap this session, do absolutely nothing.
         -- This ensures zero interference with other minimap addons.
-        if not minimap._ebsActive then return end
+        if not GetFFD(minimap).active then return end
         -- Module was active but is now disabled; a reload is required to
         -- cleanly hand control back to Blizzard. The options toggle handles
         -- prompting the user for a reload.
@@ -2040,8 +2048,8 @@ local function ApplyMinimap()
     end
     -- Guard reparent: Blizzard reparents the minimap during housing transitions
     -- and other events. Hook SetParent to force it back to UIParent.
-    if not minimap._ebsParentGuard then
-        minimap._ebsParentGuard = true
+    if not GetFFD(minimap).parentGuard then
+        GetFFD(minimap).parentGuard = true
         hooksecurefunc(minimap, "SetParent", function()
             if minimap:GetParent() ~= UIParent then
                 if not InCombatLockdown() then
@@ -2067,14 +2075,14 @@ local function ApplyMinimap()
             EBS._hiddenFrame = CreateFrame("Frame")
             EBS._hiddenFrame:Hide()
         end
-        compartment._ebsOrigParent = compartment._ebsOrigParent or compartment:GetParent()
+        GetFFD(compartment).origParent = GetFFD(compartment).origParent or compartment:GetParent()
         compartment:SetParent(EBS._hiddenFrame)
     end
 
     local isCircle = (p.shape == "circle" or p.shape == "textured_circle")
 
     -- Hide background (no black bg behind minimap)
-    if minimap._ebsBg then minimap._ebsBg:SetAlpha(0) end
+    if GetFFD(minimap).bg then GetFFD(minimap).bg:SetAlpha(0) end
 
     -- Border
     local r, g, b = GetBorderColor(p)
@@ -2161,7 +2169,7 @@ local function ApplyMinimap()
     -- Custom housing overlay: our own texture behind the minimap that shows
     -- the housing indoor map when Blizzard hides the real minimap content.
     -- Fully owned by us, no Blizzard frame manipulation.
-    if not minimap._ebsHousingTex then
+    if not GetFFD(minimap).housingTex then
         local frame = CreateFrame("Frame", nil, minimap)
         frame:SetAllPoints(minimap)
         frame:SetFrameLevel(minimap:GetFrameLevel() + 1)
@@ -2183,8 +2191,8 @@ local function ApplyMinimap()
         frame._isCircle = isCircle
         frame._tex = tex
         frame:Hide()
-        minimap._ebsHousingFrame = frame
-        minimap._ebsHousingTex = tex
+        GetFFD(minimap).housingFrame = frame
+        GetFFD(minimap).housingTex = tex
         -- Watch for MinimapBackdrop atlas changes to detect housing
         local backdrop = _G.MinimapBackdrop
         if backdrop then
@@ -2212,8 +2220,8 @@ local function ApplyMinimap()
                 end
             end
             -- Check on zone transitions
-            if not minimap._ebsHousingZoneHook then
-                minimap._ebsHousingZoneHook = true
+            if not GetFFD(minimap).housingZoneHook then
+                GetFFD(minimap).housingZoneHook = true
                 local zf = CreateFrame("Frame")
                 zf:RegisterEvent("PLAYER_ENTERING_WORLD")
                 zf:RegisterEvent("ZONE_CHANGED_NEW_AREA")
@@ -2225,7 +2233,7 @@ local function ApplyMinimap()
         end
     else
         -- Update existing housing frame on reapply
-        local frame = minimap._ebsHousingFrame
+        local frame = GetFFD(minimap).housingFrame
         if frame then
             frame:SetFrameLevel(minimap:GetFrameLevel() + 1)
             if frame._mask then
@@ -2258,15 +2266,15 @@ local function ApplyMinimap()
         zoomIn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", -2, 20)
         zoomIn:EnableMouse(true)
         zoomIn:Show()
-        if not zoomIn._ebsHooked then
+        if not GetFFD(zoomIn).hooked then
             hooksecurefunc(zoomIn, "SetPoint", function(self)
-                if self._ebsInHook then return end
-                self._ebsInHook = true
+                if GetFFD(self).inHook then return end
+                GetFFD(self).inHook = true
                 self:ClearAllPoints()
                 self:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", -2, 20)
-                self._ebsInHook = false
+                GetFFD(self).inHook = false
             end)
-            zoomIn._ebsHooked = true
+            GetFFD(zoomIn).hooked = true
         end
     end
     if zoomOut then
@@ -2276,26 +2284,26 @@ local function ApplyMinimap()
         zoomOut:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", -2, 2)
         zoomOut:EnableMouse(true)
         zoomOut:Show()
-        if not zoomOut._ebsHooked then
+        if not GetFFD(zoomOut).hooked then
             hooksecurefunc(zoomOut, "SetPoint", function(self)
-                if self._ebsInHook then return end
-                self._ebsInHook = true
+                if GetFFD(self).inHook then return end
+                GetFFD(self).inHook = true
                 self:ClearAllPoints()
                 self:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", -2, 2)
-                self._ebsInHook = false
+                GetFFD(self).inHook = false
             end)
-            zoomOut._ebsHooked = true
+            GetFFD(zoomOut).hooked = true
         end
     end
 
     -- Save zoom level when zoom buttons are clicked
-    if zoomIn and not zoomIn._ebsZoomSaveHooked then
+    if zoomIn and not GetFFD(zoomIn).zoomSaveHooked then
         zoomIn:HookScript("OnClick", function() SaveZoomLevel() end)
-        zoomIn._ebsZoomSaveHooked = true
+        GetFFD(zoomIn).zoomSaveHooked = true
     end
-    if zoomOut and not zoomOut._ebsZoomSaveHooked then
+    if zoomOut and not GetFFD(zoomOut).zoomSaveHooked then
         zoomOut:HookScript("OnClick", function() SaveZoomLevel() end)
-        zoomOut._ebsZoomSaveHooked = true
+        GetFFD(zoomOut).zoomSaveHooked = true
     end
 
     -- Mark zoom buttons so GatherMinimapButtons skips them
@@ -2432,8 +2440,8 @@ local function ApplyMinimap()
     local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
     local mailFrame = indicator and indicator.MailFrame
     local craftingFrame = indicator and indicator.CraftingOrderFrame
-    if mailFrame and not mailFrame._ebsVisHooked then
-        mailFrame._ebsVisHooked = true
+    if mailFrame and not GetFFD(mailFrame).visHooked then
+        GetFFD(mailFrame).visHooked = true
         local function onMailChange()
             local mp = EBS.db and EBS.db.profile.minimap
             if not mp or not mp.enabled then return end
@@ -2443,8 +2451,8 @@ local function ApplyMinimap()
         hooksecurefunc(mailFrame, "Show", onMailChange)
         hooksecurefunc(mailFrame, "Hide", onMailChange)
     end
-    if craftingFrame and not craftingFrame._ebsVisHooked then
-        craftingFrame._ebsVisHooked = true
+    if craftingFrame and not GetFFD(craftingFrame).visHooked then
+        GetFFD(craftingFrame).visHooked = true
         local function onCraftChange()
             local mp = EBS.db and EBS.db.profile.minimap
             if not mp or not mp.enabled then return end
@@ -2523,26 +2531,26 @@ local function ApplyMinimap()
         end
     end
     -- Coords ticker only runs while hovering the minimap
-    if not minimap._ebsCoordsHooked then
+    if not GetFFD(minimap).coordsHooked then
         minimap:HookScript("OnEnter", function(self)
-            if not self._ebsActive then return end
+            if not GetFFD(self).active then return end
             if coordFrame then coordFrame:Show() end
             coordTicker:Show()
             UpdateCoords()
         end)
         minimap:HookScript("OnLeave", function(self)
-            if not self._ebsActive then return end
+            if not GetFFD(self).active then return end
             if coordFrame and not self:IsMouseOver() then coordFrame:Hide() end
             coordTicker:Hide()
         end)
-        minimap._ebsCoordsHooked = true
+        GetFFD(minimap).coordsHooked = true
     end
 
     -- Mousewheel zoom
     if p.scrollZoom then
         minimap:EnableMouseWheel(true)
-        if not minimap._ebsZoomHooked then
-            minimap._ebsZoomHooked = true
+        if not GetFFD(minimap).zoomHooked then
+            GetFFD(minimap).zoomHooked = true
             minimap:HookScript("OnMouseWheel", function(self, delta)
                 local mp = EBS.db and EBS.db.profile.minimap
                 if not mp or not mp.scrollZoom then return end
@@ -2561,7 +2569,7 @@ local function ApplyMinimap()
     end
 
     -- Restore saved zoom level on first activation
-    if not minimap._ebsActive then
+    if not GetFFD(minimap).active then
         local saved = p.savedZoom or 0
         if saved >= 0 and saved <= minimap:GetZoomLevels() then
             minimap:SetZoom(saved)
@@ -2569,7 +2577,7 @@ local function ApplyMinimap()
     end
 
     -- Position: only set on first activation; after that, unlock mode owns positioning.
-    if not minimap._ebsActive then
+    if not GetFFD(minimap).active then
         minimap:ClearAllPoints()
         if p.position then
             local px, py = p.position.x, p.position.y
@@ -2593,7 +2601,7 @@ local function ApplyMinimap()
     end
 
     -- Mark module as active so persistent hooks know they can fire
-    minimap._ebsActive = true
+    GetFFD(minimap).active = true
 end
 
 

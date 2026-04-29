@@ -10,8 +10,13 @@ local PP = EllesmereUI.PP
 
 local EG = EllesmereUI.ELLESMERE_GREEN
 
-
-
+-- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
+local FFD = setmetatable({}, { __mode = "k" })
+local function GetFFD(frame)
+    local d = FFD[frame]
+    if not d then d = {}; FFD[frame] = d end
+    return d
+end
 
 -- Global friend groups storage (not tied to profiles, excluded from import/export)
 local function GetFriendGroupsGlobal()
@@ -185,21 +190,21 @@ end
 --  Raid Tab Skinning
 -------------------------------------------------------------------------------
 local function SkinRaidRoleIcon(icon)
-    if not icon or icon._ebsSkinned then return end
-    icon._ebsSkinned = true
-    if not icon._ebsBorder then
+    if not icon or GetFFD(icon).skinned then return end
+    GetFFD(icon).skinned = true
+    if not GetFFD(icon).border then
         local border = icon:GetParent():CreateTexture(nil, "OVERLAY", nil, 1)
         border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
         border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
         border:SetColorTexture(0, 0, 0, 0.5)
         border:SetDrawLayer("OVERLAY", -1)
-        icon._ebsBorder = border
+        GetFFD(icon).border = border
     end
 end
 
 local function SkinRaidRoleCount(frame)
-    if not frame or frame._ebsSkinned then return end
-    frame._ebsSkinned = true
+    if not frame or GetFFD(frame).skinned then return end
+    GetFFD(frame).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", frame:GetRegions()) do
         local region = select(i, frame:GetRegions())
@@ -211,13 +216,13 @@ local function SkinRaidRoleCount(frame)
 end
 
 local function SkinRaidTabButton(btn)
-    if not btn or btn._ebsBtnSkinned then return end
-    btn._ebsBtnSkinned = true
+    if not btn or GetFFD(btn).btnSkinned then return end
+    GetFFD(btn).btnSkinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     StripTextures(btn)
-    btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
-    btn._ebsBg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
-    btn._ebsBg:SetAllPoints()
+    GetFFD(btn).bg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+    GetFFD(btn).bg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
+    GetFFD(btn).bg:SetAllPoints()
     PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
     local text = btn:GetFontString()
     if text then
@@ -228,7 +233,7 @@ local function SkinRaidTabButton(btn)
     end
     btn:HookScript("OnEnter", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.7, 0.6
-        if btn._ebsAccent then
+        if GetFFD(btn).accent then
             r, g, b = EG.r, EG.g, EG.b
             a1, a2 = 1, 0.8
         end
@@ -237,7 +242,7 @@ local function SkinRaidTabButton(btn)
     end)
     btn:HookScript("OnLeave", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
-        if btn._ebsAccent then
+        if GetFFD(btn).accent then
             r, g, b = EG.r, EG.g, EG.b
             a1, a2 = 0.7, 0.5
         end
@@ -253,8 +258,8 @@ local RAID_TAB_BUTTONS = {
 }
 
 local function SkinCheckbox(checkbox)
-    if not checkbox or checkbox._ebsSkinned then return end
-    checkbox._ebsSkinned = true
+    if not checkbox or GetFFD(checkbox).skinned then return end
+    GetFFD(checkbox).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     local ar, ag, ab = EG.r, EG.g, EG.b
     if checkbox.SetNormalTexture then checkbox:SetNormalTexture("") end
@@ -267,23 +272,23 @@ local function SkinCheckbox(checkbox)
             region:SetAlpha(0)
         end
     end
-    if not checkbox._ebsBox then
-        checkbox._ebsBorder = checkbox:CreateTexture(nil, "ARTWORK", nil, 1)
-        checkbox._ebsBorder:SetSize(18, 18)
-        checkbox._ebsBorder:SetPoint("LEFT", checkbox, "LEFT", 2, 0)
-        checkbox._ebsBorder:SetColorTexture(0.4, 0.4, 0.4, 1)
-        checkbox._ebsBox = checkbox:CreateTexture(nil, "ARTWORK", nil, 2)
-        checkbox._ebsBox:SetSize(14, 14)
-        checkbox._ebsBox:SetPoint("CENTER", checkbox._ebsBorder, "CENTER", 0, 0)
-        checkbox._ebsBox:SetColorTexture(0.06, 0.06, 0.06, 1)
-        checkbox._ebsCheck = checkbox:CreateTexture(nil, "ARTWORK", nil, 3)
-        checkbox._ebsCheck:SetSize(8, 8)
-        checkbox._ebsCheck:SetPoint("CENTER", checkbox._ebsBox, "CENTER", 0, 0)
-        checkbox._ebsCheck:SetColorTexture(ar, ag, ab, 1)
-        checkbox._ebsCheck:Hide()
+    if not GetFFD(checkbox).box then
+        GetFFD(checkbox).border = checkbox:CreateTexture(nil, "ARTWORK", nil, 1)
+        GetFFD(checkbox).border:SetSize(18, 18)
+        GetFFD(checkbox).border:SetPoint("LEFT", checkbox, "LEFT", 2, 0)
+        GetFFD(checkbox).border:SetColorTexture(0.4, 0.4, 0.4, 1)
+        GetFFD(checkbox).box = checkbox:CreateTexture(nil, "ARTWORK", nil, 2)
+        GetFFD(checkbox).box:SetSize(14, 14)
+        GetFFD(checkbox).box:SetPoint("CENTER", GetFFD(checkbox).border, "CENTER", 0, 0)
+        GetFFD(checkbox).box:SetColorTexture(0.06, 0.06, 0.06, 1)
+        GetFFD(checkbox).check = checkbox:CreateTexture(nil, "ARTWORK", nil, 3)
+        GetFFD(checkbox).check:SetSize(8, 8)
+        GetFFD(checkbox).check:SetPoint("CENTER", GetFFD(checkbox).box, "CENTER", 0, 0)
+        GetFFD(checkbox).check:SetColorTexture(ar, ag, ab, 1)
+        GetFFD(checkbox).check:Hide()
     end
     local function UpdateCheck()
-        if checkbox._ebsCheck then checkbox._ebsCheck:SetShown(checkbox:GetChecked()) end
+        if GetFFD(checkbox).check then GetFFD(checkbox).check:SetShown(checkbox:GetChecked()) end
     end
     checkbox:HookScript("OnClick", UpdateCheck)
     checkbox:HookScript("OnShow", UpdateCheck)
@@ -294,10 +299,10 @@ local function SkinCheckbox(checkbox)
         text:SetTextColor(1, 1, 1, 0.8)
     end
     checkbox:HookScript("OnEnter", function()
-        if checkbox._ebsBorder then checkbox._ebsBorder:SetColorTexture(0.6, 0.6, 0.6, 1) end
+        if GetFFD(checkbox).border then GetFFD(checkbox).border:SetColorTexture(0.6, 0.6, 0.6, 1) end
     end)
     checkbox:HookScript("OnLeave", function()
-        if checkbox._ebsBorder then checkbox._ebsBorder:SetColorTexture(0.4, 0.4, 0.4, 1) end
+        if GetFFD(checkbox).border then GetFFD(checkbox).border:SetColorTexture(0.4, 0.4, 0.4, 1) end
     end)
 end
 
@@ -306,8 +311,8 @@ local function SkinRaidInfoFrame()
 end
 
 local function SkinRaidGroup(group)
-    if not group or group._ebsSkinned then return end
-    group._ebsSkinned = true
+    if not group or GetFFD(group).skinned then return end
+    GetFFD(group).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     local ar, ag, ab = EG.r, EG.g, EG.b
     local groupName = group:GetName()
@@ -317,10 +322,10 @@ local function SkinRaidGroup(group)
             region:SetAlpha(0)
         end
     end
-    if not group._ebsBg then
-        group._ebsBg = group:CreateTexture(nil, "BACKGROUND", nil, -8)
-        group._ebsBg:SetAllPoints()
-        group._ebsBg:SetColorTexture(0.025, 0.025, 0.03, 0.98)
+    if not GetFFD(group).bg then
+        GetFFD(group).bg = group:CreateTexture(nil, "BACKGROUND", nil, -8)
+        GetFFD(group).bg:SetAllPoints()
+        GetFFD(group).bg:SetColorTexture(0.025, 0.025, 0.03, 0.98)
     end
     PP.CreateBorder(group, 0.25, 0.25, 0.25, 0.9, 1, "OVERLAY", 7)
     local labelFrame = _G[groupName .. "Label"]
@@ -345,8 +350,8 @@ local function SkinRaidGroup(group)
 end
 
 local function SkinRaidSlot(slot)
-    if not slot or slot._ebsSkinned then return end
-    slot._ebsSkinned = true
+    if not slot or GetFFD(slot).skinned then return end
+    GetFFD(slot).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", slot:GetRegions()) do
         local region = select(i, slot:GetRegions())
@@ -354,13 +359,13 @@ local function SkinRaidSlot(slot)
             region:SetAlpha(0)
         end
     end
-    if not slot._ebsBg then
-        slot._ebsBg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
-        slot._ebsBg:SetAllPoints()
-        slot._ebsBg:SetColorTexture(0.045, 0.045, 0.05, 0.9)
+    if not GetFFD(slot).bg then
+        GetFFD(slot).bg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
+        GetFFD(slot).bg:SetAllPoints()
+        GetFFD(slot).bg:SetColorTexture(0.045, 0.045, 0.05, 0.9)
     end
-    if not slot._ebsBorderCreated then
-        slot._ebsBorderCreated = true
+    if not GetFFD(slot).borderCreated then
+        GetFFD(slot).borderCreated = true
         PP.CreateBorder(slot, 0.15, 0.15, 0.15, 0.7, 1, "BORDER", 1)
     end
     for i = 1, select("#", slot:GetRegions()) do
@@ -370,16 +375,16 @@ local function SkinRaidSlot(slot)
         end
     end
     slot:HookScript("OnEnter", function()
-        if slot._ebsBg then slot._ebsBg:SetColorTexture(0.07, 0.07, 0.08, 0.95) end
+        if GetFFD(slot).bg then GetFFD(slot).bg:SetColorTexture(0.07, 0.07, 0.08, 0.95) end
     end)
     slot:HookScript("OnLeave", function()
-        if slot._ebsBg then slot._ebsBg:SetColorTexture(0.045, 0.045, 0.05, 0.9) end
+        if GetFFD(slot).bg then GetFFD(slot).bg:SetColorTexture(0.045, 0.045, 0.05, 0.9) end
     end)
 end
 
 local function SkinRaidGroupButton(btn)
-    if not btn or btn._ebsSkinned then return end
-    btn._ebsSkinned = true
+    if not btn or GetFFD(btn).skinned then return end
+    GetFFD(btn).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     for i = 1, select("#", btn:GetRegions()) do
         local region = select(i, btn:GetRegions())
@@ -387,10 +392,10 @@ local function SkinRaidGroupButton(btn)
             region:SetAlpha(0)
         end
     end
-    if not btn._ebsBg then
-        btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -5)
-        btn._ebsBg:SetAllPoints()
-        btn._ebsBg:SetColorTexture(0.06, 0.06, 0.07, 0.95)
+    if not GetFFD(btn).bg then
+        GetFFD(btn).bg = btn:CreateTexture(nil, "BACKGROUND", nil, -5)
+        GetFFD(btn).bg:SetAllPoints()
+        GetFFD(btn).bg:SetColorTexture(0.06, 0.06, 0.07, 0.95)
     end
     local bdrFrame = CreateFrame("Frame", nil, btn)
     bdrFrame:SetAllPoints(btn)
@@ -405,10 +410,10 @@ local function SkinRaidGroupButton(btn)
         end
     end
     btn:HookScript("OnEnter", function()
-        if btn._ebsBg then btn._ebsBg:SetColorTexture(0.1, 0.1, 0.12, 1) end
+        if GetFFD(btn).bg then GetFFD(btn).bg:SetColorTexture(0.1, 0.1, 0.12, 1) end
     end)
     btn:HookScript("OnLeave", function()
-        if btn._ebsBg then btn._ebsBg:SetColorTexture(0.06, 0.06, 0.07, 0.95) end
+        if GetFFD(btn).bg then GetFFD(btn).bg:SetColorTexture(0.06, 0.06, 0.07, 0.95) end
     end)
 end
 
@@ -469,8 +474,8 @@ local function SkinRaidTab()
     end
     SkinRaidInfoFrame()
 
-    if raidFrame and not raidFrame._ebsBorderAdded then
-        raidFrame._ebsBorderAdded = true
+    if raidFrame and not GetFFD(raidFrame).borderAdded then
+        GetFFD(raidFrame).borderAdded = true
         local bdr = CreateFrame("Frame", nil, raidFrame)
         bdr:SetPoint("TOPLEFT", raidFrame, "TOPLEFT", 0, 0)
         bdr:SetPoint("BOTTOMRIGHT", raidFrame, "BOTTOMRIGHT", 0, 0)
@@ -508,15 +513,15 @@ local function SkinRaidTab()
 
     -- Move top bar icons
     local checkBtn = _G.RaidFrameAllAssistCheckButton
-    if checkBtn and not checkBtn._ebsShifted then
-        checkBtn._ebsShifted = true
+    if checkBtn and not GetFFD(checkBtn).shifted then
+        GetFFD(checkBtn).shifted = true
         local p1, rel, p2, ox, oy = checkBtn:GetPoint(1)
         if p1 then checkBtn:SetPoint(p1, rel, p2, (ox or 0) - 62, (oy or 0) + 59) end
     end
     if raidFrame then
         local roleCount = raidFrame.RoleCount
-        if roleCount and not roleCount._ebsShifted then
-            roleCount._ebsShifted = true
+        if roleCount and not GetFFD(roleCount).shifted then
+            GetFFD(roleCount).shifted = true
             local p1, rel, p2, ox, oy = roleCount:GetPoint(1)
             if p1 then roleCount:SetPoint(p1, rel, p2, (ox or 0) - 62, (oy or 0) + 59) end
         end
@@ -570,10 +575,10 @@ local function UpdateRaidTabButtonAccent()
         else
             btn = _G[name]
         end
-        if btn and btn._ebsBtnSkinned then
+        if btn and GetFFD(btn).btnSkinned then
             -- Hook disable/enable for alpha (one-time)
             local text = btn:GetFontString()
-            btn._ebsAccent = useAccent
+            GetFFD(btn).accent = useAccent
             if useAccent then
                 if text then text:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
                 if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
@@ -767,15 +772,15 @@ local function UpdateClassIcon(button, bnetInfo, wowInfo)
     if gameIcon then gameIcon:SetAlpha(0) end
 
     if not p.showClassIcons then
-        if button._ebsClassIcon then button._ebsClassIcon:Hide() end
+        if GetFFD(button).classIcon then GetFFD(button).classIcon:Hide() end
         return
     end
 
     -- Create icon texture
-    if not button._ebsClassIcon then
-        button._ebsClassIcon = button:CreateTexture(nil, "ARTWORK", nil, 2)
+    if not GetFFD(button).classIcon then
+        GetFFD(button).classIcon = button:CreateTexture(nil, "ARTWORK", nil, 2)
     end
-    local icon = button._ebsClassIcon
+    local icon = GetFFD(button).classIcon
     local h = button:GetHeight() - 4
     if h <= 0 then icon:Hide(); return end
 
@@ -912,8 +917,8 @@ local function UpdateFactionOverlay(button, bnetInfo, wowInfo)
         isRetail = true
     end
 
-    if not button._ebsFactionBg then
-        button._ebsFactionBg = button:CreateTexture(nil, "BACKGROUND", nil, 3)
+    if not GetFFD(button).factionBg then
+        GetFFD(button).factionBg = button:CreateTexture(nil, "BACKGROUND", nil, 3)
     end
 
     local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
@@ -927,7 +932,7 @@ local function UpdateFactionOverlay(button, bnetInfo, wowInfo)
         texPath = FACTION_TEX_NEUTRAL
     end
 
-    local tex = button._ebsFactionBg
+    local tex = GetFFD(button).factionBg
     tex:SetTexture(texPath)
     tex:SetTexCoord(0, 1, 0, 1)
     tex:ClearAllPoints()
@@ -941,8 +946,8 @@ end
 
 -- Skin a single friend button
 local function SkinFriendButton(button)
-    if button._ebsSkinned then return end
-    button._ebsSkinned = true
+    if GetFFD(button).skinned then return end
+    GetFFD(button).skinned = true
 
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
@@ -957,7 +962,7 @@ local function SkinFriendButton(button)
     local tileBg = button:CreateTexture(nil, "BACKGROUND", nil, 2)
     tileBg:SetAllPoints()
     tileBg:SetColorTexture(0, 0, 0, 0.10)
-    button._ebsTileBg = tileBg
+    GetFFD(button).tileBg = tileBg
 
     -- Strip Blizzard's highlight texture (SetVertexColor to avoid taint risk)
     local blizzHighlight = button.GetHighlightTexture and button:GetHighlightTexture()
@@ -1003,11 +1008,11 @@ local function ProcessFriendButtons()
     local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
     if not scrollBox then return end
     for _, button in scrollBox:EnumerateFrames() do
-        if button._ebsPendingSkinned then
+        if GetFFD(button).pendingSkinned then
             -- Re-apply pending button colors (survive settings changes)
-            if button._ebsName then button._ebsName:SetTextColor(0.51, 0.784, 1, 1) end
-            if button._ebsSubText then button._ebsSubText:SetTextColor(0.5, 0.5, 0.5, 0.8) end
-            if button._ebsTileBg then button._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30) end
+            if GetFFD(button).name then GetFFD(button).name:SetTextColor(0.51, 0.784, 1, 1) end
+            if GetFFD(button).subText then GetFFD(button).subText:SetTextColor(0.5, 0.5, 0.5, 0.8) end
+            if GetFFD(button).tileBg then GetFFD(button).tileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30) end
         elseif button.buttonType and button.buttonType ~= FRIENDS_BUTTON_TYPE_DIVIDER then
             SkinFriendButton(button)
             local bnetInfo, wowInfo = GetCachedFriendInfo(button)
@@ -1021,10 +1026,10 @@ end
 -- Skin a single ScrollBox+ScrollBar pair with thin EUI track
 local function SkinOneScrollbar(scrollBox, scrollBar)
     if not scrollBox or not scrollBar then return end
-    if scrollBox._ebsTrack then return end
+    if GetFFD(scrollBox).track then return end
 
     scrollBar:SetAlpha(0)
-    scrollBox._ebsScrollBar = scrollBar
+    GetFFD(scrollBox).scrollBar = scrollBar
 
     -- Parent to UIParent (parenting to FriendsListFrame taints)
     local track = CreateFrame("Frame", nil, UIParent)
@@ -1034,7 +1039,7 @@ local function SkinOneScrollbar(scrollBox, scrollBar)
     track:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 2, 0)
     track:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 2, 0)
     track:SetFrameLevel(scrollBox:GetFrameLevel() + 10)
-    scrollBox._ebsTrack = track
+    GetFFD(scrollBox).track = track
 
     local trackBg = track:CreateTexture(nil, "BACKGROUND")
     trackBg:SetColorTexture(1, 1, 1, 0)
@@ -1197,16 +1202,16 @@ end
 
 -- Skin a bottom-area button (Add Friend, Send Message, etc.)
 local function SkinBottomButton(btn)
-    if not btn or btn._ebsBtnSkinned then return end
-    btn._ebsBtnSkinned = true
+    if not btn or GetFFD(btn).btnSkinned then return end
+    GetFFD(btn).btnSkinned = true
 
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
     StripTextures(btn)
 
-    btn._ebsBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
-    btn._ebsBg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
-    btn._ebsBg:SetAllPoints()
+    GetFFD(btn).bg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+    GetFFD(btn).bg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
+    GetFFD(btn).bg:SetAllPoints()
 
     PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
 
@@ -1220,7 +1225,7 @@ local function SkinBottomButton(btn)
 
     btn:HookScript("OnEnter", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.7, 0.6
-        if btn._ebsAccent then
+        if GetFFD(btn).accent then
             r, g, b = EG.r, EG.g, EG.b
             a1, a2 = 1, 0.8
         end
@@ -1229,7 +1234,7 @@ local function SkinBottomButton(btn)
     end)
     btn:HookScript("OnLeave", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
-        if btn._ebsAccent then
+        if GetFFD(btn).accent then
             r, g, b = EG.r, EG.g, EG.b
             a1, a2 = 0.7, 0.5
         end
@@ -1263,7 +1268,7 @@ local function UpdateBottomButtonAccent()
     -- Helper: apply accent state to a single button (reads EG live, no caching)
     local function ApplyAccentToBtn(btn, labelFS)
         if not btn then return end
-        btn._ebsAccent = useAccent
+        GetFFD(btn).accent = useAccent
         if useAccent then
             if labelFS then labelFS:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
             if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
@@ -1276,7 +1281,7 @@ local function UpdateBottomButtonAccent()
     -- Bottom buttons (Send Message, Who buttons -- skip Add Friend)
     for _, name in ipairs(KNOWN_BUTTONS) do
         local btn = _G[name]
-        if btn and btn._ebsBtnSkinned and btn:IsEnabled()
+        if btn and GetFFD(btn).btnSkinned and btn:IsEnabled()
            and name ~= "FriendsFrameAddFriendButton" then
             ApplyAccentToBtn(btn, btn:GetFontString())
         end
@@ -1286,8 +1291,8 @@ local function UpdateBottomButtonAccent()
     local sb = FriendsListFrame and FriendsListFrame.ScrollBox
     if sb then
         for _, btn in sb:EnumerateFrames() do
-            if btn._ebsAcceptBtn then
-                ApplyAccentToBtn(btn._ebsAcceptBtn, btn._ebsAcceptLabel)
+            if GetFFD(btn).acceptBtn then
+                ApplyAccentToBtn(GetFFD(btn).acceptBtn, GetFFD(btn).acceptLabel)
             end
         end
     end
@@ -1586,8 +1591,8 @@ local function SkinFriendsFrame()
     end
 
     -- Resize frame (deferred to avoid tainting panel management)
-    if not frame._ebsSizeSet then
-        frame._ebsSizeSet = true
+    if not GetFFD(frame).sizeSet then
+        GetFFD(frame).sizeSet = true
         local origW = frame:GetWidth()
         local origH = frame:GetHeight()
         local origListH = FriendsListFrame:GetHeight()
@@ -1633,11 +1638,11 @@ local function SkinFriendsFrame()
         end
 
         -- Solid backdrop behind the ScrollBox for consistent dark background
-        if not FriendsListFrame.ScrollBox._ebsBackdrop then
+        if not GetFFD(FriendsListFrame.ScrollBox).backdrop then
             local bd = FriendsListFrame.ScrollBox:CreateTexture(nil, "BACKGROUND", nil, -7)
             bd:SetAllPoints()
             bd:SetColorTexture(0.02, 0.02, 0.025, 1)
-            FriendsListFrame.ScrollBox._ebsBackdrop = bd
+            GetFFD(FriendsListFrame.ScrollBox).backdrop = bd
         end
 
         -- Apply size on show (scale + positioning fully owned by Blizzard)
@@ -1650,10 +1655,10 @@ local function SkinFriendsFrame()
     end
 
     -- Dark background
-    frame._ebsBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-    frame._ebsBg:SetAllPoints()
-    frame._ebsBg:SetAlpha(1)
+    GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+    GetFFD(frame).bg:SetAllPoints()
+    GetFFD(frame).bg:SetAlpha(1)
 
     -- Pixel border
     do
@@ -1691,12 +1696,12 @@ local function SkinFriendsFrame()
     -- Tab bar background (extends below frame for bottom tabs)
     local firstTab = _G.FriendsFrameTab1
     if firstTab then
-        frame._ebsTabBarBg = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
-        frame._ebsTabBarBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-        frame._ebsTabBarBg:SetAlpha(1)
-        frame._ebsTabBarBg:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 2)
-        frame._ebsTabBarBg:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, 2)
-        frame._ebsTabBarBg:SetPoint("BOTTOM", firstTab, "BOTTOM", 0, 0)
+        GetFFD(frame).tabBarBg = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+        GetFFD(frame).tabBarBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+        GetFFD(frame).tabBarBg:SetAlpha(1)
+        GetFFD(frame).tabBarBg:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 2)
+        GetFFD(frame).tabBarBg:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, 2)
+        GetFFD(frame).tabBarBg:SetPoint("BOTTOM", firstTab, "BOTTOM", 0, 0)
     end
 
     -- Restyle Blizzard's tabs in-place. No custom tab frames,
@@ -1724,10 +1729,10 @@ local function SkinFriendsFrame()
             if hl then hl:SetTexture("") end
 
             -- Dark background
-            if not tab._ebsBg then
-                tab._ebsBg = tab:CreateTexture(nil, "BACKGROUND")
-                tab._ebsBg:SetAllPoints()
-                tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+            if not GetFFD(tab).bg then
+                GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND")
+                GetFFD(tab).bg:SetAllPoints()
+                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             end
 
             -- Active highlight
@@ -1804,29 +1809,29 @@ local function SkinFriendsFrame()
         local msgBtn = _G.FriendsFrameSendMessageButton
         if addBtn then addBtn:SetAlpha(isContacts and 1 or 0); addBtn:EnableMouse(isContacts) end
         if msgBtn then msgBtn:SetAlpha(isContacts and 1 or 0); msgBtn:EnableMouse(isContacts) end
-        if frame._ebsOfflineBtn then frame._ebsOfflineBtn:SetShown(isContacts) end
+        if GetFFD(frame).offlineBtn then GetFFD(frame).offlineBtn:SetShown(isContacts) end
         -- Show top links on all tabs except Raid
         local showTopUI = (selected ~= 3)
         -- Deselect all top sub-tabs when not on Contacts
-        if not isContacts and frame._ebsSubTabs then
-            for _, ct in ipairs(frame._ebsSubTabs) do
+        if not isContacts and GetFFD(frame).subTabs then
+            for _, ct in ipairs(GetFFD(frame).subTabs) do
                 ct._label:SetTextColor(1, 1, 1, 0.53)
                 ct:SetShown(showTopUI)
             end
-        elseif frame._ebsSubTabs then
-            for _, ct in ipairs(frame._ebsSubTabs) do
+        elseif GetFFD(frame).subTabs then
+            for _, ct in ipairs(GetFFD(frame).subTabs) do
                 ct:Show()
             end
             -- Refresh sub-tab active states
-            if frame._ebsUpdateSubTabs then frame._ebsUpdateSubTabs() end
+            if GetFFD(frame).updateSubTabs then GetFFD(frame).updateSubTabs() end
         end
         -- Title, divider, search always visible; orb hidden on raid
-        if frame._ebsStatusOrb then frame._ebsStatusOrb:SetShown(selected ~= 3) end
-        if frame._ebsBroadcastBtn then frame._ebsBroadcastBtn:SetShown(selected ~= 3) end
-        if frame._ebsTitleBtn then frame._ebsTitleBtn:Show() end
-        if frame._ebsTitleDiv then frame._ebsTitleDiv:Show() end
+        if GetFFD(frame).statusOrb then GetFFD(frame).statusOrb:SetShown(selected ~= 3) end
+        if GetFFD(frame).broadcastBtn then GetFFD(frame).broadcastBtn:SetShown(selected ~= 3) end
+        if GetFFD(frame).titleBtn then GetFFD(frame).titleBtn:Show() end
+        if GetFFD(frame).titleDiv then GetFFD(frame).titleDiv:Show() end
         -- Disable/enable search bar
-        local searchBox = frame._ebsSearchBox
+        local searchBox = GetFFD(frame).searchBox
         if searchBox then
             searchBox:SetShown(selected ~= 3)
             searchBox:SetEnabled(isContacts)
@@ -1841,21 +1846,21 @@ local function SkinFriendsFrame()
         -- Sync scrollbar visibility based on selected tab (don't read IsVisible
         -- from Blizzard ScrollBoxes -- that taints during OnShow in combat)
         local function SetTrackVis(sb, vis)
-            if sb and sb._ebsTrack then
-                sb._ebsTrack:SetShown(vis)
-                if sb._ebsTrack._hitArea then sb._ebsTrack._hitArea:SetShown(vis) end
+            if sb and GetFFD(sb).track then
+                GetFFD(sb).track:SetShown(vis)
+                if GetFFD(sb).track._hitArea then GetFFD(sb).track._hitArea:SetShown(vis) end
             end
         end
         -- Show/hide our custom ScrollBox (only when FriendsFrame is open)
-        if frame._ebsOurScrollBox then
-            frame._ebsOurScrollBox:SetShown(frame:IsShown() and isContacts and _activeSubTab == 1)
+        if GetFFD(frame).ourScrollBox then
+            GetFFD(frame).ourScrollBox:SetShown(frame:IsShown() and isContacts and _activeSubTab == 1)
         end
         local shown = frame:IsShown()
         local friendsSB = FriendsListFrame and FriendsListFrame.ScrollBox
         SetTrackVis(friendsSB, shown and isContacts and _activeSubTab == 1)
         -- Also sync our ScrollBox's scrollbar track
-        if frame._ebsOurScrollBox then
-            SetTrackVis(frame._ebsOurScrollBox, shown and isContacts and _activeSubTab == 1)
+        if GetFFD(frame).ourScrollBox then
+            SetTrackVis(GetFFD(frame).ourScrollBox, shown and isContacts and _activeSubTab == 1)
         end
         local raf = _G.RecentAlliesFrame
         if raf and raf.List then SetTrackVis(raf.List.ScrollBox, shown and isContacts and _activeSubTab == 2) end
@@ -1863,7 +1868,7 @@ local function SkinFriendsFrame()
         if who then SetTrackVis(who.ScrollBox or (who.List and who.List.ScrollBox), shown and selected == 2) end
     end
 
-    frame._ebsUpdateCustomTabs = UpdateCustomTabs
+    GetFFD(frame).updateCustomTabs = UpdateCustomTabs
 
     -- Detect tab changes by hooking each sub-frame's OnShow.
     -- Blizzard shows/hides these frames when tabs switch -- no global hooks needed.
@@ -1901,15 +1906,15 @@ local function SkinFriendsFrame()
 
     frame:HookScript("OnHide", function()
         local function HideTrack(sb)
-            if sb and sb._ebsTrack then
-                sb._ebsTrack:Hide()
-                if sb._ebsTrack._hitArea then sb._ebsTrack._hitArea:Hide() end
+            if sb and GetFFD(sb).track then
+                GetFFD(sb).track:Hide()
+                if GetFFD(sb).track._hitArea then GetFFD(sb).track._hitArea:Hide() end
             end
         end
         HideTrack(FriendsListFrame and FriendsListFrame.ScrollBox)
-        if frame._ebsOurScrollBox then
-            frame._ebsOurScrollBox:Hide()
-            HideTrack(frame._ebsOurScrollBox)
+        if GetFFD(frame).ourScrollBox then
+            GetFFD(frame).ourScrollBox:Hide()
+            HideTrack(GetFFD(frame).ourScrollBox)
         end
         _activeSubTab = 1  -- reset to match Blizzard's default on reopen
         local raf = _G.RecentAlliesFrame
@@ -1946,7 +1951,7 @@ local function SkinFriendsFrame()
     titleBtn:SetPoint("TOP", frame, "TOP", 0, -5)
 
     titleBtn._label = titleLabel
-    frame._ebsTitleBtn = titleBtn
+    GetFFD(frame).titleBtn = titleBtn
 
     -- Hover: brighten to 100%
     titleBtn:SetScript("OnEnter", function()
@@ -2036,11 +2041,11 @@ local function SkinFriendsFrame()
     end)
 
     -- Divider under title
-    frame._ebsTitleDiv = frame:CreateTexture(nil, "OVERLAY", nil, 1)
-    frame._ebsTitleDiv:SetColorTexture(1, 1, 1, 0.06)
-    frame._ebsTitleDiv:SetHeight(1)
-    frame._ebsTitleDiv:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -30)
-    frame._ebsTitleDiv:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -30)
+    GetFFD(frame).titleDiv = frame:CreateTexture(nil, "OVERLAY", nil, 1)
+    GetFFD(frame).titleDiv:SetColorTexture(1, 1, 1, 0.06)
+    GetFFD(frame).titleDiv:SetHeight(1)
+    GetFFD(frame).titleDiv:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -30)
+    GetFFD(frame).titleDiv:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -30)
 
     -- BattleNet ID bar reskin
     -- Hide Blizzard's status dropdown and BNet bar
@@ -2091,11 +2096,11 @@ local function SkinFriendsFrame()
         end
         return FRIENDS_LIST_ONLINE or "Online"
     end
-    frame._ebsGetPlayerStatus = GetPlayerStatusName
+    GetFFD(frame).getPlayerStatus = GetPlayerStatusName
 
     -- Custom sub-tabs (Friends/Recent Allies/Recruit A Friend)
     local customSubTabs = {}
-    frame._ebsSubTabs = customSubTabs
+    GetFFD(frame).subTabs = customSubTabs
     local function SkinSubTabs()
         local tabHeader = _G.FriendsTabHeader
         if not tabHeader then return end
@@ -2147,7 +2152,7 @@ local function SkinFriendsFrame()
                 ct:SetWidth(w)
             end
         end
-        frame._ebsUpdateSubTabs = function()
+        GetFFD(frame).updateSubTabs = function()
             UpdateSubTabWidths()
             UpdateSubTabs()
         end
@@ -2277,7 +2282,7 @@ local function SkinFriendsFrame()
         -- Status orb on the right side of the sub-tabs row
         local lastSubTab = customSubTabs[#customSubTabs]
         if lastSubTab then
-            local GetPlayerStatusName = frame._ebsGetPlayerStatus
+            local GetPlayerStatusName = GetFFD(frame).getPlayerStatus
 
             -- Status orb 
             local orbBtn = CreateFrame("Button", nil, frame)
@@ -2351,7 +2356,7 @@ local function SkinFriendsFrame()
                 UpdateOrbTooltip()
             end)
 
-            frame._ebsStatusOrb = orbBtn
+            GetFFD(frame).statusOrb = orbBtn
 
             -- Status/broadcast message button (to the left of status orb)
             local msgBtn = CreateFrame("Button", nil, frame)
@@ -2382,7 +2387,7 @@ local function SkinFriendsFrame()
                     bf:Show()
                 end
             end)
-            frame._ebsBroadcastBtn = msgBtn
+            GetFFD(frame).broadcastBtn = msgBtn
         end
 
         -- Initial state: default first tab to active, then verify
@@ -2428,27 +2433,27 @@ local function SkinFriendsFrame()
                 local isOnline = sd and sd.isOnline
 
                 -- One-time texture creation
-                if not btn._ebsRASkinned then
-                    btn._ebsRASkinned = true
+                if not GetFFD(btn).rASkinned then
+                    GetFFD(btn).rASkinned = true
 
                     -- Blizzard's selection system expects this method
                     function btn:SetSelected(selected)
-                        if self._ebsSelected then
-                            self._ebsSelected:SetShown(selected)
+                        if GetFFD(self).selected then
+                            GetFFD(self).selected:SetShown(selected)
                         end
                     end
 
-                    btn._ebsTileBg = btn:CreateTexture(nil, "BACKGROUND", nil, -4)
-                    btn._ebsTileBg:SetAllPoints()
+                    GetFFD(btn).tileBg = btn:CreateTexture(nil, "BACKGROUND", nil, -4)
+                    GetFFD(btn).tileBg:SetAllPoints()
 
                     -- 10% lighten overlay
                     local lighten = btn:CreateTexture(nil, "BACKGROUND", nil, -3)
                     lighten:SetAllPoints()
                     lighten:SetColorTexture(1, 1, 1, 0.02)
 
-                    btn._ebsFactionBg = btn:CreateTexture(nil, "ARTWORK", nil, -8)
-                    btn._ebsFactionBg:SetAllPoints()
-                    btn._ebsFactionBg:SetAlpha(0.2)
+                    GetFFD(btn).factionBg = btn:CreateTexture(nil, "ARTWORK", nil, -8)
+                    GetFFD(btn).factionBg:SetAllPoints()
+                    GetFFD(btn).factionBg:SetAlpha(0.2)
 
                     local hover = btn:CreateTexture(nil, "HIGHLIGHT")
                     hover:SetAllPoints()
@@ -2456,34 +2461,34 @@ local function SkinFriendsFrame()
                     hover:SetBlendMode("ADD")
 
                     -- Selection highlight
-                    btn._ebsSelected = btn:CreateTexture(nil, "ARTWORK", nil, -7)
-                    btn._ebsSelected:SetAllPoints()
-                    btn._ebsSelected:SetColorTexture(1, 1, 1, 0.08)
-                    btn._ebsSelected:Hide()
+                    GetFFD(btn).selected = btn:CreateTexture(nil, "ARTWORK", nil, -7)
+                    GetFFD(btn).selected:SetAllPoints()
+                    GetFFD(btn).selected:SetColorTexture(1, 1, 1, 0.08)
+                    GetFFD(btn).selected:Hide()
 
-                    btn._ebsClassIcon = btn:CreateTexture(nil, "ARTWORK", nil, 2)
+                    GetFFD(btn).classIcon = btn:CreateTexture(nil, "ARTWORK", nil, 2)
 
-                    btn._ebsStatusOrb = btn:CreateTexture(nil, "OVERLAY", nil, 3)
-                    btn._ebsStatusOrb:SetSize(18, 18)
+                    GetFFD(btn).statusOrb = btn:CreateTexture(nil, "OVERLAY", nil, 3)
+                    GetFFD(btn).statusOrb:SetSize(18, 18)
                     if _orbFile then
-                        btn._ebsStatusOrb:SetTexture(_orbFile)
-                        btn._ebsStatusOrb:SetTexCoord(_orbL, _orbR, _orbT, _orbB)
+                        GetFFD(btn).statusOrb:SetTexture(_orbFile)
+                        GetFFD(btn).statusOrb:SetTexCoord(_orbL, _orbR, _orbT, _orbB)
                     end
 
-                    btn._ebsName = btn:CreateFontString(nil, "OVERLAY")
-                    btn._ebsName:SetFont(raFontPath, 12, "")
-                    btn._ebsName:SetShadowOffset(1, -1)
-                    btn._ebsName:SetShadowColor(0, 0, 0, 0.8)
-                    btn._ebsName:SetPoint("TOPLEFT", btn, "TOPLEFT", 38, -4)
-                    btn._ebsName:SetJustifyH("LEFT")
+                    GetFFD(btn).name = btn:CreateFontString(nil, "OVERLAY")
+                    GetFFD(btn).name:SetFont(raFontPath, 12, "")
+                    GetFFD(btn).name:SetShadowOffset(1, -1)
+                    GetFFD(btn).name:SetShadowColor(0, 0, 0, 0.8)
+                    GetFFD(btn).name:SetPoint("TOPLEFT", btn, "TOPLEFT", 38, -4)
+                    GetFFD(btn).name:SetJustifyH("LEFT")
 
-                    btn._ebsInfoLine = btn:CreateFontString(nil, "OVERLAY")
-                    btn._ebsInfoLine:SetFont(raFontPath, 9, "")
-                    btn._ebsInfoLine:SetShadowOffset(1, -1)
-                    btn._ebsInfoLine:SetShadowColor(0, 0, 0, 0.8)
-                    btn._ebsInfoLine:SetTextColor(0.5, 0.5, 0.5, 0.8)
-                    btn._ebsInfoLine:SetPoint("TOPLEFT", btn._ebsName, "BOTTOMLEFT", 0, -3)
-                    btn._ebsInfoLine:SetJustifyH("LEFT")
+                    GetFFD(btn).infoLine = btn:CreateFontString(nil, "OVERLAY")
+                    GetFFD(btn).infoLine:SetFont(raFontPath, 9, "")
+                    GetFFD(btn).infoLine:SetShadowOffset(1, -1)
+                    GetFFD(btn).infoLine:SetShadowColor(0, 0, 0, 0.8)
+                    GetFFD(btn).infoLine:SetTextColor(0.5, 0.5, 0.5, 0.8)
+                    GetFFD(btn).infoLine:SetPoint("TOPLEFT", GetFFD(btn).name, "BOTTOMLEFT", 0, -3)
+                    GetFFD(btn).infoLine:SetJustifyH("LEFT")
 
                     -- Invite to Group button (right side, matching friends list)
                     local invBtn = CreateFrame("Button", nil, btn)
@@ -2502,7 +2507,7 @@ local function SkinFriendsFrame()
                         if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                     end)
                     invBtn:SetScript("OnClick", function()
-                        local ed = btn._ebsElementData
+                        local ed = GetFFD(btn).elementData
                         if ed and ed.characterData then
                             local fullName = ed.characterData.fullName
                             if fullName and ed.stateData and ed.stateData.isOnline then
@@ -2510,12 +2515,12 @@ local function SkinFriendsFrame()
                             end
                         end
                     end)
-                    btn._ebsInvBtn = invBtn
+                    GetFFD(btn).invBtn = invBtn
 
                     -- Click: left = select, right = context menu
                     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     btn:SetScript("OnClick", function(self, button)
-                        local ed = self._ebsElementData
+                        local ed = GetFFD(self).elementData
                         if not ed or not ed.characterData then return end
                         local c = ed.characterData
                         local guid = c.guid
@@ -2525,9 +2530,9 @@ local function SkinFriendsFrame()
                             if st then
                                 for j = 1, select("#", st:GetChildren()) do
                                     local b = select(j, st:GetChildren())
-                                    if b._ebsSelected then
-                                        local bGUID = b._ebsElementData and b._ebsElementData.characterData and b._ebsElementData.characterData.guid
-                                        b._ebsSelected:SetShown(bGUID == _raSelectedGUID)
+                                    if GetFFD(b).selected then
+                                        local bGUID = GetFFD(b).elementData and GetFFD(b).elementData.characterData and GetFFD(b).elementData.characterData.guid
+                                        GetFFD(b).selected:SetShown(bGUID == _raSelectedGUID)
                                     end
                                 end
                             end
@@ -2541,7 +2546,7 @@ local function SkinFriendsFrame()
 
                     -- Blizzard tooltip on hover
                     btn:SetScript("OnEnter", function(self)
-                        local ed = self._ebsElementData
+                        local ed = GetFFD(self).elementData
                         if not ed or not ed.characterData then return end
                         local c = ed.characterData
                         local s = ed.stateData
@@ -2581,16 +2586,16 @@ local function SkinFriendsFrame()
                 end
 
                 -- Store elementData reference for click/tooltip handlers
-                btn._ebsElementData = elementData
+                GetFFD(btn).elementData = elementData
 
                 -- Selection highlight
-                btn._ebsSelected:SetShown(cd.guid == _raSelectedGUID)
+                GetFFD(btn).selected:SetShown(cd.guid == _raSelectedGUID)
 
                 -- Tile bg
-                btn._ebsTileBg:SetColorTexture(0, 0, 0, 0.10)
+                GetFFD(btn).tileBg:SetColorTexture(0, 0, 0, 0.10)
 
                 -- Class icon
-                local icon = btn._ebsClassIcon
+                local icon = GetFFD(btn).classIcon
                 local classFile
                 if cd.classID and cd.classID > 0 then
                     local _, cf = GetClassInfo(cd.classID)
@@ -2637,8 +2642,8 @@ local function SkinFriendsFrame()
                 if faction == "Alliance" then texPath = FACTION_TEX .. "alliance.png"
                 elseif faction == "Horde" then texPath = FACTION_TEX .. "horde.png"
                 else texPath = FACTION_TEX .. "neutral.png" end
-                btn._ebsFactionBg:SetTexture(texPath)
-                btn._ebsFactionBg:SetTexCoord(0, 1, 0, 1)
+                GetFFD(btn).factionBg:SetTexture(texPath)
+                GetFFD(btn).factionBg:SetTexCoord(0, 1, 0, 1)
 
                 -- Name: class-colored if online, white 75% if offline
                 local nameText = cd.name or ""
@@ -2650,11 +2655,11 @@ local function SkinFriendsFrame()
                 elseif not isOnline then
                     nameText = "|cffbfbfbf" .. nameText .. "|r"
                 end
-                btn._ebsName:SetText(nameText)
-                btn._ebsName:SetWidth(0)
+                GetFFD(btn).name:SetText(nameText)
+                GetFFD(btn).name:SetWidth(0)
 
                 -- Status orb
-                local orb = btn._ebsStatusOrb
+                local orb = GetFFD(btn).statusOrb
                 if isOnline then
                     local _isv3 = issecretvalue
                     local sdDND = sd.isDND; local sdAFK = sd.isAFK
@@ -2665,19 +2670,19 @@ local function SkinFriendsFrame()
                     orb:SetVertexColor(0.4, 0.4, 0.4, 0.6)
                 end
                 orb:ClearAllPoints()
-                orb:SetPoint("LEFT", btn._ebsName, "RIGHT", -3, 1)
+                orb:SetPoint("LEFT", GetFFD(btn).name, "RIGHT", -3, 1)
                 orb:Show()
 
                 -- Invite button: enabled for online, disabled for offline
-                if btn._ebsInvBtn then
+                if GetFFD(btn).invBtn then
                     if isOnline then
-                        btn._ebsInvBtn:SetNormalAtlas("friendslist-invitebutton-default-normal")
-                        btn._ebsInvBtn:Enable()
-                        btn._ebsInvBtn:SetAlpha(1)
+                        GetFFD(btn).invBtn:SetNormalAtlas("friendslist-invitebutton-default-normal")
+                        GetFFD(btn).invBtn:Enable()
+                        GetFFD(btn).invBtn:SetAlpha(1)
                     else
-                        btn._ebsInvBtn:SetNormalAtlas("friendslist-invitebutton-default-disabled")
-                        btn._ebsInvBtn:Disable()
-                        btn._ebsInvBtn:SetAlpha(0.4)
+                        GetFFD(btn).invBtn:SetNormalAtlas("friendslist-invitebutton-default-disabled")
+                        GetFFD(btn).invBtn:Disable()
+                        GetFFD(btn).invBtn:SetAlpha(0.4)
                     end
                 end
 
@@ -2691,13 +2696,13 @@ local function SkinFriendsFrame()
                 end
                 local location = sd and sd.currentLocation or ""
                 if activity ~= "" and location ~= "" then
-                    btn._ebsInfoLine:SetText(activity .. "  |cff666666|  |r" .. location)
+                    GetFFD(btn).infoLine:SetText(activity .. "  |cff666666|  |r" .. location)
                 elseif activity ~= "" then
-                    btn._ebsInfoLine:SetText(activity)
+                    GetFFD(btn).infoLine:SetText(activity)
                 elseif location ~= "" then
-                    btn._ebsInfoLine:SetText(location)
+                    GetFFD(btn).infoLine:SetText(location)
                 else
-                    btn._ebsInfoLine:SetText("")
+                    GetFFD(btn).infoLine:SetText("")
                 end
             end
 
@@ -2707,34 +2712,34 @@ local function SkinFriendsFrame()
             -- Divider initializer (same style as friends list "Friends" divider)
             local function InitRADivider(btn, elementData)
                 btn:SetHeight(20)
-                if not btn._ebsDivSetup then
-                    btn._ebsDivSetup = true
+                if not GetFFD(btn).divSetup then
+                    GetFFD(btn).divSetup = true
                     btn:EnableMouse(false)
 
-                    btn._ebsDivBg = btn:CreateTexture(nil, "BACKGROUND")
-                    btn._ebsDivBg:SetAllPoints()
-                    btn._ebsDivBg:SetColorTexture(0.059, 0.062, 0.065, 1)
+                    GetFFD(btn).divBg = btn:CreateTexture(nil, "BACKGROUND")
+                    GetFFD(btn).divBg:SetAllPoints()
+                    GetFFD(btn).divBg:SetColorTexture(0.059, 0.062, 0.065, 1)
 
-                    btn._ebsDivLabel = btn:CreateFontString(nil, "OVERLAY")
-                    btn._ebsDivLabel:SetFont(raFontPath, 9, "")
-                    btn._ebsDivLabel:SetShadowOffset(1, -1)
-                    btn._ebsDivLabel:SetShadowColor(0, 0, 0, 0.8)
-                    btn._ebsDivLabel:SetTextColor(1, 1, 1, 0.4)
-                    btn._ebsDivLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
+                    GetFFD(btn).divLabel = btn:CreateFontString(nil, "OVERLAY")
+                    GetFFD(btn).divLabel:SetFont(raFontPath, 9, "")
+                    GetFFD(btn).divLabel:SetShadowOffset(1, -1)
+                    GetFFD(btn).divLabel:SetShadowColor(0, 0, 0, 0.8)
+                    GetFFD(btn).divLabel:SetTextColor(1, 1, 1, 0.4)
+                    GetFFD(btn).divLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
 
-                    btn._ebsDivLineL = btn:CreateTexture(nil, "OVERLAY")
-                    btn._ebsDivLineL:SetColorTexture(1, 1, 1, 0.1)
-                    btn._ebsDivLineL:SetHeight(1)
-                    btn._ebsDivLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
-                    btn._ebsDivLineL:SetPoint("RIGHT", btn._ebsDivLabel, "LEFT", -6, 0)
+                    GetFFD(btn).divLineL = btn:CreateTexture(nil, "OVERLAY")
+                    GetFFD(btn).divLineL:SetColorTexture(1, 1, 1, 0.1)
+                    GetFFD(btn).divLineL:SetHeight(1)
+                    GetFFD(btn).divLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
+                    GetFFD(btn).divLineL:SetPoint("RIGHT", GetFFD(btn).divLabel, "LEFT", -6, 0)
 
-                    btn._ebsDivLineR = btn:CreateTexture(nil, "OVERLAY")
-                    btn._ebsDivLineR:SetColorTexture(1, 1, 1, 0.1)
-                    btn._ebsDivLineR:SetHeight(1)
-                    btn._ebsDivLineR:SetPoint("LEFT", btn._ebsDivLabel, "RIGHT", 6, 0)
-                    btn._ebsDivLineR:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+                    GetFFD(btn).divLineR = btn:CreateTexture(nil, "OVERLAY")
+                    GetFFD(btn).divLineR:SetColorTexture(1, 1, 1, 0.1)
+                    GetFFD(btn).divLineR:SetHeight(1)
+                    GetFFD(btn).divLineR:SetPoint("LEFT", GetFFD(btn).divLabel, "RIGHT", 6, 0)
+                    GetFFD(btn).divLineR:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
                 end
-                btn._ebsDivLabel:SetText(elementData.text or "")
+                GetFFD(btn).divLabel:SetText(elementData.text or "")
             end
 
             -- Register our own view on the RA ScrollBox
@@ -2891,9 +2896,9 @@ local function SkinFriendsFrame()
             end)
 
             -- Store for search
-            frame._ebsRebuildRA = RebuildRADataProvider
-            frame._ebsRAScrollBox = rafSB
-            frame._ebsRASetSearch = function(term)
+            GetFFD(frame).rebuildRA = RebuildRADataProvider
+            GetFFD(frame).rAScrollBox = rafSB
+            GetFFD(frame).rASetSearch = function(term)
                 _raSearchTerm = term
                 if raf:IsShown() and _raLoaded then RebuildRADataProvider() end
             end
@@ -2954,12 +2959,12 @@ local function SkinFriendsFrame()
             -- so every keystroke updates the list immediately.
             if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP("direct") end
             -- Filter Recent Allies via DataProvider rebuild
-            if frame._ebsRASetSearch then frame._ebsRASetSearch(_ebsSearchTerm) end
+            if GetFFD(frame).rASetSearch then GetFFD(frame).rASetSearch(_ebsSearchTerm) end
         end)
         search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
         search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 
-        frame._ebsSearchBox = search
+        GetFFD(frame).searchBox = search
     end
 
     -- Skin scrollbars
@@ -2981,7 +2986,7 @@ local function SkinFriendsFrame()
             local sb = FriendsListFrame and FriendsListFrame.ScrollBox
             if sb then
                 for _, btn in sb:EnumerateFrames() do
-                    btn._ebsStampType = nil
+                    GetFFD(btn).stampType = nil
                 end
             end
             ProcessFriendButtons()
@@ -3013,12 +3018,12 @@ local function SkinFriendsFrame()
             if not FriendsFrame:IsShown() then return end
             if not EBS.db or not EBS.db.profile.friends.enabled then return end
             if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
-            -- Structural skinning always runs (guarded by _ebsSkinned, only fires once per button)
+            -- Structural skinning always runs (guarded by FFD skinned flag, only fires once per button)
             SkinFriendButton(button)
 
             -- On click, refresh all visible buttons in our ScrollBox so selection updates
             -- Selection highlight (update on every refresh for recycled buttons)
-            if not button._ebsSelBar then
+            if not GetFFD(button).selBar then
                 local sel = button:CreateTexture(nil, "ARTWORK", nil, -7)
                 sel:SetAllPoints()
                 sel:SetAtlas("groupfinder-highlightbar-green")
@@ -3031,23 +3036,23 @@ local function SkinFriendsFrame()
                 selFill:SetColorTexture(1, 1, 1, 0.02)
                 selFill:SetBlendMode("ADD")
                 selFill:Hide()
-                button._ebsSelBar = sel
-                button._ebsSelFill = selFill
+                GetFFD(button).selBar = sel
+                GetFFD(button).selFill = selFill
             end
             local isSel = (FriendsFrame.selectedFriend == button.id)
-            button._ebsSelBar:SetShown(isSel)
-            if button._ebsSelFill then button._ebsSelFill:SetShown(isSel) end
+            GetFFD(button).selBar:SetShown(isSel)
+            if GetFFD(button).selFill then GetFFD(button).selFill:SetShown(isSel) end
 
-            if not button._ebsClickHooked then
-                button._ebsClickHooked = true
+            if not GetFFD(button).clickHooked then
+                GetFFD(button).clickHooked = true
                 button:HookScript("OnClick", function()
-                    local sb = FriendsFrame._ebsOurScrollBox
+                    local sb = GetFFD(FriendsFrame).ourScrollBox
                     if sb then
                         for _, btn in sb:EnumerateFrames() do
-                            if btn._ebsSelBar then
+                            if GetFFD(btn).selBar then
                                 local sel = (FriendsFrame.selectedFriend == btn.id)
-                                btn._ebsSelBar:SetShown(sel)
-                                if btn._ebsSelFill then btn._ebsSelFill:SetShown(sel) end
+                                GetFFD(btn).selBar:SetShown(sel)
+                                if GetFFD(btn).selFill then GetFFD(btn).selFill:SetShown(sel) end
                             end
                         end
                     end
@@ -3087,9 +3092,9 @@ local function SkinFriendsFrame()
             -- We only need to style once -- subsequent calls for the same combo are no-ops.
             local curType = button.buttonType
             local curId = button.id or 0
-            if button._ebsStampType == curType and button._ebsStampId == curId then return end
-            button._ebsStampType = curType
-            button._ebsStampId = curId
+            if GetFFD(button).stampType == curType and GetFFD(button).stampId == curId then return end
+            GetFFD(button).stampType = curType
+            GetFFD(button).stampId = curId
 
             local bnetInfo, wowInfo = GetCachedFriendInfo(button)
 
@@ -3143,18 +3148,18 @@ local function SkinFriendsFrame()
                 isDND = (not _isv or not _isv(rawDND)) and rawDND or false
             end
 
-            if not button._ebsStatusOrb then
-                button._ebsStatusOrb = button:CreateTexture(nil, "OVERLAY", nil, 3)
-                button._ebsStatusOrb:SetSize(18, 18)
+            if not GetFFD(button).statusOrb then
+                GetFFD(button).statusOrb = button:CreateTexture(nil, "OVERLAY", nil, 3)
+                GetFFD(button).statusOrb:SetSize(18, 18)
                 if _orbFile then
-                    button._ebsStatusOrb:SetTexture(_orbFile)
-                    button._ebsStatusOrb:SetTexCoord(_orbL, _orbR, _orbT, _orbB)
+                    GetFFD(button).statusOrb:SetTexture(_orbFile)
+                    GetFFD(button).statusOrb:SetTexCoord(_orbL, _orbR, _orbT, _orbB)
                 else
-                    button._ebsStatusOrb:SetAtlas("lootroll-animreveal-a")
-                    button._ebsStatusOrb:SetTexCoord(0, 1/6, 0, 0.5)
+                    GetFFD(button).statusOrb:SetAtlas("lootroll-animreveal-a")
+                    GetFFD(button).statusOrb:SetTexCoord(0, 1/6, 0, 0.5)
                 end
             end
-            local orb = button._ebsStatusOrb
+            local orb = GetFFD(button).statusOrb
             orb:ClearAllPoints()
             local nm = button.name or button.Name
             if nm then
@@ -3181,7 +3186,7 @@ local function SkinFriendsFrame()
             -- Region icon: show if friend is in a different full region
             local fp2 = EBS.db and EBS.db.profile and EBS.db.profile.friends
             if fp2 and fp2.showRegionIcons == false then
-                if button._ebsRegionBtn then button._ebsRegionBtn:Hide() end
+                if GetFFD(button).regionBtn then GetFFD(button).regionBtn:Hide() end
             else
             local myFull = EllesmereUI.GetMyFullRegion and EllesmereUI.GetMyFullRegion()
             local friendMini
@@ -3191,7 +3196,7 @@ local function SkinFriendsFrame()
             local friendFull = friendMini and EllesmereUI.GetFullRegion and EllesmereUI.GetFullRegion(friendMini)
 
             if friendMini and friendFull and friendFull ~= myFull then
-                if not button._ebsRegionBtn then
+                if not GetFFD(button).regionBtn then
                     local rb = CreateFrame("Button", nil, button)
                     rb:SetFrameLevel(button:GetFrameLevel() + 5)
                     rb._tex = rb:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -3214,9 +3219,9 @@ local function SkinFriendsFrame()
                     else
                         rb:SetPoint("RIGHT", button, "RIGHT", -30, 0)
                     end
-                    button._ebsRegionBtn = rb
+                    GetFFD(button).regionBtn = rb
                 end
-                local rb = button._ebsRegionBtn
+                local rb = GetFFD(button).regionBtn
                 if rb._lastMini ~= friendMini then
                     rb._lastMini = friendMini
                     local iconPath = EllesmereUI.GetRegionIcon and EllesmereUI.GetRegionIcon(friendMini)
@@ -3226,7 +3231,7 @@ local function SkinFriendsFrame()
                 end
                 rb:Show()
             else
-                if button._ebsRegionBtn then button._ebsRegionBtn:Hide() end
+                if GetFFD(button).regionBtn then GetFFD(button).regionBtn:Hide() end
             end
             end -- showRegionIcons else
         end)
@@ -3271,26 +3276,26 @@ local function SkinFriendsFrame()
         local isPending = (groupName == "_pending")
 
         -- Kill any highlight on the plain Button template
-        if not btn._ebsHlKilled then
-            btn._ebsHlKilled = true
+        if not GetFFD(btn).hlKilled then
+            GetFFD(btn).hlKilled = true
             local hl = btn:GetHighlightTexture()
             if hl then hl:SetAlpha(0) end
             btn:EnableMouse(false)  -- divider itself doesn't receive mouse; child buttons do
         end
 
-        if not btn._ebsDivSetup then
-            btn._ebsDivSetup = true
+        if not GetFFD(btn).divSetup then
+            GetFFD(btn).divSetup = true
             -- Background #141516
-            btn._ebsDivBg = btn:CreateTexture(nil, "BACKGROUND")
-            btn._ebsDivBg:SetAllPoints()
-            btn._ebsDivBg:SetColorTexture(0.059, 0.062, 0.065, 1)
+            GetFFD(btn).divBg = btn:CreateTexture(nil, "BACKGROUND")
+            GetFFD(btn).divBg:SetAllPoints()
+            GetFFD(btn).divBg:SetColorTexture(0.059, 0.062, 0.065, 1)
 
             -- Label (centered, color set per-init)
-            btn._ebsDivLabel = btn:CreateFontString(nil, "OVERLAY")
-            btn._ebsDivLabel:SetFont(fontPath, 9, "")
-            btn._ebsDivLabel:SetShadowOffset(1, -1)
-            btn._ebsDivLabel:SetShadowColor(0, 0, 0, 0.8)
-            btn._ebsDivLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            GetFFD(btn).divLabel = btn:CreateFontString(nil, "OVERLAY")
+            GetFFD(btn).divLabel:SetFont(fontPath, 9, "")
+            GetFFD(btn).divLabel:SetShadowOffset(1, -1)
+            GetFFD(btn).divLabel:SetShadowColor(0, 0, 0, 0.8)
+            GetFFD(btn).divLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
 
 
             -- Up arrow (move group up in order)
@@ -3303,7 +3308,7 @@ local function SkinFriendsFrame()
             upBtn:SetAlpha(DIV_ICON_ALPHA)
             upBtn:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
             upBtn:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
-            btn._ebsDivUp = upBtn
+            GetFFD(btn).divUp = upBtn
 
             -- Down arrow (move group down in order)
             local downBtn = CreateFrame("Button", nil, btn)
@@ -3315,30 +3320,30 @@ local function SkinFriendsFrame()
             downBtn:SetAlpha(DIV_ICON_ALPHA)
             downBtn:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
             downBtn:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
-            btn._ebsDivDown = downBtn
+            GetFFD(btn).divDown = downBtn
 
             -- Lines on either side of text
-            btn._ebsDivLineL = btn:CreateTexture(nil, "OVERLAY")
-            btn._ebsDivLineL:SetColorTexture(1, 1, 1, 0.1)
-            btn._ebsDivLineL:SetHeight(1)
-            btn._ebsDivLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
-            btn._ebsDivLineL:SetPoint("RIGHT", btn._ebsDivLabel, "LEFT", -6, 0)
-            btn._ebsDivLine = btn:CreateTexture(nil, "OVERLAY")
-            btn._ebsDivLine:SetColorTexture(1, 1, 1, 0.1)
-            btn._ebsDivLine:SetHeight(1)
+            GetFFD(btn).divLineL = btn:CreateTexture(nil, "OVERLAY")
+            GetFFD(btn).divLineL:SetColorTexture(1, 1, 1, 0.1)
+            GetFFD(btn).divLineL:SetHeight(1)
+            GetFFD(btn).divLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
+            GetFFD(btn).divLineL:SetPoint("RIGHT", GetFFD(btn).divLabel, "LEFT", -6, 0)
+            GetFFD(btn).divLine = btn:CreateTexture(nil, "OVERLAY")
+            GetFFD(btn).divLine:SetColorTexture(1, 1, 1, 0.1)
+            GetFFD(btn).divLine:SetHeight(1)
             -- Right line starts after label
-            btn._ebsDivLine:SetPoint("LEFT", btn._ebsDivLabel, "RIGHT", 6, 0)
+            GetFFD(btn).divLine:SetPoint("LEFT", GetFFD(btn).divLabel, "RIGHT", 6, 0)
 
             -- Hover highlight for collapse (10% brighter)
-            btn._ebsDivHover = btn:CreateTexture(nil, "ARTWORK", nil, -5)
-            btn._ebsDivHover:SetAllPoints()
-            btn._ebsDivHover:SetColorTexture(1, 1, 1, 0.06)
-            btn._ebsDivHover:Hide()
+            GetFFD(btn).divHover = btn:CreateTexture(nil, "ARTWORK", nil, -5)
+            GetFFD(btn).divHover:SetAllPoints()
+            GetFFD(btn).divHover:SetColorTexture(1, 1, 1, 0.06)
+            GetFFD(btn).divHover:Hide()
 
             -- Enable mouse on divider for hover + click-to-collapse
             btn:EnableMouse(true)
-            btn:SetScript("OnEnter", function() btn._ebsDivHover:Show() end)
-            btn:SetScript("OnLeave", function() btn._ebsDivHover:Hide() end)
+            btn:SetScript("OnEnter", function() GetFFD(btn).divHover:Show() end)
+            btn:SetScript("OnLeave", function() GetFFD(btn).divHover:Hide() end)
 
             -- X / delete button
             local xBtn = CreateFrame("Button", nil, btn)
@@ -3351,7 +3356,7 @@ local function SkinFriendsFrame()
             xBtn:SetAlpha(DIV_ICON_ALPHA)
             xBtn:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
             xBtn:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
-            btn._ebsDivX = xBtn
+            GetFFD(btn).divX = xBtn
 
             -- Edit / rename button
             local editBtn = CreateFrame("Button", nil, btn)
@@ -3364,36 +3369,36 @@ local function SkinFriendsFrame()
             editBtn:SetAlpha(DIV_ICON_ALPHA)
             editBtn:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
             editBtn:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
-            btn._ebsDivEdit = editBtn
+            GetFFD(btn).divEdit = editBtn
 
             -- Right line endpoint set dynamically in visibility block below
         end
 
         -- Update text and color
-        btn._ebsDivLabel:SetText(displayName)
+        GetFFD(btn).divLabel:SetText(displayName)
         local colorKey = groupName or (isFavorites and ORDER_FAVORITES) or (isDefault and ORDER_UNGROUPED) or "_pending"
         local fg = GetFriendGroupsGlobal()
         local gc = fg.friendGroupColors[colorKey]
         if gc then
-            btn._ebsDivLabel:SetTextColor(gc.r, gc.g, gc.b, 1)
+            GetFFD(btn).divLabel:SetTextColor(gc.r, gc.g, gc.b, 1)
         else
             local ar, ag, ab = EG.r, EG.g, EG.b
-            btn._ebsDivLabel:SetTextColor(ar, ag, ab, 1)
+            GetFFD(btn).divLabel:SetTextColor(ar, ag, ab, 1)
         end
 
         -- Click label to open our custom color picker
-        btn._ebsColorKey = colorKey
-        if not btn._ebsDivLabelBtn then
+        GetFFD(btn).colorKey = colorKey
+        if not GetFFD(btn).divLabelBtn then
             local labelBtn = CreateFrame("Button", nil, btn)
             labelBtn:SetHeight(20)
             labelBtn:SetFrameLevel(btn:GetFrameLevel() + 3)
-            btn._ebsDivLabelBtn = labelBtn
+            GetFFD(btn).divLabelBtn = labelBtn
         end
-        btn._ebsDivLabelBtn:ClearAllPoints()
-        btn._ebsDivLabelBtn:SetPoint("CENTER", btn._ebsDivLabel, "CENTER", 0, 0)
-        btn._ebsDivLabelBtn:SetWidth((btn._ebsDivLabel:GetStringWidth() or 40) + 8)
-        btn._ebsDivLabelBtn:SetScript("OnClick", function()
-            local ck = btn._ebsColorKey
+        GetFFD(btn).divLabelBtn:ClearAllPoints()
+        GetFFD(btn).divLabelBtn:SetPoint("CENTER", GetFFD(btn).divLabel, "CENTER", 0, 0)
+        GetFFD(btn).divLabelBtn:SetWidth((GetFFD(btn).divLabel:GetStringWidth() or 40) + 8)
+        GetFFD(btn).divLabelBtn:SetScript("OnClick", function()
+            local ck = GetFFD(btn).colorKey
             if not ck then return end
             -- Widgets file is deferred; make sure ShowColorPicker exists
             -- before we call it (CDM is normally what triggers EnsureLoaded
@@ -3423,7 +3428,7 @@ local function SkinFriendsFrame()
                     if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
                 end,
             }
-            EllesmereUI:ShowColorPicker(info, btn._ebsDivLabelBtn)
+            EllesmereUI:ShowColorPicker(info, GetFFD(btn).divLabelBtn)
         end)
 
 
@@ -3446,62 +3451,62 @@ local function SkinFriendsFrame()
         --         ↑ ↓ ----- Label ----- ✎ ✕    (Custom groups)
         --         ------- Label -------          (Pending)
         if isFavorites or isDefault or isPending then
-            btn._ebsDivX:Hide()
-            btn._ebsDivEdit:Hide()
+            GetFFD(btn).divX:Hide()
+            GetFFD(btn).divEdit:Hide()
             if isPending then
-                btn._ebsDivUp:Hide()
-                btn._ebsDivDown:Hide()
-                btn._ebsDivLineL:ClearAllPoints()
-                btn._ebsDivLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
-                btn._ebsDivLineL:SetPoint("RIGHT", btn._ebsDivLabel, "LEFT", -6, 0)
-                btn._ebsDivLine:ClearAllPoints()
-                btn._ebsDivLine:SetColorTexture(1, 1, 1, 0.1)
-                btn._ebsDivLine:SetHeight(1)
-                btn._ebsDivLine:SetPoint("LEFT", btn._ebsDivLabel, "RIGHT", 6, 0)
-                btn._ebsDivLine:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+                GetFFD(btn).divUp:Hide()
+                GetFFD(btn).divDown:Hide()
+                GetFFD(btn).divLineL:ClearAllPoints()
+                GetFFD(btn).divLineL:SetPoint("LEFT", btn, "LEFT", 8, 0)
+                GetFFD(btn).divLineL:SetPoint("RIGHT", GetFFD(btn).divLabel, "LEFT", -6, 0)
+                GetFFD(btn).divLine:ClearAllPoints()
+                GetFFD(btn).divLine:SetColorTexture(1, 1, 1, 0.1)
+                GetFFD(btn).divLine:SetHeight(1)
+                GetFFD(btn).divLine:SetPoint("LEFT", GetFFD(btn).divLabel, "RIGHT", 6, 0)
+                GetFFD(btn).divLine:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
             else
                 -- Favorites and Friends: up on left, down on right for symmetry
-                btn._ebsDivUp:Show()
-                btn._ebsDivDown:Show()
-                btn._ebsDivUp:ClearAllPoints()
-                btn._ebsDivDown:ClearAllPoints()
-                btn._ebsDivUp:SetPoint("LEFT", btn, "LEFT", 8, 0)
-                btn._ebsDivDown:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
-                btn._ebsDivLineL:ClearAllPoints()
-                btn._ebsDivLineL:SetPoint("LEFT", btn._ebsDivUp, "RIGHT", 6, 0)
-                btn._ebsDivLineL:SetPoint("RIGHT", btn._ebsDivLabel, "LEFT", -6, 0)
-                btn._ebsDivLine:ClearAllPoints()
-                btn._ebsDivLine:SetColorTexture(1, 1, 1, 0.1)
-                btn._ebsDivLine:SetHeight(1)
-                btn._ebsDivLine:SetPoint("LEFT", btn._ebsDivLabel, "RIGHT", 6, 0)
-                btn._ebsDivLine:SetPoint("RIGHT", btn._ebsDivDown, "LEFT", -6, 0)
+                GetFFD(btn).divUp:Show()
+                GetFFD(btn).divDown:Show()
+                GetFFD(btn).divUp:ClearAllPoints()
+                GetFFD(btn).divDown:ClearAllPoints()
+                GetFFD(btn).divUp:SetPoint("LEFT", btn, "LEFT", 8, 0)
+                GetFFD(btn).divDown:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+                GetFFD(btn).divLineL:ClearAllPoints()
+                GetFFD(btn).divLineL:SetPoint("LEFT", GetFFD(btn).divUp, "RIGHT", 6, 0)
+                GetFFD(btn).divLineL:SetPoint("RIGHT", GetFFD(btn).divLabel, "LEFT", -6, 0)
+                GetFFD(btn).divLine:ClearAllPoints()
+                GetFFD(btn).divLine:SetColorTexture(1, 1, 1, 0.1)
+                GetFFD(btn).divLine:SetHeight(1)
+                GetFFD(btn).divLine:SetPoint("LEFT", GetFFD(btn).divLabel, "RIGHT", 6, 0)
+                GetFFD(btn).divLine:SetPoint("RIGHT", GetFFD(btn).divDown, "LEFT", -6, 0)
             end
         else
             -- Custom group: up edit -- Label -- close down (symmetric)
-            btn._ebsDivX:Show()
-            btn._ebsDivEdit:Show()
-            btn._ebsDivUp:Show()
-            btn._ebsDivDown:Show()
-            btn._ebsDivUp:ClearAllPoints()
-            btn._ebsDivDown:ClearAllPoints()
-            btn._ebsDivEdit:ClearAllPoints()
-            btn._ebsDivX:ClearAllPoints()
+            GetFFD(btn).divX:Show()
+            GetFFD(btn).divEdit:Show()
+            GetFFD(btn).divUp:Show()
+            GetFFD(btn).divDown:Show()
+            GetFFD(btn).divUp:ClearAllPoints()
+            GetFFD(btn).divDown:ClearAllPoints()
+            GetFFD(btn).divEdit:ClearAllPoints()
+            GetFFD(btn).divX:ClearAllPoints()
             -- Left side: up arrow, then edit
-            btn._ebsDivUp:SetPoint("LEFT", btn, "LEFT", 8, 0)
-            btn._ebsDivEdit:SetPoint("LEFT", btn._ebsDivUp, "RIGHT", 4, 0)
+            GetFFD(btn).divUp:SetPoint("LEFT", btn, "LEFT", 8, 0)
+            GetFFD(btn).divEdit:SetPoint("LEFT", GetFFD(btn).divUp, "RIGHT", 4, 0)
             -- Right side: down arrow, then X (inner)
-            btn._ebsDivDown:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
-            btn._ebsDivX:SetPoint("RIGHT", btn._ebsDivDown, "LEFT", -4, 0)
+            GetFFD(btn).divDown:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+            GetFFD(btn).divX:SetPoint("RIGHT", GetFFD(btn).divDown, "LEFT", -4, 0)
             -- Left line: after edit to label
-            btn._ebsDivLineL:ClearAllPoints()
-            btn._ebsDivLineL:SetPoint("LEFT", btn._ebsDivEdit, "RIGHT", 6, 0)
-            btn._ebsDivLineL:SetPoint("RIGHT", btn._ebsDivLabel, "LEFT", -6, 0)
+            GetFFD(btn).divLineL:ClearAllPoints()
+            GetFFD(btn).divLineL:SetPoint("LEFT", GetFFD(btn).divEdit, "RIGHT", 6, 0)
+            GetFFD(btn).divLineL:SetPoint("RIGHT", GetFFD(btn).divLabel, "LEFT", -6, 0)
             -- Right line: after label to X
-            btn._ebsDivLine:ClearAllPoints()
-            btn._ebsDivLine:SetColorTexture(1, 1, 1, 0.1)
-            btn._ebsDivLine:SetHeight(1)
-            btn._ebsDivLine:SetPoint("LEFT", btn._ebsDivLabel, "RIGHT", 6, 0)
-            btn._ebsDivLine:SetPoint("RIGHT", btn._ebsDivX, "LEFT", -6, 0)
+            GetFFD(btn).divLine:ClearAllPoints()
+            GetFFD(btn).divLine:SetColorTexture(1, 1, 1, 0.1)
+            GetFFD(btn).divLine:SetHeight(1)
+            GetFFD(btn).divLine:SetPoint("LEFT", GetFFD(btn).divLabel, "RIGHT", 6, 0)
+            GetFFD(btn).divLine:SetPoint("RIGHT", GetFFD(btn).divX, "LEFT", -6, 0)
         end
 
         -- Click on divider bar to toggle collapse
@@ -3522,11 +3527,11 @@ local function SkinFriendsFrame()
         end)
 
         if not isFavorites and not isDefault and not isPending then
-            btn._ebsDivX:SetScript("OnClick", function()
+            GetFFD(btn).divX:SetScript("OnClick", function()
                 local dialog = StaticPopup_Show("EBS_DELETE_FRIEND_GROUP", displayName)
                 if dialog then dialog.data = groupName end
             end)
-            btn._ebsDivEdit:SetScript("OnClick", function()
+            GetFFD(btn).divEdit:SetScript("OnClick", function()
                 local dialog = StaticPopup_Show("EBS_NEW_FRIEND_GROUP")
                 if dialog then
                     dialog.data = { renameFrom = groupName }
@@ -3547,27 +3552,27 @@ local function SkinFriendsFrame()
 
             -- Disable/gray out arrows at boundaries (keep mouse enabled to block hover)
             if isFirst then
-                btn._ebsDivUp:SetAlpha(0.06)
-                btn._ebsDivUp:SetScript("OnEnter", nil)
-                btn._ebsDivUp:SetScript("OnLeave", nil)
+                GetFFD(btn).divUp:SetAlpha(0.06)
+                GetFFD(btn).divUp:SetScript("OnEnter", nil)
+                GetFFD(btn).divUp:SetScript("OnLeave", nil)
             else
-                btn._ebsDivUp:SetAlpha(DIV_ICON_ALPHA)
-                btn._ebsDivUp:EnableMouse(true)
-                btn._ebsDivUp:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
-                btn._ebsDivUp:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
+                GetFFD(btn).divUp:SetAlpha(DIV_ICON_ALPHA)
+                GetFFD(btn).divUp:EnableMouse(true)
+                GetFFD(btn).divUp:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
+                GetFFD(btn).divUp:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
             end
             if isLast then
-                btn._ebsDivDown:SetAlpha(0.06)
-                btn._ebsDivDown:SetScript("OnEnter", nil)
-                btn._ebsDivDown:SetScript("OnLeave", nil)
+                GetFFD(btn).divDown:SetAlpha(0.06)
+                GetFFD(btn).divDown:SetScript("OnEnter", nil)
+                GetFFD(btn).divDown:SetScript("OnLeave", nil)
             else
-                btn._ebsDivDown:SetAlpha(DIV_ICON_ALPHA)
-                btn._ebsDivDown:EnableMouse(true)
-                btn._ebsDivDown:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
-                btn._ebsDivDown:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
+                GetFFD(btn).divDown:SetAlpha(DIV_ICON_ALPHA)
+                GetFFD(btn).divDown:EnableMouse(true)
+                GetFFD(btn).divDown:SetScript("OnEnter", function(self) self:SetAlpha(DIV_ICON_HOVER) end)
+                GetFFD(btn).divDown:SetScript("OnLeave", function(self) self:SetAlpha(DIV_ICON_ALPHA) end)
             end
 
-            btn._ebsDivUp:SetScript("OnClick", function()
+            GetFFD(btn).divUp:SetScript("OnClick", function()
                 if isFirst then return end
                 local order = GetValidGroupOrder()
                 for idx, k in ipairs(order) do
@@ -3578,7 +3583,7 @@ local function SkinFriendsFrame()
                     end
                 end
             end)
-            btn._ebsDivDown:SetScript("OnClick", function()
+            GetFFD(btn).divDown:SetScript("OnClick", function()
                 if isLast then return end
                 local order = GetValidGroupOrder()
                 for idx, k in ipairs(order) do
@@ -3600,18 +3605,18 @@ local function SkinFriendsFrame()
         local topGap = elementData._isFirst and 1 or 0
         local bottomGap = elementData._isLast and 1 or 2
         btn:SetHeight(36 + topGap + bottomGap)
-        if not btn._ebsPendingSkinned then
-            btn._ebsPendingSkinned = true
+        if not GetFFD(btn).pendingSkinned then
+            GetFFD(btn).pendingSkinned = true
 
             -- Tile bg (slightly brighter with blue tint)
-            btn._ebsTileBg = btn:CreateTexture(nil, "BACKGROUND", nil, 2)
-            btn._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30)
+            GetFFD(btn).tileBg = btn:CreateTexture(nil, "BACKGROUND", nil, 2)
+            GetFFD(btn).tileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30)
 
             -- Neutral overlay
-            btn._ebsFactionBg = btn:CreateTexture(nil, "BACKGROUND", nil, 3)
-            btn._ebsFactionBg:SetTexture(FACTION_TEX_NEUTRAL)
-            btn._ebsFactionBg:SetTexCoord(0, 1, 0, 1)
-            btn._ebsFactionBg:SetAlpha(0.2)
+            GetFFD(btn).factionBg = btn:CreateTexture(nil, "BACKGROUND", nil, 3)
+            GetFFD(btn).factionBg:SetTexture(FACTION_TEX_NEUTRAL)
+            GetFFD(btn).factionBg:SetTexCoord(0, 1, 0, 1)
+            GetFFD(btn).factionBg:SetAlpha(0.2)
 
             -- Hover highlight
             local hover = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -3620,20 +3625,20 @@ local function SkinFriendsFrame()
             hover:SetBlendMode("ADD")
 
             -- Name (12pt, shadow)
-            btn._ebsName = btn:CreateFontString(nil, "OVERLAY")
-            btn._ebsName:SetFont(fontPath, 12, "")
-            btn._ebsName:SetShadowOffset(1, -1)
-            btn._ebsName:SetShadowColor(0, 0, 0, 0.8)
-            btn._ebsName:SetPoint("LEFT", btn, "LEFT", 10, 4)
-            btn._ebsName:SetTextColor(0.51, 0.784, 1, 1)
+            GetFFD(btn).name = btn:CreateFontString(nil, "OVERLAY")
+            GetFFD(btn).name:SetFont(fontPath, 12, "")
+            GetFFD(btn).name:SetShadowOffset(1, -1)
+            GetFFD(btn).name:SetShadowColor(0, 0, 0, 0.8)
+            GetFFD(btn).name:SetPoint("LEFT", btn, "LEFT", 10, 4)
+            GetFFD(btn).name:SetTextColor(0.51, 0.784, 1, 1)
 
             -- Info line (9pt, shadow)
-            btn._ebsSubText = btn:CreateFontString(nil, "OVERLAY")
-            btn._ebsSubText:SetFont(fontPath, 9, "")
-            btn._ebsSubText:SetShadowOffset(1, -1)
-            btn._ebsSubText:SetShadowColor(0, 0, 0, 0.8)
-            btn._ebsSubText:SetPoint("TOPLEFT", btn._ebsName, "BOTTOMLEFT", 0, -2)
-            btn._ebsSubText:SetTextColor(0.5, 0.5, 0.5, 0.8)
+            GetFFD(btn).subText = btn:CreateFontString(nil, "OVERLAY")
+            GetFFD(btn).subText:SetFont(fontPath, 9, "")
+            GetFFD(btn).subText:SetShadowOffset(1, -1)
+            GetFFD(btn).subText:SetShadowColor(0, 0, 0, 0.8)
+            GetFFD(btn).subText:SetPoint("TOPLEFT", GetFFD(btn).name, "BOTTOMLEFT", 0, -2)
+            GetFFD(btn).subText:SetTextColor(0.5, 0.5, 0.5, 0.8)
 
             -- Decline button (x, right side)
             local declineBtn = CreateFrame("Button", nil, btn)
@@ -3656,10 +3661,10 @@ local function SkinFriendsFrame()
                 if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             end)
             declineBtn:SetScript("OnClick", function()
-                local invID = btn._ebsInviteID
+                local invID = GetFFD(btn).inviteID
                 if invID and BNDeclineFriendInvite then BNDeclineFriendInvite(invID) end
             end)
-            btn._ebsDeclineBtn = declineBtn
+            GetFFD(btn).declineBtn = declineBtn
 
             -- Accept button (styled like Add Friend / Send Message buttons)
             local acceptBtn = CreateFrame("Button", nil, btn)
@@ -3679,13 +3684,13 @@ local function SkinFriendsFrame()
             acceptLabel:SetTextColor(1, 1, 1, 0.5)
             acceptLabel:SetPoint("CENTER", 0, 0)
             acceptLabel:SetText(ACCEPT or "Accept")
-            btn._ebsAcceptLabel = acceptLabel
+            GetFFD(btn).acceptLabel = acceptLabel
 
             -- Accent support: read from DB, same pattern as bottom buttons
-            acceptBtn._ebsAccent = false
+            GetFFD(acceptBtn).accent = false
             acceptBtn:SetScript("OnEnter", function()
                 local r, g, b, a1, a2 = 1, 1, 1, 0.7, 0.6
-                if acceptBtn._ebsAccent then
+                if GetFFD(acceptBtn).accent then
                     r, g, b = EG.r, EG.g, EG.b
                     a1, a2 = 1, 0.8
                 end
@@ -3694,7 +3699,7 @@ local function SkinFriendsFrame()
             end)
             acceptBtn:SetScript("OnLeave", function()
                 local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
-                if acceptBtn._ebsAccent then
+                if GetFFD(acceptBtn).accent then
                     r, g, b = EG.r, EG.g, EG.b
                     a1, a2 = 0.7, 0.5
                 end
@@ -3702,29 +3707,29 @@ local function SkinFriendsFrame()
                 if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, r, g, b, a2) end
             end)
             acceptBtn:SetScript("OnClick", function()
-                local invID = btn._ebsInviteID
+                local invID = GetFFD(btn).inviteID
                 if invID and BNAcceptFriendInvite then BNAcceptFriendInvite(invID) end
             end)
-            btn._ebsAcceptBtn = acceptBtn
+            GetFFD(btn).acceptBtn = acceptBtn
         end
 
         -- Anchor tile/faction with per-element gaps (first gets top gap, last gets smaller bottom gap)
         local tGap = elementData._isFirst and -1 or 0
         local bGap = elementData._isLast and 1 or 2
-        btn._ebsTileBg:ClearAllPoints()
-        btn._ebsTileBg:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, tGap)
-        btn._ebsTileBg:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, bGap)
-        btn._ebsFactionBg:ClearAllPoints()
-        btn._ebsFactionBg:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, tGap)
-        btn._ebsFactionBg:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, bGap)
+        GetFFD(btn).tileBg:ClearAllPoints()
+        GetFFD(btn).tileBg:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, tGap)
+        GetFFD(btn).tileBg:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, bGap)
+        GetFFD(btn).factionBg:ClearAllPoints()
+        GetFFD(btn).factionBg:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, tGap)
+        GetFFD(btn).factionBg:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, bGap)
 
         -- Apply accent state from current settings
         local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
         local useAccent = fp and fp.accentColors ~= false
-        local acceptBtn = btn._ebsAcceptBtn
-        local acceptLabel = btn._ebsAcceptLabel
+        local acceptBtn = GetFFD(btn).acceptBtn
+        local acceptLabel = GetFFD(btn).acceptLabel
         if acceptBtn then
-            acceptBtn._ebsAccent = useAccent
+            GetFFD(acceptBtn).accent = useAccent
             if useAccent then
                 if acceptLabel then acceptLabel:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
                 if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, EG.r, EG.g, EG.b, 0.5) end
@@ -3735,12 +3740,12 @@ local function SkinFriendsFrame()
         end
 
         -- Populate data (reapply colors every init in case rebuild recycled the frame)
-        btn._ebsInviteID = elementData._inviteID
-        btn._ebsName:SetText(elementData._accountName or "")
-        btn._ebsName:SetTextColor(0.51, 0.784, 1, 1)
-        btn._ebsSubText:SetText(PENDING_INVITE or "Pending")
-        btn._ebsSubText:SetTextColor(0.5, 0.5, 0.5, 0.8)
-        btn._ebsTileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30)
+        GetFFD(btn).inviteID = elementData._inviteID
+        GetFFD(btn).name:SetText(elementData._accountName or "")
+        GetFFD(btn).name:SetTextColor(0.51, 0.784, 1, 1)
+        GetFFD(btn).subText:SetText(PENDING_INVITE or "Pending")
+        GetFFD(btn).subText:SetTextColor(0.5, 0.5, 0.5, 0.8)
+        GetFFD(btn).tileBg:SetColorTexture(0.05, 0.15, 0.20, 0.30)
     end
 
     -- Our own ScrollBox + ScrollBar (parented to UIParent) to avoid tainting
@@ -3801,8 +3806,8 @@ local function SkinFriendsFrame()
 
         _ebsOurScrollBox = ourSB
         _ebsOurScrollBar = ourBar
-        frame._ebsOurScrollBox = ourSB
-        frame._ebsOurScrollBar = ourBar
+        GetFFD(frame).ourScrollBox = ourSB
+        GetFFD(frame).ourScrollBar = ourBar
     end
 
     -- Rebuild state
@@ -4052,7 +4057,7 @@ local function SkinFriendsFrame()
 
         -- Clear stamps so the hook re-applies styling with fresh data
         for _, btn in sb:EnumerateFrames() do
-            btn._ebsStampType = nil
+            GetFFD(btn).stampType = nil
         end
         _ebsRebuilding = true
         sb:SetDataProvider(newDP, true)  -- safe: sb is our own ScrollBox, not Blizzard's
@@ -4085,14 +4090,14 @@ local function SkinFriendsFrame()
                             C_Timer.After(0.05, function()
                                 for _, btn in sb:EnumerateFrames() do
                                     if btn.buttonType == targetType and btn.id == targetId then
-                                        if not btn._ebsFlashHL then
-                                            btn._ebsFlashHL = btn:CreateTexture(nil, "ARTWORK", nil, -5)
-                                            btn._ebsFlashHL:SetAllPoints()
-                                            btn._ebsFlashHL:SetColorTexture(1, 1, 1, 0.12)
+                                        if not GetFFD(btn).flashHL then
+                                            GetFFD(btn).flashHL = btn:CreateTexture(nil, "ARTWORK", nil, -5)
+                                            GetFFD(btn).flashHL:SetAllPoints()
+                                            GetFFD(btn).flashHL:SetColorTexture(1, 1, 1, 0.12)
                                         end
-                                        btn._ebsFlashHL:Show()
+                                        GetFFD(btn).flashHL:Show()
                                         C_Timer.After(1.5, function()
-                                            if btn._ebsFlashHL then btn._ebsFlashHL:Hide() end
+                                            if GetFFD(btn).flashHL then GetFFD(btn).flashHL:Hide() end
                                         end)
                                         break
                                     end
@@ -4237,15 +4242,15 @@ local function SkinFriendsFrame()
                 local col = _G["WhoFrameColumnHeader" .. i]
                 if col then
                     hooksecurefunc(col, "SetPoint", function(self)
-                        if self._ebsAdjusting then return end
-                        self._ebsAdjusting = true
+                        if GetFFD(self).adjusting then return end
+                        GetFFD(self).adjusting = true
                         local p1, rel, p2, x, y = self:GetPoint(1)
                         if p1 then
                             self:ClearAllPoints()
                             local xOff = (i == 1) and 5 or 0
                             self:SetPoint(p1, rel, p2, (x or 0) + xOff, (y or 0) + 10)
                         end
-                        self._ebsAdjusting = false
+                        GetFFD(self).adjusting = false
                     end)
                 end
             end
@@ -4397,8 +4402,8 @@ local function SkinFriendsFrame()
             local function SkinWhoRows()
                 for i = 1, 22 do
                     local btn = _G["WhoFrameButton" .. i]
-                    if btn and not btn._ebsSkinned then
-                        btn._ebsSkinned = true
+                    if btn and not GetFFD(btn).skinned then
+                        GetFFD(btn).skinned = true
                         StripTextures(btn)
                         local hover = btn:CreateTexture(nil, "HIGHLIGHT")
                         hover:SetAllPoints()
@@ -4457,8 +4462,8 @@ local function SkinFriendsFrame()
                 qjScroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -15, 35)
 
                 -- 1px inset border (same as friends/who)
-                if not qjScroll._ebsBorderAdded then
-                    qjScroll._ebsBorderAdded = true
+                if not GetFFD(qjScroll).borderAdded then
+                    GetFFD(qjScroll).borderAdded = true
                     local bdr = CreateFrame("Frame", nil, qjf)
                     bdr:SetPoint("TOPLEFT", qjScroll, "TOPLEFT", 0, 0)
                     bdr:SetPoint("BOTTOMRIGHT", qjScroll, "BOTTOMRIGHT", 0, 0)
@@ -4489,8 +4494,8 @@ local function SkinFriendsFrame()
 
     -- Friends list area: 1px border around scrollable area
     local friendsList = FriendsListFrame
-    if friendsList and friendsList.ScrollBox and not friendsList.ScrollBox._ebsBorderAdded then
-        friendsList.ScrollBox._ebsBorderAdded = true
+    if friendsList and friendsList.ScrollBox and not GetFFD(friendsList.ScrollBox).borderAdded then
+        GetFFD(friendsList.ScrollBox).borderAdded = true
         local bdr = CreateFrame("Frame", nil, friendsList)
         bdr:SetPoint("TOPLEFT", friendsList.ScrollBox, "TOPLEFT", 0, 0)
         bdr:SetPoint("BOTTOMRIGHT", friendsList.ScrollBox, "BOTTOMRIGHT", 0, 0)
@@ -4521,10 +4526,10 @@ local function SkinFriendsFrame()
             addBtn:SetSize(btnW, BTN_H)
             addBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", 0, btnY)
 
-            if frame._ebsOfflineBtn then
-                frame._ebsOfflineBtn:ClearAllPoints()
-                frame._ebsOfflineBtn:SetSize(totalW - btnW * 2, BTN_H)
-                frame._ebsOfflineBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", btnW, btnY)
+            if GetFFD(frame).offlineBtn then
+                GetFFD(frame).offlineBtn:ClearAllPoints()
+                GetFFD(frame).offlineBtn:SetSize(totalW - btnW * 2, BTN_H)
+                GetFFD(frame).offlineBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", btnW, btnY)
             end
 
             msgBtn:SetParent(frame)
@@ -4534,7 +4539,7 @@ local function SkinFriendsFrame()
         end
 
         -- Show/Hide Offline toggle button
-        if not frame._ebsOfflineBtn then
+        if not GetFFD(frame).offlineBtn then
             local offBtn = CreateFrame("Button", nil, frame)
             SkinBottomButton(offBtn)
             offBtn:SetSize(85, BTN_H)
@@ -4546,7 +4551,7 @@ local function SkinFriendsFrame()
             offLabel:SetPoint("CENTER", 0, 0)
             offBtn:SetFontString(offLabel)
             offBtn:SetPushedTextOffset(2, -2)
-            offBtn._ebsLabel = offLabel
+            GetFFD(offBtn).label = offLabel
 
             local function UpdateOfflineLabel()
                 local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
@@ -4565,7 +4570,7 @@ local function SkinFriendsFrame()
             end)
 
             -- Show Offline: 50% white, 75% on hover, no accent
-            local offText = offBtn._ebsLabel
+            local offText = GetFFD(offBtn).label
             if offText then offText:SetTextColor(1, 1, 1, 0.3) end
             if offBtn._ppBorders then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
             offBtn:HookScript("OnEnter", function()
@@ -4577,8 +4582,8 @@ local function SkinFriendsFrame()
                 if offBtn._ppBorders then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
             end)
 
-            frame._ebsOfflineBtn = offBtn
-            frame._ebsUpdateOfflineLabel = UpdateOfflineLabel
+            GetFFD(frame).offlineBtn = offBtn
+            GetFFD(frame).updateOfflineLabel = UpdateOfflineLabel
         end
 
         -- Add Friend: 50% white, 75% on hover, no accent
@@ -4641,23 +4646,23 @@ local function SkinFriendsFrame()
         end
 
         -- Tab bar bg (parent to first custom tab so it extends below frame)
-        if frame._ebsTabBarBg and lastCT then
-            frame._ebsTabBarBg:SetParent(customTabs[1])
-            frame._ebsTabBarBg:ClearAllPoints()
-            frame._ebsTabBarBg:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 0)
-            frame._ebsTabBarBg:SetPoint("BOTTOMRIGHT", lastCT, "BOTTOMRIGHT", 0, 0)
-            frame._ebsTabBarBg:SetDrawLayer("BACKGROUND", -8)
+        if GetFFD(frame).tabBarBg and lastCT then
+            GetFFD(frame).tabBarBg:SetParent(customTabs[1])
+            GetFFD(frame).tabBarBg:ClearAllPoints()
+            GetFFD(frame).tabBarBg:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 0)
+            GetFFD(frame).tabBarBg:SetPoint("BOTTOMRIGHT", lastCT, "BOTTOMRIGHT", 0, 0)
+            GetFFD(frame).tabBarBg:SetDrawLayer("BACKGROUND", -8)
         end
 
         -- 1px top border
-        if not frame._ebsTabTopBorder then
-            frame._ebsTabTopBorder = customTabs[1]:CreateTexture(nil, "OVERLAY", nil, 7)
-            PP.DisablePixelSnap(frame._ebsTabTopBorder)
-            frame._ebsTabTopBorder:SetColorTexture(1, 1, 1, 0.08)
-            frame._ebsTabTopBorder:SetHeight(onePx)
-            frame._ebsTabTopBorder:ClearAllPoints()
-            frame._ebsTabTopBorder:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 0)
-            frame._ebsTabTopBorder:SetPoint("TOPRIGHT", lastCT, "TOPRIGHT", 0, 0)
+        if not GetFFD(frame).tabTopBorder then
+            GetFFD(frame).tabTopBorder = customTabs[1]:CreateTexture(nil, "OVERLAY", nil, 7)
+            PP.DisablePixelSnap(GetFFD(frame).tabTopBorder)
+            GetFFD(frame).tabTopBorder:SetColorTexture(1, 1, 1, 0.08)
+            GetFFD(frame).tabTopBorder:SetHeight(onePx)
+            GetFFD(frame).tabTopBorder:ClearAllPoints()
+            GetFFD(frame).tabTopBorder:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 0)
+            GetFFD(frame).tabTopBorder:SetPoint("TOPRIGHT", lastCT, "TOPRIGHT", 0, 0)
         end
 
         -- Initial state
@@ -4668,16 +4673,16 @@ local function SkinFriendsFrame()
     local closeBtn = frame.CloseButton or _G.FriendsFrameCloseButton
     if closeBtn then
         StripTextures(closeBtn)
-        closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
-        closeBtn._ebsX:SetFont(fontPath, 14, "")
-        closeBtn._ebsX:SetText("x")
-        closeBtn._ebsX:SetTextColor(1, 1, 1, 0.5)
-        closeBtn._ebsX:SetPoint("CENTER", -2, -3)
+        GetFFD(closeBtn).x = closeBtn:CreateFontString(nil, "OVERLAY")
+        GetFFD(closeBtn).x:SetFont(fontPath, 14, "")
+        GetFFD(closeBtn).x:SetText("x")
+        GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.5)
+        GetFFD(closeBtn).x:SetPoint("CENTER", -2, -3)
         closeBtn:HookScript("OnEnter", function()
-            closeBtn._ebsX:SetTextColor(1, 1, 1, 0.9)
+            GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.9)
         end)
         closeBtn:HookScript("OnLeave", function()
-            closeBtn._ebsX:SetTextColor(1, 1, 1, 0.5)
+            GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.5)
         end)
     end
 
@@ -4708,20 +4713,20 @@ local function ApplyFriends()
     else
         PP.SetBorderColor(FriendsFrame, r, g, b, 0)
     end
-    if FriendsFrame._ebsBg then
-        FriendsFrame._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-        FriendsFrame._ebsBg:SetAlpha(1)
+    if GetFFD(FriendsFrame).bg then
+        GetFFD(FriendsFrame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+        GetFFD(FriendsFrame).bg:SetAlpha(1)
     end
-    if FriendsFrame._ebsTabBarBg then
-        FriendsFrame._ebsTabBarBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-        FriendsFrame._ebsTabBarBg:SetAlpha(1)
+    if GetFFD(FriendsFrame).tabBarBg then
+        GetFFD(FriendsFrame).tabBarBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+        GetFFD(FriendsFrame).tabBarBg:SetAlpha(1)
     end
     -- Update tile backgrounds on visible buttons (friends + recent allies)
     local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
     if scrollBox then
         for _, button in scrollBox:EnumerateFrames() do
-            if button._ebsTileBg then
-                button._ebsTileBg:SetColorTexture(0, 0, 0, 0.10)
+            if GetFFD(button).tileBg then
+                GetFFD(button).tileBg:SetColorTexture(0, 0, 0, 0.10)
             end
         end
     end
@@ -4729,8 +4734,8 @@ local function ApplyFriends()
     if rafSB and rafSB.ScrollTarget then
         for i = 1, select("#", rafSB.ScrollTarget:GetChildren()) do
             local button = select(i, rafSB.ScrollTarget:GetChildren())
-            if button._ebsTileBg then
-                button._ebsTileBg:SetColorTexture(0, 0, 0, 0.10)
+            if GetFFD(button).tileBg then
+                GetFFD(button).tileBg:SetColorTexture(0, 0, 0, 0.10)
             end
         end
     end
@@ -4738,12 +4743,12 @@ local function ApplyFriends()
     -- Apply accent colors to bottom buttons, raid tab buttons, tab underline, and sub-tab active text
     UpdateBottomButtonAccent()
     UpdateRaidTabButtonAccent()
-    if FriendsFrame._ebsUpdateCustomTabs then FriendsFrame._ebsUpdateCustomTabs() end
-    if FriendsFrame._ebsUpdateSubTabs then FriendsFrame._ebsUpdateSubTabs() end
+    if GetFFD(FriendsFrame).updateCustomTabs then GetFFD(FriendsFrame).updateCustomTabs() end
+    if GetFFD(FriendsFrame).updateSubTabs then GetFFD(FriendsFrame).updateSubTabs() end
 
     -- Apply scale and saved position
-    if FriendsFrame._ebsApplyScaleAndPosition then
-        FriendsFrame._ebsApplyScaleAndPosition()
+    if GetFFD(FriendsFrame).applyScaleAndPosition then
+        GetFFD(FriendsFrame).applyScaleAndPosition()
     end
 end
 

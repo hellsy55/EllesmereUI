@@ -7182,7 +7182,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.3.2"
+EllesmereUI.VERSION = "7.3.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7855,7 +7855,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- Add EllesmereUI + Unlock Mode buttons to the Game Menu (pause menu).
     -- Both share a single Layout hook to avoid double-push conflicts.
-    if GameMenuFrame and not GameMenuFrame.EllesmereUI then
+    if GameMenuFrame and not EllesmereUI._GetFFD(GameMenuFrame).euiBtn then
         -- Game menu frame+button skinning lives in EllesmereUIBlizzardSkin.lua
         -- so it only applies when that addon is enabled. Detect whether the
         -- skin is active so EUI's own buttons match the skinned menu style.
@@ -7873,7 +7873,7 @@ initFrame:SetScript("OnEvent", function(self, event)
             HideUIPanel(GameMenuFrame)
             EllesmereUI:Toggle()
         end)
-        GameMenuFrame.EllesmereUI = btn
+        EllesmereUI._GetFFD(GameMenuFrame).euiBtn = btn
 
         local unlockBtn = CreateFrame("Button", "EllesmereUI_UnlockMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         unlockBtn:SetSize(200, 35)
@@ -7887,7 +7887,7 @@ initFrame:SetScript("OnEvent", function(self, event)
                 EllesmereUI:ToggleUnlockMode()
             end
         end)
-        GameMenuFrame.EllesmereUIUnlock = unlockBtn
+        EllesmereUI._GetFFD(GameMenuFrame).unlockBtn = unlockBtn
 
         -- Skin our custom buttons the same way as pooled Blizzard buttons
         if _reskinMenu then
@@ -8394,6 +8394,17 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
 end
 
 -------------------------------------------------------------------------------
+--  External weak-keyed lookup table for frame state (prevents tainting Blizzard
+--  frames). Stored on EllesmereUI to avoid the 200-local cap in this file.
+-------------------------------------------------------------------------------
+EllesmereUI._FFD = EllesmereUI._FFD or setmetatable({}, { __mode = "k" })
+function EllesmereUI._GetFFD(frame)
+    local d = EllesmereUI._FFD[frame]
+    if not d then d = {}; EllesmereUI._FFD[frame] = d end
+    return d
+end
+
+-------------------------------------------------------------------------------
 --  Alpha-Zero Visibility Helper
 --  For anchor-participating container frames: use alpha 0 + EnableMouse(false)
 --  instead of :Hide() so the frame stays in the layout engine with valid bounds.
@@ -8402,13 +8413,13 @@ end
 function EllesmereUI.SetElementVisibility(frame, visible)
     if not frame then return end
     if visible then
-        frame:SetAlpha(frame._euiRestoreAlpha or 1)
-        frame:EnableMouse(frame._euiRestoreMouse or false)
+        frame:SetAlpha(EllesmereUI._GetFFD(frame).restoreAlpha or 1)
+        frame:EnableMouse(EllesmereUI._GetFFD(frame).restoreMouse or false)
     else
         if frame:GetAlpha() > 0 then
-            frame._euiRestoreAlpha = frame:GetAlpha()
+            EllesmereUI._GetFFD(frame).restoreAlpha = frame:GetAlpha()
         end
-        frame._euiRestoreMouse = frame:IsMouseEnabled()
+        EllesmereUI._GetFFD(frame).restoreMouse = frame:IsMouseEnabled()
         frame:SetAlpha(0)
         frame:EnableMouse(false)
     end
@@ -8450,9 +8461,9 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
         end
 
         if blizzBar:GetParent() ~= hiddenParent then
-            blizzBar._euiOrigParent = blizzBar:GetParent()
+            EllesmereUI._GetFFD(blizzBar).origParent = blizzBar:GetParent()
         end
-        blizzBar._euiCastBarSuppressed = true
+        EllesmereUI._GetFFD(blizzBar).castBarSuppressed = true
 
         if blizzBar:GetParent() ~= hiddenParent then
             blizzBar:SetParent(hiddenParent)
@@ -8460,12 +8471,12 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
         -- Edit Mode tries to re-anchor the cast bar during layout changes.
         -- Keep re-applying our hidden parent while any EUI owner suppresses it.
-        if not blizzBar._euiSetParentHooked then
-            blizzBar._euiSetParentHooked = true
+        if not EllesmereUI._GetFFD(blizzBar).setParentHooked then
+            EllesmereUI._GetFFD(blizzBar).setParentHooked = true
             hooksecurefunc(blizzBar, "SetParent", function(self, newParent)
-                if self._euiCastBarSuppressed and newParent ~= EllesmereUI._playerCastBarHiddenParent then
+                if EllesmereUI._GetFFD(self).castBarSuppressed and newParent ~= EllesmereUI._playerCastBarHiddenParent then
                     C_Timer.After(0, function()
-                        if self._euiCastBarSuppressed
+                        if EllesmereUI._GetFFD(self).castBarSuppressed
                            and not InCombatLockdown()
                            and self:GetParent() ~= EllesmereUI._playerCastBarHiddenParent
                         then
@@ -8478,18 +8489,18 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
         local selection = blizzBar.Selection
         if selection then
-            if not selection._euiSuppressed then
-                selection._euiRestoreAlpha = selection:GetAlpha()
-                selection._euiRestoreMouse = selection:IsMouseEnabled()
+            if not EllesmereUI._GetFFD(selection).suppressed then
+                EllesmereUI._GetFFD(selection).restoreAlpha = selection:GetAlpha()
+                EllesmereUI._GetFFD(selection).restoreMouse = selection:IsMouseEnabled()
             end
-            selection._euiSuppressed = true
+            EllesmereUI._GetFFD(selection).suppressed = true
             selection:SetAlpha(0)
             selection:EnableMouse(false)
 
-            if not selection._euiShowHooked then
-                selection._euiShowHooked = true
+            if not EllesmereUI._GetFFD(selection).showHooked then
+                EllesmereUI._GetFFD(selection).showHooked = true
                 hooksecurefunc(selection, "Show", function(self)
-                    if PlayerCastingBarFrame and PlayerCastingBarFrame._euiCastBarSuppressed then
+                    if PlayerCastingBarFrame and EllesmereUI._GetFFD(PlayerCastingBarFrame).castBarSuppressed then
                         self:SetAlpha(0)
                         self:EnableMouse(false)
                     end
@@ -8500,17 +8511,17 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
         return
     end
 
-    blizzBar._euiCastBarSuppressed = false
+    EllesmereUI._GetFFD(blizzBar).castBarSuppressed = false
 
-    if hiddenParent and blizzBar:GetParent() == hiddenParent and blizzBar._euiOrigParent then
-        blizzBar:SetParent(blizzBar._euiOrigParent)
+    if hiddenParent and blizzBar:GetParent() == hiddenParent and EllesmereUI._GetFFD(blizzBar).origParent then
+        blizzBar:SetParent(EllesmereUI._GetFFD(blizzBar).origParent)
     end
 
     local selection = blizzBar.Selection
     if selection then
-        selection._euiSuppressed = false
-        selection:SetAlpha(selection._euiRestoreAlpha or 1)
-        selection:EnableMouse(selection._euiRestoreMouse or false)
+        EllesmereUI._GetFFD(selection).suppressed = false
+        selection:SetAlpha(EllesmereUI._GetFFD(selection).restoreAlpha or 1)
+        selection:EnableMouse(EllesmereUI._GetFFD(selection).restoreMouse or false)
     end
 
     -- Let Blizzard rebuild its normal event wiring and pick up any active cast
