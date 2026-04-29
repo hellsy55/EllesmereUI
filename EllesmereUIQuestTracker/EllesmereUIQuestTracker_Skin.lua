@@ -122,6 +122,8 @@ local _eqtFontRegistry = setmetatable({}, { __mode = "k" })
 
 -- Reapplies EUI font path with explicit size + outline + shadow.
 -- If `size` is nil, preserves Blizzard's current size.
+local _eqtSetStateHooked = setmetatable({}, { __mode = "k" })
+
 local function StyleFontStringSized(fs, size)
     if not fs or not fs.GetFont then return end
     if not size then
@@ -388,8 +390,9 @@ local function StyleObjectiveLine(line)
 
     -- Blizzard calls line:SetState after AddObjective, overwriting our
     -- color. Hook it so we re-tint every time Blizzard changes state.
-    if line.SetState and not line._eqtSetStateHooked then
-        line._eqtSetStateHooked = true
+    -- Guard uses external table to avoid writing properties onto Blizzard frames.
+    if line.SetState and not _eqtSetStateHooked[line] then
+        _eqtSetStateHooked[line] = true
         hooksecurefunc(line, "SetState", function(self)
             ApplyObjectiveLineColor(self)
         end)
