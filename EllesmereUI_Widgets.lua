@@ -1641,6 +1641,8 @@ local function ApplyAccentLive(r, g, b)
 end
 
 --- SetActiveTheme: main theme setter. Persists and applies with animated transition.
+--- Only changes the options panel background. Accent color is independent
+--- (controlled by the accent swatch / class color toggle).
 EllesmereUI.SetActiveTheme = function(theme)
     if not EllesmereUIDB then EllesmereUIDB = {} end
     EllesmereUIDB.activeTheme = theme
@@ -1651,9 +1653,6 @@ EllesmereUI.SetActiveTheme = function(theme)
     if EllesmereUI._applyThemeBG then
         EllesmereUI._applyThemeBG(theme, r, g, b)
     end
-
-    -- Animate accent color transition
-    ApplyAccentAnimated(r, g, b)
 end
 
 --- SetAccentColor: persists accent color and applies live.

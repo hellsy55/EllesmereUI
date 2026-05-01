@@ -379,6 +379,7 @@ local defaults = {
         totPet = {
             frameWidth = 101,
             healthHeight = 25,
+            healthClassColored = false,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitSide = "left",
@@ -386,8 +387,17 @@ local defaults = {
             healthBarOpacity = 90,
             textSize = 12,
             leftTextContent = "name",
+            leftTextClassColor = false,
+            leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
+            leftTextX = 0, leftTextY = 0,
             rightTextContent = "none",
+            rightTextClassColor = false,
+            rightTextColorR = 1, rightTextColorG = 1, rightTextColorB = 1,
+            rightTextX = 0, rightTextY = 0,
             centerTextContent = "none",
+            centerTextClassColor = false,
+            centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
+            centerTextX = 0, centerTextY = 0,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             highlightColor = { r = 1, g = 1, b = 1 },
@@ -397,6 +407,7 @@ local defaults = {
         pet = {
             frameWidth = 101,
             healthHeight = 25,
+            healthClassColored = false,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             showPortrait = false,
             portraitSide = "left",
@@ -404,8 +415,17 @@ local defaults = {
             healthBarOpacity = 90,
             textSize = 12,
             leftTextContent = "name",
+            leftTextClassColor = false,
+            leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
+            leftTextX = 0, leftTextY = 0,
             rightTextContent = "none",
+            rightTextClassColor = false,
+            rightTextColorR = 1, rightTextColorG = 1, rightTextColorB = 1,
+            rightTextX = 0, rightTextY = 0,
             centerTextContent = "none",
+            centerTextClassColor = false,
+            centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
+            centerTextX = 0, centerTextY = 0,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             highlightColor = { r = 1, g = 1, b = 1 },
@@ -614,8 +634,17 @@ local defaults = {
             simpleDebuffs = true,  -- forces Left anchor + frame-height-matched debuff size
             textSize = 12,
             leftTextContent = "name",
+            leftTextClassColor = false,
+            leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
+            leftTextX = 0, leftTextY = 0,
             rightTextContent = "perhp",
+            rightTextClassColor = false,
+            rightTextColorR = 1, rightTextColorG = 1, rightTextColorB = 1,
+            rightTextX = 0, rightTextY = 0,
             centerTextContent = "none",
+            centerTextClassColor = false,
+            centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
+            centerTextX = 0, centerTextY = 0,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             highlightColor = { r = 1, g = 1, b = 1 },
@@ -3725,31 +3754,30 @@ local function StyleSimpleFrame(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame, settings.powerPosition)
 
-    -- Text overlay frame
-    local textOverlay = CreateFrame("Frame", nil, health)
+    -- Text overlay frame (parented to frame, not health, to avoid clipping)
+    local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(health)
     textOverlay:SetFrameLevel(health:GetFrameLevel() + 12)
     frame._textOverlay = textOverlay
 
-    local ts = settings.textSize or 12
     local leftContent = settings.leftTextContent or "name"
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
     local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(leftText, ts)
+    SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(rightText, ts)
+    SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(centerText, ts)
+    SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
     frame.CenterText = centerText
@@ -3777,38 +3805,54 @@ local function StyleSimpleFrame(frame, unit)
         local lc = s.leftTextContent or "name"
         local rc = s.rightTextContent or "none"
         local cc = s.centerTextContent or "none"
+        local lsz = s.leftTextSize or s.textSize or 12
+        local rsz = s.rightTextSize or s.textSize or 12
+        local csz = s.centerTextSize or s.textSize or 12
+        local lxo = s.leftTextX or 0
+        local lyo = s.leftTextY or 0
+        local rxo = s.rightTextX or 0
+        local ryo = s.rightTextY or 0
+        local cxo = s.centerTextX or 0
+        local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
         if cc ~= "none" then
+            SetFSFont(centerText, csz)
             centerText:ClearAllPoints()
-            centerText:SetPoint("CENTER", health, "CENTER", 0, 0)
-            centerText:SetWidth(0)
+            centerText:SetJustifyH("CENTER")
+            PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
+            PP.Width(centerText, barW * 0.9)
             centerText:Show()
+            ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             leftText:Hide(); rightText:Hide()
         else
             centerText:Hide()
+            SetFSFont(leftText, lsz)
             if lc ~= "none" then
                 leftText:ClearAllPoints()
-                leftText:SetPoint("LEFT", health, "LEFT", 5, 0)
                 leftText:SetJustifyH("LEFT")
+                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
                 if rc ~= "none" then
                     local rightUsed = EstimateUFTextWidth(rc)
                     PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
                 else
-                    leftText:SetWidth(0)
+                    PP.Width(leftText, barW * 0.9)
                 end
                 leftText:Show()
+                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else leftText:Hide() end
+            SetFSFont(rightText, rsz)
             if rc ~= "none" then
                 rightText:ClearAllPoints()
-                rightText:SetPoint("RIGHT", health, "RIGHT", -5, 0)
                 rightText:SetJustifyH("RIGHT")
+                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
                 if lc ~= "none" then
                     local leftUsed = EstimateUFTextWidth(lc)
                     PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
                 else
-                    rightText:SetWidth(0)
+                    PP.Width(rightText, barW * 0.9)
                 end
                 rightText:Show()
+                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else rightText:Hide() end
         end
     end
@@ -3898,31 +3942,30 @@ local function StylePetFrame(frame, unit)
     UpdateBordersForScale(frame, unit)
     ReparentBarsToClip(frame, settings.powerPosition)
 
-    -- Text overlay frame
-    local textOverlay = CreateFrame("Frame", nil, health)
+    -- Text overlay frame (parented to frame, not health, to avoid clipping)
+    local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(health)
     textOverlay:SetFrameLevel(health:GetFrameLevel() + 12)
     frame._textOverlay = textOverlay
 
-    local ts = settings.textSize or 12
     local leftContent = settings.leftTextContent or "name"
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
     local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(leftText, ts)
+    SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(rightText, ts)
+    SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(centerText, ts)
+    SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
     frame.CenterText = centerText
@@ -3949,38 +3992,54 @@ local function StylePetFrame(frame, unit)
         local lc = s.leftTextContent or "name"
         local rc = s.rightTextContent or "none"
         local cc = s.centerTextContent or "none"
+        local lsz = s.leftTextSize or s.textSize or 12
+        local rsz = s.rightTextSize or s.textSize or 12
+        local csz = s.centerTextSize or s.textSize or 12
+        local lxo = s.leftTextX or 0
+        local lyo = s.leftTextY or 0
+        local rxo = s.rightTextX or 0
+        local ryo = s.rightTextY or 0
+        local cxo = s.centerTextX or 0
+        local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
         if cc ~= "none" then
+            SetFSFont(centerText, csz)
             centerText:ClearAllPoints()
-            centerText:SetPoint("CENTER", health, "CENTER", 0, 0)
-            centerText:SetWidth(0)
+            centerText:SetJustifyH("CENTER")
+            PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
+            PP.Width(centerText, barW * 0.9)
             centerText:Show()
+            ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             leftText:Hide(); rightText:Hide()
         else
             centerText:Hide()
+            SetFSFont(leftText, lsz)
             if lc ~= "none" then
                 leftText:ClearAllPoints()
-                leftText:SetPoint("LEFT", health, "LEFT", 5, 0)
                 leftText:SetJustifyH("LEFT")
+                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
                 if rc ~= "none" then
                     local rightUsed = EstimateUFTextWidth(rc)
                     PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
                 else
-                    leftText:SetWidth(0)
+                    PP.Width(leftText, barW * 0.9)
                 end
                 leftText:Show()
+                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else leftText:Hide() end
+            SetFSFont(rightText, rsz)
             if rc ~= "none" then
                 rightText:ClearAllPoints()
-                rightText:SetPoint("RIGHT", health, "RIGHT", -5, 0)
                 rightText:SetJustifyH("RIGHT")
+                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
                 if lc ~= "none" then
                     local leftUsed = EstimateUFTextWidth(lc)
                     PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
                 else
-                    rightText:SetWidth(0)
+                    PP.Width(rightText, barW * 0.9)
                 end
                 rightText:Show()
+                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else rightText:Hide() end
         end
     end
@@ -4074,31 +4133,30 @@ local function StyleBossFrame(frame, unit)
         end
     end
 
-    -- Text overlay frame
-    local textOverlay = CreateFrame("Frame", nil, frame.Health)
+    -- Text overlay frame (parented to frame, not health, to avoid clipping)
+    local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(frame.Health)
     textOverlay:SetFrameLevel(frame.Health:GetFrameLevel() + 12)
     frame._textOverlay = textOverlay
 
-    local bts = settings.textSize or 12
     local leftContent = settings.leftTextContent or "name"
     local rightContent = settings.rightTextContent or "perhp"
     local centerContent = settings.centerTextContent or "none"
 
     local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(leftText, bts)
+    SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(rightText, bts)
+    SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
-    SetFSFont(centerText, bts)
+    SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
     frame.CenterText = centerText
@@ -4125,38 +4183,54 @@ local function StyleBossFrame(frame, unit)
         local lc = s.leftTextContent or "name"
         local rc = s.rightTextContent or "perhp"
         local cc = s.centerTextContent or "none"
+        local lsz = s.leftTextSize or s.textSize or 12
+        local rsz = s.rightTextSize or s.textSize or 12
+        local csz = s.centerTextSize or s.textSize or 12
+        local lxo = s.leftTextX or 0
+        local lyo = s.leftTextY or 0
+        local rxo = s.rightTextX or 0
+        local ryo = s.rightTextY or 0
+        local cxo = s.centerTextX or 0
+        local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
         if cc ~= "none" then
+            SetFSFont(centerText, csz)
             centerText:ClearAllPoints()
-            centerText:SetPoint("CENTER", frame.Health, "CENTER", 0, 0)
-            centerText:SetWidth(0)
+            centerText:SetJustifyH("CENTER")
+            PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
+            PP.Width(centerText, barW * 0.9)
             centerText:Show()
+            ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             leftText:Hide(); rightText:Hide()
         else
             centerText:Hide()
+            SetFSFont(leftText, lsz)
             if lc ~= "none" then
                 leftText:ClearAllPoints()
-                leftText:SetPoint("LEFT", frame.Health, "LEFT", 5, 0)
                 leftText:SetJustifyH("LEFT")
+                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
                 if rc ~= "none" then
                     local rightUsed = EstimateUFTextWidth(rc)
                     PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
                 else
-                    leftText:SetWidth(0)
+                    PP.Width(leftText, barW * 0.9)
                 end
                 leftText:Show()
+                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else leftText:Hide() end
+            SetFSFont(rightText, rsz)
             if rc ~= "none" then
                 rightText:ClearAllPoints()
-                rightText:SetPoint("RIGHT", frame.Health, "RIGHT", -5, 0)
                 rightText:SetJustifyH("RIGHT")
+                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
                 if lc ~= "none" then
                     local leftUsed = EstimateUFTextWidth(lc)
                     PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
                 else
-                    rightText:SetWidth(0)
+                    PP.Width(rightText, barW * 0.9)
                 end
                 rightText:Show()
+                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else rightText:Hide() end
         end
     end
@@ -7129,11 +7203,13 @@ function InitializeFrames()
     local function HookBlizzardClassPower(cpFrame)
         if _blizzCPHooked then return end
         _blizzCPHooked = true
+        local _cpSetParentGuard = false
         hooksecurefunc(cpFrame, "SetParent", function(self, newParent)
-            if not _blizzCPActive then return end
+            if not _blizzCPActive or _cpSetParentGuard then return end
             if newParent ~= UIParent then
-                self:SetParent(UIParent)
+                _cpSetParentGuard = true
                 PositionClassPowerBar(self)
+                _cpSetParentGuard = false
             end
         end)
         hooksecurefunc(cpFrame, "Hide", function(self)

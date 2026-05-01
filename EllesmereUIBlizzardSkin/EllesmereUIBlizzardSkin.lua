@@ -693,6 +693,148 @@ end
 end)()
 
 -------------------------------------------------------------------------------
+--  Quick Keybind Frame: dark reskin matching the queue popup style.
+--  Strips Blizzard decoration and applies dark bg + border + button reskin.
+-------------------------------------------------------------------------------
+do
+    local _qkbSkinned = false
+    local function SkinQuickKeybindFrame()
+        if _qkbSkinned then return end
+        local qkb = QuickKeybindFrame
+        if not qkb then return end
+        _qkbSkinned = true
+
+        local RS = EllesmereUI.RESKIN
+        local _PP = EllesmereUI and EllesmereUI.PP
+
+        -- Strip all Blizzard background/border textures
+        if qkb.NineSlice then qkb.NineSlice:SetAlpha(0) end
+        if qkb.BG then qkb.BG:SetAlpha(0) end
+        if qkb.Border then qkb.Border:SetAlpha(0) end
+        if qkb.Bg then qkb.Bg:SetAlpha(0) end
+        for i = 1, select("#", qkb:GetRegions()) do
+            local r = select(i, qkb:GetRegions())
+            if r and r:IsObjectType("Texture") and not GetFFD(r).owned then
+                r:SetAlpha(0)
+            end
+        end
+
+        -- Our dark background + border
+        local bgFrame = CreateFrame("Frame", nil, qkb)
+        bgFrame:SetAllPoints(qkb)
+        bgFrame:SetFrameLevel(math.max(1, qkb:GetFrameLevel() - 1))
+        local bg = bgFrame:CreateTexture(nil, "ARTWORK")
+        bg:SetAllPoints()
+        bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.QT_ALPHA)
+        GetFFD(bg).owned = true
+        if _PP and _PP.CreateBorder then
+            _PP.CreateBorder(bgFrame, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+        end
+
+        -- Title header: it's a Frame with sub-textures; strip art, raise level
+        if qkb.Header then
+            qkb.Header:SetFrameLevel(qkb:GetFrameLevel() + 2)
+            if qkb.Header.LeftBG then qkb.Header.LeftBG:SetAlpha(0) end
+            if qkb.Header.CenterBG then qkb.Header.CenterBG:SetAlpha(0) end
+            if qkb.Header.RightBG then qkb.Header.RightBG:SetAlpha(0) end
+        end
+        -- Instruction/output text: raise above our bg
+        if qkb.InstructionText then
+            qkb.InstructionText:SetDrawLayer("OVERLAY", 6)
+        end
+        if qkb.OutputText then
+            qkb.OutputText:SetDrawLayer("OVERLAY", 6)
+        end
+        if qkb.CancelDescriptionText then
+            qkb.CancelDescriptionText:SetDrawLayer("OVERLAY", 6)
+        end
+
+        -- Reskin buttons (Okay, Cancel, Defaults, UseCharacterBindings)
+        local btnNames = { "OkayButton", "CancelButton", "DefaultsButton" }
+        local EG = EllesmereUI.ELLESMERE_GREEN
+        local useAccent = (EllesmereUIDB and EllesmereUIDB.accentReskinElements) and EG
+        for _, name in ipairs(btnNames) do
+            local btn = qkb[name]
+            if btn and not GetFFD(btn).skinned then
+                GetFFD(btn).skinned = true
+                -- Strip button textures
+                for j = 1, select("#", btn:GetRegions()) do
+                    local r = select(j, btn:GetRegions())
+                    if r and r:IsObjectType("Texture") and not GetFFD(r).owned and r ~= btn:GetFontString() then
+                        r:SetAlpha(0)
+                    end
+                end
+                if btn.Left then btn.Left:SetAlpha(0) end
+                if btn.Middle then btn.Middle:SetAlpha(0) end
+                if btn.Right then btn.Right:SetAlpha(0) end
+                -- Hook texture suppression
+                for _, texKey in ipairs({ "Left", "Middle", "Right" }) do
+                    local tex = btn[texKey]
+                    if tex and tex.SetAlpha then
+                        hooksecurefunc(tex, "SetAlpha", function(self, a)
+                            if a > 0 then self:SetAlpha(0) end
+                        end)
+                    end
+                end
+                -- Dark bg + border
+                local btnBg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
+                btnBg:SetAllPoints()
+                btnBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+                GetFFD(btnBg).owned = true
+                if _PP and _PP.CreateBorder then
+                    if useAccent then
+                        _PP.CreateBorder(btn, EG.r, EG.g, EG.b, 0.5, 1, "OVERLAY", 7)
+                    else
+                        _PP.CreateBorder(btn, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                    end
+                end
+                -- Accent-color the button text (Blizzard hover turns it white)
+                local fs = btn:GetFontString()
+                if fs and useAccent then
+                    fs:SetTextColor(EG.r, EG.g, EG.b, 1)
+                end
+            end
+        end
+
+        -- Checkbox styling (UseCharacterBindingsButton is a CheckButton)
+        if qkb.UseCharacterBindingsButton and qkb.UseCharacterBindingsButton.SetCheckedTexture then
+            -- Leave checkbox functional but ensure text is legible
+            local cbText = qkb.UseCharacterBindingsButton.Text or qkb.UseCharacterBindingsButton.text
+            if cbText then
+                cbText:SetDrawLayer("OVERLAY", 6)
+            end
+        end
+    end
+
+    -- Hook QuickKeybindFrame show to apply skin. The addon is LoadOnDemand
+    -- so the frame may not exist at login. Try after login, and also listen
+    -- for ADDON_LOADED as a fallback for late loading.
+    local _qkbHooked = false
+    local function TryHookQKB()
+        if _qkbHooked then return end
+        if not EllesmereUIDB then return end
+        if EllesmereUIDB.reskinQueuePopup == false then return end
+        local qkb = QuickKeybindFrame
+        if qkb then
+            _qkbHooked = true
+            qkb:HookScript("OnShow", SkinQuickKeybindFrame)
+        end
+    end
+    local qkbSkinFrame = CreateFrame("Frame")
+    qkbSkinFrame:RegisterEvent("PLAYER_LOGIN")
+    qkbSkinFrame:RegisterEvent("ADDON_LOADED")
+    qkbSkinFrame:SetScript("OnEvent", function(self, event, arg1)
+        if event == "PLAYER_LOGIN" then
+            self:UnregisterEvent("PLAYER_LOGIN")
+            C_Timer.After(2, TryHookQKB)
+        elseif event == "ADDON_LOADED" and arg1 == "Blizzard_QuickKeybind" then
+            self:UnregisterEvent("ADDON_LOADED")
+            C_Timer.After(0, TryHookQKB)
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
 --  Premade Group Invite Popup: same dark skin as the LFG queue popup.
 --  LFGListInviteDialog appears when a group leader accepts your application.
 -------------------------------------------------------------------------------

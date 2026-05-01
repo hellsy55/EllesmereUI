@@ -1555,73 +1555,7 @@ initFrame:SetScript("OnEvent", function(self)
         if not visOnly then
             _, h = W:SectionHeader(parent, SECTION_LAYOUT, y);  y = y - h
 
-            -- Row 1: Use Blizzard Style | Show Blizzard Icon Background (+ inline cog for opacity)
-            local blizzRow
-            blizzRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Blizzard Style Action Bars",
-                  tooltip="Disables all custom icon styling (borders, shapes, zoom, interactions) and shows Blizzard's default button artwork. Requires a UI reload to apply.",
-                  getValue=function() return EAB.db.profile.useBlizzardStyle or false end,
-                  setValue=function(v)
-                      EAB.db.profile.useBlizzardStyle = v
-                      EllesmereUI:ShowConfirmPopup({
-                          title       = "Reload Required",
-                          message     = "Changing icon style requires a UI reload to apply.",
-                          confirmText = "Reload Now",
-                          cancelText  = "Later",
-                          onConfirm   = function() ReloadUI() end,
-                      })
-                  end },
-                { type="toggle", text="Show Blizzard Icon Background",
-                  tooltip="Shows Blizzard's default icon slot background texture behind empty action bar slots.",
-                  getValue=function() return EAB.db.profile.showBlizzIconBg or false end,
-                  setValue=function(v)
-                      EAB.db.profile.showBlizzIconBg = v
-                      for _, info in ipairs(ns.BAR_CONFIG or {}) do
-                          EAB:ApplyIconBackgroundForBar(info.key)
-                      end
-                  end });  y = y - h
-            -- Inline cog: Icon Background Opacity (right region)
-            do
-                local rgn = blizzRow._rightRegion
-                local _, ibgCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Icon Background",
-                    rows = {
-                        { type="slider", label="Opacity", min=0, max=100, step=1,
-                          tooltip="Controls the opacity of the Blizzard icon slot background texture.",
-                          get=function() return math.floor((EAB.db.profile.blizzIconBgAlpha or 1) * 100 + 0.5) end,
-                          set=function(v)
-                              EAB.db.profile.blizzIconBgAlpha = v / 100
-                              for _, info in ipairs(ns.BAR_CONFIG or {}) do
-                                  EAB:ApplyIconBackgroundForBar(info.key)
-                              end
-                          end },
-                    },
-                })
-                local ibgCtrl = rgn._control
-                local ibgCogBtn = MakeCogBtn(rgn, ibgCogShow, ibgCtrl, EllesmereUI.COGS_ICON)
-                local function IbgOff() return not (EAB.db.profile.showBlizzIconBg or false) end
-                ibgCogBtn:SetAlpha(IbgOff() and 0.15 or 0.4)
-                ibgCogBtn:SetScript("OnEnter", function(self)
-                    if IbgOff() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Blizzard Icon Background"))
-                    else
-                        self:SetAlpha(0.7)
-                    end
-                end)
-                ibgCogBtn:SetScript("OnLeave", function(self)
-                    EllesmereUI.HideWidgetTooltip()
-                    self:SetAlpha(IbgOff() and 0.15 or 0.4)
-                end)
-                ibgCogBtn:SetScript("OnClick", function(self)
-                    if IbgOff() then return end
-                    ibgCogShow(self)
-                end)
-                EllesmereUI.RegisterWidgetRefresh(function()
-                    ibgCogBtn:SetAlpha(IbgOff() and 0.15 or 0.4)
-                end)
-            end
-
-            -- Row 2: Icon Size | Button Spacing
+            -- Row 1: Icon Size | Button Spacing
             local iconSizeRow
             iconSizeRow, h = W:DualRow(parent, y,
                 { type="slider", text="Icon Size", min=16, max=80, step=1,
@@ -1865,9 +1799,8 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rightRgn, growCogShow)
             end
 
-            -- Row 3: Vertical Orientation | (empty — paging arrows moved to PAGING section)
+            -- Row 3: Vertical Orientation | Bar Background
             do
-                local rightWidget = { type="label", text="" }
                 local orientRow
                 orientRow, h = W:DualRow(parent, y,
                     { type="toggle", text="Vertical Orientation",
@@ -1885,7 +1818,13 @@ initFrame:SetScript("OnEvent", function(self)
                           EllesmereUI:RefreshPage()
                       end,
                       tooltip="Toggle between horizontal and vertical bar layout." },
-                    rightWidget);  y = y - h
+                    { type="toggle", text="Bar Background",
+                      getValue=function() return SGet("bgEnabled") end,
+                      setValue=function(v)
+                          SSet("bgEnabled", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                          SUpdatePreview()
+                          EllesmereUI:RefreshPage()
+                      end });  y = y - h
                 -- Sync icon: Orientation (left)
                 do
                     local rgn = orientRow._leftRegion
@@ -1980,6 +1919,138 @@ initFrame:SetScript("OnEvent", function(self)
                     local pagingCogInitOff = pagingOff()
                     pagingCogBtn:SetAlpha(pagingCogInitOff and 0.15 or 0.4)
                     if pagingCogInitOff then pagingCogBlock:Show() else pagingCogBlock:Hide() end
+                end
+
+                -- Sync icon: Bar Background (right region)
+                do
+                    local rgn = orientRow._rightRegion
+                    EllesmereUI.BuildSyncIcon({
+                        region  = rgn,
+                        tooltip = "Apply Background Settings to all Bars",
+                        onClick = function()
+                            local s = SB()
+                            local en = s.bgEnabled
+                            local c = s.bgColor
+                            local px = s.bgPadX or 0
+                            local py = s.bgPadY or 0
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                EAB.db.profile.bars[key].bgEnabled = en
+                                if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
+                                EAB.db.profile.bars[key].bgPadX = px
+                                EAB.db.profile.bars[key].bgPadY = py
+                                EAB:ApplyBackgroundForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                        isSynced = function()
+                            local s = SB()
+                            local en = s.bgEnabled or false
+                            local px = s.bgPadX or 0
+                            local py = s.bgPadY or 0
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                local bs = EAB.db.profile.bars[key]
+                                if (bs.bgEnabled or false) ~= en then return false end
+                                if (bs.bgPadX or 0) ~= px then return false end
+                                if (bs.bgPadY or 0) ~= py then return false end
+                            end
+                            return true
+                        end,
+                        flashTargets = function() return { rgn } end,
+                        multiApply = {
+                            elementKeys   = GROUP_BAR_ORDER,
+                            elementLabels = SHORT_LABELS,
+                            getCurrentKey = function() return SelectedKey() end,
+                            onApply       = function(checkedKeys)
+                                local s = SB()
+                                local en = s.bgEnabled
+                                local c = s.bgColor
+                                local px = s.bgPadX or 0
+                                local py = s.bgPadY or 0
+                                for _, key in ipairs(checkedKeys) do
+                                    EAB.db.profile.bars[key].bgEnabled = en
+                                    if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
+                                    EAB.db.profile.bars[key].bgPadX = px
+                                    EAB.db.profile.bars[key].bgPadY = py
+                                    EAB:ApplyBackgroundForBar(key)
+                                end
+                                EllesmereUI:RefreshPage()
+                            end,
+                        },
+                    })
+                end
+                -- Inline swatch + cog on Bar Background (right region)
+                do
+                    local bgRgn = orientRow._rightRegion
+                    local bgColorGet = function()
+                        local c = SGet("bgColor")
+                        if not c then return 0, 0, 0, 0.5 end
+                        return c.r, c.g, c.b, c.a
+                    end
+                    local bgColorSet = function(r, g, b, a)
+                        SSetColor("bgColor", r, g, b, a, function(k) EAB:ApplyBackgroundForBar(k) end)
+                        SUpdatePreview()
+                    end
+                    local bgSwatch, bgUpdateSwatch = EllesmereUI.BuildColorSwatch(bgRgn, bgRgn:GetFrameLevel() + 5, bgColorGet, bgColorSet, true, 20)
+                    PP.Point(bgSwatch, "RIGHT", bgRgn._control, "LEFT", -12, 0)
+                    bgRgn._lastInline = bgSwatch
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        local off = BgDisabled()
+                        bgSwatch:SetAlpha(off and 0.15 or 1)
+                        bgUpdateSwatch()
+                    end)
+                    bgSwatch:SetAlpha(BgDisabled() and 0.15 or 1)
+                    local bgSwatchOrigClick = bgSwatch:GetScript("OnClick")
+                    bgSwatch:SetScript("OnClick", function(self, ...)
+                        if BgDisabled() then return end
+                        if bgSwatchOrigClick then bgSwatchOrigClick(self, ...) end
+                    end)
+                    bgSwatch:SetScript("OnEnter", function(self)
+                        if BgDisabled() then
+                            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Bar Background"))
+                        end
+                    end)
+                    bgSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                    local _, bgCogShowRaw = EllesmereUI.BuildCogPopup({
+                        title = "Bar Background Settings",
+                        rows = {
+                            { type="slider", label="Width", min=0, max=40, step=1,
+                              get=function() return SVal("bgPadX", 0) end,
+                              set=function(v)
+                                  SSet("bgPadX", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                            { type="slider", label="Height", min=0, max=40, step=1,
+                              get=function() return SVal("bgPadY", 0) end,
+                              set=function(v)
+                                  SSet("bgPadY", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                        },
+                    })
+                    local bgCogAnchor = bgRgn._lastInline or bgRgn._control
+                    local bgCogBtn = MakeCogBtn(bgRgn, bgCogShowRaw, bgCogAnchor, EllesmereUI.RESIZE_ICON)
+                    bgCogBtn:ClearAllPoints()
+                    bgCogBtn:SetPoint("RIGHT", bgCogAnchor, "LEFT", -9, 0)
+                    bgCogBtn:SetAlpha(BgDisabled() and 0.15 or 0.4)
+                    bgCogBtn:SetScript("OnEnter", function(self)
+                        if BgDisabled() then
+                            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Bar Background"))
+                        else
+                            self:SetAlpha(0.7)
+                        end
+                    end)
+                    bgCogBtn:SetScript("OnLeave", function(self)
+                        EllesmereUI.HideWidgetTooltip()
+                        self:SetAlpha(BgDisabled() and 0.15 or 0.4)
+                    end)
+                    bgCogBtn:SetScript("OnClick", function(self)
+                        if BgDisabled() then return end
+                        bgCogShowRaw(self)
+                    end)
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        bgCogBtn:SetAlpha(BgDisabled() and 0.15 or 0.4)
+                    end)
                 end
             end
 
@@ -2420,159 +2491,61 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
-            -- Row 3: Bar Background (toggle + inline swatch + cog) | Show Blizzard Icon Background
-            local bgAlwaysRow
-            bgAlwaysRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Bar Background",
-                  getValue=function()
-                      return SGet("bgEnabled")
-                  end,
+            -- Row 3: Show Blizzard Icon Background (+ cog) | Desaturate on Cooldown
+            local ibgRow
+            ibgRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Show Blizzard Icon Background",
+                  tooltip="Shows Blizzard's default icon slot background texture behind empty action bar slots.",
+                  getValue=function() return EAB.db.profile.showBlizzIconBg or false end,
                   setValue=function(v)
-                      SSet("bgEnabled", v, function(k) EAB:ApplyBackgroundForBar(k) end)
-                      SUpdatePreview()
+                      EAB.db.profile.showBlizzIconBg = v
+                      for _, info in ipairs(ns.BAR_CONFIG or {}) do
+                          EAB:ApplyIconBackgroundForBar(info.key)
+                      end
                       EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Desaturate on Cooldown",
                   tooltip="Desaturates (grays out) action button icons while the ability is on cooldown. GCD-only cooldowns are excluded.",
                   getValue=function() return EAB.db.profile.desaturateOnCooldown or false end,
                   setValue=function(v) EAB.db.profile.desaturateOnCooldown = v end });  y = y - h
-            -- Sync icon: Bar Background settings (left region)
+            -- Inline cog: Icon Background Opacity (left region)
             do
-                local rgn = bgAlwaysRow._leftRegion
-                EllesmereUI.BuildSyncIcon({
-                    region  = rgn,
-                    tooltip = "Apply Background Settings to all Bars",
-                    onClick = function()
-                        local s = SB()
-                        local en = s.bgEnabled
-                        local c = s.bgColor
-                        local px = s.bgPadX or 0
-                        local py = s.bgPadY or 0
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
-                            EAB.db.profile.bars[key].bgEnabled = en
-                            if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
-                            EAB.db.profile.bars[key].bgPadX = px
-                            EAB.db.profile.bars[key].bgPadY = py
-                            EAB:ApplyBackgroundForBar(key)
-                        end
-                        EllesmereUI:RefreshPage()
-                    end,
-                    isSynced = function()
-                        local s = SB()
-                        local en = s.bgEnabled or false
-                        local px = s.bgPadX or 0
-                        local py = s.bgPadY or 0
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
-                            local bs = EAB.db.profile.bars[key]
-                            if (bs.bgEnabled or false) ~= en then return false end
-                            if (bs.bgPadX or 0) ~= px then return false end
-                            if (bs.bgPadY or 0) ~= py then return false end
-                        end
-                        return true
-                    end,
-                    flashTargets = function() return { rgn } end,
-                    multiApply = {
-                        elementKeys   = GROUP_BAR_ORDER,
-                        elementLabels = SHORT_LABELS,
-                        getCurrentKey = function() return SelectedKey() end,
-                        onApply       = function(checkedKeys)
-                            local s = SB()
-                            local en = s.bgEnabled
-                            local c = s.bgColor
-                            local px = s.bgPadX or 0
-                            local py = s.bgPadY or 0
-                            for _, key in ipairs(checkedKeys) do
-                                EAB.db.profile.bars[key].bgEnabled = en
-                                if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
-                                EAB.db.profile.bars[key].bgPadX = px
-                                EAB.db.profile.bars[key].bgPadY = py
-                                EAB:ApplyBackgroundForBar(key)
-                            end
-                            EllesmereUI:RefreshPage()
-                        end,
-                    },
-                })
-            end
-
-            -- Inline elements on Bar Background (left): color swatch + cog (Width/Height)
-            do
-                local leftRgn = bgAlwaysRow._leftRegion
-
-                -- Color swatch
-                local bgColorGet = function()
-                    local c = SGet("bgColor")
-                    if not c then return 0, 0, 0, 0.5 end
-                    return c.r, c.g, c.b, c.a
-                end
-                local bgColorSet = function(r, g, b, a)
-                    SSetColor("bgColor", r, g, b, a, function(k) EAB:ApplyBackgroundForBar(k) end)
-                    SUpdatePreview()
-                end
-                local bgSwatch, bgUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, bgColorGet, bgColorSet, true, 20)
-                PP.Point(bgSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-                leftRgn._lastInline = bgSwatch
-                EllesmereUI.RegisterWidgetRefresh(function()
-                    local off = BgDisabled()
-                    bgSwatch:SetAlpha(off and 0.15 or 1)
-                    bgUpdateSwatch()
-                end)
-                bgSwatch:SetAlpha(BgDisabled() and 0.15 or 1)
-                -- Wrap OnClick to block color picker when bg is disabled (keep mouse enabled for tooltip)
-                local bgSwatchOrigClick = bgSwatch:GetScript("OnClick")
-                bgSwatch:SetScript("OnClick", function(self, ...)
-                    if BgDisabled() then return end
-                    if bgSwatchOrigClick then bgSwatchOrigClick(self, ...) end
-                end)
-                bgSwatch:SetScript("OnEnter", function(self)
-                    if BgDisabled() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Bar Background"))
-                    end
-                end)
-                bgSwatch:SetScript("OnLeave", function(self)
-                    EllesmereUI.HideWidgetTooltip()
-                end)
-
-                -- Cog for Width/Height
-                local _, bgCogShowRaw = EllesmereUI.BuildCogPopup({
-                    title = "Bar Background Settings",
+                local rgn = ibgRow._leftRegion
+                local _, ibgCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Icon Background",
                     rows = {
-                        { type="slider", label="Width", min=0, max=40, step=1,
-                          get=function() return SVal("bgPadX", 0) end,
+                        { type="slider", label="Opacity", min=0, max=100, step=1,
+                          tooltip="Controls the opacity of the Blizzard icon slot background texture.",
+                          get=function() return math.floor((EAB.db.profile.blizzIconBgAlpha or 1) * 100 + 0.5) end,
                           set=function(v)
-                              SSet("bgPadX", v, function(k) EAB:ApplyBackgroundForBar(k) end)
-                              SUpdatePreview()
-                          end },
-                        { type="slider", label="Height", min=0, max=40, step=1,
-                          get=function() return SVal("bgPadY", 0) end,
-                          set=function(v)
-                              SSet("bgPadY", v, function(k) EAB:ApplyBackgroundForBar(k) end)
-                              SUpdatePreview()
+                              EAB.db.profile.blizzIconBgAlpha = v / 100
+                              for _, info in ipairs(ns.BAR_CONFIG or {}) do
+                                  EAB:ApplyIconBackgroundForBar(info.key)
+                              end
                           end },
                     },
                 })
-                local bgCogShow = bgCogShowRaw
-                local bgCogAnchor = leftRgn._lastInline or leftRgn._control
-                local bgCogBtn = MakeCogBtn(leftRgn, bgCogShow, bgCogAnchor, EllesmereUI.RESIZE_ICON)
-                bgCogBtn:ClearAllPoints()
-                bgCogBtn:SetPoint("RIGHT", bgCogAnchor, "LEFT", -9, 0)
-                bgCogBtn:SetAlpha(BgDisabled() and 0.15 or 0.4)
-                bgCogBtn:SetScript("OnEnter", function(self)
-                    if BgDisabled() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Bar Background"))
+                local ibgCtrl = rgn._control
+                local ibgCogBtn = MakeCogBtn(rgn, ibgCogShow, ibgCtrl, EllesmereUI.COGS_ICON)
+                local function IbgOff() return not (EAB.db.profile.showBlizzIconBg or false) end
+                ibgCogBtn:SetAlpha(IbgOff() and 0.15 or 0.4)
+                ibgCogBtn:SetScript("OnEnter", function(self)
+                    if IbgOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Blizzard Icon Background"))
                     else
                         self:SetAlpha(0.7)
                     end
                 end)
-                bgCogBtn:SetScript("OnLeave", function(self)
+                ibgCogBtn:SetScript("OnLeave", function(self)
                     EllesmereUI.HideWidgetTooltip()
-                    self:SetAlpha(BgDisabled() and 0.15 or 0.4)
+                    self:SetAlpha(IbgOff() and 0.15 or 0.4)
                 end)
-                bgCogBtn:SetScript("OnClick", function(self)
-                    if BgDisabled() then return end
-                    bgCogShow(self)
+                ibgCogBtn:SetScript("OnClick", function(self)
+                    if IbgOff() then return end
+                    ibgCogShow(self)
                 end)
                 EllesmereUI.RegisterWidgetRefresh(function()
-                    bgCogBtn:SetAlpha(BgDisabled() and 0.15 or 0.4)
+                    ibgCogBtn:SetAlpha(IbgOff() and 0.15 or 0.4)
                 end)
             end
 
@@ -3714,6 +3687,62 @@ initFrame:SetScript("OnEvent", function(self)
             return barsHeaderBaseH + hintH
         end
         EllesmereUI:SetContentHeader(_barsHeaderBuilder)
+
+        -------------------------------------------------------------------
+        --  Top action buttons: Quick Keybind + Blizzard/EUI Style toggle
+        -------------------------------------------------------------------
+        do
+            local BTN_W = 312
+            local BTN_H = 38
+            local GAP = 40
+            local ROW_H = BTN_H + 20
+            local rowFrame = CreateFrame("Frame", nil, parent)
+            local totalW = parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2
+            PP.Size(rowFrame, totalW, ROW_H)
+            PP.Point(rowFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
+
+            -- Quick Keybind Mode button (left)
+            local qkbBtn = CreateFrame("Button", nil, rowFrame)
+            PP.Size(qkbBtn, BTN_W, BTN_H)
+            PP.Point(qkbBtn, "RIGHT", rowFrame, "CENTER", -(GAP / 2), 0)
+            qkbBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 1)
+            EllesmereUI.MakeStyledButton(qkbBtn, "Quick Keybind Mode", 14,
+                EllesmereUI.WB_COLOURS, function()
+                    if InCombatLockdown() then return end
+                    if not C_AddOns.IsAddOnLoaded("Blizzard_QuickKeybind") then
+                        C_AddOns.LoadAddOn("Blizzard_QuickKeybind")
+                    end
+                    if QuickKeybindFrame then
+                        EllesmereUI:Toggle()
+                        QuickKeybindFrame:Show()
+                    end
+                end)
+
+            -- Blizzard / EUI Style toggle button (right)
+            local isBlizz = EAB.db and EAB.db.profile and EAB.db.profile.useBlizzardStyle
+            local styleBtn = CreateFrame("Button", nil, rowFrame)
+            PP.Size(styleBtn, BTN_W, BTN_H)
+            PP.Point(styleBtn, "LEFT", rowFrame, "CENTER", GAP / 2, 0)
+            styleBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 1)
+            local _, _, styleLbl = EllesmereUI.MakeStyledButton(styleBtn,
+                isBlizz and "EUI Style Action Bars" or "Blizzard Style Action Bars", 14,
+                EllesmereUI.WB_COLOURS, function()
+                    local old = EAB.db.profile.useBlizzardStyle or false
+                    local new = not old
+                    EllesmereUI:ShowConfirmPopup({
+                        title       = "Reload Required",
+                        message     = "Changing icon style requires a UI reload to apply.",
+                        confirmText = "Reload Now",
+                        cancelText  = "Cancel",
+                        onConfirm   = function()
+                            EAB.db.profile.useBlizzardStyle = new
+                            ReloadUI()
+                        end,
+                    })
+                end)
+
+            y = y - ROW_H
+        end
 
         -------------------------------------------------------------------
         --  Build shared settings (single mode)

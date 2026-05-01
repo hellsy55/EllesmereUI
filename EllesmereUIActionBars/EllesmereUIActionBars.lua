@@ -5864,14 +5864,32 @@ function EAB:HookProcGlow()
     end
 
     local function ShowGlow(btn)
-        if IsBlizzStyle() then return end
+        if IsBlizzStyle() then
+            _procState.active[btn] = true
+            local sa = btn.SpellActivationAlert
+            if sa then
+                sa:SetAlpha(1)
+                sa:Show()
+                if sa.ProcStartAnim then sa.ProcStartAnim:Play() end
+                if sa.ProcLoop then sa.ProcLoop:Play() end
+            end
+            return
+        end
         _procState.active[btn] = true
         UpdateFlipbook(btn)
     end
 
     local function HideGlow(btn)
-        if IsBlizzStyle() then return end
         _procState.active[btn] = nil
+        if IsBlizzStyle() then
+            local sa = btn.SpellActivationAlert
+            if sa then
+                if sa.ProcStartAnim and sa.ProcStartAnim:IsPlaying() then sa.ProcStartAnim:Stop() end
+                if sa.ProcLoop and sa.ProcLoop:IsPlaying() then sa.ProcLoop:Stop() end
+                sa:Hide()
+            end
+            return
+        end
         local gw = EFD(btn).glowWrapper
         if gw then
             StopAllProceduralGlows(gw)
@@ -5902,7 +5920,30 @@ function EAB:HookProcGlow()
     glowFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
     glowFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     glowFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    glowFrame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
+        if event == "ACTIONBAR_UPDATE_STATE" then
+            -- Re-sync all active glows: catches procs consumed or gained
+            -- between SHOW/HIDE events (mirrors Bartender's Update() path).
+            local blizzUS = IsBlizzStyle()
+            for btn in pairs(_procState.active) do
+                local id = GetButtonSpellID(btn)
+                if not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
+                    HideGlow(btn)
+                end
+            end
+            for _, info in ipairs(BAR_CONFIG) do
+                local buttons = barButtons[info.key]
+                if buttons then
+                    for _, btn in ipairs(buttons) do
+                        if btn and (EFD(btn).squared or blizzUS) and not _procState.active[btn] then
+                            UpdateOverlayGlow(btn)
+                        end
+                    end
+                end
+            end
+            return
+        end
         if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" then
             -- Defer re-scan: the bar may not have finished paging yet
             -- when the event fires, so slot->spell mappings are stale.
@@ -5914,11 +5955,12 @@ function EAB:HookProcGlow()
                         HideGlow(btn)
                     end
                 end
+                local blizz = IsBlizzStyle()
                 for _, info in ipairs(BAR_CONFIG) do
                     local buttons = barButtons[info.key]
                     if buttons then
                         for _, btn in ipairs(buttons) do
-                            if btn and EFD(btn).squared and not _procState.active[btn] then
+                            if btn and (EFD(btn).squared or blizz) and not _procState.active[btn] then
                                 UpdateOverlayGlow(btn)
                             end
                         end
@@ -5944,11 +5986,12 @@ function EAB:HookProcGlow()
             end
         else
             -- SHOW: scan all buttons for the matching spellID
+            local blizz2 = IsBlizzStyle()
             for _, info in ipairs(BAR_CONFIG) do
                 local buttons = barButtons[info.key]
                 if buttons then
                     for _, btn in ipairs(buttons) do
-                        if btn and EFD(btn).squared then
+                        if btn and (EFD(btn).squared or blizz2) then
                             local id = GetButtonSpellID(btn)
                             if id and id == arg1 then
                                 ShowGlow(btn)
@@ -6028,12 +6071,13 @@ end
 function EAB:ScanExistingProcs()
     local found = 0
     local total = 0
+    local blizz = self.db and self.db.profile and self.db.profile.useBlizzardStyle
     for _, info in ipairs(BAR_CONFIG) do
         local buttons = barButtons[info.key]
         if buttons then
             for i = 1, #buttons do
                 local btn = buttons[i]
-                if btn and EFD(btn).squared then
+                if btn and (EFD(btn).squared or blizz) then
                     total = total + 1
                     local spellID = _procState.GetButtonSpellID(btn)
                     local overlayed = spellID and C_SpellActivationOverlay
@@ -6042,7 +6086,17 @@ function EAB:ScanExistingProcs()
                     if overlayed then
                         found = found + 1
                         _procState.active[btn] = true
-                        UpdateFlipbook(btn)
+                        if blizz then
+                            local sa = btn.SpellActivationAlert
+                            if sa then
+                                sa:SetAlpha(1)
+                                sa:Show()
+                                if sa.ProcStartAnim then sa.ProcStartAnim:Play() end
+                                if sa.ProcLoop then sa.ProcLoop:Play() end
+                            end
+                        else
+                            UpdateFlipbook(btn)
+                        end
                     end
                 end
             end
@@ -9606,6 +9660,15 @@ local function EAB_SetQuickKeybindEffects(btn, show)
     elseif btn.QuickKeybindHighlightTexture then
         btn.QuickKeybindHighlightTexture:SetShown(show)
     end
+    -- Suppress/restore the secure action so spells don't fire during QKB.
+    -- Only action buttons (those with an action attr) need this.
+    if not InCombatLockdown() and btn.commandName and btn:GetAttribute("action") then
+        if show then
+            btn:SetAttribute("type", nil)
+        else
+            btn:SetAttribute("type", "action")
+        end
+    end
     _quickKeybindState.art.ApplyButtonHighlightAlpha(btn, show)
     if btn.UpdateMouseWheelHandler then
         btn:UpdateMouseWheelHandler()
@@ -9617,7 +9680,7 @@ EAB_UpdateQuickKeybindButtons = function(show)
         local buttons = barButtons[info.key]
         if buttons then
             for _, btn in ipairs(buttons) do
-                if btn and btn._eabOwnQuickKeybind and btn.commandName then
+                if btn and btn.commandName then
                     EAB_SetQuickKeybindEffects(btn, show)
                 end
             end
@@ -9705,20 +9768,184 @@ local _qkbHookFrame
 
 _quickKeybindState.FinishClose = function()
     _quickKeybindState.closePending = false
+    -- Restore action type on buttons that were suppressed during QKB mode.
+    -- This handles the deferred-close-during-combat case where SetAttribute
+    -- was blocked earlier.
+    EAB_UpdateQuickKeybindButtons(false)
     EAB_UpdateQuickKeybindVisibility(false)
+    -- Restore bar strata if HideDim couldn't (combat-deferred close)
+    if _quickKeybindState.strataCache and not InCombatLockdown() then
+        for frame, orig in pairs(_quickKeybindState.strataCache) do
+            frame:SetFrameStrata(orig)
+        end
+        _quickKeybindState.strataCache = nil
+    end
 end
 
-local function EAB_QuickKeybindOpen()
+-- One-time initialization: hook QKB scripts on all action buttons so mouse
+-- binding works. ActionBarButtonTemplate provides the mixin methods but
+-- Blizzard only wires the OnClick/OnEnter/OnLeave scripts on buttons it
+-- knows by name (ActionButton1-12, MultiBar*, etc.). Our custom EABButtons
+-- need explicit hookup for mouse-button binding to communicate with QKB.
+_quickKeybindState.InitButtons = function()
+    if _quickKeybindState.buttonsInit then return end
+    if not QuickKeybindButtonTemplateMixin then return end
+    _quickKeybindState.buttonsInit = true
+    local PP = EllesmereUI and EllesmereUI.PP
+    local EG = EllesmereUI and EllesmereUI.ELLESMERE_GREEN
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local buttons = barButtons[info.key]
+            if buttons then
+                for _, btn in ipairs(buttons) do
+                    if btn and btn.commandName then
+                        if not btn.QuickKeybindButtonOnClick then
+                            Mixin(btn, QuickKeybindButtonTemplateMixin)
+                        end
+                        local fd = EFD(btn)
+                        if not fd.qkbClickHooked and btn.QuickKeybindButtonOnClick then
+                            btn:HookScript("OnClick", btn.QuickKeybindButtonOnClick)
+                            btn:HookScript("OnEnter", btn.QuickKeybindButtonOnEnter)
+                            btn:HookScript("OnLeave", btn.QuickKeybindButtonOnLeave)
+                            -- Accent border + highlight color on hover during QKB
+                            btn:HookScript("OnEnter", function(self)
+                                if not _quickKeybindState.open then return end
+                                if not EG then return end
+                                local fd = EFD(self)
+                                if fd.borders and PP then
+                                    PP.UpdateBorder(self, nil, EG.r, EG.g, EG.b, 0.9)
+                                    fd.borderKey = nil
+                                end
+                                local hl = self.HighlightTexture
+                                if hl then hl:SetVertexColor(EG.r, EG.g, EG.b, 1) end
+                                fd.qkbHoverActive = true
+                            end)
+                            btn:HookScript("OnLeave", function(self)
+                                local fd = EFD(self)
+                                if not fd.qkbHoverActive then return end
+                                fd.qkbHoverActive = nil
+                                fd.borderKey = nil
+                                local bk = fd.barKey
+                                if bk and PP then
+                                    EAB:ApplyBordersForBar(bk)
+                                end
+                                local hl = self.HighlightTexture
+                                if hl then
+                                    local p = EAB and EAB.db and EAB.db.profile
+                                    local useCC = p and p.highlightUseClassColor
+                                    local cc = (p and p.highlightCustomColor) or { r = 0.973, g = 0.839, b = 0.604, a = 1 }
+                                    local hr, hg, hb = cc.r, cc.g, cc.b
+                                    if useCC then
+                                        local _, ct = UnitClass("player")
+                                        local c2 = ct and RAID_CLASS_COLORS[ct]
+                                        if c2 then hr, hg, hb = c2.r, c2.g, c2.b end
+                                    end
+                                    hl:SetVertexColor(hr, hg, hb, 1)
+                                end
+                                local bk = EFD(self).barKey
+                                local s = bk and EAB.db and EAB.db.profile
+                                    and EAB.db.profile.bars and EAB.db.profile.bars[bk]
+                                if s and PP then
+                                    local c = s.borderColor or { r = 0, g = 0, b = 0, a = 1 }
+                                    local cr, cg, cb, ca = c.r, c.g, c.b, c.a or 1
+                                    if s.borderClassColor then
+                                        local _, ct = UnitClass("player")
+                                        local cc = ct and RAID_CLASS_COLORS[ct]
+                                        if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                                    end
+                                    local sz = ResolveBorderThickness(s)
+                                    if sz > 0 then
+                                        PP.UpdateBorder(self, sz, cr, cg, cb, ca)
+                                    else
+                                        PP.HideBorder(self)
+                                    end
+                                end
+                            end)
+                            fd.qkbClickHooked = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Dim overlay: darkens the rest of the UI while Quick Keybind mode is active.
+-- Action bars are raised above it so they remain visually prominent.
+_quickKeybindState.GetDimOverlay = function()
+    if _quickKeybindState.dimFrame then return _quickKeybindState.dimFrame end
+    local dim = CreateFrame("Frame", nil, UIParent)
+    dim:SetFrameStrata("HIGH")
+    dim:SetFrameLevel(0)
+    dim:SetAllPoints(UIParent)
+    dim:EnableMouse(false)
+    dim:SetMouseClickEnabled(false)
+    dim:SetMouseMotionEnabled(false)
+    local tex = dim:CreateTexture(nil, "BACKGROUND")
+    tex:SetAllPoints()
+    tex:SetColorTexture(0, 0, 0, 0.40)
+    dim:SetAlpha(0)
+    dim:Hide()
+    _quickKeybindState.dimFrame = dim
+    return dim
+end
+
+_quickKeybindState.ShowDim = function()
+    local dim = _quickKeybindState.GetDimOverlay()
+    dim:Show()
+    UIFrameFadeIn(dim, 0.2, dim:GetAlpha(), 1)
+    -- Raise action bar frames above the dim
+    for _, info in ipairs(BAR_CONFIG) do
+        local frame = barFrames[info.key]
+        if frame and not InCombatLockdown() then
+            if not _quickKeybindState.strataCache then
+                _quickKeybindState.strataCache = {}
+            end
+            if not _quickKeybindState.strataCache[frame] then
+                _quickKeybindState.strataCache[frame] = frame:GetFrameStrata()
+            end
+            frame:SetFrameStrata("DIALOG")
+        end
+    end
+    if _pagingFrame and not InCombatLockdown() then
+        if not _quickKeybindState.strataCache then _quickKeybindState.strataCache = {} end
+        if not _quickKeybindState.strataCache[_pagingFrame] then
+            _quickKeybindState.strataCache[_pagingFrame] = _pagingFrame:GetFrameStrata()
+        end
+        _pagingFrame:SetFrameStrata("DIALOG")
+    end
+end
+
+_quickKeybindState.HideDim = function()
+    local dim = _quickKeybindState.dimFrame
+    if not dim then return end
+    UIFrameFadeOut(dim, 0.2, dim:GetAlpha(), 0)
+    C_Timer_After(0.2, function()
+        if dim:GetAlpha() < 0.01 then dim:Hide() end
+    end)
+    -- Restore bar strata
+    if _quickKeybindState.strataCache and not InCombatLockdown() then
+        for frame, orig in pairs(_quickKeybindState.strataCache) do
+            frame:SetFrameStrata(orig)
+        end
+        _quickKeybindState.strataCache = nil
+    end
+end
+
+_quickKeybindState.Open = function()
     if _quickKeybindState.open then return end
     if InCombatLockdown() then return end
     _quickKeybindState.closePending = false
     _quickKeybindState.open = true
+    _quickKeybindState.InitButtons()
     EAB_UpdateQuickKeybindButtons(true)
     EAB_UpdateQuickKeybindVisibility(true)
+    _quickKeybindState.ShowDim()
 end
 
 local function EAB_QuickKeybindClose()
     if not _quickKeybindState.open and not _quickKeybindState.closePending then return end
+    _quickKeybindState.HideDim()
     if InCombatLockdown() then
         -- Drop the visual bind overlays immediately so Bar 1 does not look
         -- stuck in QuickKeybind mode, then defer the protected visibility
@@ -9771,7 +9998,7 @@ _qkbHookFrame:SetScript("OnEvent", function(self, event)
                     qkb:HookScript("OnShow", qfd.quickKeybindShowHook)
                     qkb:HookScript("OnHide", qfd.quickKeybindHideHook)
                 end
-                qfd.quickKeybindOnShow = EAB_QuickKeybindOpen
+                qfd.quickKeybindOnShow = _quickKeybindState.Open
                 qfd.quickKeybindOnHide = EAB_QuickKeybindClose
             end
         end)
