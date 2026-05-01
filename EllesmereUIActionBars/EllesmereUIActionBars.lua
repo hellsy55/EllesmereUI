@@ -2830,7 +2830,7 @@ local function LayoutBar(key)
             -- Pin SpellActivationAlert to button bounds when using custom proc
             -- glows. When custom glows are off or Blizzard style is on, leave
             -- Blizzard's alert completely untouched.
-            if btn.SpellActivationAlert and EAB.db.profile.procGlowEnabled ~= false and not EAB.db.profile.useBlizzardStyle then
+            if btn.SpellActivationAlert and EAB.db.profile.procGlowEnabled and not EAB.db.profile.useBlizzardStyle then
                 btn.SpellActivationAlert:SetAllPoints(btn)
                 btn.SpellActivationAlert:SetScale(1)
             end
@@ -5652,14 +5652,8 @@ end
 
 local function UpdateFlipbook(btn)
     local region = btn.SpellActivationAlert
-    if not region then return end
-
-    -- Blizzard style: let Blizzard handle proc glows natively
-    local _p2 = EAB.db and EAB.db.profile
-    if _p2 and _p2.useBlizzardStyle then return end
-
     local fd = EFD(btn)
-    if fd.shapeMask and fd.shapeApplied and not EFD(region).shapeMasked then
+    if region and fd.shapeMask and fd.shapeApplied and not EFD(region).shapeMasked then
         for _, tex in ipairs({region:GetRegions()}) do
             if tex and tex.AddMaskTexture then
                 pcall(tex.AddMaskTexture, tex, fd.shapeMask)
@@ -5708,27 +5702,22 @@ local function UpdateFlipbook(btn)
         end
     end
 
-    if p.procGlowEnabled == false then
+    if not p.procGlowEnabled then
         -- "Default" glow: use our glow library with Modern WoW Glow (#6)
-        -- which looks identical to Blizzard's native glow but renders
-        -- independently (Blizzard's SpellActivationAlert doesn't self-activate
-        -- in Midnight). Same approach CDM uses — always reliable.
         if not (fd.shapeMask and fd.shapeApplied) then
             if not fd.glowWrapper then
-                local wrapper = CreateFrame("Frame", nil, btn)
+                local wrapper = CreateFrame("Frame", nil, btn:GetParent() or btn)
                 wrapper:SetAllPoints(btn)
-                wrapper:SetFrameLevel(btn:GetFrameLevel() + 2)
                 wrapper:SetAlpha(0)
                 fd.glowWrapper = wrapper
             end
             local wrapper = fd.glowWrapper
+            wrapper:SetFrameLevel(btn:GetFrameLevel() + 10)
             _G_Glows.StopAllGlows(wrapper)
             wrapper:SetAlpha(1)
             wrapper:Show()
-            -- Style 6 = Modern WoW Glow, gold color (same as Blizzard default)
             _G_Glows.StartGlow(wrapper, 6, _ufBtnW, 1, 0.788, 0.137, nil, _ufBtnH)
-            -- Suppress Blizzard's native SpellActivationAlert
-            region:SetAlpha(0)
+            if region then region:SetAlpha(0) end
             fd.customizedFlipbook = true
             return
         end
@@ -5755,14 +5744,12 @@ local function UpdateFlipbook(btn)
     local loopEntry = LOOP_GLOW_TYPES[loopIdx]
 
     if not fd.glowWrapper then
-        local wrapper = CreateFrame("Frame", nil, btn)
+        local wrapper = CreateFrame("Frame", nil, btn:GetParent() or btn)
         wrapper:SetAllPoints(btn)
-        wrapper:SetFrameLevel(btn:GetFrameLevel() + 1)
         fd.glowWrapper = wrapper
     end
     local wrapper = fd.glowWrapper
-    -- Keep wrapper just above btn base but below shape border overlay
-    wrapper:SetFrameLevel(btn:GetFrameLevel() + 1)
+    wrapper:SetFrameLevel(btn:GetFrameLevel() + 10)
 
     local wfd = EFD(wrapper)
     if fd.shapeMask and fd.shapeApplied and fd.shapeMaskPath then
@@ -5781,7 +5768,7 @@ local function UpdateFlipbook(btn)
     if loopEntry.procedural or loopEntry.buttonGlow or loopEntry.autocast or loopEntry.shapeGlow then
         fd.customizedFlipbook = true
         -- Suppress Blizzard's native flipbook visuals (hide textures, not durations)
-        region:SetAlpha(0)
+        if region then region:SetAlpha(0) end
 
         StopAllProceduralGlows(wrapper)
         wrapper:Show()
@@ -5817,7 +5804,7 @@ local function UpdateFlipbook(btn)
         -- so the glow matches the button size with no scale math.
         -- Suppress Blizzard's native flipbook visuals.
         fd.customizedFlipbook = true
-        region:SetAlpha(0)
+        if region then region:SetAlpha(0) end
 
         _G_Glows.StopAllGlows(wrapper)
         wrapper:Show()
@@ -5864,32 +5851,12 @@ function EAB:HookProcGlow()
     end
 
     local function ShowGlow(btn)
-        if IsBlizzStyle() then
-            _procState.active[btn] = true
-            local sa = btn.SpellActivationAlert
-            if sa then
-                sa:SetAlpha(1)
-                sa:Show()
-                if sa.ProcStartAnim then sa.ProcStartAnim:Play() end
-                if sa.ProcLoop then sa.ProcLoop:Play() end
-            end
-            return
-        end
         _procState.active[btn] = true
         UpdateFlipbook(btn)
     end
 
     local function HideGlow(btn)
         _procState.active[btn] = nil
-        if IsBlizzStyle() then
-            local sa = btn.SpellActivationAlert
-            if sa then
-                if sa.ProcStartAnim and sa.ProcStartAnim:IsPlaying() then sa.ProcStartAnim:Stop() end
-                if sa.ProcLoop and sa.ProcLoop:IsPlaying() then sa.ProcLoop:Stop() end
-                sa:Hide()
-            end
-            return
-        end
         local gw = EFD(btn).glowWrapper
         if gw then
             StopAllProceduralGlows(gw)
@@ -5901,12 +5868,24 @@ function EAB:HookProcGlow()
     local GetButtonSpellID = _procState.GetButtonSpellID
 
     -- Check IsSpellOverlayed ground truth for a single button.
-    -- Used after slot changes to sync glow state with new spell.
+    -- Also checks base/override variants for spell transforms.
     local function UpdateOverlayGlow(btn)
         local spellID = GetButtonSpellID(btn)
-        local overlayed = spellID and C_SpellActivationOverlay
-            and C_SpellActivationOverlay.IsSpellOverlayed
-            and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
+        if not spellID then
+            if _procState.active[btn] then HideGlow(btn) end
+            return
+        end
+        local ISO = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
+        if not ISO then return end
+        local overlayed = ISO(spellID)
+        if not overlayed and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+            local ovr = C_SpellBook.FindSpellOverrideByID(spellID)
+            if ovr and ovr > 0 and ovr ~= spellID then overlayed = ISO(ovr) end
+        end
+        if not overlayed and C_Spell and C_Spell.GetBaseSpell then
+            local base = C_Spell.GetBaseSpell(spellID)
+            if base and base > 0 and base ~= spellID then overlayed = ISO(base) end
+        end
         if overlayed then
             ShowGlow(btn)
         elseif _procState.active[btn] then
@@ -5920,30 +5899,7 @@ function EAB:HookProcGlow()
     glowFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
     glowFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     glowFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
-    glowFrame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
-        if event == "ACTIONBAR_UPDATE_STATE" then
-            -- Re-sync all active glows: catches procs consumed or gained
-            -- between SHOW/HIDE events (mirrors Bartender's Update() path).
-            local blizzUS = IsBlizzStyle()
-            for btn in pairs(_procState.active) do
-                local id = GetButtonSpellID(btn)
-                if not id or not C_SpellActivationOverlay.IsSpellOverlayed(id) then
-                    HideGlow(btn)
-                end
-            end
-            for _, info in ipairs(BAR_CONFIG) do
-                local buttons = barButtons[info.key]
-                if buttons then
-                    for _, btn in ipairs(buttons) do
-                        if btn and (EFD(btn).squared or blizzUS) and not _procState.active[btn] then
-                            UpdateOverlayGlow(btn)
-                        end
-                    end
-                end
-            end
-            return
-        end
         if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" then
             -- Defer re-scan: the bar may not have finished paging yet
             -- when the event fires, so slot->spell mappings are stale.
@@ -5985,16 +5941,30 @@ function EAB:HookProcGlow()
                 for i = 1, #toHide do HideGlow(toHide[i]) end
             end
         else
-            -- SHOW: scan all buttons for the matching spellID
+            -- SHOW: scan all buttons for the matching spellID.
+            -- Also check base/override variants so spell transforms
+            -- (e.g. Lava Burst override from Lava Surge) still match.
             local blizz2 = IsBlizzStyle()
+            local _FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
             for _, info in ipairs(BAR_CONFIG) do
                 local buttons = barButtons[info.key]
                 if buttons then
                     for _, btn in ipairs(buttons) do
                         if btn and (EFD(btn).squared or blizz2) then
                             local id = GetButtonSpellID(btn)
-                            if id and id == arg1 then
-                                ShowGlow(btn)
+                            if id then
+                                local match = (id == arg1)
+                                if not match and _FO then
+                                    local ovr = _FO(id)
+                                    if ovr and ovr == arg1 then match = true end
+                                end
+                                if not match and C_Spell and C_Spell.GetBaseSpell then
+                                    local base = C_Spell.GetBaseSpell(id)
+                                    if base and base == arg1 then match = true end
+                                end
+                                if match then
+                                    ShowGlow(btn)
+                                end
                             end
                         end
                     end
@@ -6005,10 +5975,13 @@ function EAB:HookProcGlow()
 
     -- Suppress Blizzard's native SpellActivationAlert on our buttons
     -- since we render our own glow via UpdateFlipbook.
+    -- Skip when our custom glow is active (both use SpellActivationAlert).
     -- Skip for Blizzard-styled bars so native glows show normally.
     if ActionButtonSpellAlertManager and ActionButtonSpellAlertManager.ShowAlert then
         hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(_, btn)
-            if btn and EFD(btn).squared and not IsBlizzStyle() and btn.SpellActivationAlert then
+            if btn and EFD(btn).squared and not IsBlizzStyle()
+               and not _procState.active[btn]
+               and btn.SpellActivationAlert then
                 btn.SpellActivationAlert:SetAlpha(0)
             end
         end)
@@ -6080,23 +6053,22 @@ function EAB:ScanExistingProcs()
                 if btn and (EFD(btn).squared or blizz) then
                     total = total + 1
                     local spellID = _procState.GetButtonSpellID(btn)
-                    local overlayed = spellID and C_SpellActivationOverlay
-                        and C_SpellActivationOverlay.IsSpellOverlayed
-                        and C_SpellActivationOverlay.IsSpellOverlayed(spellID)
+                    local ISO = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
+                    local overlayed = spellID and ISO and ISO(spellID)
+                    if not overlayed and spellID and ISO then
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            local ovr = C_SpellBook.FindSpellOverrideByID(spellID)
+                            if ovr and ovr > 0 and ovr ~= spellID then overlayed = ISO(ovr) end
+                        end
+                        if not overlayed and C_Spell and C_Spell.GetBaseSpell then
+                            local base = C_Spell.GetBaseSpell(spellID)
+                            if base and base > 0 and base ~= spellID then overlayed = ISO(base) end
+                        end
+                    end
                     if overlayed then
                         found = found + 1
                         _procState.active[btn] = true
-                        if blizz then
-                            local sa = btn.SpellActivationAlert
-                            if sa then
-                                sa:SetAlpha(1)
-                                sa:Show()
-                                if sa.ProcStartAnim then sa.ProcStartAnim:Play() end
-                                if sa.ProcLoop then sa.ProcLoop:Play() end
-                            end
-                        else
-                            UpdateFlipbook(btn)
-                        end
+                        UpdateFlipbook(btn)
                     end
                 end
             end
@@ -6380,11 +6352,27 @@ local function UpdateKeybinds()
                 if btn then
                     local cmd = prefix .. i
                     local k1, k2 = GetBindingKey(cmd)
-                    if k1 then
-                        SetOverrideBinding(_eabBindOwner, false, k1, cmd)
-                    end
-                    if k2 then
-                        SetOverrideBinding(_eabBindOwner, false, k2, cmd)
+                    -- Flyout buttons need SetOverrideBindingClick so the
+                    -- flyout popup anchors to our visible EABButton frame.
+                    -- Native SetOverrideBinding anchors to Blizzard's hidden
+                    -- original button, so the flyout never appears.
+                    local slot = btn:GetAttribute("action")
+                    local isFlyout = slot and GetActionInfo and GetActionInfo(slot) == "flyout"
+                    if isFlyout then
+                        local btnName = btn:GetName()
+                        if k1 and btnName then
+                            SetOverrideBindingClick(_eabBindOwner, false, k1, btnName)
+                        end
+                        if k2 and btnName then
+                            SetOverrideBindingClick(_eabBindOwner, false, k2, btnName)
+                        end
+                    else
+                        if k1 then
+                            SetOverrideBinding(_eabBindOwner, false, k1, cmd)
+                        end
+                        if k2 then
+                            SetOverrideBinding(_eabBindOwner, false, k2, cmd)
+                        end
                     end
                 end
             end
