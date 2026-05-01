@@ -2600,7 +2600,7 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.SetBorderSize(border, bs2)
             end
             if castbar then
-                if castbar._ppBorders then PP.SetBorderSize(castbar, 1) end
+                if PP.GetBorders(castbar) then PP.SetBorderSize(castbar, 1) end
                 if castFill then
                     castFill:ClearAllPoints()
                     PP.Point(castFill, "TOPLEFT", castbar, "TOPLEFT", 1, 0)
@@ -8248,8 +8248,11 @@ initFrame:SetScript("OnEvent", function(self)
     ufOptSpecFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     ufOptSpecFrame:SetScript("OnEvent", function(_, _, unit)
         if unit ~= "player" then return end
-        if EllesmereUI.InvalidatePageCache then EllesmereUI:InvalidatePageCache() end
+        -- Only invalidate + rebuild when the panel is actually open.
+        -- Invalidating while closed destroys all cached pages, causing
+        -- a blank panel on next open.
         if EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown() then
+            if EllesmereUI.InvalidatePageCache then EllesmereUI:InvalidatePageCache() end
             C_Timer.After(0.2, function()
                 if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
             end)

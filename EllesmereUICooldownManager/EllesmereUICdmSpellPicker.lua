@@ -648,7 +648,7 @@ local function EnsureBarOrderSeeded(barKey, sd)
         local icon = icons[i]
         if icon then
             local fc = fcCache and fcCache[icon]
-            local sid = (fc and fc.spellID) or icon._spellID
+            local sid = fc and fc.spellID
             if type(sid) == "number" and sid > 0 then
                 sd.assignedSpells[#sd.assignedSpells + 1] = sid
             end

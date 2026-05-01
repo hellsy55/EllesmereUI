@@ -54,6 +54,15 @@ function EUI.RegisterVisibilityUpdater(fn)
     updaters[#updaters + 1] = fn
 end
 
+function EUI.UnregisterVisibilityUpdater(fn)
+    for i = #updaters, 1, -1 do
+        if updaters[i] == fn then
+            table.remove(updaters, i)
+            return
+        end
+    end
+end
+
 -- Mouseover poll registry: each entry is { frame=, visible=, isActive=fn }.
 -- isActive returns true when that frame currently wants mouseover behavior.
 local mouseoverTargets = {}

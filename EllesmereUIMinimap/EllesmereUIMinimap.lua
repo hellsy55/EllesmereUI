@@ -342,7 +342,7 @@ local function LayoutFlyoutButtons()
         -- Strip decorative border/background textures
         StripButtonDecorations(btn)
         -- Hide ungrouped overlays left over from a previous ungroup cycle
-        if btn._ungroupBg then btn._ungroupBg:Hide() end
+        if GetFFD(btn).ungroupBg then GetFFD(btn).ungroupBg:Hide() end
         if btn._ungroupRing then btn._ungroupRing:Hide() end
         -- Also force all child frames up to the same strata/level
         for _, child in ipairs({ btn:GetChildren() }) do
@@ -367,21 +367,21 @@ local function LayoutFlyoutButtons()
             icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
         end
         -- Add atlas ring border overlay
-        if not btn._flyoutRing then
+        if not GetFFD(btn).flyoutRing then
             local ring = btn:CreateTexture(nil, "OVERLAY", nil, 7)
             ring:SetAtlas("AdventureMap-combatally-ring")
             ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
             ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
-            btn._flyoutRing = ring
+            GetFFD(btn).flyoutRing = ring
         end
-        btn._flyoutRing:Show()
+        GetFFD(btn).flyoutRing:Show()
     end
 end
 
 local function RestoreFlyoutButtons()
     for btn, saved in pairs(flyoutSavedParents) do
         RestoreButtonDecorations(btn)
-        if btn._flyoutRing then btn._flyoutRing:Hide() end
+        if GetFFD(btn).flyoutRing then GetFFD(btn).flyoutRing:Hide() end
         if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
         if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
         btn:SetParent(saved.parent)
@@ -1798,7 +1798,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             local btn = entry.btn
             -- Restore from flyout if needed
             if flyoutSavedParents[btn] then
-                if btn._flyoutRing then btn._flyoutRing:Hide() end
+                if GetFFD(btn).flyoutRing then GetFFD(btn).flyoutRing:Hide() end
                 if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
                 if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
                 flyoutSavedParents[btn] = nil
@@ -1830,7 +1830,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     for _, region in ipairs({ btn:GetRegions() }) do
                         if region:IsObjectType("Texture") and region:IsShown()
                            and region:GetAlpha() > 0 and not IsJunkTexture(region)
-                           and region ~= btn._ungroupBg then
+                           and region ~= GetFFD(btn).ungroupBg then
                             icon = region
                             break
                         end
@@ -1843,26 +1843,27 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
                 end
                 -- Black square background
-                if not btn._ungroupBg then
+                if not GetFFD(btn).ungroupBg then
                     local ubg = CreateFrame("Frame", nil, btn, "BackdropTemplate")
                     ubg:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground" })
                     ubg:SetBackdropColor(0, 0, 0, 0.8)
                     ubg:SetAllPoints(btn)
-                    btn._ungroupBg = ubg
+                    GetFFD(btn).ungroupBg = ubg
                 end
                 -- Re-assert strata/level every layout; the flyout child-loop
                 -- bumps all children to DIALOG which would render the bg
                 -- above the icon after ungrouping.
-                btn._ungroupBg:SetFrameStrata(btn:GetFrameStrata())
-                btn._ungroupBg:SetFrameLevel(btn:GetFrameLevel() - 1)
-                btn._ungroupBg:Show()
+                local ubg = GetFFD(btn).ungroupBg
+                ubg:SetFrameStrata(btn:GetFrameStrata())
+                ubg:SetFrameLevel(btn:GetFrameLevel() - 1)
+                ubg:Show()
                 if btn._ungroupRing then btn._ungroupRing:Hide() end
             else
                 -- No backgrounds: restore native appearance, hide our overlays.
                 -- Do NOT override button size — native ring textures have fixed
                 -- anchors that only look correct at the button's original size.
                 RestoreButtonDecorations(btn)
-                if btn._ungroupBg then btn._ungroupBg:Hide() end
+                if GetFFD(btn).ungroupBg then GetFFD(btn).ungroupBg:Hide() end
                 if btn._ungroupRing then btn._ungroupRing:Hide() end
             end
             _suppressVisTrack = true
@@ -2097,66 +2098,70 @@ local function ApplyMinimap()
     if p.shape == "square" then
         -- Square: pixel-perfect border
         local bs = p.borderSize or 1
-        if not minimap._ppBorders then
+        if not PP.GetBorders(minimap) then
             PP.CreateBorder(minimap, r, g, b, 1, bs, "OVERLAY", 7)
         else
             PP.SetBorderColor(minimap, r, g, b, 1)
         end
         PP.SetBorderSize(minimap, bs)
-        if minimap._circBorder then minimap._circBorder:Hide() end
-        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
+        if GetFFD(minimap).circBorder then GetFFD(minimap).circBorder:Hide() end
+        if GetFFD(minimap).texCircBorder then GetFFD(minimap).texCircBorder:Hide() end
     elseif p.shape == "circle" then
         -- Circle: solid colored disc behind the minimap, slightly larger = border ring
-        if minimap._ppBorders then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
-        if not minimap._circBorder then
+        if PP.GetBorders(minimap) then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        if not GetFFD(minimap).circBorder then
             local disc = CreateFrame("Frame", nil, minimap)
             disc:SetFrameLevel(minimap:GetFrameLevel() - 1)
             local tex = disc:CreateTexture(nil, "BACKGROUND")
             tex:SetAllPoints(disc)
             tex:SetTexture("Interface\\Common\\CommonMaskCircle")
             disc._tex = tex
-            minimap._circBorder = disc
+            GetFFD(minimap).circBorder = disc
         end
         local bs = p.borderSize or 1
-        minimap._circBorder:ClearAllPoints()
-        minimap._circBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -bs, bs)
-        minimap._circBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", bs, -bs)
-        minimap._circBorder._tex:SetVertexColor(r, g, b, 1)
-        minimap._circBorder:Show()
-        if minimap._texCircBorder then minimap._texCircBorder:Hide() end
+        local circBorder = GetFFD(minimap).circBorder
+        circBorder:ClearAllPoints()
+        circBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -bs, bs)
+        circBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", bs, -bs)
+        circBorder._tex:SetVertexColor(r, g, b, 1)
+        circBorder:Show()
+        if GetFFD(minimap).texCircBorder then GetFFD(minimap).texCircBorder:Hide() end
     elseif p.shape == "textured_circle" then
         -- Textured Circle: void ring border, hide the solid circle border
-        if minimap._ppBorders then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
-        if minimap._circBorder then minimap._circBorder:Hide() end
-        if not minimap._texCircBorder then
+        if PP.GetBorders(minimap) then PP.SetBorderSize(minimap, 0); PP.SetBorderColor(minimap, 0, 0, 0, 0) end
+        if GetFFD(minimap).circBorder then GetFFD(minimap).circBorder:Hide() end
+        if not GetFFD(minimap).texCircBorder then
             local ring = minimap:CreateTexture(nil, "OVERLAY", nil, 7)
             ring:SetAtlas("wowlabs_minimapvoid-ring-single")
-            minimap._texCircBorder = ring
+            GetFFD(minimap).texCircBorder = ring
         end
         local inset = 2
-        minimap._texCircBorder:ClearAllPoints()
-        minimap._texCircBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -inset, inset)
-        minimap._texCircBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", inset, -inset)
-        minimap._texCircBorder:SetVertexColor(r, g, b, 1)
-        minimap._texCircBorder:Show()
+        local texCircBorder = GetFFD(minimap).texCircBorder
+        texCircBorder:ClearAllPoints()
+        texCircBorder:SetPoint("TOPLEFT", minimap, "TOPLEFT", -inset, inset)
+        texCircBorder:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", inset, -inset)
+        texCircBorder:SetVertexColor(r, g, b, 1)
+        texCircBorder:Show()
     end
 
     -- Live-update border when accent color changes (only when using accent)
     if p.useClassColor then
-        if not minimap._accentBorderCB then
-            minimap._accentBorderCB = function(ar, ag, ab)
-                if minimap._ppBorders then
+        if not GetFFD(minimap).accentBorderCB then
+            GetFFD(minimap).accentBorderCB = function(ar, ag, ab)
+                if PP.GetBorders(minimap) then
                     PP.SetBorderColor(minimap, ar, ag, ab, 1)
                 end
-                if minimap._circBorder and minimap._circBorder:IsShown() then
-                    minimap._circBorder._tex:SetVertexColor(ar, ag, ab, 1)
+                local cb = GetFFD(minimap).circBorder
+                if cb and cb:IsShown() then
+                    cb._tex:SetVertexColor(ar, ag, ab, 1)
                 end
-                if minimap._texCircBorder and minimap._texCircBorder:IsShown() then
-                    minimap._texCircBorder:SetVertexColor(ar, ag, ab, 1)
+                local tcb = GetFFD(minimap).texCircBorder
+                if tcb and tcb:IsShown() then
+                    tcb:SetVertexColor(ar, ag, ab, 1)
                 end
             end
         end
-        EllesmereUI.RegAccent({ type = "callback", fn = minimap._accentBorderCB })
+        EllesmereUI.RegAccent({ type = "callback", fn = GetFFD(minimap).accentBorderCB })
     end
 
     -- Size
@@ -2777,12 +2782,12 @@ do
             local alpha = show and 1 or 0
 
             -- Circle border
-            if Minimap._circBorder then Minimap._circBorder:SetAlpha(alpha) end
+            if GetFFD(Minimap).circBorder then GetFFD(Minimap).circBorder:SetAlpha(alpha) end
             -- Textured circle border
-            if Minimap._texCircBorder then Minimap._texCircBorder:SetAlpha(alpha) end
+            if GetFFD(Minimap).texCircBorder then GetFFD(Minimap).texCircBorder:SetAlpha(alpha) end
 
             -- Square pixel-perfect border
-            if Minimap._ppBorders and EllesmereUI.PP then
+            if EllesmereUI.PP and EllesmereUI.PP.GetBorders(Minimap) then
                 if show then
                     local p = EBS.db and EBS.db.profile and EBS.db.profile.minimap
                     if p then

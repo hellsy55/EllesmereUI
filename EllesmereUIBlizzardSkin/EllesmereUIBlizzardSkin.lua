@@ -145,7 +145,13 @@ end
             _ttHook(tt)
         end
         if SharedTooltip_SetBackdropStyle then
-            hooksecurefunc("SharedTooltip_SetBackdropStyle", _ttSkin)
+            -- Deferred: SharedTooltip_SetBackdropStyle can fire from
+            -- secure Blizzard code (casting bar, combat UI). Running
+            -- _ttSkin synchronously inside the hook taints the call stack
+            -- (BackdropTemplate OnLoad propagates to CastingBarFrame).
+            hooksecurefunc("SharedTooltip_SetBackdropStyle", function(tt)
+                C_Timer.After(0, function() _ttSkin(tt) end)
+            end)
         end
         if GameTooltipStatusBar then
             GameTooltipStatusBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -326,7 +332,8 @@ end
             hooksecurefunc(popup, "UpdateRecapButton", function(self)
                 for i = 1, 4 do
                     local b = self["button" .. i]
-                    if b and GetFFD(b).refreshEnabled then b:_euiRefreshEnabled() end
+                    local fn = b and GetFFD(b).refreshEnabled
+                    if fn then fn(b) end
                 end
             end)
         end
@@ -334,7 +341,8 @@ end
         -- Re-sync state for popups shown already-disabled
         for i = 1, 4 do
             local b = popup["button" .. i]
-            if b and GetFFD(b).refreshEnabled then b:_euiRefreshEnabled() end
+            local fn = b and GetFFD(b).refreshEnabled
+            if fn then fn(b) end
         end
         -- Skin edit box if present
         local eb = popup.editBox or (popup.GetName and _G[popup:GetName() .. "EditBox"])

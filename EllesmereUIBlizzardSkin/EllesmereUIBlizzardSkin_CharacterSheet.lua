@@ -694,8 +694,8 @@ local function SkinCharacterSheet()
         local slot = _G[slotName]
         if slot then
             slot:Show()
-            if slot._slotBg then
-                slot._slotBg:SetBlendMode("BLEND")
+            if GetFFD(slot).slotBg then
+                GetFFD(slot).slotBg:SetBlendMode("BLEND")
             end
         end
     end
@@ -709,7 +709,7 @@ local function SkinCharacterSheet()
     if CharacterFrameInset then
         CharacterFrameInset:SetClipsChildren(false)
     end
-    frame._sizeCheckDone = true
+    GetFFD(frame).sizeCheckDone = true
 
     for i = 1, select("#", frame:GetRegions()) do
         local region = select(i, frame:GetRegions())
@@ -787,13 +787,13 @@ local function SkinCharacterSheet()
                 GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             end
 
-            if not tab._activeHL then
+            if not GetFFD(tab).activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
                 activeHL:SetColorTexture(1, 1, 1, 0.05)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
-                tab._activeHL = activeHL
+                GetFFD(tab).activeHL = activeHL
             end
 
             -- Replace Blizzard's label with our own so font/size are under our control.
@@ -802,19 +802,19 @@ local function SkinCharacterSheet()
             if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
             tab:SetPushedTextOffset(0, 0)
 
-            if not tab._label then
+            if not GetFFD(tab).label then
                 local label = tab:CreateFontString(nil, "OVERLAY")
                 label:SetFont(fontPath, 9, "")
                 label:SetPoint("CENTER", tab, "CENTER", 0, 0)
                 label:SetJustifyH("CENTER")
                 label:SetText(labelText)
-                tab._label = label
+                GetFFD(tab).label = label
                 hooksecurefunc(tab, "SetText", function(_, newText)
                     if newText and label then label:SetText(newText) end
                 end)
             end
 
-            if not tab._underline then
+            if not GetFFD(tab).underline then
                 local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
                 if EllesmereUI and EllesmereUI.PanelPP and EllesmereUI.PanelPP.DisablePixelSnap then
                     EllesmereUI.PanelPP.DisablePixelSnap(underline)
@@ -829,7 +829,7 @@ local function SkinCharacterSheet()
                     EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
                 end
                 underline:Hide()
-                tab._underline = underline
+                GetFFD(tab).underline = underline
             end
         end
     end
@@ -841,14 +841,14 @@ local function SkinCharacterSheet()
                 -- PanelTemplates_GetSelectedTab is unreliable here -- Blizzard
                 -- updates frame.selectedTab before the template helper agrees.
                 local isActive = (frame.selectedTab or 1) == i
-                if tab._label then
-                    tab._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
+                if GetFFD(tab).label then
+                    GetFFD(tab).label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
                 end
-                if tab._underline then
-                    tab._underline:SetShown(isActive)
+                if GetFFD(tab).underline then
+                    GetFFD(tab).underline:SetShown(isActive)
                 end
-                if tab._activeHL then
-                    tab._activeHL:SetShown(isActive)
+                if GetFFD(tab).activeHL then
+                    GetFFD(tab).activeHL:SetShown(isActive)
                 end
             end
         end
@@ -914,18 +914,18 @@ local function SkinCharacterSheet()
         UpdateTabVisuals()
         -- Swapping back to the Character bottom-tab also needs to re-highlight
         -- our top-row Character button (hook installed below as _reactivateCharTab).
-        if isCharacterTab and frame._reactivateCharTab then
-            frame._reactivateCharTab()
+        if isCharacterTab and GetFFD(frame).reactivateCharTab then
+            GetFFD(frame).reactivateCharTab()
         end
 
-        if frame._themedSlots then
-            for _, slotName in ipairs(frame._themedSlots) do
+        if GetFFD(frame).themedSlots then
+            for _, slotName in ipairs(GetFFD(frame).themedSlots) do
                 local slot = _G[slotName]
                 if slot then
                     slot:SetShown(isCharacterTab)
-                    if slot._itemLevelLabel    then slot._itemLevelLabel:SetShown(isCharacterTab)    end
-                    if slot._enchantLabel      then slot._enchantLabel:SetShown(isCharacterTab)      end
-                    if slot._upgradeTrackLabel then slot._upgradeTrackLabel:SetShown(isCharacterTab) end
+                    if GetFFD(slot).itemLevelLabel    then GetFFD(slot).itemLevelLabel:SetShown(isCharacterTab)    end
+                    if GetFFD(slot).enchantLabel      then GetFFD(slot).enchantLabel:SetShown(isCharacterTab)      end
+                    if GetFFD(slot).upgradeTrackLabel then GetFFD(slot).upgradeTrackLabel:SetShown(isCharacterTab) end
                 end
             end
         end
@@ -935,15 +935,15 @@ local function SkinCharacterSheet()
             if btn then btn:SetShown(isCharacterTab) end
         end
 
-        if frame._statsPanel       then frame._statsPanel:SetShown(isCharacterTab)       end
-        if frame._iLvlText         then frame._iLvlText:SetShown(isCharacterTab)         end
-        if frame._statsBg          then frame._statsBg:SetShown(isCharacterTab)          end
-        if frame._scrollFrame      then frame._scrollFrame:SetShown(isCharacterTab)      end
-        if frame._scrollBar        then frame._scrollBar:SetShown(isCharacterTab)        end
-        if frame._socketContainer  then frame._socketContainer:SetShown(isCharacterTab)  end
+        if GetFFD(frame).statsPanel       then GetFFD(frame).statsPanel:SetShown(isCharacterTab)       end
+        if GetFFD(frame).iLvlText         then GetFFD(frame).iLvlText:SetShown(isCharacterTab)         end
+        if GetFFD(frame).statsBg          then GetFFD(frame).statsBg:SetShown(isCharacterTab)          end
+        if GetFFD(frame).scrollFrame      then GetFFD(frame).scrollFrame:SetShown(isCharacterTab)      end
+        if GetFFD(frame).scrollBar        then GetFFD(frame).scrollBar:SetShown(isCharacterTab)        end
+        if GetFFD(frame).socketContainer  then GetFFD(frame).socketContainer:SetShown(isCharacterTab)  end
 
-        if frame._statsSections then
-            for _, sectionData in ipairs(frame._statsSections) do
+        if GetFFD(frame).statsSections then
+            for _, sectionData in ipairs(GetFFD(frame).statsSections) do
                 if sectionData.container then
                     sectionData.container:SetShown(isCharacterTab)
                 end
@@ -952,8 +952,8 @@ local function SkinCharacterSheet()
 
         -- Titles / Equipment sub-panels only exist on the Character tab.
         if not isCharacterTab then
-            if frame._titlesPanel then frame._titlesPanel:SetShown(false) end
-            if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
+            if GetFFD(frame).titlesPanel then GetFFD(frame).titlesPanel:SetShown(false) end
+            if GetFFD(frame).equipPanel  then GetFFD(frame).equipPanel:SetShown(false)  end
         end
 
         if GetFFD(frame).modelScene   then GetFFD(frame).modelScene:SetShown(isCharacterTab)   end
@@ -986,7 +986,7 @@ local function SkinCharacterSheet()
     local statsBg = statsPanel:CreateTexture(nil, "BACKGROUND")
     statsBg:SetColorTexture(0.03, 0.045, 0.05, 0.95)
     statsBg:SetAllPoints(statsPanel)
-    frame._statsBg = statsBg
+    GetFFD(frame).statsBg = statsBg
 
     -- Map INVTYPE to inventory slot numbers and display names
     local INVTYPE_TO_SLOT = {
@@ -1261,11 +1261,11 @@ local function SkinCharacterSheet()
     -- Positioned below iLvlText once that FontString exists (see below).
     mythicRatingLabel:SetTextColor(0.8, 0.8, 0.8, 1)
     mythicRatingLabel:SetText("M+ Score:")
-    frame._mythicRatingLabel = mythicRatingLabel
+    GetFFD(frame).mythicRatingLabel = mythicRatingLabel
 
     -- Legacy alias retained for call sites that test existence of the value
     -- FontString. The label now hosts both parts via color escapes.
-    frame._mythicRatingValue = mythicRatingLabel
+    GetFFD(frame).mythicRatingValue = mythicRatingLabel
 
     -- Color brackets: highest threshold that the score meets wins.
     local MP_COLOR_BRACKETS = {
@@ -1295,7 +1295,7 @@ local function SkinCharacterSheet()
     iLvlText:SetFont(fontPath, 18, "")
     iLvlText:SetPoint("TOP", statsPanel, "TOP", 0, -(25 + 3))  -- buttonHeight(25) + 3 gap
     iLvlText:SetTextColor(0.6, 0.2, 1, 1)
-    frame._iLvlText = iLvlText  -- Store on frame for tab visibility control
+    GetFFD(frame).iLvlText = iLvlText  -- Store for tab visibility control
 
     -- M+ Score sits directly below the iLvl text, also centered.
     mythicRatingLabel:SetPoint("TOP", iLvlText, "BOTTOM", 0, -4)
@@ -1384,18 +1384,18 @@ local function SkinCharacterSheet()
         -- the Character sub-pane is active (selectedTab is unreliable on the
         -- initial open path).
         local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
-        if EllesmereUIDB and EllesmereUIDB.showMythicRating and frame._mythicRatingLabel then
+        if EllesmereUIDB and EllesmereUIDB.showMythicRating and GetFFD(frame).mythicRatingLabel then
             local mythicRating = C_ChallengeMode.GetOverallDungeonScore()
             if mythicRating and mythicRating > 0 then
                 local score = math.floor(mythicRating)
                 local hex = GetMPScoreHex(score)
-                frame._mythicRatingLabel:SetText(string.format("M+ Score: |cff%s%d|r", hex, score))
-                frame._mythicRatingLabel:SetShown(isCharTab)
+                GetFFD(frame).mythicRatingLabel:SetText(string.format("M+ Score: |cff%s%d|r", hex, score))
+                GetFFD(frame).mythicRatingLabel:SetShown(isCharTab)
             else
-                frame._mythicRatingLabel:Hide()
+                GetFFD(frame).mythicRatingLabel:Hide()
             end
-        elseif frame._mythicRatingLabel then
-            frame._mythicRatingLabel:Hide()
+        elseif GetFFD(frame).mythicRatingLabel then
+            GetFFD(frame).mythicRatingLabel:Hide()
         end
     end
 
@@ -1443,7 +1443,7 @@ local function SkinCharacterSheet()
     scrollFrame:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 0, -HEADER_H)
     scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 2)
     scrollFrame:SetFrameLevel(51)
-    frame._scrollFrame = scrollFrame
+    GetFFD(frame).scrollFrame = scrollFrame
 
     -- Scroll child: no anchors (scroll frame positions it internally).
     -- Width is set dynamically to match the scroll frame whenever the
@@ -1572,8 +1572,8 @@ local function SkinCharacterSheet()
         trackOwner = statsPanel,
         topInset   = -HEADER_H,
     })
-    frame._scrollBar         = scrollTrack
-    frame._updateScrollThumb = scrollTrack._update
+    GetFFD(frame).scrollBar         = scrollTrack
+    GetFFD(frame).updateScrollThumb = scrollTrack._update
 
     -- Re-anchor the scroll frame + track top edge based on whether the
     -- M+ Score line is visible. When hidden, collapse 16px of dead space
@@ -1591,7 +1591,7 @@ local function SkinCharacterSheet()
         scrollTrack:ClearAllPoints()
         scrollTrack:SetPoint("TOPRIGHT",    statsPanel, "TOPRIGHT",    -2, -h)
         scrollTrack:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -2,  0)
-        if frame._updateScrollThumb then frame._updateScrollThumb() end
+        if GetFFD(frame).updateScrollThumb then GetFFD(frame).updateScrollThumb() end
     end
     EllesmereUI._updateScrollHeaderOffset()
 
@@ -1819,20 +1819,20 @@ local function SkinCharacterSheet()
 
     local statSections = GetStatSectionsOrder()
 
-    frame._statsPanel = statsPanel
-    frame._statsValues = {}  -- Will be filled as sections are created
-    frame._statsSections = {}  -- Store sections for collapse/expand
-    frame._lastSpec = GetSpecialization()  -- Track current spec
+    GetFFD(frame).statsPanel = statsPanel
+    GetFFD(frame).statsValues = {}  -- Will be filled as sections are created
+    GetFFD(frame).statsSections = {}  -- Store sections for collapse/expand
+    GetFFD(frame).lastSpec = GetSpecialization()  -- Track current spec
 
     -- Function to refresh attributes stats if spec changed
     local function RefreshAttributeStats()
         local currentSpec = GetSpecialization()
-        if currentSpec == frame._lastSpec then return end
+        if currentSpec == GetFFD(frame).lastSpec then return end
 
-        frame._lastSpec = currentSpec
+        GetFFD(frame).lastSpec = currentSpec
 
         -- Find and update Attributes section
-        for sectionIdx, sectionData in ipairs(frame._statsSections) do
+        for sectionIdx, sectionData in ipairs(GetFFD(frame).statsSections) do
             if sectionData.sectionTitle == "Attributes" then
                 -- Get new stats for current spec
                 local newStats = GetFilteredAttributeStats()
@@ -1849,8 +1849,8 @@ local function SkinCharacterSheet()
                             stat.label:Show()
 
                             if stat.value then
-                                -- Find and update the corresponding entry in frame._statsValues
-                                for _, statsValueEntry in ipairs(frame._statsValues) do
+                                -- Find and update the corresponding entry in GetFFD(frame).statsValues
+                                for _, statsValueEntry in ipairs(GetFFD(frame).statsValues) do
                                     if statsValueEntry.value == stat.value then
                                         -- Update the function
                                         statsValueEntry.func = newStats[labelIndex].func
@@ -1881,7 +1881,7 @@ local function SkinCharacterSheet()
                     end
                 end
 
-                frame._recalculateSections()
+                GetFFD(frame).recalculateSections()
                 break
             end
         end
@@ -1891,7 +1891,7 @@ local function SkinCharacterSheet()
     local function RefreshStatsVisibility()
         local currentSpec = GetSpecialization()
 
-        for _, sectionData in ipairs(frame._statsSections) do
+        for _, sectionData in ipairs(GetFFD(frame).statsSections) do
             -- Collapsed sections keep all rows hidden regardless of
             -- per-stat filters. Let the collapse/expand path own visibility.
             if not sectionData.isCollapsed then
@@ -1938,9 +1938,9 @@ local function SkinCharacterSheet()
 
     -- Function to update visibility of stat categories
     local function UpdateStatCategoryVisibility()
-        if not frame._statsSections or #frame._statsSections == 0 then return end
+        if not GetFFD(frame).statsSections or #GetFFD(frame).statsSections == 0 then return end
 
-        for _, sectionData in ipairs(frame._statsSections) do
+        for _, sectionData in ipairs(GetFFD(frame).statsSections) do
             local settingKey = "showStatCategory_" .. (sectionData.settingKey or sectionData.sectionTitle:gsub(" ", ""))
             local shouldShow = not (EllesmereUIDB and EllesmereUIDB[settingKey] == false)
 
@@ -1950,7 +1950,7 @@ local function SkinCharacterSheet()
                 sectionData.container:Hide()
             end
         end
-        frame._recalculateSections()
+        GetFFD(frame).recalculateSections()
     end
     EllesmereUI._updateStatCategoryVisibility = UpdateStatCategoryVisibility
 
@@ -1958,7 +1958,7 @@ local function SkinCharacterSheet()
     local function RecalculateSectionPositions()
         -- Collect visible sections so first/last can be determined after hidden ones are skipped
         local visible = {}
-        for _, sectionData in ipairs(frame._statsSections) do
+        for _, sectionData in ipairs(GetFFD(frame).statsSections) do
             if sectionData.container:IsShown() then
                 visible[#visible + 1] = sectionData
             end
@@ -2006,7 +2006,7 @@ local function SkinCharacterSheet()
         end
         scrollChild:SetHeight(-yOffset)
     end
-    frame._recalculateSections = RecalculateSectionPositions
+    GetFFD(frame).recalculateSections = RecalculateSectionPositions
 
     -- Create sections in scroll child
     local yOffset = 0
@@ -2094,7 +2094,7 @@ local function SkinCharacterSheet()
             leftBar = leftBar,
             rightBar = rightBar,
         }
-        table.insert(frame._statsSections, sectionData)
+        table.insert(GetFFD(frame).statsSections, sectionData)
 
         -- Stats in section
         for statIdx, stat in ipairs(section.stats) do
@@ -2211,7 +2211,7 @@ local function SkinCharacterSheet()
                 end)
 
                 -- Store for updates
-                table.insert(frame._statsValues, {
+                table.insert(GetFFD(frame).statsValues, {
                     value = value,
                     func = stat.func,
                     rawFunc = stat.rawFunc,
@@ -2279,7 +2279,7 @@ local function SkinCharacterSheet()
                 EllesmereUIDB.charSheetCollapsedSections[_collapseKey] = sectionData.isCollapsed or nil
             end
 
-            frame._recalculateSections()
+            GetFFD(frame).recalculateSections()
         end)
 
         -- Up/Down reorder arrows (friends-list Favorites/Friends style):
@@ -2295,7 +2295,7 @@ local function SkinCharacterSheet()
             local function SaveOrder()
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.statSectionsOrder = {}
-                for _, sec in ipairs(frame._statsSections) do
+                for _, sec in ipairs(GetFFD(frame).statsSections) do
                     table.insert(EllesmereUIDB.statSectionsOrder, sec.sectionTitle)
                 end
             end
@@ -2331,23 +2331,23 @@ local function SkinCharacterSheet()
             rightBar:SetPoint("RIGHT", downBtn,      "LEFT", -6, 0)
 
             upBtn:SetScript("OnClick", function()
-                for i, sec in ipairs(frame._statsSections) do
+                for i, sec in ipairs(GetFFD(frame).statsSections) do
                     if sec == sectionData and i > 1 then
-                        frame._statsSections[i], frame._statsSections[i - 1] =
-                            frame._statsSections[i - 1], frame._statsSections[i]
+                        GetFFD(frame).statsSections[i], GetFFD(frame).statsSections[i - 1] =
+                            GetFFD(frame).statsSections[i - 1], GetFFD(frame).statsSections[i]
                         SaveOrder()
-                        frame._recalculateSections()
+                        GetFFD(frame).recalculateSections()
                         return
                     end
                 end
             end)
             downBtn:SetScript("OnClick", function()
-                for i, sec in ipairs(frame._statsSections) do
-                    if sec == sectionData and i < #frame._statsSections then
-                        frame._statsSections[i], frame._statsSections[i + 1] =
-                            frame._statsSections[i + 1], frame._statsSections[i]
+                for i, sec in ipairs(GetFFD(frame).statsSections) do
+                    if sec == sectionData and i < #GetFFD(frame).statsSections then
+                        GetFFD(frame).statsSections[i], GetFFD(frame).statsSections[i + 1] =
+                            GetFFD(frame).statsSections[i + 1], GetFFD(frame).statsSections[i]
                         SaveOrder()
-                        frame._recalculateSections()
+                        GetFFD(frame).recalculateSections()
                         return
                     end
                 end
@@ -2373,7 +2373,7 @@ local function SkinCharacterSheet()
     if not (EllesmereUIDB and EllesmereUIDB.statSectionsOrder) then
         if not EllesmereUIDB then EllesmereUIDB = {} end
         EllesmereUIDB.statSectionsOrder = {}
-        for _, sec in ipairs(frame._statsSections) do
+        for _, sec in ipairs(GetFFD(frame).statsSections) do
             table.insert(EllesmereUIDB.statSectionsOrder, sec.sectionTitle)
         end
     end
@@ -2387,7 +2387,7 @@ local function SkinCharacterSheet()
         local tertiaryRaw   = EllesmereUIDB and EllesmereUIDB.showTertiaryRaw
         local secondaryBoth = EllesmereUIDB and EllesmereUIDB.showSecondaryBoth
         local tertiaryBoth  = EllesmereUIDB and EllesmereUIDB.showTertiaryBoth
-        for _, statEntry in ipairs(frame._statsValues) do
+        for _, statEntry in ipairs(GetFFD(frame).statsValues) do
             local isSec = (statEntry.categoryKey == "SecondaryStats")
             local isTer = (statEntry.categoryKey == "Tertiary")
             local useBoth = statEntry.rawFunc and ((isSec and secondaryBoth) or (isTer and tertiaryBoth))
@@ -2508,7 +2508,7 @@ local function SkinCharacterSheet()
     }
 
     -- Store on frame for use in tab hooks
-    frame._themedSlots = itemSlots
+    GetFFD(frame).themedSlots = itemSlots
 
     -- Create custom buttons for right side (Character, Titles, Equipment Manager)
     local buttonWidth = 64
@@ -2584,7 +2584,7 @@ local function SkinCharacterSheet()
     -- Expose a closure that re-highlights the Character top-button so
     -- ApplyTabVisibility can invoke it when the Blizzard bottom-tab swaps
     -- back to Character (Rep/Currency -> Character).
-    frame._reactivateCharTab = function()
+    GetFFD(frame).reactivateCharTab = function()
         if SetActiveTopButton and characterBtn then
             SetActiveTopButton(characterBtn)
         end
@@ -2597,7 +2597,7 @@ local function SkinCharacterSheet()
     titlesPanel:SetPoint("BOTTOMLEFT", statsPanel, "BOTTOMLEFT", 0, 0)
     titlesPanel:SetFrameLevel(50)
     titlesPanel:Hide()
-    frame._titlesPanel = titlesPanel  -- Store reference on frame
+    GetFFD(frame).titlesPanel = titlesPanel  -- Store reference on frame
 
     -- Titles panel background
     local titlesBg = titlesPanel:CreateTexture(nil, "BACKGROUND")
@@ -2842,7 +2842,7 @@ local function SkinCharacterSheet()
     RefreshTitlesList()
 
     -- Hook to refresh titles when shown
-    frame._titlesPanel:HookScript("OnShow", function()
+    GetFFD(frame).titlesPanel:HookScript("OnShow", function()
         titlesSearchBox:SetText("")
         RefreshTitlesList()
     end)
@@ -2852,8 +2852,8 @@ local function SkinCharacterSheet()
         SetActiveTopButton(characterBtn)
         if not statsPanel:IsShown() then
             statsPanel:SetShown(true)
-            if CharacterFrame._titlesPanel then CharacterFrame._titlesPanel:SetShown(false) end
-            if CharacterFrame._equipPanel  then CharacterFrame._equipPanel:SetShown(false)  end
+            if GetFFD(CharacterFrame).titlesPanel then GetFFD(CharacterFrame).titlesPanel:SetShown(false) end
+            if GetFFD(CharacterFrame).equipPanel  then GetFFD(CharacterFrame).equipPanel:SetShown(false)  end
             -- Deactivate equipment sidebar (hides flyout arrows).
             local sidebarTab = _G.PaperDollSidebarTab1
             if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
@@ -2862,10 +2862,10 @@ local function SkinCharacterSheet()
 
     -- Titles button to show titles
     CreateEUIButton("Titles", "Titles", function()
-        if not CharacterFrame._titlesPanel:IsShown() then
-            CharacterFrame._titlesPanel:SetShown(true)
+        if not GetFFD(CharacterFrame).titlesPanel:IsShown() then
+            GetFFD(CharacterFrame).titlesPanel:SetShown(true)
             statsPanel:SetShown(false)
-            if CharacterFrame._equipPanel then CharacterFrame._equipPanel:SetShown(false) end
+            if GetFFD(CharacterFrame).equipPanel then GetFFD(CharacterFrame).equipPanel:SetShown(false) end
             -- Deactivate equipment sidebar (hides flyout arrows).
             local sidebarTab = _G.PaperDollSidebarTab1
             if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
@@ -2879,7 +2879,7 @@ local function SkinCharacterSheet()
     equipPanel:SetPoint("BOTTOMLEFT", statsPanel, "BOTTOMLEFT", 0, 0)
     equipPanel:SetFrameLevel(50)
     equipPanel:Hide()
-    frame._equipPanel = equipPanel
+    GetFFD(frame).equipPanel = equipPanel
 
     -- Equipment panel background
     local equipBg = equipPanel:CreateTexture(nil, "BACKGROUND")
@@ -3364,7 +3364,7 @@ local function SkinCharacterSheet()
     -- Also re-detects which set is currently equipped so the accent
     -- highlight tracks gear swaps without a full tile rebuild.
     local function RefreshEquipSetColors()
-        if not (CharacterFrame and CharacterFrame:IsShown() and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown()) then
+        if not (CharacterFrame and CharacterFrame:IsShown() and GetFFD(CharacterFrame).equipPanel and GetFFD(CharacterFrame).equipPanel:IsShown()) then
             return
         end
         local EG_EQ = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
@@ -3417,7 +3417,7 @@ local function SkinCharacterSheet()
         C_Timer.After(0.01, function()
             _refreshPending = false
             if CharacterFrame and CharacterFrame:IsShown()
-               and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown() then
+               and GetFFD(CharacterFrame).equipPanel and GetFFD(CharacterFrame).equipPanel:IsShown() then
                 RefreshEquipmentSets()
             end
         end)
@@ -3459,10 +3459,10 @@ local function SkinCharacterSheet()
     -- per-slot flyout arrows appear. Our equipPanel overlays Blizzard's
     -- EquipmentManagerPane with our own gear-sets UI.
     CreateEUIButton("Equipment", "Equipment", function()
-        if not CharacterFrame._equipPanel:IsShown() then
-            CharacterFrame._equipPanel:SetShown(true)
+        if not GetFFD(CharacterFrame).equipPanel:IsShown() then
+            GetFFD(CharacterFrame).equipPanel:SetShown(true)
             statsPanel:SetShown(false)
-            if CharacterFrame._titlesPanel then CharacterFrame._titlesPanel:SetShown(false) end
+            if GetFFD(CharacterFrame).titlesPanel then GetFFD(CharacterFrame).titlesPanel:SetShown(false) end
             -- Activate Blizzard's equipment sidebar for flyout arrows.
             local sidebarTab = _G.PaperDollSidebarTab3
             if sidebarTab and sidebarTab.Click then
@@ -3518,14 +3518,14 @@ local function SkinCharacterSheet()
     else
         globalSocketContainer:Hide()
     end
-    frame._socketContainer = globalSocketContainer  -- Store reference on frame
+    GetFFD(frame).socketContainer = globalSocketContainer  -- Store reference on frame
 
     -- Create overlay frame for text labels (above model, transparent, no mouse input)
     local textOverlayFrame = CreateFrame("Frame", "EUI_CharSheet_TextOverlay", frame)
     textOverlayFrame:SetFrameLevel(5)  -- Higher than model (FrameLevel 2)
     textOverlayFrame:EnableMouse(false)
     textOverlayFrame:Show()
-    frame._textOverlayFrame = textOverlayFrame
+    GetFFD(frame).textOverlayFrame = textOverlayFrame
 
     -- Top-left eyeball toggle: temporarily hides all item slot text (item level,
     -- upgrade track, enchants) by alpha-ing the shared overlay. Session-only.
@@ -3544,8 +3544,8 @@ local function SkinCharacterSheet()
         eyeBtn:SetScript("OnClick", function()
             hidden = not hidden
             eyeTex:SetTexture(hidden and EYE_INVISIBLE or EYE_VISIBLE)
-            if frame._textOverlayFrame then
-                frame._textOverlayFrame:SetAlpha(hidden and 0 or 1)
+            if GetFFD(frame).textOverlayFrame then
+                GetFFD(frame).textOverlayFrame:SetAlpha(hidden and 0 or 1)
             end
         end)
         eyeBtn:SetScript("OnEnter", function(self)
@@ -3558,7 +3558,7 @@ local function SkinCharacterSheet()
             self:SetAlpha(0.4)
             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
         end)
-        frame._textEyeBtn = eyeBtn
+        GetFFD(frame).textEyeBtn = eyeBtn
     end
 
     for _, slotName in ipairs(itemSlots) do
@@ -3571,7 +3571,7 @@ local function SkinCharacterSheet()
 
         -- Create itemlevel labels
         local slot = _G[slotName]
-        if slot and not slot._itemLevelLabel and not skipLabels then
+        if slot and not GetFFD(slot).itemLevelLabel and not skipLabels then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
             local label = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             label:SetFont(fontPath, itemLevelSize, "")
@@ -3593,11 +3593,11 @@ local function SkinCharacterSheet()
                 label:SetPoint("CENTER", slot, "RIGHT", 15, 10)
             end
 
-            slot._itemLevelLabel = label
+            GetFFD(slot).itemLevelLabel = label
         end
 
         -- Create enchant labels
-        if slot and not slot._enchantLabel and not skipLabels then
+        if slot and not GetFFD(slot).enchantLabel and not skipLabels then
             local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
             local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             enchantLabel:SetFont(fontPath, enchantSize, "")
@@ -3630,12 +3630,12 @@ local function SkinCharacterSheet()
             hoverFrame:EnableMouse(true)
             hoverFrame:Hide()
 
-            slot._enchantLabel     = enchantLabel
-            slot._enchantHoverFrame = hoverFrame
+            GetFFD(slot).enchantLabel     = enchantLabel
+            GetFFD(slot).enchantHoverFrame = hoverFrame
         end
 
         -- Create upgrade track labels (positioned relative to itemlevel)
-        if slot and not slot._upgradeTrackLabel and slot._itemLevelLabel then
+        if slot and not GetFFD(slot).upgradeTrackLabel and GetFFD(slot).itemLevelLabel then
             local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
             local upgradeTrackLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, "")
@@ -3645,19 +3645,19 @@ local function SkinCharacterSheet()
             -- Position beside itemlevel label based on column
             if tContains(leftColumnSlots, slotName) then
                 -- Left column: upgradeTrack RIGHT of itemLevel
-                upgradeTrackLabel:SetPoint("LEFT", slot._itemLevelLabel, "RIGHT", 3, 0)
+                upgradeTrackLabel:SetPoint("LEFT", GetFFD(slot).itemLevelLabel, "RIGHT", 3, 0)
             elseif tContains(rightColumnSlots, slotName) then
                 -- Right column: upgradeTrack LEFT of itemLevel
-                upgradeTrackLabel:SetPoint("RIGHT", slot._itemLevelLabel, "LEFT", -3, 0)
+                upgradeTrackLabel:SetPoint("RIGHT", GetFFD(slot).itemLevelLabel, "LEFT", -3, 0)
             elseif slotName == "CharacterMainHandSlot" then
                 -- MainHand: upgradeTrack LEFT of itemLevel
-                upgradeTrackLabel:SetPoint("RIGHT", slot._itemLevelLabel, "LEFT", -3, 0)
+                upgradeTrackLabel:SetPoint("RIGHT", GetFFD(slot).itemLevelLabel, "LEFT", -3, 0)
             elseif slotName == "CharacterSecondaryHandSlot" then
                 -- OffHand: upgradeTrack RIGHT of itemLevel
-                upgradeTrackLabel:SetPoint("LEFT", slot._itemLevelLabel, "RIGHT", 3, 0)
+                upgradeTrackLabel:SetPoint("LEFT", GetFFD(slot).itemLevelLabel, "RIGHT", 3, 0)
             end
 
-            slot._upgradeTrackLabel = upgradeTrackLabel
+            GetFFD(slot).upgradeTrackLabel = upgradeTrackLabel
         end
     end
 
@@ -3974,8 +3974,8 @@ local function SkinCharacterSheet()
         -- un-clickable until the user clicks Currency to resync.
         if isCharacterTab then
             if statsPanel        then statsPanel:SetShown(true)          end
-            if frame._titlesPanel then frame._titlesPanel:SetShown(false) end
-            if frame._equipPanel  then frame._equipPanel:SetShown(false)  end
+            if GetFFD(frame).titlesPanel then GetFFD(frame).titlesPanel:SetShown(false) end
+            if GetFFD(frame).equipPanel  then GetFFD(frame).equipPanel:SetShown(false)  end
             if SetActiveTopButton and characterBtn then
                 SetActiveTopButton(characterBtn)
             end
@@ -3984,7 +3984,7 @@ local function SkinCharacterSheet()
 
     frame:HookScript("OnHide", function()
         globalSocketContainer:Hide()
-        if frame._scrollBar then frame._scrollBar:Hide() end
+        if GetFFD(frame).scrollBar then GetFFD(frame).scrollBar:Hide() end
     end)
 
 
@@ -4043,13 +4043,13 @@ local function SkinCharacterSheet()
         end
 
         -- Update itemlevel label with optional rarity color
-        if slot._itemLevelLabel then
+        if GetFFD(slot).itemLevelLabel then
             -- Check if itemlevel is enabled (default: true)
             local showItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.showItemLevel ~= false)
 
             if showItemLevel then
-                slot._itemLevelLabel:SetText(tostring(itemLevel) or "")
-                slot._itemLevelLabel:SetShown(isCharTab)
+                GetFFD(slot).itemLevelLabel:SetText(tostring(itemLevel) or "")
+                GetFFD(slot).itemLevelLabel:SetShown(isCharTab)
 
                 -- Color resolution order:
                 --   1. User custom color (if enabled)
@@ -4069,16 +4069,16 @@ local function SkinCharacterSheet()
                     displayColor = { r = 1, g = 1, b = 1 }
                 end
 
-                slot._itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
+                GetFFD(slot).itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
             else
-                slot._itemLevelLabel:Hide()
+                GetFFD(slot).itemLevelLabel:Hide()
             end
         end
 
         -- Enchant label: keep the inline atlas escapes (|A:...|a) so the
         -- quality icons still render, strip the readable text, and park the
         -- full original text behind a hover tooltip on an overlapping frame.
-        if slot._enchantLabel then
+        if GetFFD(slot).enchantLabel then
             local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.showEnchants ~= false)
             -- Only flag missing enchants for level 90+ characters: leveling
             -- gear churn means the red icon and pulse would constantly fire
@@ -4108,24 +4108,24 @@ local function SkinCharacterSheet()
             end
 
             if showEnchants and iconOnly and iconOnly ~= "" then
-                slot._enchantLabel:SetText(iconOnly)
-                slot._enchantLabel:SetShown(isCharTab)
+                GetFFD(slot).enchantLabel:SetText(iconOnly)
+                GetFFD(slot).enchantLabel:SetShown(isCharTab)
 
-                if slot._enchantHoverFrame then
-                    slot._enchantHoverFrame:SetShown(isCharTab)
-                    slot._enchantHoverFrame:SetScript("OnEnter", function(self)
+                if GetFFD(slot).enchantHoverFrame then
+                    GetFFD(slot).enchantHoverFrame:SetShown(isCharTab)
+                    GetFFD(slot).enchantHoverFrame:SetScript("OnEnter", function(self)
                         if not tooltipText or tooltipText == "" then return end
                         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                         GameTooltip:SetText(tooltipText, 1, 1, 1, 1, true)
                         GameTooltip:Show()
                     end)
-                    slot._enchantHoverFrame:SetScript("OnLeave", function()
+                    GetFFD(slot).enchantHoverFrame:SetScript("OnLeave", function()
                         GameTooltip:Hide()
                     end)
                 end
             else
-                slot._enchantLabel:Hide()
-                if slot._enchantHoverFrame then slot._enchantHoverFrame:Hide() end
+                GetFFD(slot).enchantLabel:Hide()
+                if GetFFD(slot).enchantHoverFrame then GetFFD(slot).enchantHoverFrame:Hide() end
             end
 
             -- Pulsing red border overlay for missing enchants. Driven by the
@@ -4136,13 +4136,13 @@ local function SkinCharacterSheet()
         end
 
         -- Update upgrade track label
-        if slot._upgradeTrackLabel then
+        if GetFFD(slot).upgradeTrackLabel then
             -- Check if upgradetrack is enabled (default: true)
             local showUpgradeTrack = (not EllesmereUIDB) or (EllesmereUIDB.showUpgradeTrack ~= false)
 
             if showUpgradeTrack then
-                slot._upgradeTrackLabel:SetText(upgradeTrackText or "")
-                slot._upgradeTrackLabel:SetShown(isCharTab)
+                GetFFD(slot).upgradeTrackLabel:SetText(upgradeTrackText or "")
+                GetFFD(slot).upgradeTrackLabel:SetShown(isCharTab)
 
                 -- Determine color to use
                 local displayColor
@@ -4154,9 +4154,9 @@ local function SkinCharacterSheet()
                     displayColor = upgradeTrackColor
                 end
 
-                slot._upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
+                GetFFD(slot).upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
             else
-                slot._upgradeTrackLabel:Hide()
+                GetFFD(slot).upgradeTrackLabel:Hide()
             end
         end
     end
@@ -4176,15 +4176,15 @@ local function SkinCharacterSheet()
         end
     end
 
-    if not frame._itemLevelMonitor then
-        frame._itemLevelMonitor = CreateFrame("Frame")
-        frame._itemLevelMonitor:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-        frame._itemLevelMonitor:RegisterEvent("UNIT_INVENTORY_CHANGED")
-        frame._itemLevelMonitor:RegisterEvent("SOCKET_INFO_UPDATE")
-        frame._itemLevelMonitor:RegisterEvent("ITEM_UPGRADE_MASTER_UPDATE")
+    if not GetFFD(frame).itemLevelMonitor then
+        GetFFD(frame).itemLevelMonitor = CreateFrame("Frame")
+        GetFFD(frame).itemLevelMonitor:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+        GetFFD(frame).itemLevelMonitor:RegisterEvent("UNIT_INVENTORY_CHANGED")
+        GetFFD(frame).itemLevelMonitor:RegisterEvent("SOCKET_INFO_UPDATE")
+        GetFFD(frame).itemLevelMonitor:RegisterEvent("ITEM_UPGRADE_MASTER_UPDATE")
         -- BAG_UPDATE_DELAYED removed: bag contents don't affect the
         -- displayed equipped-item info (ilvl / enchant / upgrade track).
-        frame._itemLevelMonitor:SetScript("OnEvent", function(_, event, unit)
+        GetFFD(frame).itemLevelMonitor:SetScript("OnEvent", function(_, event, unit)
             if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
             if not (frame and frame:IsShown()) then return end
             RefreshAllSlotLabels()
@@ -4256,7 +4256,7 @@ local function SkinCharacterSlot(slotName, slotID)
     local slotBg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
     slotBg:SetAllPoints(slot)
     slotBg:SetColorTexture(0.5, 0.5, 0.5, 0.7)  -- Gray background with transparency
-    slot._slotBg = slotBg
+    GetFFD(slot).slotBg = slotBg
 
     -- Create custom border on the slot using PP.CreateBorder
     if EllesmereUI and EllesmereUI.PanelPP then
@@ -4341,7 +4341,7 @@ if EllesmereUI then
                     -- Update active set when equipment changes
                     -- UpdateActiveEquipmentSet()  -- API no longer available in current WoW version
                     -- RefreshEquipmentSets()  -- Function not in scope here
-                    if CharacterFrame and CharacterFrame:IsShown() and CharacterFrame._equipPanel and CharacterFrame._equipPanel:IsShown() then
+                    if CharacterFrame and CharacterFrame:IsShown() and GetFFD(CharacterFrame).equipPanel and GetFFD(CharacterFrame).equipPanel:IsShown() then
                         -- Equipment panel will be refreshed by the equipSetChangeFrame handler
                     end
                 else
@@ -4406,46 +4406,46 @@ function EllesmereUI._applyCharSheetTextSizes()
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
         if slot then
-            if slot._itemLevelLabel then
+            if GetFFD(slot).itemLevelLabel then
                 local flags = ""
                 if itemLevelOutline then
                     flags = "OUTLINE"
                 end
-                slot._itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
+                GetFFD(slot).itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
                 -- Apply shadow effect if enabled
                 if itemLevelShadow then
-                    slot._itemLevelLabel:SetShadowColor(0, 0, 0, 1)
-                    slot._itemLevelLabel:SetShadowOffset(1, -1)
+                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 1)
+                    GetFFD(slot).itemLevelLabel:SetShadowOffset(1, -1)
                 else
-                    slot._itemLevelLabel:SetShadowColor(0, 0, 0, 0)
+                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 0)
                 end
             end
-            if slot._upgradeTrackLabel then
+            if GetFFD(slot).upgradeTrackLabel then
                 local flags = ""
                 if upgradeTrackOutline then
                     flags = "OUTLINE"
                 end
-                slot._upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
+                GetFFD(slot).upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
                 -- Apply shadow effect if enabled
                 if upgradeTrackShadow then
-                    slot._upgradeTrackLabel:SetShadowColor(0, 0, 0, 1)
-                    slot._upgradeTrackLabel:SetShadowOffset(1, -1)
+                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 1)
+                    GetFFD(slot).upgradeTrackLabel:SetShadowOffset(1, -1)
                 else
-                    slot._upgradeTrackLabel:SetShadowColor(0, 0, 0, 0)
+                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 0)
                 end
             end
-            if slot._enchantLabel then
+            if GetFFD(slot).enchantLabel then
                 local flags = ""
                 if enchantOutline then
                     flags = "OUTLINE"
                 end
-                slot._enchantLabel:SetFont(fontPath, enchantSize, flags)
+                GetFFD(slot).enchantLabel:SetFont(fontPath, enchantSize, flags)
                 -- Apply shadow effect if enabled
                 if enchantShadow then
-                    slot._enchantLabel:SetShadowColor(0, 0, 0, 1)
-                    slot._enchantLabel:SetShadowOffset(1, -1)
+                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 1)
+                    GetFFD(slot).enchantLabel:SetShadowOffset(1, -1)
                 else
-                    slot._enchantLabel:SetShadowColor(0, 0, 0, 0)
+                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 0)
                 end
             end
         end
@@ -4460,19 +4460,19 @@ function EllesmereUI._applyCharSheetItemColors()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._itemLevelLabel then
+        if slot and GetFFD(slot).itemLevelLabel then
             local itemLink = GetInventoryItemLink("player", slot:GetID())
             if itemLink then
                 local _, _, quality = GetItemInfo(itemLink)
                 -- Use rarity color by default, unless explicitly disabled
                 if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and quality then
                     local r, g, b = GetItemQualityColor(quality)
-                    slot._itemLevelLabel:SetTextColor(r, g, b, 0.9)
+                    GetFFD(slot).itemLevelLabel:SetTextColor(r, g, b, 0.9)
                 else
-                    slot._itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
+                    GetFFD(slot).itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
                 end
             else
-                slot._itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
+                GetFFD(slot).itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
             end
         end
     end
@@ -4481,7 +4481,7 @@ end
 -- Function to refresh category colors when changed in options
 function EllesmereUI._refreshCharacterSheetColors()
     local charFrame = CharacterFrame
-    if not charFrame or not charFrame._statsSections then return end
+    if not charFrame or not GetFFD(charFrame).statsSections then return end
 
     -- Default category colors
     local DEFAULT_CATEGORY_COLORS = {
@@ -4508,7 +4508,7 @@ function EllesmereUI._refreshCharacterSheetColors()
     -- Update each section's colors. Uses the persisted colorKey (the DB
     -- key) rather than the display title so mismatches like "Secondary"
     -- vs "Secondary Stats" resolve correctly.
-    for _, sectionData in ipairs(charFrame._statsSections) do
+    for _, sectionData in ipairs(GetFFD(charFrame).statsSections) do
         local key = sectionData.colorKey or sectionData.sectionTitle
         local newColor = GetCategoryColor(key)
 
@@ -4543,11 +4543,11 @@ function EllesmereUI._refreshUpgradeTrackVisibility()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._upgradeTrackLabel then
+        if slot and GetFFD(slot).upgradeTrackLabel then
             if showUpgradeTrack then
-                slot._upgradeTrackLabel:Show()
+                GetFFD(slot).upgradeTrackLabel:Show()
             else
-                slot._upgradeTrackLabel:Hide()
+                GetFFD(slot).upgradeTrackLabel:Hide()
             end
         end
     end
@@ -4561,11 +4561,11 @@ function EllesmereUI._refreshEnchantsVisibility()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._enchantLabel then
+        if slot and GetFFD(slot).enchantLabel then
             if showEnchants then
-                slot._enchantLabel:Show()
+                GetFFD(slot).enchantLabel:Show()
             else
-                slot._enchantLabel:Hide()
+                GetFFD(slot).enchantLabel:Hide()
             end
         end
     end
@@ -4577,7 +4577,7 @@ function EllesmereUI._refreshEnchantsColors()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._enchantLabel then
+        if slot and GetFFD(slot).enchantLabel then
             -- Determine color to use
             local displayColor
             if EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor and EllesmereUIDB.charSheetEnchantColor then
@@ -4588,7 +4588,7 @@ function EllesmereUI._refreshEnchantsColors()
                 displayColor = { r = 1, g = 1, b = 1 }
             end
 
-            slot._enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
+            GetFFD(slot).enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
         end
     end
 end
@@ -4601,11 +4601,11 @@ function EllesmereUI._refreshItemLevelVisibility()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._itemLevelLabel then
+        if slot and GetFFD(slot).itemLevelLabel then
             if showItemLevel then
-                slot._itemLevelLabel:Show()
+                GetFFD(slot).itemLevelLabel:Show()
             else
-                slot._itemLevelLabel:Hide()
+                GetFFD(slot).itemLevelLabel:Hide()
             end
         end
     end
@@ -4617,7 +4617,7 @@ function EllesmereUI._refreshItemLevelColors()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._itemLevelLabel then
+        if slot and GetFFD(slot).itemLevelLabel then
             -- Determine color to use
             local displayColor
             if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
@@ -4639,7 +4639,7 @@ function EllesmereUI._refreshItemLevelColors()
                 end
             end
 
-            slot._itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
+            GetFFD(slot).itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
         end
     end
 end
@@ -4650,7 +4650,7 @@ function EllesmereUI._refreshUpgradeTrackColors()
 
     for _, slotName in ipairs(itemSlots) do
         local slot = _G[slotName]
-        if slot and slot._upgradeTrackLabel then
+        if slot and GetFFD(slot).upgradeTrackLabel then
             local itemLink = GetInventoryItemLink("player", slot:GetID())
             if itemLink then
                 -- Upgrade track color via C_Item.GetItemUpgradeInfo (no tooltip).
@@ -4664,7 +4664,7 @@ function EllesmereUI._refreshUpgradeTrackColors()
                     displayColor = upgradeTrackColor
                 end
 
-                slot._upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
+                GetFFD(slot).upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
             end
         end
     end

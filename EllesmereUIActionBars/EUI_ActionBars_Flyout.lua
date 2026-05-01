@@ -13,6 +13,7 @@ local SHAPE_ICON_EXPAND_OFFSETS = ns.SHAPE_ICON_EXPAND_OFFSETS
 local SHAPE_INSETS             = ns.SHAPE_INSETS
 local ResolveBorderThickness   = ns.ResolveBorderThickness
 local EAB                      = ns.EAB
+local EFD                      = ns.EFD
 
 -------------------------------------------------------------------------------
 --  SkinBlizzardFlyoutButton
@@ -20,8 +21,9 @@ local EAB                      = ns.EAB
 -------------------------------------------------------------------------------
 local function SkinBlizzardFlyoutButton(btn, shape, zoom, brdOn, cr, cg, cb, ca, sbR, sbG, sbB, sbA, brdSz)
     -- Strip default Blizzard art (one-time)
-    if not btn._eabBlizzStripped then
-        btn._eabBlizzStripped = true
+    local fd = EFD(btn)
+    if not fd.blizzStripped then
+        fd.blizzStripped = true
         local nt = btn.NormalTexture or btn:GetNormalTexture()
         if nt then nt:SetAlpha(0) end
         if btn.IconMask and EllesmereUI and EllesmereUI._hiddenParent then
@@ -34,10 +36,10 @@ local function SkinBlizzardFlyoutButton(btn, shape, zoom, brdOn, cr, cg, cb, ca,
 
     if shape ~= "none" and shape ~= "cropped" and SHAPE_MASKS and SHAPE_MASKS[shape] then
         local maskTex = SHAPE_MASKS[shape]
-        if not btn._eabShapeMask then
-            btn._eabShapeMask = btn:CreateMaskTexture()
+        if not fd.shapeMask then
+            fd.shapeMask = btn:CreateMaskTexture()
         end
-        local mask = btn._eabShapeMask
+        local mask = fd.shapeMask
         mask:SetTexture(maskTex, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         mask:ClearAllPoints()
         if brdSz and brdSz >= 1 then
@@ -88,10 +90,10 @@ local function SkinBlizzardFlyoutButton(btn, shape, zoom, brdOn, cr, cg, cb, ca,
         end
 
         -- Shape border
-        if not btn._eabShapeBorder then
-            btn._eabShapeBorder = btn:CreateTexture(nil, "OVERLAY", nil, 6)
+        if not fd.shapeBorder then
+            fd.shapeBorder = btn:CreateTexture(nil, "OVERLAY", nil, 6)
         end
-        local borderTex = btn._eabShapeBorder
+        local borderTex = fd.shapeBorder
         pcall(borderTex.RemoveMaskTexture, borderTex, mask)
         borderTex:ClearAllPoints()
         borderTex:SetAllPoints(btn)
@@ -103,20 +105,20 @@ local function SkinBlizzardFlyoutButton(btn, shape, zoom, brdOn, cr, cg, cb, ca,
             borderTex:Hide()
         end
 
-        if btn._eabBorders and EllesmereUI and EllesmereUI.PP then
+        if fd.borders and EllesmereUI and EllesmereUI.PP then
             EllesmereUI.PP.HideBorder(btn)
         end
     else
         -- Square / cropped / none
-        if btn._eabShapeMask then
-            pcall(icon.RemoveMaskTexture, icon, btn._eabShapeMask)
+        if fd.shapeMask then
+            pcall(icon.RemoveMaskTexture, icon, fd.shapeMask)
             if btn.cooldown and not btn.cooldown:IsForbidden() then
-                pcall(btn.cooldown.RemoveMaskTexture, btn.cooldown, btn._eabShapeMask)
+                pcall(btn.cooldown.RemoveMaskTexture, btn.cooldown, fd.shapeMask)
                 pcall(btn.cooldown.SetSwipeTexture, btn.cooldown, "")
             end
-            btn._eabShapeMask:Hide()
+            fd.shapeMask:Hide()
         end
-        if btn._eabShapeBorder then btn._eabShapeBorder:Hide() end
+        if fd.shapeBorder then fd.shapeBorder:Hide() end
 
         icon:ClearAllPoints()
         icon:SetAllPoints(btn)
@@ -132,13 +134,13 @@ local function SkinBlizzardFlyoutButton(btn, shape, zoom, brdOn, cr, cg, cb, ca,
         local PP = EllesmereUI and EllesmereUI.PP
         if PP then
             if brdOn then
-                if not btn._eabBorders then
+                if not fd.borders then
                     PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", -1)
-                    btn._eabBorders = btn._ppBorders
+                    fd.borders = PP.GetBorders(btn)
                 end
                 PP.UpdateBorder(btn, brdSz, cr, cg, cb, ca)
                 PP.ShowBorder(btn)
-            elseif btn._eabBorders then
+            elseif fd.borders then
                 PP.HideBorder(btn)
             end
         end
@@ -154,7 +156,7 @@ local function OnBlizzardFlyoutShow(flyout)
     local caller = flyout:GetParent()
     if not caller then return end
 
-    local barKey = caller._eabBarKey
+    local barKey = EFD(caller).barKey
     if not barKey then return end
 
     local prof = EAB and EAB.db and EAB.db.profile
@@ -209,8 +211,8 @@ end
 local function InstallBlizzFlyoutHook()
     local sf = _G.SpellFlyout
     if not sf then return false end
-    if sf._eabHooked then return true end
-    sf._eabHooked = true
+    if EFD(sf).hooked then return true end
+    EFD(sf).hooked = true
     sf:HookScript("OnShow", OnBlizzardFlyoutShow)
     return true
 end

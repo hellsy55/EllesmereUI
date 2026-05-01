@@ -299,7 +299,7 @@ initFrame:SetScript("OnEvent", function(self)
                          if EllesmereUI._updateStatCategoryVisibility then
                              EllesmereUI._updateStatCategoryVisibility()
                          end
-                         local sf = CharacterFrame and CharacterFrame._scrollFrame
+                         local sf = CharacterFrame and EllesmereUI._GetFFD and EllesmereUI._GetFFD(CharacterFrame).scrollFrame
                          if sf then sf:SetVerticalScroll(0) end
                          EllesmereUI:RefreshPage()
                      end }
@@ -325,20 +325,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.themedCharacterSheet = v
-                  if not v then
-                      EllesmereUIDB.showMythicRating = false
-                      EllesmereUIDB.showItemLevel = false
-                      EllesmereUIDB.showUpgradeTrack = false
-                      EllesmereUIDB.showEnchants = false
-                      EllesmereUIDB.showGems = false
-                      EllesmereUIDB.showStatCategory_Attributes = false
-                      EllesmereUIDB.showStatCategory_Attack = false
-                      EllesmereUIDB.showStatCategory_Crests = false
-                      EllesmereUIDB.showStatCategory_SecondaryStats = false
-                      EllesmereUIDB.showStatCategory_Tertiary = false
-                      EllesmereUIDB.showStatCategory_Defense = false
-                      EllesmereUIDB.showStatCategory_PvP = false
-                  end
+                  -- Individual feature toggles retain their values.
+                  -- The disabled overlay handles the visual disable state.
                   if EllesmereUI.ShowConfirmPopup then
                       EllesmereUI:ShowConfirmPopup({
                           title       = "Reload Required",

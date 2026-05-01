@@ -493,8 +493,13 @@ local function ApplyTrackerVisibility()
     end
 end
 
-local SuppressBlizzardMPlus   = ApplyTrackerVisibility
-local UnsuppressBlizzardMPlus = function() end  -- nothing to do; the hook only fires inside M+
+local function SuppressBlizzardMPlus()
+    ApplyTrackerVisibility()
+    if _G._EQT_SetSuppressed then _G._EQT_SetSuppressed("MythicPlus", true) end
+end
+local function UnsuppressBlizzardMPlus()
+    if _G._EQT_SetSuppressed then _G._EQT_SetSuppressed("MythicPlus", false) end
+end
 
 -- Run lifecycle
 local function StartRun()

@@ -670,7 +670,7 @@ local function SkinInspectSheet()
     textOverlayFrame:EnableMouse(false)
     textOverlayFrame:SetAlpha(1)  -- Always visible by default
     textOverlayFrame:Show()
-    frame._textOverlayFrame = textOverlayFrame
+    GetFFD(frame).textOverlayFrame = textOverlayFrame
 
     -- Position slots and style them
     if InspectPaperDollItemsFrame then
@@ -797,13 +797,13 @@ local function SkinInspectSheet()
             end
 
             -- Add active highlight
-            if not tab._activeHL then
+            if not GetFFD(tab).activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
                 activeHL:SetColorTexture(1, 1, 1, 0.05)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
-                tab._activeHL = activeHL
+                GetFFD(tab).activeHL = activeHL
             end
 
             -- Replace Blizzard label with custom font
@@ -812,13 +812,13 @@ local function SkinInspectSheet()
             if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
             tab:SetPushedTextOffset(0, 0)
 
-            if not tab._label then
+            if not GetFFD(tab).label then
                 local label = tab:CreateFontString(nil, "OVERLAY")
                 label:SetFont(fontPath, 9, nil)
                 label:SetPoint("CENTER", tab, "CENTER", 0, 0)
                 label:SetJustifyH("CENTER")
                 label:SetText(labelText)
-                tab._label = label
+                GetFFD(tab).label = label
 
                 hooksecurefunc(tab, "SetText", function(_, newText)
                     if newText and label then label:SetText(newText) end
@@ -826,7 +826,7 @@ local function SkinInspectSheet()
             end
 
             -- Add underline for active tab
-            if not tab._underline then
+            if not GetFFD(tab).underline then
                 local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
                 if EllesmereUI and EllesmereUI.PanelPP and EllesmereUI.PanelPP.DisablePixelSnap then
                     EllesmereUI.PanelPP.DisablePixelSnap(underline)
@@ -841,7 +841,7 @@ local function SkinInspectSheet()
                     EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
                 end
                 underline:Hide()
-                tab._underline = underline
+                GetFFD(tab).underline = underline
             end
         end
     end
@@ -858,6 +858,14 @@ local function SkinInspectSheet()
             GetFFD(frame).modelBgGlow:SetShown(isTab1)
         end
 
+        -- Show Talents/Transmog buttons only on Tab 1 (Character sheet)
+        if GetFFD(frame).talentsBtn then
+            GetFFD(frame).talentsBtn:SetShown(isTab1)
+        end
+        if GetFFD(frame).transmogBtn then
+            GetFFD(frame).transmogBtn:SetShown(isTab1)
+        end
+
         -- Update label visibility with ApplyTabVisibility - only show on Tab 1
         ApplyTabVisibility(isTab1)
 
@@ -869,14 +877,14 @@ local function SkinInspectSheet()
                 if GetFFD(tab).bg then
                     GetFFD(tab).bg:Show()
                 end
-                if tab._label then
-                    tab._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
+                if GetFFD(tab).label then
+                    GetFFD(tab).label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
                 end
-                if tab._underline then
-                    tab._underline:SetShown(isActive)
+                if GetFFD(tab).underline then
+                    GetFFD(tab).underline:SetShown(isActive)
                 end
-                if tab._activeHL then
-                    tab._activeHL:SetShown(isActive)
+                if GetFFD(tab).activeHL then
+                    GetFFD(tab).activeHL:SetShown(isActive)
                 end
             end
         end
@@ -1022,7 +1030,7 @@ if EllesmereUI then
     local function RefreshSlotStyles()
         if not InspectPaperDollItemsFrame then return end
         if not InspectFrame then return end
-        local textOverlayFrame = InspectFrame._textOverlayFrame
+        local textOverlayFrame = GetFFD(InspectFrame).textOverlayFrame
         if not textOverlayFrame then return end
 
         for slotName, gridPos in pairs(slotGridMap) do

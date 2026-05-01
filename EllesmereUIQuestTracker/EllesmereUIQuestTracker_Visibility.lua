@@ -47,23 +47,52 @@ local function Expand()
     otf:SetParent(UIParent)
 end
 
--- Suppression API (cross-module hide). Routed through UpdateVisibility so
--- suppression composes with the user's chosen visibility mode / options.
-function EQT.ApplySuppression(on)
-    _eqtSuppressed = on and true or false
-    if EQT.UpdateVisibility then EQT.UpdateVisibility() end
-end
-
 -------------------------------------------------------------------------------
--- Auto-hide: hard-coded to raids and arenas only. Uses the same hook-on-Show
--- pattern as the M+ timer (EllesmereUIMythicTimer.lua line ~502) since that
--- pattern is proven taint-free: we never SetScript, never recurse into
--- children, never touch mouse state, just :Hide() the tracker top-level
--- whenever Blizzard tries to :Show() it in a raid or arena.
+-- Auto-hide: hard-coded to raids and arenas only.
 -------------------------------------------------------------------------------
 local function ShouldAutoHide()
     local _, instanceType = GetInstanceInfo()
     return instanceType == "raid" or instanceType == "arena"
+end
+
+-- Suspend/resume all QT event frames in raids/arenas/M+. Prevents quest
+-- events (QUEST_LOG_UPDATE etc.) from doing skin/resize/classify work when
+-- the tracker is hidden anyway. Re-registers on zone-out / unsuppress.
+local _eventsSuspended = false
+local function SuspendQTEvents()
+    if _eventsSuspended then return end
+    _eventsSuspended = true
+    if EQT._eventFrames then
+        for _, f in ipairs(EQT._eventFrames) do
+            f:UnregisterAllEvents()
+        end
+    end
+end
+local function ResumeQTEvents()
+    if not _eventsSuspended then return end
+    _eventsSuspended = false
+    if EQT._eventFrames and EQT._eventRegistrations then
+        for i, f in ipairs(EQT._eventFrames) do
+            local evts = EQT._eventRegistrations[i]
+            if evts then
+                for _, ev in ipairs(evts) do
+                    f:RegisterEvent(ev)
+                end
+            end
+        end
+    end
+end
+
+-- Suppression API (cross-module hide). Routed through UpdateVisibility so
+-- suppression composes with the user's chosen visibility mode / options.
+function EQT.ApplySuppression(on)
+    _eqtSuppressed = on and true or false
+    if _eqtSuppressed then
+        SuspendQTEvents()
+    else
+        ResumeQTEvents()
+    end
+    if EQT.UpdateVisibility then EQT.UpdateVisibility() end
 end
 
 local _showHookInstalled = false
@@ -75,6 +104,7 @@ local function InstallShowHook()
     -- Raid/arena auto-hide. Runs before other Show hooks (hooksecurefunc
     -- stacks); the M+ timer installs its own similar hook for M+.
     hooksecurefunc(otf, "Show", function(self)
+        if _eqtSuppressed then return end
         if ShouldAutoHide() then self:Hide() end
     end)
     -- BG follows the tracker's actual IsShown() state, regardless of who
@@ -84,9 +114,7 @@ local function InstallShowHook()
     -- be hidden again -- we re-check IsShown().
     otf:HookScript("OnHide", function() if _bgFrame then _bgFrame:Hide() end end)
     otf:HookScript("OnShow", function()
-        -- Defer one frame so Blizzard's post-show layout pass populates
-        -- usedBlocks before we re-measure; otherwise an empty tracker
-        -- shown on login would snap our BG to the fallback strip.
+        if _eqtSuppressed then return end
         if EQT.ResizeBGToContent then EQT.ResizeBGToContent() end
         if EQT.QueueResize then EQT.QueueResize() end
     end)
@@ -99,12 +127,16 @@ local function UpdateVisibility()
 
     -- Raid/arena auto-hide takes precedence and uses a hard Hide(); the
     -- Show-hook re-hides if Blizzard tries to bring it back.
+    -- Also suspend all QT event frames so quest events don't burn CPU
+    -- processing skin/resize/classify work for a hidden tracker.
     if ShouldAutoHide() then
+        SuspendQTEvents()
         otf:Hide()
         if _bgFrame then _bgFrame:Hide() end
         return
     end
 
+    ResumeQTEvents()
     if not otf:IsShown() then otf:Show() end
 
     -- User visibility: enabled flag, visibility mode, and the visHide* opts.
@@ -370,10 +402,13 @@ function EQT.InitVisibility()
         SyncBGToTracker()
     end)
 
-    -- Register with the shared visibility dispatcher so combat/group/target/
-    -- mount/shapeshift transitions re-run UpdateVisibility.
+    -- Register with the shared visibility dispatcher for combat/mount
+    -- visibility modes. Bails immediately when suppressed (M+/raid).
     if EllesmereUI.RegisterVisibilityUpdater then
-        EllesmereUI.RegisterVisibilityUpdater(UpdateVisibility)
+        EllesmereUI.RegisterVisibilityUpdater(function()
+            if _eqtSuppressed then return end
+            UpdateVisibility()
+        end)
     end
 
     -- Mouseover mode: poll both the tracker and our BG frame as one target

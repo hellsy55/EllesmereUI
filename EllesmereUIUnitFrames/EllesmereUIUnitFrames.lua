@@ -1826,7 +1826,7 @@ local function UpdateBordersForScale(frame, unit)
                 PP.Width(castbarBg, snappedFrameW)
             end
             -- Re-snap border textures
-            if castbarBg._ppBorders then
+            if PP.GetBorders(castbarBg) then
                 PP.SetBorderSize(castbarBg, 1)
                 frame.Castbar:ClearAllPoints()
                 PP.Point(frame.Castbar, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
@@ -2945,7 +2945,7 @@ end
 
 
 local function FrameBorderEnter(self)
-    if self.unifiedBorder and self.unifiedBorder._ppBorders then
+    if self.unifiedBorder and PP.GetBorders(self.unifiedBorder) then
         local unit = self.unit or "player"
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
@@ -2955,7 +2955,7 @@ local function FrameBorderEnter(self)
     end
 end
 local function FrameBorderLeave(self)
-    if self.unifiedBorder and self.unifiedBorder._ppBorders then
+    if self.unifiedBorder and PP.GetBorders(self.unifiedBorder) then
         local unit = self.unit or "player"
         local isMini = (unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$")))
         local settings = isMini and GetMiniDonorSettings() or GetSettingsForUnit(unit)
@@ -6687,6 +6687,9 @@ function InitializeFrames()
         ROGUE       = "RogueComboPointBarFrame",
         WARLOCK     = "WarlockPowerFrame",
     }
+    -- External state for Blizzard class power bars (never write onto
+    -- Blizzard frames -- see CLAUDE.md _FFD rule).
+    local _blizzCPState = {}  -- { origParent, hooked }
     local savedClassPowerBar = nil
     if classPowerStyle == "blizzard" then
         local _, classFile = UnitClass("player")
@@ -6694,8 +6697,8 @@ function InitializeFrames()
         local cpFrame = frameName and _G[frameName]
         if cpFrame then
             savedClassPowerBar = cpFrame
-            savedClassPowerBar._origParent = cpFrame:GetParent()
-            savedClassPowerBar:SetParent(UIParent)
+            _blizzCPState.origParent = cpFrame:GetParent()
+            cpFrame:SetParent(UIParent)
         end
     end
 
@@ -7118,9 +7121,32 @@ function InitializeFrames()
         bar:Show()
     end
 
+    -- Hook Blizzard class power bar so form changes / spec changes can't
+    -- steal it back. Hooks SetParent to re-assert our parent, and Show/Hide
+    -- to keep it visible. Only active while classPowerStyle == "blizzard".
+    local _blizzCPHooked = false
+    local _blizzCPActive = false  -- true while we own the bar
+    local function HookBlizzardClassPower(cpFrame)
+        if _blizzCPHooked then return end
+        _blizzCPHooked = true
+        hooksecurefunc(cpFrame, "SetParent", function(self, newParent)
+            if not _blizzCPActive then return end
+            if newParent ~= UIParent then
+                self:SetParent(UIParent)
+                PositionClassPowerBar(self)
+            end
+        end)
+        hooksecurefunc(cpFrame, "Hide", function(self)
+            if not _blizzCPActive then return end
+            if not InCombatLockdown() then self:Show() end
+        end)
+    end
+
     if classPowerStyle ~= "none" and frames.player then
         if classPowerStyle == "blizzard" then
             if savedClassPowerBar then
+                _blizzCPActive = true
+                HookBlizzardClassPower(savedClassPowerBar)
                 PositionClassPowerBar(savedClassPowerBar)
                 frames._classPowerBar = savedClassPowerBar
             end
@@ -7148,15 +7174,15 @@ function InitializeFrames()
         db.profile.player.classPowerStyle = style
 
         -- Clean up existing
+        _blizzCPActive = false
         if frames._customClassPower then
             DestroyCustomClassPower()
             frames._classPowerBar = nil
         elseif frames._classPowerBar then
             frames._classPowerBar:Hide()
             frames._classPowerBar:ClearAllPoints()
-            local origParent = frames._classPowerBar._origParent or PlayerFrame or UIParent
+            local origParent = _blizzCPState.origParent or PlayerFrame or UIParent
             frames._classPowerBar:SetParent(origParent)
-            frames._classPowerBar._origParent = nil
             frames._classPowerBar = nil
         end
 
@@ -7181,7 +7207,9 @@ function InitializeFrames()
             local frameName = BLIZZARD_CP_FRAMES[classFile]
             local cpFrame = frameName and _G[frameName]
             if cpFrame then
-                cpFrame._origParent = cpFrame:GetParent()
+                _blizzCPState.origParent = cpFrame:GetParent()
+                _blizzCPActive = true
+                HookBlizzardClassPower(cpFrame)
                 cpFrame:SetParent(UIParent)
                 frames._classPowerBar = cpFrame
             end

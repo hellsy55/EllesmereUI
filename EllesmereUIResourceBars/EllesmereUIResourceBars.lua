@@ -706,7 +706,7 @@ local function MakePixelBorder(parent, r, g, b, a, size)
 
     return {
         _frame = bf,
-        edges = bf._ppBorders,
+        edges = PP.GetBorders(bf),
         SetColor = function(self, cr, cg, cb, ca)
             PP.SetBorderColor(bf, cr, cg, cb, ca or 1)
         end,

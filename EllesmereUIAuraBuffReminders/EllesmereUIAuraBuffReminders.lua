@@ -404,6 +404,26 @@ local function _unitHasBuffFromPlayer(u, spellIDs)
     end
 
     if inCombat then return false end  -- sourceUnit secret in combat, caller uses snapshot
+    -- Fast path: direct lookup for whitelisted IDs (1 API call per ID instead
+    -- of scanning every aura on the unit via GetAuraDataByIndex).
+    local needScan = false
+    for id in pairs(idLookup) do
+        if NON_SECRET_SPELL_IDS[id] then
+            local aura = C_UnitAuras.GetUnitAuraBySpellID(u, id)
+            if aura and not isSecret(aura) then
+                local src = aura.sourceUnit
+                if src and not isSecret(src) then
+                    if UnitIsUnit(src, "player") then return true end
+                else
+                    return true  -- sourceUnit unavailable OOC, assume ours
+                end
+            end
+        else
+            needScan = true
+        end
+    end
+    if not needScan then return false end
+    -- Fallback: full scan for non-whitelisted IDs only
     for i = 1, AURA_SCAN_LIMIT do
         local aura = C_UnitAuras.GetAuraDataByIndex(u, i, "HELPFUL")
         if not aura then break end
@@ -1337,7 +1357,7 @@ local function ApplyGlow(btn, glowType, cr, cg, cb, overrideSz)
     if glowType == 0 then return end
     local entry = GLOW_TYPES[glowType]; if not entry then return end
     if not btn._eabrGlowWrapper then
-        local w = CreateFrame("Frame", nil, btn); w:SetAllPoints(btn); w:SetFrameLevel(btn:GetFrameLevel()+1)
+        local w = CreateFrame("Frame", nil, btn); w:SetAllPoints(btn); w:SetFrameLevel(btn:GetFrameLevel()+4)
         btn._eabrGlowWrapper = w
     end
     local wrapper = btn._eabrGlowWrapper; local sz = overrideSz or btn:GetWidth() or ICON_SIZE
@@ -3072,7 +3092,7 @@ end
 mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     if e == "ENCOUNTER_START" then
         SnapshotPlayerAuras()
-        SnapshotOwnOnRaidBuffs()
+        if _isEvokerOwnOnRaid then SnapshotOwnOnRaidBuffs() end
         _encounterSnapshotTime = GetTime()
         -- Mark combat immediately: ENCOUNTER_START fires before
         -- InCombatLockdown() returns true, but aura APIs are already
@@ -3105,7 +3125,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         -- since the aura API is fully available pre-lockdown).
         if not _encounterSnapshotTime or (GetTime() - _encounterSnapshotTime) > 1 then
             SnapshotPlayerAuras()
-            SnapshotOwnOnRaidBuffs()
+            if _isEvokerOwnOnRaid then SnapshotOwnOnRaidBuffs() end
         end
         _encounterSnapshotTime = nil
         RequestRefresh()

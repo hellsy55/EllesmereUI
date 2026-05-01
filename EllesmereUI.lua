@@ -1226,9 +1226,14 @@ do
 
         -- Single native SetBackdrop call replaces 4 texture objects per border.
         -- BackdropTemplate renders the edge in C++ with one draw call.
-        local container = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-        container:SetAllPoints(frame)
-        container:SetFrameLevel(frame:GetFrameLevel() + 1)
+        -- Create a plain intermediary first (pure C-side, no mixin OnLoad)
+        -- so BackdropTemplate's OnLoad never runs on a Blizzard-parented frame.
+        -- This prevents taint propagation when frame is a Blizzard frame.
+        local intermediary = CreateFrame("Frame", nil, frame)
+        intermediary:SetAllPoints(frame)
+        intermediary:SetFrameLevel(frame:GetFrameLevel() + 1)
+        local container = CreateFrame("Frame", nil, intermediary, "BackdropTemplate")
+        container:SetAllPoints(intermediary)
 
         -- Guard: BackdropTemplateMixin.SetupTextureCoordinates does arithmetic
         -- on frame width/height. In tainted execution (nameplates, combat aura
@@ -1249,9 +1254,6 @@ do
         -- Store border data externally (avoids tainting secure frames)
         bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
         _ppBorderData[frame] = bd
-        frame._ppBorders = container
-        frame._ppBorderSize = borderSize
-        frame._ppBorderColor = bd.borderColor
 
         -- Initial snap (effective scale may not be final yet)
         SnapBorderTextures(container, frame, borderSize)
@@ -1273,13 +1275,17 @@ do
         return container
     end
 
+    function PP.GetBorders(frame)
+        local bd = _ppBorderData[frame]
+        return bd and bd.container
+    end
+
     function PP.SetBorderSize(frame, borderSize)
         local bd = _ppBorderData[frame]
         if not bd then return end
         borderSize = borderSize or 1
         SnapBorderTextures(bd.container, frame, borderSize)
         bd.borderSize = borderSize
-        frame._ppBorderSize = borderSize
     end
 
     function PP.SetBorderColor(frame, r, g, b, a)
@@ -1287,7 +1293,6 @@ do
         if not bd then return end
         a = a or 1
         bd.borderColor = { r, g, b, a }
-        frame._ppBorderColor = bd.borderColor
         bd.container._bdColor = bd.borderColor
         bd.container:SetBackdropBorderColor(r, g, b, a)
     end
@@ -1431,6 +1436,7 @@ do
 
     -- Panel borders delegate to the unified PP border system
     PanelPP.CreateBorder  = PP.CreateBorder
+    PanelPP.GetBorders    = PP.GetBorders
     PanelPP.SetBorderSize = PP.SetBorderSize
     PanelPP.SetBorderColor = PP.SetBorderColor
     PanelPP.UpdateBorder  = PP.UpdateBorder
@@ -7182,7 +7188,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.3.3"
+EllesmereUI.VERSION = "7.3.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -29,6 +29,7 @@ local function CFD(cf)
     if not d then d = {}; _cfd[cf] = d end
     return d
 end
+EllesmereUI._chatCFD = CFD
 
 local CHAT_DEFAULTS = {
     profile = {
@@ -284,8 +285,8 @@ function ECHAT.ApplyBorders()
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and CFD(cf).bg and CFD(cf).bg._ppBorders then
-            CFD(cf).bg._ppBorders:SetShown(not hide)
+        if cf and CFD(cf).bg and PP.GetBorders(CFD(cf).bg) then
+            PP.GetBorders(CFD(cf).bg):SetShown(not hide)
         end
         if cf and CFD(cf).inputDiv then
             CFD(cf).inputDiv:SetShown(not hide)
@@ -294,8 +295,8 @@ function ECHAT.ApplyBorders()
     local cf1 = _G.ChatFrame1
     if cf1 and CFD(cf1).sidebar then
         local sbBgHidden = cfg.hideSidebarBg
-        if CFD(cf1).sidebar._ppBorders then
-            CFD(cf1).sidebar._ppBorders:SetShown(not hide and not sbBgHidden)
+        if PP.GetBorders(CFD(cf1).sidebar) then
+            PP.GetBorders(CFD(cf1).sidebar):SetShown(not hide and not sbBgHidden)
         end
         if CFD(cf1).sidebarDiv then
             CFD(cf1).sidebarDiv:SetShown(not hide)
@@ -518,8 +519,8 @@ function ECHAT.ApplySidebarBackground()
     if sbBg and sbBg.SetShown then
         sbBg:SetShown(show)
     end
-    if sb._ppBorders then
-        sb._ppBorders:SetShown(show)
+    if PP.GetBorders(sb) then
+        PP.GetBorders(sb):SetShown(show)
     end
 end
 
@@ -1116,62 +1117,57 @@ local function _BuildAlphaCache()
     _alphaFrames = {}
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
-        if cf and CFD(cf).bg then
+        local cfd = cf and CFD(cf)
+        if cf and cfd.bg then
             _alphaFrames[#_alphaFrames + 1] = {
                 cf = cf,
-                tab = _G["ChatFrame" .. i .. "Tab"],
                 eb = _G["ChatFrame" .. i .. "EditBox"],
+                bg = cfd.bg,
+                scrollTrack = cfd.scrollTrack,
+                resizeGrip = cfd.resizeGrip,
             }
         end
     end
+    -- Cache sidebar + its frame + mode for the fade loop
+    local cf1 = _G.ChatFrame1
+    _alphaFrames._sidebar = cf1 and CFD(cf1).sidebar
+    local cfg = ECHAT.DB()
+    _alphaFrames._sidebarMode = cfg and cfg.sidebarVisibility or "always"
 end
 
 
 local function _ApplyAlpha(alpha)
     _chatAlphaCurrent = alpha
     if not _alphaFrames then _BuildAlphaCache() end
+    -- Dock manager: once, outside the loop
+    if _euiDockStyled and _G.GeneralDockManager then
+        _G.GeneralDockManager:SetAlpha(alpha)
+    end
     for i = 1, #_alphaFrames do
         local af = _alphaFrames[i]
         local cf = af.cf
-        -- Set dock manager alpha (it holds all the reskinned Blizzard tabs)
-        if _G.GeneralDockManager and _euiDockStyled then
-            _G.GeneralDockManager:SetAlpha(alpha)
-        end
-        if cf:IsShown() or CFD(cf).bg:IsShown() then
-            -- bg is a child of cf, so it inherits cf's alpha automatically.
-            -- Don't set bg alpha explicitly or it compounds (0.5 * 0.5 = 0.25).
+        if cf:IsShown() or af.bg:IsShown() then
             cf:SetAlpha(alpha)
             local eb = af.eb
             if eb then
-                if cf.isTemporary then
+                if cf.isTemporary or not eb:HasFocus() then
                     eb:SetAlpha(alpha)
-                else
-                    local hasFocus = eb:HasFocus()
-                    if issecretvalue and issecretvalue(hasFocus) then hasFocus = false end
-                    if not hasFocus then
-                        eb:SetAlpha(alpha)
-                    end
                 end
             end
-            if CFD(cf).scrollTrack then CFD(cf).scrollTrack:SetAlpha(alpha) end
-            if CFD(cf).resizeGrip then CFD(cf).resizeGrip:SetAlpha(alpha * 0.2) end
+            if af.resizeGrip then af.resizeGrip:SetAlpha(alpha * 0.2) end
         end
     end
-    -- Fade active-tab underline (parented to UIParent, not dock manager)
-    for i = 1, 20 do
-        local tab = _G["ChatFrame" .. i .. "Tab"]
-        if tab then
-            local ul = CFD(tab).underline
-            if ul and ul:IsShown() then ul:SetAlpha(alpha) end
-        end
-    end
-    local cf1 = _G.ChatFrame1
-    if cf1 and CFD(cf1).sidebar then
-        local sbMode = ECHAT.DB().sidebarVisibility or "always"
+    -- Active underline: single tracked ref instead of 20-tab loop
+    local ul = ns._activeUnderline
+    if ul and ul:IsShown() then ul:SetAlpha(alpha) end
+    -- Sidebar (mode cached at build time)
+    local sb = _alphaFrames._sidebar
+    if sb then
+        local sbMode = _alphaFrames._sidebarMode
         if sbMode == "mouseover" then
-            CFD(cf1).sidebar:SetAlpha(min(alpha, _sidebarFadeAlpha))
+            sb:SetAlpha(min(alpha, _sidebarFadeAlpha))
         elseif sbMode ~= "never" then
-            CFD(cf1).sidebar:SetAlpha(alpha)
+            sb:SetAlpha(alpha)
         end
     end
 end
@@ -1182,9 +1178,11 @@ local function _SetAlphaTarget(target)
     _chatFadeFrame:Show()
 end
 
+local _fadeApplyAccum = 0
 _chatFadeFrame:SetScript("OnUpdate", function(self, dt)
     if _chatAlphaCurrent == _chatAlphaTarget then
         self:Hide()
+        _fadeApplyAccum = 0
         return
     end
     local fadingIn = _chatAlphaTarget > _chatAlphaCurrent
@@ -1196,6 +1194,12 @@ _chatFadeFrame:SetScript("OnUpdate", function(self, dt)
     else
         _chatAlphaCurrent = max(_chatAlphaTarget, _chatAlphaCurrent - speed)
     end
+    -- Throttle widget updates to ~30Hz. The alpha step accumulates every
+    -- frame but we only push it to widgets every 33ms. Fade is still
+    -- smooth; saves 75% of SetAlpha calls at 120fps.
+    _fadeApplyAccum = _fadeApplyAccum + dt
+    if _fadeApplyAccum < 0.016 then return end
+    _fadeApplyAccum = 0
     _ApplyAlpha(_chatAlphaCurrent)
     if _chatAlphaCurrent == _chatAlphaTarget then
         self:Hide()
@@ -1477,20 +1481,29 @@ local URL_PATTERNS = {
     "^(www%.[-%w_%%]+%.%a%a+)",
 }
 
+-- Cheap literal pre-check: skip all regex if message has no URL-like
+-- substring. 99% of chat messages hit this fast path and return false.
 local function ContainsURL(text)
     if not text then return false end
-    for _, p in ipairs(URL_PATTERNS) do
-        if text:match(p) then return true end
+    return text:find("://", 1, true) or text:find("www.", 1, true)
+end
+
+-- Pre-compute substitution string once (color hex is constant)
+local _urlSubstitution
+local function _GetUrlSubstitution()
+    if not _urlSubstitution then
+        local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
+        local hex = string.format("|cff%02x%02x%02x", eg.r * 255, eg.g * 255, eg.b * 255)
+        _urlSubstitution = hex .. "|H" .. addonName .. "url:%1|h[%1]|h|r"
     end
-    return false
+    return _urlSubstitution
 end
 
 local function WrapURLs(text)
     if not text then return text end
+    local sub = _GetUrlSubstitution()
     for _, p in ipairs(URL_PATTERNS) do
-        local eg = EUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-        local hex = string.format("|cff%02x%02x%02x", eg.r * 255, eg.g * 255, eg.b * 255)
-        text = text:gsub(p, hex .. "|H" .. addonName .. "url:%1|h[%1]|h|r")
+        text = text:gsub(p, sub)
     end
     return text
 end
@@ -1683,8 +1696,11 @@ local function UpdateTabStyle(tab)
         CFD(tab).bg:SetColorTexture(BG_R, BG_G, BG_B, isActive and BG_A or (BG_A * 0.67))
     end
 
-    -- Accent underline
-    if CFD(tab).underline then CFD(tab).underline:SetShown(isActive) end
+    -- Accent underline -- track the active one for fast ApplyAlpha
+    if CFD(tab).underline then
+        CFD(tab).underline:SetShown(isActive)
+        if isActive then ns._activeUnderline = CFD(tab).underline end
+    end
 
 end
 
@@ -1747,13 +1763,13 @@ local function SkinTab(cf)
 
     -- Hook SetAlpha: enforce our alpha after Blizzard sets it.
     -- Second arg acts as skip flag to prevent recursion.
+    -- Cache chat frame reference to avoid string concat per SetAlpha call
+    local _tabCF = _G["ChatFrame" .. tab:GetID()]
     hooksecurefunc(tab, "SetAlpha", function(self, alpha, skip)
         if skip then return end
-        local cf2 = _G["ChatFrame" .. self:GetID()]
-        if not cf2 then return end
+        if not _tabCF then return end
         local sel = _G.GeneralDockManager and _G.GeneralDockManager.selected
-        local isActive = (not cf2.isDocked or cf2 == sel)
-        -- Don't override alpha while the tab is flashing for a new message
+        local isActive = (not _tabCF.isDocked or _tabCF == sel)
         if self.alerting then return end
         self:SetAlpha(isActive and 1 or 0.5, true)
     end)
@@ -2293,6 +2309,7 @@ local function SkinChatFrame(cf)
         local function FinishResize(self)
             self._dragging = false
             _cfResizing = false
+            self:SetScript("OnUpdate", nil)  -- stop per-frame polling
             CFD(cf).resizeTarget = nil
             self:SetAlpha(0.2)
             -- Save size and update position to reflect new dimensions
@@ -2330,13 +2347,14 @@ local function SkinChatFrame(cf)
             self._anchorY = py or 0
             self._dragging = true
             _cfResizing = true
+            -- Start OnUpdate only while dragging (zero cost when idle)
+            grip:SetScript("OnUpdate", grip._onUpdate)
         end)
         grip:SetScript("OnMouseUp", function(self)
             if not self._dragging then return end
             FinishResize(self)
         end)
-        grip:SetScript("OnUpdate", function(self)
-            if not self._dragging then return end
+        grip._onUpdate = function(self)
             if not IsMouseButtonDown("LeftButton") then
                 FinishResize(self)
                 return
@@ -2360,7 +2378,7 @@ local function SkinChatFrame(cf)
             cf:ClearAllPoints()
             cf:SetPoint(self._anchorPt, UIParent, self._anchorRelPt, tgtX, tgtY)
             _cfIgnoreSetPoint = false
-        end)
+        end
         CFD(cf).resizeGrip = grip
     end
 
@@ -2955,6 +2973,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function StartIdleFade()
+
             if _idleFadeActive then return end
             _idleFadeActive = true
             ECHAT.SetIdleFadeAlpha(GetIdleFadeAlpha())
@@ -2972,6 +2991,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         function ECHAT.ResetIdleTimer()
+
             if not IsIdleApplicable() then return end
             CancelIdleFade()
             local cfg = ECHAT.DB()

@@ -3985,7 +3985,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local removed = sd.removedSpells
             for _, icon in ipairs(liveIcons) do
-                local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
+                local _sid = ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID
                 if _sid and _sid > 0 then
                     _sid = NormalizeToBase(_sid)
                     if not seen[_sid] and not (removed and removed[_sid]) then
@@ -7346,7 +7346,7 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(slot._icon, "BOTTOMRIGHT", slot, "BOTTOMRIGHT", -bSz, bSz)
                 slot._icon:Show()
 
-                if slot._ppBorders then
+                if PP.GetBorders(slot) then
                     PP.SetBorderColor(slot, bR, bG, bB, 1)
                     PP.SetBorderSize(slot, bSz)
                 end
@@ -7453,7 +7453,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Size(addBtn, iconSize, iconH); addBtn:ClearAllPoints()
             PP.Point(addBtn, "TOPLEFT", self, "TOPLEFT", addPx, addPy)
-            if addBtn._ppBorders then PP.SetBorderSize(addBtn, 1) end
+            if PP.GetBorders(addBtn) then PP.SetBorderSize(addBtn, 1) end
             local ar, ag, ab = EllesmereUI.GetAccentColor()
 
             addLbl:SetTextColor(ar, ag, ab, 0.6)

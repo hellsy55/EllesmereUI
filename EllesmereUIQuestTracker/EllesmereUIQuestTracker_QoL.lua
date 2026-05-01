@@ -53,6 +53,11 @@ local function InstallAutoQuests()
     autoFrame:RegisterEvent("QUEST_COMPLETE")
     autoFrame:RegisterEvent("QUEST_AUTOCOMPLETE")
     autoFrame:RegisterEvent("GOSSIP_SHOW")
+    if not EQT._eventFrames then EQT._eventFrames = {} end
+    if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
+    local aidx = #EQT._eventFrames + 1
+    EQT._eventFrames[aidx] = autoFrame
+    EQT._eventRegistrations[aidx] = {"QUEST_DETAIL", "QUEST_COMPLETE", "QUEST_AUTOCOMPLETE", "GOSSIP_SHOW"}
     autoFrame:SetScript("OnEvent", function(_, event, ...)
         if Cfg("enabled") == false then return end
 
@@ -244,6 +249,11 @@ local function InstallQuestItemHotkey()
     qItemFrame:RegisterEvent("QUEST_TURNED_IN")
     qItemFrame:RegisterEvent("UPDATE_BINDINGS")
     qItemFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    if not EQT._eventFrames then EQT._eventFrames = {} end
+    if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
+    local idx = #EQT._eventFrames + 1
+    EQT._eventFrames[idx] = qItemFrame
+    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "UPDATE_BINDINGS", "PLAYER_REGEN_ENABLED"}
     qItemFrame:SetScript("OnEvent", function(_, event)
         if InCombatLockdown() then return end
         if event == "PLAYER_REGEN_ENABLED" then

@@ -262,7 +262,8 @@ local function UpdateOverlayVisuals()
                     local style = entry.glowStyle or 1
                     -- Force Custom Shape Glow for custom-shaped icons
                     local glowParent = overlay:GetParent()
-                    local shapeName = glowParent and glowParent._shapeName
+                    local gpfc = glowParent and ns._ecmeFC and ns._ecmeFC[glowParent]
+                    local shapeName = gpfc and gpfc.shapeName
                     if shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none" then
                         style = 2
                     end

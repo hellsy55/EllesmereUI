@@ -238,7 +238,7 @@ local function SkinRaidTabButton(btn)
             a1, a2 = 1, 0.8
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
     end)
     btn:HookScript("OnLeave", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
@@ -247,7 +247,7 @@ local function SkinRaidTabButton(btn)
             a1, a2 = 0.7, 0.5
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
     end)
 end
 
@@ -581,10 +581,10 @@ local function UpdateRaidTabButtonAccent()
             GetFFD(btn).accent = useAccent
             if useAccent then
                 if text then text:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
-                if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
+                if PP.GetBorders(btn) then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
             else
                 if text then text:SetTextColor(1, 1, 1, 0.5) end
-                if btn._ppBorders then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
+                if PP.GetBorders(btn) then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
             end
         end
     end
@@ -1230,7 +1230,7 @@ local function SkinBottomButton(btn)
             a1, a2 = 1, 0.8
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
     end)
     btn:HookScript("OnLeave", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
@@ -1239,7 +1239,7 @@ local function SkinBottomButton(btn)
             a1, a2 = 0.7, 0.5
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if btn._ppBorders then PP.SetBorderColor(btn, r, g, b, a2) end
+        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
     end)
 end
 
@@ -1271,10 +1271,10 @@ local function UpdateBottomButtonAccent()
         GetFFD(btn).accent = useAccent
         if useAccent then
             if labelFS then labelFS:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
-            if btn._ppBorders then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
+            if PP.GetBorders(btn) then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
         else
             if labelFS then labelFS:SetTextColor(1, 1, 1, 0.5) end
-            if btn._ppBorders then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
+            if PP.GetBorders(btn) then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
         end
     end
 
@@ -1736,13 +1736,14 @@ local function SkinFriendsFrame()
             end
 
             -- Active highlight
-            if not tab._activeHL then
+            local tfd = GetFFD(tab)
+            if not tfd.activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
                 activeHL:SetColorTexture(1, 1, 1, 0.05)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
-                tab._activeHL = activeHL
+                tfd.activeHL = activeHL
             end
 
             -- Hide Blizzard's label (shifts on select) and use our own
@@ -1755,7 +1756,7 @@ local function SkinFriendsFrame()
             label:SetPoint("CENTER", tab, "CENTER", 0, 0)
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
-            tab._label = label
+            tfd.label = label
             -- Sync our label when Blizzard updates the text (e.g. Quick Join count).
             -- Blizzard calls tab:SetText() on the button, not the FontString directly.
             hooksecurefunc(tab, "SetText", function(_, newText)
@@ -1763,7 +1764,7 @@ local function SkinFriendsFrame()
             end)
 
             -- Accent underline (1px pixel-perfect)
-            if not tab._underline then
+            if not tfd.underline then
                 local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
                 PP.DisablePixelSnap(underline)
                 underline:SetHeight(PP.mult or 1)
@@ -1773,7 +1774,7 @@ local function SkinFriendsFrame()
                 underline:SetColorTexture(ar, ag, ab, 1)
                 EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
                 underline:Hide()
-                tab._underline = underline
+                tfd.underline = underline
             end
 
             customTabs[i] = tab
@@ -1790,19 +1791,20 @@ local function SkinFriendsFrame()
         local useAccent = fp and fp.accentColors ~= false
         for i, ct in ipairs(customTabs) do
             local isActive = (i == selected)
-            if ct._label then ct._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5) end
-            if ct._underline then
-                ct._underline:SetShown(isActive)
+            local ctd = GetFFD(ct)
+            if ctd.label then ctd.label:SetTextColor(1, 1, 1, isActive and 1 or 0.5) end
+            if ctd.underline then
+                ctd.underline:SetShown(isActive)
                 if isActive then
                     if useAccent then
                         local ar, ag, ab = EG.r, EG.g, EG.b
-                        ct._underline:SetColorTexture(ar, ag, ab, 1)
+                        ctd.underline:SetColorTexture(ar, ag, ab, 1)
                     else
-                        ct._underline:SetColorTexture(1, 1, 1, 0.6)
+                        ctd.underline:SetColorTexture(1, 1, 1, 0.6)
                     end
                 end
             end
-            if ct._activeHL then ct._activeHL:SetShown(isActive) end
+            if ctd.activeHL then ctd.activeHL:SetShown(isActive) end
         end
         -- Show/hide bottom buttons based on whether Contacts tab is active
         local addBtn = _G.FriendsFrameAddFriendButton
@@ -3695,7 +3697,7 @@ local function SkinFriendsFrame()
                     a1, a2 = 1, 0.8
                 end
                 acceptLabel:SetTextColor(r, g, b, a1)
-                if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, r, g, b, a2) end
+                if PP.GetBorders(acceptBtn) then PP.SetBorderColor(acceptBtn, r, g, b, a2) end
             end)
             acceptBtn:SetScript("OnLeave", function()
                 local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
@@ -3704,7 +3706,7 @@ local function SkinFriendsFrame()
                     a1, a2 = 0.7, 0.5
                 end
                 acceptLabel:SetTextColor(r, g, b, a1)
-                if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, r, g, b, a2) end
+                if PP.GetBorders(acceptBtn) then PP.SetBorderColor(acceptBtn, r, g, b, a2) end
             end)
             acceptBtn:SetScript("OnClick", function()
                 local invID = GetFFD(btn).inviteID
@@ -3732,10 +3734,10 @@ local function SkinFriendsFrame()
             GetFFD(acceptBtn).accent = useAccent
             if useAccent then
                 if acceptLabel then acceptLabel:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
-                if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, EG.r, EG.g, EG.b, 0.5) end
+                if PP.GetBorders(acceptBtn) then PP.SetBorderColor(acceptBtn, EG.r, EG.g, EG.b, 0.5) end
             else
                 if acceptLabel then acceptLabel:SetTextColor(1, 1, 1, 0.5) end
-                if acceptBtn._ppBorders then PP.SetBorderColor(acceptBtn, 1, 1, 1, 0.4) end
+                if PP.GetBorders(acceptBtn) then PP.SetBorderColor(acceptBtn, 1, 1, 1, 0.4) end
             end
         end
 
@@ -4324,12 +4326,15 @@ local function SkinFriendsFrame()
                 zoneLabel:SetPoint("LEFT", col2, "LEFT", 5, 0)
                 zoneLabel:SetText("Zone")
                 -- Wire click to sort by zone
-                -- Wire col2 to sort by zone using col1's OnClick mixin method
+                -- Wire col2 to sort by zone using col1's OnClick mixin method.
+                -- Store sortType in FFD to avoid tainting the Blizzard frame.
                 local col1ref = _G["WhoFrameColumnHeader1"]
                 if col1ref and col1ref.OnClick then
-                    col2.sortType = "zone"
+                    GetFFD(col2).sortType = "zone"
                     col2:SetScript("OnClick", function(self)
+                        self.sortType = GetFFD(self).sortType
                         col1ref.OnClick(self)
+                        self.sortType = nil
                     end)
                 end
             end
@@ -4572,14 +4577,14 @@ local function SkinFriendsFrame()
             -- Show Offline: 50% white, 75% on hover, no accent
             local offText = GetFFD(offBtn).label
             if offText then offText:SetTextColor(1, 1, 1, 0.3) end
-            if offBtn._ppBorders then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
+            if PP.GetBorders(offBtn) then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
             offBtn:HookScript("OnEnter", function()
                 if offText then offText:SetTextColor(1, 1, 1, 0.5) end
-                if offBtn._ppBorders then PP.SetBorderColor(offBtn, 1, 1, 1, 0.5) end
+                if PP.GetBorders(offBtn) then PP.SetBorderColor(offBtn, 1, 1, 1, 0.5) end
             end)
             offBtn:HookScript("OnLeave", function()
                 if offText then offText:SetTextColor(1, 1, 1, 0.3) end
-                if offBtn._ppBorders then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
+                if PP.GetBorders(offBtn) then PP.SetBorderColor(offBtn, 1, 1, 1, 0.3) end
             end)
 
             GetFFD(frame).offlineBtn = offBtn
@@ -4589,14 +4594,14 @@ local function SkinFriendsFrame()
         -- Add Friend: 50% white, 75% on hover, no accent
         local addText = addBtn:GetFontString()
         if addText then addText:SetTextColor(1, 1, 1, 0.3) end
-        if addBtn._ppBorders then PP.SetBorderColor(addBtn, 1, 1, 1, 0.3) end
+        if PP.GetBorders(addBtn) then PP.SetBorderColor(addBtn, 1, 1, 1, 0.3) end
         addBtn:HookScript("OnEnter", function()
             if addText then addText:SetTextColor(1, 1, 1, 0.5) end
-            if addBtn._ppBorders then PP.SetBorderColor(addBtn, 1, 1, 1, 0.5) end
+            if PP.GetBorders(addBtn) then PP.SetBorderColor(addBtn, 1, 1, 1, 0.5) end
         end)
         addBtn:HookScript("OnLeave", function()
             if addText then addText:SetTextColor(1, 1, 1, 0.3) end
-            if addBtn._ppBorders then PP.SetBorderColor(addBtn, 1, 1, 1, 0.3) end
+            if PP.GetBorders(addBtn) then PP.SetBorderColor(addBtn, 1, 1, 1, 0.3) end
         end)
 
         LayoutFriendBtns()
@@ -4633,14 +4638,15 @@ local function SkinFriendsFrame()
 
             -- 1px pixel-perfect divider between tabs
             if i > 1 then
-                if not ct._div then
-                    ct._div = ct:CreateTexture(nil, "OVERLAY", nil, 7)
-                    PP.DisablePixelSnap(ct._div)
+                local ctd = GetFFD(ct)
+                if not ctd.div then
+                    ctd.div = ct:CreateTexture(nil, "OVERLAY", nil, 7)
+                    PP.DisablePixelSnap(ctd.div)
                 end
-                ct._div:SetColorTexture(1, 1, 1, 0.08)
-                ct._div:SetSize(onePx, snappedTabH)
-                ct._div:ClearAllPoints()
-                ct._div:SetPoint("TOPLEFT", ct, "TOPLEFT", 0, 0)
+                ctd.div:SetColorTexture(1, 1, 1, 0.08)
+                ctd.div:SetSize(onePx, snappedTabH)
+                ctd.div:ClearAllPoints()
+                ctd.div:SetPoint("TOPLEFT", ct, "TOPLEFT", 0, 0)
             end
             lastCT = ct
         end

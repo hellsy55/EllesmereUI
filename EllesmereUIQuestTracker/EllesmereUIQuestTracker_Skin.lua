@@ -21,6 +21,10 @@
 local _, ns = ...
 local EQT = ns.EQT
 
+-- External weak-keyed table for block skin state (never write custom keys
+-- onto Blizzard pool frames -- causes taint).
+local _skinned = setmetatable({}, { __mode = "k" })
+
 -- Color helpers. All four user-facing text colors come from DB so they
 -- follow the Colors section in the options page.
 local function GetTitleRGB()
@@ -471,7 +475,6 @@ do
     f:RegisterEvent("PLAYER_ENTERING_WORLD")
     local _pending = false
     f:SetScript("OnEvent", function()
-        -- Debounced: quest events can burst-fire. Refresh once per 250ms.
         if _pending then return end
         _pending = true
         C_Timer.After(0.25, function()
@@ -479,6 +482,11 @@ do
             _refreshClassifyCache()
         end)
     end)
+    if not EQT._eventFrames then EQT._eventFrames = {} end
+    if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
+    local idx = #EQT._eventFrames + 1
+    EQT._eventFrames[idx] = f
+    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "PLAYER_ENTERING_WORLD"}
 end
 
 -- Hides Blizzard's built-in quest type icon(s) on a block (without
@@ -580,6 +588,11 @@ do
             end)
         end
     end)
+    if not EQT._eventFrames then EQT._eventFrames = {} end
+    if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
+    local idx = #EQT._eventFrames + 1
+    EQT._eventFrames[idx] = sf
+    EQT._eventRegistrations[idx] = {"SUPER_TRACKING_CHANGED", "PLAYER_ENTERING_WORLD"}
 end
 
 -- One-time layout setup for the title fontstring: font, anchors, width.
@@ -621,6 +634,13 @@ function ApplyFocusHighlight(block)  -- global to file
         r, g, b = GetTitleRGB()
     end
     fs:SetTextColor(r, g, b)
+end
+
+-- Skip all skinning work when the tracker is force-hidden (M+, raid, arena).
+-- Uses the cached suppression flag only (set by ApplySuppression /
+-- UpdateVisibility). No per-call API queries.
+local function ShouldSkipSkin()
+    return EQT.IsSuppressed and EQT.IsSuppressed()
 end
 
 -- Hook block line-add APIs once per block instance. Catches every line
@@ -670,6 +690,7 @@ local function HookBlockLineMethods(block)
     -- After Blizzard runs, retrieve the line via GetExistingLine and style.
     if block.AddObjective and block.GetExistingLine then
         hooksecurefunc(block, "AddObjective", function(self, objectiveKey)
+            if ShouldSkipSkin() then return end
             local line = self:GetExistingLine(objectiveKey)
             if line then StyleObjectiveLine(line) end
         end)
@@ -679,6 +700,7 @@ local function HookBlockLineMethods(block)
     -- for writing text into an arbitrary FontString owned by the block.
     if block.SetStringText then
         hooksecurefunc(block, "SetStringText", function(_, fontString)
+            if ShouldSkipSkin() then return end
             if fontString and fontString.GetObjectType
                and fontString:GetObjectType() == "FontString" then
                 StyleFontString(fontString)
@@ -749,20 +771,11 @@ local function SuppressPOI(block)
     pb:SetParent(_poiHiddenParent)
     pb:EnableMouse(false)
     hooksecurefunc(pb, "SetParent", function(self, parent)
+        if ShouldSkipSkin() then return end
         if parent ~= _poiHiddenParent then
             self:SetParent(_poiHiddenParent)
         end
     end)
-end
-
--- Skip all skinning work when the tracker is force-hidden (M+, raid, arena).
-local function ShouldSkipSkin()
-    if EQT.IsSuppressed and EQT.IsSuppressed() then return true end
-    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-       and C_ChallengeMode.IsChallengeModeActive() then return true end
-    local _, instanceType = GetInstanceInfo()
-    if instanceType == "raid" or instanceType == "arena" then return true end
-    return false
 end
 
 local function SkinBlock(block)
@@ -776,7 +789,7 @@ local function SkinBlock(block)
     -- Skip blocks already fully skinned. The heavy work (strip textures,
     -- style fontstrings, walk children) only needs to happen once per block.
     -- Quest type icons and focus highlight are cheap and re-applied below.
-    if block._eqtSkinned then
+    if _skinned[block] then
         ApplyQuestTypeIcon(block)
         ApplyFocusHighlight(block)
         return
@@ -838,7 +851,7 @@ local function SkinBlock(block)
     -- Strip ornamental textures + style objective fontstrings on child frames.
     ProcessBlockChildren(block, 0)
 
-    block._eqtSkinned = true
+    _skinned[block] = true
 end
 
 
@@ -907,6 +920,7 @@ local function HookTracker(tracker)
         if tracker.Header then SkinHeader(tracker.Header) end
         if tracker.Update then
             hooksecurefunc(tracker, "Update", function(self)
+                if ShouldSkipSkin() then return end
                 if self.Header then EnsureAccentDivider(self.Header) end
                 if EQT.QueueResize then EQT.QueueResize() end
             end)
@@ -918,6 +932,7 @@ local function HookTracker(tracker)
         SkinHeader(tracker.Header)
         if tracker.Header.SetCollapsed then
             hooksecurefunc(tracker.Header, "SetCollapsed", function(self)
+                if ShouldSkipSkin() then return end
                 SkinHeader(self)
             end)
         end
@@ -925,10 +940,11 @@ local function HookTracker(tracker)
 
     if tracker.AddBlock then
         hooksecurefunc(tracker, "AddBlock", function(_, block)
+            if ShouldSkipSkin() then return end
             -- Clear the stamp on every AddBlock. Blizzard's pool reuse
             -- re-adds decorative textures during Init, so a recycled block
             -- needs a full re-skin even if it was skinned before.
-            if block then block._eqtSkinned = nil end
+            if block then _skinned[block] = nil end
             SkinBlock(block)
         end)
     end
@@ -961,6 +977,7 @@ local function HookTracker(tracker)
     -- Update hook so we catch cases where Update fires mid-transition.
     if tracker.ContentsFrame and tracker.ContentsFrame.HookScript then
         tracker.ContentsFrame:HookScript("OnSizeChanged", function()
+            if ShouldSkipSkin() then return end
             if EQT.QueueResize then EQT.QueueResize() end
         end)
     end
@@ -1060,6 +1077,11 @@ function EQT.InitSkin()
     evt:SetScript("OnEvent", function()
         if EQT.QueueResize then EQT.QueueResize() end
     end)
+    if not EQT._eventFrames then EQT._eventFrames = {} end
+    if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
+    local idx = #EQT._eventFrames + 1
+    EQT._eventFrames[idx] = evt
+    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED"}
 
     -- Top-level ObjectiveTrackerFrame:Update fires whenever any section
     -- changes (added, removed, resized). Route through QueueResize so
@@ -1067,11 +1089,13 @@ function EQT.InitSkin()
     local otf = _G.ObjectiveTrackerFrame
     if otf and otf.Update then
         hooksecurefunc(otf, "Update", function()
+            if ShouldSkipSkin() then return end
             if EQT.QueueResize then EQT.QueueResize() end
         end)
     end
     if _G.ObjectiveTracker_Update then
         hooksecurefunc("ObjectiveTracker_Update", function()
+            if ShouldSkipSkin() then return end
             if EQT.QueueResize then EQT.QueueResize() end
         end)
     end
@@ -1083,7 +1107,7 @@ function EQT.InitSkin()
                 for _, byTemplate in pairs(t.usedBlocks) do
                     if type(byTemplate) == "table" then
                         for _, block in pairs(byTemplate) do
-                            if type(block) == "table" then block._eqtSkinned = nil end
+                            if type(block) == "table" then _skinned[block] = nil end
                         end
                     end
                 end

@@ -261,15 +261,11 @@ initFrame:SetScript("OnEvent", function(self)
         specChangeFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
         specChangeFrame:SetScript("OnEvent", function(self, event)
             if event == "ACTIVE_TALENT_GROUP_CHANGED" and _barsHeaderBuilder then
-                -- Only rebuild if ActionBars is the active module and panel is open
-                if not EllesmereUI:IsShown() or EllesmereUI:GetActiveModule() ~= "EllesmereUIActionBars" then
-                    activePreview = nil
-                    return
-                end
-                -- Force a full rebuild of the preview and header on spec change
                 activePreview = nil
-                EllesmereUI:SetContentHeader(_barsHeaderBuilder)
-                UpdatePreviewAndResize()
+                if EllesmereUI:IsShown() and EllesmereUI:GetActiveModule() == "EllesmereUIActionBars" then
+                    EllesmereUI:SetContentHeader(_barsHeaderBuilder)
+                    UpdatePreviewAndResize()
+                end
             end
         end)
     end
@@ -747,8 +743,9 @@ initFrame:SetScript("OnEvent", function(self)
                     bf:SetPoint("TOPLEFT", self, "TOPLEFT", xOff, yOff)
                     bf:Show()
 
-                    -- Icon texture from real button
-                    local realBtn = _G[info.buttonPrefix .. i]
+                    -- Icon texture from our EABButton (not the hidden Blizzard button)
+                    local eabBtns = ns.barButtons and ns.barButtons[info.key]
+                    local realBtn = eabBtns and eabBtns[i] or _G[info.buttonPrefix .. i]
                     local hasAction = realBtn and ns.ButtonHasAction(realBtn, info.buttonPrefix)
                     local iconTex = hasAction and realBtn.icon and realBtn.icon:GetTexture()
 
@@ -2435,7 +2432,10 @@ initFrame:SetScript("OnEvent", function(self)
                       SUpdatePreview()
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Desaturate on Cooldown",
+                  tooltip="Desaturates (grays out) action button icons while the ability is on cooldown. GCD-only cooldowns are excluded.",
+                  getValue=function() return EAB.db.profile.desaturateOnCooldown or false end,
+                  setValue=function(v) EAB.db.profile.desaturateOnCooldown = v end });  y = y - h
             -- Sync icon: Bar Background settings (left region)
             do
                 local rgn = bgAlwaysRow._leftRegion
@@ -4215,22 +4215,8 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return p.hideCastingAnimations or castAnimForced() end,
               setValue=function(v)
                   p.hideCastingAnimations = v
-                  -- Live-apply: register/unregister casting events
-                  if ActionBarActionEventsFrame then
-                      if v then
-                          ActionBarActionEventsFrame:UnregisterEvent("UNIT_SPELLCAST_START")
-                          ActionBarActionEventsFrame:UnregisterEvent("UNIT_SPELLCAST_STOP")
-                          ActionBarActionEventsFrame:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-                          ActionBarActionEventsFrame:UnregisterEvent("UNIT_SPELLCAST_FAILED")
-                          ActionBarActionEventsFrame:UnregisterEvent("UNIT_SPELLCAST_INTERRUPTED")
-                      else
-                          ActionBarActionEventsFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
-                          ActionBarActionEventsFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
-                          ActionBarActionEventsFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-                          ActionBarActionEventsFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
-                          ActionBarActionEventsFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
-                      end
-                  end
+                  -- ActionBarActionEventsFrame is killed at file-load time.
+                  -- Casting animation visibility is handled by ApplySettings.
               end },
             { type="label", text="" });  y = y - h
 

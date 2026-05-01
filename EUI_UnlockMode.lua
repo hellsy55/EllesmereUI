@@ -439,6 +439,7 @@ local flashlightEnabled = false  -- cursor flashlight toggle
 local hoverBarEnabled = false   -- show-bar-on-hover toggle
 local darkOverlaysEnabled = true  -- dark overlay backgrounds on movers
 local coordsEnabled = false     -- show coordinates for all elements at all times
+local _blizzOwnedOverlays = {}  -- info overlays for Blizzard-controlled elements
 local unlockTipFrame           -- one-time "how to use" tip frame
 local pendingAfterClose        -- callback to run after DoClose completes
 local selectedMover            -- currently selected mover frame (for arrow key nudging)
@@ -3647,6 +3648,206 @@ local function SortMoverFrameLevels()
         entry.mover._baseLevel = lvl
         entry.mover._raisedLevel = lvl + #sorted + 5
         entry.mover:SetFrameLevel(lvl)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Blizzard-Owned Info Overlays
+--  Visual overlays shown during unlock mode on elements whose position is
+--  controlled by Blizzard Edit Mode (chat, micro menu, bags, encounter bar).
+--  Not draggable. Hover shows accent-colored "Move via Blizz Edit Mode"
+--  text with the same animation as regular mover links. Clicking the text
+--  closes unlock mode and opens Blizzard's Edit Mode.
+-------------------------------------------------------------------------------
+local BLIZZ_OWNED_OVERLAY_DEFS = {
+    { label = "Chat", frame = function() return ChatFrame1 end,
+      anchor = function(ov, cf)
+          -- Span sidebar + bg + tabs for the full chat region.
+          -- Detect sidebar side by comparing screen positions.
+          local cfd = EllesmereUI._chatCFD and EllesmereUI._chatCFD(cf)
+          local bg = cfd and cfd.bg
+          local sidebar = cfd and cfd.sidebar
+          if not bg then
+              ov:SetAllPoints(cf)
+              return
+          end
+          local sidebarRight = false
+          if sidebar and bg and sidebar.GetLeft and bg.GetLeft then
+              local sl = sidebar:GetLeft() or 0
+              local bl = bg:GetLeft() or 0
+              sidebarRight = sl > bl
+          end
+          ov:ClearAllPoints()
+          if sidebarRight then
+              ov:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
+              ov:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
+          else
+              ov:SetPoint("TOPLEFT", sidebar or bg, "TOPLEFT", 0, 0)
+              ov:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
+          end
+          -- Extend top to cover tabs (they sit above the bg)
+          local tab1 = _G.ChatFrame1Tab
+          if tab1 and tab1:IsShown() then
+              local topAnchor = sidebarRight and bg or (sidebar or bg)
+              ov:SetPoint("TOPLEFT", topAnchor, "TOPLEFT", 0, tab1:GetHeight() + 2)
+          end
+      end },
+    { label = "Micro Menu",    frame = function() return _G.MicroMenuContainer end },
+    { label = "Bags",          frame = function() return _G.BagsBar end },
+    { label = "Encounter Bar", frame = function() return _G.PlayerPowerBarAlt end, showAlways = true, fallbackW = 240, fallbackH = 36, yOffset = 44 },
+}
+
+local function CreateBlizzOwnedOverlay(def, parent)
+    local ar, ag, ab = GetAccent()
+    local ov = CreateFrame("Frame", nil, parent)
+    ov:EnableMouse(true)
+    -- Background: same as regular movers
+    local bg = ov:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+    -- Border: accent at idle, white on hover
+    local brd = EllesmereUI.MakeBorder(ov, ar, ag, ab, 0.6)
+    ov._brd = brd
+    -- Label (always visible, same style as mover labels)
+    local nameFs = ov:CreateFontString(nil, "OVERLAY")
+    nameFs:SetFont(FONT_PATH, 10, "")
+    nameFs:SetShadowOffset(1, -1)
+    nameFs:SetShadowColor(0, 0, 0, 0.8)
+    nameFs:SetPoint("CENTER", ov, "CENTER", 0, 0)
+    nameFs:SetTextColor(1, 1, 1, 0.75)
+    nameFs:SetText(def.label)
+    nameFs:SetWordWrap(false)
+    ov._nameFs = nameFs
+    -- Action text (hidden at idle, fades in on hover)
+    local actionFs = ov:CreateFontString(nil, "OVERLAY")
+    actionFs:SetFont(FONT_PATH, 9, "")
+    actionFs:SetShadowOffset(1, -1)
+    actionFs:SetShadowColor(0, 0, 0, 0.8)
+    actionFs:SetPoint("TOP", nameFs, "BOTTOM", 0, -2)
+    actionFs:SetTextColor(ar, ag, ab, 0.9)
+    actionFs:SetText("Move via Blizz Edit Mode")
+    actionFs:SetAlpha(0)
+    ov._actionFs = actionFs
+    -- Clickable button sized to the action text only
+    local actionBtn = CreateFrame("Button", nil, ov)
+    actionBtn:SetFrameLevel(ov:GetFrameLevel() + 2)
+    actionBtn:SetPoint("TOPLEFT", actionFs, "TOPLEFT", -4, 2)
+    actionBtn:SetPoint("BOTTOMRIGHT", actionFs, "BOTTOMRIGHT", 4, -2)
+    actionBtn:Hide()
+    -- Hover animation state
+    local hoverT = 0
+    local hoverTarget = 0
+    local animFrame = CreateFrame("Frame")
+    local function ApplyHover(t)
+        actionFs:SetAlpha(t)
+        if t > 0.01 then actionBtn:Show() else actionBtn:Hide() end
+        -- Shift label up to make room for action text
+        local yOff = t * 5
+        nameFs:SetPoint("CENTER", ov, "CENTER", 0, yOff)
+    end
+    animFrame:SetScript("OnUpdate", function(self, dt)
+        local dir = hoverTarget > hoverT and 1 or -1
+        hoverT = hoverT + dir * (dt / 0.15)
+        if (dir == 1 and hoverT >= hoverTarget) or (dir == -1 and hoverT <= hoverTarget) then
+            hoverT = hoverTarget
+            if hoverT == 0 then self:Hide() end
+        end
+        ApplyHover(hoverT)
+    end)
+    animFrame:Hide()
+    -- Hover handlers on the overlay frame
+    local function OnEnter()
+        hoverTarget = 1
+        ov._brd:SetColor(1, 1, 1, 0.9)
+        animFrame:Show()
+    end
+    local function OnLeave()
+        if actionBtn:IsShown() and actionBtn:IsMouseOver() then return end
+        if ov:IsMouseOver() then return end
+        hoverTarget = 0
+        ov._brd:SetColor(ar, ag, ab, 0.6)
+        animFrame:Show()
+    end
+    ov:SetScript("OnEnter", OnEnter)
+    ov:SetScript("OnLeave", OnLeave)
+    -- Action button hover: brighten text, keep overlay hovered
+    actionBtn:SetScript("OnEnter", function()
+        actionFs:SetTextColor(1, 1, 1, 1)
+        OnEnter()
+    end)
+    actionBtn:SetScript("OnLeave", function()
+        actionFs:SetTextColor(ar, ag, ab, 0.9)
+        OnLeave()
+    end)
+    -- Click: close unlock mode, open Blizzard Edit Mode
+    actionBtn:SetScript("OnClick", function()
+        if InCombatLockdown() then return end
+        if EditModeManagerFrame then
+            ns.RequestClose(false, function()
+                ShowUIPanel(EditModeManagerFrame)
+            end)
+        end
+    end)
+    ov._forceCollapse = function()
+        hoverT = 0; hoverTarget = 0
+        animFrame:Hide()
+        ApplyHover(0)
+        ov._brd:SetColor(ar, ag, ab, 0.6)
+    end
+    return ov
+end
+
+local function ShowBlizzOwnedOverlays(parent)
+    for _, def in ipairs(BLIZZ_OWNED_OVERLAY_DEFS) do
+        local anchorFrame = def.frame()
+        if not anchorFrame then
+            -- frame doesn't exist at all, skip
+        elseif anchorFrame:IsShown() and anchorFrame:GetWidth() > 1 then
+            -- Visible frame: anchor directly
+            local ov = _blizzOwnedOverlays[def.label]
+            if not ov then
+                ov = CreateBlizzOwnedOverlay(def, parent)
+                _blizzOwnedOverlays[def.label] = ov
+            end
+            ov:SetFrameStrata("TOOLTIP")
+            ov:SetFrameLevel(parent:GetFrameLevel() + 15)
+            ov:ClearAllPoints()
+            if def.anchor then
+                def.anchor(ov, anchorFrame)
+            else
+                ov:SetAllPoints(anchorFrame)
+            end
+            ov._forceCollapse()
+            ov:Show()
+        elseif def.showAlways then
+            -- Hidden frame but showAlways: position at frame's location with fallback size
+            local ov = _blizzOwnedOverlays[def.label]
+            if not ov then
+                ov = CreateBlizzOwnedOverlay(def, parent)
+                _blizzOwnedOverlays[def.label] = ov
+            end
+            ov:SetFrameStrata("TOOLTIP")
+            ov:SetFrameLevel(parent:GetFrameLevel() + 15)
+            ov:ClearAllPoints()
+            ov:SetSize(def.fallbackW or 200, def.fallbackH or 40)
+            -- Read the frame's current anchor or fall back to bottom center
+            local pt, rel, rpt, ox, oy = anchorFrame:GetPoint(1)
+            local yAdj = def.yOffset or 0
+            if pt and rel then
+                ov:SetPoint(pt, rel, rpt or pt, ox or 0, (oy or 0) + yAdj)
+            else
+                ov:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 200 + yAdj)
+            end
+            ov._forceCollapse()
+            ov:Show()
+        end
+    end
+end
+
+local function HideBlizzOwnedOverlays()
+    for _, ov in pairs(_blizzOwnedOverlays) do
+        if ov._forceCollapse then ov._forceCollapse() end
+        ov:Hide()
     end
 end
 
@@ -7695,6 +7896,7 @@ local function DoClose()
         m:Hide()
     end
     HideAllGuidesAndHighlight()
+    HideBlizzOwnedOverlays()
     unlockFrame:Hide()
     unlockFrame:SetAlpha(1)
 
@@ -7721,6 +7923,9 @@ local function DoClose()
     if EAB and EAB.RefreshMouseover and not InCombatLockdown() then
         EAB:RefreshMouseover()
     end
+
+    -- Restore CDM bar visibility (unlock forced all bars visible)
+    if _G._ECME_ApplyVisibility then _G._ECME_ApplyVisibility() end
 
     -- Restore panel scale and show options
     local panelRealScale
@@ -8277,18 +8482,38 @@ function ns.OpenUnlockMode()
         end
     end
 
-    -- Hide objective tracker (alpha only -- no :Hide() to avoid taint)
+    -- Hide objective tracker (alpha only -- no :Hide() to avoid taint).
+    -- Hook SetAlpha to suppress Blizzard re-showing it during unlock
+    -- (mounting, quest updates, etc. call SetAlpha(1) on their own).
     local objTracker = _G.ObjectiveTrackerFrame
     if objTracker and objTracker:IsShown() then
         objTrackerWasVisible = true
         objTracker:SetAlpha(0)
         if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, false) end
+        if not objTracker._eabUnlockAlphaHooked then
+            objTracker._eabUnlockAlphaHooked = true
+            hooksecurefunc(objTracker, "SetAlpha", function(self, a)
+                if isUnlocked and a > 0 then
+                    self:SetAlpha(0)
+                end
+            end)
+        end
     else
         objTrackerWasVisible = false
     end
     -- Also hide EllesmereUI QT background (separate UIParent child)
     local qtBg = _G.EllesmereUIQTBackground
-    if qtBg then qtBg:SetAlpha(0) end
+    if qtBg then
+        qtBg:SetAlpha(0)
+        if not qtBg._eabUnlockAlphaHooked then
+            qtBg._eabUnlockAlphaHooked = true
+            hooksecurefunc(qtBg, "SetAlpha", function(self, a)
+                if isUnlocked and a > 0 then
+                    self:SetAlpha(0)
+                end
+            end)
+        end
+    end
 
     -- Reset session state and snapshot current positions
     wipe(pendingPositions)
@@ -8487,6 +8712,13 @@ function ns.OpenUnlockMode()
                     end
                 end
 
+                -- Info overlays on Blizzard-owned elements (chat, micro, bags, encounter)
+                -- Start at alpha 0; the mover fade-in loop below handles them.
+                ShowBlizzOwnedOverlays(unlockFrame)
+                for _, bov in pairs(_blizzOwnedOverlays) do
+                    bov:SetAlpha(0)
+                end
+
                 -- Retry ticker: some addons (CDM) may not have their bar
                 -- frames ready yet. Poll briefly to catch late arrivals.
                 local retryAttempts = 0
@@ -8548,19 +8780,29 @@ function ns.OpenUnlockMode()
 
             -- Movers fade in over 0.75s, delayed by 0.5s
             local MOVER_DELAY = 0.50
+            local moverFadeT = glitchT - MOVER_DELAY
             for _, m in pairs(movers) do
                 if m:IsShown() then
-                    local moverT = glitchT - MOVER_DELAY
-                    if moverT > 0 then
+                    if moverFadeT > 0 then
                         -- Re-sync once right as movers begin fading in so any
                         -- frames that were nil at initial sync are now ready.
                         if not fadeInSynced then
                             fadeInSynced = true
                             for _, rm in pairs(movers) do rm:Sync() end
                         end
-                        m:SetAlpha((darkOverlaysEnabled and 1 or MOVER_ALPHA) * min(1, moverT / GLITCH_DUR))
+                        m:SetAlpha((darkOverlaysEnabled and 1 or MOVER_ALPHA) * min(1, moverFadeT / GLITCH_DUR))
                     else
                         m:SetAlpha(0)
+                    end
+                end
+            end
+            -- Blizzard-owned overlays fade in on the same curve
+            for _, bov in pairs(_blizzOwnedOverlays) do
+                if bov:IsShown() then
+                    if moverFadeT > 0 then
+                        bov:SetAlpha(min(1, moverFadeT / GLITCH_DUR))
+                    else
+                        bov:SetAlpha(0)
                     end
                 end
             end
@@ -8880,6 +9122,7 @@ local function SuspendForCombat()
     DeselectMover()
     for _, m in pairs(movers) do m:Hide() end
     HideAllGuidesAndHighlight()
+    HideBlizzOwnedOverlays()
     if arrowKeyFrame then arrowKeyFrame:Hide() end
     selectedMover = nil
     selectElementPicker = nil

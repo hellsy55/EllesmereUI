@@ -26,6 +26,15 @@ local _anyStacks    = false
 local function StartGlow(...) if ns.StartNativeGlow then return ns.StartNativeGlow(...) end end
 local function StopGlow(...)  if ns.StopNativeGlow  then return ns.StopNativeGlow(...)  end end
 
+-- External weak-keyed lookup for Blizzard bar FontString refs.
+-- Avoids writing custom properties onto Blizzard StatusBar frames.
+local _blizzBarFS = setmetatable({}, { __mode = "k" })
+local function BBFS(bar)
+    local d = _blizzBarFS[bar]
+    if not d then d = {}; _blizzBarFS[bar] = d end
+    return d
+end
+
 -------------------------------------------------------------------------------
 --  Textures
 -------------------------------------------------------------------------------
@@ -758,7 +767,7 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         if bSz > 0 then
             local PP = EllesmereUI and EllesmereUI.PP
             if PP then
-                if not bar._barBorder._ppBorders then
+                if not PP.GetBorders(bar._barBorder) then
                     PP.CreateBorder(bar._barBorder, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1, bSz)
                 else
                     PP.UpdateBorder(bar._barBorder, bSz, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1)
@@ -1097,8 +1106,9 @@ end
 local function GetBlizzBarFontStrings(blizzBar)
     if not blizzBar then return nil, nil end
     -- Return cached refs if already discovered (and found)
-    if blizzBar._tbbNameFS then
-        return blizzBar._tbbNameFS, blizzBar._tbbTimerFS
+    local cached = _blizzBarFS[blizzBar]
+    if cached and cached.nameFS then
+        return cached.nameFS, cached.timerFS
     end
     -- Discover by iterating regions. The StatusBar has 2 FontStrings:
     -- 1st FontString = spell name, 2nd FontString = timer text.
@@ -1112,9 +1122,10 @@ local function GetBlizzBarFontStrings(blizzBar)
             if fsIdx == 2 then timerFS = rgn end
         end
     end
-    -- Cache (use false as sentinel for "searched but not found")
-    blizzBar._tbbNameFS  = nameFS or false
-    blizzBar._tbbTimerFS = timerFS or false
+    -- Cache via external table (use false as sentinel for "searched but not found")
+    local d = BBFS(blizzBar)
+    d.nameFS  = nameFS or false
+    d.timerFS = timerFS or false
     return nameFS, timerFS
 end
 

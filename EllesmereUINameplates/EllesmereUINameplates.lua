@@ -27,6 +27,7 @@ local C_NamePlate = C_NamePlate
 local GetRaidTargetIndex, SetRaidTargetIconTexture = GetRaidTargetIndex, SetRaidTargetIconTexture
 local C_CVar, NamePlateConstants, Enum = C_CVar, NamePlateConstants, Enum
 local _, PLAYER_CLASS = UnitClass("player")
+
 local function GetFont()
     if EllesmereUI and EllesmereUI.GetFontPath then
         return EllesmereUI.GetFontPath("nameplates")
@@ -57,6 +58,10 @@ ns.GetNPUseShadow = GetNPUseShadow
 ns.SetFSFont = SetFSFont
 ns.plates = {}
 _G.EllesmereNameplates_NS = ns
+
+-- External weak-keyed table for nameplate Y-offset state (never write custom
+-- keys onto Blizzard C_NamePlate frames -- causes taint).
+local _npYOffsetState = setmetatable({}, { __mode = "k" })
 
 -- Constant table for health text bar slots (hoisted to file scope to avoid
 -- per-call allocation inside UpdateHealthValues).
@@ -925,6 +930,7 @@ end
 -- never into Lua comparisons. This is the standard secret-safe pattern.
 -- Active pandemic slots register themselves for a lightweight alpha-only tick
 -- instead of polling every plate globally.
+local pandemicTickFrame  -- forward declaration; created at line ~3240
 local function ApplyPandemicGlow(slot)
     local durObj = slot._durationObj
     if not durObj or not pandemicCurve then
@@ -936,6 +942,7 @@ local function ApplyPandemicGlow(slot)
     slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(pandemicCurve)))
     -- Register for alpha-only tick updates
     activePandemicSlots[slot] = true
+    if pandemicTickFrame then pandemicTickFrame:Show() end
 end
 ns.StopPandemicGlow = StopPandemicGlow
 ns.ApplyPandemicGlow = ApplyPandemicGlow
@@ -1183,6 +1190,24 @@ local function GetTextSlotColor(slotKey)
     local c = (p and p[slotKey .. "Color"]) or defaults[slotKey .. "Color"]
     if c then return c.r, c.g, c.b end
     return 1, 1, 1
+end
+
+-- Clear a single aura slot (debuff/buff/cc). File-scope to avoid
+-- closure allocation inside UpdateAuras.
+local function ClearAuraSlot(slot)
+    slot:Hide()
+    slot.icon:SetTexture(nil)
+    if slot.pandemicGlow and slot.pandemicGlow.active then ns.StopPandemicGlow(slot) end
+    if slot.dispelGlow and slot.dispelGlow.active then ns.StopDispelGlow(slot) end
+    slot._durationObj = nil
+    local cd = slot.cd
+    if cd then
+        if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
+        if cd.Clear then cd:Clear()
+        elseif CooldownFrame_Clear then CooldownFrame_Clear(cd)
+        else cd:SetCooldown(0, 0) end
+        cd:Hide()
+    end
 end
 
 -- Position target arrows OUTSIDE the outermost side auras (if arrows are shown).
@@ -3214,14 +3239,16 @@ end)
 castFallbackFrame:Hide()
 
 -- Pandemic glow alpha-only tick: only iterates slots with active pandemic glows
-local pandemicTickFrame = CreateFrame("Frame")
+pandemicTickFrame = CreateFrame("Frame")
 local pandemicTickAccum = 0
 pandemicTickFrame:SetScript("OnUpdate", function(_, elapsed)
     pandemicTickAccum = pandemicTickAccum + elapsed
     if pandemicTickAccum < 0.2 then return end
     pandemicTickAccum = 0
-    if not GetPandemicGlow() then return end
+    if not GetPandemicGlow() then pandemicTickFrame:Hide(); return end
+    local anyActive = false
     for slot in pairs(ns.activePandemicSlots) do
+        anyActive = true
         local durObj = slot._durationObj
         if durObj and slot.pandemicGlow and slot.pandemicGlow.active then
             slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(ns.pandemicCurve)))
@@ -3229,7 +3256,9 @@ pandemicTickFrame:SetScript("OnUpdate", function(_, elapsed)
             ns.StopPandemicGlow(slot)
         end
     end
+    if not anyActive then pandemicTickFrame:Hide() end
 end)
+pandemicTickFrame:Hide()  -- start hidden; shown when pandemic glows activate
 
 local NameplateFrame = {}
 
@@ -3502,8 +3531,13 @@ function NameplateFrame:SetUnit(unit, nameplate)
     self:UpdateRaidIcon()
     self:ApplyTarget()
     self:ApplyMouseover()
-    self:UpdateAuras()
     self:UpdateCast()
+    -- Defer aura processing one frame: aura data may not be fully populated
+    -- on the exact frame of NAME_PLATE_UNIT_ADDED, and UpdateAuras is the
+    -- most expensive call (~0.3ms). Deferring keeps the plate-add event
+    -- under 1ms while the aura display catches up on the next UNIT_AURA.
+    self._castDirtyFull = true
+    C_Timer.After(0, function() if self.unit then self:UpdateAuras() end end)
 end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
@@ -4158,11 +4192,56 @@ function NameplateFrame:UpdateAuras(updateInfo)
     local needsFullRefresh = not updateInfo or updateInfo.isFullUpdate or not self._shownAuras
 
     if not needsFullRefresh then
-        local hasRelevantChange = false
-        if updateInfo.addedAuras and #updateInfo.addedAuras > 0 then
-            hasRelevantChange = true
+        -- FAST PATH: if the only changes are duration/stack updates on
+        -- already-displayed auras (no adds, no removes), just refresh
+        -- cooldown + stacks on the existing slots. Skips the full clear +
+        -- rebuild + reposition that costs ~0.3ms per call.
+        -- Only count added auras as relevant if any are from the player
+        -- (or if showAllDebuffs is on, or if it's a buff/CC the filter would
+        -- pick up). In a 20-man raid, other players' debuffs fire addedAuras
+        -- constantly but none of them will be displayed on our plate.
+        local hasAdds = false
+        if updateInfo.addedAuras then
+            for _, aura in ipairs(updateInfo.addedAuras) do
+                if aura.isFromPlayerOrPlayerPet or aura.isHelpful or (aura.dispelName and aura.isHarmful) then
+                    hasAdds = true; break
+                end
+            end
         end
-        if not hasRelevantChange and updateInfo.removedAuraInstanceIDs then
+        local hasRemoves = updateInfo.removedAuraInstanceIDs and #updateInfo.removedAuraInstanceIDs > 0
+        local hasUpdates = updateInfo.updatedAuraInstanceIDs and #updateInfo.updatedAuraInstanceIDs > 0
+
+        if hasUpdates and not hasAdds and not hasRemoves then
+            local allKnown = true
+            for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                if not self._shownAuras[id] then
+                    allKnown = false; break
+                end
+            end
+            if allKnown then
+                -- Duration/stack refresh only: update existing slots in place
+                for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                    local slot = self._shownAuras[id]
+                    if slot then
+                        if slot.cd and C_UnitAuras_GetAuraDuration then
+                            local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                            if durObj and slot.cd.SetCooldownFromDurationObject then
+                                slot.cd:SetCooldownFromDurationObject(durObj)
+                            end
+                            slot._durationObj = durObj
+                        end
+                        if slot.count and C_UnitAuras_GetAuraAppDisplayCount then
+                            slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
+                        end
+                    end
+                end
+                return
+            end
+        end
+
+        -- Standard relevance check for adds/removes/updates
+        local hasRelevantChange = hasAdds
+        if not hasRelevantChange and hasRemoves then
             for _, id in ipairs(updateInfo.removedAuraInstanceIDs) do
                 if self._shownAuras[id] then
                     hasRelevantChange = true
@@ -4170,7 +4249,8 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 end
             end
         end
-        if not hasRelevantChange and updateInfo.updatedAuraInstanceIDs then
+        if not hasRelevantChange and hasUpdates then
+            -- Updates on non-displayed auras (allKnown was false above)
             for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
                 if self._shownAuras[id] then
                     hasRelevantChange = true
@@ -4189,79 +4269,34 @@ function NameplateFrame:UpdateAuras(updateInfo)
         wipe(self._shownAuras)
     end
 
-    for i = 1, 4 do
-        local dSlot = self.debuffs[i]
-        local bSlot = self.buffs[i]
-        dSlot:Hide()
-        dSlot.icon:SetTexture(nil)
-        if dSlot.pandemicGlow and dSlot.pandemicGlow.active then
-            ns.StopPandemicGlow(dSlot)
-        end
-        dSlot._durationObj = nil
-        bSlot:Hide()
-        bSlot.icon:SetTexture(nil)
-        if bSlot.dispelGlow and bSlot.dispelGlow.active then
-            ns.StopDispelGlow(bSlot)
-        end
-        local dCd = dSlot.cd
-        if dCd then
-            if dCd.SetDrawSwipe then dCd:SetDrawSwipe(false) end
-            if dCd.Clear then dCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(dCd)
-            else dCd:SetCooldown(0, 0) end
-            dCd:Hide()  -- prevent stale-swipe black-box render on pool reuse
-        end
-        local bCd = bSlot.cd
-        if bCd then
-            if bCd.SetDrawSwipe then bCd:SetDrawSwipe(false) end
-            if bCd.Clear then bCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(bCd)
-            else bCd:SetCooldown(0, 0) end
-            bCd:Hide()
-        end
-    end
-    for i = 1, 2 do
-        local ccSlot = self.cc[i]
-        ccSlot:Hide()
-        ccSlot.icon:SetTexture(nil)
-        local cCd = ccSlot.cd
-        if cCd then
-            if cCd.SetDrawSwipe then cCd:SetDrawSwipe(false) end
-            if cCd.Clear then cCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(cCd)
-            else cCd:SetCooldown(0, 0) end
-            cCd:Hide()
-        end
-    end
+    -- Only reset slots that were previously active (tracked via _prevCounts).
+    local prevD = self._prevDebuffCount or 4
+    local prevB = self._prevBuffCount or 4
+    local prevCC = self._prevCCCount or 2
+    for i = 1, prevD do ClearAuraSlot(self.debuffs[i]) end
+    for i = 1, prevB do ClearAuraSlot(self.buffs[i]) end
+    for i = 1, prevCC do ClearAuraSlot(self.cc[i]) end
+
     -- Get slot assignments; skip processing for any slot set to "none"
     local debuffSlotVal, buffSlotVal, ccSlotVal = GetAuraSlots()
     local dIdx = 1
+
+    -----------------------------------------------------------------------
+    --  Debuffs: build importantSet via cached callback (zero closure alloc),
+    --  then iterate importantSet with GetAuraDataByAuraInstanceID (zero
+    --  GetUnitAuras table alloc). showAll mode falls back to GetUnitAuras.
+    -----------------------------------------------------------------------
     if debuffSlotVal ~= "none" then
     local showAll = p and p.showAllDebuffs
-    -- Build the important set from Blizzard's debuffList synchronously.
-    -- The debuffList is already current when UNIT_AURA fires.
-    local importantSet
-    if not showAll and self.nameplate then
-        if not self._importantSet then self._importantSet = {} end
-        importantSet = self._importantSet
-        wipe(importantSet)
-        local uf = self.nameplate.UnitFrame
-        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
-            if not self._iterateCB then
-                self._iterateCB = function(auraInstanceID)
-                    self._importantSet[auraInstanceID] = true
-                end
-            end
-            uf.AurasFrame.debuffList:Iterate(self._iterateCB)
-        end
-    end
-    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
-        if allDebuffs then
-            for _, aura in ipairs(allDebuffs) do
-                if dIdx > 4 then break end
-                local id = aura and aura.auraInstanceID
-                if id and aura.icon and (showAll or (importantSet and importantSet[id])) then
+    if showAll then
+        -- showAll mode: must scan all player debuffs
+        if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+            local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
+            if allDebuffs then
+                for _, aura in ipairs(allDebuffs) do
+                    if dIdx > 4 then break end
+                    local id = aura and aura.auraInstanceID
+                    if id and aura.icon then
                         local slot = self.debuffs[dIdx]
                         slot.icon:SetTexture(aura.icon)
                         slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4277,17 +4312,66 @@ function NameplateFrame:UpdateAuras(updateInfo)
                                 cd:Show()
                             end
                             slot._durationObj = durObj
-                        else
-                            slot._durationObj = nil
                         end
                         slot:Show()
-                        self._shownAuras[id] = true
+                        self._shownAuras[id] = slot
                         dIdx = dIdx + 1
+                    end
+                end
+            end
+        end
+    else
+        -- Normal mode: build importantSet from Blizzard's debuffList (cached
+        -- callback), then intersect with HARMFUL|PLAYER (C-side filter handles
+        -- secret isFromPlayerOrPlayerPet correctly). One GetUnitAuras call but
+        -- only process the intersection.
+        local uf = self.nameplate.UnitFrame
+        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
+            if not self._importantSet then self._importantSet = {} end
+            local importantSet = self._importantSet
+            wipe(importantSet)
+            if not self._iterateCB then
+                self._iterateCB = function(auraInstanceID)
+                    self._importantSet[auraInstanceID] = true
+                end
+            end
+            uf.AurasFrame.debuffList:Iterate(self._iterateCB)
+            -- HARMFUL|PLAYER: C-side filter ensures only player debuffs.
+            -- Intersect with importantSet to show only important player debuffs.
+            if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+                local allPlayerDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
+                if allPlayerDebuffs then
+                    for _, aura in ipairs(allPlayerDebuffs) do
+                        if dIdx > 4 then break end
+                        local id = aura and aura.auraInstanceID
+                        if id and aura.icon and importantSet[id] then
+                            local slot = self.debuffs[dIdx]
+                            slot.icon:SetTexture(aura.icon)
+                            slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                            if C_UnitAuras_GetAuraAppDisplayCount then
+                                slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
+                            end
+                            local cd = slot.cd
+                            if cd and C_UnitAuras_GetAuraDuration then
+                                local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                                if durObj and cd.SetCooldownFromDurationObject then
+                                    if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+                                    cd:SetCooldownFromDurationObject(durObj)
+                                    cd:Show()
+                                end
+                                slot._durationObj = durObj
+                            end
+                            slot:Show()
+                            self._shownAuras[id] = slot
+                            dIdx = dIdx + 1
+                        end
+                    end
                 end
             end
         end
     end
     local debuffCount = dIdx - 1
+    self._prevDebuffCount = debuffCount
     if debuffCount > 0 then
         local spacing = GetAuraSpacing()
         local debuffSz = GetDebuffIconSize()
@@ -4296,47 +4380,40 @@ function NameplateFrame:UpdateAuras(updateInfo)
         end
         PositionAuraSlot(self.debuffs, debuffCount, debuffSlotVal, self, debuffSz, debuffSz, spacing, GetAuraSlotOffsets("debuffSlot"))
     end
-    -- Pandemic glow check for debuffs
+    -- Pandemic glow check for shown debuffs only
     local pandemicEnabled = GetPandemicGlow()
-    for i = 1, 4 do
-        local slot = self.debuffs[i]
-        local pg = slot.pandemicGlow
-        if i <= (dIdx - 1) and pandemicEnabled then
-            ns.ApplyPandemicGlow(slot)
-        else
-            if pg and pg.active then
-                ns.StopPandemicGlow(slot)
-            end
+    for i = 1, debuffCount do
+        if pandemicEnabled then
+            ns.ApplyPandemicGlow(self.debuffs[i])
         end
     end
     end -- debuffSlotVal ~= "none"
+
+    -----------------------------------------------------------------------
+    --  Buffs: build importantBuffSet via cached callback, iterate with
+    --  GetAuraDataByAuraInstanceID (same pattern as debuffs).
+    -----------------------------------------------------------------------
+    local bIdx = 1
     if buffSlotVal ~= "none" then
-    if UnitCanAttack("player", unit) and C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        -- Build important buff set from Blizzard's buffList (same approach
-        -- as debuffs above). Only show buffs Blizzard considers important.
-        local importantBuffSet
-        if self.nameplate then
-            local uf = self.nameplate.UnitFrame
-            if uf and uf.AurasFrame and uf.AurasFrame.buffList and uf.AurasFrame.buffList.Iterate then
-                if not self._importantBuffSet then self._importantBuffSet = {} end
-                importantBuffSet = self._importantBuffSet
-                wipe(importantBuffSet)
-                if not self._buffIterateCB then
-                    self._buffIterateCB = function(auraInstanceID)
-                        self._importantBuffSet[auraInstanceID] = true
-                    end
+    if UnitCanAttack("player", unit) then
+        local uf = self.nameplate.UnitFrame
+        if uf and uf.AurasFrame and uf.AurasFrame.buffList and uf.AurasFrame.buffList.Iterate then
+            if not self._importantBuffSet then self._importantBuffSet = {} end
+            local importantBuffSet = self._importantBuffSet
+            wipe(importantBuffSet)
+            if not self._buffIterateCB then
+                self._buffIterateCB = function(auraInstanceID)
+                    self._importantBuffSet[auraInstanceID] = true
                 end
-                uf.AurasFrame.buffList:Iterate(self._buffIterateCB)
             end
-        end
-        local allBuffs = C_UnitAuras.GetUnitAuras(unit, "HELPFUL")
-        local bIdx = 1
-        if allBuffs then
-            for _, aura in ipairs(allBuffs) do
+            uf.AurasFrame.buffList:Iterate(self._buffIterateCB)
+            local _getAura = C_UnitAuras.GetAuraDataByAuraInstanceID
+            local dispelGlowOn = ns.GetDispelGlow()
+            local buffSz = GetBuffIconSize()
+            for id in pairs(importantBuffSet) do
                 if bIdx > 4 then break end
-                local id = aura and aura.auraInstanceID
-                if id and aura.icon
-                    and (importantBuffSet and importantBuffSet[id]) then
+                local aura = _getAura(unit, id)
+                if aura and aura.icon then
                     local slot = self.buffs[bIdx]
                     slot.icon:SetTexture(aura.icon)
                     slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4353,13 +4430,12 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         end
                     end
                     slot:Show()
-                    self._shownAuras[id] = true
-                    -- Dispellable buff glow
-                    local canDispel, typeColor = ns.CanDispelAura(unit, aura)
-                    if ns.GetDispelGlow() and canDispel then
-                        ns.StartDispelGlow(slot, GetBuffIconSize(), typeColor)
-                    elseif slot.dispelGlow and slot.dispelGlow.active then
-                        ns.StopDispelGlow(slot)
+                    self._shownAuras[id] = slot
+                    if dispelGlowOn then
+                        local canDispel, typeColor = ns.CanDispelAura(unit, aura)
+                        if canDispel then
+                            ns.StartDispelGlow(slot, buffSz, typeColor)
+                        end
                     end
                     bIdx = bIdx + 1
                 end
@@ -4367,6 +4443,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
         end
     end
     end -- buffSlotVal ~= "none"
+    local buffCount = bIdx - 1
+    self._prevBuffCount = buffCount
+
+    -----------------------------------------------------------------------
+    --  CC: still needs GetUnitAuras (no Blizzard list to iterate), but
+    --  CC auras are rare (0-2 per unit). Minimal allocation cost.
+    -----------------------------------------------------------------------
     local ccShown = 0
     if ccSlotVal ~= "none" then
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then
@@ -4390,24 +4473,22 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         end
                     end
                     slot:Show()
-                    self._shownAuras[aura.auraInstanceID] = true
+                    self._shownAuras[aura.auraInstanceID] = slot
                 end
             end
         end
     end
     end -- ccSlotVal ~= "none"
+    self._prevCCCount = ccShown
+
     -- Reposition buffs and CC based on actual shown counts
-    if buffSlotVal ~= "none" then
-        local buffCount = 0
-        for i = 1, 4 do if self.buffs[i]:IsShown() then buffCount = buffCount + 1 end end
-        if buffCount > 0 then
-            local spacing = GetAuraSpacing()
-            local buffSz = GetBuffIconSize()
-            for i = 1, buffCount do
-                PP.Size(self.buffs[i], buffSz, buffSz)
-            end
-            PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
+    if buffSlotVal ~= "none" and buffCount > 0 then
+        local spacing = GetAuraSpacing()
+        local buffSz = GetBuffIconSize()
+        for i = 1, buffCount do
+            PP.Size(self.buffs[i], buffSz, buffSz)
         end
+        PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
     end
     if ccSlotVal ~= "none" and ccShown > 0 then
         local spacing = GetAuraSpacing()
@@ -4496,10 +4577,6 @@ function NameplateFrame:UpdateCast()
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
     local isChannel = false
     local isEmpowered = false
-    -- type(name) == "nil" is the taint-safe pattern for secret strings:
-    -- type() returns a plain string ("string" / "nil"), so comparing that
-    -- to "nil" never touches the secret value itself. Direct equality on
-    -- the secret string ("" or another string literal) taints.
     if type(name) == "nil" then
         name, _, texture, _, _, _, kickProtected, castSpellID = UnitChannelInfo(self.unit)
         isChannel = true
@@ -4520,14 +4597,13 @@ function NameplateFrame:UpdateCast()
         end
         self.isCasting = false
         self._castTex = nil
+        self._castDirtyFull = nil
         self:HideKickTick()
         self:ClearImportantCastGlow()
         self:ApplyScale()
-        -- Reposition class power pips (cast bar gone, pips move back to health bar)
         if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
             UpdateClassPowerOnPlate(self)
         end
-        -- Release elevated cast overlay (cast ended)
         if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
         return
     end
@@ -4540,70 +4616,72 @@ function NameplateFrame:UpdateCast()
         end
     end
 
-    self.cast:Show()
-    if type(texture) ~= "nil" then
-        self._castTex = texture
-        self.castIcon:SetTexture(texture)
-    elseif self._castTex then
-        self.castIcon:SetTexture(self._castTex)
-    elseif castSpellID then
-        local info = C_Spell.GetSpellInfo(castSpellID)
-        if info and info.iconID then
-            self._castTex = info.iconID
-            self.castIcon:SetTexture(info.iconID)
-        end
-    end
-    self.castName:SetText(type(name) ~= "nil" and name or "")
-    
-    -- Get the cast target name and class for display.
-    -- UnitShouldDisplaySpellTargetName gates whether the target is
-    -- available; UnitSpellTargetName returns a secret value -- pass
-    -- directly to SetText (which accepts secrets).
-    local spellTarget, spellTargetClass
-    if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(self.unit) then
-        local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
-        if rawTarget then
-            spellTarget = rawTarget
-            spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
-        end
-    end
-    local hasTarget = spellTarget and true or false
-    self.castTarget:SetText(spellTarget or "")
+    -- FAST PATH: on DELAYED/UPDATE events (not START), the icon, name,
+    -- target, and glow haven't changed. Only the duration needs updating.
+    -- _castDirtyFull is set by UNIT_SPELLCAST_START/CHANNEL_START/EMPOWER_START.
+    local isFullSetup = self._castDirtyFull or not self.isCasting
+    self._castDirtyFull = nil
 
-    -- Apply class color to cast target text if enabled and target is a player
-    local db = p or defaults
-    local useClassColor = defaults.castTargetClassColor
-    if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
-    if useClassColor then
-        local appliedCTC = false
-        if spellTargetClass and C_ClassColor then
-            local c = C_ClassColor.GetClassColor(spellTargetClass)
-            if c then
-                self.castTarget:SetTextColor(c:GetRGB())
-                appliedCTC = true
+    if isFullSetup then
+        self.cast:Show()
+        if type(texture) ~= "nil" then
+            self._castTex = texture
+            self.castIcon:SetTexture(texture)
+        elseif self._castTex then
+            self.castIcon:SetTexture(self._castTex)
+        elseif castSpellID then
+            local info = C_Spell.GetSpellInfo(castSpellID)
+            if info and info.iconID then
+                self._castTex = info.iconID
+                self.castIcon:SetTexture(info.iconID)
             end
         end
-        if not appliedCTC then
-            self.castTarget:SetTextColor(1, 1, 1, 1)
+        self.castName:SetText(type(name) ~= "nil" and name or "")
+
+        local spellTarget, spellTargetClass
+        if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(self.unit) then
+            local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
+            if rawTarget then
+                spellTarget = rawTarget
+                spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+            end
         end
-    else
-        local ctc = (db and db.castTargetColor) or defaults.castTargetColor
-        self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
-    end
+        local hasTarget = spellTarget and true or false
+        self.castTarget:SetText(spellTarget or "")
 
-    -- All three zones are independent: show/hide based on their own conditions
-    self.castTarget:SetShown(hasTarget)
-    self.castTimer:SetShown(self._showCastTimer)
+        local db = p or defaults
+        local useClassColor = defaults.castTargetClassColor
+        if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
+        if useClassColor then
+            local appliedCTC = false
+            if spellTargetClass and C_ClassColor then
+                local c = C_ClassColor.GetClassColor(spellTargetClass)
+                if c then
+                    self.castTarget:SetTextColor(c:GetRGB())
+                    appliedCTC = true
+                end
+            end
+            if not appliedCTC then
+                self.castTarget:SetTextColor(1, 1, 1, 1)
+            end
+        else
+            local ctc = (db and db.castTargetColor) or defaults.castTargetColor
+            self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
+        end
 
-    if type(kickProtected) == "nil" then
-        kickProtected = false
+        self.castTarget:SetShown(hasTarget)
+        self.castTimer:SetShown(self._showCastTimer)
+
+        if type(kickProtected) == "nil" then
+            kickProtected = false
+        end
+        self._kickProtected = kickProtected
+        local cfg = p or defaults
+        local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        self.castBarOverlay:SetVertexColor(unintColor.r, unintColor.g, unintColor.b)
+        self.castShieldFrame:Show()
+        self:ApplyCastColor(kickProtected)
     end
-    self._kickProtected = kickProtected
-    local cfg = p or defaults
-    local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
-    self.castBarOverlay:SetVertexColor(unintColor.r, unintColor.g, unintColor.b)
-    self.castShieldFrame:Show()
-    self:ApplyCastColor(kickProtected)
     
     if UnitCastingDuration and self.cast.SetTimerDuration then
         if isChannel then
@@ -4650,16 +4728,15 @@ function NameplateFrame:UpdateCast()
             NotifyCastStarted()
         end
     end
-    self:ApplyScale()
-    self:UpdateKickTick(kickProtected, isChannel, isEmpowered)
-    -- Important cast glow
-    self:UpdateImportantCastGlow(castSpellID)
-    -- Reposition class power pips (cast bar now visible, pips move below it)
-    if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
-        UpdateClassPowerOnPlate(self)
+    if isFullSetup then
+        self:ApplyScale()
+        self:UpdateKickTick(kickProtected, isChannel, isEmpowered)
+        self:UpdateImportantCastGlow(castSpellID)
+        if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
+            UpdateClassPowerOnPlate(self)
+        end
+        if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
     end
-    -- Refresh elevated cast overlay (acquires/releases as needed)
-    if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
 end
 function NameplateFrame:ApplyScale()
     local base = 1
@@ -4931,9 +5008,11 @@ function NameplateFrame:UNIT_FLAGS()
     self:UpdateHealthColor()
 end
 function NameplateFrame:UNIT_SPELLCAST_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_CHANNEL_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_DELAYED()
@@ -4984,6 +5063,7 @@ function NameplateFrame:UNIT_SPELLCAST_NOT_INTERRUPTIBLE()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_UPDATE()
@@ -5182,11 +5262,11 @@ function ns.RefreshFriendlyNameOnlyOffset()
             if yOff ~= 0 then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)
-                nameplate._enoYOffset = true
-            elseif nameplate._enoYOffset then
+                _npYOffsetState[nameplate] = true
+            elseif _npYOffsetState[nameplate] then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, 0)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, 0)
-                nameplate._enoYOffset = nil
+                _npYOffsetState[nameplate] = nil
             end
         end
     end
@@ -5231,7 +5311,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
                 if yOff ~= 0 and nameplate.UnitFrame then
                     nameplate.UnitFrame:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                     nameplate.UnitFrame:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)
-                    nameplate._enoYOffset = true
+                    _npYOffsetState[nameplate] = true
                 end
                 -- Font is applied globally via SystemFont_NamePlate override
             end
@@ -5261,13 +5341,13 @@ manager:SetScript("OnEvent", function(self, event, unit)
             ns.RestoreNPCHealthBar(nameplate)
         end
         -- Restore name-only Y-offset if we applied one
-        if nameplate and nameplate._enoYOffset then
+        if nameplate and _npYOffsetState[nameplate] then
             local uf = nameplate.UnitFrame
             if uf then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, 0)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, 0)
             end
-            nameplate._enoYOffset = nil
+            _npYOffsetState[nameplate] = nil
         end
         pendingUnits[unit] = nil
         if pendingWatchers[unit] then

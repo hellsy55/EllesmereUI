@@ -180,7 +180,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         return {
-            _frame = bf, edges = bf._ppBorders or {},
+            _frame = bf, edges = (PP and PP.GetBorders(bf)) or {},
             SetColor = function(self, cr, cg, cb, ca)
                 if PP then PP.SetBorderColor(bf, cr, cg, cb, ca or 1) end
             end,
@@ -488,7 +488,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 pc._barBorder = {
                     _frame = bf,
-                    edges = bf._ppBorders or {},
+                    edges = (PP and PP.GetBorders(bf)) or {},
                     SetSize = function(self, sz)
                         if PP then PP.SetBorderSize(bf, sz) end
                     end,
