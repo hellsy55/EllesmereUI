@@ -513,77 +513,73 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Suppress Blizzard's Talents + View (dressing room) buttons and replace
-    -- with our own matching pair at the bottom of the frame.
-    -- Both are non-secure; alpha+mouse suppression is taint-free.
+    -- Restyle Blizzard's Talents + View (dressing room) buttons in place.
+    -- User clicks the actual Blizzard button so the secure handler fires
+    -- natively with no addon taint in the call stack.
     do
         local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
         local BTN_W, BTN_H = 90, 21
         local BTN_Y = 8
 
-        -- Suppress all Blizzard buttons in InspectPaperDollItemsFrame
-        local paperDollItemsFrame = InspectPaperDollItemsFrame
-        if paperDollItemsFrame then
-            if paperDollItemsFrame.InspectTalents then
-                paperDollItemsFrame.InspectTalents:SetAlpha(0)
-                paperDollItemsFrame.InspectTalents:EnableMouse(false)
-            end
-            for i = 1, paperDollItemsFrame:GetNumChildren() do
-                local child = select(i, paperDollItemsFrame:GetChildren())
-                if child and child:GetObjectType() == "Button" and not child:GetName()
-                   and child ~= paperDollItemsFrame.InspectTalents then
-                    child:SetAlpha(0)
-                    child:EnableMouse(false)
-                end
-            end
-        end
+        local function RestyleButton(btn, labelText, anchor, anchorPoint, xOff)
+            if not btn then return end
+            local ffd = GetFFD(btn)
+            if ffd.restyled then return end
+            ffd.restyled = true
 
-        -- Suppress Blizzard ViewButton
-        local blizViewBtn = InspectPaperDollFrame and InspectPaperDollFrame.ViewButton
-        if blizViewBtn then
-            blizViewBtn:SetAlpha(0)
-            blizViewBtn:EnableMouse(false)
-        end
-
-        local function MakeBottomButton(labelText, anchor, anchorPoint, xOff, onClick)
-            local btn = CreateFrame("Button", nil, frame)
-            btn:SetSize(BTN_W, BTN_H)
+            btn:ClearAllPoints()
             btn:SetPoint(anchor, frame, anchorPoint, xOff, BTN_Y)
+            btn:SetSize(BTN_W, BTN_H)
             btn:SetFrameLevel(frame:GetFrameLevel() + 20)
 
+            -- Strip default textures and hide native text
+            for _, region in ipairs({btn:GetRegions()}) do
+                if region.SetTexture then
+                    region:SetTexture(nil)
+                    region:Hide()
+                elseif region.SetTextColor then
+                    region:SetTextColor(0, 0, 0, 0)
+                end
+            end
+
+            -- Our label
             local label = btn:CreateFontString(nil, "OVERLAY")
             label:SetFont(fontPath, 10, "")
             label:SetPoint("CENTER", btn, "CENTER", 0, 0)
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
             label:SetTextColor(1, 1, 1, 0.6)
-            btn._label = label
+            ffd.label = label
 
-            btn:SetScript("OnEnter", function(self) self._label:SetTextColor(1, 1, 1, 1) end)
-            btn:SetScript("OnLeave", function(self) self._label:SetTextColor(1, 1, 1, 0.6) end)
-            btn:SetScript("OnClick", onClick)
+            btn:HookScript("OnEnter", function() label:SetTextColor(1, 1, 1, 1) end)
+            btn:HookScript("OnLeave", function() label:SetTextColor(1, 1, 1, 0.6) end)
 
             if EllesmereUI and EllesmereUI.PanelPP then
                 EllesmereUI.PanelPP.CreateBorder(btn, 0.4, 0.4, 0.4, 1, 1, "OVERLAY", 7)
             end
 
-            return btn
+            btn:SetAlpha(1)
+            btn:EnableMouse(true)
+            btn:Show()
         end
 
-        -- Talents button (bottom-right, shifted 2px right from original)
-        if not GetFFD(frame).talentsBtn then
-            local blizTalentsBtn = paperDollItemsFrame and paperDollItemsFrame.InspectTalents
-            GetFFD(frame).talentsBtn = MakeBottomButton("Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -7, function()
-                if blizTalentsBtn then blizTalentsBtn:Click() end
-            end)
+        -- Suppress other unnamed buttons in InspectPaperDollItemsFrame
+        local paperDollItemsFrame = InspectPaperDollItemsFrame
+        if paperDollItemsFrame then
+            local talentsBtn = paperDollItemsFrame.InspectTalents
+            for i = 1, paperDollItemsFrame:GetNumChildren() do
+                local child = select(i, paperDollItemsFrame:GetChildren())
+                if child and child:GetObjectType() == "Button" and not child:GetName()
+                   and child ~= talentsBtn then
+                    child:SetAlpha(0)
+                    child:EnableMouse(false)
+                end
+            end
+            RestyleButton(talentsBtn, "Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -7)
         end
 
-        -- Transmog button (bottom-left, mirrors Talents)
-        if not GetFFD(frame).transmogBtn then
-            GetFFD(frame).transmogBtn = MakeBottomButton("Transmog", "BOTTOMLEFT", "BOTTOMLEFT", 10, function()
-                if blizViewBtn then blizViewBtn:Click() end
-            end)
-        end
+        local blizViewBtn = InspectPaperDollFrame and InspectPaperDollFrame.ViewButton
+        RestyleButton(blizViewBtn, "Transmog", "BOTTOMLEFT", "BOTTOMLEFT", 10)
     end
 
     -- Hide slot wrapper frames

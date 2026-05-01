@@ -1150,7 +1150,9 @@ local function _ApplyAlpha(alpha)
             cf:SetAlpha(alpha)
             local eb = af.eb
             if eb then
-                if cf.isTemporary or not eb:HasFocus() then
+                local focused = eb:HasFocus()
+                if issecretvalue and issecretvalue(focused) then focused = false end
+                if cf.isTemporary or not focused then
                     eb:SetAlpha(alpha)
                 end
             end
@@ -1904,7 +1906,12 @@ local function SkinEditBox(cf)
                 if CFD(self).histIdx == 0 then
                     self:SetText("")
                 else
-                    self:SetText(h[#h - CFD(self).histIdx + 1])
+                    local entry = h[#h - CFD(self).histIdx + 1]
+                    if not entry or (issecretvalue and issecretvalue(entry)) then
+                        self:SetText("")
+                    else
+                        self:SetText(entry)
+                    end
                 end
             end)
             eb:HookScript("OnEditFocusLost", function(self)
@@ -1971,7 +1978,9 @@ local function SkinChatFrame(cf)
             local cfg = ECHAT.DB()
             if cfg.sidebarVisibility == "mouseover" then
                 C_Timer.After(0, function()
-                    if not sidebar:IsMouseOver() then
+                    local over = sidebar:IsMouseOver()
+                    if issecretvalue and issecretvalue(over) then over = false end
+                    if not over then
                         _sidebarFadeTarget = 0
                         if _sidebarFadeFrame then _sidebarFadeFrame:Show() end
                     end

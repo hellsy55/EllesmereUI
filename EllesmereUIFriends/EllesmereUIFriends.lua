@@ -3014,9 +3014,12 @@ local function SkinFriendsFrame()
         friendsBar:RegisterCallback("OnScroll", _ebsOnScrollActivity)
     end
 
-    -- Hook friend button updates (secure hook on Blizzard function)
-    if FriendsFrame_UpdateFriendButton then
-        hooksecurefunc("FriendsFrame_UpdateFriendButton", function(button)
+    -- Post-update skinning for friend buttons. Called directly from our own
+    -- ScrollBox factory -- NOT via hooksecurefunc on the global function.
+    -- A global hook on FriendsFrame_UpdateFriendButton tainted Blizzard's
+    -- secure execution paths (HistoryKeeper token creation, chat message
+    -- processing) exactly like the old FriendsList_Update hook did.
+    local function PostUpdateFriendButton(button)
             if not FriendsFrame:IsShown() then return end
             if not EBS.db or not EBS.db.profile.friends.enabled then return end
             if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
@@ -3236,7 +3239,6 @@ local function SkinFriendsFrame()
                 if GetFFD(button).regionBtn then GetFFD(button).regionBtn:Hide() end
             end
             end -- showRegionIcons else
-        end)
     end
 
     ---------------------------------------------------------------------------
@@ -3800,7 +3802,10 @@ local function SkinFriendsFrame()
             elseif elementData.buttonType == FRIENDS_BUTTON_TYPE_INVITE then
                 factory("FriendsFrameFriendInviteTemplate", FriendsFrame_UpdateFriendInviteButton)
             else
-                factory("FriendsListButtonTemplate", FriendsFrame_UpdateFriendButton)
+                factory("FriendsListButtonTemplate", function(btn, ed)
+                    FriendsFrame_UpdateFriendButton(btn, ed)
+                    PostUpdateFriendButton(btn)
+                end)
             end
         end)
         ScrollUtil.InitScrollBoxListWithScrollBar(ourSB, ourBar, view)
@@ -4187,8 +4192,9 @@ local function SkinFriendsFrame()
     end)
 
     -- Status events (BN_FRIEND_INFO_CHANGED, etc.) are handled by the
-    -- FriendsFrame_UpdateFriendButton hooksecurefunc above, which fires per-button
-    -- when Blizzard processes these events. No separate event frame needed.
+    -- friendsEventFrame above, which triggers a DataProvider rebuild.
+    -- The rebuild re-renders buttons via our factory wrapper that calls
+    -- PostUpdateFriendButton directly (no global hooksecurefunc needed).
 
     ---------------------------------------------------------------------------
     --  Skin Who / Raid / Quick Join tabs (simple reskins, Blizzard handles logic)

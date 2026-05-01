@@ -1431,26 +1431,38 @@ ShowWidgetTooltip = function(label, text, opts)
     tt:Show()
     -- Auto-size width: use natural text width + padding, capped at MAX_W
     if not (opts and opts.width) then
-        local naturalW = tt.text:GetStringWidth() + PAD * 2
-        tt:SetWidth(math.min(naturalW, MAX_W))
+        local sw = tt.text:GetStringWidth()
+        if issecretvalue and issecretvalue(sw) then
+            tt:SetWidth(MAX_W)
+        else
+            local naturalW = sw + PAD * 2
+            tt:SetWidth(math.min(naturalW, MAX_W))
+        end
     end
     tt:SetHeight(10)
     local textH = tt.text:GetStringHeight()
-    tt:SetHeight(textH + 16)
+    if issecretvalue and issecretvalue(textH) then
+        tt:SetHeight(26)
+    else
+        tt:SetHeight(textH + 16)
+    end
     -- Clamp to screen edges so tooltips don't go off-screen
+    -- Skip clamping if frame metrics are secret (tainted execution in M+)
     local ttScale = tt:GetEffectiveScale()
-    local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
-    local ttLeft = (tt:GetLeft() or 0) * ttScale
-    local ttRight = (tt:GetRight() or 0) * ttScale
-    if ttLeft < 0 then
-        local pt, rel, relPt, px, py = tt:GetPoint(1)
-        if pt then
-            tt:SetPoint(pt, rel, relPt, (px or 0) - ttLeft / ttScale, py or 0)
-        end
-    elseif ttRight > screenW then
-        local pt, rel, relPt, px, py = tt:GetPoint(1)
-        if pt then
-            tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+    if not (issecretvalue and issecretvalue(ttScale)) then
+        local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
+        local ttLeft = (tt:GetLeft() or 0) * ttScale
+        local ttRight = (tt:GetRight() or 0) * ttScale
+        if ttLeft < 0 then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, (px or 0) - ttLeft / ttScale, py or 0)
+            end
+        elseif ttRight > screenW then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+            end
         end
     end
     -- Cancel any in-progress fade-out so its OnFinished doesn't hide us

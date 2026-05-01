@@ -5814,7 +5814,7 @@ local function UpdateFlipbook(btn)
         end
     end
 
-    if fd.shapeMask and fd.shapeApplied then
+    if region and fd.shapeMask and fd.shapeApplied then
         MaskFrameTextures(region, fd.shapeMask)
         EFD(region).shapeMasked = true
     end
