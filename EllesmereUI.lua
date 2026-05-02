@@ -473,6 +473,7 @@ function EllesmereUI.Print(...)
     if instanceType == "party" and C_ChallengeMode
        and C_ChallengeMode.IsChallengeModeActive
        and C_ChallengeMode.IsChallengeModeActive() then return end
+    if (instanceType == "pvp" or instanceType == "arena") and InCombatLockdown() then return end
     f:AddMessage(strjoin(" ", tostringall(...)))
 end
 
@@ -2305,7 +2306,7 @@ do
         return C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id) or 134414
     end
 
-    -- M+/raid instance check (mirrors chat module's IsInProtectedInstance)
+    -- M+/raid/PvP instance check -- guards against tainted execution
     local function InProtectedInstance()
         local _, instanceType = IsInInstance()
         if instanceType == "raid" and InCombatLockdown() then return true end
@@ -2314,6 +2315,7 @@ do
             and C_ChallengeMode.IsChallengeModeActive() then
             return true
         end
+        if (instanceType == "pvp" or instanceType == "arena") and InCombatLockdown() then return true end
         return false
     end
 
@@ -7188,7 +7190,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.3.9"
+EllesmereUI.VERSION = "7.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -418,10 +418,12 @@ local function SkinRaidGroupButton(btn)
 end
 
 local function SkinRaidTab()
-    -- Full block: skip ALL styling during M+ or raid combat
+    -- Full block: skip ALL styling during M+, raid combat, or PvP combat
     local inMplus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
     local inRaidCombat = InCombatLockdown() and IsInRaid()
-    if inMplus or inRaidCombat then return end
+    local _, iType = IsInInstance()
+    local inPvP = (iType == "pvp" or iType == "arena") and InCombatLockdown()
+    if inMplus or inRaidCombat or inPvP then return end
 
     for _, name in ipairs(RAID_TAB_BUTTONS) do
         local btn
@@ -1413,6 +1415,10 @@ StaticPopupDialogs["EBS_NEW_FRIEND_GROUP"] = {
 -- Inject group assignment into Blizzard's friend right-click menu
 local function EBS_ModifyFriendMenu(ownerRegion, rootDescription, contextData)
     if not contextData then return end
+    -- Origin guard: only run when FriendsFrame is actually open. Without
+    -- this, the callback fires during BNet whisper processing (chat
+    -- right-click, social system menus) and taints secure execution paths.
+    if not FriendsFrame or not FriendsFrame:IsShown() then return end
     local fp = EBS.db and EBS.db.profile and EBS.db.profile.friends
     if not fp or not fp.enabled then return end
     -- Don't add group options for Recent Allies entries
@@ -1560,7 +1566,6 @@ local function SkinFriendsFrame()
     local frame = FriendsFrame
     if not frame or friendsSkinned then return end
     friendsSkinned = true
-
     local p = EBS.db.profile.friends
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
 
@@ -1569,8 +1574,7 @@ local function SkinFriendsFrame()
     if frame.Bg then frame.Bg:Hide() end
     if frame.TitleBg then frame.TitleBg:Hide() end
     if frame.TopTileStreaks then
-        frame.TopTileStreaks:Hide()
-        hooksecurefunc(frame.TopTileStreaks, "Show", function(self) self:Hide() end)
+        frame.TopTileStreaks:SetAlpha(0)
     end
     if frame.PortraitContainer then frame.PortraitContainer:Hide() end
     if frame.portrait then frame.portrait:Hide() end
@@ -1608,10 +1612,10 @@ local function SkinFriendsFrame()
             frame:SetWidth(origW - 40)
             frame:SetHeight(origH + EXTRA_H)
             FriendsListFrame:SetHeight(origListH + EXTRA_H)
-            -- Re-anchor Blizzard's ScrollBox to fill the resized frame
-            FriendsListFrame.ScrollBox:ClearAllPoints()
-            FriendsListFrame.ScrollBox:SetPoint("TOPLEFT", FriendsListFrame, "TOPLEFT", LIST_LEFT, LIST_TOP)
-            FriendsListFrame.ScrollBox:SetPoint("BOTTOMRIGHT", FriendsListFrame, "BOTTOMRIGHT", LIST_RIGHT, LIST_BOTTOM)
+            -- Hide Blizzard's ScrollBox visually without touching its layout or
+            -- creating children on it. Our own ScrollBox handles all rendering.
+            FriendsListFrame.ScrollBox:SetAlpha(0)
+            FriendsListFrame.ScrollBox:EnableMouse(false)
             -- Match other sub-tab content frames to the same list pane bounds
             local function FitToListPane(f)
                 if not f then return end
@@ -1637,16 +1641,12 @@ local function SkinFriendsFrame()
             FitToListPane(_G.RecruitAFriendFrame)
         end
 
-        -- Solid backdrop behind the ScrollBox for consistent dark background
-        if not GetFFD(FriendsListFrame.ScrollBox).backdrop then
-            local bd = FriendsListFrame.ScrollBox:CreateTexture(nil, "BACKGROUND", nil, -7)
-            bd:SetAllPoints()
-            bd:SetColorTexture(0.02, 0.02, 0.025, 1)
-            GetFFD(FriendsListFrame.ScrollBox).backdrop = bd
-        end
+        -- Backdrop is on our own ScrollBox (created later in the file)
 
         -- Apply size on show (scale + positioning fully owned by Blizzard)
-        frame:HookScript("OnShow", function()
+        -- Use hooksecurefunc instead of HookScript to avoid tainting FriendsFrame's
+        -- OnShow script chain (which breaks ClaimRaidFrame in combat).
+        hooksecurefunc(frame, "Show", function()
             if not InCombatLockdown() then
                 ApplySize()
             end
@@ -1673,9 +1673,9 @@ local function SkinFriendsFrame()
         frame.IgnoreListWindow:SetFrameStrata("DIALOG")
     end
 
-    -- Reparent RaidInfoFrame to UIParent so it renders above the main frame
+    -- Raise RaidInfoFrame above the main frame without reparenting (SetParent
+    -- from addon code taints the frame tree, breaking ClaimRaidFrame in combat).
     if _G.RaidInfoFrame then
-        _G.RaidInfoFrame:SetParent(UIParent)
         _G.RaidInfoFrame:SetFrameStrata("DIALOG")
     end
 
@@ -1683,14 +1683,6 @@ local function SkinFriendsFrame()
     if FriendsTooltip then
         FriendsTooltip:SetParent(UIParent)
         FriendsTooltip:SetFrameStrata("TOOLTIP")
-        local _ftAdjusting = false
-        hooksecurefunc(FriendsTooltip, "SetPoint", function(self, point, rel, relP, x, y)
-            if _ftAdjusting then return end
-            _ftAdjusting = true
-            self:ClearAllPoints()
-            self:SetPoint(point, rel, relP, (x or 0) - 20, y or 0)
-            _ftAdjusting = false
-        end)
     end
 
     -- Tab bar background (extends below frame for bottom tabs)
@@ -1896,12 +1888,11 @@ local function SkinFriendsFrame()
             end
         end)
     end
-
-    frame:HookScript("OnShow", function()
+    hooksecurefunc(frame, "Show", function()
         UpdateCustomTabs()
     end)
 
-    frame:HookScript("OnHide", function()
+    hooksecurefunc(frame, "Hide", function()
         local function HideTrack(sb)
             if sb and GetFFD(sb).track then
                 GetFFD(sb).track:Hide()
@@ -1919,7 +1910,6 @@ local function SkinFriendsFrame()
         local who = _G.WhoFrame
         if who then HideTrack(who.ScrollBox or (who.List and who.List.ScrollBox)) end
     end)
-
     -- Title text -- show BNet tag, accent colored
     -- Hide Blizzard's title
     if frame.TitleContainer then
@@ -2394,12 +2384,11 @@ local function SkinFriendsFrame()
         C_Timer.After(0.1, UpdateSubTabs)
         C_Timer.After(0.5, UpdateSubTabs)
         -- Also update on frame show
-        frame:HookScript("OnShow", function()
+        hooksecurefunc(frame, "Show", function()
             C_Timer.After(0.1, UpdateSubTabs)
         end)
     end
     SkinSubTabs()
-
     -- Recent Allies: custom element factory and DataProvider for styled buttons
     do
         local raf = _G.RecentAlliesFrame
@@ -3239,7 +3228,6 @@ local function SkinFriendsFrame()
     ---------------------------------------------------------------------------
     --  Friend Grouping: Element Factory + DataProvider Rebuild
     ---------------------------------------------------------------------------
-
     -- Priority from already-fetched info (avoids redundant API calls and throwaway tables)
     local function GetBNetPriority(info)
         if info and info.gameAccountInfo then
@@ -4200,14 +4188,14 @@ local function SkinFriendsFrame()
             end
         end
     end
-    frame:HookScript("OnHide", function()
+    hooksecurefunc(frame, "Hide", function()
         UnregisterFriendsEvents()
         local bar = FriendsListFrame.ScrollBar
         if bar and bar.GetScrollPercentage then
             _ebsSavedScrollPct = bar:GetScrollPercentage() or 0
         end
     end)
-    frame:HookScript("OnShow", function()
+    hooksecurefunc(frame, "Show", function()
         RegisterFriendsEvents()
         -- RebuildFriendsDataProvider is triggered by FriendsList_Update /
         -- FRIENDLIST_UPDATE events that fire on show. No need to call it
@@ -4454,9 +4442,7 @@ local function SkinFriendsFrame()
                 end
             end
             SkinWhoRows()
-            if WhoList_Update then
-                hooksecurefunc("WhoList_Update", SkinWhoRows)
-            end
+            who:HookScript("OnShow", SkinWhoRows)
 
             -- Push the scroll list down 35px and add 5px left padding
             local sb = who.ScrollBox or (who.scrollFrame)
@@ -4526,18 +4512,15 @@ local function SkinFriendsFrame()
         end
     end
 
-
-    -- Friends list area: 1px border around scrollable area
-    local friendsList = FriendsListFrame
-    if friendsList and friendsList.ScrollBox and not GetFFD(friendsList.ScrollBox).borderAdded then
-        GetFFD(friendsList.ScrollBox).borderAdded = true
-        local bdr = CreateFrame("Frame", nil, friendsList)
-        bdr:SetPoint("TOPLEFT", friendsList.ScrollBox, "TOPLEFT", 0, 0)
-        bdr:SetPoint("BOTTOMRIGHT", friendsList.ScrollBox, "BOTTOMRIGHT", 0, 0)
-        bdr:SetFrameLevel(friendsList.ScrollBox:GetFrameLevel() + 2)
+    -- Friends list area: 1px border around our custom scrollable area
+    local ourSB = GetFFD(frame).ourScrollBox
+    if ourSB and not GetFFD(ourSB).borderAdded then
+        GetFFD(ourSB).borderAdded = true
+        local bdr = CreateFrame("Frame", nil, ourSB)
+        bdr:SetAllPoints(ourSB)
+        bdr:SetFrameLevel(ourSB:GetFrameLevel() + 2)
         PP.CreateBorder(bdr, 1, 1, 1, 0.1, 1, "OVERLAY", 7)
     end
-
     -- Shared inset: everything inside the frame uses this left/right padding
     local INSET = 3
     local BTN_H = 22
@@ -4549,14 +4532,13 @@ local function SkinFriendsFrame()
     local msgBtn = _G.FriendsFrameSendMessageButton
     if addBtn and msgBtn then
         local BTN_GAP = 10
-        local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
+        local scrollBox = GetFFD(frame).ourScrollBox or frame
         local btnY = -BTN_H - BTN_GAP + 10
 
         local function LayoutFriendBtns()
             local totalW = frame:GetWidth() - 30
             local btnW = math.floor(totalW / 3)
 
-            addBtn:SetParent(frame)
             addBtn:ClearAllPoints()
             addBtn:SetSize(btnW, BTN_H)
             addBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", 0, btnY)
@@ -4567,7 +4549,6 @@ local function SkinFriendsFrame()
                 GetFFD(frame).offlineBtn:SetPoint("BOTTOMLEFT", scrollBox or frame, "BOTTOMLEFT", btnW, btnY)
             end
 
-            msgBtn:SetParent(frame)
             msgBtn:ClearAllPoints()
             msgBtn:SetSize(btnW, BTN_H)
             msgBtn:SetPoint("BOTTOMRIGHT", scrollBox or frame, "BOTTOMRIGHT", 0, btnY)
@@ -4635,7 +4616,7 @@ local function SkinFriendsFrame()
         end)
 
         LayoutFriendBtns()
-        frame:HookScript("OnShow", LayoutFriendBtns)
+        hooksecurefunc(frame, "Show", LayoutFriendBtns)
     end
 
     -- Position custom tabs below the frame
@@ -4880,7 +4861,7 @@ function EBS:OnEnable()
                         end
                     end)
                     if FriendsFrame then
-                        FriendsFrame:HookScript("OnShow", function()
+                        hooksecurefunc(FriendsFrame, "Show", function()
                             if not friendsSkinned and EBS.db.profile.friends.enabled then
                                 C_Timer.After(0, ApplyFriends)
                             end

@@ -11,6 +11,11 @@ if not oUF then
     return
 end
 
+-- Portrait UNIT_MODEL_CHANGED on eventless frames (TargetTarget) triggers
+-- UnitIsUnit which returns secret booleans in protected instances. Rather
+-- than patching the global, we unregister the problematic event after oUF
+-- sets up eventless frames. See PostCreateTargetTarget below.
+
 -- External lookup for portrait side per frame. Avoids writing custom
 -- properties onto oUF frames which taints their secure execution chain.
 EllesmereUI._ufPortraitSide = EllesmereUI._ufPortraitSide or setmetatable({}, { __mode = "k" })
@@ -2957,6 +2962,36 @@ local function SetupShowOnCastBar(frame, unit)
     castbar.PostChannelStop = dismissCastBar
     castbar.PostCastFail = dismissCastBar
 
+    -- Guard against nil stages from UnitEmpoweredStagePercentages during
+    -- empower casts where stage data isn't available yet.
+    castbar.UpdatePips = function(element, stages)
+        if not stages then return end
+        local isHoriz = element:GetOrientation() == "HORIZONTAL"
+        local elementSize = isHoriz and element:GetWidth() or element:GetHeight()
+        local lastOffset = 0
+        for stage, stageSection in next, stages do
+            local offset = lastOffset + (elementSize * stageSection)
+            lastOffset = offset
+            local pip = element.Pips[stage]
+            if not pip then
+                pip = (element.CreatePip or function(e)
+                    return CreateFrame("Frame", nil, e, "CastingBarFrameStagePipTemplate")
+                end)(element, stage)
+                element.Pips[stage] = pip
+            end
+            pip:ClearAllPoints()
+            if isHoriz then
+                pip:SetPoint("CENTER", element, "LEFT", offset, 0)
+            else
+                pip:SetPoint("CENTER", element, "BOTTOM", 0, offset)
+            end
+            pip:Show()
+        end
+        for i = #stages + 1, #element.Pips do
+            element.Pips[i]:Hide()
+        end
+    end
+
     -- Catch-all: hide the icon AND the background whenever the castbar
     -- hides for any reason (oUF holdTime expiry, target/focus switch, etc.)
     -- so neither ever gets stuck. Target/focus switching while the previous
@@ -4257,11 +4292,47 @@ local function RegisterStylesOnce()
     oUF:RegisterStyle("EllesmerePet", function(frame, unit)
         StylePetFrame(frame, unit)
     end)
+    -- Skip unitIsUnit check in portrait Update for eventless frames to avoid
+    -- secret boolean errors. These frames poll on OnUpdate so redundant
+    -- portrait updates are harmless.
+    local function ApplyPortraitOverride(frame)
+        if not frame.Portrait then return end
+        frame.Portrait.Override = function(self, event, evtUnit)
+            local element = self.Portrait
+            if not element then return end
+            local u = self.unit
+            if element.PreUpdate then element:PreUpdate(u) end
+            local isAvailable = UnitIsConnected(u) and UnitIsVisible(u)
+            if element:IsObjectType("PlayerModel") then
+                if not isAvailable then
+                    element:SetCamDistanceScale(0.25)
+                    element:SetPortraitZoom(0)
+                    element:SetPosition(0, 0, 0.25)
+                    element:ClearModel()
+                    element:SetModel([[Interface\Buttons\TalkToMeQuestionMark.m2]])
+                else
+                    element:SetCamDistanceScale(1)
+                    element:SetPortraitZoom(1)
+                    element:SetPosition(0, 0, 0)
+                    element:SetUnit(u)
+                end
+            else
+                if isAvailable then
+                    SetPortraitTexture(element, u)
+                else
+                    element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
+                end
+            end
+            if element.PostUpdate then element:PostUpdate(u, isAvailable) end
+        end
+    end
     oUF:RegisterStyle("EllesmereTargetTarget", function(frame, unit)
         StyleSimpleFrame(frame, unit)
+        ApplyPortraitOverride(frame)
     end)
     oUF:RegisterStyle("EllesmereFocusTarget", function(frame, unit)
         StyleSimpleFrame(frame, unit)
+        ApplyPortraitOverride(frame)
     end)
     oUF:RegisterStyle("EllesmereBoss", function(frame, unit)
         StyleBossFrame(frame, unit)

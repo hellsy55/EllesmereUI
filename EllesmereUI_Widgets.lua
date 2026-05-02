@@ -1395,13 +1395,14 @@ end
 
 -- opts (optional table): { color = {r,g,b}, width = number } to override text color or force width
 ShowWidgetTooltip = function(label, text, opts)
-    -- Suppress tooltips in M+/raid combat -- frame APIs return secret
+    -- Suppress tooltips in M+/raid/PvP combat -- frame APIs return secret
     -- values in tainted execution and tooltips aren't useful mid-pull.
     do
         local _, iType = IsInInstance()
         if iType == "party" and C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
            and C_ChallengeMode.IsChallengeModeActive() then return end
         if iType == "raid" and InCombatLockdown() then return end
+        if (iType == "pvp" or iType == "arena") and InCombatLockdown() then return end
     end
     local tt = GetTooltipFrame()
     local MAX_W = 250

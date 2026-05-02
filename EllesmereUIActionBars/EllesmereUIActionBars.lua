@@ -5530,7 +5530,16 @@ do
             if _activePushedN == 0 then _pollFrame:Hide() end
         end)
         _pollFrame:Hide()
-        hooksecurefunc("UseAction", function(slot)
+        -- ActionButtonDown fires on key press regardless of "cast on key down"
+        -- CVar. This ensures pushed texture shows while the key is held for
+        -- both key-down and key-up casting modes.
+        -- Extract base key from compound binding (e.g. "SHIFT-1" → "1",
+        -- "CTRL-Q" → "Q"). IsKeyDown only accepts raw key names.
+        local function BaseKey(binding)
+            if not binding then return nil end
+            return binding:match("[^%-]+$")
+        end
+        local function ShowPushedForSlot(slot)
             local prof = EAB.db and EAB.db.profile
             if not prof then return end
             if not prof.useBlizzardStyle and (prof.pushedTextureType or 2) == 6 then return end
@@ -5540,17 +5549,37 @@ do
             if not cmd then return end
             local k1, k2 = GetBindingKey(cmd)
             if not k1 then return end
-            -- Cache bound keys per button (reused across presses)
             local keys = _btnKeys[btn]
             if not keys then keys = {}; _btnKeys[btn] = keys end
-            keys[1] = k1; keys[2] = k2; keys[3] = nil
+            keys[1] = BaseKey(k1); keys[2] = BaseKey(k2); keys[3] = nil
             btn.PushedTexture:Show()
             if not _activePushed[btn] then
                 _activePushed[btn] = true
                 _activePushedN = _activePushedN + 1
             end
             _pollFrame:Show()
-        end)
+        end
+        -- ActionButtonDown/MultiActionButtonDown fire on key press regardless
+        -- of "cast on key down" CVar. This ensures pushed texture shows while
+        -- the key is held for both key-down and key-up casting modes.
+        hooksecurefunc("ActionButtonDown", function(id) ShowPushedForSlot(id) end)
+        if MultiActionButtonDown then
+            local multiBarPage = {
+                MultiBarBottomLeft  = 6,
+                MultiBarBottomRight = 5,
+                MultiBarRight       = 3,
+                MultiBarLeft        = 4,
+                MultiBar5           = 13,
+                MultiBar6           = 14,
+                MultiBar7           = 15,
+            }
+            hooksecurefunc("MultiActionButtonDown", function(barName, id)
+                local page = multiBarPage[barName]
+                if not page then return end
+                local slot = (page - 1) * 12 + id
+                ShowPushedForSlot(slot)
+            end)
+        end
     end
 end
 

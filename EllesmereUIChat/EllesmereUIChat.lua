@@ -2528,14 +2528,15 @@ local function SkinChatFrame(cf)
         end
     end
 
-    -- Skip scrollbar entirely for undocked temporary frames in M+ / raid combat
+    -- Skip scrollbar entirely for undocked temporary frames in M+ / raid / PvP combat
     if cf.isTemporary and not cf.isDocked then
         local _, instanceType = IsInInstance()
         local inMPlus = instanceType == "party" and C_ChallengeMode
             and C_ChallengeMode.IsChallengeModeActive
             and C_ChallengeMode.IsChallengeModeActive()
         local inRaidCombat = instanceType == "raid" and InCombatLockdown()
-        if inMPlus or inRaidCombat then return end
+        local inPvP = (instanceType == "pvp" or instanceType == "arena") and InCombatLockdown()
+        if inMPlus or inRaidCombat or inPvP then return end
     end
 
     -- Kill Blizzard's ScrollBar
