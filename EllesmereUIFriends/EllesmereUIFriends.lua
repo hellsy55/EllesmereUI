@@ -1757,11 +1757,6 @@ local function SkinFriendsFrame()
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
             tfd.label = label
-            -- Sync our label when Blizzard updates the text (e.g. Quick Join count).
-            -- Blizzard calls tab:SetText() on the button, not the FontString directly.
-            hooksecurefunc(tab, "SetText", function(_, newText)
-                if newText and label then label:SetText(newText) end
-            end)
 
             -- Accent underline (1px pixel-perfect)
             if not tfd.underline then
@@ -4127,15 +4122,42 @@ local function SkinFriendsFrame()
     -- The global hook tainted every Blizzard call site (BN whisper
     -- processing, HistoryKeeper token creation) because the wrapper
     -- injected addon code into secure execution paths.
+    -- Sync our custom tab labels with Blizzard's tab text (replaces per-tab
+    -- hooksecurefunc on SetText which tainted BNet whisper processing).
+    local function SyncFriendsTabLabels()
+        for i = 1, (FriendsFrame and FriendsFrame.numTabs) or 4 do
+            local tab = _G["FriendsFrameTab" .. i]
+            if tab then
+                local tfd = GetFFD(tab)
+                if tfd.label then
+                    local bliz = tab:GetFontString()
+                    local txt = bliz and bliz:GetText()
+                    if txt then tfd.label:SetText(txt) end
+                end
+            end
+        end
+    end
+
+    -- Only register friend events while FriendsFrame is shown. In Midnight,
+    -- having addon code execute for BN_FRIEND_INFO_CHANGED (even an early
+    -- return) taints the execution context for the entire event dispatch
+    -- batch, breaking BNet whisper processing and HistoryKeeper.
     local friendsEventFrame = CreateFrame("Frame")
-    friendsEventFrame:RegisterEvent("FRIENDLIST_UPDATE")
-    friendsEventFrame:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
-    friendsEventFrame:RegisterEvent("BN_FRIEND_INFO_CHANGED")
-    friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_ADDED")
-    friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
     friendsEventFrame:SetScript("OnEvent", function(_, event)
         RebuildFriendsDataProvider("event:" .. event)
+        SyncFriendsTabLabels()
     end)
+    local function RegisterFriendsEvents()
+        friendsEventFrame:RegisterEvent("FRIENDLIST_UPDATE")
+        friendsEventFrame:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
+        friendsEventFrame:RegisterEvent("BN_FRIEND_INFO_CHANGED")
+        friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_ADDED")
+        friendsEventFrame:RegisterEvent("BN_FRIEND_INVITE_REMOVED")
+    end
+    local function UnregisterFriendsEvents()
+        friendsEventFrame:UnregisterAllEvents()
+    end
+    if FriendsFrame:IsShown() then RegisterFriendsEvents() end
 
     -- Auto-accept group invites from friends
     local _autoAcceptHideStatic = false
@@ -4179,12 +4201,14 @@ local function SkinFriendsFrame()
         end
     end
     frame:HookScript("OnHide", function()
+        UnregisterFriendsEvents()
         local bar = FriendsListFrame.ScrollBar
         if bar and bar.GetScrollPercentage then
             _ebsSavedScrollPct = bar:GetScrollPercentage() or 0
         end
     end)
     frame:HookScript("OnShow", function()
+        RegisterFriendsEvents()
         -- RebuildFriendsDataProvider is triggered by FriendsList_Update /
         -- FRIENDLIST_UPDATE events that fire on show. No need to call it
         -- here -- just defer the button styling + scroll restore.
@@ -4192,7 +4216,7 @@ local function SkinFriendsFrame()
     end)
 
     -- Status events (BN_FRIEND_INFO_CHANGED, etc.) are handled by the
-    -- friendsEventFrame above, which triggers a DataProvider rebuild.
+    -- friendsEventFrame above (only registered while FriendsFrame is shown).
     -- The rebuild re-renders buttons via our factory wrapper that calls
     -- PostUpdateFriendButton directly (no global hooksecurefunc needed).
 
