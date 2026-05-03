@@ -405,22 +405,16 @@ local function ApplyChatPosition()
     _cfIgnoreSetPoint = false
 end
 
--- Chat frame size: apply saved width/height from DB.
+-- Chat frame size: Blizzard is sole authority for chat sizing.
+-- We no longer apply saved width/height.
 local function ApplyChatSize()
-    local cfg = ECHAT.DB()
-    if not cfg then return end
-    local cf1 = _G.ChatFrame1
-    if not cf1 then return end
-    if cfg.chatWidth then cf1:SetWidth(cfg.chatWidth) end
-    if cfg.chatHeight then cf1:SetHeight(cfg.chatHeight) end
+    -- no-op: Blizzard handles all chat frame sizing
 end
 ECHAT.ApplyChatSize = ApplyChatSize
 
 function ECHAT.ApplyLockChatSize()
     local cfg = ECHAT.DB()
-    local cf1 = _G.ChatFrame1
-    if not cf1 or not CFD(cf1).resizeGrip then return end
-    CFD(cf1).resizeGrip:SetShown(not cfg.lockChatSize)
+    -- No-op: custom resize grip removed, Blizzard handles sizing.
 end
 
 -- Flip sidebar to left or right side of chat bg
@@ -2267,129 +2261,31 @@ local function SkinChatFrame(cf)
         btnFrame:SetParent(_hiddenParent)
     end
 
-    -- Reposition Blizzard's resize button to align with our bg.
-    -- ChatFrame1: hidden (we have our own grip). Others: repositioned.
+    -- Restyle Blizzard's resize button to align with our bg (all chat frames).
     local resizeBtn = _G[name .. "ResizeButton"]
-    if resizeBtn then
-        if name == "ChatFrame1" then
-            resizeBtn:SetParent(_hiddenParent)
-        else
-            -- Restyle with our custom resize texture
-            resizeBtn:SetSize(18, 18)
-            resizeBtn:ClearAllPoints()
-            resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
-            resizeBtn:SetFrameStrata("HIGH")
-            -- Strip default textures and apply ours
-            if resizeBtn.GetRegions then
-                for ri = 1, select("#", resizeBtn:GetRegions()) do
-                    local region = select(ri, resizeBtn:GetRegions())
-                    if region and region:IsObjectType("Texture") then
-                        region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
-                        region:SetDesaturated(true)
-                        region:SetVertexColor(1, 1, 1)
-                        region:SetAllPoints()
-                    end
+    if resizeBtn and CFD(cf).bg then
+        resizeBtn:SetSize(18, 18)
+        resizeBtn:ClearAllPoints()
+        resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
+        resizeBtn:SetFrameStrata("HIGH")
+        if resizeBtn.GetRegions then
+            for ri = 1, select("#", resizeBtn:GetRegions()) do
+                local region = select(ri, resizeBtn:GetRegions())
+                if region and region:IsObjectType("Texture") then
+                    region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
+                    region:SetDesaturated(true)
+                    region:SetVertexColor(1, 1, 1)
+                    region:SetAllPoints()
                 end
             end
-            resizeBtn:SetAlpha(0.2)
-            resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
         end
+        resizeBtn:SetAlpha(0.2)
+        resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+        resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
     end
 
-    -- Custom resize grip on ChatFrame1's bg (bottom-right corner)
-    if name == "ChatFrame1" and CFD(cf).bg and not CFD(cf).resizeGrip then
-        local grip = CreateFrame("Button", nil, UIParent)
-        grip:SetSize(18, 18)
-        grip:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
-        grip:SetFrameStrata("HIGH")
-        grip:SetFrameLevel(100)
-        local gripTex = grip:CreateTexture(nil, "OVERLAY")
-        gripTex:SetAllPoints()
-        gripTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
-        gripTex:SetDesaturated(true)
-        gripTex:SetVertexColor(1, 1, 1)
-        grip:SetAlpha(0.2)
-        grip:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-        grip:SetScript("OnLeave", function(self)
-            if not self._dragging then self:SetAlpha(0.2) end
-        end)
-
-        local function FinishResize(self)
-            self._dragging = false
-            _cfResizing = false
-            self:SetScript("OnUpdate", nil)  -- stop per-frame polling
-            CFD(cf).resizeTarget = nil
-            self:SetAlpha(0.2)
-            -- Save size and update position to reflect new dimensions
-            local cfg = ECHAT.DB()
-            if cfg then
-                cfg.chatWidth = cf:GetWidth()
-                cfg.chatHeight = cf:GetHeight()
-                -- Update saved position from current TOPLEFT anchor
-                local cfS = cf:GetEffectiveScale()
-                local uiS = UIParent:GetEffectiveScale()
-                local cCX, cCY = cf:GetCenter()
-                local uCX, uCY = UIParent:GetCenter()
-                if cCX and uCX then
-                    cfg.chatPosition = {
-                        point = "CENTER", relPoint = "CENTER",
-                        x = (cCX * cfS - uCX * uiS) / uiS,
-                        y = (cCY * cfS - uCY * uiS) / uiS,
-                    }
-                end
-            end
-            ApplyChatPosition()
-        end
-
-        grip:SetScript("OnMouseDown", function(self, button)
-            if button ~= "LeftButton" then return end
-            if InCombatLockdown() then return end
-            self._startCX, self._startCY = GetCursorPosition()
-            self._startW = cf:GetWidth()
-            self._startH = cf:GetHeight()
-            -- Capture current anchor so we can compensate for center-based resize
-            local pt, _, relPt, px, py = cf:GetPoint(1)
-            self._anchorPt = pt
-            self._anchorRelPt = relPt
-            self._anchorX = px or 0
-            self._anchorY = py or 0
-            self._dragging = true
-            _cfResizing = true
-            -- Start OnUpdate only while dragging (zero cost when idle)
-            grip:SetScript("OnUpdate", grip._onUpdate)
-        end)
-        grip:SetScript("OnMouseUp", function(self)
-            if not self._dragging then return end
-            FinishResize(self)
-        end)
-        grip._onUpdate = function(self)
-            if not IsMouseButtonDown("LeftButton") then
-                FinishResize(self)
-                return
-            end
-            local es = cf:GetEffectiveScale()
-            local cx, cy = GetCursorPosition()
-            local dx = (cx - self._startCX) / es
-            local dy = (cy - self._startCY) / es
-            local newW = max(200, self._startW + dx)
-            local newH = max(100, self._startH - dy)
-            -- Compensate position so top-left stays fixed (CENTER anchor
-            -- grows equally in all directions; shift center by half the delta)
-            local dW = newW - self._startW
-            local dH = newH - self._startH
-            local tgtX = self._anchorX + dW / 2
-            local tgtY = self._anchorY - dH / 2
-            -- Store target so the SetPoint hook can enforce it against Blizzard
-            CFD(cf).resizeTarget = { self._anchorPt, self._anchorRelPt, tgtX, tgtY }
-            _cfIgnoreSetPoint = true
-            cf:SetSize(newW, newH)
-            cf:ClearAllPoints()
-            cf:SetPoint(self._anchorPt, UIParent, self._anchorRelPt, tgtX, tgtY)
-            _cfIgnoreSetPoint = false
-        end
-        CFD(cf).resizeGrip = grip
-    end
+    -- Custom resize grip removed: Blizzard is sole authority for chat sizing.
+    -- Blizzard's resize button (restyled above) handles all resizing natively.
 
     -- Hide scroll buttons + scroll-to-bottom
     for _, suffix in ipairs({"BottomButton", "DownButton", "UpButton"}) do

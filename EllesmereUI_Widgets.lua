@@ -1454,10 +1454,13 @@ ShowWidgetTooltip = function(label, text, opts)
     -- Clamp to screen edges so tooltips don't go off-screen
     -- Skip clamping if frame metrics are secret (tainted execution in M+)
     local ttScale = tt:GetEffectiveScale()
-    if not (issecretvalue and issecretvalue(ttScale)) then
+    local _ttLeft = tt:GetLeft()
+    local _ttRight = tt:GetRight()
+    local _isv = issecretvalue
+    if not (_isv and (_isv(ttScale) or _isv(_ttLeft) or _isv(_ttRight))) then
         local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
-        local ttLeft = (tt:GetLeft() or 0) * ttScale
-        local ttRight = (tt:GetRight() or 0) * ttScale
+        local ttLeft = (_ttLeft or 0) * ttScale
+        local ttRight = (_ttRight or 0) * ttScale
         if ttLeft < 0 then
             local pt, rel, relPt, px, py = tt:GetPoint(1)
             if pt then
