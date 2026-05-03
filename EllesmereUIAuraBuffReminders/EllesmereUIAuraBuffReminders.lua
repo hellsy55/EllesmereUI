@@ -2381,7 +2381,7 @@ local function Refresh()
                 end
             end
             if combatIdx > 0 then EllesmereUI.SetElementVisibility(combatAnchor, true); LayoutCombatIcons() end
-            if cursorIdx > 0 then EllesmereUI.SetElementVisibility(cursorAnchor, true); LayoutCursorIcons() end
+            if cursorIdx > 0 then cursorAnchor:Show(); EllesmereUI.SetElementVisibility(cursorAnchor, true); LayoutCursorIcons() end
         end
         return
     end
@@ -2695,6 +2695,7 @@ local function BeaconLayoutIcons()
                 f:ClearAllPoints()
                 f:SetPoint("CENTER", cursorAnchor, "CENTER", startX + (i - 1) * (sz + spacing), -(sz + 8))
             end
+            cursorAnchor:Show()
             EllesmereUI.SetElementVisibility(cursorAnchor, true)
         end
         return

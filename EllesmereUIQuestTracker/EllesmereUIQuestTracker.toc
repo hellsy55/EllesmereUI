@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: A modern, light quest tracker reskin with improved functionality
 ## Author: Ellesmere
-## Version: 7.4.4
+## Version: 7.4.5
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQuestTrackerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
