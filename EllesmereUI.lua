@@ -1264,7 +1264,9 @@ do
         local ticks = 0
         container:SetScript("OnUpdate", function(self)
             ticks = ticks + 1
-            SnapBorderTextures(self, frame, bd.borderSize or 1)
+            -- pcall: SetBackdrop can trigger Blizzard OnSizeChanged on
+            -- tooltip frames where dimensions are secret values.
+            pcall(SnapBorderTextures, self, frame, bd.borderSize or 1)
             if ticks >= 2 then
                 self:SetScript("OnUpdate", nil)
             end
@@ -7199,7 +7201,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.4.3"
+EllesmereUI.VERSION = "7.4.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

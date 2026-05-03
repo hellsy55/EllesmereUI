@@ -4323,19 +4323,9 @@ if EllesmereUI then
             -- Custom drag-to-move was removed to eliminate taint in the
             -- UIParentPanelManager execution context.
 
-            -- Kick off skinning 1s after PLAYER_LOGIN (off the critical path
-            -- so it doesn't add to the login CPU spike) instead of inside the
-            -- very first OnShow. Running the skin synchronously inside
-            -- Blizzard's OnShow -> ShowSubFrame chain leaves the Reputation
-            -- and Currency panes partially-initialized (content shown but
-            -- not rendered) until a later hide/show cycle heals them.
-            -- The OnShow hook remains as a fallback for the rare case where
-            -- the user somehow opens the sheet in the first second of login.
-            C_Timer.After(1, function()
-                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
-                    ApplyThemedCharacterSheet()
-                end
-            end)
+            -- Skin lazily on first OnShow (not on a timer). The old 1s
+            -- C_Timer.After caused a 30ms login spike from the 4000-line
+            -- SkinCharacterSheet running on the critical path.
             CharacterFrame:HookScript("OnShow", ApplyThemedCharacterSheet)
 
             -- Function to detect and set active equipment set

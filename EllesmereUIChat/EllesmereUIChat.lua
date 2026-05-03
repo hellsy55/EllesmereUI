@@ -2618,7 +2618,9 @@ local function SkinChatFrame(cf)
                 self._elapsed = 0
                 local pct = blizSB.GetScrollPercentage and blizSB:GetScrollPercentage()
                 local ext = blizSB.GetVisibleExtentPercentage and blizSB:GetVisibleExtentPercentage()
-                if pct == _lastPct and ext == _lastExt then return end
+                if pct == _lastPct and ext == _lastExt then
+                    return
+                end
                 _lastPct, _lastExt = pct, ext
                 UpdateThumb()
             end
@@ -2693,7 +2695,6 @@ initFrame:SetScript("OnEvent", function(self)
         local cf = _G["ChatFrame" .. i]
         if cf then SkinChatFrame(cf) end
     end
-
     ---------------------------------------------------------------------------
     --  2b. Expanded font size options. Font is applied at skin time only.
     --      The global hooksecurefunc("FCF_SetChatWindowFontSize") was removed
@@ -2990,85 +2991,86 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Hover detection: lightweight ticker checks cursor position for
-        -- idle fade + scrollbar. Fires 4x/sec. Tabs and sidebar use
-        -- OnEnter/OnLeave (they have EnableMouse for click handling).
+        -- Event-driven hover detection: zero CPU when idle.
+        -- Uses EnableMouseMotion on our bg frames + HookScript on tabs.
+        -- EnableMouseMotion captures hover without blocking clicks, but
+        -- does block camera turning. We accept this trade-off for zero-poll.
         local _idleMouseOver = false
-        local _pollFrames = {}
+        local _hoverCount = 0
+        local _editFocusCount = 0
+
+        local function UpdateHoverState()
+            local over = (_hoverCount > 0) or (_editFocusCount > 0)
+            if not IsIdleApplicable() then return end
+            if over and not _idleMouseOver then
+                _idleMouseOver = true
+                CancelIdleFade()
+            elseif not over and _idleMouseOver then
+                _idleMouseOver = false
+                ECHAT.ResetIdleTimer()
+            end
+        end
+
+        local function OnChatEnter(cf)
+            _hoverCount = _hoverCount + 1
+            UpdateHoverState()
+            local track = CFD(cf).scrollTrack
+            if track and track._setHovered then
+                track._setHovered(true)
+                track._showTrack()
+            end
+        end
+        local function OnChatLeave(cf)
+            _hoverCount = max(0, _hoverCount - 1)
+            UpdateHoverState()
+            local track = CFD(cf).scrollTrack
+            if track and track._setHovered and not track._isDragging() then
+                track._setHovered(false)
+                track._hideTrack()
+            end
+        end
+
         for i = 1, 20 do
             local cf = _G["ChatFrame" .. i]
             if cf and cf.isTemporary then break end
             if cf then
-                _pollFrames[#_pollFrames + 1] = {
-                    cf    = cf,
-                    tab   = _G["ChatFrame" .. i .. "Tab"],
-                    bg    = CFD(cf).bg,
-                    track = CFD(cf).scrollTrack,
-                }
+                local bg = CFD(cf).bg
+                if bg then
+                    if bg.EnableMouseMotion then bg:EnableMouseMotion(true) end
+                    bg:HookScript("OnEnter", function() OnChatEnter(cf) end)
+                    bg:HookScript("OnLeave", function() OnChatLeave(cf) end)
+                end
+                local tab = _G["ChatFrame" .. i .. "Tab"]
+                if tab then
+                    tab:HookScript("OnEnter", function() OnChatEnter(cf) end)
+                    tab:HookScript("OnLeave", function() OnChatLeave(cf) end)
+                end
             end
         end
-        local _pollSidebar = CFD(ChatFrame1).sidebar
 
-        C_Timer.NewTicker(0.15, function()
-            RefreshCursorPos()
-            local over = false
-            local hoverCF = nil
-            local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
-                and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
-            for pi = 1, #_pollFrames do
-                local pf = _pollFrames[pi]
-                local cf = pf.cf
-                -- Check tab hover for ALL docked frames (tabs are visible even
-                -- when the chat frame is hidden). Check bg/cf only for shown frames.
-                if not over and pf.tab and IsCursorOverCached(pf.tab) then
-                    over = true; hoverCF = cf
-                end
-                if cf:IsShown() or cf == selected then
-                    if not over then
-                        if IsCursorOverCached(pf.bg) or IsCursorOverCached(cf) then
-                            over = true; hoverCF = cf
-                        end
-                    end
-                    local track = pf.track
-                    if track then
-                        local isOverThis = (hoverCF == cf)
-                        if isOverThis and not track._isHovered() then
-                            track._setHovered(true)
-                            track._showTrack()
-                        elseif not isOverThis and track._isHovered() and not track._isDragging() then
-                            track._setHovered(false)
-                            track._hideTrack()
-                        end
-                    end
-                end
+        local sidebar = CFD(ChatFrame1).sidebar
+        if sidebar then
+            if sidebar.EnableMouseMotion then sidebar:EnableMouseMotion(true) end
+            sidebar:HookScript("OnEnter", function()
+                _hoverCount = _hoverCount + 1; UpdateHoverState()
+            end)
+            sidebar:HookScript("OnLeave", function()
+                _hoverCount = max(0, _hoverCount - 1); UpdateHoverState()
+            end)
+        end
+
+        -- Edit box focus tracking (event-driven, no polling)
+        for i = 1, 20 do
+            local eb = _G["ChatFrame" .. i .. "EditBox"]
+            if eb then
+                eb:HookScript("OnEditFocusGained", function()
+                    _editFocusCount = _editFocusCount + 1; UpdateHoverState()
+                end)
+                eb:HookScript("OnEditFocusLost", function()
+                    _editFocusCount = max(0, _editFocusCount - 1); UpdateHoverState()
+                end)
             end
-            if not over and IsCursorOverCached(_pollSidebar) then
-                over = true
-            end
-            -- Check if any edit box has focus (covers temp frames too)
-            if not over then
-                for ei = 1, 20 do
-                    local eb = _G["ChatFrame" .. ei .. "EditBox"]
-                    if eb then
-                        local focused = eb:HasFocus()
-                        if issecretvalue and issecretvalue(focused) then focused = false end
-                        if focused then
-                            over = true
-                            break
-                        end
-                    end
-                end
-            end
-            if IsIdleApplicable() then
-                if over and not _idleMouseOver then
-                    _idleMouseOver = true
-                    CancelIdleFade()
-                elseif not over and _idleMouseOver then
-                    _idleMouseOver = false
-                    ECHAT.ResetIdleTimer()
-                end
-            end
-        end)
+        end
 
         -- Start the initial timer
         ECHAT.ResetIdleTimer()

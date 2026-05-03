@@ -1,71 +1,5 @@
 local addon, ns = ...
 
--------------------------------------------------------------------------------
---  /npprof profiler: IIFE wrapper keeps locals + constants out of the main
---  chunk's 200-local budget.  Exposes _G._npStart / _G._npEnd globals that
---  are nil (zero cost) until "/npprof" toggles them on.
---
---  Usage in-game:
---    /npprof          -- start profiling
---    /npprof          -- stop and print sorted-by-peak report
---    /npprof reset    -- clear accumulated data
--------------------------------------------------------------------------------
-;(function()
-    local _profiling = false
-    local _data = {}       -- label -> { total=, count=, peak= }
-    local _dpStop = debugprofilestop
-
-    local function npStart()
-        return _dpStop()
-    end
-
-    local function npEnd(t0, label)
-        local elapsed = _dpStop() - t0
-        local d = _data[label]
-        if not d then
-            d = { total = 0, count = 0, peak = 0 }
-            _data[label] = d
-        end
-        d.total = d.total + elapsed
-        d.count = d.count + 1
-        if elapsed > d.peak then d.peak = elapsed end
-    end
-
-    SLASH_NPPROF1 = "/npprof"
-    SlashCmdList["NPPROF"] = function(msg)
-        msg = (msg or ""):lower():match("^%s*(.-)%s*$")
-        if msg == "reset" then
-            wipe(_data)
-            print("|cff00ff00[NPProf]|r data reset")
-            return
-        end
-        if _profiling then
-            -- Stop: print report
-            _G._npStart = nil
-            _G._npEnd   = nil
-            _profiling   = false
-            local sorted = {}
-            for label, d in pairs(_data) do
-                sorted[#sorted + 1] = { label = label, total = d.total, count = d.count, peak = d.peak }
-            end
-            table.sort(sorted, function(a, b) return a.peak > b.peak end)
-            print("|cff00ff00[NPProf]|r stopped.  Results (sorted by peak ms):")
-            print(string.format("  %-40s %8s %8s %8s", "LABEL", "PEAK", "AVG", "COUNT"))
-            for _, r in ipairs(sorted) do
-                local avg = r.count > 0 and (r.total / r.count) or 0
-                print(string.format("  %-40s %7.3f  %7.3f  %7d", r.label, r.peak, avg, r.count))
-            end
-        else
-            -- Start
-            wipe(_data)
-            _G._npStart = npStart
-            _G._npEnd   = npEnd
-            _profiling   = true
-            print("|cff00ff00[NPProf]|r profiling started.  /npprof again to stop and print.")
-        end
-    end
-end)()
-
 local ENP = EllesmereUI.Lite.NewAddon("EllesmereUINameplates")
 
 -- Profile alias: set in OnInitialize, nil before that.
@@ -2042,7 +1976,6 @@ local activeCastCount = 0
 ns._castingPlates = {}
 kickWatcher:SetScript("OnEvent", function(self, event)
     if event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_USABLE" then
-        local t0 = _G._npStart and _G._npStart()
         for plate in pairs(ns._castingPlates) do
             if plate.isCasting and plate.unit then
                 local kickProtected
@@ -2064,7 +1997,6 @@ kickWatcher:SetScript("OnEvent", function(self, event)
                 end
             end
         end
-        if t0 then _G._npEnd(t0, "SPELL_CD_UPDATE") end
     else
         RefreshKickAbility()
     end
@@ -3623,7 +3555,6 @@ function NameplateFrame:ApplyHealthTextAppearance()
 end
 
 function NameplateFrame:SetUnit(unit, nameplate)
-    local t0 = _G._npStart and _G._npStart()
     self.unit = unit
     self.nameplate = nameplate
     self:SetParent(nameplate)
@@ -3723,7 +3654,6 @@ function NameplateFrame:SetUnit(unit, nameplate)
         end
     end
     C_Timer.After(0, self._deferredSetupCB)
-    if t0 then _G._npEnd(t0, "SetUnit") end
 end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
@@ -3993,7 +3923,6 @@ end
 function NameplateFrame:UpdateHealthColor()
     local unit = self.unit
     if not unit then return end
-    local t0 = _G._npStart and _G._npStart()
     self.health:SetStatusBarColor(GetReactionColor(unit))
     -- Focus overlay: show stripe textures on focus target's health bar
     -- Fill clip frame at full alpha, bg clip frame at half alpha
@@ -4037,7 +3966,6 @@ function NameplateFrame:UpdateHealthColor()
         self.targetClipFill:Hide()
         self.targetClipBg:Hide()
     end
-    if t0 then _G._npEnd(t0, "UpdateHealthColor") end
 end
 function NameplateFrame:UpdateHealth()
     self:UpdateHealthValues()
@@ -4280,7 +4208,6 @@ function NameplateFrame:ApplyMouseover()
 end
 function NameplateFrame:UpdateAuras(updateInfo)
     if not self.unit or not self.nameplate then return end
-    local t0 = _G._npStart and _G._npStart()
     local unit = self.unit
 
     local needsFullRefresh = not updateInfo or updateInfo.isFullUpdate or not self._shownAuras
@@ -4329,7 +4256,6 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         end
                     end
                 end
-                if t0 then _G._npEnd(t0, "UpdateAuras.fastpath") end
                 return
             end
         end
@@ -4354,7 +4280,6 @@ function NameplateFrame:UpdateAuras(updateInfo)
             end
         end
         if not hasRelevantChange then
-            if t0 then _G._npEnd(t0, "UpdateAuras.skip") end
             return
         end
     end
@@ -4596,7 +4521,6 @@ function NameplateFrame:UpdateAuras(updateInfo)
     end
     -- Reposition target arrows outside the outermost side auras
     PositionArrowsOutsideAuras(self)
-    if t0 then _G._npEnd(t0, needsFullRefresh and "UpdateAuras.full" or "UpdateAuras.incr") end
 end
 function NameplateFrame:UpdateImportantCastGlow(spellID)
     local cfg = p or defaults
@@ -4671,7 +4595,6 @@ function NameplateFrame:UpdateCast()
         self.cast:Hide()
         return
     end
-    local t0 = _G._npStart and _G._npStart()
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
     local isChannel = false
     local isEmpowered = false
@@ -4703,7 +4626,6 @@ function NameplateFrame:UpdateCast()
             UpdateClassPowerOnPlate(self)
         end
         if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
-        if t0 then _G._npEnd(t0, "UpdateCast.nocast") end
         return
     end
 
@@ -4838,7 +4760,6 @@ function NameplateFrame:UpdateCast()
         end
         if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
     end
-    if t0 then _G._npEnd(t0, "UpdateCast") end
 end
 function NameplateFrame:ApplyScale()
     local base = 1
@@ -5086,14 +5007,10 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     end)
 end
 function NameplateFrame:UNIT_HEALTH()
-    local t0 = _G._npStart and _G._npStart()
     self:UpdateHealthValues()
-    if t0 then _G._npEnd(t0, "UNIT_HEALTH") end
 end
 function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()
-    local t0 = _G._npStart and _G._npStart()
     self:UpdateHealthValues()
-    if t0 then _G._npEnd(t0, "UNIT_ABSORB") end
 end
 function NameplateFrame:UNIT_AURA(_, updateInfo)
     -- PERF: If we have the RefreshAuras hook installed (enemy plates), defer
@@ -5150,9 +5067,7 @@ function NameplateFrame:UNIT_NAME_UPDATE()
     self:UpdateName()
 end
 function NameplateFrame:UNIT_THREAT_LIST_UPDATE()
-    local t0 = _G._npStart and _G._npStart()
     self:UpdateHealthColor()
-    if t0 then _G._npEnd(t0, "THREAT_UPDATE") end
 end
 function NameplateFrame:UNIT_SPELLCAST_START()
     self._castDirtyFull = true
@@ -5554,7 +5469,6 @@ manager:SetScript("OnEvent", function(self, event, unit)
         end
         if ns.RemoveFriendlyPlate then ns.RemoveFriendlyPlate(unit) end
     elseif event == "PLAYER_TARGET_CHANGED" then
-        local t0 = _G._npStart and _G._npStart()
         -- PERF: only update old + new target plates instead of iterating all
         local oldTarget = ns._cachedTargetPlate
         ns._cachedTargetPlate = nil
@@ -5573,7 +5487,6 @@ manager:SetScript("OnEvent", function(self, event, unit)
             ns._cachedTargetPlate:ApplyTarget()
             ns._cachedTargetPlate:UpdateHealthColor()
         end
-        if t0 then _G._npEnd(t0, "TARGET_CHANGED") end
     elseif event == "PLAYER_FOCUS_CHANGED" then
         -- PERF: only update old + new focus plates instead of iterating all
         local oldFocus = ns._cachedFocusPlate

@@ -10,195 +10,6 @@ qolFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
 
     ---------------------------------------------------------------------------
-    --  Health Potion Macro
-    ---------------------------------------------------------------------------
-    do
-        -- Item IDs per category (newest expansion first so best items are picked)
-        local ITEM_LISTS = {
-            -- 1 = Healthstone
-            [1] = { 5512 },
-            -- 2 = Health Potions  (Midnight → War Within → older)
-            [2] = { 241305, 212943, 211880 },
-            -- 3 = Combat Potions  (Midnight → War Within)
-            [3] = { 241309, 212265, 212259, 212260 },
-        }
-
-        local MACRO_NAME = "EUI_Health"
-        local MACRO_ICON = "INV_MISC_QUESTIONMARK"
-
-        -- Find the first item from a list that is in the player's bags
-        local function FindItemInBags(itemIDs)
-            for _, itemID in ipairs(itemIDs) do
-                for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
-                    for slot = 1, C_Container.GetContainerNumSlots(bag) do
-                        local info = C_Container.GetContainerItemInfo(bag, slot)
-                        if info and info.itemID == itemID then
-                            return itemID
-                        end
-                    end
-                end
-            end
-            return nil
-        end
-
-        -- Tracks the last written macro body so we skip EditMacro when nothing changed
-        local cachedMacroBody = nil
-
-        local function RefreshHealthMacro()
-            if not (EllesmereUIDB and EllesmereUIDB.healthMacroEnabled) then return end
-            if InCombatLockdown() then return end
-
-            -- Walk priorities in order and grab the first matching item from bags
-            local slots = {
-                EllesmereUIDB.healthMacroPrio1 or 1,
-                EllesmereUIDB.healthMacroPrio2 or 2,
-                EllesmereUIDB.healthMacroPrio3 or 3,
-            }
-
-            local tokens = {}
-            for i = 1, #slots do
-                local itemList = ITEM_LISTS[slots[i]]
-                if itemList then
-                    local found = FindItemInBags(itemList)
-                    if found then
-                        tokens[#tokens + 1] = "item:" .. found
-                    end
-                end
-            end
-
-            local newBody
-            if #tokens == 0 then
-                newBody = "#showtooltip\n/run print(\"EUI: No health consumable in bags.\")"
-            elseif #tokens == 1 then
-                newBody = "#showtooltip " .. tokens[1] .. "\n/use " .. tokens[1]
-            else
-                newBody = "#showtooltip " .. tokens[1] .. "\n/castsequence reset=combat " .. table.concat(tokens, ", ")
-            end
-
-            if newBody == cachedMacroBody then return end
-            cachedMacroBody = newBody
-
-            local idx = GetMacroIndexByName(MACRO_NAME)
-            if idx == 0 then
-                CreateMacro(MACRO_NAME, MACRO_ICON, newBody, nil)
-            else
-                EditMacro(idx, MACRO_NAME, MACRO_ICON, newBody)
-            end
-        end
-
-        EllesmereUI._applyHealthMacro = RefreshHealthMacro
-
-        -- Rebuild whenever bags change
-        local macroFrame = CreateFrame("Frame")
-        macroFrame:RegisterEvent("BAG_UPDATE")
-        macroFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        macroFrame:SetScript("OnEvent", function(self, event)
-            if event == "PLAYER_ENTERING_WORLD" then
-                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-            end
-            if EllesmereUIDB and EllesmereUIDB.healthMacroEnabled then
-                C_Timer.After(0.5, RefreshHealthMacro)
-            end
-        end)
-    end
-
-    ---------------------------------------------------------------------------
-    --  Food & Drink Macro
-    ---------------------------------------------------------------------------
-    do
-        -- Only Mage food and actual drinks -- NO buff food (stat food stays for raid)
-        local CONSUMABLE_LIST = {
-            -- Mage food (restores both health and mana, no stat buff)
-            { id = 113509 }, -- Conjured Mana Bun
-            { id = 80618  }, -- Conjured Mana Fritter
-            { id = 80610  }, -- Conjured Mana Pudding
-            { id = 65499  }, -- Conjured Mana Cake
-            { id = 43523  }, -- Conjured Mana Strudel
-            -- Midnight drinks (no stat buff)
-            { id = 242298 }, -- Argentleaf Tea
-            { id = 242693 }, -- Kafaccino
-            -- TWW drinks
-            { id = 260260 }, -- Springrunner Sparkling
-            { id = 247695 }, -- Sparkling Mana Supplement
-            { id = 247694 }, -- Snifted Void Essence
-            { id = 227322 }, -- Sanctified Sasparilla
-            { id = 202315 }, -- Frozen Solid Tea
-            { id = 197771 }, -- Delicious Dragon Spittle
-            -- Generic vendor water (fallback)
-            { id = 8766   }, -- Refreshing Spring Water
-            { id = 159    }, -- Refreshing Spring Water (old)
-        }
-
-        local MACRO_NAME = "EUI_FoodDrink"
-        local MACRO_ICON = "INV_MISC_QUESTIONMARK"
-
-        local function FindBest()
-            for _, e in ipairs(CONSUMABLE_LIST) do
-                if (C_Item.GetItemCount(e.id, false, false) or 0) > 0 then
-                    return "item:" .. e.id
-                end
-            end
-            return nil
-        end
-
-        local function EnsureMacro()
-            if InCombatLockdown() then return false end
-            if GetMacroInfo(MACRO_NAME) ~= nil then return true end
-            return CreateMacro(MACRO_NAME, MACRO_ICON, "#showtooltip", nil) ~= nil
-        end
-
-        local lastItem = nil
-        local pendingUpdate = false
-
-        local function UpdateMacro(ignoreCombat)
-            if not (EllesmereUIDB and EllesmereUIDB.foodMacroEnabled) then return end
-            if not ignoreCombat and UnitAffectingCombat("player") then return end
-            if InCombatLockdown() then return end
-            if not EnsureMacro() then return end
-
-            local bestItem = FindBest()
-            if bestItem == lastItem then return end
-
-            local body = bestItem
-                and string.format("#showtooltip\n/castsequence reset=combat %s", bestItem)
-                or "#showtooltip"
-
-            EditMacro(GetMacroIndexByName(MACRO_NAME), MACRO_NAME, MACRO_ICON, body)
-            lastItem = bestItem
-        end
-
-        EllesmereUI._applyFoodMacro = function() UpdateMacro(true) end
-
-        local fdFrame = CreateFrame("Frame")
-        fdFrame:RegisterEvent("PLAYER_LOGIN")
-        fdFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        fdFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-        fdFrame:RegisterEvent("SPELLS_CHANGED")
-
-        fdFrame:SetScript("OnEvent", function(self, event)
-            if not (EllesmereUIDB and EllesmereUIDB.foodMacroEnabled) then
-                if event ~= "PLAYER_LOGIN" then return end
-            end
-            if event == "PLAYER_LOGIN" then
-                C_Timer.After(1, function() UpdateMacro(true) end)
-            elseif event == "PLAYER_REGEN_ENABLED" then
-                UpdateMacro(true)
-            elseif event == "BAG_UPDATE_DELAYED" then
-                if not pendingUpdate then
-                    pendingUpdate = true
-                    C_Timer.After(0.05, function()
-                        pendingUpdate = false
-                        UpdateMacro(false)
-                    end)
-                end
-            elseif event == "SPELLS_CHANGED" then
-                -- Mage food appears/disappears when conjured
-                UpdateMacro(false)
-            end
-        end)
-    end
-
-    ---------------------------------------------------------------------------
     --  Auto Unwrap Collections (Mounts / Pets / Toys)
     ---------------------------------------------------------------------------
     do
@@ -275,7 +86,6 @@ qolFrame:SetScript("OnEvent", function(self)
             busy = true
             C_Timer.After(0.2, function()
                 busy = false
-                if not (EllesmereUIDB and EllesmereUIDB.autoUnwrapCollections) then return end
                 local changed = AckMountAlerts() or AckPetAlerts() or AckToyAlerts()
                 if changed then
                     if CollectionsMicroButton and MainMenuMicroButton_HideAlert then
@@ -303,79 +113,138 @@ qolFrame:SetScript("OnEvent", function(self)
         f:RegisterEvent("NEW_PET_ADDED")
         f:RegisterEvent("NEW_TOY_ADDED")
         f:SetScript("OnEvent", function(self, event)
-            if event == "PLAYER_LOGIN" then self:UnregisterEvent("PLAYER_LOGIN") end
+            if event == "PLAYER_LOGIN" then
+                self:UnregisterEvent("PLAYER_LOGIN")
+                -- Defer 3s so ToyBox.fanfareToys is available (avoids
+                -- the 1000+ toy fallback scan that spikes the login frame)
+                C_Timer.After(3, DismissCollectionAlerts)
+                return
+            end
             DismissCollectionAlerts()
         end)
     end
 
     ---------------------------------------------------------------------------
-    --  Auto Open Containers
+    --  Auto Open Containers (incremental cache -- no login spike)
     ---------------------------------------------------------------------------
     do
-        local openableCache = {}
-        local pendingOpen = false
+        local _openableCache = {}  -- itemID -> true/false
+        local _cacheBuilt = false
+        local function IsEnabled()
+            return EllesmereUIDB and EllesmereUIDB.autoOpenContainers ~= false
+        end
+        local SLOTS_PER_FRAME = 3  -- check 3 slots per OnUpdate tick
 
-        local function IsOpenable(bag, slot)
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            if not info or not info.itemID then return false end
-            local cached = openableCache[info.itemID]
+        local function IsOpenableByID(itemID, bag, slot)
+            local cached = _openableCache[itemID]
             if cached ~= nil then return cached end
-            -- Check tooltip for the "Right Click to Open" / ITEM_OPENABLE text
             local tip = C_TooltipInfo and C_TooltipInfo.GetBagItem and C_TooltipInfo.GetBagItem(bag, slot)
             if tip and tip.lines then
                 for _, line in ipairs(tip.lines) do
                     if line and line.leftText and line.leftText == ITEM_OPENABLE then
-                        openableCache[info.itemID] = true
+                        _openableCache[itemID] = true
                         return true
                     end
                 end
             end
-            openableCache[info.itemID] = false
+            _openableCache[itemID] = false
             return false
         end
 
-        local function AnyBagOpen()
-            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
-                if IsBagOpen(bag) then return true end
-            end
-            return false
-        end
+        -- Incremental scanner: checks SLOTS_PER_FRAME bag slots per tick.
+        -- Once all bags are scanned, hides itself (zero CPU when idle).
+        local _scanBag = BACKPACK_CONTAINER
+        local _scanSlot = 1
+        local _pendingOpens = {}
 
-        local containerFrame = CreateFrame("Frame")
-        containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-        containerFrame:SetScript("OnEvent", function()
-            if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false then return end
-            if InCombatLockdown() then return end
-            if AnyBagOpen() then return end
-            if not pendingOpen then
-                pendingOpen = true
-                C_Timer.After(0.3, function()
-                    if AnyBagOpen() then pendingOpen = false; return end
-                    local itemsToOpen = {}
-                    for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
-                        for slot = 1, C_Container.GetContainerNumSlots(bag) do
-                            if IsOpenable(bag, slot) then
-                                table.insert(itemsToOpen, { bag = bag, slot = slot })
+        local scanFrame = CreateFrame("Frame")
+        scanFrame:Hide()
+        scanFrame:SetScript("OnUpdate", function(self)
+            if not IsEnabled() then self:Hide(); return end
+            local checked = 0
+            while checked < SLOTS_PER_FRAME do
+                local numSlots = C_Container.GetContainerNumSlots(_scanBag)
+                if _scanSlot > numSlots then
+                    _scanBag = _scanBag + 1
+                    _scanSlot = 1
+                    if _scanBag > NUM_BAG_SLOTS then
+                        -- Full scan complete
+                        _cacheBuilt = true
+                        self:Hide()
+                        -- Open any containers found during scan
+                        if #_pendingOpens > 0 and not InCombatLockdown() then
+                            local function OpenNext(idx)
+                                if idx > #_pendingOpens then wipe(_pendingOpens); return end
+                                if InCombatLockdown() then wipe(_pendingOpens); return end
+                                local item = _pendingOpens[idx]
+                                local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
+                                if info and info.itemID and _openableCache[info.itemID] then
+                                    C_Container.UseContainerItem(item.bag, item.slot)
+                                end
+                                C_Timer.After(0.15, function() OpenNext(idx + 1) end)
                             end
+                            OpenNext(1)
+                        end
+                        return
+                    end
+                else
+                    local info = C_Container.GetContainerItemInfo(_scanBag, _scanSlot)
+                    if info and info.itemID then
+                        if IsOpenableByID(info.itemID, _scanBag, _scanSlot) then
+                            _pendingOpens[#_pendingOpens + 1] = { bag = _scanBag, slot = _scanSlot }
                         end
                     end
-
-                    local function OpenNext(index)
-                        if index > #itemsToOpen then
-                            pendingOpen = false
-                            return
-                        end
-                        if InCombatLockdown() or AnyBagOpen() then pendingOpen = false; return end
-                        local item = itemsToOpen[index]
-                        if IsOpenable(item.bag, item.slot) then
-                            C_Container.UseContainerItem(item.bag, item.slot)
-                        end
-                        C_Timer.After(0.15, function() OpenNext(index + 1) end)
-                    end
-
-                    OpenNext(1)
-                end)
+                    _scanSlot = _scanSlot + 1
+                    checked = checked + 1
+                end
             end
+        end)
+
+        -- Start incremental scan 2s after login
+        C_Timer.After(2, function()
+            if not IsEnabled() then return end
+            _scanBag = BACKPACK_CONTAINER
+            _scanSlot = 1
+            wipe(_pendingOpens)
+            scanFrame:Show()
+        end)
+
+        -- After cache is built, BAG_UPDATE_DELAYED only checks changed slots
+        local containerFrame = CreateFrame("Frame")
+        if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false) then
+            containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+        end
+        containerFrame:SetScript("OnEvent", function()
+            if not _cacheBuilt then return end
+            if not IsEnabled() then return end
+            if InCombatLockdown() then return end
+            local toOpen = {}
+            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                    local info = C_Container.GetContainerItemInfo(bag, slot)
+                    if info and info.itemID then
+                        -- Only tooltip-check uncached items (new loot)
+                        if _openableCache[info.itemID] == nil then
+                            IsOpenableByID(info.itemID, bag, slot)
+                        end
+                        if _openableCache[info.itemID] then
+                            toOpen[#toOpen + 1] = { bag = bag, slot = slot }
+                        end
+                    end
+                end
+            end
+            if #toOpen == 0 then return end
+            local function OpenNext(idx)
+                if idx > #toOpen then return end
+                if InCombatLockdown() then return end
+                local item = toOpen[idx]
+                local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
+                if info2 and info2.itemID and _openableCache[info2.itemID] then
+                    C_Container.UseContainerItem(item.bag, item.slot)
+                end
+                C_Timer.After(0.15, function() OpenNext(idx + 1) end)
+            end
+            C_Timer.After(0.3, function() OpenNext(1) end)
         end)
     end
 
@@ -592,11 +461,10 @@ qolFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Quick Loot
     ---------------------------------------------------------------------------
-    do
+    if EllesmereUIDB and EllesmereUIDB.quickLoot then
         local lootFrame = CreateFrame("Frame")
         lootFrame:RegisterEvent("LOOT_READY")
         lootFrame:SetScript("OnEvent", function()
-            if not (EllesmereUIDB and EllesmereUIDB.quickLoot) then return end
             if IsShiftKeyDown() then return end
             for i = 1, GetNumLootItems() do
                 local index = i
@@ -1376,8 +1244,7 @@ do
         end
     end
 
-    C_Timer.After(1.5, function()
-        if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+    C_Timer.After(2, function()
         local MK = EllesmereUI.MakeUnlockElement
         EllesmereUI:RegisterUnlockElements({
             MK({
@@ -1421,8 +1288,7 @@ do
         })
     end)
 
-    C_Timer.After(1.5, function()
-        if not EllesmereUI or not EllesmereUI.RegisterUnlockElements then return end
+    C_Timer.After(2.5, function()
         local MK = EllesmereUI.MakeUnlockElement
         EllesmereUI:RegisterUnlockElements({
             MK({
@@ -1589,10 +1455,12 @@ do
     end
 
     local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)
-    repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-    repairWarnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    repairWarnFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+    if not (EllesmereUIDB and EllesmereUIDB.repairWarning == false) then
+        repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+        repairWarnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        repairWarnFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+    end
 
     local function CheckDurabilityAndShow()
         if not EllesmereUIDB then return end

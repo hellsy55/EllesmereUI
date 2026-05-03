@@ -538,7 +538,6 @@ boot:SetScript("OnEvent", function(self)
     _G._EUI_BattleRes_DB = function() return addon.db end
     CreateBrezFrame()
     _registerEvents()
-    -- Seed initial state in case we /reloaded mid-encounter or mid-key.
     _refreshEncounterState()
     _refreshKeystoneState()
     Apply()

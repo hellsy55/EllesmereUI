@@ -4,6 +4,7 @@
 --  Clickable SecureActionButton icons with combat-aware tracking
 --  Blizzard 12.0 Midnight non-secret spell support
 -------------------------------------------------------------------------------
+
 local ADDON_NAME = ...
 
 -- AceDB replaced by EllesmereUI.Lite.NewDB
@@ -961,17 +962,41 @@ local function PlayerHasFlaskBuff()
 end
 
 -------------------------------------------------------------------------------
+--  Item count cache: GetItemCount is a bag scan. Cache results and only
+--  invalidate on BAG_UPDATE_DELAYED (bags don't change during combat or
+--  between events). Saves dozens of redundant bag scans per refresh.
+-------------------------------------------------------------------------------
+local _itemCountCache = {}
+local _itemCountDirty = true
+
+local function InvalidateItemCountCache()
+    _itemCountDirty = true
+end
+
+local function CachedGetItemCount(itemID)
+    if _itemCountDirty then
+        wipe(_itemCountCache)
+        _itemCountDirty = false
+    end
+    local cached = _itemCountCache[itemID]
+    if cached ~= nil then return cached end
+    local count = GetItemCount(itemID, false) or 0
+    _itemCountCache[itemID] = count
+    return count
+end
+
+-------------------------------------------------------------------------------
 --  Helpers: Find best item in bags for a preferred choice
 -------------------------------------------------------------------------------
 local function FindFlaskItem(preferredKey, lastUsedItemID)
     if preferredKey == "last_used" then
-        if lastUsedItemID and (GetItemCount(lastUsedItemID, false) or 0) > 0 then
+        if lastUsedItemID and CachedGetItemCount(lastUsedItemID) > 0 then
             return lastUsedItemID
         end
         -- Fallback: first flask found in bags
         for _, f in ipairs(FLASK_ITEMS) do
             for _, id in ipairs(f.items) do
-                if (GetItemCount(id, false) or 0) > 0 then return id end
+                if CachedGetItemCount(id) > 0 then return id end
             end
         end
         return nil
@@ -979,7 +1004,7 @@ local function FindFlaskItem(preferredKey, lastUsedItemID)
     for _, f in ipairs(FLASK_ITEMS) do
         if f.key == preferredKey then
             for _, id in ipairs(f.items) do
-                if (GetItemCount(id, false) or 0) > 0 then return id end
+                if CachedGetItemCount(id) > 0 then return id end
             end
         end
     end
@@ -988,29 +1013,29 @@ end
 
 local function FindFoodItem(preferredKey, lastUsedItemID)
     if preferredKey == "last_used" then
-        if lastUsedItemID and (GetItemCount(lastUsedItemID, false) or 0) > 0 then
+        if lastUsedItemID and CachedGetItemCount(lastUsedItemID) > 0 then
             return lastUsedItemID
         end
         for _, f in ipairs(FOOD_ITEMS) do
-            if (GetItemCount(f.itemID, false) or 0) > 0 then return f.itemID end
+            if CachedGetItemCount(f.itemID) > 0 then return f.itemID end
         end
         return nil
     end
     for _, f in ipairs(FOOD_ITEMS) do
-        if f.key == preferredKey and (GetItemCount(f.itemID, false) or 0) > 0 then return f.itemID end
+        if f.key == preferredKey and CachedGetItemCount(f.itemID) > 0 then return f.itemID end
     end
     return nil
 end
 
 local function FindWeaponEnchantItem(preferredKey, lastUsedItemID, targetCat)
     if preferredKey == "last_used" then
-        if lastUsedItemID and (GetItemCount(lastUsedItemID, false) or 0) > 0 then
+        if lastUsedItemID and CachedGetItemCount(lastUsedItemID) > 0 then
             return lastUsedItemID
         end
         -- Fallback: first matching weapon enchant in bags
         for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
             local wt = we.weaponType
-            if ((wt == "NEUTRAL") or (wt == targetCat)) and (GetItemCount(we.itemID, false) or 0) > 0 then
+            if ((wt == "NEUTRAL") or (wt == targetCat)) and CachedGetItemCount(we.itemID) > 0 then
                 return we.itemID
             end
         end
@@ -1020,7 +1045,7 @@ local function FindWeaponEnchantItem(preferredKey, lastUsedItemID, targetCat)
     for _, choice in ipairs(WEAPON_ENCHANT_CHOICES) do
         if choice.key == preferredKey then
             for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
-                if we.name == choice.name and (GetItemCount(we.itemID, false) or 0) > 0 then
+                if we.name == choice.name and CachedGetItemCount(we.itemID) > 0 then
                     return we.itemID
                 end
             end
@@ -1870,8 +1895,8 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             if showRune then
                 local hasRuneBuff = InMythicPlusKey() or PlayerHasAuraByID(RUNE_BUFF_IDS)
                 if not hasRuneBuff then
-                    local voidCount = GetItemCount(259085, false) or 0
-                    local etherCount = GetItemCount(243191, false) or 0
+                    local voidCount = CachedGetItemCount(259085)
+                    local etherCount = CachedGetItemCount(243191)
                     local runeItem = nil
                     if voidCount > 0 then runeItem = 259085       -- Void-Touched Augment Rune
                     elseif etherCount > 0 then runeItem = 243191  -- Ethereal Augment Rune
@@ -2029,7 +2054,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 end
                 local currentZone = tostring(C_Map.GetBestMapForUnit("player") or 0)
                 if co._inkyZoneSet[currentZone] then
-                    local hasPotion = (GetItemCount(INKY_BLACK_ITEM, false) or 0) > 0
+                    local hasPotion = CachedGetItemCount(INKY_BLACK_ITEM) > 0
                     local hasBuff = PlayerHasAuraByID({INKY_BLACK_BUFF})
                     if not hasBuff and hasPotion then
                         local e = AcquireEntry()
@@ -2087,7 +2112,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             end
             local hasHealthstone = false
             for _, itemID in ipairs(HEALTHSTONE_ITEM_IDS) do
-                if C_Item.GetItemCount(itemID) > 0 then hasHealthstone = true; break end
+                if CachedGetItemCount(itemID) > 0 then hasHealthstone = true; break end
             end
             if hasWarlock and not hasHealthstone then
                 local e = AcquireEntry()
@@ -2196,11 +2221,7 @@ local function Refresh()
     if _memProbe then _m1 = collectgarbage("count") end
 
     local playerClass = GetPlayerClass()
-    local specID = GetSpecID()
-    local inInstance = InRealInstancedContent()
-    local inKeystone = InMythicPlusKey()
     local inCombat = InCombat()
-    local inPvP = InPvPInstance()
 
     -- Collect missing reminders (reuse pooled entry tables)
     ResetEntryPool()
@@ -2210,25 +2231,38 @@ local function Refresh()
     local remindersOn = db.profile.display.remindersEnabled ~= false
 
     ---------------------------------------------------------------------------
-    --  1) Raid Buffs
+    --  1) Raid Buffs (runs in and out of combat)
     ---------------------------------------------------------------------------
     if remindersOn then
+        local inInstance = InRealInstancedContent()
         CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
     end
     if _memProbe then _m2 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  2) Auras (suppressed in M+ keystones)
+    --  OOC-only sections: skip entirely during combat (only raid buffs
+    --  and pet reminders can display in combat).
     ---------------------------------------------------------------------------
-    if remindersOn and not inKeystone and not inCombat then
+    local specID, inInstance, inKeystone, inPvP
+    if not inCombat then
+        specID = GetSpecID()
+        inInstance = inInstance or InRealInstancedContent()
+        inKeystone = InMythicPlusKey()
+        inPvP = InPvPInstance()
+    end
+
+    ---------------------------------------------------------------------------
+    --  2) Auras (suppressed in M+ keystones and combat)
+    ---------------------------------------------------------------------------
+    if remindersOn and not inCombat and not inKeystone then
         CollectAuras(missing, playerClass, specID, inInstance, inCombat)
     end
     if _memProbe then _m3 = collectgarbage("count") end
 
     ---------------------------------------------------------------------------
-    --  3) Consumables (suppressed in M+ keystones, in combat, and in PvP)
+    --  3) Consumables (suppressed in M+ keystones, combat, and PvP)
     ---------------------------------------------------------------------------
-    if remindersOn and not inKeystone and not inCombat and not inPvP then
+    if remindersOn and not inCombat and not inKeystone and not inPvP then
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
     end
     if _memProbe then _m4 = collectgarbage("count") end
@@ -2397,7 +2431,7 @@ local function Refresh()
 end
 
 local REFRESH_THROTTLE_COMBAT = 0.5
-local REFRESH_THROTTLE_OOC    = 0.25
+local REFRESH_THROTTLE_OOC    = 0.5
 local _lastRefreshTime = 0
 local _refreshTimerActive = false
 local function _doRefresh()
@@ -2965,7 +2999,9 @@ function EABR:OnEnable()
             end
         end)
     end
-    cursorAnchor:Show()
+    -- Start hidden: OnUpdate only runs while :IsShown(), saving CPU
+    -- when no cursor-attached reminders are active.
+    cursorAnchor:Hide()
     EllesmereUI.SetElementVisibility(cursorAnchor, false)
 
     -- Create talent reminder anchor (independent of iconAnchor so parent alpha doesn't hide it)
@@ -3077,7 +3113,9 @@ function EABR:OnEnable()
             return
         end
         _rangeAccum = _rangeAccum + elapsed
-        if _rangeAccum < 0.5 then return end
+        if _rangeAccum < 0.5 then
+            return
+        end
         _rangeAccum = 0
 
         _rangeChanged = false
@@ -3219,6 +3257,15 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     if e == "UNIT_ENTERED_VEHICLE" or e == "UNIT_EXITED_VEHICLE" then
         if arg1 == "player" then RequestRefresh() end
         return
+    end
+
+    -- Roster changes don't affect player buffs/consumables. Skip the
+    -- full refresh (which scans all group members via AnyGroupMemberMissingBuff).
+    if e == "GROUP_ROSTER_UPDATE" then return end
+
+    -- Bag changes: invalidate item count cache so next refresh re-scans
+    if e == "BAG_UPDATE_DELAYED" or e == "BAG_UPDATE" or e == "BAG_UPDATE_COOLDOWN" then
+        InvalidateItemCountCache()
     end
 
     -- All other events: just refresh
