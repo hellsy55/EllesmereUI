@@ -610,7 +610,8 @@ local RAID_BUFFS = {
       buffIDs={381732,381741,381746,381748,381749,381750,381751,381752,381753,381754,381756,381757,381758},
       check="raid" },
     { key="sky",    class="SHAMAN",  name="Skyfury",                castSpell=462854, buffIDs={462854},  check="raid" },
-    { key="hmark",  class="HUNTER",  name="Hunter's Mark",          castSpell=257284, buffIDs={257284},  check="huntersMark" },
+    -- Hunter's Mark: disabled (under maintenance)
+    -- { key="hmark",  class="HUNTER",  name="Hunter's Mark",          castSpell=257284, buffIDs={257284},  check="huntersMark" },
 }
 
 -------------------------------------------------------------------------------
@@ -630,9 +631,10 @@ local AURAS = {
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false, shapeshiftIndex=1 },
     -- Paladin Aura: in dungeons/raids only Devotion satisfies; elsewhere any aura works
+    -- noPvP: Devotion Aura is ContextuallySecret in PvP even out of combat
     { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,
       buffIDs={465, 32223, 317920}, instanceBuffIDs={465},
-      check="player", combatOk=false },
+      check="player", combatOk=false, noPvP=true },
     -- Beacon of Light: standalone IsSpellOverlayed system (not checked by CollectAuras)
     { key="bol",        class="PALADIN", name="Beacon of Light",   castSpell=53563,  buffIDs={53563},
       standalone=true, notIfKnown=200025 },
@@ -1604,8 +1606,11 @@ end
 local function CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
 local rb = db.profile.raidBuffs
 if inInstance or rb.showNonInstanced then
+    local _, iType = IsInInstance()
+    local inPvP = (iType == "pvp" or iType == "arena")
     for _, buff in ipairs(RAID_BUFFS) do
-        if rb.enabled[buff.key] and (buff.class == playerClass) and Known(buff.castSpell) then
+        if rb.enabled[buff.key] and (buff.class == playerClass) and Known(buff.castSpell)
+           and not (buff.noPvP and inPvP) then
             -- In combat, skip buffs whose IDs are not all whitelisted
             local canCheck = true
             if inCombat then

@@ -3375,6 +3375,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 function(r, g, b, a)
                     local bd = SelectedTBB(); if not bd then return end
+                    bd.fillColorMode = "custom"
                     bd.fillR, bd.fillG, bd.fillB, bd.fillA = r, g, b, a; RefreshTBB()
                 end,
                 true, 20)

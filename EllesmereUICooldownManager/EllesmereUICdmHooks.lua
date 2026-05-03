@@ -558,14 +558,16 @@ local function DecorateFrame(frame, barData)
                 local bk2 = fc2 and fc2.barKey
                 -- Per-bar "Suppress GCD": force alpha 0 when the displayed
                 -- cooldown is just a GCD. isOnGCD is a clean bool from
-                -- C_Spell.GetSpellCooldown.
+                -- C_Spell.GetSpellCooldown. Do NOT return early -- active
+                -- state detection below must still run so overlays and
+                -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
+                local _gcdSuppressed = false
                 if bd2 and bd2.suppressGCD and sid2 and C_Spell and C_Spell.GetSpellCooldown then
                     local cdInfo = C_Spell.GetSpellCooldown(sid2)
                     if cdInfo and cdInfo.isOnGCD then
                         cd:SetSwipeColor(0, 0, 0, 0)
-                        fd._isProcessingOverride = false
-                        return
+                        _gcdSuppressed = true
                     end
                 end
                 -- Check per-spell settings
@@ -610,7 +612,9 @@ local function DecorateFrame(frame, barData)
                     -- Hide Active State: force black swipe, track active flag.
                     -- CD model override is handled by the SetDesaturation hook
                     -- which fires on every Blizzard cooldown tick.
-                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    if not _gcdSuppressed then
+                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    end
                     if isActive then
                         fd._hideActiveOverriding = true
                         fd._wasActive = true
@@ -639,7 +643,9 @@ local function DecorateFrame(frame, barData)
                     fd._wasActive = true
                 else
                     -- Not active: black swipe.
-                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    if not _gcdSuppressed then
+                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    end
                     -- Transition: buff just ended, CD starting. Re-apply the
                     -- cooldown duration so the swipe shows immediately
                     -- (e.g. Invoke Niuzao). Only fires once per transition,
@@ -817,6 +823,44 @@ local function DecorateFrame(frame, barData)
                         frame:SetAlpha(bd2 and bd2.barOpacity or 1)
                     end
                 end
+                -- For hidden cdState modes, defer the evaluation by one
+                -- frame. Blizzard's SetDesaturated fires inside the secure
+                -- CDM chain where C_Spell.GetSpellCooldown can briefly
+                -- disagree with Blizzard's own evaluation (charge spells
+                -- report isActive while charges remain, GCD tail races).
+                -- Deferring lets the API settle before we query it.
+                if cse == "hiddenOnCD" or cse == "hiddenReady" then
+                    if not fd._cdStatePending then
+                        fd._cdStatePending = CreateFrame("Frame")
+                        fd._cdStatePending:Hide()
+                    end
+                    fd._cdStatePending.cse = cse
+                    fd._cdStatePending:SetScript("OnUpdate", function(self)
+                        self:Hide()
+                        local fc3 = _ecmeFC[frame]
+                        local sid3 = fc3 and fc3.spellID
+                        local bk3 = fc3 and fc3.barKey
+                        if not sid3 or not bk3 then return end
+                        local liveSid = sid3
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            liveSid = C_SpellBook.FindSpellOverrideByID(sid3) or sid3
+                        end
+                        local cseInfo = C_Spell.GetSpellCooldown(liveSid)
+                        local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+                        local myCse = self.cse
+                        local hide
+                        if myCse == "hiddenOnCD" then
+                            hide = onCD
+                        else
+                            hide = not onCD
+                        end
+                        local bd3 = barDataByKey and barDataByKey[bk3]
+                        frame:SetAlpha(hide and 0 or (bd3 and bd3.barOpacity or 1))
+                        if fc3 then fc3._cdStateHidden = hide or false end
+                    end)
+                    fd._cdStatePending:Show()
+                    return
+                end
                 -- Query cooldown on the live override (e.g. Shimmer, not
                 -- Blink) so charge-based replacements report correctly.
                 local liveSid = sid2
@@ -825,17 +869,7 @@ local function DecorateFrame(frame, barData)
                 end
                 local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
-                if cse == "hiddenOnCD" then
-                    local bd2 = barDataByKey and barDataByKey[bk2]
-                    local hide = onCD
-                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
-                    if fc2 then fc2._cdStateHidden = hide or false end
-                elseif cse == "hiddenReady" then
-                    local bd2 = barDataByKey and barDataByKey[bk2]
-                    local hide = not onCD
-                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
-                    if fc2 then fc2._cdStateHidden = hide or false end
-                elseif cse == "pixelGlowReady" or cse == "buttonGlowReady" then
+                if cse == "pixelGlowReady" or cse == "buttonGlowReady" then
                     if not onCD then
                         if fd.glowOverlay and not fd._cdStateGlowOn then
                             local style = cse == "pixelGlowReady" and 1 or 3
@@ -1096,6 +1130,7 @@ _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
 _racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("BAG_UPDATE_DELAYED")
 _racialCdListener:RegisterEvent("ENCOUNTER_END")
+_racialCdListener:RegisterEvent("CHALLENGE_MODE_START")
 _racialCdListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 _racialCdListener:RegisterEvent("PLAYER_REGEN_ENABLED")
 
@@ -1200,9 +1235,8 @@ ns._isPresetCdDirty = function() return _presetCdDirty end
 
 _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
     -- Infrequent events: handle immediately and return
-    if event == "ENCOUNTER_END" then
-        local _, instanceType = GetInstanceInfo()
-        if instanceType == "raid" then
+    if event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_START" then
+        if event == "CHALLENGE_MODE_START" or select(2, GetInstanceInfo()) == "raid" then
             for _, f in pairs(_presetFrames) do
                 if f._isItemPresetFrame then
                     f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
@@ -1496,8 +1530,11 @@ local function CollectAndReanchor()
                     -- Ensure stack/charge text stays above our border overlay.
                     -- Blizzard resets frame levels on pooled frames during zone
                     -- transitions; re-raise cheaply here every collect pass.
-                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, 30) end
-                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, 30) end
+                    -- Use relative levels so cursor-anchored bars (level 9980+)
+                    -- keep text above their icons.
+                    local _txtLvl = frame:GetFrameLevel() + 23
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, _txtLvl) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, _txtLvl) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
@@ -1883,8 +1920,9 @@ local function CollectAndReanchor()
                     end
                     end
                     frame:Show()
-                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, 30) end
-                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, 30) end
+                    local _txtLvl2 = frame:GetFrameLevel() + 23
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, _txtLvl2) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, _txtLvl2) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)

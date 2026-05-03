@@ -189,17 +189,14 @@ end
 -------------------------------------------------------------------------------
 --  Raid Tab Skinning
 -------------------------------------------------------------------------------
+-- Taint-safe raid tab skinning: NEVER CreateTexture, CreateFrame, or
+-- PP.CreateBorder on any frame in the RaidFrame tree. These permanently
+-- taint the frame, breaking ClaimRaidFrame -> RaidFrame:SetParent().
+-- Safe operations: SetTexture(""), font/color on FontStrings, HookScript,
+-- BackdropTemplateMixin.
+
 local function SkinRaidRoleIcon(icon)
-    if not icon or GetFFD(icon).skinned then return end
-    GetFFD(icon).skinned = true
-    if not GetFFD(icon).border then
-        local border = icon:GetParent():CreateTexture(nil, "OVERLAY", nil, 1)
-        border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
-        border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
-        border:SetColorTexture(0, 0, 0, 0.5)
-        border:SetDrawLayer("OVERLAY", -1)
-        GetFFD(icon).border = border
-    end
+    -- No-op: CreateTexture on protected parent taints
 end
 
 local function SkinRaidRoleCount(frame)
@@ -219,11 +216,29 @@ local function SkinRaidTabButton(btn)
     if not btn or GetFFD(btn).btnSkinned then return end
     GetFFD(btn).btnSkinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
-    StripTextures(btn)
-    GetFFD(btn).bg = btn:CreateTexture(nil, "BACKGROUND", nil, -6)
-    GetFFD(btn).bg:SetColorTexture(0.025, 0.035, 0.045, 0.92)
-    GetFFD(btn).bg:SetAllPoints()
-    PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
+    -- Hide Blizzard textures with SetTexture("") (not SetAlpha)
+    for i = 1, select("#", btn:GetRegions()) do
+        local region = select(i, btn:GetRegions())
+        if region and region:IsObjectType("Texture") then
+            region:SetTexture("")
+        end
+    end
+    -- Clear state textures so Blizzard doesn't re-apply them
+    if btn.SetNormalTexture then btn:SetNormalTexture("") end
+    if btn.SetPushedTexture then btn:SetPushedTexture("") end
+    if btn.SetHighlightTexture then btn:SetHighlightTexture("") end
+    if btn.SetDisabledTexture then btn:SetDisabledTexture("") end
+    -- Dark bg + border via BackdropTemplateMixin (no child frames)
+    if BackdropTemplateMixin then
+        Mixin(btn, BackdropTemplateMixin)
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        btn:SetBackdropColor(0.025, 0.035, 0.045, 0.92)
+        btn:SetBackdropBorderColor(1, 1, 1, 0.4)
+    end
     local text = btn:GetFontString()
     if text then
         text:SetFont(fontPath, 9, "")
@@ -238,7 +253,7 @@ local function SkinRaidTabButton(btn)
             a1, a2 = 1, 0.8
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
+        if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(r, g, b, a2) end
     end)
     btn:HookScript("OnLeave", function()
         local r, g, b, a1, a2 = 1, 1, 1, 0.5, 0.4
@@ -247,7 +262,7 @@ local function SkinRaidTabButton(btn)
             a1, a2 = 0.7, 0.5
         end
         if text then text:SetTextColor(r, g, b, a1) end
-        if PP.GetBorders(btn) then PP.SetBorderColor(btn, r, g, b, a2) end
+        if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(r, g, b, a2) end
     end)
 end
 
@@ -261,7 +276,7 @@ local function SkinCheckbox(checkbox)
     if not checkbox or GetFFD(checkbox).skinned then return end
     GetFFD(checkbox).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
-    local ar, ag, ab = EG.r, EG.g, EG.b
+    -- Safe: SetTexture("") on existing textures, font changes on FontStrings
     if checkbox.SetNormalTexture then checkbox:SetNormalTexture("") end
     if checkbox.SetPushedTexture then checkbox:SetPushedTexture("") end
     if checkbox.SetHighlightTexture then checkbox:SetHighlightTexture("") end
@@ -269,41 +284,14 @@ local function SkinCheckbox(checkbox)
     for i = 1, select("#", checkbox:GetRegions()) do
         local region = select(i, checkbox:GetRegions())
         if region and region:IsObjectType("Texture") then
-            region:SetAlpha(0)
+            region:SetTexture("")
         end
     end
-    if not GetFFD(checkbox).box then
-        GetFFD(checkbox).border = checkbox:CreateTexture(nil, "ARTWORK", nil, 1)
-        GetFFD(checkbox).border:SetSize(18, 18)
-        GetFFD(checkbox).border:SetPoint("LEFT", checkbox, "LEFT", 2, 0)
-        GetFFD(checkbox).border:SetColorTexture(0.4, 0.4, 0.4, 1)
-        GetFFD(checkbox).box = checkbox:CreateTexture(nil, "ARTWORK", nil, 2)
-        GetFFD(checkbox).box:SetSize(14, 14)
-        GetFFD(checkbox).box:SetPoint("CENTER", GetFFD(checkbox).border, "CENTER", 0, 0)
-        GetFFD(checkbox).box:SetColorTexture(0.06, 0.06, 0.06, 1)
-        GetFFD(checkbox).check = checkbox:CreateTexture(nil, "ARTWORK", nil, 3)
-        GetFFD(checkbox).check:SetSize(8, 8)
-        GetFFD(checkbox).check:SetPoint("CENTER", GetFFD(checkbox).box, "CENTER", 0, 0)
-        GetFFD(checkbox).check:SetColorTexture(ar, ag, ab, 1)
-        GetFFD(checkbox).check:Hide()
-    end
-    local function UpdateCheck()
-        if GetFFD(checkbox).check then GetFFD(checkbox).check:SetShown(checkbox:GetChecked()) end
-    end
-    checkbox:HookScript("OnClick", UpdateCheck)
-    checkbox:HookScript("OnShow", UpdateCheck)
-    C_Timer.After(0, UpdateCheck)
     local text = checkbox.Text or checkbox.text or (checkbox.GetName and _G[checkbox:GetName().."Text"])
     if text and text.SetFont then
         text:SetFont(fontPath, 10, "")
         text:SetTextColor(1, 1, 1, 0.8)
     end
-    checkbox:HookScript("OnEnter", function()
-        if GetFFD(checkbox).border then GetFFD(checkbox).border:SetColorTexture(0.6, 0.6, 0.6, 1) end
-    end)
-    checkbox:HookScript("OnLeave", function()
-        if GetFFD(checkbox).border then GetFFD(checkbox).border:SetColorTexture(0.4, 0.4, 0.4, 1) end
-    end)
 end
 
 local function SkinRaidInfoFrame()
@@ -316,18 +304,25 @@ local function SkinRaidGroup(group)
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
     local ar, ag, ab = EG.r, EG.g, EG.b
     local groupName = group:GetName()
+    -- Hide textures with SetTexture("") (not SetAlpha)
     for i = 1, select("#", group:GetRegions()) do
         local region = select(i, group:GetRegions())
         if region and region:IsObjectType("Texture") then
-            region:SetAlpha(0)
+            region:SetTexture("")
         end
     end
-    if not GetFFD(group).bg then
-        GetFFD(group).bg = group:CreateTexture(nil, "BACKGROUND", nil, -8)
-        GetFFD(group).bg:SetAllPoints()
-        GetFFD(group).bg:SetColorTexture(0.025, 0.025, 0.03, 0.98)
+    -- Bg + border via BackdropTemplateMixin (no child frames)
+    if BackdropTemplateMixin then
+        Mixin(group, BackdropTemplateMixin)
+        group:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        group:SetBackdropColor(0.025, 0.025, 0.03, 0.98)
+        group:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.9)
     end
-    PP.CreateBorder(group, 0.25, 0.25, 0.25, 0.9, 1, "OVERLAY", 7)
+    -- Font changes on FontStrings are safe
     local labelFrame = _G[groupName .. "Label"]
     if labelFrame then
         for i = 1, select("#", labelFrame:GetRegions()) do
@@ -353,20 +348,23 @@ local function SkinRaidSlot(slot)
     if not slot or GetFFD(slot).skinned then return end
     GetFFD(slot).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
+    -- Hide textures with SetTexture("")
     for i = 1, select("#", slot:GetRegions()) do
         local region = select(i, slot:GetRegions())
         if region and region:IsObjectType("Texture") then
-            region:SetAlpha(0)
+            region:SetTexture("")
         end
     end
-    if not GetFFD(slot).bg then
-        GetFFD(slot).bg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
-        GetFFD(slot).bg:SetAllPoints()
-        GetFFD(slot).bg:SetColorTexture(0.045, 0.045, 0.05, 0.9)
-    end
-    if not GetFFD(slot).borderCreated then
-        GetFFD(slot).borderCreated = true
-        PP.CreateBorder(slot, 0.15, 0.15, 0.15, 0.7, 1, "BORDER", 1)
+    -- Bg + border via BackdropTemplateMixin
+    if BackdropTemplateMixin then
+        Mixin(slot, BackdropTemplateMixin)
+        slot:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        slot:SetBackdropColor(0.045, 0.045, 0.05, 0.9)
+        slot:SetBackdropBorderColor(0.15, 0.15, 0.15, 0.7)
     end
     for i = 1, select("#", slot:GetRegions()) do
         local region = select(i, slot:GetRegions())
@@ -375,10 +373,10 @@ local function SkinRaidSlot(slot)
         end
     end
     slot:HookScript("OnEnter", function()
-        if GetFFD(slot).bg then GetFFD(slot).bg:SetColorTexture(0.07, 0.07, 0.08, 0.95) end
+        if slot.SetBackdropColor then slot:SetBackdropColor(0.07, 0.07, 0.08, 0.95) end
     end)
     slot:HookScript("OnLeave", function()
-        if GetFFD(slot).bg then GetFFD(slot).bg:SetColorTexture(0.045, 0.045, 0.05, 0.9) end
+        if slot.SetBackdropColor then slot:SetBackdropColor(0.045, 0.045, 0.05, 0.9) end
     end)
 end
 
@@ -386,44 +384,39 @@ local function SkinRaidGroupButton(btn)
     if not btn or GetFFD(btn).skinned then return end
     GetFFD(btn).skinned = true
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("friends") or STANDARD_TEXT_FONT
+    -- Hide textures with SetTexture("")
     for i = 1, select("#", btn:GetRegions()) do
         local region = select(i, btn:GetRegions())
         if region and region:IsObjectType("Texture") then
-            region:SetAlpha(0)
+            region:SetTexture("")
         end
     end
-    if not GetFFD(btn).bg then
-        GetFFD(btn).bg = btn:CreateTexture(nil, "BACKGROUND", nil, -5)
-        GetFFD(btn).bg:SetAllPoints()
-        GetFFD(btn).bg:SetColorTexture(0.06, 0.06, 0.07, 0.95)
+    -- Bg + border via BackdropTemplateMixin
+    if BackdropTemplateMixin then
+        Mixin(btn, BackdropTemplateMixin)
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        btn:SetBackdropColor(0.06, 0.06, 0.07, 0.95)
+        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
     end
-    local bdrFrame = CreateFrame("Frame", nil, btn)
-    bdrFrame:SetAllPoints(btn)
-    bdrFrame:SetFrameLevel(btn:GetFrameLevel() + 1)
-    PP.CreateBorder(bdrFrame, 0.3, 0.3, 0.3, 0.9, 1, "BORDER", 1)
     for i = 1, select("#", btn:GetRegions()) do
         local region = select(i, btn:GetRegions())
         if region and region:IsObjectType("FontString") then
             region:SetFont(fontPath, 9, "")
-            local p1, rel, p2, ox, oy = region:GetPoint(1)
-            if p1 then region:SetPoint(p1, rel, p2, (ox or 0) - 10, oy or 0) end
         end
     end
     btn:HookScript("OnEnter", function()
-        if GetFFD(btn).bg then GetFFD(btn).bg:SetColorTexture(0.1, 0.1, 0.12, 1) end
+        if btn.SetBackdropColor then btn:SetBackdropColor(0.1, 0.1, 0.12, 1) end
     end)
     btn:HookScript("OnLeave", function()
-        if GetFFD(btn).bg then GetFFD(btn).bg:SetColorTexture(0.06, 0.06, 0.07, 0.95) end
+        if btn.SetBackdropColor then btn:SetBackdropColor(0.06, 0.06, 0.07, 0.95) end
     end)
 end
 
 local function SkinRaidTab()
-    -- Full block: skip ALL styling during M+, raid combat, or PvP combat
-    local inMplus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
-    local inRaidCombat = InCombatLockdown() and IsInRaid()
-    local _, iType = IsInInstance()
-    local inPvP = (iType == "pvp" or iType == "arena") and InCombatLockdown()
-    if inMplus or inRaidCombat or inPvP then return end
 
     for _, name in ipairs(RAID_TAB_BUTTONS) do
         local btn
@@ -476,17 +469,24 @@ local function SkinRaidTab()
     end
     SkinRaidInfoFrame()
 
+    -- Border via BackdropTemplateMixin (no CreateFrame on protected frames)
     if raidFrame and not GetFFD(raidFrame).borderAdded then
         GetFFD(raidFrame).borderAdded = true
-        local bdr = CreateFrame("Frame", nil, raidFrame)
-        bdr:SetPoint("TOPLEFT", raidFrame, "TOPLEFT", 0, 0)
-        bdr:SetPoint("BOTTOMRIGHT", raidFrame, "BOTTOMRIGHT", 0, 0)
-        bdr:SetFrameLevel(raidFrame:GetFrameLevel() + 2)
-        PP.CreateBorder(bdr, 1, 1, 1, 0.1, 1, "OVERLAY", 7)
+        if BackdropTemplateMixin then
+            Mixin(raidFrame, BackdropTemplateMixin)
+            raidFrame:SetBackdrop({
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            raidFrame:SetBackdropBorderColor(1, 1, 1, 0.1)
+        end
     end
 
-    -- Skip layout changes during any combat (styling above is safe)
-    if InCombatLockdown() then return end
+    -- Skip layout changes during combat, M+, or PvP
+    local inMplus2 = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
+    local _, iType2 = IsInInstance()
+    local inPvP2 = (iType2 == "pvp" or iType2 == "arena")
+    if InCombatLockdown() or inMplus2 or inPvP2 then return end
 
     -- Reposition RaidFrame content
     if raidFrame then
@@ -509,7 +509,7 @@ local function SkinRaidTab()
         if raidInfoBtn then
             raidInfoBtn:ClearAllPoints()
             raidInfoBtn:SetSize(btnW, 20)
-            raidInfoBtn:SetPoint("TOPRIGHT", scrollBox, "TOPRIGHT", 0, 54)
+            raidInfoBtn:SetPoint("TOPRIGHT", scrollBox, "TOPRIGHT", 12, 48)
         end
     end
 
@@ -578,15 +578,14 @@ local function UpdateRaidTabButtonAccent()
             btn = _G[name]
         end
         if btn and GetFFD(btn).btnSkinned then
-            -- Hook disable/enable for alpha (one-time)
             local text = btn:GetFontString()
             GetFFD(btn).accent = useAccent
             if useAccent then
                 if text then text:SetTextColor(EG.r, EG.g, EG.b, 0.7) end
-                if PP.GetBorders(btn) then PP.SetBorderColor(btn, EG.r, EG.g, EG.b, 0.5) end
+                if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(EG.r, EG.g, EG.b, 0.5) end
             else
                 if text then text:SetTextColor(1, 1, 1, 0.5) end
-                if PP.GetBorders(btn) then PP.SetBorderColor(btn, 1, 1, 1, 0.4) end
+                if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(1, 1, 1, 0.4) end
             end
         end
     end
@@ -1647,7 +1646,10 @@ local function SkinFriendsFrame()
         -- Use hooksecurefunc instead of HookScript to avoid tainting FriendsFrame's
         -- OnShow script chain (which breaks ClaimRaidFrame in combat).
         hooksecurefunc(frame, "Show", function()
-            if not InCombatLockdown() then
+            local _mplus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
+            local _, _iT = IsInInstance()
+            local _pvp = (_iT == "pvp" or _iT == "arena")
+            if not InCombatLockdown() and not _mplus and not _pvp then
                 ApplySize()
             end
         end)
@@ -1872,7 +1874,7 @@ local function SkinFriendsFrame()
         if sf then
             sf:HookScript("OnShow", function()
                 UpdateCustomTabs(tabIdx)
-                if tabIdx == 3 then C_Timer.After(0, SkinRaidTab) end
+                if tabIdx == 3 then C_Timer.After(0, SkinRaidTab); C_Timer.After(0.2, SkinRaidTab) end
             end)
         end
     end
@@ -1883,7 +1885,7 @@ local function SkinFriendsFrame()
             if rf then
                 rf:HookScript("OnShow", function()
                     UpdateCustomTabs(3)
-                    C_Timer.After(0, SkinRaidTab)
+                    C_Timer.After(0, SkinRaidTab); C_Timer.After(0.2, SkinRaidTab)
                 end)
             end
         end)
@@ -4709,7 +4711,10 @@ end
 
 -- Live updates: colors, border, opacity
 local function ApplyFriends()
-    if InCombatLockdown() then QueueApplyAll(); return end
+    local _mplus = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
+    local _, _iT = IsInInstance()
+    local _pvp = (_iT == "pvp" or _iT == "arena")
+    if InCombatLockdown() or _mplus or _pvp then QueueApplyAll(); return end
 
     local p = EBS.db.profile.friends
     p.enabled = true

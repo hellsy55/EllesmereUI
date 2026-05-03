@@ -543,6 +543,14 @@ local function CreateFlyoutToggle()
         if GetFFD(self).freeMoveJustDragged then return end
         ToggleFlyoutPanel()
     end)
+    btn:SetScript("OnEnter", function(self)
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Addon Buttons", { anchor = "left" })
+        end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
 
     -- Safety: ensure mouse stays enabled. Some Blizzard code or addon hooks
     -- on minimap children can disable mouse input. Re-assert on every Show.
@@ -1097,7 +1105,7 @@ local function CreateGreatVaultBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._whole:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault") end
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault", { anchor = "left" }) end
     end)
     btn:SetScript("OnLeave", function(self)
         self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)
@@ -1495,7 +1503,8 @@ local function CreatePortalBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._icon:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "M+ Portals") end
+        if _portalFlyout and _portalFlyout:IsShown() then return end
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "M+ Portals", { anchor = "left" }) end
     end)
     btn:SetScript("OnLeave", function(self)
         self._icon:SetVertexColor(0.85, 0.85, 0.85, 1)
@@ -1511,6 +1520,7 @@ local function CreatePortalBtn(parent)
     end)
     btn:SetScript("OnClick", function(self)
         if GetFFD(self).freeMoveJustDragged then return end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip(true) end
         ToggleMinimapPortalFlyout(self)
     end)
 
@@ -1550,6 +1560,18 @@ local function BuildCustomIndicators(minimap)
                 blizBtn.menu:SetPoint("TOPRIGHT", self, "TOPLEFT", -4, 0)
             end
         end)
+    local trackBaseEnter = _customIndicators.tracking:GetScript("OnEnter")
+    local trackBaseLeave = _customIndicators.tracking:GetScript("OnLeave")
+    _customIndicators.tracking:SetScript("OnEnter", function(self)
+        if trackBaseEnter then trackBaseEnter(self) end
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Tracking", { anchor = "left" })
+        end
+    end)
+    _customIndicators.tracking:SetScript("OnLeave", function(self)
+        if trackBaseLeave then trackBaseLeave(self) end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
 
     -- Calendar (day-of-month atlas)
     local calDay = tonumber(date("%d")) or 1
@@ -1560,6 +1582,18 @@ local function BuildCustomIndicators(minimap)
             if ToggleCalendar then ToggleCalendar() end
         end)
     _customIndicators.calendar._calDay = calDay
+    local calBaseEnter = _customIndicators.calendar:GetScript("OnEnter")
+    local calBaseLeave = _customIndicators.calendar:GetScript("OnLeave")
+    _customIndicators.calendar:SetScript("OnEnter", function(self)
+        if calBaseEnter then calBaseEnter(self) end
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Calendar", { anchor = "left" })
+        end
+    end)
+    _customIndicators.calendar:SetScript("OnLeave", function(self)
+        if calBaseLeave then calBaseLeave(self) end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
 
     -- Mail (informational, tooltip on hover, with hover atlas)
     _customIndicators.mail = CreateIndicatorBtn("_mail", minimap,
@@ -1569,7 +1603,7 @@ local function BuildCustomIndicators(minimap)
     _customIndicators.mail:SetScript("OnEnter", function(self)
         if mailBaseEnter then mailBaseEnter(self) end
         if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
-            EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail")
+            EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail", { anchor = "left" })
         end
     end)
     _customIndicators.mail:SetScript("OnLeave", function(self)
@@ -1585,7 +1619,24 @@ local function BuildCustomIndicators(minimap)
     _customIndicators.crafting:SetScript("OnEnter", function(self)
         if craftBaseEnter then craftBaseEnter(self) end
         if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
-            EllesmereUI.ShowWidgetTooltip(self, PROFESSIONS_CRAFTING_ORDERS or "Crafting Orders")
+            local label = "Crafting Orders"
+            if C_CraftingOrders and C_CraftingOrders.GetPersonalOrdersInfo then
+                local infos = C_CraftingOrders.GetPersonalOrdersInfo()
+                if type(infos) == "table" then
+                    local lines = {}
+                    for _, info in ipairs(infos) do
+                        local count = tonumber(info.numPersonalOrders) or 0
+                        if count > 0 then
+                            local name = tostring(info.professionName or info.profession or "Unknown")
+                            lines[#lines + 1] = count .. " " .. name .. " Order" .. (count > 1 and "s" or "")
+                        end
+                    end
+                    if #lines > 0 then
+                        label = label .. "\n" .. table.concat(lines, "\n")
+                    end
+                end
+            end
+            EllesmereUI.ShowWidgetTooltip(self, label, { anchor = "left" })
         end
     end)
     _customIndicators.crafting:SetScript("OnLeave", function(self)

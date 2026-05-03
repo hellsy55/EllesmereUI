@@ -3660,7 +3660,10 @@ end
 --  closes unlock mode and opens Blizzard's Edit Mode.
 -------------------------------------------------------------------------------
 local BLIZZ_OWNED_OVERLAY_DEFS = {
-    { label = "Chat", frame = function() return ChatFrame1 end,
+    { label = "Chat", frame = function()
+          if not EllesmereUI._chatCFD then return nil end
+          return ChatFrame1
+      end,
       anchor = function(ov, cf)
           -- Span sidebar + bg + tabs for the full chat region.
           -- Detect sidebar side by comparing screen positions.

@@ -3204,7 +3204,21 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     ECHAT.ApplySidebarVisibility()
     ECHAT.ApplyBorders()
-    -- ECHAT.ApplySidebarIcons() -- causes taint
+    -- ECHAT.ApplySidebarIcons() -- causes taint (full layout chain)
+    -- Apply individual icon visibility from DB without the layout chain.
+    do
+        local _cfg = ECHAT.DB()
+        local _cf1 = _G.ChatFrame1
+        if _cfg and _cf1 then
+            local _sbd = CFD(_cf1)
+            if _sbd.scrollBtn then _sbd.scrollBtn:SetShown(_cfg.showScroll ~= false) end
+            if _sbd.friendsBtn then _sbd.friendsBtn:SetShown(_cfg.showFriends ~= false) end
+            if _sbd.copyBtn then _sbd.copyBtn:SetShown(_cfg.showCopy ~= false) end
+            if _sbd.portalBtn then _sbd.portalBtn:SetShown(_cfg.showPortals ~= false) end
+            if _sbd.voiceBtn then _sbd.voiceBtn:SetShown(_cfg.showVoice ~= false) end
+            if _sbd.settingsBtn then _sbd.settingsBtn:SetShown(_cfg.showSettings ~= false) end
+        end
+    end
     ECHAT.ApplySidebarPosition()
     ECHAT.ApplyIconColor()
     ECHAT.ApplyInputPosition()

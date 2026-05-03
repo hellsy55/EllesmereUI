@@ -1312,6 +1312,8 @@ local function EnsureGlow(plate)
     plate.glowBottom = MkTex(); plate.glowBottom:SetHeight(GLOW_CORNER); plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT"); plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT"); plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
     plate.glowLeft = MkTex(); plate.glowLeft:SetWidth(GLOW_CORNER); plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT"); plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT"); plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
     plate.glowRight = MkTex(); plate.glowRight:SetWidth(GLOW_CORNER); plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT"); plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT"); plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    -- Center fill: covers the gap between top/bottom edges inside the health bar
+    plate.glowCenter = MkTex(); plate.glowCenter:SetPoint("TOPLEFT", plate.glowLeft, "TOPRIGHT"); plate.glowCenter:SetPoint("BOTTOMRIGHT", plate.glowRight, "BOTTOMLEFT"); plate.glowCenter:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
     plate.glow = plate.glowFrame
     plate.glowFrame:Hide()
 end
@@ -1949,6 +1951,10 @@ end
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
 function ns.RefreshAllSettings()
+    -- Re-read profile reference: RepointAllDBs may have swapped the
+    -- profile table (spec-linked profiles). All color lookups via _C()
+    -- read from this local.
+    p = ENP.db.profile
     -- Bump the appearance generation so SetUnit re-runs ApplyAppearance
     -- on each plate. Without this bump, cache-hit re-spawns would skip
     -- the static appearance work and the new settings wouldn't apply.
@@ -4624,7 +4630,9 @@ function NameplateFrame:UpdateCast()
 
     if isFullSetup then
         self.cast:Show()
-        if type(texture) ~= "nil" then
+        local _isv = issecretvalue
+        local texClean = texture ~= nil and not (_isv and _isv(texture))
+        if texClean then
             self._castTex = texture
             self.castIcon:SetTexture(texture)
         elseif self._castTex then
@@ -5533,6 +5541,10 @@ do
     specLoginFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     specLoginFrame:SetScript("OnEvent", function(_, event, unit)
         if unit ~= "player" then return end
+        -- Re-read profile reference: spec swap may have changed the
+        -- active profile. Without this, all color lookups via _C()
+        -- read stale data from the old spec's profile.
+        p = ENP.db.profile
         RefreshThreatCache()
         -- If the framework handler is registered, let it handle this
         if EllesmereUI and EllesmereUI._specSwitchRegistry

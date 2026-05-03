@@ -2092,11 +2092,20 @@ function EllesmereUI.GetSoulFragments()
         local cur = C_Spell and C_Spell.GetSpellCastCount and C_Spell.GetSpellCastCount(228477) or 0
         return cur, 6
     elseif specID == 1480 then -- Devourer (hero spec)
-        local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1225789)
-        if not aura then aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1227702) end
-        local cur = aura and aura.applications or 0
-        local max = (C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(1247534)) and 35 or 50
-        return cur, max
+        -- In Void Metamorphosis (1217607): stacks come from Silence the
+        -- Whispers (1227702) and max is 40. Outside meta: stacks come
+        -- from Dark Heart (1225789) and max is 50 (or 35 with Soul
+        -- Glutton talent 1247534).
+        local inMeta = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1217607)
+        local aura, max
+        if inMeta then
+            aura = C_UnitAuras.GetPlayerAuraBySpellID(1227702)
+            max = 40
+        else
+            aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1225789)
+            max = (C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(1247534)) and 35 or 50
+        end
+        return (aura and aura.applications or 0), max
     end
     -- Havoc or unknown spec: no soul fragments
     return 0, 0
@@ -7190,7 +7199,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.4"
+EllesmereUI.VERSION = "7.4.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

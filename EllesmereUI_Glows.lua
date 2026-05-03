@@ -358,7 +358,10 @@ end
 local function StartShapeGlow(wrapper, sz, cr, cg, cb, scale, opts)
     scale = scale or 1.20
     opts = opts or {}
-    local btn = wrapper:GetParent()
+    -- anchorFrame overrides GetParent() for cases where the wrapper is
+    -- parented to a different frame (e.g. action bar wrappers use
+    -- btn:GetParent() to escape mask clipping).
+    local btn = opts.anchorFrame or wrapper:GetParent()
     if not btn then return end
     if not wrapper._euiSgData then
         local glow   = btn:CreateTexture(nil, "OVERLAY", nil, 5)

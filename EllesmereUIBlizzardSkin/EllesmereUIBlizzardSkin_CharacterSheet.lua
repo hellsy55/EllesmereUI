@@ -64,6 +64,41 @@ local _TRACK_GRAY   = { r = 0.62, g = 0.62, b = 0.62 }
 
 -- Returns "(n/m)" (or "") + color, sourced from C_Item.GetItemUpgradeInfo
 -- so no tooltip scan is needed.
+-- Locale-agnostic track color lookup. All known localized trackString values
+local _trackColorMap = {
+    -- Explorer (gray)
+    Explorer = _TRACK_GRAY, Expedicionario = _TRACK_GRAY, Forscher = _TRACK_GRAY,
+    Explorateur = _TRACK_GRAY, Esploratore = _TRACK_GRAY, Explorador = _TRACK_GRAY,
+    Delve = _TRACK_GRAY,
+    -- Adventurer (white)
+    Adventurer = _TRACK_WHITE, Aventurero = _TRACK_WHITE, Abenteurer = _TRACK_WHITE,
+    Aventurier = _TRACK_WHITE, Avventuriero = _TRACK_WHITE, Aventureiro = _TRACK_WHITE,
+    -- Veteran (green)
+    Veteran = _TRACK_VET, Veterano = _TRACK_VET, ["Vétéran"] = _TRACK_VET,
+    -- Champion (blue)
+    Champion = _TRACK_CHAMP, ["Campeón"] = _TRACK_CHAMP, Campione = _TRACK_CHAMP,
+    ["Campeão"] = _TRACK_CHAMP,
+    -- Hero (purple)
+    Hero = _TRACK_HERO, ["Héroe"] = _TRACK_HERO, Held = _TRACK_HERO,
+    ["Héros"] = _TRACK_HERO, Eroe = _TRACK_HERO, ["Herói"] = _TRACK_HERO,
+    -- Myth (orange)
+    Myth = _TRACK_MYTH, Mito = _TRACK_MYTH, Mythos = _TRACK_MYTH,
+    Mythe = _TRACK_MYTH,
+    -- ruRU
+    ["Исследователь"] = _TRACK_GRAY, ["Искатель приключений"] = _TRACK_WHITE,
+    ["Ветеран"] = _TRACK_VET, ["Защитник"] = _TRACK_CHAMP,
+    ["Герой"] = _TRACK_HERO, ["Легенда"] = _TRACK_MYTH,
+    -- koKR
+    ["탐험가"] = _TRACK_GRAY, ["모험가"] = _TRACK_WHITE, ["노련가"] = _TRACK_VET,
+    ["챔피언"] = _TRACK_CHAMP, ["영웅"] = _TRACK_HERO, ["신화"] = _TRACK_MYTH,
+    -- zhCN
+    ["探索者"] = _TRACK_GRAY, ["冒险者"] = _TRACK_WHITE, ["老兵"] = _TRACK_VET,
+    ["勇士"] = _TRACK_CHAMP, ["英雄"] = _TRACK_HERO, ["神话"] = _TRACK_MYTH,
+    -- zhTW
+    ["探險者"] = _TRACK_GRAY, ["冒險者"] = _TRACK_WHITE, ["精兵"] = _TRACK_VET,
+    ["神話"] = _TRACK_MYTH,
+}
+
 local function EUI_GetUpgradeTrack(itemLink)
     if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
         return "", _TRACK_WHITE
@@ -73,14 +108,7 @@ local function EUI_GetUpgradeTrack(itemLink)
     local trk = info.trackString or ""
     local cur, maxL = info.currentLevel, info.maxLevel
     local text = (cur and maxL and maxL > 0) and ("(" .. cur .. "/" .. maxL .. ")") or ""
-    local color = _TRACK_WHITE
-    if     trk == "Champion"     then color = _TRACK_CHAMP
-    elseif trk:match("Myth")     then color = _TRACK_MYTH
-    elseif trk:match("Hero")     then color = _TRACK_HERO
-    elseif trk:match("Veteran")  then color = _TRACK_VET
-    elseif trk:match("Adventurer") then color = _TRACK_WHITE
-    elseif trk:match("Delve") or trk:match("Explorer") then color = _TRACK_GRAY
-    end
+    local color = _trackColorMap[trk] or _TRACK_WHITE
     return text, color
 end
 
@@ -2492,7 +2520,9 @@ local function SkinCharacterSheet()
 
         -- Add border directly on the slot with item color (2px thickness)
         if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 7)
+            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 2)
+            local bdrFrame = EllesmereUI.PanelPP.GetBorders(slot)
+            if bdrFrame then bdrFrame:SetFrameLevel(slot:GetFrameLevel() + 1) end
         end
     end
 
@@ -3702,9 +3732,11 @@ local function SkinCharacterSheet()
             if not GetFFD(slot).missingEnchBorder then
                 local overlay = CreateFrame("Frame", nil, slot)
                 overlay:SetAllPoints(slot)
-                overlay:SetFrameLevel(slot:GetFrameLevel() + 2)
+                overlay:SetFrameLevel(slot:GetFrameLevel() + 1)
                 if EllesmereUI and EllesmereUI.PanelPP then
-                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 7)  -- #e54949
+                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 2)  -- #e54949
+                    local enchBdr = EllesmereUI.PanelPP.GetBorders(overlay)
+                    if enchBdr then enchBdr:SetFrameLevel(slot:GetFrameLevel() + 1) end
                 end
                 GetFFD(slot).missingEnchBorder = overlay
             end
@@ -3775,7 +3807,9 @@ local function SkinCharacterSheet()
             icon:SetAllPoints(gemFrame)
 
             -- 2px pixel-perfect border, recolored per-gem in UpdateSocketIcons.
-            PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 2)
+            PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 1)
+            local gemBdr = PP_GEM.GetBorders(gemFrame)
+            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel() + 1) end
 
             GetFFD(slot).charSocketsFrames[i] = gemFrame
             GetFFD(slot).charSocketsIcons[i]  = icon
