@@ -978,6 +978,9 @@ local function PostUpdateFriendButton(button)
         local origInfo = GetFFD(button)._origInfo
         if not origInfo then
             origInfo = infoText:GetText() or ""
+            -- Strip any previously-appended note suffix to avoid stacking
+            -- (button recycling can leave our old text in infoText)
+            origInfo = origInfo:match("^(.-)  |cff888888|") or origInfo
             GetFFD(button)._origInfo = origInfo
         end
         local userNote
@@ -2316,7 +2319,9 @@ local function SkinFriendsFrame()
             local nameFS = row:CreateFontString(nil, "OVERLAY")
             nameFS:SetFont(fontPath, 11, "")
             nameFS:SetPoint("LEFT", row, "LEFT", 8, 0)
+            nameFS:SetWidth((FriendsListFrame:GetWidth() - 30) * 0.75)
             nameFS:SetJustifyH("LEFT")
+            nameFS:SetWordWrap(false)
             row._name = nameFS
 
             local infoFS = row:CreateFontString(nil, "OVERLAY")
@@ -2369,9 +2374,14 @@ local function SkinFriendsFrame()
                     if info.gameAccountInfo and info.gameAccountInfo.characterName then
                         charName = info.gameAccountInfo.characterName:lower()
                     end
-                    if strfind(btag, term, 1, true) or strfind(acctName, term, 1, true) or strfind(charName, term, 1, true) then
+                    local areaName = ""
+                    if info.gameAccountInfo and info.gameAccountInfo.areaName then
+                        areaName = info.gameAccountInfo.areaName:lower()
+                    end
+                    if strfind(btag, term, 1, true) or strfind(acctName, term, 1, true) or strfind(charName, term, 1, true) or strfind(areaName, term, 1, true) then
                         local displayName = info.accountName or info.battleTag or ""
                         local charDisplay = info.gameAccountInfo and info.gameAccountInfo.characterName or ""
+                        local areaDisplay = info.gameAccountInfo and info.gameAccountInfo.areaName or ""
                         local isOnline = info.gameAccountInfo and info.gameAccountInfo.isOnline
                         local classFile = GetFriendClassFile(info, nil)
                         matches[#matches + 1] = {
@@ -2379,6 +2389,7 @@ local function SkinFriendsFrame()
                             id = key,
                             display = displayName,
                             char = charDisplay,
+                            area = areaDisplay,
                             online = isOnline,
                             classFile = classFile,
                             sortName = btag,
@@ -2421,16 +2432,17 @@ local function SkinFriendsFrame()
                 local row = GetResultRow(i)
                 local nameText = m.display
                 if m.online then
-                    -- Class-color the character name portion
+                    -- Class-color the character name portion, append zone
+                    local areaSuffix = (m.area and m.area ~= "") and (" |cff888888- " .. m.area .. "|r") or ""
                     if m.classFile and m.char ~= "" then
                         local cc = _getClassColorCode(m.classFile)
                         if cc then
-                            nameText = nameText .. " (" .. cc .. m.char .. "|r)"
+                            nameText = nameText .. " (" .. cc .. m.char .. "|r)" .. areaSuffix
                         else
-                            nameText = nameText .. " (" .. m.char .. ")"
+                            nameText = nameText .. " (" .. m.char .. ")" .. areaSuffix
                         end
                     elseif m.char ~= "" then
-                        nameText = nameText .. " |cff888888(" .. m.char .. ")|r"
+                        nameText = nameText .. " |cff888888(" .. m.char .. ")|r" .. areaSuffix
                     end
                     local bnc = FRIENDS_BNET_NAME_COLOR or { r = 0.510, g = 0.773, b = 1.0 }
                     row._name:SetTextColor(bnc.r, bnc.g, bnc.b)

@@ -287,21 +287,23 @@ do
     end)
 end
 
-local function SkinCharacterSheet()
-    if skinned then return end
-    skinned = true
+-- Lightweight pre-skin: chrome hides, bg, inset. Safe to run while
+-- CharacterFrame is hidden (before first open). Avoids the bug where
+-- running mid-OnShow prevents Rep/Currency ScrollBox data render.
+local _preSkinned = false
+local function PreSkinCharacterSheet()
+    if _preSkinned then return end
+    _preSkinned = true
 
     local frame = CharacterFrame
-    if not frame then return end
+    if not frame then _preSkinned = false; return end
 
     if CharacterFrame.NineSlice then CharacterFrame.NineSlice:Hide() end
-    -- frame.Bg and CharacterFrameBg stay visible -- they're anchors for slot positioning.
     if frame.Background then frame.Background:Hide() end
     if frame.TitleBg then frame.TitleBg:Hide() end
     if frame.TopTileStreaks then frame.TopTileStreaks:Hide() end
     if frame.Portrait then frame.Portrait:Hide() end
     if CharacterFramePortrait then CharacterFramePortrait:Hide() end
-    -- NOTE: Don't hide CharacterFrameBg - we use it as anchor point for item slots!
     if CharacterModelFrameBackgroundOverlay then CharacterModelFrameBackgroundOverlay:Hide() end
     if CharacterModelFrameBackgroundTopLeft then CharacterModelFrameBackgroundTopLeft:Hide() end
     if CharacterModelFrameBackgroundBotLeft then CharacterModelFrameBackgroundBotLeft:Hide() end
@@ -319,8 +321,6 @@ local function SkinCharacterSheet()
                 CharacterFrameInset.NineSlice[edge]:Hide()
             end
         end
-        -- Alpha 0 on the top-level NineSlice; children inherit. Never recurse
-        -- mouse state on Blizzard containers (see CLAUDE.md).
         CharacterFrameInset.NineSlice:SetAlpha(0)
     end
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
@@ -333,10 +333,6 @@ local function SkinCharacterSheet()
             CharacterFrameInset.Bg:SetAlpha(0)
         end
     end
-
-    -- Hide Blizzard's secure CharacterModelScene via alpha + top-level
-    -- EnableMouse(false) so our replacement PlayerModel receives input.
-    -- Never reposition or resize the secure frame, and never recurse into its children.
     if CharacterModelScene then
         CharacterModelScene:SetAlpha(0)
         CharacterModelScene:EnableMouse(false)
@@ -347,6 +343,19 @@ local function SkinCharacterSheet()
             CharacterModelScene.ControlFrame:SetAlpha(0)
             CharacterModelScene.ControlFrame:EnableMouse(false)
         end
+    end
+    for i = 1, select("#", frame:GetRegions()) do
+        local region = select(i, frame:GetRegions())
+        if region and region:IsObjectType("Texture") then
+            region:SetAlpha(0)
+        end
+    end
+    GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+    GetFFD(frame).bg:SetAllPoints(frame)
+    GetFFD(frame).bg:SetAlpha(1)
+    if EllesmereUI and EllesmereUI.PanelPP then
+        EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
     end
 
     -- PlayerModel widget. SetUnit("player") natively follows shapeshift forms
@@ -738,24 +747,18 @@ local function SkinCharacterSheet()
         CharacterFrameInset:SetClipsChildren(false)
     end
     GetFFD(frame).sizeCheckDone = true
+end
 
-    for i = 1, select("#", frame:GetRegions()) do
-        local region = select(i, frame:GetRegions())
-        if region and region:IsObjectType("Texture") then
-            region:SetAlpha(0)
-        end
-    end
+local function SkinCharacterSheet()
+    if skinned then return end
+    skinned = true
+
+    PreSkinCharacterSheet()
+
+    local frame = CharacterFrame
+    if not frame then return end
 
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
-
-    GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
-    GetFFD(frame).bg:SetAllPoints(frame)
-    GetFFD(frame).bg:SetAlpha(1)
-
-    if EllesmereUI and EllesmereUI.PanelPP then
-        EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
-    end
 
     local closeBtn = frame.CloseButton or _G.CharacterFrameCloseButton
     if closeBtn then
@@ -4229,6 +4232,14 @@ local function SkinCharacterSheet()
         -- event. Run a refresh now so first-open gets decorated immediately.
         RefreshAllSlotLabels()
     end
+
+    -- Re-apply tab visibility now that all elements exist. The early call
+    -- at line ~1004 runs before stats panel / model scene / slots are
+    -- created, so when opening Rep/Currency directly via hotkey the
+    -- character-tab elements never got hidden.
+    local isCharTab = not (_G.ReputationFrame and _G.ReputationFrame:IsShown())
+        and not (_G.TokenFrame and _G.TokenFrame:IsShown())
+    ApplyTabVisibility(isCharTab)
 end
 
 -- Get item rarity color from link
@@ -4319,13 +4330,14 @@ if EllesmereUI then
     initFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
         if CharacterFrame then
-            -- Positioning fully owned by Blizzard's UIPanelLayout system.
-            -- Custom drag-to-move was removed to eliminate taint in the
-            -- UIParentPanelManager execution context.
+            -- Lightweight pre-skin (chrome hides, bg, border) runs early
+            -- while CharacterFrame is still hidden. Running these mid-OnShow
+            -- prevents Rep/Currency ScrollBox from completing its data render.
+            if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
+                PreSkinCharacterSheet()
+            end
 
-            -- Skin lazily on first OnShow (not on a timer). The old 1s
-            -- C_Timer.After caused a 30ms login spike from the 4000-line
-            -- SkinCharacterSheet running on the critical path.
+            -- Heavy skin (model, slots, stats, tabs) defers to first OnShow.
             CharacterFrame:HookScript("OnShow", ApplyThemedCharacterSheet)
 
             -- Function to detect and set active equipment set

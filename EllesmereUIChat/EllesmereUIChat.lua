@@ -1658,6 +1658,23 @@ local TAB_TEX_SUFFIXES = {
     "HighlightLeft", "HighlightMiddle", "HighlightRight",
 }
 
+-- Clip frame for underlines: masks them to the dock manager bounds so
+-- they don't extend past the visible tab row.  Our frame on UIParent,
+-- anchored to gdm -- zero writes to Blizzard frames.
+local _ulClipFrame
+local function GetULClipFrame()
+    if _ulClipFrame then return _ulClipFrame end
+    local gdm = _G.GeneralDockManager
+    if not gdm then return nil end
+    _ulClipFrame = CreateFrame("Frame", nil, UIParent)
+    _ulClipFrame:SetPoint("TOPLEFT", gdm, "TOPLEFT", 0, 0)
+    _ulClipFrame:SetPoint("BOTTOMRIGHT", gdm, "BOTTOMRIGHT", 0, 0)
+    _ulClipFrame:SetClipsChildren(true)
+    _ulClipFrame:SetFrameStrata("MEDIUM")
+    _ulClipFrame:SetFrameLevel(5)
+    return _ulClipFrame
+end
+
 -- Update visual state of one skinned tab (colors, underline, pulse)
 local function UpdateTabStyle(tab)
     if not tab or not CFD(tab).skinned then return end
@@ -1724,7 +1741,7 @@ local function SkinTab(cf)
     -- Accent underline: deferred to avoid pixel snap hooks firing during
     -- chat init's secure window.
     C_Timer.After(0, function()
-        local ulHost = CreateFrame("Frame", nil, UIParent)
+        local ulHost = CreateFrame("Frame", nil, GetULClipFrame() or UIParent)
         ulHost:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
         ulHost:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
         ulHost:SetHeight((PP and PP.mult) or 1)
@@ -1737,6 +1754,7 @@ local function SkinTab(cf)
         ulHost:Hide()
         if EUI.RegAccent then EUI.RegAccent({ type = "solid", obj = underline, a = 1 }) end
         CFD(tab).underline = ulHost
+        UpdateTabStyle(tab)
     end)
 
     -- Hover highlight
@@ -2798,11 +2816,10 @@ initFrame:SetScript("OnEvent", function(self)
         local gdm2 = _G.GeneralDockManager
         local sf = _G.GeneralDockManagerScrollFrame
         local sfc = _G.GeneralDockManagerScrollFrameChild
-        if sf and gdm2 then
-            sf:ClearAllPoints()
-            sf:SetPoint("BOTTOMLEFT", gdm2, "BOTTOMLEFT", 0, 0)
-            sf:SetPoint("TOPRIGHT", gdm2, "TOPRIGHT", 0, 0)
-        end
+        -- Don't override sf anchoring -- Blizzard's default stops at the
+        -- overflow button, which is what hides overflow tabs natively.
+        -- sf is a child of gdm, so it follows our dock repositioning.
+        -- Height is already set in StyleDockManager.
         if sfc then
             sfc:ClearAllPoints()
             sfc:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 0)
@@ -2860,8 +2877,6 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
     ECHAT._deferredTabColorUpdate = DeferredTabColorUpdate
-
-
 
 
     ---------------------------------------------------------------------------
@@ -3030,27 +3045,53 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        for i = 1, 20 do
-            local cf = _G["ChatFrame" .. i]
-            if cf and cf.isTemporary then break end
-            if cf then
-                local bg = CFD(cf).bg
-                if bg then
-                    if bg.EnableMouseMotion then bg:EnableMouseMotion(true) end
-                    bg:HookScript("OnEnter", function() OnChatEnter(cf) end)
-                    bg:HookScript("OnLeave", function() OnChatLeave(cf) end)
-                end
-                local tab = _G["ChatFrame" .. i .. "Tab"]
-                if tab then
-                    tab:HookScript("OnEnter", function() OnChatEnter(cf) end)
-                    tab:HookScript("OnLeave", function() OnChatLeave(cf) end)
-                end
+        -- Single invisible overlay covering tabs + bg + sidebar.
+        -- EnableMouseMotion detects hover without blocking clicks.
+        -- Placed at BACKGROUND strata so it never intercepts anything.
+        do
+            local cf1 = _G.ChatFrame1
+            local gdm = _G.GeneralDockManager
+            local bg1 = CFD(cf1).bg
+            local sb = CFD(cf1).sidebar
+            if bg1 and gdm then
+                local overlay = CreateFrame("Frame", nil, UIParent)
+                overlay:SetPoint("TOPLEFT", gdm, "TOPLEFT", sb and -40 or 0, 0)
+                overlay:SetPoint("BOTTOMRIGHT", bg1, "BOTTOMRIGHT", 0, 0)
+                overlay:SetFrameStrata("BACKGROUND")
+                overlay:EnableMouseMotion(true)
+                overlay:SetScript("OnEnter", function()
+                    _hoverCount = _hoverCount + 1
+                    UpdateHoverState()
+                    local sel = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+                    if sel then
+                        local track = CFD(sel).scrollTrack
+                        if track and track._setHovered then
+                            track._setHovered(true)
+                            track._showTrack()
+                        end
+                    end
+                end)
+                overlay:SetScript("OnLeave", function()
+                    _hoverCount = max(0, _hoverCount - 1)
+                    UpdateHoverState()
+                    local sel = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+                    if sel then
+                        local track = CFD(sel).scrollTrack
+                        if track and track._setHovered and not track._isDragging() then
+                            track._setHovered(false)
+                            track._hideTrack()
+                        end
+                    end
+                end)
             end
         end
 
+        -- Sidebar has EnableMouse(true) which blocks the overlay beneath it.
+        -- HookScript on our own frame -- safe, no taint.
         local sidebar = CFD(ChatFrame1).sidebar
         if sidebar then
-            if sidebar.EnableMouseMotion then sidebar:EnableMouseMotion(true) end
             sidebar:HookScript("OnEnter", function()
                 _hoverCount = _hoverCount + 1; UpdateHoverState()
             end)
