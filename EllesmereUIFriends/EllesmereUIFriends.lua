@@ -836,9 +836,7 @@ local function SkinFriendButton(button)
     tileBg:SetColorTexture(0, 0, 0, 0.10)
     GetFFD(button).tileBg = tileBg
 
-    -- Strip Blizzard's highlight texture
-    local blizzHighlight = button.GetHighlightTexture and button:GetHighlightTexture()
-    if blizzHighlight then blizzHighlight:SetVertexColor(0, 0, 0, 0) end
+    -- Keep Blizzard's highlight texture for native selection/hover
 
     -- Hover highlight (OnEnter/OnLeave)
     local hover = button:CreateTexture(nil, "ARTWORK", nil, -7)
@@ -887,43 +885,7 @@ local function PostUpdateFriendButton(button)
     -- Structural skinning (one-time per button, guarded by FFD flag)
     SkinFriendButton(button)
 
-    -- Selection highlight
-    if not GetFFD(button).selBar then
-        local sel = button:CreateTexture(nil, "ARTWORK", nil, -7)
-        sel:SetAllPoints()
-        sel:SetAtlas("groupfinder-highlightbar-green")
-        sel:SetDesaturated(true)
-        sel:SetVertexColor(0.4, 0.7, 1.0)
-        sel:SetAlpha(1)
-        sel:Hide()
-        local selFill = button:CreateTexture(nil, "ARTWORK", nil, -8)
-        selFill:SetAllPoints()
-        selFill:SetColorTexture(1, 1, 1, 0.02)
-        selFill:SetBlendMode("ADD")
-        selFill:Hide()
-        GetFFD(button).selBar = sel
-        GetFFD(button).selFill = selFill
-    end
-    local isSel = (FriendsFrame.selectedFriend == button.id)
-    GetFFD(button).selBar:SetShown(isSel)
-    if GetFFD(button).selFill then GetFFD(button).selFill:SetShown(isSel) end
-
-    -- Click hook to update selection across visible buttons
-    if not GetFFD(button).clickHooked then
-        GetFFD(button).clickHooked = true
-        button:HookScript("OnClick", function()
-            local sb = FriendsListFrame and FriendsListFrame.ScrollBox
-            if sb then
-                for _, btn in sb:EnumerateFrames() do
-                    if GetFFD(btn).selBar then
-                        local sel2 = (FriendsFrame.selectedFriend == btn.id)
-                        GetFFD(btn).selBar:SetShown(sel2)
-                        if GetFFD(btn).selFill then GetFFD(btn).selFill:SetShown(sel2) end
-                    end
-                end
-            end
-        end)
-    end
+    -- Selection highlight: use Blizzard's native selection (not stripped)
 
     -- Hide Blizzard elements
     local fav = button.Favorite
@@ -2204,6 +2166,10 @@ local function SkinFriendsFrame()
         end)
         clearBtn:Hide()
         search:SetTextInsets(6, 18, 0, 0)
+        search:SetScript("OnEditFocusLost", function(self)
+            self:SetText("")
+            clearBtn:Hide()
+        end)
 
         -- Dropdown results frame
         local dropdown = CreateFrame("Frame", nil, frame)

@@ -3100,17 +3100,17 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Edit box focus tracking (event-driven, no polling)
-        for i = 1, 20 do
-            local eb = _G["ChatFrame" .. i .. "EditBox"]
-            if eb then
-                eb:HookScript("OnEditFocusGained", function()
-                    _editFocusCount = _editFocusCount + 1; UpdateHoverState()
-                end)
-                eb:HookScript("OnEditFocusLost", function()
-                    _editFocusCount = max(0, _editFocusCount - 1); UpdateHoverState()
-                end)
-            end
+        -- Edit box focus tracking -- only ChatFrame1 (permanent, no secret
+        -- values). Hooking temp whisper edit boxes (11+) taints their
+        -- execution context, causing secret value errors on BN_WHISPER tellTarget.
+        local eb1 = _G["ChatFrame1EditBox"]
+        if eb1 then
+            eb1:HookScript("OnEditFocusGained", function()
+                _editFocusCount = _editFocusCount + 1; UpdateHoverState()
+            end)
+            eb1:HookScript("OnEditFocusLost", function()
+                _editFocusCount = max(0, _editFocusCount - 1); UpdateHoverState()
+            end)
         end
 
         -- Start the initial timer
