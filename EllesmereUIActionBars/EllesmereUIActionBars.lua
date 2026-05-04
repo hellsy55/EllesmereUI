@@ -2878,6 +2878,16 @@ local function LayoutBar(key)
                         local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
                         if not bs or not bs.showRankIcon then
                             self:SetShown(false)
+                            return
+                        end
+                        -- Hide stale overlays after spec swap: if the slot
+                        -- no longer holds an item, the overlay is ghost state.
+                        local action = btn:GetAttribute("action") or 0
+                        if action > 0 and GetActionInfo then
+                            local actionType = GetActionInfo(action)
+                            if actionType ~= "item" then
+                                self:SetShown(false)
+                            end
                         end
                     end)
                     EFD(btn).qualityHooked = true
@@ -5931,6 +5941,9 @@ function EAB:HookProcGlow()
 
     -- Check IsSpellOverlayed ground truth for a single button.
     -- Also checks base/override variants for spell transforms.
+    -- Match LAB: only check IsSpellOverlayed on the button's current spell.
+    -- No base/override fallback -- that caused false positives (e.g. Tempest
+    -- glowing because its base spell Lightning Bolt was overlayed by Stormkeeper).
     local function UpdateOverlayGlow(btn)
         local spellID = GetButtonSpellID(btn)
         if not spellID then
@@ -5939,16 +5952,7 @@ function EAB:HookProcGlow()
         end
         local ISO = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
         if not ISO then return end
-        local overlayed = ISO(spellID)
-        if not overlayed and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-            local ovr = C_SpellBook.FindSpellOverrideByID(spellID)
-            if ovr and ovr > 0 and ovr ~= spellID then overlayed = ISO(ovr) end
-        end
-        if not overlayed and C_Spell and C_Spell.GetBaseSpell then
-            local base = C_Spell.GetBaseSpell(spellID)
-            if base and base > 0 and base ~= spellID then overlayed = ISO(base) end
-        end
-        if overlayed then
+        if ISO(spellID) then
             ShowGlow(btn)
         elseif _procState.active[btn] then
             HideGlow(btn)
@@ -5961,8 +5965,9 @@ function EAB:HookProcGlow()
     glowFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
     glowFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     glowFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    glowFrame:RegisterEvent("SPELL_UPDATE_ICON")
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
-        if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" then
+        if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" or event == "SPELL_UPDATE_ICON" then
             -- Defer re-scan: the bar may not have finished paging yet
             -- when the event fires, so slot->spell mappings are stale.
             C_Timer_After(0, function()
@@ -6004,29 +6009,15 @@ function EAB:HookProcGlow()
             end
         else
             -- SHOW: scan all buttons for the matching spellID.
-            -- Also check base/override variants so spell transforms
-            -- (e.g. Lava Burst override from Lava Surge) still match.
             local blizz2 = IsBlizzStyle()
-            local _FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
             for _, info in ipairs(BAR_CONFIG) do
                 local buttons = barButtons[info.key]
                 if buttons then
                     for _, btn in ipairs(buttons) do
                         if btn and (EFD(btn).squared or blizz2) then
                             local id = GetButtonSpellID(btn)
-                            if id then
-                                local match = (id == arg1)
-                                if not match and _FO then
-                                    local ovr = _FO(id)
-                                    if ovr and ovr == arg1 then match = true end
-                                end
-                                if not match and C_Spell and C_Spell.GetBaseSpell then
-                                    local base = C_Spell.GetBaseSpell(id)
-                                    if base and base == arg1 then match = true end
-                                end
-                                if match then
-                                    ShowGlow(btn)
-                                end
+                            if id and id == arg1 then
+                                ShowGlow(btn)
                             end
                         end
                     end

@@ -2162,7 +2162,10 @@ local function SkinChatFrame(cf)
         -- Friends button toggles FriendsFrame
         if friendsBtn then
         friendsBtn:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
+                return
+            end
             ToggleFriendsFrame()
         end)
         end

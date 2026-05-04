@@ -203,9 +203,27 @@ local function GetReferenceObjectiveTime(run, objectiveIndex, mode)
     if mode == COMPARE_NONE then return nil end
 
     local store = EnsureProfileStore("bestObjectiveSplits")
-    local scopeKey = GetScopeKey(run, mode)
-    local scope = store and scopeKey and store[scopeKey]
-    return scope and scope[objectiveIndex] or nil
+    if not store then return nil end
+
+    -- Try exact scope first, then fall back to broader scopes.
+    -- LEVEL_AFFIX -> LEVEL -> DUNGEON
+    local tryOrder
+    if mode == COMPARE_LEVEL_AFFIX then
+        tryOrder = { COMPARE_LEVEL_AFFIX, COMPARE_LEVEL, COMPARE_DUNGEON }
+    elseif mode == COMPARE_LEVEL then
+        tryOrder = { COMPARE_LEVEL, COMPARE_DUNGEON }
+    else
+        tryOrder = { mode }
+    end
+
+    for _, tryMode in ipairs(tryOrder) do
+        local scopeKey = GetScopeKey(run, tryMode)
+        local scope = scopeKey and store[scopeKey]
+        if scope and scope[objectiveIndex] then
+            return scope[objectiveIndex]
+        end
+    end
+    return nil
 end
 
 local function UpdateBestObjectiveSplits(run, objectiveIndex, elapsed)
@@ -351,6 +369,7 @@ local function UpdateObjectives()
                     end
                 end
 
+                obj.rawQuantity = rawQuantity
                 if obj.totalQuantity and obj.totalQuantity > 0 then
                     local percent = (rawQuantity / obj.totalQuantity) * 100
                     obj.quantity = floor(percent * 100 + 0.5) / 100

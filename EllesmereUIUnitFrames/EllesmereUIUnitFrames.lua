@@ -1028,16 +1028,21 @@ do
   oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end
 
--- eui-perpp: power percent using explicit power type (runs in oUF _PROXY env)
+-- Resolved power type per unit. Updated by GetDisplayPower override so
+-- tags match the power bar when powerTypeOverride is active (e.g. Balance
+-- Druid showing Mana instead of Astral Power).
+_G._EUI_ResolvedPowerType = _G._EUI_ResolvedPowerType or {}
+
+-- eui-perpp: power percent using resolved power type (runs in oUF _PROXY env)
 oUF.Tags.Methods["eui-perpp"] = [[function(u)
-    local pType = UnitPowerType(u)
+    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return string.format('%d', UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
 end]]
 oUF.Tags.Events["eui-perpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
 
 -- eui-curpp: current power as abbreviated number
 oUF.Tags.Methods["eui-curpp"] = [[function(u)
-    local pType = UnitPowerType(u)
+    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return AbbreviateNumbers(UnitPower(u, pType))
 end]]
 oUF.Tags.Events["eui-curpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
@@ -2315,7 +2320,7 @@ local function CreatePowerBar(frame, unit, settings)
     -- Parent to frame (not power) so text isn't clipped by the bar clip container
     local ppTextOvr = CreateFrame("Frame", nil, frame)
     ppTextOvr:SetAllPoints(power)
-    ppTextOvr:SetFrameLevel(frame:GetFrameLevel() + 11)
+    ppTextOvr:SetFrameLevel(frame:GetFrameLevel() + 15)
     local ppFS = ppTextOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(ppFS, settings.powerPercentSize or 9)
     ppFS:Hide()
@@ -2460,17 +2465,18 @@ local function CreatePowerBar(frame, unit, settings)
             power.GetDisplayPower = function(self, u)
                 local spec = GetSpecialization and GetSpecialization()
                 if not spec then return nil end
+                local resolved
                 -- Check user override
                 local ps = GetSettingsForUnit("player")
                 local ov = ps and ps.powerTypeOverride
                 if ov and ov[spec] and classAlt then
-                    return classAlt[spec]  -- nil = UnitPowerType, number = forced
+                    resolved = classAlt[spec]  -- nil = UnitPowerType, number = forced
+                elseif classDef and classDef[spec] ~= nil then
+                    resolved = classDef[spec]
                 end
-                -- Addon default for this spec
-                if classDef and classDef[spec] ~= nil then
-                    return classDef[spec]
-                end
-                return nil
+                -- Publish for tags so text matches the bar
+                _G._EUI_ResolvedPowerType[u or "player"] = resolved
+                return resolved
             end
         end
     end
@@ -3154,7 +3160,9 @@ local function CreateTargetAuras(frame, unit)
     do
         local debuffs = CreateFrame("Frame", nil, frame)
         local effectiveAnc = (dAnc ~= "none") and dAnc or "bottomleft"
-        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(effectiveAnc, settings and settings.debuffGrowth or "auto")
+        local simpleOn = unitIsBoss and settings and settings.simpleDebuffs ~= false
+        local effectiveGrowth = simpleOn and "auto" or (settings and settings.debuffGrowth or "auto")
+        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(effectiveAnc, effectiveGrowth)
         local debuffCbOff = 0
         if effectiveAnc == "bottomleft" or effectiveAnc == "bottomright" then
             debuffCbOff = cbOffset
@@ -3162,7 +3170,7 @@ local function CreateTargetAuras(frame, unit)
         -- Simple Debuff Display: anchor to the top of the health bar, not the
         -- frame's vertical center (matches preview layout).
         local simpleAnchorParent = frame
-        if unitIsBoss and settings and settings.simpleDebuffs ~= false then
+        if simpleOn then
             dia = "TOPRIGHT"
             dfp = "TOPLEFT"
             dox = 0
@@ -3175,7 +3183,7 @@ local function CreateTargetAuras(frame, unit)
         debuffs.size = debuffAuraSize
         debuffs.spacing = gap
         debuffs.num = (dAnc ~= "none") and maxDebuffs or 0
-        debuffs.maxCols = AuraMaxCols(settings and settings.debuffGrowth, maxDebuffs)
+        debuffs.maxCols = AuraMaxCols(effectiveGrowth, maxDebuffs)
         debuffs.initialAnchor = dia
         debuffs.growthX = dgx
         debuffs.growthY = dgy

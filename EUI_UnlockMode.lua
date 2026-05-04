@@ -7863,7 +7863,10 @@ local function DoClose()
         local objTracker = _G.ObjectiveTrackerFrame
         if objTracker then
             objTracker:SetAlpha(1)
-            if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, true) end
+            local wasEnabled = objTracker._eabMouseWasEnabled
+            if objTracker.EnableMouse then
+                pcall(objTracker.EnableMouse, objTracker, wasEnabled and true or false)
+            end
         end
         objTrackerWasVisible = false
     end
@@ -8491,6 +8494,7 @@ function ns.OpenUnlockMode()
     local objTracker = _G.ObjectiveTrackerFrame
     if objTracker and objTracker:IsShown() then
         objTrackerWasVisible = true
+        objTracker._eabMouseWasEnabled = objTracker:IsMouseEnabled()
         objTracker:SetAlpha(0)
         if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, false) end
         if not objTracker._eabUnlockAlphaHooked then
@@ -9100,7 +9104,10 @@ local function SuspendForCombat()
         local objTracker = _G.ObjectiveTrackerFrame
         if objTracker then
             objTracker:SetAlpha(1)
-            if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, true) end
+            local wasEnabled = objTracker._eabMouseWasEnabled
+            if objTracker.EnableMouse then
+                pcall(objTracker.EnableMouse, objTracker, wasEnabled and true or false)
+            end
         end
     end
 

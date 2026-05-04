@@ -1835,8 +1835,13 @@ local function RestoreBlizzardBuffFrame()
             end
         end
         frame:SetAlpha(1)
-        frame:EnableMouse(true)
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        -- BuffBarCooldownViewer's default is EnableMouse(false); restoring
+        -- it with EnableMouse(true) creates an invisible click-catcher.
+        -- Other viewers need mouse for tooltip hover.
+        if frameName ~= "BuffBarCooldownViewer" then
+            frame:EnableMouse(true)
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        end
         fc.hidden = false
         fc.restoring = nil
     end
@@ -4122,7 +4127,8 @@ _CDMApplyVisibility = function()
                     for ii = 1, #icons do
                         local ic = icons[ii]
                         if ic then
-                            ic:EnableMouse(true)
+                            ic:EnableMouse(false)
+                            if ic.EnableMouseMotion then ic:EnableMouseMotion(true) end
                             local icfc = _ecmeFC[ic]
                             if not (icfc and icfc._cdStateHidden) then
                                 ic:SetAlpha(visAlpha)

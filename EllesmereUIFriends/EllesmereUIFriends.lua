@@ -1088,6 +1088,7 @@ local function ProcessFriendButtons()
     end
 end
 
+
 -- Skin a single ScrollBox+ScrollBar pair with thin EUI track
 local function SkinOneScrollbar(scrollBox, scrollBar)
     if not scrollBox or not scrollBar then return end
@@ -1399,7 +1400,57 @@ local function SkinFriendsFrame()
                 end
             end
             FitToListPane(_G.RecentAlliesFrame)
-            FitToListPane(_G.RecruitAFriendFrame)
+            -- Skin Recent Allies scrollbar identically to Friends list
+            local raFrame = _G.RecentAlliesFrame
+            if raFrame and raFrame.List then
+                local raBar = raFrame.List.ScrollBar or raFrame.ScrollBar
+                if raBar then
+                    StripTextures(raBar)
+                    if raBar.Background then raBar.Background:Hide() end
+                    if raBar.Back then raBar.Back:SetAlpha(0); raBar.Back:SetSize(1, 0.001) end
+                    if raBar.Forward then raBar.Forward:SetAlpha(0); raBar.Forward:SetSize(1, 0.001) end
+                    local raTrack = raBar.Track
+                    if raTrack then
+                        raTrack:DisableDrawLayer("ARTWORK")
+                        raTrack:DisableDrawLayer("BACKGROUND")
+                        raTrack:ClearAllPoints()
+                        raTrack:SetPoint("TOPLEFT", raBar, "TOPLEFT", 0, 0)
+                        raTrack:SetPoint("BOTTOMRIGHT", raBar, "BOTTOMRIGHT", 0, 0)
+                    end
+                    local raThumb = raBar.GetThumb and raBar:GetThumb()
+                    if raThumb then
+                        raThumb:DisableDrawLayer("ARTWORK")
+                        raThumb:DisableDrawLayer("BACKGROUND")
+                        local raTex = raThumb:CreateTexture(nil, "OVERLAY")
+                        raTex:SetColorTexture(1, 1, 1, 0.4)
+                        raTex:SetWidth(3)
+                        raTex:SetPoint("TOP", raThumb, "TOP", 0, 0)
+                        raTex:SetPoint("BOTTOM", raThumb, "BOTTOM", 0, 0)
+                        raTex:SetPoint("RIGHT", raThumb, "RIGHT", 0, 0)
+                    end
+                    raBar:SetWidth(5)
+                    local p1, rel, p2, ox, oy = raBar:GetPoint(1)
+                    if p1 then
+                        raBar:SetPoint(p1, rel, p2, (ox or 0) - 6, (oy or 0) + 4)
+                    end
+                    raBar:SetAlpha(0.6)
+                    raBar:HookScript("OnEnter", function() raBar:SetAlpha(0.95) end)
+                    raBar:HookScript("OnLeave", function() raBar:SetAlpha(0.6) end)
+                    if raThumb then
+                        raThumb:HookScript("OnEnter", function() raBar:SetAlpha(0.95) end)
+                        raThumb:HookScript("OnLeave", function() raBar:SetAlpha(0.6) end)
+                    end
+                end
+            end
+            local raf = _G.RecruitAFriendFrame
+            if raf then
+                raf:ClearAllPoints()
+                raf:SetPoint("TOPLEFT", frame, "TOPLEFT", LIST_LEFT, -20)
+                raf:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", LIST_RIGHT, LIST_BOTTOM - 20)
+                StripTextures(raf)
+                if raf.Bg then raf.Bg:Hide() end
+                if raf.NineSlice then raf.NineSlice:Hide() end
+            end
         end
 
         hooksecurefunc(frame, "Show", function()
@@ -1541,14 +1592,16 @@ local function SkinFriendsFrame()
             end
             if ctd.activeHL then ctd.activeHL:SetShown(isActive) end
         end
+        local showContactsUI = isContacts and _activeSubTab == 1
         local addBtn = _G.FriendsFrameAddFriendButton
         local msgBtn = _G.FriendsFrameSendMessageButton
-        if addBtn then addBtn:SetAlpha(isContacts and 1 or 0); addBtn:EnableMouse(isContacts) end
-        if msgBtn then msgBtn:SetAlpha(isContacts and 1 or 0); msgBtn:EnableMouse(isContacts) end
-        if GetFFD(frame).addBdr then GetFFD(frame).addBdr:SetShown(isContacts) end
-        if GetFFD(frame).msgBdr then GetFFD(frame).msgBdr:SetShown(isContacts) end
-        if GetFFD(frame).listOverlay then GetFFD(frame).listOverlay:SetShown(isContacts) end
-        if GetFFD(frame).listBdr then GetFFD(frame).listBdr:SetShown(isContacts) end
+        if addBtn then addBtn:SetAlpha(showContactsUI and 1 or 0); addBtn:EnableMouse(showContactsUI) end
+        if msgBtn then msgBtn:SetAlpha(showContactsUI and 1 or 0); msgBtn:EnableMouse(showContactsUI) end
+        if GetFFD(frame).addBdr then GetFFD(frame).addBdr:SetShown(showContactsUI) end
+        if GetFFD(frame).msgBdr then GetFFD(frame).msgBdr:SetShown(showContactsUI) end
+        local showListChrome = isContacts and _activeSubTab ~= 3
+        if GetFFD(frame).listOverlay then GetFFD(frame).listOverlay:SetShown(showListChrome) end
+        if GetFFD(frame).listBdr then GetFFD(frame).listBdr:SetShown(showListChrome) end
         if GetFFD(frame).searchBox then GetFFD(frame).searchBox:SetShown(isContacts) end
         if not isContacts and GetFFD(frame).searchDropdown then GetFFD(frame).searchDropdown:Hide() end
         local showTopUI = (selected ~= 3)
@@ -1563,8 +1616,8 @@ local function SkinFriendsFrame()
             end
             if GetFFD(frame).updateSubTabs then GetFFD(frame).updateSubTabs() end
         end
-        if GetFFD(frame).statusOrb then GetFFD(frame).statusOrb:SetShown(selected ~= 3) end
-        if GetFFD(frame).broadcastBtn then GetFFD(frame).broadcastBtn:SetShown(selected ~= 3) end
+        if GetFFD(frame).statusOrb then GetFFD(frame).statusOrb:SetShown(isContacts) end
+        if GetFFD(frame).broadcastBtn then GetFFD(frame).broadcastBtn:SetShown(isContacts) end
         if GetFFD(frame).titleBtn then GetFFD(frame).titleBtn:Show() end
         if GetFFD(frame).titleDiv then GetFFD(frame).titleDiv:Show() end
         -- Sync scrollbar visibility
@@ -1899,11 +1952,14 @@ local function SkinFriendsFrame()
                 if isSelected then return end
                 local tabName = info.name or ""
                 if strfind(tabName, "Recruit") then
-                    local savedSubTab = _activeSubTab
-                    if RecruitAFriendFrame and RecruitAFriendFrame.RecruitmentButton then
-                        RecruitAFriendFrame.RecruitmentButton:Click()
+                    -- Let Blizzard show the full RAF page natively.
+                    -- Re-enable mouse momentarily so the click registers.
+                    if bliz then
+                        bliz:EnableMouse(true)
+                        bliz:Click()
+                        bliz:EnableMouse(false)
                     end
-                    _activeSubTab = savedSubTab
+                    _activeSubTab = i
                     UpdateSubTabs()
                     UpdateCustomTabs()
                     return

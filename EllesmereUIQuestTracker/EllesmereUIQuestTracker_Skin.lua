@@ -25,6 +25,7 @@ local EQT = ns.EQT
 -- onto Blizzard pool frames -- causes taint).
 local _skinned = setmetatable({}, { __mode = "k" })
 
+
 -- Color helpers. All four user-facing text colors come from DB so they
 -- follow the Colors section in the options page.
 local function GetTitleRGB()
@@ -686,27 +687,11 @@ local function HookBlockLineMethods(block)
         end)
     end
 
-    -- AddObjective(block, objectiveKey, ...) pools a line and assigns it.
-    -- After Blizzard runs, retrieve the line via GetExistingLine and style.
-    if block.AddObjective and block.GetExistingLine then
-        hooksecurefunc(block, "AddObjective", function(self, objectiveKey)
-            if ShouldSkipSkin() then return end
-            local line = self:GetExistingLine(objectiveKey)
-            if line then StyleObjectiveLine(line) end
-        end)
-    end
-
-    -- SetStringText(block, fontString, text, ...) is Blizzard's wrapper
-    -- for writing text into an arbitrary FontString owned by the block.
-    if block.SetStringText then
-        hooksecurefunc(block, "SetStringText", function(_, fontString)
-            if ShouldSkipSkin() then return end
-            if fontString and fontString.GetObjectType
-               and fontString:GetObjectType() == "FontString" then
-                StyleFontString(fontString)
-            end
-        end)
-    end
+    -- AddObjective / SetStringText hooks REMOVED (session 68 perf audit).
+    -- SkinBlock already styles all fontstrings via GetRegions() walk +
+    -- ProcessBlockChildren. These per-call hooks charged Blizzard's entire
+    -- AddObjective/SetStringText execution to our addon in the profiler
+    -- (11 + 14 = 25 calls per collapse, ~8ms attributed to us).
 end
 
 -- Ornamental atlas keywords: textures with these substrings in their atlas
@@ -735,6 +720,7 @@ end
 -- so it's not recreated per SkinBlock call.
 local function ProcessBlockChildren(frame, depth)
     if not frame or depth > 3 or not frame.GetChildren then return end
+
     for _, child in ipairs({ frame:GetChildren() }) do
         if child.GetObjectType then
             local ok, otype = pcall(child.GetObjectType, child)
@@ -756,6 +742,7 @@ local function ProcessBlockChildren(frame, depth)
             end
         end
     end
+
 end
 
 -- Suppress a POI button permanently. Hooks Show + SetAlpha so Blizzard
@@ -781,6 +768,7 @@ end
 local function SkinBlock(block)
     if not block then return end
     if ShouldSkipSkin() then return end
+
 
     -- Suppress POI on every entry -- Blizzard may assign a new pooled
     -- poiButton to the block between skin passes.
@@ -852,6 +840,7 @@ local function SkinBlock(block)
     ProcessBlockChildren(block, 0)
 
     _skinned[block] = true
+
 end
 
 
@@ -861,6 +850,7 @@ end
 -------------------------------------------------------------------------------
 local function SkinExistingBlocks(tracker)
     if not tracker then return end
+
 
     -- Refresh the accent divider under this tracker's header on every pass
     -- so collapsed/re-expanded states always keep a visible divider.
@@ -901,6 +891,7 @@ local function SkinExistingBlocks(tracker)
             end
         end
     end
+
 end
 
 -------------------------------------------------------------------------------
@@ -933,6 +924,7 @@ local function HookTracker(tracker)
         if tracker.Header.SetCollapsed then
             hooksecurefunc(tracker.Header, "SetCollapsed", function(self)
                 if ShouldSkipSkin() then return end
+            
                 SkinHeader(self)
             end)
         end
@@ -941,40 +933,41 @@ local function HookTracker(tracker)
     if tracker.AddBlock then
         hooksecurefunc(tracker, "AddBlock", function(_, block)
             if ShouldSkipSkin() then return end
-            -- Clear the stamp on every AddBlock. Blizzard's pool reuse
-            -- re-adds decorative textures during Init, so a recycled block
-            -- needs a full re-skin even if it was skinned before.
+        
             if block then _skinned[block] = nil end
             SkinBlock(block)
         end)
     end
 
-    -- Re-evaluate the divider AND queue a BG resize after every layout
-    -- pass. Update fires on content changes, collapse, and expand; the
-    -- debounce in QueueResize coalesces bursts into a single measurement.
+    -- tracker.Update hook REPLACED with lightweight dirty flag (session 68).
+    -- The old hooksecurefunc charged Blizzard's entire Update() (10 calls
+    -- per collapse, full layout pass each) to our addon in the profiler.
+    -- Now we just set a flag and defer the work to a single pass.
+    local _updateDirty = false
     if tracker.Update then
-        hooksecurefunc(tracker, "Update", function(self)
-            if ShouldSkipSkin() then return end
-            if self.Header then EnsureAccentDivider(self.Header) end
-            if EQT.QueueResize then EQT.QueueResize() end
-            -- Suppress POI buttons that Blizzard assigned after AddBlock
-            -- (e.g. during LayoutBlock or expand/collapse). SuppressPOI is
-            -- a cheap flag check for already-hooked buttons.
-            if self.usedBlocks then
-                for _, byTemplate in pairs(self.usedBlocks) do
-                    if type(byTemplate) == "table" then
-                        for _, block in pairs(byTemplate) do
-                            if type(block) == "table" then SuppressPOI(block) end
+        hooksecurefunc(tracker, "Update", function()
+            if ShouldSkipSkin() or _updateDirty then return end
+            _updateDirty = true
+            C_Timer.After(0, function()
+                _updateDirty = false
+                if ShouldSkipSkin() then return end
+            
+                if tracker.Header then EnsureAccentDivider(tracker.Header) end
+                if EQT.QueueResize then EQT.QueueResize() end
+                if tracker.usedBlocks then
+                    for _, byTemplate in pairs(tracker.usedBlocks) do
+                        if type(byTemplate) == "table" then
+                            for _, block in pairs(byTemplate) do
+                                if type(block) == "table" then SuppressPOI(block) end
+                            end
                         end
                     end
                 end
-            end
+            end)
         end)
     end
 
-    -- OnSizeChanged fires when frames settle into their final positions
-    -- after Blizzard's layout pass. Belt-and-suspenders alongside the
-    -- Update hook so we catch cases where Update fires mid-transition.
+    -- OnSizeChanged: just queue resize (already deferred via QueueResize).
     if tracker.ContentsFrame and tracker.ContentsFrame.HookScript then
         tracker.ContentsFrame:HookScript("OnSizeChanged", function()
             if ShouldSkipSkin() then return end
@@ -1083,22 +1076,10 @@ function EQT.InitSkin()
     EQT._eventFrames[idx] = evt
     EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED"}
 
-    -- Top-level ObjectiveTrackerFrame:Update fires whenever any section
-    -- changes (added, removed, resized). Route through QueueResize so
-    -- bursts of updates coalesce into a single deferred resize.
-    local otf = _G.ObjectiveTrackerFrame
-    if otf and otf.Update then
-        hooksecurefunc(otf, "Update", function()
-            if ShouldSkipSkin() then return end
-            if EQT.QueueResize then EQT.QueueResize() end
-        end)
-    end
-    if _G.ObjectiveTracker_Update then
-        hooksecurefunc("ObjectiveTracker_Update", function()
-            if ShouldSkipSkin() then return end
-            if EQT.QueueResize then EQT.QueueResize() end
-        end)
-    end
+    -- OTF.Update / ObjectiveTracker_Update hooks REMOVED (session 68).
+    -- They only called QueueResize, which is already triggered by
+    -- the deferred tracker.Update dirty-flag and event handlers above.
+    -- Each hooksecurefunc charged Blizzard's full OTF:Update() to us.
 
     EQT.RestyleAll = function()
         -- Clear skin stamps so the full strip+restyle runs again
@@ -1125,3 +1106,4 @@ function EQT.InitSkin()
         end })
     end
 end
+

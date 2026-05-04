@@ -438,13 +438,22 @@ qolFrame:SetScript("OnEvent", function(self)
                         and IsInGuild()
                         and CanGuildBankRepair()
                         and cost <= GetGuildBankWithdrawMoney()
+
+                    -- Check if we can actually afford the repair
+                    if not useGuild and GetMoney() < cost then
+                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060Not enough gold to repair.|r")
+                        return
+                    end
+
                     RepairAllItems(useGuild)
 
                     if useGuild then
                         C_Timer.After(0.5, function()
                             local remainCost, stillNeed = GetRepairAllCost()
                             if stillNeed and remainCost > 0 then
-                                RepairAllItems(false)
+                                if GetMoney() >= remainCost then
+                                    RepairAllItems(false)
+                                end
                             end
                         end)
                     end

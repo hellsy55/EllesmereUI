@@ -841,7 +841,7 @@ local function StartPandemicGlow(slot, slotSize)
     if not pg then
         local wrapper = CreateFrame("Frame", nil, slot)
         wrapper:SetAllPoints()
-        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         flipTex:SetPoint("CENTER")
         local animGroup = flipTex:CreateAnimationGroup()
@@ -973,7 +973,7 @@ local function StartDispelGlow(slot, slotSize, typeColor)
     if not dg then
         local wrapper = CreateFrame("Frame", nil, slot)
         wrapper:SetAllPoints()
-        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         flipTex:SetPoint("CENTER")
         local animGroup = flipTex:CreateAnimationGroup()
@@ -3147,8 +3147,11 @@ local function HideBlizzardFrame(nameplate, unit)
             if not ufUnit then return end
             local plate = ns.plates[ufUnit]
             if plate and plate.unit then
-                -- PERF: use stashed updateInfo for relevance filtering
-                -- instead of forcing a full rebuild every time.
+                -- Skip if UNIT_AURA already handled this frame's update
+                if plate._auraHandledThisFrame then
+                    plate._auraHandledThisFrame = nil
+                    return
+                end
                 local pending = plate._pendingAuraUpdate
                 plate._pendingAuraUpdate = nil
                 plate:UpdateAuras(pending)
@@ -5055,11 +5058,12 @@ function NameplateFrame:UNIT_AURA(_, updateInfo)
                 return
             end
         end
-        -- Has adds/removes/unknown updates: defer full rebuild to RefreshAuras hook.
-        -- Stash updateInfo so the hook can use relevance filtering instead of
-        -- always doing a full rebuild.
-        self._pendingAuraUpdate = updateInfo
-        return
+        -- Adds/removes: run UpdateAuras directly instead of deferring to
+        -- RefreshAuras hook. The deferral caused debuffs to not show/hide
+        -- until the next aura event when RefreshAuras didn't fire in time.
+        -- Flag so RefreshAuras hook skips the redundant rebuild.
+        self._pendingAuraUpdate = nil
+        self._auraHandledThisFrame = true
     end
     self:UpdateAuras(updateInfo)
 end
@@ -5692,6 +5696,9 @@ function npAddon:OnInitialize()
     end
 end
 function npAddon:OnEnable()
+    -- Re-read profile: PreSeedSpecProfile may have re-pointed db.profile
+    -- to a different table between OnInitialize and OnEnable.
+    p = ENP.db.profile
     SetupAuraCVars()
     ApplyClassPowerSetting()
     -- Apply spec-assigned preset on login (before UI is opened)

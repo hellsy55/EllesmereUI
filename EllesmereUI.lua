@@ -7201,7 +7201,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.4.7"
+EllesmereUI.VERSION = "7.4.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7530,12 +7530,17 @@ end)
 SLASH_EUIOPTIONS1 = "/eui"
 SLASH_EUIOPTIONS2 = "/ellesmere"
 SLASH_EUIOPTIONS3 = "/ellesmereui"
+-- Defer slash command actions by one frame to avoid tainting
+-- Blizzard's ParseText -> ClearChat -> UpdateHeader chain when
+-- typed in a BN_WHISPER edit box (secret tellTarget value).
 SlashCmdList.EUIOPTIONS = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:Toggle()
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:Toggle()
+    end)
 end
 
 -- Debug: /euimem toggles per-second memory delta readout
@@ -7544,7 +7549,7 @@ SlashCmdList.EUIMEM = function()
     if EllesmereUI._memTicker then
         EllesmereUI._memTicker:Cancel()
         EllesmereUI._memTicker = nil
-        print("|cff00ff00[EUI Memory Tracker]|r Stopped.")
+        EllesmereUI.Print("|cff00ff00[EUI Memory Tracker]|r Stopped.")
         return
     end
     local addons = {}
@@ -7559,7 +7564,7 @@ SlashCmdList.EUIMEM = function()
     for _, name in ipairs(addons) do
         lastMem[name] = GetAddOnMemoryUsage(name)
     end
-    print("|cff00ff00[EUI Memory Tracker]|r Tracking " .. #addons .. " addons. /euimem to stop.")
+    EllesmereUI.Print("|cff00ff00[EUI Memory Tracker]|r Tracking " .. #addons .. " addons. /euimem to stop.")
     local MEM_INTERVAL = 10
     local sampleCount = 0
     local accumMem = {}
@@ -7599,39 +7604,45 @@ SlashCmdList.EUIMEM = function()
         end
         sampleCount = 0
         local totalColor = math.abs(totalAvg) > 40 and "ffff6060" or math.abs(totalAvg) > 25 and "ffffff60" or "ff60ff60"
-        print(string.format("|c%s[EUI Memory Tracker]|r %+.1f kb/s avg", totalColor, totalAvg))
-        for _, line in ipairs(lines) do print(line) end
+        EllesmereUI.Print(string.format("|c%s[EUI Memory Tracker]|r %+.1f kb/s avg", totalColor, totalAvg))
+        for _, line in ipairs(lines) do EllesmereUI.Print(line) end
     end)
 end
 
 -- Quick-access: /ee opens global settings
 SLASH_EUIQUICK1 = "/ee"
 SlashCmdList.EUIQUICK = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:Toggle()
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:Toggle()
+    end)
 end
 
 -- Quick-access: /epm opens directly to Party Mode settings
 SLASH_EUIPARTYMODE1 = "/epm"
 SlashCmdList.EUIPARTYMODE = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:ShowModule("EllesmereUIPartyMode")
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:ShowModule("EllesmereUIPartyMode")
+    end)
 end
 
 -- Toggle party mode on/off
 SLASH_PARTYMODETOGGLE1 = "/partymode"
 SlashCmdList.PARTYMODETOGGLE = function()
-    if EllesmereUI_TogglePartyMode then
-        EllesmereUI_TogglePartyMode()
-    else
-        print("|cffff6060[EllesmereUI]|r Party Mode addon is not loaded.")
-    end
+    C_Timer.After(0, function()
+        if EllesmereUI_TogglePartyMode then
+            EllesmereUI_TogglePartyMode()
+        else
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Party Mode addon is not loaded.")
+        end
+    end)
 end
 
 -- Debug: reset preview hint dismissed flag
@@ -7640,48 +7651,54 @@ SLASH_EUIRESETHINT1 = "/euiresethint"
 -- Quick-access: /unlock opens Unlock Mode directly
 SLASH_EUIUNLOCK1 = "/unlock"
 SlashCmdList.EUIUNLOCK = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    if EllesmereUI.NeedsBetaReset() then EllesmereUI:ShowWelcomePopup(); return end
-    EllesmereUI:EnsureLoaded()
-    if EllesmereUI._openUnlockMode then
-        EllesmereUI._openUnlockMode()
-    else
-        print("|cffff6060[EllesmereUI]|r Unlock Mode is not available.")
-    end
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        if EllesmereUI.NeedsBetaReset() then EllesmereUI:ShowWelcomePopup(); return end
+        EllesmereUI:EnsureLoaded()
+        if EllesmereUI._openUnlockMode then
+            EllesmereUI._openUnlockMode()
+        else
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Unlock Mode is not available.")
+        end
+    end)
 end
 
 -- Test: /euipopup shows the welcome popup without wiping anything
 SLASH_EUIPOPUP1 = "/euipopup"
 SlashCmdList.EUIPOPUP = function()
-    EllesmereUI:ShowWelcomePopup()
+    C_Timer.After(0, function() EllesmereUI:ShowWelcomePopup() end)
 end
 
 SlashCmdList.EUIRESETHINT = function()
-    if EllesmereUIDB then
-        EllesmereUIDB.previewHintDismissed = nil
-        EllesmereUIDB.unlockTipSeen = nil
-        EllesmereUIDB.sidebarUnlockTipSeen = nil
-    end
-    print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
+    C_Timer.After(0, function()
+        if EllesmereUIDB then
+            EllesmereUIDB.previewHintDismissed = nil
+            EllesmereUIDB.unlockTipSeen = nil
+            EllesmereUIDB.sidebarUnlockTipSeen = nil
+        end
+        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
+    end)
 end
 
 -- Debug: wipe saved UI scale so next reload re-snapshots from Blizzard default
 SLASH_EUIRESETSCALE1 = "/euiresetscale"
 SlashCmdList.EUIRESETSCALE = function()
-    if EllesmereUIDB then
-        EllesmereUIDB.ppUIScale = nil
-        EllesmereUIDB.ppUIScaleAuto = nil
-    end
-    print("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale.")
+    C_Timer.After(0, function()
+        if EllesmereUIDB then
+            EllesmereUIDB.ppUIScale = nil
+            EllesmereUIDB.ppUIScaleAuto = nil
+        end
+        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale.")
+    end)
 end
 
 -- Open the panel with a specific addon's tab selected
 function EllesmereUI:ShowModule(folderName)
     if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+        EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
@@ -7886,7 +7903,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetSize(200, 35)
         btn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
                 return
             end
             HideUIPanel(GameMenuFrame)
@@ -7898,7 +7915,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         unlockBtn:SetSize(200, 35)
         unlockBtn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot toggle Unlock Mode during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot toggle Unlock Mode during combat.")
                 return
             end
             HideUIPanel(GameMenuFrame)
@@ -8123,7 +8140,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetText("Open EllesmereUI")
         btn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
                 return
             end
             -- Close Blizzard settings first, then open ours on next frame to avoid taint
