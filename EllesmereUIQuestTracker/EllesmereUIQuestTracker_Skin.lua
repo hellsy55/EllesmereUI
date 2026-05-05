@@ -758,7 +758,6 @@ local function SuppressPOI(block)
     pb:SetParent(_poiHiddenParent)
     pb:EnableMouse(false)
     hooksecurefunc(pb, "SetParent", function(self, parent)
-        if ShouldSkipSkin() then return end
         if parent ~= _poiHiddenParent then
             self:SetParent(_poiHiddenParent)
         end
@@ -967,13 +966,11 @@ local function HookTracker(tracker)
         end)
     end
 
-    -- OnSizeChanged: just queue resize (already deferred via QueueResize).
-    if tracker.ContentsFrame and tracker.ContentsFrame.HookScript then
-        tracker.ContentsFrame:HookScript("OnSizeChanged", function()
-            if ShouldSkipSkin() then return end
-            if EQT.QueueResize then EQT.QueueResize() end
-        end)
-    end
+    -- ContentsFrame:HookScript("OnSizeChanged") REMOVED: HookScript injects
+    -- addon code into Blizzard's execution context, tainting ANY secure call
+    -- chain that triggers a layout resize (e.g. dropdown menus at M+ end).
+    -- The deferred tracker.Update hook + event handlers already call
+    -- QueueResize, so this was purely redundant belt-and-suspenders.
 
     -- Skin blocks that already exist before our hooks were installed.
     -- Run immediately for blocks already populated, then once more

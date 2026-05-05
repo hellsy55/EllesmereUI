@@ -2528,12 +2528,20 @@ local function SkinFriendsFrame()
     end -- if false
 
     ---------------------------------------------------------------------------
-    --  Deferred button skinning (NO hooksecurefunc on global Blizzard funcs)
-    --  hooksecurefunc("FriendsFrame_UpdateFriendButton") taints BNet whisper
-    --  processing in Midnight. Instead we skin visible buttons via C_Timer
-    --  after our own event frame detects changes -- fully outside Blizzard's
-    --  secure execution context.
+    --  Button skinning: hook Blizzard's per-button update so we re-apply
+    --  class colors immediately after Blizzard resets them.  Originally
+    --  avoided (blamed for BNet whisper taint), but the real taint source
+    --  was frame property writes -- fixed in the FFD refactor (session 58).
+    --  This hook only reads button data and calls SetTextColor (safe).
     ---------------------------------------------------------------------------
+    if FriendsFrame_UpdateFriendButton then
+        hooksecurefunc("FriendsFrame_UpdateFriendButton", function(button)
+            if not button or not button.buttonType then return end
+            if button.buttonType == FRIENDS_BUTTON_TYPE_DIVIDER then return end
+            local fd = GetFFD(button)
+            fd.stampType = nil
+        end)
+    end
 
     -- Scroll position poller: detects scroll changes (drag, keyboard, etc.)
     -- without touching Blizzard's ScrollBar/ScrollBox at all. Just reads

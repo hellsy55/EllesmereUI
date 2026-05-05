@@ -3147,13 +3147,11 @@ local function HideBlizzardFrame(nameplate, unit)
             if not ufUnit then return end
             local plate = ns.plates[ufUnit]
             if plate and plate.unit then
-                -- Skip if UNIT_AURA already handled this frame's update
-                if plate._auraHandledThisFrame then
-                    plate._auraHandledThisFrame = nil
-                    return
-                end
+                -- RefreshAuras fired: debuffList is now current. Clear the
+                -- pending stash and fallback (we handle it here).
                 local pending = plate._pendingAuraUpdate
                 plate._pendingAuraUpdate = nil
+                plate._auraFallbackPending = nil
                 plate:UpdateAuras(pending)
             end
         end)
@@ -3711,6 +3709,8 @@ function NameplateFrame:ClearUnit()
     self.unit = nil
     self.nameplate = nil
     self._shownAuras = nil
+    self._pendingAuraUpdate = nil
+    self._auraFallbackPending = nil
     self._absorbHidden = nil
     self.cast:Hide()
     self.castShieldFrame:Hide()
@@ -5058,12 +5058,27 @@ function NameplateFrame:UNIT_AURA(_, updateInfo)
                 return
             end
         end
-        -- Adds/removes: run UpdateAuras directly instead of deferring to
-        -- RefreshAuras hook. The deferral caused debuffs to not show/hide
-        -- until the next aura event when RefreshAuras didn't fire in time.
-        -- Flag so RefreshAuras hook skips the redundant rebuild.
-        self._pendingAuraUpdate = nil
-        self._auraHandledThisFrame = true
+        -- Adds/removes: defer to RefreshAuras hook where debuffList is
+        -- guaranteed current. Reading debuffList here races with Blizzard's
+        -- processing and causes auras to not display on other plates.
+        self._pendingAuraUpdate = updateInfo
+        -- Fallback: if RefreshAuras doesn't fire (e.g. Blizzard's UnitFrame
+        -- suppressed), process next frame.
+        if not self._auraFallbackPending then
+            self._auraFallbackPending = true
+            if not self._auraFallbackCB then
+                self._auraFallbackCB = function()
+                    self._auraFallbackPending = nil
+                    if self._pendingAuraUpdate and self.unit then
+                        local pending = self._pendingAuraUpdate
+                        self._pendingAuraUpdate = nil
+                        self:UpdateAuras(pending)
+                    end
+                end
+            end
+            C_Timer.After(0, self._auraFallbackCB)
+        end
+        return
     end
     self:UpdateAuras(updateInfo)
 end
