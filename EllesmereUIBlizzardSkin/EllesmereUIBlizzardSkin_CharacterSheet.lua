@@ -3979,7 +3979,7 @@ local function SkinCharacterSheet()
     socketWatcher:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     socketWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
     socketWatcher:SetScript("OnEvent", function(_, event, slotID)
-        if not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet) then return end
+        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
         -- Clear stale gem art for the slot that just changed BEFORE the
         -- debounced refresh runs. Without this, the old item's gem icons
         -- can remain visible until /reload if the refresh path somehow
@@ -4202,7 +4202,7 @@ local function SkinCharacterSheet()
     -- redundant work; the events guarantee we catch upgrade / enchant /
     -- socket changes without per-frame polling.
     local function RefreshAllSlotLabels()
-        if not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet) then return end
+        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
         if not (frame and frame:IsShown()) then return end
         for _, slotName in ipairs(itemSlots) do
             local itemLink = GetInventoryItemLink("player", _G[slotName]:GetID())
@@ -4311,7 +4311,7 @@ end
 
 -- Main function to apply themed character sheet
 local function ApplyThemedCharacterSheet()
-    if not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet) then
+    if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then
         return
     end
 
@@ -4333,7 +4333,7 @@ if EllesmereUI then
             -- Lightweight pre-skin (chrome hides, bg, border) runs early
             -- while CharacterFrame is still hidden. Running these mid-OnShow
             -- prevents Rep/Currency ScrollBox from completing its data render.
-            if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet then
+            if not EllesmereUIDB or EllesmereUIDB.themedCharacterSheet ~= false then
                 PreSkinCharacterSheet()
             end
 

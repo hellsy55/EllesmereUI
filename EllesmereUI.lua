@@ -3799,17 +3799,10 @@ local function CreateMainFrame()
         mainFrame:SetScale(baseScale2 * userScale2)
         -- Re-sync PanelPP mult for the (possibly new) scale
         if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
-        -- Re-snap all borders after the scale change. Effective scale
-        -- propagates through the frame hierarchy after layout, so wait
-        -- 2 frames before re-snapping to ensure accurate values.
-        local snapTicks = 0
-        mainFrame:SetScript("OnUpdate", function(self)
-            snapTicks = snapTicks + 1
-            if snapTicks >= 2 then
-                self:SetScript("OnUpdate", nil)
-                PP.ResnapAllBorders()
-            end
-        end)
+        -- Panel borders are resnapped by the tab-switch ResnapBordersUnder
+        -- call (scoped to the active page, ~2ms). The global ResnapAllBorders
+        -- was iterating every border in the addon (~74ms) which is unnecessary
+        -- since non-panel borders have their own scale and resnap triggers.
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()

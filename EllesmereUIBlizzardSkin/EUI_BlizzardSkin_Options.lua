@@ -209,7 +209,7 @@ initFrame:SetScript("OnEvent", function(self)
 
 
         local function themedOff()
-            return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            return EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false
         end
 
         local function AttachDisabledOverlay(target)
@@ -320,7 +320,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Enable Character Sheet",
               tooltip="Applies EllesmereUI theme styling to the character sheet window.",
               getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.themedCharacterSheet or false
+                  return not EllesmereUIDB or EllesmereUIDB.themedCharacterSheet ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end

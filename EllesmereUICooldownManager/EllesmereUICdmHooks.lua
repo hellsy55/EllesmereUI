@@ -2221,21 +2221,21 @@ local function CollectAndReanchor()
         -- matching can propagate against settled bar widths. Must happen
         -- BEFORE ApplyAllWidthHeightMatches so it isn't gated off.
         if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
-        if EllesmereUI.ApplyAllWidthHeightMatches then
-            EllesmereUI.ApplyAllWidthHeightMatches()
-        end
-        if EllesmereUI._applySavedPositions then
-            EllesmereUI._applySavedPositions()
-        end
-        -- Forced anchor reapply: simulates a user un-anchor + re-anchor on
-        -- every anchored element so any 1px-off cached answer (idempotent
-        -- guard skipping a stale converged state) gets corrected against
-        -- now-settled target bounds. Same trigger moment as the width-match
-        -- retrigger above; idempotent for correct answers, only "moves"
-        -- bars that were actually wrong. See EUI_UnlockMode.lua for why.
-        if EllesmereUI.ReapplyAllUnlockAnchorsForced then
-            EllesmereUI.ReapplyAllUnlockAnchorsForced()
-        end
+        -- Defer position/width corrections to next frame. These are purely
+        -- visual positioning operations (width match, saved positions,
+        -- anchor reapply) that cost ~25ms synchronously but are
+        -- imperceptible if they settle 1 frame late.
+        C_Timer.After(0, function()
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
+            end
+            if EllesmereUI._applySavedPositions then
+                EllesmereUI._applySavedPositions()
+            end
+            if EllesmereUI.ReapplyAllUnlockAnchorsForced then
+                EllesmereUI.ReapplyAllUnlockAnchorsForced()
+            end
+        end)
     else
         -- Routine reanchor (icon churn, mob death, etc.) -- still clear
         -- the gate so subsequent layout calls don't get stuck.
