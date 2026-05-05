@@ -615,6 +615,17 @@ function EllesmereUI.RefreshAllAddons()
     if _G._EMIN_RefreshFlyout then _G._EMIN_RefreshFlyout() end
     -- Global class/power colors (updates oUF, nameplates, raid frames)
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
+    -- Re-register unlock elements for all modules whose bar sets can
+    -- differ between profiles. Without this, _applySavedPositions uses
+    -- stale registrations from the outgoing profile and anchors fail
+    -- for elements that only exist in the incoming profile (they land
+    -- at CENTER/CENTER = screen center).
+    if _G._ECME_RegisterUnlock then _G._ECME_RegisterUnlock() end
+    if _G._ECME_RegisterTBBUnlock then _G._ECME_RegisterTBBUnlock() end
+    if _G._ERB_RegisterUnlock then _G._ERB_RegisterUnlock() end
+    if _G._EABR_RegisterUnlock then _G._EABR_RegisterUnlock() end
+    if _G._ECL_RegisterUnlock then _G._ECL_RegisterUnlock() end
+    if _G._EUI_BattleRes_RegisterUnlock then _G._EUI_BattleRes_RegisterUnlock() end
     -- After all addons have rebuilt and positioned their frames from
     -- db.profile.positions, re-apply centralized grow-direction positioning
     -- (handles lazy migration of imported TOPLEFT positions to CENTER format)

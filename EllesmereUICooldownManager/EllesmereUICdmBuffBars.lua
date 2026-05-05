@@ -1675,4 +1675,5 @@ function ns.RegisterTBBUnlockElements()
         EllesmereUI:RegisterUnlockElements(elements)
     end
 end
+_G._ECME_RegisterTBBUnlock = ns.RegisterTBBUnlockElements
 
