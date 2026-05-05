@@ -1875,18 +1875,21 @@ local function SkinEditBox(cf)
     eb:SetFont(GetFont(), ebSize, "")
     eb:SetTextInsets(8, 8, 0, 0)
 
-    -- Arrow key history
-    -- Hook UpdateHeader to re-apply custom font on the header ("Say:", etc.)
-    if eb.UpdateHeader then
-        hooksecurefunc(eb, "UpdateHeader", function(self)
-            if self.header then
-                self.header:SetFont(GetFont(), GetFrameFontSize(self:GetParent():GetID()), "")
-            end
-            if self.headerSuffix then
-                self.headerSuffix:SetFont(GetFont(), GetFrameFontSize(self:GetParent():GetID()), "")
-            end
-        end)
+    -- Apply custom font to the header ("Say:", "Party:", etc.) and suffix.
+    -- Called once at skin time and again on focus-gained (covers chat type
+    -- switches). Never from inside UpdateHeader -- calling SetFont in that
+    -- secure chain taints the execution context and blocks SendChatMessage.
+    local function ApplyEditBoxHeaderFont(editBox)
+        local sz = GetFrameFontSize(editBox:GetParent():GetID())
+        if editBox.header then
+            editBox.header:SetFont(GetFont(), sz, "")
+        end
+        if editBox.headerSuffix then
+            editBox.headerSuffix:SetFont(GetFont(), sz, "")
+        end
     end
+    ApplyEditBoxHeaderFont(eb)
+    eb:HookScript("OnEditFocusGained", function(self) ApplyEditBoxHeaderFont(self) end)
 
     eb:SetAltArrowKeyMode(false)
     if not CFD(eb).history then
@@ -1897,7 +1900,7 @@ local function SkinEditBox(cf)
                 local h = CFD(self).history
                 local last = h[#h]
                 if issecretvalue and last and issecretvalue(last) then
-                    h[#h] = nil -- remove stale secret entry
+                    h[#h] = nil
                 end
                 if h[#h] ~= text then
                     h[#h + 1] = text
@@ -1906,6 +1909,14 @@ local function SkinEditBox(cf)
             end)
             eb:HookScript("OnKeyDown", function(self, key)
                 if key ~= "UP" and key ~= "DOWN" then return end
+                -- In M+ keys and boss encounters, Blizzard restricts addon
+                -- chat operations. Calling SetText here taints the edit box
+                -- execution context, blocking SendChatMessage on next Enter.
+                -- Fall back to Blizzard's built-in history in restricted contexts.
+                local restricted = GetCVarBool("addonChatRestrictionsForced")
+                    or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+                        and C_ChallengeMode.IsChallengeModeActive())
+                if restricted then return end
                 local h = CFD(self).history
                 if #h == 0 then return end
                 if key == "UP" then
@@ -2945,7 +2956,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         idleEventFrame:SetScript("OnEvent", OnActiveMessage)
 
-        -- Reset idle when user types in chat (focus or any keystroke)
         for i = 1, 20 do
             local eb = _G["ChatFrame" .. i .. "EditBox"]
             if eb then

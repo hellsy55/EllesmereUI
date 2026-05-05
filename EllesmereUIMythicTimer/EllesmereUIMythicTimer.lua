@@ -1028,10 +1028,20 @@ local function RenderStandalone()
     local timerText
     local timerDetailText
     if run.completed then
-        -- Completed run: just freeze the clock at the final elapsed
-        -- seconds. No milliseconds -- the display format stays consistent
-        -- with the running timer and there's no "99:99.999" glitch.
-        timerText = FormatTime(run.elapsed or completedElapsed or 0)
+        -- Completed run: freeze the clock at the final elapsed seconds
+        -- but preserve the user's chosen display mode so "/33:00" doesn't
+        -- vanish on completion.
+        local mode = p.timerDisplayMode or "REMAINING_TOTAL"
+        local elaStr = FormatTime(run.elapsed or completedElapsed or 0)
+        local maxStr = FormatTime(maxTime)
+        if mode == "REMAINING_TOTAL" then
+            timerText = elaStr .. " / " .. maxStr
+        elseif mode == "ELAPSED_DETAIL" then
+            timerText = elaStr
+            timerDetailText = " (" .. elaStr .. " / " .. maxStr .. ")"
+        else
+            timerText = elaStr
+        end
     else
         local mode = p.timerDisplayMode or "REMAINING_TOTAL"
         local elaStr = FormatTime(elapsed)
