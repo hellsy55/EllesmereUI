@@ -1711,6 +1711,7 @@ initFrame:SetScript("OnEvent", function(self)
                               if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
                                   fdb.moduleFonts[capturedIdx].font = v
                               end
+                              FontReload()
                           end },
                         { type = "dropdown", text = entry.display .. " Outline",
                           values = outlineValues, order = outlineOrder,
@@ -1726,6 +1727,7 @@ initFrame:SetScript("OnEvent", function(self)
                               if fdb.moduleFonts and fdb.moduleFonts[capturedIdx] then
                                   fdb.moduleFonts[capturedIdx].outline = v
                               end
+                              FontReload()
                           end })
 
                     -- Add delete X button on the far left of the row
@@ -3228,29 +3230,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.unlockAnchors = nil
                 EllesmereUIDB.unlockWidthMatch = nil
                 EllesmereUIDB.unlockHeightMatch = nil
-                -- QoL Features defaults
-                EllesmereUIDB.hideBlizzardPartyFrame = false
-                EllesmereUIDB.quickLoot = false
-                EllesmereUIDB.quickLootShiftSkip = false
-                EllesmereUIDB.skipCinematics = false
-                EllesmereUIDB.skipCinematicsAuto = false
-                EllesmereUIDB.autoFillDelete = false
-                EllesmereUIDB.autoInsertKeystone = false
-                EllesmereUIDB.instanceResetAnnounce = false
-                EllesmereUIDB.instanceResetAnnounceMsg = ""
-                EllesmereUIDB.quickSignup = false
-                EllesmereUIDB.persistSignupNote = false
-                EllesmereUIDB.ahCurrentExpansion = false
-                EllesmereUIDB.healthMacroEnabled = false
-                EllesmereUIDB.healthMacroPrio1 = 1
-                EllesmereUIDB.healthMacroPrio2 = 2
-                EllesmereUIDB.healthMacroPrio3 = 3
-                EllesmereUIDB.foodMacroEnabled = false
-                EllesmereUIDB.hideScreenshotStatus = false
-                EllesmereUIDB.trainAllButton = false
-                EllesmereUIDB.autoUnwrapCollections = false
-                EllesmereUIDB.autoOpenContainers = false
-                EllesmereUIDB.autoRepairGuild = false
+                -- QoL Features are NOT reset here; they have their own module reset
             end
             if EllesmereUI._applyRightClickTarget then
                 EllesmereUI._applyRightClickTarget()

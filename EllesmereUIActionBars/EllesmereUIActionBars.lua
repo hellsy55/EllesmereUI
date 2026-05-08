@@ -7837,6 +7837,11 @@ function EAB:FinishSetup()
             end
             UpdateKeybinds()
         end)
+        -- Re-evaluate visibility options (visOnlyInstances, visHideHousing,
+        -- etc.) after every loading screen. ZONE_CHANGED_NEW_AREA alone is
+        -- insufficient: it can fire before GetInstanceInfo() updates, and
+        -- doesn't fire at all on /reload inside an instance.
+        self:UpdateHousingVisibility()
     end)
 
     local function QueueAlwaysShowButtonsRefresh()

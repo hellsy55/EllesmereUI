@@ -674,9 +674,13 @@ initFrame:SetScript("OnEvent", function(self)
         pages    = { PAGE_DISPLAY },
         buildPage = BuildPage,
         onReset  = function()
-            if EllesmereUIMythicTimerDB then
-                EllesmereUIMythicTimerDB.profiles = nil
-                EllesmereUIMythicTimerDB.profileKeys = nil
+            -- Lite DB stores data at EllesmereUIDB.profiles[X].addons.EllesmereUIMythicTimer
+            if EllesmereUIDB and EllesmereUIDB.profiles then
+                local profile = EllesmereUIDB.activeProfile or "Default"
+                local p = EllesmereUIDB.profiles[profile]
+                if p and p.addons and p.addons.EllesmereUIMythicTimer then
+                    wipe(p.addons.EllesmereUIMythicTimer)
+                end
             end
         end,
     })

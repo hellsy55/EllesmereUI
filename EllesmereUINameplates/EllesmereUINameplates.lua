@@ -285,6 +285,8 @@ do
         ["atrocity"]      = TB .. "atrocity.tga",
         ["divide"]        = TB .. "divide.tga",
         ["glass"]         = TB .. "glass.tga",
+        ["fade-right"]    = TB .. "fade-right.tga",
+        ["fade"]          = TB .. "fade.tga",
         ["gradient-lr"]   = TB .. "gradient-lr.tga",
         ["gradient-rl"]   = TB .. "gradient-rl.tga",
         ["gradient-bt"]   = TB .. "gradient-bt.tga",
@@ -294,6 +296,7 @@ do
     }
     ns.healthBarTextureOrder = {
         "none", "melli", "atrocity",
+        "fade", "fade-right",
         "beautiful", "plating",
         "divide", "glass",
         "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -307,6 +310,8 @@ do
         ["atrocity"]    = "Atrocity",
         ["divide"]      = "Divide",
         ["glass"]       = "Glass",
+        ["fade-right"]  = "Fade Right",
+        ["fade"]        = "Fade",
         ["gradient-lr"] = "Gradient Right",
         ["gradient-rl"] = "Gradient Left",
         ["gradient-bt"] = "Gradient Up",

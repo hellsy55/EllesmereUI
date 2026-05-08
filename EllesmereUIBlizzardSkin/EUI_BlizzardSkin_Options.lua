@@ -645,6 +645,7 @@ initFrame:SetScript("OnEvent", function(self)
     local EDR_BAR_TEXTURES = ns.EDR_BAR_TEXTURES
     local EDR_BAR_TEXTURE_ORDER = {
         "none", "melli", "atrocity",
+        "fade", "fade-right",
         "beautiful", "plating",
         "divide", "glass",
         "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -658,6 +659,8 @@ initFrame:SetScript("OnEvent", function(self)
         ["atrocity"]    = "Atrocity",
         ["divide"]      = "Divide",
         ["glass"]       = "Glass",
+        ["fade-right"]  = "Fade Right",
+        ["fade"]        = "Fade",
         ["gradient-lr"] = "Gradient Right",
         ["gradient-rl"] = "Gradient Left",
         ["gradient-bt"] = "Gradient Up",
@@ -883,6 +886,24 @@ initFrame:SetScript("OnEvent", function(self)
             if EllesmereUIDragonRidingDB then
                 EllesmereUIDragonRidingDB.profiles = nil
                 EllesmereUIDragonRidingDB.profileKeys = nil
+            end
+            if EllesmereUIDB then
+                EllesmereUIDB.customTooltips = nil
+                EllesmereUIDB.accentReskinElements = nil
+                EllesmereUIDB.tooltipPlayerTitles = nil
+                EllesmereUIDB.tooltipFontScale = nil
+                EllesmereUIDB.tooltipMythicScore = nil
+                EllesmereUIDB.uberTooltips = nil
+                EllesmereUIDB.uberTooltipsManual = nil
+                EllesmereUIDB.reskinQueuePopup = nil
+                EllesmereUIDB.reskinGameMenu = nil
+                EllesmereUIDB.showQueueTimer = nil
+                EllesmereUIDB.showMythicRating = nil
+                EllesmereUIDB.statCategoryColors = nil
+                EllesmereUIDB.statSectionsOrder = nil
+                EllesmereUIDB.charSheetCollapsedSections = nil
+                EllesmereUIDB.characterFramePos = nil
+                EllesmereUIDB.friendsFramePos = nil
             end
         end,
     })

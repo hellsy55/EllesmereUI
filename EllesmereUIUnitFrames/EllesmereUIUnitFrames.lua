@@ -759,6 +759,8 @@ local healthBarTextures = {
     ["atrocity"]      = TEXTURE_BASE .. "atrocity.tga",
     ["divide"]        = TEXTURE_BASE .. "divide.tga",
     ["glass"]         = TEXTURE_BASE .. "glass.tga",
+    ["fade-right"]    = TEXTURE_BASE .. "fade-right.tga",
+    ["fade"]          = TEXTURE_BASE .. "fade.tga",
     ["gradient-lr"]   = TEXTURE_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TEXTURE_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TEXTURE_BASE .. "gradient-bt.tga",
@@ -768,6 +770,7 @@ local healthBarTextures = {
 }
 local healthBarTextureOrder = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -781,6 +784,8 @@ local healthBarTextureNames = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",

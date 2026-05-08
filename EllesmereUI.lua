@@ -288,7 +288,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
     { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
     { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
@@ -2554,9 +2554,14 @@ function EllesmereUI.AppendSharedMediaTextures(names, order, castBarNames, textu
 
     -- Collect SM texture names not already present, sort alphabetically
     local sorted = {}
+    -- Filter out icon textures that some SM packs incorrectly register as statusbar
+    local SM_TEX_BLACKLIST = {
+        play_icon = true, stop_icon = true,
+        user_icon = true, users_icon = true,
+    }
     for name in pairs(smTextures) do
         local key = "sm:" .. name
-        if not textures[key] then
+        if not textures[key] and not SM_TEX_BLACKLIST[name] then
             sorted[#sorted + 1] = name
         end
     end
@@ -7194,7 +7199,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.5.4"
+EllesmereUI.VERSION = "7.5.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

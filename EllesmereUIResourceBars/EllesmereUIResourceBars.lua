@@ -2986,6 +2986,8 @@ local CAST_BAR_TEXTURES = {
     ["atrocity"]      = TEX_BASE .. "atrocity.tga",
     ["divide"]        = TEX_BASE .. "divide.tga",
     ["glass"]         = TEX_BASE .. "glass.tga",
+    ["fade-right"]    = TEX_BASE .. "fade-right.tga",
+    ["fade"]          = TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TEX_BASE .. "gradient-bt.tga",
@@ -2995,6 +2997,7 @@ local CAST_BAR_TEXTURES = {
 }
 local CAST_BAR_TEXTURE_ORDER = {
     "none", "blizzard", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -3009,6 +3012,8 @@ local CAST_BAR_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -3033,6 +3038,8 @@ local BAR_TEXTURES = {
     ["atrocity"]      = BAR_TEX_BASE .. "atrocity.tga",
     ["divide"]        = BAR_TEX_BASE .. "divide.tga",
     ["glass"]         = BAR_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = BAR_TEX_BASE .. "fade-right.tga",
+    ["fade"]          = BAR_TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = BAR_TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = BAR_TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = BAR_TEX_BASE .. "gradient-bt.tga",
@@ -3042,6 +3049,7 @@ local BAR_TEXTURES = {
 }
 local BAR_TEXTURE_ORDER = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -3055,6 +3063,8 @@ local BAR_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",

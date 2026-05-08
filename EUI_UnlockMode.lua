@@ -7827,6 +7827,8 @@ local function DoClose()
 
     -- Notify action bars to restore Blizzard-owned frame anchors
     if _G._EAB_UnlockModeClose then pcall(_G._EAB_UnlockModeClose) end
+    -- Notify damage meters
+    if _G._EDM_UnlockModeClose then pcall(_G._EDM_UnlockModeClose) end
 
     -- Recalculate action bar flyout directions after positions are finalized
     if _G._EAB_RecalcFlyouts then pcall(_G._EAB_RecalcFlyouts) end
@@ -8458,6 +8460,8 @@ function ns.OpenUnlockMode()
 
     -- Notify action bars to flip Blizzard-owned frame anchors for drag
     if _G._EAB_UnlockModeOpen then pcall(_G._EAB_UnlockModeOpen) end
+    -- Notify damage meters
+    if _G._EDM_UnlockModeOpen then pcall(_G._EDM_UnlockModeOpen) end
 
     -- Remove any stale anchor/match relationships before entering unlock mode.
     -- By this point all elements are registered, so anything not in the registry
