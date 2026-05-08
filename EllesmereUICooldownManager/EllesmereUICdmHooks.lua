@@ -68,6 +68,7 @@ end
 ns._MemSnap = MemSnap
 ns._MemDelta = MemDelta
 
+ns._spellOrderDirty = true  -- start dirty so first reanchor builds caches
 
 -- Per-frame decoration state (weak-keyed)
 local hookFrameData = setmetatable({}, { __mode = "k" })
@@ -463,22 +464,27 @@ local function DecorateFrame(frame, barData)
         fd.bg = bg
     end
 
+    -- Frame levels are relative to the icon's own level so that icons
+    -- with higher base levels (Blizzard increments +1 per icon) never
+    -- render their content above a neighbor's border or text.
+    local baseLvl = frame:GetFrameLevel()
+
     if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
-        go:SetFrameLevel(frame:GetFrameLevel() + 6)
         go:SetAlpha(0)
         go:EnableMouse(false)
         fd.glowOverlay = go
     end
+    fd.glowOverlay:SetFrameLevel(baseLvl + 16)
 
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
-        txo:SetFrameLevel(25)
         txo:EnableMouse(false)
         fd.textOverlay = txo
     end
+    fd.textOverlay:SetFrameLevel(baseLvl + 23)
 
     if not fd.keybindText then
         local kt = fd.textOverlay:CreateFontString(nil, "OVERLAY")
@@ -515,13 +521,13 @@ local function DecorateFrame(frame, barData)
     if not fd.borderFrame then
         local bf = CreateFrame("Frame", nil, frame)
         bf:SetAllPoints(frame)
-        bf:SetFrameLevel(frame:GetFrameLevel() + 5)
         fd.borderFrame = bf
         EllesmereUI.PP.CreateBorder(bf,
             barData.borderR or 0, barData.borderG or 0,
             barData.borderB or 0, barData.borderA or 1,
             barData.borderSize or 1, "OVERLAY", 7)
     end
+    fd.borderFrame:SetFrameLevel(baseLvl + 13)
 
     fd.procGlowActive = false
 
@@ -552,14 +558,16 @@ local function DecorateFrame(frame, barData)
                 local bk2 = fc2 and fc2.barKey
                 -- Per-bar "Suppress GCD": force alpha 0 when the displayed
                 -- cooldown is just a GCD. isOnGCD is a clean bool from
-                -- C_Spell.GetSpellCooldown.
+                -- C_Spell.GetSpellCooldown. Do NOT return early -- active
+                -- state detection below must still run so overlays and
+                -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
+                local _gcdSuppressed = false
                 if bd2 and bd2.suppressGCD and sid2 and C_Spell and C_Spell.GetSpellCooldown then
                     local cdInfo = C_Spell.GetSpellCooldown(sid2)
                     if cdInfo and cdInfo.isOnGCD then
                         cd:SetSwipeColor(0, 0, 0, 0)
-                        fd._isProcessingOverride = false
-                        return
+                        _gcdSuppressed = true
                     end
                 end
                 -- Check per-spell settings
@@ -567,6 +575,28 @@ local function DecorateFrame(frame, barData)
                 if sid2 and bk2 then
                     local sd2 = ns.GetBarSpellData(bk2)
                     ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
+                    -- Fallback: sid2 may be a base/override variant while
+                    -- settings are stored under the assigned spell ID.
+                    if not ss2 and sd2 and sd2.spellSettings and sd2.assignedSpells then
+                        local fc2 = _ecmeFC[frame]
+                        -- Try linkedSpellIDs
+                        if fc2 and fc2.linkedSpellIDs then
+                            for _, lid in ipairs(fc2.linkedSpellIDs) do
+                                if sd2.spellSettings[lid] then ss2 = sd2.spellSettings[lid]; break end
+                            end
+                        end
+                        -- Try override resolution
+                        if not ss2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            for _, asid in ipairs(sd2.assignedSpells) do
+                                if asid and asid > 0 and asid ~= sid2
+                                   and sd2.spellSettings[asid] then
+                                    if C_SpellBook.FindSpellOverrideByID(asid) == sid2 then
+                                        ss2 = sd2.spellSettings[asid]; break
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
                 -- Detect active state from swipe color
                 local swipeColor = frame.cooldownSwipeColor
@@ -582,7 +612,9 @@ local function DecorateFrame(frame, barData)
                     -- Hide Active State: force black swipe, track active flag.
                     -- CD model override is handled by the SetDesaturation hook
                     -- which fires on every Blizzard cooldown tick.
-                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    if not _gcdSuppressed then
+                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    end
                     if isActive then
                         fd._hideActiveOverriding = true
                         fd._wasActive = true
@@ -611,7 +643,9 @@ local function DecorateFrame(frame, barData)
                     fd._wasActive = true
                 else
                     -- Not active: black swipe.
-                    cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    if not _gcdSuppressed then
+                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    end
                     -- Transition: buff just ended, CD starting. Re-apply the
                     -- cooldown duration so the swipe shows immediately
                     -- (e.g. Invoke Niuzao). Only fires once per transition,
@@ -754,6 +788,8 @@ local function DecorateFrame(frame, barData)
                 local bk2 = fc2 and fc2.barKey
                 if not sid2 or not bk2 then return end
                 if bk2:sub(1, 7) == "__ghost" then return end
+                -- FocusKick icon alpha is owned by SetFocusKickAlpha only.
+                if bk2 == ns.FOCUSKICK_BAR_KEY then return end
                 local sd2 = ns.GetBarSpellData(bk2)
                 local ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
                 -- Fallback: sid2 may be a spell override while settings are
@@ -787,6 +823,44 @@ local function DecorateFrame(frame, barData)
                         frame:SetAlpha(bd2 and bd2.barOpacity or 1)
                     end
                 end
+                -- For hidden cdState modes, defer the evaluation by one
+                -- frame. Blizzard's SetDesaturated fires inside the secure
+                -- CDM chain where C_Spell.GetSpellCooldown can briefly
+                -- disagree with Blizzard's own evaluation (charge spells
+                -- report isActive while charges remain, GCD tail races).
+                -- Deferring lets the API settle before we query it.
+                if cse == "hiddenOnCD" or cse == "hiddenReady" then
+                    if not fd._cdStatePending then
+                        fd._cdStatePending = CreateFrame("Frame")
+                        fd._cdStatePending:Hide()
+                    end
+                    fd._cdStatePending.cse = cse
+                    fd._cdStatePending:SetScript("OnUpdate", function(self)
+                        self:Hide()
+                        local fc3 = _ecmeFC[frame]
+                        local sid3 = fc3 and fc3.spellID
+                        local bk3 = fc3 and fc3.barKey
+                        if not sid3 or not bk3 then return end
+                        local liveSid = sid3
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            liveSid = C_SpellBook.FindSpellOverrideByID(sid3) or sid3
+                        end
+                        local cseInfo = C_Spell.GetSpellCooldown(liveSid)
+                        local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+                        local myCse = self.cse
+                        local hide
+                        if myCse == "hiddenOnCD" then
+                            hide = onCD
+                        else
+                            hide = not onCD
+                        end
+                        local bd3 = barDataByKey and barDataByKey[bk3]
+                        frame:SetAlpha(hide and 0 or (bd3 and bd3.barOpacity or 1))
+                        if fc3 then fc3._cdStateHidden = hide or false end
+                    end)
+                    fd._cdStatePending:Show()
+                    return
+                end
                 -- Query cooldown on the live override (e.g. Shimmer, not
                 -- Blink) so charge-based replacements report correctly.
                 local liveSid = sid2
@@ -795,17 +869,7 @@ local function DecorateFrame(frame, barData)
                 end
                 local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
-                if cse == "hiddenOnCD" then
-                    local bd2 = barDataByKey and barDataByKey[bk2]
-                    local hide = onCD
-                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
-                    if fc2 then fc2._cdStateHidden = hide or false end
-                elseif cse == "hiddenReady" then
-                    local bd2 = barDataByKey and barDataByKey[bk2]
-                    local hide = not onCD
-                    frame:SetAlpha(hide and 0 or (bd2 and bd2.barOpacity or 1))
-                    if fc2 then fc2._cdStateHidden = hide or false end
-                elseif cse == "pixelGlowReady" or cse == "buttonGlowReady" then
+                if cse == "pixelGlowReady" or cse == "buttonGlowReady" then
                     if not onCD then
                         if fd.glowOverlay and not fd._cdStateGlowOn then
                             local style = cse == "pixelGlowReady" and 1 or 3
@@ -1066,6 +1130,7 @@ _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
 _racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("BAG_UPDATE_DELAYED")
 _racialCdListener:RegisterEvent("ENCOUNTER_END")
+_racialCdListener:RegisterEvent("CHALLENGE_MODE_START")
 _racialCdListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 _racialCdListener:RegisterEvent("PLAYER_REGEN_ENABLED")
 
@@ -1077,60 +1142,25 @@ for _, preset in ipairs(ns.CDM_ITEM_PRESETS or {}) do
     end
 end
 
-_racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
-    -- Encounter end (boss kill/wipe): Blizzard resets potion CDs, but our
-    -- cached _cdStart/_cdDur would keep the old swipe until wall-clock
-    -- expiry. Force-clear all item-preset caches. Return early so the
-    -- update loop below doesn't immediately re-cache the stale data
-    -- (Blizzard hasn't processed the reset yet at this point). A follow-up
-    -- BAG_UPDATE_COOLDOWN fires once Blizzard finishes and picks up the
-    -- fresh state.
-    if event == "ENCOUNTER_END" then
-        -- Potion CDs only reset on raid boss kills, not in M+.
-        local _, instanceType = GetInstanceInfo()
-        if instanceType == "raid" then
-            for _, f in pairs(_presetFrames) do
-                if f._isItemPresetFrame then
-                    f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
-                    if f._cooldown then f._cooldown:Clear() end
-                    if f._tex then f._tex:SetDesaturated(false) end
-                    f._lastDesat = false
-                end
-            end
-            _encounterResetUntil = GetTime() + 3
-        end
-        return
-    end
-    -- Healthstone combat lockout: track usage in combat, clear on combat end
-    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" then
-        local targetItemID = spellID and _combatLockoutSpells[spellID]
-        if targetItemID and InCombatLockdown() then
-            for _, f in pairs(_presetFrames) do
-                if f._isItemPresetFrame and f._presetItemID == targetItemID then
-                    f._inCombatLockout = true
-                    if f._cooldown then f._cooldown:Clear() end
-                    if f._tex then f._tex:SetDesaturated(true) end
-                    f._lastDesat = true
-                end
-            end
-        end
-        return
-    end
-    if event == "PLAYER_REGEN_ENABLED" then
-        for _, f in pairs(_presetFrames) do
-            if f._isItemPresetFrame and f._inCombatLockout then
-                f._inCombatLockout = nil
-            end
-        end
-        return
-    end
-    -- Directly update cooldowns on existing preset frames instead of
-    -- waiting for CollectAndReanchor (which only runs on viewer changes).
+-- Dirty flag: high-frequency events (SPELL_UPDATE_COOLDOWN, BAG_UPDATE_COOLDOWN)
+-- just set this flag. The BuffTicker (10Hz) processes it, coalescing dozens of
+-- per-GCD events into a single update pass.
+local _presetCdDirty = false
+
+-- The actual update work, called from BuffTicker at 10Hz max.
+local function ProcessPresetCooldowns()
+    _presetCdDirty = false
+    local now = GetTime()
     for fkey, f in pairs(_presetFrames) do
         if f:IsShown() then
             if (f._isRacialFrame or f._isCustomSpellFrame) and not f._isCustomBuffFrame then
-                local sid = fkey:match(":(%d+)$")
-                sid = sid and tonumber(sid)
+                -- Cache extracted spellID on the frame to avoid regex every tick
+                local sid = f._cachedPresetSID
+                if not sid then
+                    local m = fkey:match(":(%d+)$")
+                    sid = m and tonumber(m)
+                    f._cachedPresetSID = sid
+                end
                 if sid then
                     local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
                     if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
@@ -1138,7 +1168,7 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
                     end
                     ApplySpellDesaturation(f, durObj)
                 end
-            elseif f._isItemPresetFrame and f._presetItemID and GetTime() >= _encounterResetUntil then
+            elseif f._isItemPresetFrame and f._presetItemID and now >= _encounterResetUntil then
                 local itemID = f._presetItemID
                 local getContainerCD = C_Container and C_Container.GetItemCooldown
                 local start, dur
@@ -1158,12 +1188,11 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
                 if start and dur and dur > 1.5 then
                     f._cooldown:SetCooldown(start, dur)
                     f._cdStart = start; f._cdDur = dur
-                elseif not (f._cdStart and f._cdDur and GetTime() < f._cdStart + f._cdDur) then
+                elseif not (f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)) then
                     f._cooldown:Clear()
                     f._cdStart = nil; f._cdDur = nil
                 end
-                -- Update charge count + desaturate
-                local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
+                local itemOnCD = f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)
                 local total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
                 if total == 0 and f._presetData and f._presetData.altItemIDs then
                     for _, altID in ipairs(f._presetData.altItemIDs) do
@@ -1200,6 +1229,51 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
         end
     end
     if QueueCustomBuffUpdate then QueueCustomBuffUpdate() end
+end
+ns._ProcessPresetCooldowns = ProcessPresetCooldowns
+ns._isPresetCdDirty = function() return _presetCdDirty end
+
+_racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
+    -- Infrequent events: handle immediately and return
+    if event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_START" then
+        if event == "CHALLENGE_MODE_START" or select(2, GetInstanceInfo()) == "raid" then
+            for _, f in pairs(_presetFrames) do
+                if f._isItemPresetFrame then
+                    f._cdStart = nil; f._cdDur = nil; f._inCombatLockout = nil
+                    if f._cooldown then f._cooldown:Clear() end
+                    if f._tex then f._tex:SetDesaturated(false) end
+                    f._lastDesat = false
+                end
+            end
+            _encounterResetUntil = GetTime() + 3
+        end
+        return
+    end
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" then
+        local targetItemID = spellID and _combatLockoutSpells[spellID]
+        if targetItemID and InCombatLockdown() then
+            for _, f in pairs(_presetFrames) do
+                if f._isItemPresetFrame and f._presetItemID == targetItemID then
+                    f._inCombatLockout = true
+                    if f._cooldown then f._cooldown:Clear() end
+                    if f._tex then f._tex:SetDesaturated(true) end
+                    f._lastDesat = true
+                end
+            end
+        end
+        return
+    end
+    if event == "PLAYER_REGEN_ENABLED" then
+        for _, f in pairs(_presetFrames) do
+            if f._isItemPresetFrame and f._inCombatLockout then
+                f._inCombatLockout = nil
+            end
+        end
+        _presetCdDirty = true  -- refresh desaturation on combat end
+        return
+    end
+    -- High-frequency events: just set dirty flag for BuffTicker to process
+    _presetCdDirty = true
 end)
 
 -- Custom aura bar cast detection
@@ -1428,6 +1502,12 @@ local function CollectAndReanchor()
                 local count = 0
 
                 local hideCD = not barData.showCooldownText
+                -- FocusKick icon alpha is owned exclusively by
+                -- SetFocusKickAlpha; skip the per-icon alpha override here
+                -- so CollectAndReanchor doesn't clobber the nameplate-driven
+                -- visibility state with a stale _visHidden flag.
+                local isFocusKickBar = (barKey == ns.FOCUSKICK_BAR_KEY)
+
                 for _, entry in ipairs(list) do
                     count = count + 1
                     local frame = entry.frame
@@ -1440,13 +1520,21 @@ local function CollectAndReanchor()
                     -- Hidden frames are collected for data (assignedSpells)
                     -- but left visually untouched so we don't override
                     -- Blizzard's "hide when inactive" state machine.
-                    if frame:IsShown() then
+                    if frame:IsShown() and not isFocusKickBar then
                         local barHidden = container and container._visHidden
                         local fcH = _ecmeFC[frame]
                         if not (fcH and fcH._cdStateHidden) then
                             frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
                         end
                     end
+                    -- Ensure stack/charge text stays above our border overlay.
+                    -- Blizzard resets frame levels on pooled frames during zone
+                    -- transitions; re-raise cheaply here every collect pass.
+                    -- Use relative levels so cursor-anchored bars (level 9980+)
+                    -- keep text above their icons.
+                    local _txtLvl = frame:GetFrameLevel() + 23
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, _txtLvl) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, _txtLvl) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
@@ -1530,7 +1618,6 @@ local function CollectAndReanchor()
     --  For each bar: inject custom frames, assign sort keys, sort, position.
     --  No allowSet, no entryBySpell, no dedup, no change detection.
     ---------------------------------------------------------------------------
-
     -- Ensure custom-frame-only CD/utility bars get processed
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and not bd.isGhostBar
@@ -1543,6 +1630,28 @@ local function CollectAndReanchor()
         end
     end
 
+    -- Pre-build claim set for racial/custom spell checks: collect all
+    -- spellIDs already claimed by Blizzard frames across all bars. This
+    -- replaces the O(frames * FindSpellOverrideByID) inner loop with a
+    -- set lookup.
+    local _claimSet = _scratch_spellOrder  -- reuse scratch for claim set (wiped per bar below)
+    local _globalClaimSet = {}
+    for _, flist in pairs(cdFrames) do
+        for _, f in ipairs(flist) do
+            local fc = _ecmeFC[f]
+            if fc then
+                local fSid = fc.spellID
+                if fSid then _globalClaimSet[fSid] = true end
+                if fc.baseSpellID then _globalClaimSet[fc.baseSpellID] = true end
+                if fc.linkedSpellIDs then
+                    for _, lid in ipairs(fc.linkedSpellIDs) do
+                        if lid and lid > 0 then _globalClaimSet[lid] = true end
+                    end
+                end
+            end
+        end
+    end
+
     for barKey, frames in pairs(cdFrames) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled then
@@ -1551,26 +1660,34 @@ local function CollectAndReanchor()
                 local sd = ns.GetBarSpellData(barKey)
                 local spellList = sd and sd.assignedSpells
 
-                -- Build spell order map for sorting (store all variants)
-                local spellOrder = _scratch_spellOrder; wipe(spellOrder)
-                if spellList then
-                    local idx = 0
-                    for _, sid in ipairs(spellList) do
-                        if sid and sid ~= 0 then
-                            idx = idx + 1
-                            if not spellOrder[sid] then spellOrder[sid] = idx end
-                            -- Forward: base -> current override
-                            if _FindOverride then
-                                local ovr = _FindOverride(sid)
-                                if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
-                                    spellOrder[ovr] = idx
+                -- Spell order map: cached per-bar, rebuilt only when spells
+                -- change (spec swap, talent change, user edits). During
+                -- combat rotation, the assigned list is static so the cache
+                -- hit rate is ~100%.
+                local spellOrder
+                if not ns._spellOrderDirty and container._cachedSpellOrder then
+                    spellOrder = container._cachedSpellOrder
+                else
+                    if not container._cachedSpellOrder then container._cachedSpellOrder = {} end
+                    spellOrder = container._cachedSpellOrder
+                    wipe(spellOrder)
+                    if spellList then
+                        local idx = 0
+                        for _, sid in ipairs(spellList) do
+                            if sid and sid ~= 0 then
+                                idx = idx + 1
+                                if not spellOrder[sid] then spellOrder[sid] = idx end
+                                if _FindOverride then
+                                    local ovr = _FindOverride(sid)
+                                    if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                        spellOrder[ovr] = idx
+                                    end
                                 end
-                            end
-                            -- Reverse: override -> base
-                            if C_Spell and C_Spell.GetBaseSpell then
-                                local base = C_Spell.GetBaseSpell(sid)
-                                if base and base > 0 and base ~= sid and not spellOrder[base] then
-                                    spellOrder[base] = idx
+                                if C_Spell and C_Spell.GetBaseSpell then
+                                    local base = C_Spell.GetBaseSpell(sid)
+                                    if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                        spellOrder[base] = idx
+                                    end
                                 end
                             end
                         end
@@ -1655,86 +1772,32 @@ local function CollectAndReanchor()
                                 end
                             end
                             if f then
-                                local getContainerCD = C_Container and C_Container.GetItemCooldown
-                                local start, dur, enable
-                                if getContainerCD then
-                                    start, dur, enable = getContainerCD(itemID)
+                                -- CD state is maintained by ProcessPresetCooldowns
+                                -- at 10Hz. Here we just re-apply cached visuals
+                                -- (no API queries needed per reanchor).
+                                if f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
+                                    f._cooldown:SetCooldown(f._cdStart, f._cdDur)
                                 end
-                                if not (start and dur and dur > 1.5) then
-                                    start, dur, enable = C_Item.GetItemCooldown(itemID)
+                                if f._lastDesat ~= nil and f._tex then
+                                    f._tex:SetDesaturated(f._lastDesat)
                                 end
-                                if not (start and dur and dur > 1.5) and f._presetData and f._presetData.altItemIDs then
-                                    for _, altID in ipairs(f._presetData.altItemIDs) do
-                                        if getContainerCD then
-                                            start, dur, enable = getContainerCD(altID)
-                                        end
-                                        if not (start and dur and dur > 1.5) then
-                                            start, dur, enable = C_Item.GetItemCooldown(altID)
-                                        end
-                                        if start and dur and dur > 1.5 then break end
-                                    end
-                                end
-                                if start and dur and dur > 1.5 and enable then
-                                    f._cooldown:SetCooldown(start, dur)
-                                    f._cdStart = start; f._cdDur = dur
-                                elseif f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
-                                    -- keep cached cooldown
-                                else
-                                    f._cooldown:Clear()
-                                    f._cdStart = nil; f._cdDur = nil
-                                end
-                                local itemOnCD = f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur)
-                                local total = C_Item.GetItemCount(itemID, false, true) or 0
-                                if f._presetData and f._presetData.altItemIDs then
-                                    for _, altID in ipairs(f._presetData.altItemIDs) do
-                                        total = total + (C_Item.GetItemCount(altID, false, true) or 0)
-                                    end
-                                end
-                                if f._itemCountText then
-                                    local showItemCount = barData.showItemCount ~= false
-                                    local displayCount = showItemCount
-                                        and ((total > 1) and total
-                                        or (total == 1 and f._presetData and f._presetData.combatLockout) and total
-                                        or nil) or nil
-                                    if displayCount then
-                                        if f._lastItemCount ~= displayCount then
-                                            f._itemCountText:SetText(displayCount)
-                                            f._lastItemCount = displayCount
-                                        end
-                                        if not f._itemCountText:IsShown() then f._itemCountText:Show() end
-                                    elseif f._lastItemCount then
-                                        f._itemCountText:SetText("")
-                                        f._itemCountText:Hide()
-                                        f._lastItemCount = nil
-                                    end
-                                end
-                                local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
-                                if f._tex then f._tex:SetDesaturated(shouldDesat) end
-                                f._lastDesat = shouldDesat
                                 frames[#frames + 1] = f
                                 local fc = FC(f)
                                 fc.barKey = barKey; fc.spellID = sid
                             end
                         elseif sid and sid > 0 then
                             -- Racial / custom spell (only if no Blizzard frame claimed it)
-                            -- Transform-aware: check base, override, and exact match
-                            local hasClaim = false
-                            for _, f in ipairs(frames) do
-                                local fc = _ecmeFC[f]
-                                if fc then
-                                    local fSid = fc.spellID
-                                    if fSid == sid then
-                                        hasClaim = true; break
-                                    end
-                                    if _FindOverride and sid > 0 then
-                                        local ovr = _FindOverride(sid)
-                                        if ovr and ovr > 0 and fSid == ovr then hasClaim = true; break end
-                                    end
-                                    if C_Spell and C_Spell.GetBaseSpell then
-                                        local base = C_Spell.GetBaseSpell(sid)
-                                        if base and base > 0 and fSid == base then hasClaim = true; break end
-                                    end
-                                end
+                            -- Uses pre-built _globalClaimSet (set of all spellIDs
+                            -- on Blizzard frames). Still checks override/base of
+                            -- the candidate spell (2 API calls per spell, not per frame).
+                            local hasClaim = _globalClaimSet[sid] or false
+                            if not hasClaim and _FindOverride then
+                                local ovr = _FindOverride(sid)
+                                if ovr and ovr > 0 and _globalClaimSet[ovr] then hasClaim = true end
+                            end
+                            if not hasClaim and C_Spell and C_Spell.GetBaseSpell then
+                                local base = C_Spell.GetBaseSpell(sid)
+                                if base and base > 0 and _globalClaimSet[base] then hasClaim = true end
                             end
                             if not hasClaim then
                                 local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
@@ -1843,17 +1906,23 @@ local function CollectAndReanchor()
                 local icons = cdmBarIcons[barKey]
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local barHidden = container._visHidden
+                local isFKBar = (barKey == ns.FOCUSKICK_BAR_KEY)
 
                 local hideCDText = not barData.showCooldownText
                 for i, frame in ipairs(frames) do
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
                     icons[i] = frame
+                    if not isFKBar then
                     local fcH = _ecmeFC[frame]
                     if not (fcH and fcH._cdStateHidden) then
                         frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
                     end
+                    end
                     frame:Show()
+                    local _txtLvl2 = frame:GetFrameLevel() + 23
+                    if frame.Applications then pcall(frame.Applications.SetFrameLevel, frame.Applications, _txtLvl2) end
+                    if frame.ChargeCount then pcall(frame.ChargeCount.SetFrameLevel, frame.ChargeCount, _txtLvl2) end
                     if frame.Cooldown then
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
@@ -1991,6 +2060,8 @@ local function CollectAndReanchor()
             end
         end
     end
+
+    ns._spellOrderDirty = false  -- spell order caches are now valid
 
     -- Re-apply proc glows for any active procs (picks up per-spell settings)
     if ns.ScanExistingProcGlows then ns.ScanExistingProcGlows() end
@@ -2150,21 +2221,21 @@ local function CollectAndReanchor()
         -- matching can propagate against settled bar widths. Must happen
         -- BEFORE ApplyAllWidthHeightMatches so it isn't gated off.
         if EllesmereUI then EllesmereUI._cdmRebuilding = nil end
-        if EllesmereUI.ApplyAllWidthHeightMatches then
-            EllesmereUI.ApplyAllWidthHeightMatches()
-        end
-        if EllesmereUI._applySavedPositions then
-            EllesmereUI._applySavedPositions()
-        end
-        -- Forced anchor reapply: simulates a user un-anchor + re-anchor on
-        -- every anchored element so any 1px-off cached answer (idempotent
-        -- guard skipping a stale converged state) gets corrected against
-        -- now-settled target bounds. Same trigger moment as the width-match
-        -- retrigger above; idempotent for correct answers, only "moves"
-        -- bars that were actually wrong. See EUI_UnlockMode.lua for why.
-        if EllesmereUI.ReapplyAllUnlockAnchorsForced then
-            EllesmereUI.ReapplyAllUnlockAnchorsForced()
-        end
+        -- Defer position/width corrections to next frame. These are purely
+        -- visual positioning operations (width match, saved positions,
+        -- anchor reapply) that cost ~25ms synchronously but are
+        -- imperceptible if they settle 1 frame late.
+        C_Timer.After(0, function()
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                EllesmereUI.ApplyAllWidthHeightMatches()
+            end
+            if EllesmereUI._applySavedPositions then
+                EllesmereUI._applySavedPositions()
+            end
+            if EllesmereUI.ReapplyAllUnlockAnchorsForced then
+                EllesmereUI.ReapplyAllUnlockAnchorsForced()
+            end
+        end)
     else
         -- Routine reanchor (icon churn, mob death, etc.) -- still clear
         -- the gate so subsequent layout calls don't get stuck.
@@ -2504,14 +2575,22 @@ function ns.SetupViewerHooks()
                 -- icons get collected and centered. Batched via C_Timer to
                 -- collapse the spam (fires many times per frame).
                 if frame.OnActiveStateChanged then
+                    local _asDeferFrame = CreateFrame("Frame")
+                    _asDeferFrame:Hide()
+                    local _asDeferTicks = 0
+                    _asDeferFrame:SetScript("OnUpdate", function(self)
+                        _asDeferTicks = _asDeferTicks + 1
+                        if _asDeferTicks < 2 then return end
+                        self:Hide()
+                        _activeStateReanchorPending = false
+                        CollectAndReanchor()
+                    end)
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
                         ReapplyPositions()
                         if _activeStateReanchorPending then return end
                         _activeStateReanchorPending = true
-                        C_Timer.After(0, function()
-                            _activeStateReanchorPending = false
-                            CollectAndReanchor()
-                        end)
+                        _asDeferTicks = 0
+                        _asDeferFrame:Show()
                     end)
                 end
             end
@@ -2688,7 +2767,7 @@ function ns.SetupViewerHooks()
                                         if not fd.buffGlowOverlay then
                                             local ov = CreateFrame("Frame", nil, frame)
                                             ov:SetAllPoints(frame)
-                                            ov:SetFrameLevel(frame:GetFrameLevel() + 7)
+                                            ov:SetFrameLevel(22)
                                             ov:EnableMouse(false)
                                             fd.buffGlowOverlay = ov
                                         end
@@ -2720,7 +2799,7 @@ function ns.SetupViewerHooks()
                                             if not fd.pandemicOverlay then
                                                 local ov = CreateFrame("Frame", nil, frame)
                                                 ov:SetAllPoints(frame)
-                                                ov:SetFrameLevel(frame:GetFrameLevel() + 8)
+                                                ov:SetFrameLevel(23)
                                                 ov:EnableMouse(false)
                                                 fd.pandemicOverlay = ov
                                             end
@@ -2798,6 +2877,12 @@ function ns.SetupViewerHooks()
                     end
                 end
                 if ns.UpdateOverlayVisuals then ns.UpdateOverlayVisuals() end
+            end
+            -- Process preset cooldowns (trinkets/items/racials) if any event
+            -- dirtied the flag since the last tick. Coalesces dozens of per-GCD
+            -- SPELL_UPDATE_COOLDOWN events into a single 10Hz update pass.
+            if ns._isPresetCdDirty and ns._isPresetCdDirty() then
+                ns._ProcessPresetCooldowns()
             end
             MemDelta("BuffTicker")
         end)

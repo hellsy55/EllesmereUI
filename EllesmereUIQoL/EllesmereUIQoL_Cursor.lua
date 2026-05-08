@@ -727,10 +727,6 @@ local function CreateCastCircle()
                     if self._spark then self._spark:Show() end
                     if self._sparkGlow then self._sparkGlow:Show() end
                 end
-            else
-                castRing:StopRing()
-                if self._spark then self._spark:Hide() end
-                if self._sparkGlow then self._sparkGlow:Hide() end
             end
 
         elseif event == "UNIT_SPELLCAST_CHANNEL_START"
@@ -750,23 +746,23 @@ local function CreateCastCircle()
                     if self._spark then self._spark:Show() end
                     if self._sparkGlow then self._sparkGlow:Show() end
                 end
-            else
-                castRing:StopRing()
-                if self._spark then self._spark:Hide() end
-                if self._sparkGlow then self._sparkGlow:Hide() end
             end
 
         elseif event == "UNIT_SPELLCAST_STOP" then
             if castID == self._castID then
+                self._castID = nil
                 castRing:StopRing()
                 if self._spark then self._spark:Hide() end
                 if self._sparkGlow then self._sparkGlow:Hide() end
             end
 
         else  -- FAILED, INTERRUPTED, CHANNEL_STOP, EMPOWER_STOP
-            castRing:StopRing()
-            if self._spark then self._spark:Hide() end
-            if self._sparkGlow then self._sparkGlow:Hide() end
+            if not castID or castID == self._castID then
+                self._castID = nil
+                castRing:StopRing()
+                if self._spark then self._spark:Hide() end
+                if self._sparkGlow then self._sparkGlow:Hide() end
+            end
         end
     end)
 

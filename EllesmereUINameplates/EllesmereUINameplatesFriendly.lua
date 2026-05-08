@@ -31,6 +31,7 @@ local Enum = Enum
 local friendlyEnabled = false
 local friendlyPlates = {}
 ns.friendlyPlates = friendlyPlates
+local _cachedFriendlyTargetPlate = nil
 
 local FRIENDLY_BAR_W = 150
 local FRIENDLY_PLATE_Y_OFFSET = -18
@@ -809,13 +810,14 @@ function ns.RemoveFriendlyPlate(unit)
     if friendlyMouseoverPlate == plate then
         friendlyMouseoverPlate = nil
     end
+    if _cachedFriendlyTargetPlate == plate then _cachedFriendlyTargetPlate = nil end
     plate:ClearUnit()
     friendlyFrameCache:Release(plate)
     friendlyPlates[unit] = nil
 end
 
 -- Same as RemoveFriendlyPlate but does NOT restore the Blizzard UF.
--- Used when promoting friendly → enemy so the Blizzard UF stays suppressed
+-- Used when promoting friendly -> enemy so the Blizzard UF stays suppressed
 -- until HideBlizzardFrame takes over in the enemy plate's SetUnit.
 function ns.RemoveFriendlyPlateNoRestore(unit)
     local plate = friendlyPlates[unit]
@@ -823,6 +825,7 @@ function ns.RemoveFriendlyPlateNoRestore(unit)
     if friendlyMouseoverPlate == plate then
         friendlyMouseoverPlate = nil
     end
+    if _cachedFriendlyTargetPlate == plate then _cachedFriendlyTargetPlate = nil end
     -- Clean up our plate without restoring Blizzard UF
     plate:UnregisterAllEvents()
     plate.name:SetText("")
@@ -861,7 +864,19 @@ end
 
 friendlyManager:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_TARGET_CHANGED" then
-        for _, plate in pairs(friendlyPlates) do plate:ApplyTarget() end
+        -- PERF: only update old + new target instead of iterating all
+        local oldTarget = _cachedFriendlyTargetPlate
+        _cachedFriendlyTargetPlate = nil
+        for _, plate in pairs(friendlyPlates) do
+            if plate.unit and UnitIsUnit(plate.unit, "target") then
+                _cachedFriendlyTargetPlate = plate
+                break
+            end
+        end
+        if oldTarget and oldTarget.unit then oldTarget:ApplyTarget() end
+        if _cachedFriendlyTargetPlate and _cachedFriendlyTargetPlate ~= oldTarget then
+            _cachedFriendlyTargetPlate:ApplyTarget()
+        end
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
         if friendlyMouseoverPlate then
             friendlyMouseoverPlate.highlight:Hide()

@@ -192,18 +192,18 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(function() swRefresh() end)
             end
             wire(r._leftRegion,  leftKeys)
-            wire(r._rightRegion, rightKeys)
+            if rightKeys then wire(r._rightRegion, rightKeys) end
             return r, rowH
         end
 
         _, h = MakeColorRow(
             "Title Color",    { r = "titleR",     g = "titleG",     b = "titleB"     },
-            "Quest Color",    { r = "questR",     g = "questG",     b = "questB"     })
+            "Completed Color",{ r = "completedR", g = "completedG", b = "completedB" })
         y = y - h
 
         _, h = MakeColorRow(
-            "Completed Color",{ r = "completedR", g = "completedG", b = "completedB" },
-            "Focused Color",  { r = "focusR",     g = "focusG",     b = "focusB"     })
+            "Focused Color",  { r = "focusR",     g = "focusG",     b = "focusB"     },
+            "", nil)
         y = y - h
 
         y = y - 10

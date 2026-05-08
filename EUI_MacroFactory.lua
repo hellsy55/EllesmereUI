@@ -16,7 +16,7 @@ do
         local idx = GetMacroIndexByName("EUI_Health")
         if idx == 0 then return end
         if InCombatLockdown() then return end
-        local body = "#showtooltip item:241304\n/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305"
+        local body = "#showtooltip item:241304\n/cast [nocombat] spell:1231411\n/use [combat] item:241304\n/use [combat] item:241305"
         EditMacro(idx, nil, nil, body)
         EllesmereUIDB._healthMacroMigrated = true
     end)
@@ -53,7 +53,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             name = "EUI_Health",
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
-            fixedBody = "/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
+            fixedBody = "/cast [nocombat] spell:1231411\n/use [combat] item:241304\n/use [combat] item:241305",
             fixedTooltip = "item:241304",
         },
         {
@@ -463,7 +463,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         activeSpecID, activeSpecName = GetSpecializationInfo(specIndex)
     end
     local activeClassName = UnitClass("player") or "Unknown"
-    local activeSpecDefs = activeSpecID and SPEC_DEFS[activeSpecID] or {}
+    local isEnglishClient = (GetLocale() == "enUS" or GetLocale() == "enGB")
+    local activeSpecDefs = isEnglishClient and activeSpecID and SPEC_DEFS[activeSpecID] or {}
 
     ---------------------------------------------------------------------------
     --  DB helper (shared across all buttons and event handlers)
@@ -1159,10 +1160,14 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         BuildMacroGroup(activeSpecDefs, "RIGHT", (activeSpecName or "Spec") .. " " .. activeClassName .. " Macro Factory", SPEC_ICONS_PER_ROW, SPEC_ICON_GAP, MAX_SPEC_VISIBLE_ROWS)
     else
         local emptyFS = container:CreateFontString(nil, "OVERLAY")
-        emptyFS:SetFont(fontPath, 12, "")
+        emptyFS:SetFont(fontPath, 16, "")
         emptyFS:SetTextColor(1, 1, 1, 0.25)
         emptyFS:SetPoint("CENTER", container, "TOPLEFT", halfW + halfW / 2, -SECTION_H / 2)
-        emptyFS:SetText("No spec macros for " .. (activeSpecName or "this spec"))
+        if not isEnglishClient then
+            emptyFS:SetText("Spec Macros are currently not supported\nfor non-English clients. Support coming soon!")
+        else
+            emptyFS:SetText("No spec macros for " .. (activeSpecName or "this spec"))
+        end
         emptyFS:SetJustifyH("CENTER")
     end
 

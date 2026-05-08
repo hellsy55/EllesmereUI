@@ -27,6 +27,7 @@ local C_NamePlate = C_NamePlate
 local GetRaidTargetIndex, SetRaidTargetIconTexture = GetRaidTargetIndex, SetRaidTargetIconTexture
 local C_CVar, NamePlateConstants, Enum = C_CVar, NamePlateConstants, Enum
 local _, PLAYER_CLASS = UnitClass("player")
+
 local function GetFont()
     if EllesmereUI and EllesmereUI.GetFontPath then
         return EllesmereUI.GetFontPath("nameplates")
@@ -34,10 +35,10 @@ local function GetFont()
     return (p and p.font) or defaults.font
 end
 local function GetNPOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or "OUTLINE"
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE"
 end
 local function GetNPUseShadow()
-    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("nameplates")
 end
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
@@ -57,6 +58,10 @@ ns.GetNPUseShadow = GetNPUseShadow
 ns.SetFSFont = SetFSFont
 ns.plates = {}
 _G.EllesmereNameplates_NS = ns
+
+-- External weak-keyed table for nameplate Y-offset state (never write custom
+-- keys onto Blizzard C_NamePlate frames -- causes taint).
+local _npYOffsetState = setmetatable({}, { __mode = "k" })
 
 -- Constant table for health text bar slots (hoisted to file scope to avoid
 -- per-call allocation inside UpdateHealthValues).
@@ -280,6 +285,8 @@ do
         ["atrocity"]      = TB .. "atrocity.tga",
         ["divide"]        = TB .. "divide.tga",
         ["glass"]         = TB .. "glass.tga",
+        ["fade-right"]    = TB .. "fade-right.tga",
+        ["fade"]          = TB .. "fade.tga",
         ["gradient-lr"]   = TB .. "gradient-lr.tga",
         ["gradient-rl"]   = TB .. "gradient-rl.tga",
         ["gradient-bt"]   = TB .. "gradient-bt.tga",
@@ -289,6 +296,7 @@ do
     }
     ns.healthBarTextureOrder = {
         "none", "melli", "atrocity",
+        "fade", "fade-right",
         "beautiful", "plating",
         "divide", "glass",
         "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -302,6 +310,8 @@ do
         ["atrocity"]    = "Atrocity",
         ["divide"]      = "Divide",
         ["glass"]       = "Glass",
+        ["fade-right"]  = "Fade Right",
+        ["fade"]        = "Fade",
         ["gradient-lr"] = "Gradient Right",
         ["gradient-rl"] = "Gradient Left",
         ["gradient-bt"] = "Gradient Up",
@@ -836,7 +846,7 @@ local function StartPandemicGlow(slot, slotSize)
     if not pg then
         local wrapper = CreateFrame("Frame", nil, slot)
         wrapper:SetAllPoints()
-        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         flipTex:SetPoint("CENTER")
         local animGroup = flipTex:CreateAnimationGroup()
@@ -925,6 +935,7 @@ end
 -- never into Lua comparisons. This is the standard secret-safe pattern.
 -- Active pandemic slots register themselves for a lightweight alpha-only tick
 -- instead of polling every plate globally.
+local pandemicTickFrame  -- forward declaration; created at line ~3240
 local function ApplyPandemicGlow(slot)
     local durObj = slot._durationObj
     if not durObj or not pandemicCurve then
@@ -936,6 +947,7 @@ local function ApplyPandemicGlow(slot)
     slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(pandemicCurve)))
     -- Register for alpha-only tick updates
     activePandemicSlots[slot] = true
+    if pandemicTickFrame then pandemicTickFrame:Show() end
 end
 ns.StopPandemicGlow = StopPandemicGlow
 ns.ApplyPandemicGlow = ApplyPandemicGlow
@@ -966,7 +978,7 @@ local function StartDispelGlow(slot, slotSize, typeColor)
     if not dg then
         local wrapper = CreateFrame("Frame", nil, slot)
         wrapper:SetAllPoints()
-        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         flipTex:SetPoint("CENTER")
         local animGroup = flipTex:CreateAnimationGroup()
@@ -1185,6 +1197,24 @@ local function GetTextSlotColor(slotKey)
     return 1, 1, 1
 end
 
+-- Clear a single aura slot (debuff/buff/cc). File-scope to avoid
+-- closure allocation inside UpdateAuras.
+local function ClearAuraSlot(slot)
+    slot:Hide()
+    slot.icon:SetTexture(nil)
+    if slot.pandemicGlow and slot.pandemicGlow.active then ns.StopPandemicGlow(slot) end
+    if slot.dispelGlow and slot.dispelGlow.active then ns.StopDispelGlow(slot) end
+    slot._durationObj = nil
+    local cd = slot.cd
+    if cd then
+        if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
+        if cd.Clear then cd:Clear()
+        elseif CooldownFrame_Clear then CooldownFrame_Clear(cd)
+        else cd:SetCooldown(0, 0) end
+        cd:Hide()
+    end
+end
+
 -- Position target arrows OUTSIDE the outermost side auras (if arrows are shown).
 -- Called after all aura positioning is complete.
 local function PositionArrowsOutsideAuras(plate)
@@ -1287,6 +1317,8 @@ local function EnsureGlow(plate)
     plate.glowBottom = MkTex(); plate.glowBottom:SetHeight(GLOW_CORNER); plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT"); plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT"); plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
     plate.glowLeft = MkTex(); plate.glowLeft:SetWidth(GLOW_CORNER); plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT"); plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT"); plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
     plate.glowRight = MkTex(); plate.glowRight:SetWidth(GLOW_CORNER); plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT"); plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT"); plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    -- Center fill: covers the gap between top/bottom edges inside the health bar
+    plate.glowCenter = MkTex(); plate.glowCenter:SetPoint("TOPLEFT", plate.glowLeft, "TOPRIGHT"); plate.glowCenter:SetPoint("BOTTOMRIGHT", plate.glowRight, "BOTTOMLEFT"); plate.glowCenter:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
     plate.glow = plate.glowFrame
     plate.glowFrame:Hide()
 end
@@ -1924,6 +1956,10 @@ end
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
 function ns.RefreshAllSettings()
+    -- Re-read profile reference: RepointAllDBs may have swapped the
+    -- profile table (spec-linked profiles). All color lookups via _C()
+    -- read from this local.
+    p = ENP.db.profile
     -- Bump the appearance generation so SetUnit re-runs ApplyAppearance
     -- on each plate. Without this bump, cache-hit re-spawns would skip
     -- the static appearance work and the new settings wouldn't apply.
@@ -1939,9 +1975,13 @@ local kickWatcher = CreateFrame("Frame")
 kickWatcher:RegisterEvent("PLAYER_LOGIN")
 kickWatcher:RegisterEvent("SPELLS_CHANGED")
 local activeCastCount = 0
+-- PERF: set of plates currently casting so kick/color updates iterate only
+-- the 1-3 casting plates instead of all 20+ plates in the scene.
+-- Stored on ns to avoid 200-local pressure.
+ns._castingPlates = {}
 kickWatcher:SetScript("OnEvent", function(self, event)
     if event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_USABLE" then
-        for _, plate in pairs(ns.plates) do
+        for plate in pairs(ns._castingPlates) do
             if plate.isCasting and plate.unit then
                 local kickProtected
                 local isChannel = false
@@ -1956,7 +1996,6 @@ kickWatcher:SetScript("OnEvent", function(self, event)
                 if type(kickProtected) == "nil" then kickProtected = false end
                 plate._kickProtected = kickProtected
                 plate:ApplyCastColor(kickProtected)
-                -- Re-snapshot kick tick position when kick CD state changes mid-cast
                 plate:UpdateKickTick(kickProtected, isChannel)
                 if ns.RefreshCastOverlayKickTick then
                     ns.RefreshCastOverlayKickTick(plate, kickProtected, isChannel)
@@ -1968,30 +2007,29 @@ kickWatcher:SetScript("OnEvent", function(self, event)
     end
 end)
 local _castColorTicker
-local function NotifyCastStarted()
+local function NotifyCastStarted(plate)
+    if plate then ns._castingPlates[plate] = true end
     activeCastCount = activeCastCount + 1
     if activeCastCount == 1 then
         kickWatcher:RegisterEvent("SPELL_UPDATE_COOLDOWN")
         kickWatcher:RegisterEvent("SPELL_UPDATE_USABLE")
-        -- Poll cast bar color at 5fps while any cast is active.
-        -- SPELL_UPDATE_COOLDOWN/USABLE don't reliably fire when a CD naturally
-        -- expires, so we need this lightweight poll fallback.
-        -- Only runs while casts are visible.
         if activeKickSpell and not _castColorTicker then
             _castColorTicker = C_Timer.NewTicker(0.2, function()
-                for _, plate in pairs(ns.plates) do
-                    if plate.isCasting and plate.unit and plate._kickProtected ~= nil then
-                        plate:ApplyCastColor(plate._kickProtected)
+                for pl in pairs(ns._castingPlates) do
+                    if pl.isCasting and pl.unit and pl._kickProtected ~= nil then
+                        pl:ApplyCastColor(pl._kickProtected)
                     end
                 end
             end)
         end
     end
 end
-local function NotifyCastEnded()
+local function NotifyCastEnded(plate)
+    if plate then ns._castingPlates[plate] = nil end
     activeCastCount = activeCastCount - 1
     if activeCastCount <= 0 then
         activeCastCount = 0
+        wipe(ns._castingPlates)
         kickWatcher:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
         kickWatcher:UnregisterEvent("SPELL_UPDATE_USABLE")
         if _castColorTicker then
@@ -2000,6 +2038,13 @@ local function NotifyCastEnded()
         end
     end
 end
+
+-- PERF: cached plate references for target/focus so we can update only
+-- the old + new plate on target/focus change instead of iterating all.
+-- Stored on ns to avoid 200-local pressure (4 locals saved).
+ns._cachedTargetPlate = nil
+ns._cachedFocusPlate  = nil
+
 local function SetupAuraCVars()
     if C_CVar and C_CVar.SetCVarBitfield and NamePlateConstants and Enum then
         local npcCVar = NamePlateConstants.ENEMY_NPC_AURA_DISPLAY_CVAR
@@ -2563,19 +2608,14 @@ end
 local function RefreshClassPower()
     -- Form check (e.g. Druid combo points only in cat form)
     if classPowerFormReq and GetShapeshiftFormID() ~= classPowerFormReq then
-        for _, plate in pairs(ns.plates) do
-            HideClassPowerOnPlate(plate)
-        end
+        -- Only need to hide pips on the target plate (others never have them)
+        if ns._cachedTargetPlate then HideClassPowerOnPlate(ns._cachedTargetPlate) end
         return
     end
-    local plates = ns.plates
-    for _, plate in pairs(plates) do
-        if plate.unit and UnitIsUnit(plate.unit, "target") then
-            EnsureClassPowerPips(plate)
-            UpdateClassPowerOnPlate(plate)
-        else
-            HideClassPowerOnPlate(plate)
-        end
+    -- PERF: only the target plate shows class power; skip iterating all plates
+    if ns._cachedTargetPlate and ns._cachedTargetPlate.unit and UnitIsUnit(ns._cachedTargetPlate.unit, "target") then
+        EnsureClassPowerPips(ns._cachedTargetPlate)
+        UpdateClassPowerOnPlate(ns._cachedTargetPlate)
     end
 end
 
@@ -2584,19 +2624,17 @@ end
 local function RefreshClassPowerFull()
     -- Form check (e.g. Druid combo points only in cat form)
     local formHidden = classPowerFormReq and GetShapeshiftFormID() ~= classPowerFormReq
-    local plates = ns.plates
-    for _, plate in pairs(plates) do
-        if not formHidden and plate.unit and UnitIsUnit(plate.unit, "target") then
-            EnsureClassPowerPips(plate)
-            UpdateClassPowerOnPlate(plate)
+    -- PERF: only the target plate shows pips; only it needs reposition for cpPush
+    local tp = ns._cachedTargetPlate
+    if tp and tp.unit then
+        if not formHidden and UnitIsUnit(tp.unit, "target") then
+            EnsureClassPowerPips(tp)
+            UpdateClassPowerOnPlate(tp)
         else
-            HideClassPowerOnPlate(plate)
+            HideClassPowerOnPlate(tp)
         end
-        -- Reposition elements above the health bar so they clear (or un-clear) the pips
-        if plate.unit then
-            plate:RefreshNamePosition()
-            plate:UpdateRaidIcon()
-        end
+        tp:RefreshNamePosition()
+        tp:UpdateRaidIcon()
     end
 end
 
@@ -2726,12 +2764,13 @@ DisableClassPowerWatcher = function()
     classPowerWatcher:Hide()
     classPowerWatcher = nil
     classPowerFormReq = nil
-    -- Hide all pips on all plates and reposition elements that were pushed
-    for _, plate in pairs(ns.plates) do
-        HideClassPowerOnPlate(plate)
-        if plate.unit then
-            plate:RefreshNamePosition()
-            plate:UpdateRaidIcon()
+    -- PERF: only target plate had pips; only it needs cleanup
+    local tp = ns._cachedTargetPlate
+    if tp then
+        HideClassPowerOnPlate(tp)
+        if tp.unit then
+            tp:RefreshNamePosition()
+            tp:UpdateRaidIcon()
         end
     end
 end
@@ -2845,14 +2884,21 @@ local function IsQuestMob(unit)
 end
 ns.IsQuestMob = IsQuestMob
 
--- Invalidate quest cache on quest log changes
+-- Invalidate quest cache on quest log changes (throttled to avoid
+-- recoloring all plates on every QUEST_LOG_UPDATE burst).
 local questCacheWatcher = CreateFrame("Frame")
 questCacheWatcher:RegisterEvent("QUEST_LOG_UPDATE")
+ns._questDirty = false
 questCacheWatcher:SetScript("OnEvent", function()
     wipe(questMobCache)
-    -- Refresh colors on all visible plates
-    for _, plate in pairs(ns.plates) do
-        plate:UpdateHealthColor()
+    if not ns._questDirty then
+        ns._questDirty = true
+        C_Timer.After(0.5, function()
+            ns._questDirty = false
+            for _, plate in pairs(ns.plates) do
+                plate:UpdateHealthColor()
+            end
+        end)
     end
 end)
 
@@ -3022,6 +3068,8 @@ local function HideBlizzardElement(element)
 end
 local function MoveToOffscreen(element, unit)
     if not element then return end
+    -- PERF: skip SetParent if already offscreen (saves ~14 calls per plate respawn)
+    if element:GetParent() == npOffscreenParent then return end
     if not storedParents[element] then
         storedParents[element] = element:GetParent()
     end
@@ -3039,54 +3087,60 @@ local function HideBlizzardFrame(nameplate, unit)
     if not nameplate then return end
     local uf = nameplate.UnitFrame
     if not uf then return end
-    if unit and UnitCanAttack("player", unit) then
-        uf:SetAlpha(0)
-        if uf.healthBar then
-            uf.healthBar:SetParent(npOffscreenParent)
-        end
-        -- Move visual children off the UnitFrame so Blizzard's layout engine
-        -- stops recalculating bounds from them.
-        MoveToOffscreen(uf.HealthBarsContainer, unit)
-        MoveToOffscreen(uf.castBar, unit)
-        MoveToOffscreen(uf.name, unit)
-        MoveToOffscreen(uf.selectionHighlight, unit)
-        MoveToOffscreen(uf.aggroHighlight, unit)
-        MoveToOffscreen(uf.softTargetFrame, unit)
-        MoveToOffscreen(uf.SoftTargetFrame, unit)
-        MoveToOffscreen(uf.ClassificationFrame, unit)
-        MoveToOffscreen(uf.RaidTargetFrame, unit)
-        MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
-        if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
-        -- Move AurasFrame list frames offscreen -- we query C_UnitAuras
-        -- directly for debuff/CC data so these visual lists are unused.
-        if uf.AurasFrame then
-            MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
-            MoveToOffscreen(uf.AurasFrame.BuffListFrame, unit)
-            MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
-            MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
-        end
-        -- All visual children are reparented offscreen so layout
-        -- recalculations won't shift bounds.
-        -- Only silence the castBar events (we render our own cast bar).
-        if uf.castBar then
-            uf.castBar:UnregisterAllEvents()
-        end
-        -- Keep WidgetContainer functional but reparent it to the nameplate
-        -- itself so its layout doesn't affect the UnitFrame's bounds.
-        if uf.WidgetContainer then
-            uf.WidgetContainer:SetParent(nameplate)
-        end
+    -- Suppress unconditionally -- if we're called, an EUI plate is taking
+    -- over this nameplate. Never gate on UnitCanAttack: that API can return
+    -- false on the first frame (unit not fully registered yet), which skips
+    -- the entire block and leaves Blizzard's UnitFrame visible behind ours
+    -- as a giant black box.
+    uf:SetAlpha(0)
+    if uf.healthBar then
+        uf.healthBar:SetParent(npOffscreenParent)
+    end
+    -- Move visual children off the UnitFrame so Blizzard's layout engine
+    -- stops recalculating bounds from them.
+    MoveToOffscreen(uf.HealthBarsContainer, unit)
+    MoveToOffscreen(uf.castBar, unit)
+    MoveToOffscreen(uf.name, unit)
+    MoveToOffscreen(uf.selectionHighlight, unit)
+    MoveToOffscreen(uf.aggroHighlight, unit)
+    MoveToOffscreen(uf.softTargetFrame, unit)
+    MoveToOffscreen(uf.SoftTargetFrame, unit)
+    MoveToOffscreen(uf.ClassificationFrame, unit)
+    MoveToOffscreen(uf.RaidTargetFrame, unit)
+    MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
+    if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
+    -- Move AurasFrame list frames offscreen -- we query C_UnitAuras
+    -- directly for debuff/CC data so these visual lists are unused.
+    if uf.AurasFrame then
+        MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
+        MoveToOffscreen(uf.AurasFrame.BuffListFrame, unit)
+        MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
+        MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
+    end
+    -- All visual children are reparented offscreen so layout
+    -- recalculations won't shift bounds.
+    -- Only silence the castBar events (we render our own cast bar).
+    if uf.castBar then
+        uf.castBar:UnregisterAllEvents()
+    end
+    -- Keep WidgetContainer functional but reparent it to the nameplate
+    -- itself so its layout doesn't affect the UnitFrame's bounds.
+    if uf.WidgetContainer then
+        uf.WidgetContainer:SetParent(nameplate)
     end
     if not hookedUFs[uf] then
         hookedUFs[uf] = true
         local locked = false
         hooksecurefunc(uf, "SetAlpha", function(self)
             if locked then return end
-            locked = true
+            -- Only force alpha 0 while an EUI plate owns this nameplate.
+            -- When the nameplate is recycled for a friendly unit, the EUI
+            -- plate is released and ns.plates[unit] is nil, so the hook
+            -- becomes a no-op and Blizzard can show the friendly frame.
             local ufUnit = self.unit or (self.GetUnit and self:GetUnit())
-            if ufUnit and UnitExists(ufUnit) and UnitCanAttack("player", ufUnit) then
-                self:SetAlpha(0)
-            end
+            if not ufUnit or not ns.plates[ufUnit] then return end
+            locked = true
+            self:SetAlpha(0)
             locked = false
         end)
     end
@@ -3104,9 +3158,20 @@ local function HideBlizzardFrame(nameplate, unit)
             if not ufUnit then return end
             local plate = ns.plates[ufUnit]
             if plate and plate.unit then
-                plate:UpdateAuras()
+                -- RefreshAuras fired: debuffList is now current. Clear the
+                -- pending stash and fallback (we handle it here).
+                local pending = plate._pendingAuraUpdate
+                plate._pendingAuraUpdate = nil
+                plate._auraFallbackPending = nil
+                plate:UpdateAuras(pending)
             end
         end)
+    end
+    -- PERF: mark plate as having the RefreshAuras hook so UNIT_AURA can
+    -- defer full rebuilds to it (avoids double processing).
+    local plate2 = ns.plates[unit]
+    if plate2 and uf.AurasFrame and hookedAurasFrames[uf.AurasFrame] then
+        plate2._hasRefreshAurasHook = true
     end
     -- Keep Blizzard's UnitFrame processing UNIT_AURA so its
     -- debuffList/buffList stay current for our importance filter.
@@ -3206,7 +3271,7 @@ castFallbackFrame:SetScript("OnUpdate", function()
                     fallbackCastCount = 0
                     castFallbackFrame:Hide()
                 end
-                NotifyCastEnded()
+                NotifyCastEnded(plate)
             end
         end
     end
@@ -3214,14 +3279,16 @@ end)
 castFallbackFrame:Hide()
 
 -- Pandemic glow alpha-only tick: only iterates slots with active pandemic glows
-local pandemicTickFrame = CreateFrame("Frame")
+pandemicTickFrame = CreateFrame("Frame")
 local pandemicTickAccum = 0
 pandemicTickFrame:SetScript("OnUpdate", function(_, elapsed)
     pandemicTickAccum = pandemicTickAccum + elapsed
     if pandemicTickAccum < 0.2 then return end
     pandemicTickAccum = 0
-    if not GetPandemicGlow() then return end
+    if not GetPandemicGlow() then pandemicTickFrame:Hide(); return end
+    local anyActive = false
     for slot in pairs(ns.activePandemicSlots) do
+        anyActive = true
         local durObj = slot._durationObj
         if durObj and slot.pandemicGlow and slot.pandemicGlow.active then
             slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(ns.pandemicCurve)))
@@ -3229,7 +3296,9 @@ pandemicTickFrame:SetScript("OnUpdate", function(_, elapsed)
             ns.StopPandemicGlow(slot)
         end
     end
+    if not anyActive then pandemicTickFrame:Hide() end
 end)
+pandemicTickFrame:Hide()  -- start hidden; shown when pandemic glows activate
 
 local NameplateFrame = {}
 
@@ -3383,7 +3452,7 @@ function NameplateFrame:ApplyAppearance()
     end
     PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, gap, GetAuraSlotOffsets("ccSlot"))
     if self.absorbForward then
-        self.absorbForward:SetHeight(GetHealthBarHeight())
+        self.absorbForward:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     end
     if self.absorbOverflow then
         self.absorbOverflow:SetHeight(GetHealthBarHeight())
@@ -3392,6 +3461,109 @@ function NameplateFrame:ApplyAppearance()
     ns.ApplyAbsorbStyle(self)
     self:ApplyBorder()
     self:ApplyBorderColor()
+    self:ApplyHealthTextAppearance()
+end
+
+-- PERF: Set up health text font, position, color, and cache slot assignments.
+-- Called from ApplyAppearance (settings change / fresh plate), NOT on every
+-- health tick.  UpdateHealthValues only updates text content via the cache.
+function NameplateFrame:ApplyHealthTextAppearance()
+    self.hpText:Hide()
+    self.hpNumber:Hide()
+    if not self._cachedHealthSlots then
+        self._cachedHealthSlots = { _count = 0 }
+    end
+    local ca = self._cachedHealthSlots
+    local ci = 0
+
+    for si = 1, #HP_BAR_SLOTS do
+        local slot = HP_BAR_SLOTS[si]
+        local element = GetTextSlot(slot.key)
+        local txOff, tyOff = GetTextSlotOffsets(slot.key)
+        local slotFontSz = GetTextSlotSize(slot.key)
+        local sr, sg, sb = GetTextSlotColor(slot.key)
+        if element == "healthPercent" or element == "healthPercentNoSign" then
+            local fs = self.hpText
+            fs:SetParent(self.healthTextFrame)
+            SetFSFont(fs, slotFontSz, GetNPOutline())
+            fs:ClearAllPoints()
+            if slot.anchor == "CENTER" then
+                fs:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
+            else
+                PP.Point(fs, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
+            end
+            fs:SetJustifyH(slot.anchor)
+            fs:SetTextColor(sr, sg, sb, 1)
+            fs:Show()
+            ci = ci + 1
+            if not ca[ci] then ca[ci] = {} end
+            ca[ci].element = element
+            ca[ci].fs = fs
+        elseif element == "healthNumber" then
+            local fs = self.hpNumber
+            fs:SetParent(self.healthTextFrame)
+            SetFSFont(fs, slotFontSz, GetNPOutline())
+            fs:ClearAllPoints()
+            if slot.anchor == "CENTER" then
+                fs:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
+            else
+                PP.Point(fs, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
+            end
+            fs:SetJustifyH(slot.anchor)
+            fs:SetTextColor(sr, sg, sb, 1)
+            fs:Show()
+            ci = ci + 1
+            if not ca[ci] then ca[ci] = {} end
+            ca[ci].element = element
+            ca[ci].fs = fs
+        elseif element == "healthPctNum" or element == "healthNumPct" then
+            local fs = self.hpText
+            fs:SetParent(self.healthTextFrame)
+            SetFSFont(fs, slotFontSz, GetNPOutline())
+            fs:ClearAllPoints()
+            if slot.anchor == "CENTER" then
+                fs:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
+            else
+                PP.Point(fs, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
+            end
+            fs:SetJustifyH(slot.anchor)
+            fs:SetTextColor(sr, sg, sb, 1)
+            fs:Show()
+            ci = ci + 1
+            if not ca[ci] then ca[ci] = {} end
+            ca[ci].element = element
+            ca[ci].fs = fs
+        end
+    end
+
+    -- Top slot health text
+    local topElement = GetTextSlot("textSlotTop")
+    if topElement == "healthPercent" or topElement == "healthPercentNoSign" or topElement == "healthNumber"
+       or topElement == "healthPctNum" or topElement == "healthNumPct" then
+        local nameYOff = GetNameYOffset()
+        local cpPush = GetClassPowerTopPush(self)
+        local txOff, tyOff = GetTextSlotOffsets("textSlotTop")
+        local topFontSz = GetTextSlotSize("textSlotTop")
+        local tr, tg, tb = GetTextSlotColor("textSlotTop")
+        local fs
+        if topElement == "healthNumber" then
+            fs = self.hpNumber
+        else
+            fs = self.hpText
+        end
+        SetFSFont(fs, topFontSz, GetNPOutline())
+        fs:SetParent(self.topTextFrame)
+        fs:ClearAllPoints()
+        PP.Point(fs, "BOTTOM", self.health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
+        fs:SetJustifyH("CENTER")
+        fs:SetTextColor(tr, tg, tb, 1)
+        fs:Show()
+        ci = ci + 1
+        if not ca[ci] then ca[ci] = {} end
+        ca[ci].element = topElement
+        ca[ci].fs = fs
+    end
+    ca._count = ci
 end
 
 function NameplateFrame:SetUnit(unit, nameplate)
@@ -3399,111 +3571,101 @@ function NameplateFrame:SetUnit(unit, nameplate)
     self.nameplate = nameplate
     self:SetParent(nameplate)
     self:ClearAllPoints()
-    -- Single center anchor: the entire plate moves as one unit when the
-    -- nameplate bounces by 1px, preventing edge-rounding shimmer.
     self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
-    -- Stacking bounds frame (must reparent to this nameplate every spawn)
-    if nameplate.SetStackingBoundsFrame then
-        if not self._stackBounds then
-            self._stackBounds = CreateFrame("Frame", nil, nameplate)
-            local tex = self._stackBounds:CreateTexture(nil, "BACKGROUND")
-            tex:SetColorTexture(1, 0, 0, 0)
-            tex:SetAllPoints(self._stackBounds)
-        end
-        self._stackBounds:SetParent(nameplate)
-        self._stackBounds:ClearAllPoints()
-        local barH = GetHealthBarHeight()
-        local castH2 = GetCastBarHeight()
-        local nameGap = 4 + GetEnemyNameTextSize()
-        local totalH = nameGap + barH + castH2
-        local scale = GetStackSpacingScale() / 100
-        self._stackBounds:SetPoint("CENTER", nameplate, "CENTER", 0, GetNameplateYOffset())
-        self._stackBounds:SetSize(GetHealthBarWidth(), totalH * scale)
-        self._stackBounds:Show()
-        nameplate:SetStackingBoundsFrame(self._stackBounds)
-    end
     -- Apply static appearance only when stale (settings changed or fresh
     -- pool plate). Cache-hit re-spawns skip this entirely.
     if self._appearanceGen ~= ns._npAppearanceGen then
         self:ApplyAppearance()
         self._appearanceGen = ns._npAppearanceGen
     end
-    -- Focus cast height override (per-unit). ApplyAppearance set the base
-    -- cast height; if this plate is the focus, override the cast bar /
-    -- icon / spark / kick marker to the focus-specific size.
-    if unit and UnitIsUnit(unit, "focus") then
-        local pct = GetFocusCastHeight()
-        if pct ~= 100 then
-            local castH = math.floor(GetCastBarHeight() * pct / 100 + 0.5)
-            self.cast:SetSize(GetHealthBarWidth(), castH)
-            self.castIconFrame:SetSize(castH, castH)
-            self.castSpark:SetHeight(castH)
-            self.kickMarker:SetSize(GetHealthBarWidth(), castH)
-        end
-    end
-    -- Cast target color: class-colored if enabled and target is a player, otherwise use castTargetColor
-    local useClassColor = defaults.castTargetClassColor
-    if p and p.castTargetClassColor ~= nil then useClassColor = p.castTargetClassColor end
-    if useClassColor then
-        local appliedCTC = false
-        if self.unit then
-            local classToken
-            if UnitSpellTargetClass then
-                classToken = UnitSpellTargetClass(self.unit)
-            end
-            if not classToken then
-                local targetUnit = self.unit .. "target"
-                if UnitIsPlayer(targetUnit) then
-                    classToken = UnitClassBase(targetUnit)
-                end
-            end
-            if classToken and C_ClassColor then
-                local c = C_ClassColor.GetClassColor(classToken)
-                if c then
-                    self.castTarget:SetTextColor(c:GetRGB())
-                    appliedCTC = true
-                end
-            end
-        end
-        if not appliedCTC then
-            self.castTarget:SetTextColor(1, 1, 1, 1)
-        end
-    else
-        local ctc = (p and p.castTargetColor) or defaults.castTargetColor
-        self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
-    end
     HideBlizzardFrame(nameplate, unit)
     self:RegisterUnitEvent("UNIT_HEALTH", unit)
     self:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", unit)
     self:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
     self:RegisterUnitEvent("UNIT_AURA", unit)
-    self:RegisterUnitEvent("LOSS_OF_CONTROL_UPDATE", unit)
-    self:RegisterUnitEvent("LOSS_OF_CONTROL_ADDED", unit)
     self:RegisterUnitEvent("UNIT_THREAT_LIST_UPDATE", unit)
-    self:RegisterUnitEvent("UNIT_FLAGS", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_START", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_DELAYED", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_STOP", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_UPDATE", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTIBLE", unit)
-    self:RegisterUnitEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE", unit)
+    -- Critical: health bar must display immediately
     self:UpdateHealth()
-    self:UpdateName()
-    self:UpdateClassification()
-    self:UpdateRaidIcon()
-    self:ApplyTarget()
-    self:ApplyMouseover()
-    self:UpdateAuras()
-    self:UpdateCast()
+    -- PERF: defer non-critical work 1 frame. Stacking bounds, name, cast bar,
+    -- classification, raid icon, target glow, mouseover -- all imperceptible
+    -- if they appear 1 frame late. Cuts ~40% off the plate-add spike.
+    self._castDirtyFull = true
+    if not self._deferredSetupCB then
+        self._deferredSetupCB = function()
+            if not self.unit then return end
+            local np = self.nameplate
+            -- Stacking bounds
+            if np and np.SetStackingBoundsFrame then
+                if not self._stackBounds then
+                    self._stackBounds = CreateFrame("Frame", nil, np)
+                    local tex = self._stackBounds:CreateTexture(nil, "BACKGROUND")
+                    tex:SetColorTexture(1, 0, 0, 0)
+                    tex:SetAllPoints(self._stackBounds)
+                end
+                self._stackBounds:SetParent(np)
+                self._stackBounds:ClearAllPoints()
+                local barH = GetHealthBarHeight()
+                local castH2 = GetCastBarHeight()
+                local nameGap = 4 + GetEnemyNameTextSize()
+                local totalH = nameGap + barH + castH2
+                local scale = GetStackSpacingScale() / 100
+                self._stackBounds:SetPoint("CENTER", np, "CENTER", 0, GetNameplateYOffset())
+                self._stackBounds:SetSize(GetHealthBarWidth(), totalH * scale)
+                self._stackBounds:Show()
+                np:SetStackingBoundsFrame(self._stackBounds)
+            end
+            -- Focus cast height override
+            if UnitIsUnit(self.unit, "focus") then
+                local pct = GetFocusCastHeight()
+                if pct ~= 100 then
+                    local castH = math.floor(GetCastBarHeight() * pct / 100 + 0.5)
+                    self.cast:SetSize(GetHealthBarWidth(), castH)
+                    self.castIconFrame:SetSize(castH, castH)
+                    self.castSpark:SetHeight(castH)
+                    self.kickMarker:SetSize(GetHealthBarWidth(), castH)
+                end
+            end
+            -- Cast target color
+            local useClassColor = defaults.castTargetClassColor
+            if p and p.castTargetClassColor ~= nil then useClassColor = p.castTargetClassColor end
+            if useClassColor then
+                local appliedCTC = false
+                local classToken
+                if UnitSpellTargetClass then
+                    classToken = UnitSpellTargetClass(self.unit)
+                end
+                if not classToken then
+                    local targetUnit = self.unit .. "target"
+                    if UnitIsPlayer(targetUnit) then
+                        classToken = UnitClassBase(targetUnit)
+                    end
+                end
+                if classToken and C_ClassColor then
+                    local c = C_ClassColor.GetClassColor(classToken)
+                    if c then
+                        self.castTarget:SetTextColor(c:GetRGB())
+                        appliedCTC = true
+                    end
+                end
+                if not appliedCTC then
+                    self.castTarget:SetTextColor(1, 1, 1, 1)
+                end
+            else
+                local ctc = (p and p.castTargetColor) or defaults.castTargetColor
+                self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
+            end
+            self:UpdateName()
+            self:UpdateClassification()
+            self:UpdateRaidIcon()
+            self:ApplyTarget()
+            self:ApplyMouseover()
+            self:UpdateCast()
+            self:UpdateAuras()
+        end
+    end
+    C_Timer.After(0, self._deferredSetupCB)
 end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
@@ -3516,7 +3678,7 @@ function NameplateFrame:ClearUnit()
             fallbackCastCount = fallbackCastCount - 1
             if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
         end
-        NotifyCastEnded()
+        NotifyCastEnded(self)
     end
     -- Release elevated cast overlay (plate going away)
     if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
@@ -3558,6 +3720,9 @@ function NameplateFrame:ClearUnit()
     self.unit = nil
     self.nameplate = nil
     self._shownAuras = nil
+    self._pendingAuraUpdate = nil
+    self._auraFallbackPending = nil
+    self._absorbHidden = nil
     self.cast:Hide()
     self.castShieldFrame:Hide()
     self.castShieldFrame:SetAlpha(1)
@@ -3636,70 +3801,50 @@ function NameplateFrame:UpdateHealthValues()
 
     local absorbIsSecret = issecretvalue and issecretvalue(absorbAmt)
 
-    self.absorb:ClearAllPoints()
-    self.absorb:SetWidth(self.health:GetWidth())
-    self.absorb:SetHeight(self.health:GetHeight())
-
-    if self.absorbForward then
-        self.absorbForward:ClearAllPoints()
-        self.absorbForward:SetWidth(self.health:GetWidth())
-        self.absorbForward:SetHeight(self.health:GetHeight())
-    end
-
-    if absorbIsSecret then
-        -- Secret-value absorbs (enemy players / Midnight units) cannot be split
-        -- safely in Lua. Instead, keep the health bar scaled to include absorbs,
-        -- then render a single forward absorb segment in the newly-created gap.
+    -- PERF: skip ALL absorb work when absorbs are 0 and were already 0.
+    -- Most M+ mobs have no absorbs, so this skips ~10 widget calls per tick.
+    local absorbZero = not absorbIsSecret and (not absorbAmt or absorbAmt <= 0)
+    if absorbZero and self._absorbHidden then
+        -- Fast path: absorbs were and still are zero
+        self.health:SetMinMaxValues(0, maxHealth)
+        self.health:SetValue(curHealth)
+    elseif absorbIsSecret then
+        self._absorbHidden = false
+        self.absorb:ClearAllPoints()
+        if self.absorbForward then self.absorbForward:ClearAllPoints() end
         self.health:SetMinMaxValues(0, maxWithAbsorbs or maxHealth)
         self.health:SetValue(curHealth)
-
         self.absorb:SetMinMaxValues(0, maxWithAbsorbs or maxHealth)
         self.absorb:SetReverseFill(false)
         self.absorb:SetPoint("TOPLEFT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
         self.absorb:SetPoint("BOTTOMLEFT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
         self.absorb:SetValue(absorbAmt)
         self.absorb:Show()
-
-        if self.absorbForward then
-            self.absorbForward:Hide()
-        end
-        if self.absorbOverflow then
-            self.absorbOverflow:Hide()
-            self.absorbOverflow:SetWidth(0)
-        end
-        if self.absorbOverflowDivider then
-            self.absorbOverflowDivider:Hide()
-        end
+        if self.absorbForward then self.absorbForward:Hide() end
+        if self.absorbOverflow then self.absorbOverflow:Hide(); self.absorbOverflow:SetWidth(0) end
+        if self.absorbOverflowDivider then self.absorbOverflowDivider:Hide() end
     else
+        self.absorb:ClearAllPoints()
+        if self.absorbForward then self.absorbForward:ClearAllPoints() end
         self.health:SetMinMaxValues(0, maxHealth)
         self.health:SetValue(curHealth)
-
         self.absorb:SetMinMaxValues(0, maxHealth)
-        if self.absorbForward then
-            self.absorbForward:SetMinMaxValues(0, maxHealth)
-        end
+        if self.absorbForward then self.absorbForward:SetMinMaxValues(0, maxHealth) end
 
         local absorbValue = absorbAmt or 0
         if absorbValue <= 0 then
+            self._absorbHidden = true
             self.absorb:Hide()
-            if self.absorbForward then
-                self.absorbForward:Hide()
-            end
-            if self.absorbOverflow then
-                self.absorbOverflow:Hide()
-                self.absorbOverflow:SetWidth(0)
-            end
-            if self.absorbOverflowDivider then
-                self.absorbOverflowDivider:Hide()
-            end
+            if self.absorbForward then self.absorbForward:Hide() end
+            if self.absorbOverflow then self.absorbOverflow:Hide(); self.absorbOverflow:SetWidth(0) end
+            if self.absorbOverflowDivider then self.absorbOverflowDivider:Hide() end
         else
+            self._absorbHidden = false
             local missing = maxHealth - curHealth
             if missing < 0 then missing = 0 end
-
             local forwardAbsorb = math.min(absorbValue, missing)
             local remainingAbsorb = absorbValue - forwardAbsorb
             if remainingAbsorb < 0 then remainingAbsorb = 0 end
-
             local backfillAbsorb = math.min(remainingAbsorb, curHealth or 0)
             local overflowAbsorb = remainingAbsorb - backfillAbsorb
             if overflowAbsorb < 0 then overflowAbsorb = 0 end
@@ -3709,22 +3854,13 @@ function NameplateFrame:UpdateHealthValues()
                 self.absorbForward:SetPoint("TOPLEFT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
                 self.absorbForward:SetPoint("BOTTOMLEFT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 self.absorbForward:SetValue(forwardAbsorb)
-                if forwardAbsorb > 0 then
-                    self.absorbForward:Show()
-                else
-                    self.absorbForward:Hide()
-                end
+                if forwardAbsorb > 0 then self.absorbForward:Show() else self.absorbForward:Hide() end
             end
-
             self.absorb:SetReverseFill(true)
             self.absorb:SetPoint("TOPRIGHT", self.health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
             self.absorb:SetPoint("BOTTOMRIGHT", self.health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
             self.absorb:SetValue(backfillAbsorb)
-            if backfillAbsorb > 0 then
-                self.absorb:Show()
-            else
-                self.absorb:Hide()
-            end
+            if backfillAbsorb > 0 then self.absorb:Show() else self.absorb:Hide() end
 
             if self.absorbOverflow then
                 self.absorbOverflow:SetMinMaxValues(0, maxHealth)
@@ -3732,15 +3868,11 @@ function NameplateFrame:UpdateHealthValues()
                 if overflowAbsorb > 0 then
                     self.absorbOverflow:Show()
                     self.absorbOverflow:SetWidth(self.health:GetWidth())
-                    if self.absorbOverflowDivider then
-                        self.absorbOverflowDivider:Show()
-                    end
+                    if self.absorbOverflowDivider then self.absorbOverflowDivider:Show() end
                 else
                     self.absorbOverflow:Hide()
                     self.absorbOverflow:SetWidth(0)
-                    if self.absorbOverflowDivider then
-                        self.absorbOverflowDivider:Hide()
-                    end
+                    if self.absorbOverflowDivider then self.absorbOverflowDivider:Hide() end
                 end
             elseif self.absorbOverflowDivider then
                 self.absorbOverflowDivider:Hide()
@@ -3748,11 +3880,12 @@ function NameplateFrame:UpdateHealthValues()
         end
     end
 
-    -- Hash line positioning (target only)
+    -- Hash line positioning (target only).
+    -- PERF: use cached _isTarget flag set by ApplyTarget instead of
+    -- calling UnitIsUnit on every health tick for every plate.
     local hlEnabled = (p and p.hashLineEnabled)
     local hlPct = (p and p.hashLinePercent) or defaults.hashLinePercent
-    local isTarget = unit and UnitIsUnit(unit, "target")
-    if hlEnabled and hlPct and hlPct > 0 and isTarget then
+    if hlEnabled and hlPct and hlPct > 0 and self._isTarget then
         local barW = self.health:GetWidth()
         local xPos = barW * (hlPct / 100)
         self.hashLine:ClearAllPoints()
@@ -3765,105 +3898,40 @@ function NameplateFrame:UpdateHealthValues()
         self.hashLine:Hide()
     end
 
-    -- Compute text strings
-    local pctText, pctNoSignText, numText
-    if UnitIsDeadOrGhost(unit) then
-        pctText = "0%"
-        pctNoSignText = "0"
-        numText = "0"
-    elseif UnitHealthPercent then
-        local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
-        pctText = string.format("%d%%", pctVal)
-        pctNoSignText = string.format("%d", pctVal)
-        numText = AbbreviateNumbers(UnitHealth(unit))
-    else
-        pctText = ""
-        pctNoSignText = ""
-        numText = ""
-    end
-
-    -- Hide all health text first
-    self.hpText:Hide()
-    self.hpNumber:Hide()
-
-    for si = 1, #HP_BAR_SLOTS do
-        local slot = HP_BAR_SLOTS[si]
-        local element = GetTextSlot(slot.key)
-        local txOff, tyOff = GetTextSlotOffsets(slot.key)
-        local slotFontSz = GetTextSlotSize(slot.key)
-        local sr, sg, sb = GetTextSlotColor(slot.key)
-        if element == "healthPercent" or element == "healthPercentNoSign" then
-            self.hpText:SetParent(self.healthTextFrame)
-            SetFSFont(self.hpText, slotFontSz, GetNPOutline())
-            self.hpText:SetText(element == "healthPercentNoSign" and pctNoSignText or pctText)
-            self.hpText:ClearAllPoints()
-            if slot.anchor == "CENTER" then
-                self.hpText:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
-            else
-                PP.Point(self.hpText, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
-            end
-            self.hpText:SetJustifyH(slot.anchor)
-            self.hpText:SetTextColor(sr, sg, sb, 1)
-            self.hpText:Show()
-        elseif element == "healthNumber" then
-            self.hpNumber:SetParent(self.healthTextFrame)
-            SetFSFont(self.hpNumber, slotFontSz, GetNPOutline())
-            self.hpNumber:SetText(numText)
-            self.hpNumber:ClearAllPoints()
-            if slot.anchor == "CENTER" then
-                self.hpNumber:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
-            else
-                PP.Point(self.hpNumber, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
-            end
-            self.hpNumber:SetJustifyH(slot.anchor)
-            self.hpNumber:SetTextColor(sr, sg, sb, 1)
-            self.hpNumber:Show()
-        elseif element == "healthPctNum" or element == "healthNumPct" then
-            self.hpText:SetParent(self.healthTextFrame)
-            SetFSFont(self.hpText, slotFontSz, GetNPOutline())
-            SetCombinedHealthText(self.hpText, element, pctText, numText)
-            self.hpText:ClearAllPoints()
-            if slot.anchor == "CENTER" then
-                self.hpText:SetPoint("CENTER", self.health, "CENTER", txOff, tyOff)
-            else
-                PP.Point(self.hpText, slot.anchor, self.health, slot.point, slot.xOff + txOff, tyOff)
-            end
-            self.hpText:SetJustifyH(slot.anchor)
-            self.hpText:SetTextColor(sr, sg, sb, 1)
-            self.hpText:Show()
-        end
-    end
-
-    -- Process top slot for health elements
-    local topElement = GetTextSlot("textSlotTop")
-    if topElement == "healthPercent" or topElement == "healthPercentNoSign" or topElement == "healthNumber"
-       or topElement == "healthPctNum" or topElement == "healthNumPct" then
-        local nameYOff = GetNameYOffset()
-        local cpPush = GetClassPowerTopPush(self)
-        local txOff, tyOff = GetTextSlotOffsets("textSlotTop")
-        local topFontSz = GetTextSlotSize("textSlotTop")
-        local tr, tg, tb = GetTextSlotColor("textSlotTop")
-        local fs
-        if topElement == "healthNumber" then
-            fs = self.hpNumber
-            fs:SetText(numText)
+    -- PERF: Text content only -- appearance (font, position, color) is set in
+    -- ApplyHealthTextAppearance, called from ApplyAppearance.  This path runs
+    -- on every UNIT_HEALTH tick so it must be as lean as possible.
+    local ca = self._cachedHealthSlots
+    if ca and ca._count > 0 then
+        local pctText, pctNoSignText, numText
+        if UnitIsDeadOrGhost(unit) then
+            pctText = "0%"
+            pctNoSignText = "0"
+            numText = "0"
+        elseif UnitHealthPercent then
+            local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
+            pctText = string.format("%d%%", pctVal)
+            pctNoSignText = string.format("%d", pctVal)
+            numText = AbbreviateNumbers(UnitHealth(unit))
         else
-            fs = self.hpText
-            if topElement == "healthPercent" then
+            pctText = ""
+            pctNoSignText = ""
+            numText = ""
+        end
+        for si = 1, ca._count do
+            local entry = ca[si]
+            local el = entry.element
+            local fs = entry.fs
+            if el == "healthPercent" then
                 fs:SetText(pctText)
-            elseif topElement == "healthPercentNoSign" then
+            elseif el == "healthPercentNoSign" then
                 fs:SetText(pctNoSignText)
-            else
-                SetCombinedHealthText(fs, topElement, pctText, numText)
+            elseif el == "healthNumber" then
+                fs:SetText(numText)
+            elseif el == "healthPctNum" or el == "healthNumPct" then
+                SetCombinedHealthText(fs, el, pctText, numText)
             end
         end
-        SetFSFont(fs, topFontSz, GetNPOutline())
-        fs:SetParent(self.topTextFrame)
-        fs:ClearAllPoints()
-        PP.Point(fs, "BOTTOM", self.health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
-        fs:SetJustifyH("CENTER")
-        fs:SetTextColor(tr, tg, tb, 1)
-        fs:Show()
     end
 end
 function NameplateFrame:UpdateHealthColor()
@@ -4100,6 +4168,7 @@ end
 function NameplateFrame:ApplyTarget()
     if not self.unit then return end
     local isTarget = UnitIsUnit(self.unit, "target")
+    self._isTarget = isTarget  -- cached for hot-path hash line check
     local style = GetTargetGlowStyle()
     if isTarget and style ~= "none" then
         EnsureGlow(self)
@@ -4158,11 +4227,56 @@ function NameplateFrame:UpdateAuras(updateInfo)
     local needsFullRefresh = not updateInfo or updateInfo.isFullUpdate or not self._shownAuras
 
     if not needsFullRefresh then
-        local hasRelevantChange = false
-        if updateInfo.addedAuras and #updateInfo.addedAuras > 0 then
-            hasRelevantChange = true
+        -- FAST PATH: if the only changes are duration/stack updates on
+        -- already-displayed auras (no adds, no removes), just refresh
+        -- cooldown + stacks on the existing slots. Skips the full clear +
+        -- rebuild + reposition that costs ~0.3ms per call.
+        -- Only count added auras as relevant if any are from the player
+        -- (or if showAllDebuffs is on, or if it's a buff/CC the filter would
+        -- pick up). In a 20-man raid, other players' debuffs fire addedAuras
+        -- constantly but none of them will be displayed on our plate.
+        local hasAdds = false
+        if updateInfo.addedAuras then
+            for _, aura in ipairs(updateInfo.addedAuras) do
+                if aura.isFromPlayerOrPlayerPet or aura.isHelpful or (aura.dispelName and aura.isHarmful) then
+                    hasAdds = true; break
+                end
+            end
         end
-        if not hasRelevantChange and updateInfo.removedAuraInstanceIDs then
+        local hasRemoves = updateInfo.removedAuraInstanceIDs and #updateInfo.removedAuraInstanceIDs > 0
+        local hasUpdates = updateInfo.updatedAuraInstanceIDs and #updateInfo.updatedAuraInstanceIDs > 0
+
+        if hasUpdates and not hasAdds and not hasRemoves then
+            local allKnown = true
+            for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                if not self._shownAuras[id] then
+                    allKnown = false; break
+                end
+            end
+            if allKnown then
+                -- Duration/stack refresh only: update existing slots in place
+                for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                    local slot = self._shownAuras[id]
+                    if slot then
+                        if slot.cd and C_UnitAuras_GetAuraDuration then
+                            local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                            if durObj and slot.cd.SetCooldownFromDurationObject then
+                                slot.cd:SetCooldownFromDurationObject(durObj)
+                            end
+                            slot._durationObj = durObj
+                        end
+                        if slot.count and C_UnitAuras_GetAuraAppDisplayCount then
+                            slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
+                        end
+                    end
+                end
+                return
+            end
+        end
+
+        -- Standard relevance check for adds/removes/updates
+        local hasRelevantChange = hasAdds
+        if not hasRelevantChange and hasRemoves then
             for _, id in ipairs(updateInfo.removedAuraInstanceIDs) do
                 if self._shownAuras[id] then
                     hasRelevantChange = true
@@ -4170,7 +4284,8 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 end
             end
         end
-        if not hasRelevantChange and updateInfo.updatedAuraInstanceIDs then
+        if not hasRelevantChange and hasUpdates then
+            -- Updates on non-displayed auras (allKnown was false above)
             for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
                 if self._shownAuras[id] then
                     hasRelevantChange = true
@@ -4189,79 +4304,34 @@ function NameplateFrame:UpdateAuras(updateInfo)
         wipe(self._shownAuras)
     end
 
-    for i = 1, 4 do
-        local dSlot = self.debuffs[i]
-        local bSlot = self.buffs[i]
-        dSlot:Hide()
-        dSlot.icon:SetTexture(nil)
-        if dSlot.pandemicGlow and dSlot.pandemicGlow.active then
-            ns.StopPandemicGlow(dSlot)
-        end
-        dSlot._durationObj = nil
-        bSlot:Hide()
-        bSlot.icon:SetTexture(nil)
-        if bSlot.dispelGlow and bSlot.dispelGlow.active then
-            ns.StopDispelGlow(bSlot)
-        end
-        local dCd = dSlot.cd
-        if dCd then
-            if dCd.SetDrawSwipe then dCd:SetDrawSwipe(false) end
-            if dCd.Clear then dCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(dCd)
-            else dCd:SetCooldown(0, 0) end
-            dCd:Hide()  -- prevent stale-swipe black-box render on pool reuse
-        end
-        local bCd = bSlot.cd
-        if bCd then
-            if bCd.SetDrawSwipe then bCd:SetDrawSwipe(false) end
-            if bCd.Clear then bCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(bCd)
-            else bCd:SetCooldown(0, 0) end
-            bCd:Hide()
-        end
-    end
-    for i = 1, 2 do
-        local ccSlot = self.cc[i]
-        ccSlot:Hide()
-        ccSlot.icon:SetTexture(nil)
-        local cCd = ccSlot.cd
-        if cCd then
-            if cCd.SetDrawSwipe then cCd:SetDrawSwipe(false) end
-            if cCd.Clear then cCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(cCd)
-            else cCd:SetCooldown(0, 0) end
-            cCd:Hide()
-        end
-    end
+    -- Only reset slots that were previously active (tracked via _prevCounts).
+    local prevD = self._prevDebuffCount or 4
+    local prevB = self._prevBuffCount or 4
+    local prevCC = self._prevCCCount or 2
+    for i = 1, prevD do ClearAuraSlot(self.debuffs[i]) end
+    for i = 1, prevB do ClearAuraSlot(self.buffs[i]) end
+    for i = 1, prevCC do ClearAuraSlot(self.cc[i]) end
+
     -- Get slot assignments; skip processing for any slot set to "none"
     local debuffSlotVal, buffSlotVal, ccSlotVal = GetAuraSlots()
     local dIdx = 1
+
+    -----------------------------------------------------------------------
+    --  Debuffs: build importantSet via cached callback (zero closure alloc),
+    --  then iterate importantSet with GetAuraDataByAuraInstanceID (zero
+    --  GetUnitAuras table alloc). showAll mode falls back to GetUnitAuras.
+    -----------------------------------------------------------------------
     if debuffSlotVal ~= "none" then
     local showAll = p and p.showAllDebuffs
-    -- Build the important set from Blizzard's debuffList synchronously.
-    -- The debuffList is already current when UNIT_AURA fires.
-    local importantSet
-    if not showAll and self.nameplate then
-        if not self._importantSet then self._importantSet = {} end
-        importantSet = self._importantSet
-        wipe(importantSet)
-        local uf = self.nameplate.UnitFrame
-        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
-            if not self._iterateCB then
-                self._iterateCB = function(auraInstanceID)
-                    self._importantSet[auraInstanceID] = true
-                end
-            end
-            uf.AurasFrame.debuffList:Iterate(self._iterateCB)
-        end
-    end
-    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
-        if allDebuffs then
-            for _, aura in ipairs(allDebuffs) do
-                if dIdx > 4 then break end
-                local id = aura and aura.auraInstanceID
-                if id and aura.icon and (showAll or (importantSet and importantSet[id])) then
+    if showAll then
+        -- showAll mode: must scan all player debuffs
+        if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+            local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
+            if allDebuffs then
+                for _, aura in ipairs(allDebuffs) do
+                    if dIdx > 4 then break end
+                    local id = aura and aura.auraInstanceID
+                    if id and aura.icon then
                         local slot = self.debuffs[dIdx]
                         slot.icon:SetTexture(aura.icon)
                         slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4277,17 +4347,66 @@ function NameplateFrame:UpdateAuras(updateInfo)
                                 cd:Show()
                             end
                             slot._durationObj = durObj
-                        else
-                            slot._durationObj = nil
                         end
                         slot:Show()
-                        self._shownAuras[id] = true
+                        self._shownAuras[id] = slot
                         dIdx = dIdx + 1
+                    end
+                end
+            end
+        end
+    else
+        -- Normal mode: build importantSet from Blizzard's debuffList (cached
+        -- callback), then intersect with HARMFUL|PLAYER (C-side filter handles
+        -- secret isFromPlayerOrPlayerPet correctly). One GetUnitAuras call but
+        -- only process the intersection.
+        local uf = self.nameplate.UnitFrame
+        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
+            if not self._importantSet then self._importantSet = {} end
+            local importantSet = self._importantSet
+            wipe(importantSet)
+            if not self._iterateCB then
+                self._iterateCB = function(auraInstanceID)
+                    self._importantSet[auraInstanceID] = true
+                end
+            end
+            uf.AurasFrame.debuffList:Iterate(self._iterateCB)
+            -- HARMFUL|PLAYER: C-side filter ensures only player debuffs.
+            -- Intersect with importantSet to show only important player debuffs.
+            if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+                local allPlayerDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
+                if allPlayerDebuffs then
+                    for _, aura in ipairs(allPlayerDebuffs) do
+                        if dIdx > 4 then break end
+                        local id = aura and aura.auraInstanceID
+                        if id and aura.icon and importantSet[id] then
+                            local slot = self.debuffs[dIdx]
+                            slot.icon:SetTexture(aura.icon)
+                            slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                            if C_UnitAuras_GetAuraAppDisplayCount then
+                                slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
+                            end
+                            local cd = slot.cd
+                            if cd and C_UnitAuras_GetAuraDuration then
+                                local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                                if durObj and cd.SetCooldownFromDurationObject then
+                                    if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+                                    cd:SetCooldownFromDurationObject(durObj)
+                                    cd:Show()
+                                end
+                                slot._durationObj = durObj
+                            end
+                            slot:Show()
+                            self._shownAuras[id] = slot
+                            dIdx = dIdx + 1
+                        end
+                    end
                 end
             end
         end
     end
     local debuffCount = dIdx - 1
+    self._prevDebuffCount = debuffCount
     if debuffCount > 0 then
         local spacing = GetAuraSpacing()
         local debuffSz = GetDebuffIconSize()
@@ -4296,47 +4415,40 @@ function NameplateFrame:UpdateAuras(updateInfo)
         end
         PositionAuraSlot(self.debuffs, debuffCount, debuffSlotVal, self, debuffSz, debuffSz, spacing, GetAuraSlotOffsets("debuffSlot"))
     end
-    -- Pandemic glow check for debuffs
+    -- Pandemic glow check for shown debuffs only
     local pandemicEnabled = GetPandemicGlow()
-    for i = 1, 4 do
-        local slot = self.debuffs[i]
-        local pg = slot.pandemicGlow
-        if i <= (dIdx - 1) and pandemicEnabled then
-            ns.ApplyPandemicGlow(slot)
-        else
-            if pg and pg.active then
-                ns.StopPandemicGlow(slot)
-            end
+    for i = 1, debuffCount do
+        if pandemicEnabled then
+            ns.ApplyPandemicGlow(self.debuffs[i])
         end
     end
     end -- debuffSlotVal ~= "none"
+
+    -----------------------------------------------------------------------
+    --  Buffs: build importantBuffSet via cached callback, iterate with
+    --  GetAuraDataByAuraInstanceID (same pattern as debuffs).
+    -----------------------------------------------------------------------
+    local bIdx = 1
     if buffSlotVal ~= "none" then
-    if UnitCanAttack("player", unit) and C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        -- Build important buff set from Blizzard's buffList (same approach
-        -- as debuffs above). Only show buffs Blizzard considers important.
-        local importantBuffSet
-        if self.nameplate then
-            local uf = self.nameplate.UnitFrame
-            if uf and uf.AurasFrame and uf.AurasFrame.buffList and uf.AurasFrame.buffList.Iterate then
-                if not self._importantBuffSet then self._importantBuffSet = {} end
-                importantBuffSet = self._importantBuffSet
-                wipe(importantBuffSet)
-                if not self._buffIterateCB then
-                    self._buffIterateCB = function(auraInstanceID)
-                        self._importantBuffSet[auraInstanceID] = true
-                    end
+    if UnitCanAttack("player", unit) then
+        local uf = self.nameplate.UnitFrame
+        if uf and uf.AurasFrame and uf.AurasFrame.buffList and uf.AurasFrame.buffList.Iterate then
+            if not self._importantBuffSet then self._importantBuffSet = {} end
+            local importantBuffSet = self._importantBuffSet
+            wipe(importantBuffSet)
+            if not self._buffIterateCB then
+                self._buffIterateCB = function(auraInstanceID)
+                    self._importantBuffSet[auraInstanceID] = true
                 end
-                uf.AurasFrame.buffList:Iterate(self._buffIterateCB)
             end
-        end
-        local allBuffs = C_UnitAuras.GetUnitAuras(unit, "HELPFUL")
-        local bIdx = 1
-        if allBuffs then
-            for _, aura in ipairs(allBuffs) do
+            uf.AurasFrame.buffList:Iterate(self._buffIterateCB)
+            local _getAura = C_UnitAuras.GetAuraDataByAuraInstanceID
+            local dispelGlowOn = ns.GetDispelGlow()
+            local buffSz = GetBuffIconSize()
+            for id in pairs(importantBuffSet) do
                 if bIdx > 4 then break end
-                local id = aura and aura.auraInstanceID
-                if id and aura.icon
-                    and (importantBuffSet and importantBuffSet[id]) then
+                local aura = _getAura(unit, id)
+                if aura and aura.icon then
                     local slot = self.buffs[bIdx]
                     slot.icon:SetTexture(aura.icon)
                     slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4353,13 +4465,12 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         end
                     end
                     slot:Show()
-                    self._shownAuras[id] = true
-                    -- Dispellable buff glow
-                    local canDispel, typeColor = ns.CanDispelAura(unit, aura)
-                    if ns.GetDispelGlow() and canDispel then
-                        ns.StartDispelGlow(slot, GetBuffIconSize(), typeColor)
-                    elseif slot.dispelGlow and slot.dispelGlow.active then
-                        ns.StopDispelGlow(slot)
+                    self._shownAuras[id] = slot
+                    if dispelGlowOn then
+                        local canDispel, typeColor = ns.CanDispelAura(unit, aura)
+                        if canDispel then
+                            ns.StartDispelGlow(slot, buffSz, typeColor)
+                        end
                     end
                     bIdx = bIdx + 1
                 end
@@ -4367,6 +4478,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
         end
     end
     end -- buffSlotVal ~= "none"
+    local buffCount = bIdx - 1
+    self._prevBuffCount = buffCount
+
+    -----------------------------------------------------------------------
+    --  CC: still needs GetUnitAuras (no Blizzard list to iterate), but
+    --  CC auras are rare (0-2 per unit). Minimal allocation cost.
+    -----------------------------------------------------------------------
     local ccShown = 0
     if ccSlotVal ~= "none" then
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then
@@ -4390,24 +4508,22 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         end
                     end
                     slot:Show()
-                    self._shownAuras[aura.auraInstanceID] = true
+                    self._shownAuras[aura.auraInstanceID] = slot
                 end
             end
         end
     end
     end -- ccSlotVal ~= "none"
+    self._prevCCCount = ccShown
+
     -- Reposition buffs and CC based on actual shown counts
-    if buffSlotVal ~= "none" then
-        local buffCount = 0
-        for i = 1, 4 do if self.buffs[i]:IsShown() then buffCount = buffCount + 1 end end
-        if buffCount > 0 then
-            local spacing = GetAuraSpacing()
-            local buffSz = GetBuffIconSize()
-            for i = 1, buffCount do
-                PP.Size(self.buffs[i], buffSz, buffSz)
-            end
-            PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
+    if buffSlotVal ~= "none" and buffCount > 0 then
+        local spacing = GetAuraSpacing()
+        local buffSz = GetBuffIconSize()
+        for i = 1, buffCount do
+            PP.Size(self.buffs[i], buffSz, buffSz)
         end
+        PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
     end
     if ccSlotVal ~= "none" and ccShown > 0 then
         local spacing = GetAuraSpacing()
@@ -4496,10 +4612,6 @@ function NameplateFrame:UpdateCast()
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
     local isChannel = false
     local isEmpowered = false
-    -- type(name) == "nil" is the taint-safe pattern for secret strings:
-    -- type() returns a plain string ("string" / "nil"), so comparing that
-    -- to "nil" never touches the secret value itself. Direct equality on
-    -- the secret string ("" or another string literal) taints.
     if type(name) == "nil" then
         name, _, texture, _, _, _, kickProtected, castSpellID = UnitChannelInfo(self.unit)
         isChannel = true
@@ -4516,18 +4628,17 @@ function NameplateFrame:UpdateCast()
                 fallbackCastCount = fallbackCastCount - 1
                 if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
             end
-            NotifyCastEnded()
+            NotifyCastEnded(self)
         end
         self.isCasting = false
         self._castTex = nil
+        self._castDirtyFull = nil
         self:HideKickTick()
         self:ClearImportantCastGlow()
         self:ApplyScale()
-        -- Reposition class power pips (cast bar gone, pips move back to health bar)
         if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
             UpdateClassPowerOnPlate(self)
         end
-        -- Release elevated cast overlay (cast ended)
         if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
         return
     end
@@ -4540,70 +4651,74 @@ function NameplateFrame:UpdateCast()
         end
     end
 
-    self.cast:Show()
-    if type(texture) ~= "nil" then
-        self._castTex = texture
-        self.castIcon:SetTexture(texture)
-    elseif self._castTex then
-        self.castIcon:SetTexture(self._castTex)
-    elseif castSpellID then
-        local info = C_Spell.GetSpellInfo(castSpellID)
-        if info and info.iconID then
-            self._castTex = info.iconID
-            self.castIcon:SetTexture(info.iconID)
-        end
-    end
-    self.castName:SetText(type(name) ~= "nil" and name or "")
-    
-    -- Get the cast target name and class for display.
-    -- UnitShouldDisplaySpellTargetName gates whether the target is
-    -- available; UnitSpellTargetName returns a secret value -- pass
-    -- directly to SetText (which accepts secrets).
-    local spellTarget, spellTargetClass
-    if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(self.unit) then
-        local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
-        if rawTarget then
-            spellTarget = rawTarget
-            spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
-        end
-    end
-    local hasTarget = spellTarget and true or false
-    self.castTarget:SetText(spellTarget or "")
+    -- FAST PATH: on DELAYED/UPDATE events (not START), the icon, name,
+    -- target, and glow haven't changed. Only the duration needs updating.
+    -- _castDirtyFull is set by UNIT_SPELLCAST_START/CHANNEL_START/EMPOWER_START.
+    local isFullSetup = self._castDirtyFull or not self.isCasting
+    self._castDirtyFull = nil
 
-    -- Apply class color to cast target text if enabled and target is a player
-    local db = p or defaults
-    local useClassColor = defaults.castTargetClassColor
-    if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
-    if useClassColor then
-        local appliedCTC = false
-        if spellTargetClass and C_ClassColor then
-            local c = C_ClassColor.GetClassColor(spellTargetClass)
-            if c then
-                self.castTarget:SetTextColor(c:GetRGB())
-                appliedCTC = true
+    if isFullSetup then
+        self.cast:Show()
+        local _isv = issecretvalue
+        local texClean = texture ~= nil and not (_isv and _isv(texture))
+        if texClean then
+            self._castTex = texture
+            self.castIcon:SetTexture(texture)
+        elseif self._castTex then
+            self.castIcon:SetTexture(self._castTex)
+        elseif castSpellID then
+            local info = C_Spell.GetSpellInfo(castSpellID)
+            if info and info.iconID then
+                self._castTex = info.iconID
+                self.castIcon:SetTexture(info.iconID)
             end
         end
-        if not appliedCTC then
-            self.castTarget:SetTextColor(1, 1, 1, 1)
+        self.castName:SetText(type(name) ~= "nil" and name or "")
+
+        local spellTarget, spellTargetClass
+        if UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(self.unit) then
+            local rawTarget = UnitSpellTargetName and UnitSpellTargetName(self.unit)
+            if rawTarget then
+                spellTarget = rawTarget
+                spellTargetClass = UnitSpellTargetClass and UnitSpellTargetClass(self.unit)
+            end
         end
-    else
-        local ctc = (db and db.castTargetColor) or defaults.castTargetColor
-        self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
-    end
+        local hasTarget = spellTarget and true or false
+        self.castTarget:SetText(spellTarget or "")
 
-    -- All three zones are independent: show/hide based on their own conditions
-    self.castTarget:SetShown(hasTarget)
-    self.castTimer:SetShown(self._showCastTimer)
+        local db = p or defaults
+        local useClassColor = defaults.castTargetClassColor
+        if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
+        if useClassColor then
+            local appliedCTC = false
+            if spellTargetClass and C_ClassColor then
+                local c = C_ClassColor.GetClassColor(spellTargetClass)
+                if c then
+                    self.castTarget:SetTextColor(c:GetRGB())
+                    appliedCTC = true
+                end
+            end
+            if not appliedCTC then
+                self.castTarget:SetTextColor(1, 1, 1, 1)
+            end
+        else
+            local ctc = (db and db.castTargetColor) or defaults.castTargetColor
+            self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
+        end
 
-    if type(kickProtected) == "nil" then
-        kickProtected = false
+        self.castTarget:SetShown(hasTarget)
+        self.castTimer:SetShown(self._showCastTimer)
+
+        if type(kickProtected) == "nil" then
+            kickProtected = false
+        end
+        self._kickProtected = kickProtected
+        local cfg = p or defaults
+        local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        self.castBarOverlay:SetVertexColor(unintColor.r, unintColor.g, unintColor.b)
+        self.castShieldFrame:Show()
+        self:ApplyCastColor(kickProtected)
     end
-    self._kickProtected = kickProtected
-    local cfg = p or defaults
-    local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
-    self.castBarOverlay:SetVertexColor(unintColor.r, unintColor.g, unintColor.b)
-    self.castShieldFrame:Show()
-    self:ApplyCastColor(kickProtected)
     
     if UnitCastingDuration and self.cast.SetTimerDuration then
         if isChannel then
@@ -4628,7 +4743,7 @@ function NameplateFrame:UpdateCast()
                     and Enum.StatusBarTimerDirection.ElapsedTime
                     or Enum.StatusBarTimerDirection.RemainingTime
                 self.cast:SetTimerDuration(castDuration, nil, direction)
-                if not self.isCasting then NotifyCastStarted() end
+                if not self.isCasting then NotifyCastStarted(self) end
                 self.isCasting = true
             end
         else
@@ -4637,7 +4752,7 @@ function NameplateFrame:UpdateCast()
                 self.cast:SetReverseFill(false)
                 self.cast:SetTimerDuration(castDuration, nil, Enum.StatusBarTimerDirection.ElapsedTime)
             end
-            if not self.isCasting then NotifyCastStarted() end
+            if not self.isCasting then NotifyCastStarted(self) end
             self.isCasting = true
         end
     else
@@ -4647,19 +4762,18 @@ function NameplateFrame:UpdateCast()
             _fallbackPlates[self] = true
             fallbackCastCount = fallbackCastCount + 1
             castFallbackFrame:Show()
-            NotifyCastStarted()
+            NotifyCastStarted(self)
         end
     end
-    self:ApplyScale()
-    self:UpdateKickTick(kickProtected, isChannel, isEmpowered)
-    -- Important cast glow
-    self:UpdateImportantCastGlow(castSpellID)
-    -- Reposition class power pips (cast bar now visible, pips move below it)
-    if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
-        UpdateClassPowerOnPlate(self)
+    if isFullSetup then
+        self:ApplyScale()
+        self:UpdateKickTick(kickProtected, isChannel, isEmpowered)
+        self:UpdateImportantCastGlow(castSpellID)
+        if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
+            UpdateClassPowerOnPlate(self)
+        end
+        if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
     end
-    -- Refresh elevated cast overlay (acquires/releases as needed)
-    if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
 end
 function NameplateFrame:ApplyScale()
     local base = 1
@@ -4828,7 +4942,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             fallbackCastCount = fallbackCastCount - 1
             if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
         end
-        NotifyCastEnded()
+        NotifyCastEnded(self)
     end
     self.isCasting = false
     self:HideKickTick()
@@ -4913,27 +5027,84 @@ function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()
     self:UpdateHealthValues()
 end
 function NameplateFrame:UNIT_AURA(_, updateInfo)
+    -- PERF: If we have the RefreshAuras hook installed (enemy plates), defer
+    -- full rebuilds to the hook which fires AFTER Blizzard updates debuffList.
+    -- The incremental fast path (updates to existing auras) runs here since
+    -- it doesn't depend on debuffList.
+    if self._hasRefreshAurasHook and updateInfo and not updateInfo.isFullUpdate and self._shownAuras then
+        -- Try incremental fast path only (no full rebuilds from UNIT_AURA)
+        local hasAdds = false
+        if updateInfo.addedAuras then
+            for _, aura in ipairs(updateInfo.addedAuras) do
+                if aura.isFromPlayerOrPlayerPet or aura.isHelpful or (aura.dispelName and aura.isHarmful) then
+                    hasAdds = true; break
+                end
+            end
+        end
+        local hasRemoves = updateInfo.removedAuraInstanceIDs and #updateInfo.removedAuraInstanceIDs > 0
+        local hasUpdates = updateInfo.updatedAuraInstanceIDs and #updateInfo.updatedAuraInstanceIDs > 0
+        if hasUpdates and not hasAdds and not hasRemoves then
+            local allKnown = true
+            for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                if not self._shownAuras[id] then allKnown = false; break end
+            end
+            if allKnown then
+                -- Duration/stack refresh only
+                local unit = self.unit
+                for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
+                    local slot = self._shownAuras[id]
+                    if slot then
+                        if slot.cd and C_UnitAuras_GetAuraDuration then
+                            local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                            if durObj and slot.cd.SetCooldownFromDurationObject then
+                                slot.cd:SetCooldownFromDurationObject(durObj)
+                            end
+                            slot._durationObj = durObj
+                        end
+                        if slot.count and C_UnitAuras_GetAuraAppDisplayCount then
+                            slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
+                        end
+                    end
+                end
+                return
+            end
+        end
+        -- Adds/removes: defer to RefreshAuras hook where debuffList is
+        -- guaranteed current. Reading debuffList here races with Blizzard's
+        -- processing and causes auras to not display on other plates.
+        self._pendingAuraUpdate = updateInfo
+        -- Fallback: if RefreshAuras doesn't fire (e.g. Blizzard's UnitFrame
+        -- suppressed), process next frame.
+        if not self._auraFallbackPending then
+            self._auraFallbackPending = true
+            if not self._auraFallbackCB then
+                self._auraFallbackCB = function()
+                    self._auraFallbackPending = nil
+                    if self._pendingAuraUpdate and self.unit then
+                        local pending = self._pendingAuraUpdate
+                        self._pendingAuraUpdate = nil
+                        self:UpdateAuras(pending)
+                    end
+                end
+            end
+            C_Timer.After(0, self._auraFallbackCB)
+        end
+        return
+    end
     self:UpdateAuras(updateInfo)
 end
 function NameplateFrame:UNIT_NAME_UPDATE()
     self:UpdateName()
 end
-function NameplateFrame:LOSS_OF_CONTROL_UPDATE()
-    self:UpdateAuras()
-end
-function NameplateFrame:LOSS_OF_CONTROL_ADDED()
-    self:UpdateAuras()
-end
 function NameplateFrame:UNIT_THREAT_LIST_UPDATE()
     self:UpdateHealthColor()
 end
-function NameplateFrame:UNIT_FLAGS()
-    self:UpdateHealthColor()
-end
 function NameplateFrame:UNIT_SPELLCAST_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_CHANNEL_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_DELAYED()
@@ -4956,7 +5127,7 @@ function NameplateFrame:UNIT_SPELLCAST_CHANNEL_STOP()
             fallbackCastCount = fallbackCastCount - 1
             if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
         end
-        NotifyCastEnded()
+        NotifyCastEnded(self)
     end
     self.isCasting = false
     self:HideKickTick()
@@ -4984,6 +5155,7 @@ function NameplateFrame:UNIT_SPELLCAST_NOT_INTERRUPTIBLE()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_START()
+    self._castDirtyFull = true
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_UPDATE()
@@ -4992,6 +5164,37 @@ end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_STOP()
     self:UpdateCast()
 end
+
+-------------------------------------------------------------------------------
+--  Centralized cast event dispatcher: registers all 13 SPELLCAST events ONCE
+--  globally instead of 13 RegisterUnitEvent calls per plate. On each event,
+--  looks up ns.plates[unit] (O(1) hash) and dispatches to the plate's handler.
+--  Same approach as Platynator's Cache system.
+-------------------------------------------------------------------------------
+do
+    local castDispatcher = CreateFrame("Frame")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_START")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_DELAYED")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_STOP")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_FAILED")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_CHANNEL_UPDATE")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_EMPOWER_START")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_EMPOWER_UPDATE")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_EMPOWER_STOP")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_INTERRUPTIBLE")
+    castDispatcher:RegisterEvent("UNIT_SPELLCAST_NOT_INTERRUPTIBLE")
+    castDispatcher:SetScript("OnEvent", function(_, event, unit, ...)
+        local plate = ns.plates[unit]
+        if not plate then return end
+        local handler = plate[event]
+        if handler then handler(plate, unit, ...) end
+    end)
+    ns._castDispatcher = castDispatcher
+end
+
 local manager = CreateFrame("Frame")
 manager:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 manager:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
@@ -5182,11 +5385,11 @@ function ns.RefreshFriendlyNameOnlyOffset()
             if yOff ~= 0 then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)
-                nameplate._enoYOffset = true
-            elseif nameplate._enoYOffset then
+                _npYOffsetState[nameplate] = true
+            elseif _npYOffsetState[nameplate] then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, 0)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, 0)
-                nameplate._enoYOffset = nil
+                _npYOffsetState[nameplate] = nil
             end
         end
     end
@@ -5231,7 +5434,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
                 if yOff ~= 0 and nameplate.UnitFrame then
                     nameplate.UnitFrame:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                     nameplate.UnitFrame:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)
-                    nameplate._enoYOffset = true
+                    _npYOffsetState[nameplate] = true
                 end
                 -- Font is applied globally via SystemFont_NamePlate override
             end
@@ -5261,13 +5464,13 @@ manager:SetScript("OnEvent", function(self, event, unit)
             ns.RestoreNPCHealthBar(nameplate)
         end
         -- Restore name-only Y-offset if we applied one
-        if nameplate and nameplate._enoYOffset then
+        if nameplate and _npYOffsetState[nameplate] then
             local uf = nameplate.UnitFrame
             if uf then
                 uf:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, 0)
                 uf:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, 0)
             end
-            nameplate._enoYOffset = nil
+            _npYOffsetState[nameplate] = nil
         end
         pendingUnits[unit] = nil
         if pendingWatchers[unit] then
@@ -5287,24 +5490,51 @@ manager:SetScript("OnEvent", function(self, event, unit)
                     mouseoverTicker = nil
                 end
             end
+            -- Clear cached refs before release
+            if ns._cachedTargetPlate == plate then ns._cachedTargetPlate = nil end
+            if ns._cachedFocusPlate  == plate then ns._cachedFocusPlate  = nil end
             plate:ClearUnit()
             frameCache:Release(plate)
             ns.plates[unit] = nil
         end
         if ns.RemoveFriendlyPlate then ns.RemoveFriendlyPlate(unit) end
     elseif event == "PLAYER_TARGET_CHANGED" then
+        -- PERF: only update old + new target plates instead of iterating all
+        local oldTarget = ns._cachedTargetPlate
+        ns._cachedTargetPlate = nil
+        -- Find new target plate
         for _, plate in pairs(ns.plates) do
-            plate:ApplyTarget()
-            plate:UpdateHealthColor()
+            if plate.unit and UnitIsUnit(plate.unit, "target") then
+                ns._cachedTargetPlate = plate
+                break
+            end
+        end
+        if oldTarget and oldTarget.unit then
+            oldTarget:ApplyTarget()
+            oldTarget:UpdateHealthColor()
+        end
+        if ns._cachedTargetPlate and ns._cachedTargetPlate ~= oldTarget then
+            ns._cachedTargetPlate:ApplyTarget()
+            ns._cachedTargetPlate:UpdateHealthColor()
         end
     elseif event == "PLAYER_FOCUS_CHANGED" then
+        -- PERF: only update old + new focus plates instead of iterating all
+        local oldFocus = ns._cachedFocusPlate
+        ns._cachedFocusPlate = nil
         local focusPct = GetFocusCastHeight()
+        -- Find new focus plate
         for _, plate in pairs(ns.plates) do
+            if plate.unit and UnitIsUnit(plate.unit, "focus") then
+                ns._cachedFocusPlate = plate
+                break
+            end
+        end
+        local function UpdateFocusPlate(plate)
+            if not plate or not plate.unit then return end
             plate:UpdateHealthColor()
-            -- Refresh cast bar height for focus multiplier (old + new focus)
             if focusPct ~= 100 then
                 local castH = GetCastBarHeight()
-                if plate.unit and UnitIsUnit(plate.unit, "focus") then
+                if UnitIsUnit(plate.unit, "focus") then
                     castH = math.floor(castH * focusPct / 100 + 0.5)
                 end
                 plate.cast:SetHeight(castH)
@@ -5312,6 +5542,10 @@ manager:SetScript("OnEvent", function(self, event, unit)
                 plate.castSpark:SetHeight(castH)
                 plate.kickMarker:SetHeight(castH)
             end
+        end
+        UpdateFocusPlate(oldFocus)
+        if ns._cachedFocusPlate and ns._cachedFocusPlate ~= oldFocus then
+            UpdateFocusPlate(ns._cachedFocusPlate)
         end
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
         UpdateMouseover()
@@ -5453,6 +5687,10 @@ do
     specLoginFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     specLoginFrame:SetScript("OnEvent", function(_, event, unit)
         if unit ~= "player" then return end
+        -- Re-read profile reference: spec swap may have changed the
+        -- active profile. Without this, all color lookups via _C()
+        -- read stale data from the old spec's profile.
+        p = ENP.db.profile
         RefreshThreatCache()
         -- If the framework handler is registered, let it handle this
         if EllesmereUI and EllesmereUI._specSwitchRegistry
@@ -5484,6 +5722,9 @@ function npAddon:OnInitialize()
     end
 end
 function npAddon:OnEnable()
+    -- Re-read profile: PreSeedSpecProfile may have re-pointed db.profile
+    -- to a different table between OnInitialize and OnEnable.
+    p = ENP.db.profile
     SetupAuraCVars()
     ApplyClassPowerSetting()
     -- Apply spec-assigned preset on login (before UI is opened)

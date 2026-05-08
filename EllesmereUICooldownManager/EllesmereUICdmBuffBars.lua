@@ -26,6 +26,15 @@ local _anyStacks    = false
 local function StartGlow(...) if ns.StartNativeGlow then return ns.StartNativeGlow(...) end end
 local function StopGlow(...)  if ns.StopNativeGlow  then return ns.StopNativeGlow(...)  end end
 
+-- External weak-keyed lookup for Blizzard bar FontString refs.
+-- Avoids writing custom properties onto Blizzard StatusBar frames.
+local _blizzBarFS = setmetatable({}, { __mode = "k" })
+local function BBFS(bar)
+    local d = _blizzBarFS[bar]
+    if not d then d = {}; _blizzBarFS[bar] = d end
+    return d
+end
+
 -------------------------------------------------------------------------------
 --  Textures
 -------------------------------------------------------------------------------
@@ -38,6 +47,8 @@ local TBB_TEXTURES = {
     ["atrocity"]      = TBB_TEX_BASE .. "atrocity.tga",
     ["divide"]        = TBB_TEX_BASE .. "divide.tga",
     ["glass"]         = TBB_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = TBB_TEX_BASE .. "fade-right.tga",
+    ["fade"]          = TBB_TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = TBB_TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TBB_TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TBB_TEX_BASE .. "gradient-bt.tga",
@@ -47,6 +58,7 @@ local TBB_TEXTURES = {
 }
 local TBB_TEXTURE_ORDER = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -60,6 +72,8 @@ local TBB_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -87,14 +101,14 @@ local function GetFont()
 end
 local function GetOutline()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        return EllesmereUI.GetFontOutlineFlag()
+        return EllesmereUI.GetFontOutlineFlag("cdm")
     end
     return "OUTLINE"
 end
 local function SetFont(fs, size)
     if not (fs and fs.SetFont) then return end
     fs:SetFont(GetFont(), size, GetOutline())
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
         fs:SetShadowColor(0, 0, 0, 1)
         fs:SetShadowOffset(1, -1)
     else
@@ -758,7 +772,7 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         if bSz > 0 then
             local PP = EllesmereUI and EllesmereUI.PP
             if PP then
-                if not bar._barBorder._ppBorders then
+                if not PP.GetBorders(bar._barBorder) then
                     PP.CreateBorder(bar._barBorder, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1, bSz)
                 else
                     PP.UpdateBorder(bar._barBorder, bSz, cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1)
@@ -1097,8 +1111,9 @@ end
 local function GetBlizzBarFontStrings(blizzBar)
     if not blizzBar then return nil, nil end
     -- Return cached refs if already discovered (and found)
-    if blizzBar._tbbNameFS then
-        return blizzBar._tbbNameFS, blizzBar._tbbTimerFS
+    local cached = _blizzBarFS[blizzBar]
+    if cached and cached.nameFS then
+        return cached.nameFS, cached.timerFS
     end
     -- Discover by iterating regions. The StatusBar has 2 FontStrings:
     -- 1st FontString = spell name, 2nd FontString = timer text.
@@ -1112,9 +1127,10 @@ local function GetBlizzBarFontStrings(blizzBar)
             if fsIdx == 2 then timerFS = rgn end
         end
     end
-    -- Cache (use false as sentinel for "searched but not found")
-    blizzBar._tbbNameFS  = nameFS or false
-    blizzBar._tbbTimerFS = timerFS or false
+    -- Cache via external table (use false as sentinel for "searched but not found")
+    local d = BBFS(blizzBar)
+    d.nameFS  = nameFS or false
+    d.timerFS = timerFS or false
     return nameFS, timerFS
 end
 
@@ -1211,17 +1227,35 @@ function ns.UpdateTrackedBuffBarTimers()
                         end
                     end
 
-                    -- Name + timer from Blizzard's FontStrings (passthrough)
-                    local blizzNameFS, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
-                    -- Name: passthrough every tick so dynamic buffs (Roll the
-                    -- Bones → Broadside/True Bearing/etc.) update live.
-                    if bar._nameText and bar._nameText:IsShown() and blizzNameFS then
-                        local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
-                        if ok and txt then
-                            bar._nameText:SetText(txt)
+                    -- Name: read from aura data (same source as icon) so the
+                    -- name always matches the actual buff, not the Blizzard
+                    -- frame's font string which can be stale after pool
+                    -- recycling. Falls back to C_Spell for the config spell ID.
+                    if bar._nameText and bar._nameText:IsShown() then
+                        local nameStr
+                        if blzChild and blzChild.auraInstanceID and blzChild.auraDataUnit then
+                            local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID,
+                                blzChild.auraDataUnit, blzChild.auraInstanceID)
+                            if ok and ad and ad.name then nameStr = ad.name end
+                        end
+                        if not nameStr then
+                            local blizzNameFS = GetBlizzBarFontStrings(blizzBar)
+                            if blizzNameFS then
+                                local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
+                                if ok and txt then nameStr = txt end
+                            end
+                        end
+                        if not nameStr and cfg.spellID and cfg.spellID > 0 then
+                            local spInfo = C_Spell.GetSpellInfo(cfg.spellID)
+                            if spInfo then nameStr = spInfo.name end
+                        end
+                        if nameStr then
+                            bar._nameText:SetText(nameStr)
                             bar._nameSet = true
                         end
                     end
+                    -- Timer: passthrough from Blizzard's FontString (changes constantly)
+                    local _, blizzTimerFS = GetBlizzBarFontStrings(blizzBar)
                     -- Timer: passthrough every frame (changes constantly)
                     if cfg.showTimer and bar._timerText and blizzTimerFS then
                         bar._timerText:SetText(blizzTimerFS:GetText())
@@ -1646,4 +1680,5 @@ function ns.RegisterTBBUnlockElements()
         EllesmereUI:RegisterUnlockElements(elements)
     end
 end
+_G._ECME_RegisterTBBUnlock = ns.RegisterTBBUnlockElements
 

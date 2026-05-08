@@ -48,7 +48,6 @@ local QT_DEFAULTS = {
             -- Text colors. All apply via SetTextColor on their respective
             -- FontStrings (titles, objective lines, focus override).
             titleR               = 1.000, titleG = 0.910, titleB = 0.471,  -- FFE878
-            questR               = 0.722, questG = 0.722, questB = 0.722,  -- B8B8B8
             completedR           = 0.251, completedG = 1.000, completedB = 0.349,  -- 40FF59
             focusR               = 0.871, focusG = 0.251, focusB = 1.000,  -- DE40FF
 

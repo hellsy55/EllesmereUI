@@ -52,13 +52,13 @@ do
             end
 
             local title = popup:CreateFontString(nil, "OVERLAY")
-            title:SetFont(FONT, 16, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            title:SetFont(FONT, 16, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             title:SetTextColor(1, 1, 1)
             title:SetPoint("TOP", popup, "TOP", 0, -20)
             title:SetText("CDM Addon Conflict")
 
             local msg = popup:CreateFontString(nil, "OVERLAY")
-            msg:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            msg:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             msg:SetTextColor(1, 1, 1, 0.75)
             msg:SetPoint("TOP", title, "BOTTOM", 0, -14)
             msg:SetWidth(POPUP_W - 60)
@@ -80,7 +80,7 @@ do
             btnBg:SetPoint("BOTTOMRIGHT", -1, 1)
             btnBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
             local btnLbl = btn:CreateFontString(nil, "OVERLAY")
-            btnLbl:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "")
+            btnLbl:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("cdm") or "")
             btnLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
             btnLbl:SetPoint("CENTER")
             btnLbl:SetText("Disable & Reload")
@@ -204,6 +204,11 @@ local _cdmViewerNames = {
 -- Weak keys so entries are collected when frames are recycled.
 local _ecmeFC = setmetatable({}, { __mode = "k" })
 local function FC(f) local c = _ecmeFC[f]; if not c then c = {}; _ecmeFC[f] = c end; return c end
+
+-- Separate weak-keyed table for SetFrameClickThrough mouse-state tracking.
+-- This recurses into Blizzard pool icons parented to CDM bars, so it must
+-- use an external table rather than writing onto the frames directly.
+local _cdmMouseState = setmetatable({}, { __mode = "k" })
 
 -- Access decoration data stored externally by EllesmereUICdmHooks.lua
 -- Populated at runtime (hooks file loads after this file)
@@ -806,6 +811,7 @@ end
 --- GetBarSpellData always has a valid key. No nil window.
 local function ProcessSpecChange(newSpecKey)
     if not newSpecKey then return end
+    ns._spellOrderDirty = true  -- force spell order cache rebuild
 
     -- Atomic swap: write the new key BEFORE rebuilding so every
     -- GetBarSpellData call during the rebuild reads the correct spec.
@@ -1131,13 +1137,14 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
     if entry.shapeGlow then
         -- CDM-specific: read shape mask/border from the icon frame
         local icon = parent
-        local shape = icon._shapeApplied and icon._shapeName or nil
+        local ifc2 = _ecmeFC[icon]
+        local shape = (ifc2 and ifc2.shapeApplied) and (ifc2 and ifc2.shapeName) or nil
         local maskPath   = shape and CDM_SHAPES.masks[shape]
         local borderPath = shape and CDM_SHAPES.borders[shape]
         _G_Glows.StartShapeGlow(overlay, math.min(pW, pH), cr, cg, cb, 1.20, {
             maskPath   = maskPath,
             borderPath = borderPath,
-            shapeMask  = icon._shapeMask,
+            shapeMask  = ifc2 and ifc2.shapeMask,
         })
     elseif entry.procedural then
         local N = opts and opts.N or 8
@@ -1253,7 +1260,8 @@ local function FindOurIconForBlizzChild(barKey, blizzChild)
     local icons = cdmBarIcons[barKey]
     if not icons then return nil end
     for _, icon in ipairs(icons) do
-        local bc = (_ecmeFC[icon] and _ecmeFC[icon].blizzChild) or icon._blizzChild
+        local iifc = _ecmeFC[icon]
+        local bc = iifc and iifc.blizzChild
         if icon == blizzChild or bc == blizzChild then return icon end
     end
     -- Fallback: match by spellID (covers override spells like HST -> Storm Stream)
@@ -1261,12 +1269,12 @@ local function FindOurIconForBlizzChild(barKey, blizzChild)
     if alertSid then
         for _, icon in ipairs(icons) do
             local ifc = _ecmeFC[icon]
-            if (ifc and ifc.spellID or icon._spellID) == alertSid then return icon end
+            if (ifc and ifc.spellID) == alertSid then return icon end
         end
         -- Check override mapping (base spell <-> override)
         for _, icon in ipairs(icons) do
             local ifc = _ecmeFC[icon]
-            local iconSid = ifc and ifc.spellID or icon._spellID
+            local iconSid = ifc and ifc.spellID
             if iconSid and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
                 local ovr = C_SpellBook.FindSpellOverrideByID(iconSid)
                 if ovr and ovr == alertSid then return icon end
@@ -1318,7 +1326,7 @@ local function ShowProcGlow(icon, cr, cg, cb)
 
     -- Per-spell proc glow settings
     -- Force Custom Shape Glow (style 2) for custom-shaped icons
-    local shapeName = icon._shapeName
+    local shapeName = fc and fc.shapeName
     local isCustomShape = shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none"
     local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local fc = _ecmeFC[icon]
@@ -1327,6 +1335,25 @@ local function ShowProcGlow(icon, cr, cg, cb)
         local bk = fc and fc.barKey
         local sd = bk and ns.GetBarSpellData(bk)
         local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+        -- Fallback: sid may be a base/override variant while settings
+        -- are stored under the assigned spell ID.
+        if not ss and sd and sd.spellSettings and sd.assignedSpells then
+            if fc.linkedSpellIDs then
+                for _, lid in ipairs(fc.linkedSpellIDs) do
+                    if sd.spellSettings[lid] then ss = sd.spellSettings[lid]; break end
+                end
+            end
+            if not ss and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                for _, asid in ipairs(sd.assignedSpells) do
+                    if asid and asid > 0 and asid ~= sid
+                       and sd.spellSettings[asid] then
+                        if C_SpellBook.FindSpellOverrideByID(asid) == sid then
+                            ss = sd.spellSettings[asid]; break
+                        end
+                    end
+                end
+            end
+        end
         if ss then
             if ss.procGlow == 0 then return end -- proc glow disabled
             if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
@@ -1387,8 +1414,7 @@ local function InstallProcGlowHooks()
         local cr, cg, cb = PROC_GLOW_COLOR[1], PROC_GLOW_COLOR[2], PROC_GLOW_COLOR[3]
         ShowProcGlow(ourIcon, cr, cg, cb)
         -- Force icon texture re-evaluation so override textures apply immediately
-        local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
-        ourIcon._lastTex = nil
+        FC(ourIcon).lastTex = nil
     end)
 
     hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(_, frame)
@@ -1404,8 +1430,7 @@ local function InstallProcGlowHooks()
         -- the glow restarts naturally on the next frame.
         StopProcGlow(ourIcon)
         -- Force icon texture re-evaluation so the original texture restores immediately
-        local ofc = _ecmeFC[ourIcon]; if ofc then ofc.lastTex = nil end
-        ourIcon._lastTex = nil
+        FC(ourIcon).lastTex = nil
     end)
 
     _procGlowHooksInstalled = true
@@ -1810,8 +1835,13 @@ local function RestoreBlizzardBuffFrame()
             end
         end
         frame:SetAlpha(1)
-        frame:EnableMouse(true)
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        -- BuffBarCooldownViewer's default is EnableMouse(false); restoring
+        -- it with EnableMouse(true) creates an invisible click-catcher.
+        -- Other viewers need mouse for tooltip hover.
+        if frameName ~= "BuffBarCooldownViewer" then
+            frame:EnableMouse(true)
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        end
         fc.hidden = false
         fc.restoring = nil
     end
@@ -1967,16 +1997,16 @@ end
 local function SetFrameClickThrough(frame, clickThrough)
     if not frame then return end
     if clickThrough then
-        if frame._cdmMouseWas == nil then
-            frame._cdmMouseWas = frame:IsMouseEnabled()
+        if _cdmMouseState[frame] == nil then
+            _cdmMouseState[frame] = frame:IsMouseEnabled()
         end
         frame:EnableMouse(false)
         if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
         if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
     else
-        if frame._cdmMouseWas ~= nil then
-            frame:EnableMouse(frame._cdmMouseWas)
-            frame._cdmMouseWas = nil
+        if _cdmMouseState[frame] ~= nil then
+            frame:EnableMouse(_cdmMouseState[frame])
+            _cdmMouseState[frame] = nil
         end
     end
     for _, child in ipairs({ frame:GetChildren() }) do
@@ -2026,6 +2056,12 @@ BuildCDMBar = function(barIndex)
     -- Scale removed -- all sizing is width/height based now
     if not InCombatLockdown() then frame:SetScale(1) end
 
+    -- Restore default strata/level (skip if cursor-anchored; that path uses TOOLTIP/9980)
+    if not frame._mouseTrack then
+        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameLevel(5)
+    end
+
     -- Clear any previous mouse-tracking OnUpdate
     if frame._mouseTrack then
         frame:SetScript("OnUpdate", nil)
@@ -2035,7 +2071,7 @@ BuildCDMBar = function(barIndex)
             p.cdmBarPositions[key] = frame._preMousePos
         end
         frame._preMousePos = nil
-        -- Restore default strata when leaving cursor anchor
+        -- Restore saved frame level when leaving cursor anchor
         frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
@@ -2052,6 +2088,15 @@ BuildCDMBar = function(barIndex)
     -- Uses the literal key because FOCUSKICK_BAR_KEY is declared later in
     -- this file (~L3076) and would be nil here.
     if key == "focuskick" then
+        frame:Show()
+        return
+    end
+
+    -- Cursor-anchored bar: if already tracking and still configured for
+    -- mouse, skip the teardown+rebuild cycle. The OnUpdate is already
+    -- running and repositioning correctly; tearing it down causes a
+    -- 1-frame blink to BOTTOMLEFT 0,0 on every FullCDMRebuild.
+    if frame._mouseTrack and barData.anchorTo == "mouse" then
         frame:Show()
         return
     end
@@ -2696,7 +2741,7 @@ LayoutCDMBar = function(barKey)
             thisIconH = expandedCol and (iconH + onePx) or iconH
             thisIconW = expandedRow and (iconW + onePx) or iconW
         end
-        icon._matchExpanded = (expandedCol or expandedRow) or nil
+        FC(icon).matchExpanded = (expandedCol or expandedRow) or nil
         icon:SetSize(thisIconW * iS, thisIconH * iS)
 
         -- Cumulative offsets: each prior expanded icon shifts subsequent
@@ -2875,25 +2920,26 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
     end
 
+    local ifc = FC(icon)
     if shape == "none" or shape == "cropped" or not shape then
         -- Remove shape mask if previously applied
-        if icon._shapeMask then
-            local mask = icon._shapeMask
+        if ifc.shapeMask then
+            local mask = ifc.shapeMask
             if tex then pcall(tex.RemoveMaskTexture, tex, mask) end
             if bg then pcall(bg.RemoveMaskTexture, bg, mask) end
             if cd then pcall(cd.RemoveMaskTexture, cd, mask) end
             mask:SetTexture(nil); mask:ClearAllPoints(); mask:SetSize(0.001, 0.001); mask:Hide()
         end
-        if icon._shapeBorder then icon._shapeBorder:Hide() end
-        icon._shapeApplied = nil
-        icon._shapeName = nil
+        if ifc.shapeBorder then ifc.shapeBorder:Hide() end
+        ifc.shapeApplied = nil
+        ifc.shapeName = nil
 
         -- Restore square borders (pixel-perfect via PP)
         -- Border lives on fd.borderFrame (child of icon) to avoid tainting
-        -- Blizzard's secure frames. Fall back to icon._ppBorders for
+        -- Blizzard's secure frames. Fall back to PP.GetBorders(icon) for
         -- CDM-owned frames that don't go through DecorateFrame's child wrapper.
         local bdrTarget = (fd and fd.borderFrame) or icon
-        if fd and fd.borderFrame or icon._ppBorders then
+        if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
             EllesmereUI.PP.ShowBorder(bdrTarget)
             EllesmereUI.PP.UpdateBorder(bdrTarget, borderSz, brdR, brdG, brdB, brdA)
         end
@@ -2904,7 +2950,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
             tex:ClearAllPoints()
             tex:SetAllPoints(icon)
             local extraCrop = 0
-            if icon._matchExpanded then
+            if ifc.matchExpanded then
                 local baseW = barData.iconSize or 36
                 extraCrop = (1 - 2 * zoom) / (2 * (baseW + 1))
             end
@@ -2934,10 +2980,10 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     local maskTex = CDM_SHAPES.masks[shape]
     if not maskTex then return end
 
-    if not icon._shapeMask then
-        icon._shapeMask = icon:CreateMaskTexture()
+    if not ifc.shapeMask then
+        ifc.shapeMask = icon:CreateMaskTexture()
     end
-    local mask = icon._shapeMask
+    local mask = ifc.shapeMask
     mask:SetTexture(maskTex, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     mask:Show()
 
@@ -2985,22 +3031,22 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
 
     -- Hide square borders (pixel-perfect via PP)
     local bdrTarget2 = (fd and fd.borderFrame) or icon
-    if fd and fd.borderFrame or icon._ppBorders then
+    if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
         EllesmereUI.PP.HideBorder(bdrTarget2)
     end
 
     -- Shape border texture (on a dedicated frame above the cooldown swipe)
-    if not icon._shapeBorderFrame then
+    if not ifc.shapeBorderFrame then
         local sbf = CreateFrame("Frame", nil, icon)
         sbf:SetAllPoints(icon)
         sbf:SetFrameLevel(icon:GetFrameLevel() + 2)
-        icon._shapeBorderFrame = sbf
+        ifc.shapeBorderFrame = sbf
     end
-    icon._shapeBorderFrame:SetFrameLevel(icon:GetFrameLevel() + 2)
-    if not icon._shapeBorder then
-        icon._shapeBorder = icon._shapeBorderFrame:CreateTexture(nil, "OVERLAY", nil, 6)
+    ifc.shapeBorderFrame:SetFrameLevel(icon:GetFrameLevel() + 2)
+    if not ifc.shapeBorder then
+        ifc.shapeBorder = ifc.shapeBorderFrame:CreateTexture(nil, "OVERLAY", nil, 6)
     end
-    local borderTex = icon._shapeBorder
+    local borderTex = ifc.shapeBorder
     borderTex:ClearAllPoints()
     borderTex:SetAllPoints(icon)
     if borderSz > 0 and CDM_SHAPES.borders[shape] then
@@ -3032,8 +3078,8 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         bg:ClearAllPoints(); bg:SetAllPoints()
     end
 
-    icon._shapeApplied = true
-    icon._shapeName = shape
+    ifc.shapeApplied = true
+    ifc.shapeName = shape
 end
 ns.ApplyShapeToCDMIcon = ApplyShapeToCDMIcon
 
@@ -3104,7 +3150,7 @@ local function RefreshCDMIconAppearance(barKey)
         end
         -- Update border (pixel-perfect via PP)
         local bdrTgt = (fd and fd.borderFrame) or icon
-        if fd and fd.borderFrame or icon._ppBorders then
+        if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
             EllesmereUI.PP.UpdateBorder(bdrTgt, borderSize, barData.borderR or 0, barData.borderG or 0, barData.borderB or 0, barData.borderA or 1)
         end
         -- Update background
@@ -3120,8 +3166,9 @@ local function RefreshCDMIconAppearance(barKey)
         local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
         local scX, scY = barData.stackCountX or 0, (barData.stackCountY or 0) + 2
         local showItemCount = barData.showItemCount ~= false
-        local borderLvl = icon:GetFrameLevel() + 5
-        local textLvl = 25
+        -- Text must render above borders. Levels are relative to the
+        -- icon's own frame level (CdmHooks: border +13, text +23).
+        local textLvl = icon:GetFrameLevel() + 23
         -- Applications (buff stacks / aura applications) -- not an item count.
         -- Blizzard manages show/hide based on whether stacks exist; we only
         -- restyle position/font and never gate visibility on showItemCount.
@@ -3493,10 +3540,15 @@ local function EnsureFocusKickProxy()
             _focusKickLastPlateVisible = nil
             ApplyFocusKickAnchor()
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
-            _focusKickLastPlateVisible = nil
-            ApplyFocusKickAnchor()
+            -- Only react when the tracked unit's plate is removed.
+            -- Reacting to every plate removal caused the bar to flicker
+            -- off during AoE when unrelated mobs died or faded.
+            if unit and (unit == fkUnit or UnitIsUnit(unit, fkUnit)) then
+                _focusKickLastPlateVisible = nil
+                ApplyFocusKickAnchor()
+            end
         elseif event == "NAME_PLATE_UNIT_ADDED" then
-            if unit == fkUnit or UnitIsUnit(unit or "none", fkUnit) then
+            if unit and (unit == fkUnit or UnitIsUnit(unit, fkUnit)) then
                 _focusKickLastPlateVisible = nil
                 ApplyFocusKickAnchor()
             end
@@ -3659,7 +3711,7 @@ local function FRGlobalFont()
 end
 local function FROutlineFlag()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
-        local f = EllesmereUI.GetFontOutlineFlag()
+        local f = EllesmereUI.GetFontOutlineFlag("cdm")
         if f and f ~= "" then return f end
     end
     return "NONE"
@@ -3682,7 +3734,7 @@ local function FRSetFontSafe(fs, path, size, flags)
 end
 local function FRApplyFontShadow(fs)
     if not fs then return end
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() then
+    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
         fs:SetShadowColor(0, 0, 0, 0.8)
         fs:SetShadowOffset(1, -1)
     else
@@ -4046,7 +4098,11 @@ _CDMApplyVisibility = function()
                 local icons = cdmBarIcons[barData.key]
                 if icons then
                     for ii = 1, #icons do
-                        if icons[ii] then icons[ii]:SetAlpha(0) end
+                        local ic = icons[ii]
+                        if ic then
+                            ic:SetAlpha(0)
+                            ic:EnableMouse(false)
+                        end
                     end
                 end
             else
@@ -4071,6 +4127,8 @@ _CDMApplyVisibility = function()
                     for ii = 1, #icons do
                         local ic = icons[ii]
                         if ic then
+                            ic:EnableMouse(false)
+                            if ic.EnableMouseMotion then ic:EnableMouseMotion(true) end
                             local icfc = _ecmeFC[ic]
                             if not (icfc and icfc._cdStateHidden) then
                                 ic:SetAlpha(visAlpha)
@@ -4132,6 +4190,7 @@ _CDMApplyVisibility = function()
     end
 end
 ns.CDMApplyVisibility = _CDMApplyVisibility
+_G._ECME_ApplyVisibility = _CDMApplyVisibility
 
 -- Live-apply bar opacity to a bar's frame + icons. Skips hidden bars so
 -- visibility state is never overridden (hidden stays at alpha 0).
@@ -4272,7 +4331,7 @@ local function ApplyCachedKeybinds()
             local kbText = ifd and ifd.keybindText or icon._keybindText
             if kbText then
                 local ifc = _ecmeFC[icon]
-                local sid = ifc and ifc.spellID or icon._spellID
+                local sid = ifc and ifc.spellID
                 if bd and bd.showKeybind and sid then
                     local key = _cdmKeybindCache[sid]
                     if not key then
@@ -4321,7 +4380,7 @@ local function UpdateCDMKeybinds()
     _keybindRebuildPending = false
     RebuildKeybindCache()
     _keybindCacheReady = true
-    -- Defer apply by one frame so the Blizzard tick has populated icon._spellID
+    -- Defer apply by one frame so the Blizzard tick has populated FC(icon).spellID
     C_Timer.After(0, ApplyCachedKeybinds)
 end
 ns.UpdateCDMKeybinds = UpdateCDMKeybinds
@@ -4330,6 +4389,7 @@ ns.ApplyCachedKeybinds = ApplyCachedKeybinds
 ns.CDMKeybindCache = _cdmKeybindCache
 
 BuildAllCDMBars = function()
+    ns._spellOrderDirty = true  -- force spell order cache rebuild
     -- Hard guard: never build with an unknown spec. CDMFinishSetup is
     -- gated on GetActiveSpecKey() at OnEnable, so this is a defense in
     -- depth for any other path that calls BuildAllCDMBars too early.
@@ -4391,13 +4451,9 @@ BuildAllCDMBars = function()
             local icons = cdmBarIcons[barData.key]
             if icons then
                 for _, icon in ipairs(icons) do
-                    local iifc = _ecmeFC[icon]
-                    if iifc then iifc.lastTex = nil; iifc.lastDesat = nil; iifc.blizzChild = nil end
-                    icon._lastTex = nil
-                    icon._lastDesat = nil
-                    if iifc then iifc.spellID = nil end
-                    icon._spellID = nil
-                    icon._blizzChild = nil
+                    local iifc = FC(icon)
+                    iifc.lastTex = nil; iifc.lastDesat = nil; iifc.blizzChild = nil
+                    iifc.spellID = nil
                 end
             end
             LayoutCDMBar(barData.key)
@@ -4453,15 +4509,15 @@ BuildAllCDMBars = function()
         for _, icons in pairs(cdmBarIcons) do
             for _, icon in ipairs(icons) do
                 local ifc = _ecmeFC[icon]
-                local pendFP = ifc and ifc.pendingFontPath or icon._pendingFontPath
+                local pendFP = ifc and ifc.pendingFontPath
                 if pendFP then
                     local ifd = _getFD(icon)
                     local cd = ifd and ifd.cooldown or icon._cooldown
                     if cd then
-                        local fontPath, fontSize = pendFP, (ifc and ifc.pendingFontSize or icon._pendingFontSize)
-                        local fR = ifc and ifc.pendingFontR or icon._pendingFontR
-                        local fG = ifc and ifc.pendingFontG or icon._pendingFontG
-                        local fB = ifc and ifc.pendingFontB or icon._pendingFontB
+                        local fontPath, fontSize = pendFP, ifc.pendingFontSize
+                        local fR = ifc.pendingFontR
+                        local fG = ifc.pendingFontG
+                        local fB = ifc.pendingFontB
                         for ri = 1, cd:GetNumRegions() do
                             local region = select(ri, cd:GetRegions())
                             if region and region.GetObjectType and region:GetObjectType() == "FontString" then
@@ -4469,9 +4525,8 @@ BuildAllCDMBars = function()
                                 break
                             end
                         end
-                        if ifc then ifc.pendingFontPath = nil; ifc.pendingFontSize = nil; ifc.pendingFontR = nil; ifc.pendingFontG = nil; ifc.pendingFontB = nil end
-                        icon._pendingFontPath = nil; icon._pendingFontSize = nil
-                        icon._pendingFontR = nil; icon._pendingFontG = nil; icon._pendingFontB = nil
+                        ifc.pendingFontPath = nil; ifc.pendingFontSize = nil
+                        ifc.pendingFontR = nil; ifc.pendingFontG = nil; ifc.pendingFontB = nil
                     end
                 end
             end
@@ -4511,6 +4566,7 @@ local _rebuildGen = 0
 
 function ns.FullCDMRebuild(reason)
     _rebuildGen = _rebuildGen + 1
+    ns._spellOrderDirty = true  -- force spell order cache rebuild
     -- Full-wipe reasons: clear per-frame caches and run a direct reanchor.
     -- Used for talent change and any path where spell IDs behind
     -- cooldownIDs may have changed (so cached resolvedSid is stale).
@@ -4671,7 +4727,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
                 end
                 for _, icon in ipairs(icons) do
                     local fc = ns._ecmeFC and ns._ecmeFC[icon]
-                    local sid = (fc and fc.spellID) or icon._spellID
+                    local sid = fc and fc.spellID
                     if type(sid) == "number" and sid > 0 and not seen[sid] then
                         sd.assignedSpells[#sd.assignedSpells + 1] = sid
                         seen[sid] = true
@@ -5298,7 +5354,8 @@ local function _rotCreateHighlight(icon)
 end
 
 local function _rotHide(icon)
-    local hf = icon and icon._rotationHighlight
+    local rfc = icon and _ecmeFC[icon]
+    local hf = rfc and rfc.rotationHighlight
     if not hf then return end
     if hf.Flipbook and hf.Flipbook.Anim then hf.Flipbook.Anim:Stop() end
     hf:Hide()
@@ -5306,11 +5363,12 @@ end
 
 local function _rotShow(icon)
     if not icon then return end
-    local hf = icon._rotationHighlight
+    local rfc = FC(icon)
+    local hf = rfc.rotationHighlight
     if not hf then
         hf = _rotCreateHighlight(icon)
         if not hf then return end
-        icon._rotationHighlight = hf
+        rfc.rotationHighlight = hf
     end
     if hf.Flipbook then
         local w = icon:GetWidth() or 36
@@ -5344,7 +5402,7 @@ local function UpdateRotationHighlights()
         for _, icons in pairs(cdmBarIcons) do
             for _, icon in ipairs(icons) do
                 local ifc = _ecmeFC[icon]
-                local sid = ifc and ifc.spellID or icon._spellID
+                local sid = ifc and ifc.spellID
                 if sid and sid == suggestedSpell and icon:IsShown() then
                     _rotShow(icon)
                     newSet[icon] = true
@@ -5374,7 +5432,8 @@ local function _rotSyncCombat()
     local inCombat = InCombatLockdown() or UnitAffectingCombat("player")
     ns._rotationInCombat = inCombat and true or false
     for icon in pairs(ns._rotationGlowedIcons) do
-        local hf = icon and icon._rotationHighlight
+        local rfc2 = icon and _ecmeFC[icon]
+        local hf = rfc2 and rfc2.rotationHighlight
         if hf and hf:IsShown() and hf.Flipbook and hf.Flipbook.Anim then
             if ns._rotationInCombat then
                 if not hf.Flipbook.Anim:IsPlaying() then hf.Flipbook.Anim:Play() end
@@ -5530,6 +5589,9 @@ end
 
 local _rosterRebuildPending = false
 local function ScheduleRosterRebuild()
+    -- Roster changes (promote, join, leave) don't change spells or bar
+    -- routing. Only party frame anchoring needs a refresh. A full
+    -- BuildAllCDMBars was causing massive single-frame CPU spikes.
     if EllesmereUI and EllesmereUI.InvalidateFrameCache then
         EllesmereUI.InvalidateFrameCache()
     end
@@ -5537,9 +5599,8 @@ local function ScheduleRosterRebuild()
         _rosterRebuildPending = true
         return
     end
-    C_Timer.After(0.2, function()
-        BuildAllCDMBars()
-    end)
+    -- Lightweight: just reanchor bars that depend on party frames
+    if ns.QueueReanchor then ns.QueueReanchor() end
 end
 
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
@@ -5641,12 +5702,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if event == "PLAYER_REGEN_ENABLED" and _keybindRebuildPending then
             UpdateCDMKeybinds()
         end
-        -- Flush deferred roster rebuild that was blocked during combat
+        -- Flush deferred roster reanchor that was blocked during combat
         if event == "PLAYER_REGEN_ENABLED" and _rosterRebuildPending then
             _rosterRebuildPending = false
-            C_Timer.After(0.2, function()
-                BuildAllCDMBars()
-            end)
+            if ns.QueueReanchor then ns.QueueReanchor() end
         end
         return
     end
@@ -5778,7 +5837,7 @@ SlashCmdList.CDMDBG = function()
                 for i = 1, math.min(count, 6) do
                     local icon = icons[i]
                     local fc = fcCache and fcCache[icon]
-                    local sid = (fc and fc.spellID) or (icon and icon._spellID) or 0
+                    local sid = (fc and fc.spellID) or 0
                     local name = sid and sid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid) or "?"
                     preview[i] = tostring(sid) .. ":" .. tostring(name)
                 end

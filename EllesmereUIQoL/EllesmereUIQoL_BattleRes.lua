@@ -145,7 +145,7 @@ local function ApplyShape()
 
         -- Pixel-perfect border via PP.CreateBorder (canonical EUI pattern).
         if PP then
-            if not frame._ppBorders then PP.CreateBorder(frame, 0, 0, 0, 1, 1, "OVERLAY", 2) end
+            if not PP.GetBorders(frame) then PP.CreateBorder(frame, 0, 0, 0, 1, 1, "OVERLAY", 2) end
             if bs > 0 then
                 local r, g, b, a = _resolveBorderColor(p)
                 PP.UpdateBorder(frame, bs, r, g, b, a)
@@ -538,7 +538,6 @@ boot:SetScript("OnEvent", function(self)
     _G._EUI_BattleRes_DB = function() return addon.db end
     CreateBrezFrame()
     _registerEvents()
-    -- Seed initial state in case we /reloaded mid-encounter or mid-key.
     _refreshEncounterState()
     _refreshKeystoneState()
     Apply()

@@ -7,6 +7,14 @@
 local ADDON_NAME = ...
 local skinned = false
 
+-- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
+local FFD = setmetatable({}, { __mode = "k" })
+local function GetFFD(frame)
+    local d = FFD[frame]
+    if not d then d = {}; FFD[frame] = d end
+    return d
+end
+
 local MP_COLOR_BRACKETS = {
     { 3850, "ff8000" }, { 3695, "f9753f" }, { 3575, "f16961" },
     { 3455, "e75e7f" }, { 3335, "db529c" }, { 3215, "cc47b9" },
@@ -75,9 +83,9 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
     local inspectUnit = InspectFrame and InspectFrame.unit
     if not inspectUnit then return end
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local itemLink = GetInventoryItemLink(inspectUnit, slotID)
-    slot._euiItemLink = itemLink
+    GetFFD(slot).itemLink = itemLink
 
     local borderR, borderG, borderB = 0.4, 0.4, 0.4
     if itemLink then
@@ -90,10 +98,10 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.SetBorderColor(slot, borderR, borderG, borderB, 1)
     end
-    slot._euiBorder = true
+    GetFFD(slot).border = true
 
     -- Item level label (font size matches CharacterSheet)
-    if itemLink and not slot._euiILvlText and not skipLabels then
+    if itemLink and not GetFFD(slot).iLvlText and not skipLabels then
         local ilvl = select(4, GetItemInfo(itemLink))
         if ilvl and ilvl > 0 then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
@@ -130,12 +138,12 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             displayColor = displayColor or { r = 1, g = 1, b = 1 }
             ilvlText:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
 
-            slot._euiILvlText = ilvlText
+            GetFFD(slot).iLvlText = ilvlText
         end
     end
 
     -- Enchant label (font size matches CharacterSheet)
-    if itemLink and not slot._euiEnchantText and not skipLabels then
+    if itemLink and not GetFFD(slot).enchantText and not skipLabels then
         local enchantSize = EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize or 9
         local enchantText = EllesmereUI.GetEnchantText(slotID, inspectUnit)
         local canHaveEnchant = INSPECT_ENCHANT_SLOTS[slotID]
@@ -176,7 +184,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             end
 
             enchantLabel:SetText(iconOnly)
-            slot._euiEnchantText = enchantLabel
+            GetFFD(slot).enchantText = enchantLabel
 
             local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
             hoverFrame:SetSize(20, 20)
@@ -201,12 +209,12 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
                 if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             end)
 
-            slot._euiEnchantHoverFrame = hoverFrame
+            GetFFD(slot).enchantHoverFrame = hoverFrame
         end
     end
 
     -- Upgrade track label (font size matches CharacterSheet)
-    if itemLink and not slot._euiUpgradeText and slot._euiILvlText and not skipLabels then
+    if itemLink and not GetFFD(slot).upgradeText and GetFFD(slot).iLvlText and not skipLabels then
         local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
         local upgradeText, upgradeColor = EllesmereUI.GetUpgradeTrack(itemLink)
         if upgradeText and upgradeText ~= "" then
@@ -216,17 +224,17 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             upgradeLabel:SetJustifyH("CENTER")
 
             if slotName == "InspectMainHandSlot" then
-                upgradeLabel:SetPoint("RIGHT", slot._euiILvlText, "LEFT", -3, 0)
+                upgradeLabel:SetPoint("RIGHT", GetFFD(slot).iLvlText, "LEFT", -3, 0)
             elseif slotName == "InspectSecondaryHandSlot" then
-                upgradeLabel:SetPoint("LEFT", slot._euiILvlText, "RIGHT", 3, 0)
+                upgradeLabel:SetPoint("LEFT", GetFFD(slot).iLvlText, "RIGHT", 3, 0)
             elseif isRightColumn then
-                upgradeLabel:SetPoint("RIGHT", slot._euiILvlText, "LEFT", -3, 0)
+                upgradeLabel:SetPoint("RIGHT", GetFFD(slot).iLvlText, "LEFT", -3, 0)
             else
-                upgradeLabel:SetPoint("LEFT", slot._euiILvlText, "RIGHT", 3, 0)
+                upgradeLabel:SetPoint("LEFT", GetFFD(slot).iLvlText, "RIGHT", 3, 0)
             end
 
             upgradeLabel:SetText(upgradeText)
-            slot._euiUpgradeText = upgradeLabel
+            GetFFD(slot).upgradeText = upgradeLabel
         end
     end
 end
@@ -247,14 +255,14 @@ local function ApplyTabVisibility(showLabels)
         local slot = _G[slotName]
         if slot then
             -- Only show labels if on Tab 1 and settings allow
-            if slot._euiILvlText then
-                slot._euiILvlText:SetShown(showLabels and showItemLevel)
+            if GetFFD(slot).iLvlText then
+                GetFFD(slot).iLvlText:SetShown(showLabels and showItemLevel)
             end
-            if slot._euiUpgradeText then
-                slot._euiUpgradeText:SetShown(showLabels and showUpgradeTrack)
+            if GetFFD(slot).upgradeText then
+                GetFFD(slot).upgradeText:SetShown(showLabels and showUpgradeTrack)
             end
-            if slot._euiEnchantText then
-                slot._euiEnchantText:SetShown(showLabels and showEnchants)
+            if GetFFD(slot).enchantText then
+                GetFFD(slot).enchantText:SetShown(showLabels and showEnchants)
             end
         end
     end
@@ -262,8 +270,8 @@ local function ApplyTabVisibility(showLabels)
     -- Hide/show avg ilvl + M+ score
     local frame = InspectFrame
     if frame then
-        if frame._euiAvgIlvlText then frame._euiAvgIlvlText:SetShown(showLabels) end
-        if frame._euiMPlusScoreText then frame._euiMPlusScoreText:SetShown(showLabels) end
+        if GetFFD(frame).avgIlvlText then GetFFD(frame).avgIlvlText:SetShown(showLabels) end
+        if GetFFD(frame).mPlusScoreText then GetFFD(frame).mPlusScoreText:SetShown(showLabels) end
     end
 end
 
@@ -297,12 +305,12 @@ local function SkinInspectSheet()
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 
     -- Create custom background texture FIRST before hiding anything
-    if frame._ebsBg then
-        frame._ebsBg:Show()
+    if GetFFD(frame).bg then
+        GetFFD(frame).bg:Show()
     else
-        frame._ebsBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-        frame._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-        frame._ebsBg:SetAllPoints(frame)
+        GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+        GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+        GetFFD(frame).bg:SetAllPoints(frame)
     end
 
     -- Hide Blizzard backgrounds and borders
@@ -326,7 +334,7 @@ local function SkinInspectSheet()
     end
 
     -- Create model background directly on InspectFrame
-    if not frame._euiModelBgFrame then
+    if not GetFFD(frame).modelBgFrame then
         -- Main background texture
         local bgTex = frame:CreateTexture(nil, "BACKGROUND", nil, 5)
         bgTex:SetAtlas("transmog-locationBG")
@@ -342,9 +350,9 @@ local function SkinInspectSheet()
         bgGlowTex:SetHeight(math.max(1, bgTex:GetHeight() * GLOW_HEIGHT_RATIO))
         bgGlowTex:SetAlpha(0.5)
 
-        frame._euiModelBg = bgTex
-        frame._euiModelBgGlow = bgGlowTex
-        frame._euiModelBgFrame = true  -- Just mark it as created
+        GetFFD(frame).modelBg = bgTex
+        GetFFD(frame).modelBgGlow = bgGlowTex
+        GetFFD(frame).modelBgFrame = true  -- Just mark it as created
     end
 
     -- Hide portrait (separate handling to ensure it's fully hidden)
@@ -487,95 +495,91 @@ local function SkinInspectSheet()
             end
         end
 
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
-        if not closeBtn._ebsX then
-            closeBtn._ebsX = closeBtn:CreateFontString(nil, "OVERLAY")
-            closeBtn._ebsX:SetFont(fontPath, 16, nil)
-            closeBtn._ebsX:SetText("x")
-            closeBtn._ebsX:SetTextColor(1, 1, 1, 0.75)
-            closeBtn._ebsX:SetPoint("CENTER", -2, -3)
+        if not GetFFD(closeBtn).x then
+            GetFFD(closeBtn).x = closeBtn:CreateFontString(nil, "OVERLAY")
+            GetFFD(closeBtn).x:SetFont(fontPath, 16, nil)
+            GetFFD(closeBtn).x:SetText("x")
+            GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.75)
+            GetFFD(closeBtn).x:SetPoint("CENTER", -2, -3)
 
             closeBtn:HookScript("OnEnter", function()
-                if closeBtn._ebsX then closeBtn._ebsX:SetTextColor(1, 1, 1, 1) end
+                if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 1) end
             end)
             closeBtn:HookScript("OnLeave", function()
-                if closeBtn._ebsX then closeBtn._ebsX:SetTextColor(1, 1, 1, 0.75) end
+                if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetTextColor(1, 1, 1, 0.75) end
             end)
         end
     end
 
-    -- Suppress Blizzard's Talents + View (dressing room) buttons and replace
-    -- with our own matching pair at the bottom of the frame.
-    -- Both are non-secure; alpha+mouse suppression is taint-free.
+    -- Restyle Blizzard's Talents + View (dressing room) buttons in place.
+    -- User clicks the actual Blizzard button so the secure handler fires
+    -- natively with no addon taint in the call stack.
     do
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
         local BTN_W, BTN_H = 90, 21
         local BTN_Y = 8
 
-        -- Suppress all Blizzard buttons in InspectPaperDollItemsFrame
-        local paperDollItemsFrame = InspectPaperDollItemsFrame
-        if paperDollItemsFrame then
-            if paperDollItemsFrame.InspectTalents then
-                paperDollItemsFrame.InspectTalents:SetAlpha(0)
-                paperDollItemsFrame.InspectTalents:EnableMouse(false)
-            end
-            for i = 1, paperDollItemsFrame:GetNumChildren() do
-                local child = select(i, paperDollItemsFrame:GetChildren())
-                if child and child:GetObjectType() == "Button" and not child:GetName()
-                   and child ~= paperDollItemsFrame.InspectTalents then
-                    child:SetAlpha(0)
-                    child:EnableMouse(false)
-                end
-            end
-        end
+        local function RestyleButton(btn, labelText, anchor, anchorPoint, xOff)
+            if not btn then return end
+            local ffd = GetFFD(btn)
+            if ffd.restyled then return end
+            ffd.restyled = true
 
-        -- Suppress Blizzard ViewButton
-        local blizViewBtn = InspectPaperDollFrame and InspectPaperDollFrame.ViewButton
-        if blizViewBtn then
-            blizViewBtn:SetAlpha(0)
-            blizViewBtn:EnableMouse(false)
-        end
-
-        local function MakeBottomButton(labelText, anchor, anchorPoint, xOff, onClick)
-            local btn = CreateFrame("Button", nil, frame)
-            btn:SetSize(BTN_W, BTN_H)
+            btn:ClearAllPoints()
             btn:SetPoint(anchor, frame, anchorPoint, xOff, BTN_Y)
+            btn:SetSize(BTN_W, BTN_H)
             btn:SetFrameLevel(frame:GetFrameLevel() + 20)
 
+            -- Strip default textures and hide native text
+            for _, region in ipairs({btn:GetRegions()}) do
+                if region.SetTexture then
+                    region:SetTexture(nil)
+                    region:Hide()
+                elseif region.SetTextColor then
+                    region:SetTextColor(0, 0, 0, 0)
+                end
+            end
+
+            -- Our label
             local label = btn:CreateFontString(nil, "OVERLAY")
             label:SetFont(fontPath, 10, "")
             label:SetPoint("CENTER", btn, "CENTER", 0, 0)
             label:SetJustifyH("CENTER")
             label:SetText(labelText)
             label:SetTextColor(1, 1, 1, 0.6)
-            btn._label = label
+            ffd.label = label
 
-            btn:SetScript("OnEnter", function(self) self._label:SetTextColor(1, 1, 1, 1) end)
-            btn:SetScript("OnLeave", function(self) self._label:SetTextColor(1, 1, 1, 0.6) end)
-            btn:SetScript("OnClick", onClick)
+            btn:HookScript("OnEnter", function() label:SetTextColor(1, 1, 1, 1) end)
+            btn:HookScript("OnLeave", function() label:SetTextColor(1, 1, 1, 0.6) end)
 
             if EllesmereUI and EllesmereUI.PanelPP then
                 EllesmereUI.PanelPP.CreateBorder(btn, 0.4, 0.4, 0.4, 1, 1, "OVERLAY", 7)
             end
 
-            return btn
+            btn:SetAlpha(1)
+            btn:EnableMouse(true)
+            btn:Show()
         end
 
-        -- Talents button (bottom-right, shifted 2px right from original)
-        if not frame._euiTalentsBtn then
-            local blizTalentsBtn = paperDollItemsFrame and paperDollItemsFrame.InspectTalents
-            frame._euiTalentsBtn = MakeBottomButton("Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -7, function()
-                if blizTalentsBtn then blizTalentsBtn:Click() end
-            end)
+        -- Suppress other unnamed buttons in InspectPaperDollItemsFrame
+        local paperDollItemsFrame = InspectPaperDollItemsFrame
+        if paperDollItemsFrame then
+            local talentsBtn = paperDollItemsFrame.InspectTalents
+            for i = 1, paperDollItemsFrame:GetNumChildren() do
+                local child = select(i, paperDollItemsFrame:GetChildren())
+                if child and child:GetObjectType() == "Button" and not child:GetName()
+                   and child ~= talentsBtn then
+                    child:SetAlpha(0)
+                    child:EnableMouse(false)
+                end
+            end
+            RestyleButton(talentsBtn, "Talents", "BOTTOMRIGHT", "BOTTOMRIGHT", -7)
         end
 
-        -- Transmog button (bottom-left, mirrors Talents)
-        if not frame._euiTransmogBtn then
-            frame._euiTransmogBtn = MakeBottomButton("Transmog", "BOTTOMLEFT", "BOTTOMLEFT", 10, function()
-                if blizViewBtn then blizViewBtn:Click() end
-            end)
-        end
+        local blizViewBtn = InspectPaperDollFrame and InspectPaperDollFrame.ViewButton
+        RestyleButton(blizViewBtn, "Transmog", "BOTTOMLEFT", "BOTTOMLEFT", 10)
     end
 
     -- Hide slot wrapper frames
@@ -662,7 +666,7 @@ local function SkinInspectSheet()
     textOverlayFrame:EnableMouse(false)
     textOverlayFrame:SetAlpha(1)  -- Always visible by default
     textOverlayFrame:Show()
-    frame._textOverlayFrame = textOverlayFrame
+    GetFFD(frame).textOverlayFrame = textOverlayFrame
 
     -- Position slots and style them
     if InspectPaperDollItemsFrame then
@@ -700,32 +704,32 @@ local function SkinInspectSheet()
     -- Average item level + M+ score, centered below the title/level text.
     -- Anchored to frame TOP so they sit below the character info header.
     do
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
-        if not frame._euiAvgIlvlText then
+        if not GetFFD(frame).avgIlvlText then
             local ilvlFS = frame:CreateFontString(nil, "OVERLAY")
             ilvlFS:SetFont(fontPath, 16, "")
             ilvlFS:SetTextColor(0.6, 0.2, 1, 1)
             ilvlFS:SetJustifyH("CENTER")
             ilvlFS:SetPoint("TOP", frame, "TOP", 0, -43)
-            frame._euiAvgIlvlText = ilvlFS
+            GetFFD(frame).avgIlvlText = ilvlFS
         end
 
-        if not frame._euiMPlusScoreText then
+        if not GetFFD(frame).mPlusScoreText then
             local mpFS = frame:CreateFontString(nil, "OVERLAY")
             mpFS:SetFont(fontPath, 12, "")
             mpFS:SetTextColor(0.8, 0.8, 0.8, 1)
             mpFS:SetJustifyH("CENTER")
-            mpFS:SetPoint("TOP", frame._euiAvgIlvlText, "BOTTOM", 0, -2)
-            frame._euiMPlusScoreText = mpFS
+            mpFS:SetPoint("TOP", GetFFD(frame).avgIlvlText, "BOTTOM", 0, -2)
+            GetFFD(frame).mPlusScoreText = mpFS
         end
 
         local avg = CalculateAverageItemLevel()
         if avg and avg > 0 then
-            frame._euiAvgIlvlText:SetFormattedText("%.2f", avg)
-            frame._euiAvgIlvlText:Show()
+            GetFFD(frame).avgIlvlText:SetFormattedText("%.2f", avg)
+            GetFFD(frame).avgIlvlText:Show()
         else
-            frame._euiAvgIlvlText:Hide()
+            GetFFD(frame).avgIlvlText:Hide()
         end
 
         local inspectUnit = frame.unit
@@ -743,15 +747,15 @@ local function SkinInspectSheet()
                     hex = MP_COLOR_BRACKETS[i][2]; break
                 end
             end
-            frame._euiMPlusScoreText:SetFormattedText("M+ Score: |cff%s%d|r", hex, math.floor(mpScore))
-            frame._euiMPlusScoreText:Show()
+            GetFFD(frame).mPlusScoreText:SetFormattedText("M+ Score: |cff%s%d|r", hex, math.floor(mpScore))
+            GetFFD(frame).mPlusScoreText:Show()
         else
-            frame._euiMPlusScoreText:Hide()
+            GetFFD(frame).mPlusScoreText:Hide()
         end
     end
 
     -- Style Tabs (InspectFrameTab1, 2, 3)
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 
@@ -778,24 +782,24 @@ local function SkinInspectSheet()
             if hl then hl:SetTexture("") end
 
             -- Add custom background
-            if not tab._ebsBg then
-                tab._ebsBg = tab:CreateTexture(nil, "BACKGROUND", nil, 1)
-                tab._ebsBg:SetAllPoints()
-                tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+            if not GetFFD(tab).bg then
+                GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND", nil, 1)
+                GetFFD(tab).bg:SetAllPoints()
+                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             else
                 -- Ensure it stays visible
-                tab._ebsBg:Show()
-                tab._ebsBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+                GetFFD(tab).bg:Show()
+                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
             end
 
             -- Add active highlight
-            if not tab._activeHL then
+            if not GetFFD(tab).activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
                 activeHL:SetColorTexture(1, 1, 1, 0.05)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
-                tab._activeHL = activeHL
+                GetFFD(tab).activeHL = activeHL
             end
 
             -- Replace Blizzard label with custom font
@@ -804,13 +808,13 @@ local function SkinInspectSheet()
             if blizLabel then blizLabel:SetTextColor(0, 0, 0, 0) end
             tab:SetPushedTextOffset(0, 0)
 
-            if not tab._label then
+            if not GetFFD(tab).label then
                 local label = tab:CreateFontString(nil, "OVERLAY")
                 label:SetFont(fontPath, 9, nil)
                 label:SetPoint("CENTER", tab, "CENTER", 0, 0)
                 label:SetJustifyH("CENTER")
                 label:SetText(labelText)
-                tab._label = label
+                GetFFD(tab).label = label
 
                 hooksecurefunc(tab, "SetText", function(_, newText)
                     if newText and label then label:SetText(newText) end
@@ -818,7 +822,7 @@ local function SkinInspectSheet()
             end
 
             -- Add underline for active tab
-            if not tab._underline then
+            if not GetFFD(tab).underline then
                 local underline = tab:CreateTexture(nil, "OVERLAY", nil, 6)
                 if EllesmereUI and EllesmereUI.PanelPP and EllesmereUI.PanelPP.DisablePixelSnap then
                     EllesmereUI.PanelPP.DisablePixelSnap(underline)
@@ -833,7 +837,7 @@ local function SkinInspectSheet()
                     EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
                 end
                 underline:Hide()
-                tab._underline = underline
+                GetFFD(tab).underline = underline
             end
         end
     end
@@ -843,11 +847,19 @@ local function SkinInspectSheet()
         local isTab1 = (frame.selectedTab or 1) == 1
 
         -- Show model background only on Tab 1
-        if frame._euiModelBg then
-            frame._euiModelBg:SetShown(isTab1)
+        if GetFFD(frame).modelBg then
+            GetFFD(frame).modelBg:SetShown(isTab1)
         end
-        if frame._euiModelBgGlow then
-            frame._euiModelBgGlow:SetShown(isTab1)
+        if GetFFD(frame).modelBgGlow then
+            GetFFD(frame).modelBgGlow:SetShown(isTab1)
+        end
+
+        -- Show Talents/Transmog buttons only on Tab 1 (Character sheet)
+        if GetFFD(frame).talentsBtn then
+            GetFFD(frame).talentsBtn:SetShown(isTab1)
+        end
+        if GetFFD(frame).transmogBtn then
+            GetFFD(frame).transmogBtn:SetShown(isTab1)
         end
 
         -- Update label visibility with ApplyTabVisibility - only show on Tab 1
@@ -858,17 +870,17 @@ local function SkinInspectSheet()
             if tab then
                 local isActive = (frame.selectedTab or 1) == i
                 -- Ensure background is always visible
-                if tab._ebsBg then
-                    tab._ebsBg:Show()
+                if GetFFD(tab).bg then
+                    GetFFD(tab).bg:Show()
                 end
-                if tab._label then
-                    tab._label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
+                if GetFFD(tab).label then
+                    GetFFD(tab).label:SetTextColor(1, 1, 1, isActive and 1 or 0.5)
                 end
-                if tab._underline then
-                    tab._underline:SetShown(isActive)
+                if GetFFD(tab).underline then
+                    GetFFD(tab).underline:SetShown(isActive)
                 end
-                if tab._activeHL then
-                    tab._activeHL:SetShown(isActive)
+                if GetFFD(tab).activeHL then
+                    GetFFD(tab).activeHL:SetShown(isActive)
                 end
             end
         end
@@ -955,10 +967,10 @@ local function EnsureInspectNineSliceHidden()
         InspectFrameInset.NineSlice:SetAlpha(0)
 
         -- Create EUI-styled background to cover the inset area
-        if not InspectFrameInset._euiBg then
-            InspectFrameInset._euiBg = InspectFrameInset:CreateTexture(nil, "BACKGROUND", nil, -8)
-            InspectFrameInset._euiBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-            InspectFrameInset._euiBg:SetAllPoints(InspectFrameInset)
+        if not GetFFD(InspectFrameInset).bg then
+            GetFFD(InspectFrameInset).bg = InspectFrameInset:CreateTexture(nil, "BACKGROUND", nil, -8)
+            GetFFD(InspectFrameInset).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+            GetFFD(InspectFrameInset).bg:SetAllPoints(InspectFrameInset)
         end
     end
 end
@@ -1014,32 +1026,32 @@ if EllesmereUI then
     local function RefreshSlotStyles()
         if not InspectPaperDollItemsFrame then return end
         if not InspectFrame then return end
-        local textOverlayFrame = InspectFrame._textOverlayFrame
+        local textOverlayFrame = GetFFD(InspectFrame).textOverlayFrame
         if not textOverlayFrame then return end
 
         for slotName, gridPos in pairs(slotGridMap) do
             local slot = _G[slotName]
             if slot then
                 -- Hide and clear old labels BEFORE creating new ones
-                if slot._euiILvlText then
-                    slot._euiILvlText:Hide()
-                    slot._euiILvlText = nil
+                if GetFFD(slot).iLvlText then
+                    GetFFD(slot).iLvlText:Hide()
+                    GetFFD(slot).iLvlText = nil
                 end
-                if slot._euiEnchantText then
-                    slot._euiEnchantText:Hide()
-                    slot._euiEnchantText = nil
+                if GetFFD(slot).enchantText then
+                    GetFFD(slot).enchantText:Hide()
+                    GetFFD(slot).enchantText = nil
                 end
-                if slot._euiEnchantHoverFrame then
-                    slot._euiEnchantHoverFrame:Hide()
-                    slot._euiEnchantHoverFrame = nil
+                if GetFFD(slot).enchantHoverFrame then
+                    GetFFD(slot).enchantHoverFrame:Hide()
+                    GetFFD(slot).enchantHoverFrame = nil
                 end
-                if slot._euiUpgradeText then
-                    slot._euiUpgradeText:Hide()
-                    slot._euiUpgradeText = nil
+                if GetFFD(slot).upgradeText then
+                    GetFFD(slot).upgradeText:Hide()
+                    GetFFD(slot).upgradeText = nil
                 end
 
                 -- Clear old styling
-                slot._euiBorder = false
+                GetFFD(slot).border = false
                 -- Re-style (right column = col 1)
                 local isRightColumn = gridPos.col == 1
                 EUI_UpdateSlotStyle(slotName, slot:GetID(), textOverlayFrame, isRightColumn)
@@ -1115,9 +1127,9 @@ function EllesmereUI._refreshInspectItemLevelVisibility()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
-        if slot and slot._euiILvlText then
+        if slot and GetFFD(slot).iLvlText then
             -- Only show if Tab 1 AND setting is enabled
-            slot._euiILvlText:SetShown(isTab1 and showItemLevel)
+            GetFFD(slot).iLvlText:SetShown(isTab1 and showItemLevel)
         end
     end
 end
@@ -1131,9 +1143,9 @@ function EllesmereUI._refreshInspectUpgradeTrackVisibility()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
-        if slot and slot._euiUpgradeText then
+        if slot and GetFFD(slot).upgradeText then
             -- Only show if Tab 1 AND setting is enabled
-            slot._euiUpgradeText:SetShown(isTab1 and showUpgradeTrack)
+            GetFFD(slot).upgradeText:SetShown(isTab1 and showUpgradeTrack)
         end
     end
 end
@@ -1147,9 +1159,9 @@ function EllesmereUI._refreshInspectEnchantsVisibility()
 
     for slotName, _ in pairs(slotGridMap) do
         local slot = _G[slotName]
-        if slot and slot._euiEnchantText then
+        if slot and GetFFD(slot).enchantText then
             -- Only show if Tab 1 AND setting is enabled
-            slot._euiEnchantText:SetShown(isTab1 and showEnchants)
+            GetFFD(slot).enchantText:SetShown(isTab1 and showEnchants)
         end
     end
 end

@@ -210,7 +210,7 @@ initFrame:SetScript("OnEvent", function(self)
 
 
         local function themedOff()
-            return not (EllesmereUIDB and EllesmereUIDB.themedCharacterSheet)
+            return EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false
         end
 
         local function AttachDisabledOverlay(target)
@@ -300,7 +300,7 @@ initFrame:SetScript("OnEvent", function(self)
                          if EllesmereUI._updateStatCategoryVisibility then
                              EllesmereUI._updateStatCategoryVisibility()
                          end
-                         local sf = CharacterFrame and CharacterFrame._scrollFrame
+                         local sf = CharacterFrame and EllesmereUI._GetFFD and EllesmereUI._GetFFD(CharacterFrame).scrollFrame
                          if sf then sf:SetVerticalScroll(0) end
                          EllesmereUI:RefreshPage()
                      end }
@@ -321,25 +321,13 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Enable Character Sheet",
               tooltip="Applies EllesmereUI theme styling to the character sheet window.",
               getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.themedCharacterSheet or false
+                  return not EllesmereUIDB or EllesmereUIDB.themedCharacterSheet ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.themedCharacterSheet = v
-                  if not v then
-                      EllesmereUIDB.showMythicRating = false
-                      EllesmereUIDB.showItemLevel = false
-                      EllesmereUIDB.showUpgradeTrack = false
-                      EllesmereUIDB.showEnchants = false
-                      EllesmereUIDB.showGems = false
-                      EllesmereUIDB.showStatCategory_Attributes = false
-                      EllesmereUIDB.showStatCategory_Attack = false
-                      EllesmereUIDB.showStatCategory_Crests = false
-                      EllesmereUIDB.showStatCategory_SecondaryStats = false
-                      EllesmereUIDB.showStatCategory_Tertiary = false
-                      EllesmereUIDB.showStatCategory_Defense = false
-                      EllesmereUIDB.showStatCategory_PvP = false
-                  end
+                  -- Individual feature toggles retain their values.
+                  -- The disabled overlay handles the visual disable state.
                   if EllesmereUI.ShowConfirmPopup then
                       EllesmereUI:ShowConfirmPopup({
                           title       = "Reload Required",
@@ -699,6 +687,7 @@ initFrame:SetScript("OnEvent", function(self)
     local EDR_BAR_TEXTURES = ns.EDR_BAR_TEXTURES
     local EDR_BAR_TEXTURE_ORDER = {
         "none", "melli", "atrocity",
+        "fade", "fade-right",
         "beautiful", "plating",
         "divide", "glass",
         "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -712,6 +701,8 @@ initFrame:SetScript("OnEvent", function(self)
         ["atrocity"]    = "Atrocity",
         ["divide"]      = "Divide",
         ["glass"]       = "Glass",
+        ["fade-right"]  = "Fade Right",
+        ["fade"]        = "Fade",
         ["gradient-lr"] = "Gradient Right",
         ["gradient-rl"] = "Gradient Left",
         ["gradient-bt"] = "Gradient Up",
@@ -940,6 +931,24 @@ initFrame:SetScript("OnEvent", function(self)
             if EllesmereUIDragonRidingDB then
                 EllesmereUIDragonRidingDB.profiles = nil
                 EllesmereUIDragonRidingDB.profileKeys = nil
+            end
+            if EllesmereUIDB then
+                EllesmereUIDB.customTooltips = nil
+                EllesmereUIDB.accentReskinElements = nil
+                EllesmereUIDB.tooltipPlayerTitles = nil
+                EllesmereUIDB.tooltipFontScale = nil
+                EllesmereUIDB.tooltipMythicScore = nil
+                EllesmereUIDB.uberTooltips = nil
+                EllesmereUIDB.uberTooltipsManual = nil
+                EllesmereUIDB.reskinQueuePopup = nil
+                EllesmereUIDB.reskinGameMenu = nil
+                EllesmereUIDB.showQueueTimer = nil
+                EllesmereUIDB.showMythicRating = nil
+                EllesmereUIDB.statCategoryColors = nil
+                EllesmereUIDB.statSectionsOrder = nil
+                EllesmereUIDB.charSheetCollapsedSections = nil
+                EllesmereUIDB.characterFramePos = nil
+                EllesmereUIDB.friendsFramePos = nil
             end
         end,
     })

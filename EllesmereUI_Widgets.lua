@@ -1395,13 +1395,14 @@ end
 
 -- opts (optional table): { color = {r,g,b}, width = number } to override text color or force width
 ShowWidgetTooltip = function(label, text, opts)
-    -- Suppress tooltips in M+/raid combat -- frame APIs return secret
+    -- Suppress tooltips in M+/raid/PvP combat -- frame APIs return secret
     -- values in tainted execution and tooltips aren't useful mid-pull.
     do
         local _, iType = IsInInstance()
         if iType == "party" and C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
            and C_ChallengeMode.IsChallengeModeActive() then return end
         if iType == "raid" and InCombatLockdown() then return end
+        if (iType == "pvp" or iType == "arena") and InCombatLockdown() then return end
     end
     local tt = GetTooltipFrame()
     local MAX_W = 250
@@ -1422,6 +1423,10 @@ ShowWidgetTooltip = function(label, text, opts)
     tt:ClearAllPoints()
     if opts and opts.anchor == "below" then
         tt:SetPoint("TOP", label, "BOTTOM", 0, -4)
+    elseif opts and opts.anchor == "left" then
+        tt:SetPoint("RIGHT", label, "LEFT", -4, 0)
+    elseif opts and opts.anchor == "right" then
+        tt:SetPoint("LEFT", label, "RIGHT", 4, 0)
     else
         tt:SetPoint("BOTTOM", label, "TOP", 0, 4)
     end
@@ -1431,26 +1436,55 @@ ShowWidgetTooltip = function(label, text, opts)
     tt:Show()
     -- Auto-size width: use natural text width + padding, capped at MAX_W
     if not (opts and opts.width) then
-        local naturalW = tt.text:GetStringWidth() + PAD * 2
-        tt:SetWidth(math.min(naturalW, MAX_W))
+        local sw = tt.text:GetStringWidth()
+        if issecretvalue and issecretvalue(sw) then
+            tt:SetWidth(MAX_W)
+        else
+            local naturalW = sw + PAD * 2
+            tt:SetWidth(math.min(naturalW, MAX_W))
+        end
     end
     tt:SetHeight(10)
     local textH = tt.text:GetStringHeight()
-    tt:SetHeight(textH + 16)
+    if issecretvalue and issecretvalue(textH) then
+        tt:SetHeight(26)
+    else
+        tt:SetHeight(textH + 16)
+    end
     -- Clamp to screen edges so tooltips don't go off-screen
+    -- Skip clamping if frame metrics are secret (tainted execution in M+)
     local ttScale = tt:GetEffectiveScale()
-    local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
-    local ttLeft = (tt:GetLeft() or 0) * ttScale
-    local ttRight = (tt:GetRight() or 0) * ttScale
-    if ttLeft < 0 then
-        local pt, rel, relPt, px, py = tt:GetPoint(1)
-        if pt then
-            tt:SetPoint(pt, rel, relPt, (px or 0) - ttLeft / ttScale, py or 0)
+    local _ttLeft = tt:GetLeft()
+    local _ttRight = tt:GetRight()
+    local _isv = issecretvalue
+    if not (_isv and (_isv(ttScale) or _isv(_ttLeft) or _isv(_ttRight))) then
+        local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
+        local ttLeft = (_ttLeft or 0) * ttScale
+        local ttRight = (_ttRight or 0) * ttScale
+        if ttLeft < 0 then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, (px or 0) - ttLeft / ttScale, py or 0)
+            end
+        elseif ttRight > screenW then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+            end
         end
-    elseif ttRight > screenW then
-        local pt, rel, relPt, px, py = tt:GetPoint(1)
-        if pt then
-            tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+        local screenH = GetScreenHeight() * UIParent:GetEffectiveScale()
+        local ttTop = (tt:GetTop() or 0) * ttScale
+        local ttBottom = (tt:GetBottom() or 0) * ttScale
+        if ttBottom < 0 then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, px or 0, (py or 0) - ttBottom / ttScale)
+            end
+        elseif ttTop > screenH then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, px or 0, (py or 0) - (ttTop - screenH) / ttScale)
+            end
         end
     end
     -- Cancel any in-progress fade-out so its OnFinished doesn't hide us
@@ -1468,18 +1502,22 @@ ShowWidgetTooltip = function(label, text, opts)
     tt._fadeAG:Play()
 end
 
-HideWidgetTooltip = function()
+HideWidgetTooltip = function(instant)
     local tt = GetTooltipFrame()
     if not tt:IsShown() then return end
-    -- Fade out
     if tt._fadeOutAG then tt._fadeOutAG:Stop() end
+    if tt._fadeAG then tt._fadeAG:Stop() end
+    if instant then
+        tt:SetAlpha(0); tt:Hide()
+        return
+    end
+    -- Fade out
     if not tt._fadeOutAG then
         tt._fadeOutAG = tt:CreateAnimationGroup()
         tt._fadeOut = tt._fadeOutAG:CreateAnimation("Alpha")
         tt._fadeOut:SetDuration(0.25)
         tt._fadeOut:SetSmoothing("IN")
     end
-    if tt._fadeAG then tt._fadeAG:Stop() end
     tt._fadeOut:SetFromAlpha(tt:GetAlpha())
     tt._fadeOut:SetToAlpha(0)
     tt._fadeOutAG:SetScript("OnFinished", function() tt:SetAlpha(0); tt:Hide() end)
@@ -1641,6 +1679,8 @@ local function ApplyAccentLive(r, g, b)
 end
 
 --- SetActiveTheme: main theme setter. Persists and applies with animated transition.
+--- Only changes the options panel background. Accent color is independent
+--- (controlled by the accent swatch / class color toggle).
 EllesmereUI.SetActiveTheme = function(theme)
     if not EllesmereUIDB then EllesmereUIDB = {} end
     EllesmereUIDB.activeTheme = theme
@@ -1651,9 +1691,6 @@ EllesmereUI.SetActiveTheme = function(theme)
     if EllesmereUI._applyThemeBG then
         EllesmereUI._applyThemeBG(theme, r, g, b)
     end
-
-    -- Animate accent color transition
-    ApplyAccentAnimated(r, g, b)
 end
 
 --- SetAccentColor: persists accent color and applies live.
@@ -3062,6 +3099,10 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
         div:SetPoint("BOTTOM", frame, "BOTTOM", 0, 0)
     end
 
+    -- Store widget config on regions so sync icons can check disabled state
+    leftRegion._widgetCfg = leftCfg
+    rightRegion._widgetCfg = rightCfg
+
     -- Expose half regions so callers can anchor child elements to them
     frame._leftRegion  = leftRegion
     frame._rightRegion = rightRegion
@@ -3368,6 +3409,10 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
         PP.Point(div, "TOP", rgn, "TOPRIGHT", 0, 0)
         PP.Point(div, "BOTTOM", rgn, "BOTTOMRIGHT", 0, 0)
     end
+
+    leftRegion._widgetCfg = leftCfg
+    if midRegion then midRegion._widgetCfg = midCfg end
+    rightRegion._widgetCfg = rightCfg
 
     frame._leftRegion  = leftRegion
     frame._midRegion   = midRegion
@@ -5129,6 +5174,9 @@ local function BuildSyncIcon(opts)
     local animState = opts.isSynced() and 0 or 1  -- start at correct state
 
     local function ApplyState(s)
+        -- Force hidden when the parent widget is disabled
+        local parentCfg = region._widgetCfg
+        if parentCfg and parentCfg.disabled and parentCfg.disabled() then s = 0 end
         -- s: 0 = synced (label centered, subtext hidden), 1 = desynced (label up, subtext visible)
         local labelY = LABEL_Y_NORMAL + s * (LABEL_Y_SHIFTED - LABEL_Y_NORMAL)
         label:ClearAllPoints()
@@ -5202,6 +5250,7 @@ local function BuildSyncIcon(opts)
         allText:SetTextColor(r, g, b, 0.65)
         if multiText then multiText:SetTextColor(r, g, b, 0.65) end
         ResizeBtn()
+
 
         local synced = opts.isSynced()
         local target = synced and 0 or 1
@@ -5441,8 +5490,23 @@ local function BuildCursorAnchorRow(opts)
           disabledTooltip = opts.disabledTip,
           getValue = function() return getData().anchorTo == "mouse" end,
           setValue = function(v)
-              getData().anchorTo = v and "mouse" or "none"
-              onApply()
+              local old = getData().anchorTo
+              local new = v and "mouse" or "none"
+              getData().anchorTo = new
+              -- Cursor anchor requires a reload to take effect cleanly
+              -- (Blizzard viewer Layout fights icon positions on live switch).
+              local changed = (old == "mouse") ~= (new == "mouse")
+              if changed then
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Changing cursor anchor requires a UI reload to take effect.",
+                      confirmText = "Reload Now",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
+              else
+                  onApply()
+              end
               EllesmereUI:RefreshPage(true)
           end },
         { type = "dropdown", text = "Cursor Position",

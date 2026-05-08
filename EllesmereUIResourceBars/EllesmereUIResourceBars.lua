@@ -52,10 +52,10 @@ local function GetRBFont()
     return RB_FONT_FALLBACK
 end
 local function GetRBOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("resourceBars")) or ""
 end
 local function GetRBUseShadow()
-    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("resourceBars")
 end
 local function SetRBFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
@@ -706,7 +706,7 @@ local function MakePixelBorder(parent, r, g, b, a, size)
 
     return {
         _frame = bf,
-        edges = bf._ppBorders,
+        edges = PP.GetBorders(bf),
         SetColor = function(self, cr, cg, cb, ca)
             PP.SetBorderColor(bf, cr, cg, cb, ca or 1)
         end,
@@ -1021,18 +1021,11 @@ local function RegisterUnlockElements()
             getFrame = function() return secondaryFrame end,
             getSize  = function()
                 local s = S()
-                if cachedSecondary and cachedSecondary.type == "bar" then
-                    return (ERB.db.profile.primary.width or 214), s.pipHeight
-                end
                 return s.pipWidth, s.pipHeight
             end,
             setWidth = function(_, w)
                 local s = S()
-                if cachedSecondary and cachedSecondary.type == "bar" then
-                    ERB.db.profile.primary.width = PP.Snap(w)
-                else
-                    s.pipWidth = PP.Snap(w)
-                end
+                s.pipWidth = PP.Snap(w)
                 Rebuild()
             end,
             setHeight = function(_, h) S().pipHeight = PP.Snap(h); Rebuild() end,
@@ -1545,6 +1538,8 @@ local function BuildBars()
             ppHeight = ppHeight + ppExpandDelta
         end
     end
+    -- Clean stale key from old suppress/restore system
+    if pp._expandWasOn ~= nil then pp._expandWasOn = nil end
     -- Snap stored width/height to the physical pixel grid so the frame is
     -- always a whole number of physical pixels. Use SnapForES (round to
     -- nearest) rather than PP.Scale (truncate toward zero) so a stored
@@ -1722,11 +1717,7 @@ local function BuildBars()
         local totalW
 
         local isBarType = cachedSecondary.type == "bar"
-        if isBarType then
-            totalW = ERB.db.profile.primary.width or 214
-        else
-            totalW = sp.pipWidth or 214
-        end
+        totalW = sp.pipWidth or 214
 
         -- Frame dimensions: snapped ONCE to the physical pixel grid using
         -- the captured _crEs. Pip layout below uses the SAME _crEs and the
@@ -2995,6 +2986,8 @@ local CAST_BAR_TEXTURES = {
     ["atrocity"]      = TEX_BASE .. "atrocity.tga",
     ["divide"]        = TEX_BASE .. "divide.tga",
     ["glass"]         = TEX_BASE .. "glass.tga",
+    ["fade-right"]    = TEX_BASE .. "fade-right.tga",
+    ["fade"]          = TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TEX_BASE .. "gradient-bt.tga",
@@ -3004,6 +2997,7 @@ local CAST_BAR_TEXTURES = {
 }
 local CAST_BAR_TEXTURE_ORDER = {
     "none", "blizzard", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -3018,6 +3012,8 @@ local CAST_BAR_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -3042,6 +3038,8 @@ local BAR_TEXTURES = {
     ["atrocity"]      = BAR_TEX_BASE .. "atrocity.tga",
     ["divide"]        = BAR_TEX_BASE .. "divide.tga",
     ["glass"]         = BAR_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = BAR_TEX_BASE .. "fade-right.tga",
+    ["fade"]          = BAR_TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = BAR_TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = BAR_TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = BAR_TEX_BASE .. "gradient-bt.tga",
@@ -3051,6 +3049,7 @@ local BAR_TEXTURES = {
 }
 local BAR_TEXTURE_ORDER = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -3064,6 +3063,8 @@ local BAR_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -4114,18 +4115,21 @@ function ERB:OnInitialize()
     _G._ERB_Apply = function() ERB:ApplyAll() end
     -- Unlock mode: disable expandIfNoResource before positions are captured,
     -- restore on close. Prevents expanded height from corrupting saved state.
+    -- Session-local flag so stale SavedVariables can't force the setting back on
+    local _expandSuppressedThisSession = false
     _G._ERB_SuppressExpand = function()
         local p = self.db and self.db.profile and self.db.profile.primary
         if p and p.expandIfNoResource then
-            p._expandWasOn = true
+            _expandSuppressedThisSession = true
             p.expandIfNoResource = false
             ERB:ApplyAll()
         end
     end
     _G._ERB_RestoreExpand = function()
+        if not _expandSuppressedThisSession then return end
+        _expandSuppressedThisSession = false
         local p = self.db and self.db.profile and self.db.profile.primary
-        if p and p._expandWasOn then
-            p._expandWasOn = nil
+        if p then
             p.expandIfNoResource = true
             ERB:ApplyAll()
         end

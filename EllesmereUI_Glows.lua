@@ -358,7 +358,10 @@ end
 local function StartShapeGlow(wrapper, sz, cr, cg, cb, scale, opts)
     scale = scale or 1.20
     opts = opts or {}
-    local btn = wrapper:GetParent()
+    -- anchorFrame overrides GetParent() for cases where the wrapper is
+    -- parented to a different frame (e.g. action bar wrappers use
+    -- btn:GetParent() to escape mask clipping).
+    local btn = opts.anchorFrame or wrapper:GetParent()
     if not btn then return end
     if not wrapper._euiSgData then
         local glow   = btn:CreateTexture(nil, "OVERLAY", nil, 5)
@@ -387,21 +390,8 @@ local function StartShapeGlow(wrapper, sz, cr, cg, cb, scale, opts)
     d.glow:SetVertexColor(cr, cg, cb, 1)
     d.glow:SetAlpha(1); d.glow:Show()
 
-    -- Edge glow
-    d.edge:ClearAllPoints()
-    local inset = 4
-    d.edge:SetPoint("TOPLEFT",     btn, "TOPLEFT",      inset, -inset)
-    d.edge:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT",  -inset,  inset)
-    if borderPath then
-        d.edge:SetTexture(borderPath)
-    elseif maskPath then
-        d.edge:SetTexture(maskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    else
-        d.edge:SetColorTexture(1, 1, 1, 1)
-    end
-    d.edge:SetBlendMode("ADD")
-    d.edge:SetVertexColor(cr, cg, cb, 1)
-    d.edge:SetAlpha(0.85); d.edge:Show()
+    -- Edge: not used (created an ugly inset inner border ring)
+    d.edge:Hide()
 
     -- Bright border overlay
     d.bright:ClearAllPoints(); d.bright:SetAllPoints(btn)

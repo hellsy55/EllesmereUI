@@ -288,7 +288,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
     { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
     { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
@@ -473,6 +473,7 @@ function EllesmereUI.Print(...)
     if instanceType == "party" and C_ChallengeMode
        and C_ChallengeMode.IsChallengeModeActive
        and C_ChallengeMode.IsChallengeModeActive() then return end
+    if (instanceType == "pvp" or instanceType == "arena") and InCombatLockdown() then return end
     f:AddMessage(strjoin(" ", tostringall(...)))
 end
 
@@ -1226,9 +1227,14 @@ do
 
         -- Single native SetBackdrop call replaces 4 texture objects per border.
         -- BackdropTemplate renders the edge in C++ with one draw call.
-        local container = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-        container:SetAllPoints(frame)
-        container:SetFrameLevel(frame:GetFrameLevel() + 1)
+        -- Create a plain intermediary first (pure C-side, no mixin OnLoad)
+        -- so BackdropTemplate's OnLoad never runs on a Blizzard-parented frame.
+        -- This prevents taint propagation when frame is a Blizzard frame.
+        local intermediary = CreateFrame("Frame", nil, frame)
+        intermediary:SetAllPoints(frame)
+        intermediary:SetFrameLevel(frame:GetFrameLevel() + 1)
+        local container = CreateFrame("Frame", nil, intermediary, "BackdropTemplate")
+        container:SetAllPoints(intermediary)
 
         -- Guard: BackdropTemplateMixin.SetupTextureCoordinates does arithmetic
         -- on frame width/height. In tainted execution (nameplates, combat aura
@@ -1236,7 +1242,8 @@ do
         -- with a wrapper that skips the call when size is restricted.
         if container.SetupTextureCoordinates then
             container.SetupTextureCoordinates = function(self)
-                local w, h = self:GetSize()
+                local ok, w, h = pcall(self.GetSize, self)
+                if not ok then return end
                 if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return end
                 BackdropTemplateMixin.SetupTextureCoordinates(self)
             end
@@ -1248,9 +1255,6 @@ do
         -- Store border data externally (avoids tainting secure frames)
         bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
         _ppBorderData[frame] = bd
-        frame._ppBorders = container
-        frame._ppBorderSize = borderSize
-        frame._ppBorderColor = bd.borderColor
 
         -- Initial snap (effective scale may not be final yet)
         SnapBorderTextures(container, frame, borderSize)
@@ -1260,7 +1264,9 @@ do
         local ticks = 0
         container:SetScript("OnUpdate", function(self)
             ticks = ticks + 1
-            SnapBorderTextures(self, frame, bd.borderSize or 1)
+            -- pcall: SetBackdrop can trigger Blizzard OnSizeChanged on
+            -- tooltip frames where dimensions are secret values.
+            pcall(SnapBorderTextures, self, frame, bd.borderSize or 1)
             if ticks >= 2 then
                 self:SetScript("OnUpdate", nil)
             end
@@ -1272,13 +1278,17 @@ do
         return container
     end
 
+    function PP.GetBorders(frame)
+        local bd = _ppBorderData[frame]
+        return bd and bd.container
+    end
+
     function PP.SetBorderSize(frame, borderSize)
         local bd = _ppBorderData[frame]
         if not bd then return end
         borderSize = borderSize or 1
         SnapBorderTextures(bd.container, frame, borderSize)
         bd.borderSize = borderSize
-        frame._ppBorderSize = borderSize
     end
 
     function PP.SetBorderColor(frame, r, g, b, a)
@@ -1286,7 +1296,6 @@ do
         if not bd then return end
         a = a or 1
         bd.borderColor = { r, g, b, a }
-        frame._ppBorderColor = bd.borderColor
         bd.container._bdColor = bd.borderColor
         bd.container:SetBackdropBorderColor(r, g, b, a)
     end
@@ -1430,6 +1439,7 @@ do
 
     -- Panel borders delegate to the unified PP border system
     PanelPP.CreateBorder  = PP.CreateBorder
+    PanelPP.GetBorders    = PP.GetBorders
     PanelPP.SetBorderSize = PP.SetBorderSize
     PanelPP.SetBorderColor = PP.SetBorderColor
     PanelPP.UpdateBorder  = PP.UpdateBorder
@@ -1638,37 +1648,108 @@ local function ResolveFontName(fontName)
 end
 EllesmereUI.ResolveFontName = ResolveFontName
 
--- Get the resolved font path for an addon key (addonKey is ignored — always uses global font)
+-- Per-module font overrides: all state stored on the EllesmereUI table
+-- to stay under the 200-local / 60-upvalue Lua 5.1 caps.
+EllesmereUI._addonKeyToFolder = {
+    actionBars   = "EllesmereUIActionBars",
+    nameplates   = "EllesmereUINameplates",
+    unitFrames   = "EllesmereUIUnitFrames",
+    cdm          = "EllesmereUICooldownManager",
+    resourceBars = "EllesmereUIResourceBars",
+    auraBuff     = "EllesmereUIAuraBuffReminders",
+    extras       = "EllesmereUIQoL",
+    friends      = "EllesmereUIFriends",
+    minimap      = "EllesmereUIMinimap",
+    chat         = "EllesmereUIChat",
+    questTracker = "EllesmereUIQuestTracker",
+    mythicTimer  = "EllesmereUIMythicTimer",
+    blizzardSkin = "EllesmereUIBlizzardSkin",
+    damageMeters = "EllesmereUIDamageMeters",
+}
+EllesmereUI._moduleFontCache = {}
+EllesmereUI._moduleFontCacheVer = 0
+
+-- Resolve an addonKey to a moduleFonts entry (or nil for global).
+-- Cached per-key for zero-alloc repeated lookups.
+function EllesmereUI.GetModuleFontEntry(addonKey)
+    if not addonKey then return nil end
+    local db = EllesmereUI.GetFontsDB()
+    local mfList = db.moduleFonts
+    if not mfList or #mfList == 0 then return nil end
+
+    local cache = EllesmereUI._moduleFontCache
+    local ver = #mfList
+    if ver ~= EllesmereUI._moduleFontCacheVer then
+        wipe(cache)
+        EllesmereUI._moduleFontCacheVer = ver
+    end
+
+    local cached = cache[addonKey]
+    if cached ~= nil then
+        return cached ~= false and cached or nil
+    end
+
+    local folder = EllesmereUI._addonKeyToFolder[addonKey] or addonKey
+
+    for _, entry in ipairs(mfList) do
+        if entry.folder == folder then
+            cache[addonKey] = entry
+            return entry
+        end
+    end
+    cache[addonKey] = false
+    return nil
+end
+
+-- Get the resolved font path for an addon key.
+-- Falls back to the global font when no per-module override is configured.
 function EllesmereUI.GetFontPath(addonKey)
     local db = EllesmereUI.GetFontsDB()
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    if override and override.font and override.font ~= "__global" then
+        return ResolveFontName(override.font)
+    end
     return ResolveFontName(db.global or "Expressway")
 end
 
--- Get the font name (not path) for an addon key (addonKey is ignored — always uses global font)
+-- Get the font name (not path) for an addon key.
 function EllesmereUI.GetFontName(addonKey)
     local db = EllesmereUI.GetFontsDB()
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    if override and override.font and override.font ~= "__global" then
+        return override.font
+    end
     return db.global or "Expressway"
 end
 
--- Get the WoW font flag string for the current global outline mode.
--- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow — caller should set shadow offset)
-function EllesmereUI.GetFontOutlineFlag()
+-- Get the WoW font flag string for the outline mode.
+-- Pass an addonKey to get per-module override; nil returns the global setting.
+-- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow)
+function EllesmereUI.GetFontOutlineFlag(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    local mode = db.outlineMode or "none"
-    if mode == "outline" then
-        return "OUTLINE"
-    elseif mode == "thick" then
-        return "THICKOUTLINE"
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local mode
+    if override and override.outline and override.outline ~= "__global" then
+        mode = override.outline
     else
-        return ""
+        mode = db.outlineMode or "none"
     end
+    if mode == "outline" then return "OUTLINE"
+    elseif mode == "thick" then return "THICKOUTLINE"
+    else return "" end
 end
 
--- Returns true when the current outline mode uses drop shadow instead of outline.
--- Callers that set SetShadowOffset should check this to decide whether to show shadow.
-function EllesmereUI.GetFontUseShadow()
+-- Returns true when the outline mode uses drop shadow instead of outline.
+-- Pass an addonKey to get per-module override; nil returns the global setting.
+function EllesmereUI.GetFontUseShadow(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    local mode = db.outlineMode or "none"
+    local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local mode
+    if override and override.outline and override.outline ~= "__global" then
+        mode = override.outline
+    else
+        mode = db.outlineMode or "none"
+    end
     return mode == "none" or mode == "shadow"
 end
 
@@ -2013,11 +2094,20 @@ function EllesmereUI.GetSoulFragments()
         local cur = C_Spell and C_Spell.GetSpellCastCount and C_Spell.GetSpellCastCount(228477) or 0
         return cur, 6
     elseif specID == 1480 then -- Devourer (hero spec)
-        local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1225789)
-        if not aura then aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1227702) end
-        local cur = aura and aura.applications or 0
-        local max = (C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(1247534)) and 35 or 50
-        return cur, max
+        -- In Void Metamorphosis (1217607): stacks come from Silence the
+        -- Whispers (1227702) and max is 40. Outside meta: stacks come
+        -- from Dark Heart (1225789) and max is 50 (or 35 with Soul
+        -- Glutton talent 1247534).
+        local inMeta = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1217607)
+        local aura, max
+        if inMeta then
+            aura = C_UnitAuras.GetPlayerAuraBySpellID(1227702)
+            max = 40
+        else
+            aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1225789)
+            max = (C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(1247534)) and 35 or 50
+        end
+        return (aura and aura.applications or 0), max
     end
     -- Havoc or unknown spec: no soul fragments
     return 0, 0
@@ -2227,7 +2317,7 @@ do
         return C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id) or 134414
     end
 
-    -- M+/raid instance check (mirrors chat module's IsInProtectedInstance)
+    -- M+/raid/PvP instance check -- guards against tainted execution
     local function InProtectedInstance()
         local _, instanceType = IsInInstance()
         if instanceType == "raid" and InCombatLockdown() then return true end
@@ -2236,6 +2326,7 @@ do
             and C_ChallengeMode.IsChallengeModeActive() then
             return true
         end
+        if (instanceType == "pvp" or instanceType == "arena") and InCombatLockdown() then return true end
         return false
     end
 
@@ -2463,9 +2554,14 @@ function EllesmereUI.AppendSharedMediaTextures(names, order, castBarNames, textu
 
     -- Collect SM texture names not already present, sort alphabetically
     local sorted = {}
+    -- Filter out icon textures that some SM packs incorrectly register as statusbar
+    local SM_TEX_BLACKLIST = {
+        play_icon = true, stop_icon = true,
+        user_icon = true, users_icon = true,
+    }
     for name in pairs(smTextures) do
         local key = "sm:" .. name
-        if not textures[key] then
+        if not textures[key] and not SM_TEX_BLACKLIST[name] then
             sorted[#sorted + 1] = name
         end
     end
@@ -3708,17 +3804,10 @@ local function CreateMainFrame()
         mainFrame:SetScale(baseScale2 * userScale2)
         -- Re-sync PanelPP mult for the (possibly new) scale
         if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
-        -- Re-snap all borders after the scale change. Effective scale
-        -- propagates through the frame hierarchy after layout, so wait
-        -- 2 frames before re-snapping to ensure accurate values.
-        local snapTicks = 0
-        mainFrame:SetScript("OnUpdate", function(self)
-            snapTicks = snapTicks + 1
-            if snapTicks >= 2 then
-                self:SetScript("OnUpdate", nil)
-                PP.ResnapAllBorders()
-            end
-        end)
+        -- Panel borders are resnapped by the tab-switch ResnapBordersUnder
+        -- call (scoped to the active page, ~2ms). The global ResnapAllBorders
+        -- was iterating every border in the addon (~74ms) which is unnecessary
+        -- since non-panel borders have their own scale and resnap triggers.
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()
@@ -7110,7 +7199,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.2.7"
+EllesmereUI.VERSION = "7.5.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7439,12 +7528,17 @@ end)
 SLASH_EUIOPTIONS1 = "/eui"
 SLASH_EUIOPTIONS2 = "/ellesmere"
 SLASH_EUIOPTIONS3 = "/ellesmereui"
+-- Defer slash command actions by one frame to avoid tainting
+-- Blizzard's ParseText -> ClearChat -> UpdateHeader chain when
+-- typed in a BN_WHISPER edit box (secret tellTarget value).
 SlashCmdList.EUIOPTIONS = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:Toggle()
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:Toggle()
+    end)
 end
 
 -- Debug: /euimem toggles per-second memory delta readout
@@ -7453,7 +7547,7 @@ SlashCmdList.EUIMEM = function()
     if EllesmereUI._memTicker then
         EllesmereUI._memTicker:Cancel()
         EllesmereUI._memTicker = nil
-        print("|cff00ff00[EUI Memory Tracker]|r Stopped.")
+        EllesmereUI.Print("|cff00ff00[EUI Memory Tracker]|r Stopped.")
         return
     end
     local addons = {}
@@ -7468,7 +7562,7 @@ SlashCmdList.EUIMEM = function()
     for _, name in ipairs(addons) do
         lastMem[name] = GetAddOnMemoryUsage(name)
     end
-    print("|cff00ff00[EUI Memory Tracker]|r Tracking " .. #addons .. " addons. /euimem to stop.")
+    EllesmereUI.Print("|cff00ff00[EUI Memory Tracker]|r Tracking " .. #addons .. " addons. /euimem to stop.")
     local MEM_INTERVAL = 10
     local sampleCount = 0
     local accumMem = {}
@@ -7508,39 +7602,45 @@ SlashCmdList.EUIMEM = function()
         end
         sampleCount = 0
         local totalColor = math.abs(totalAvg) > 40 and "ffff6060" or math.abs(totalAvg) > 25 and "ffffff60" or "ff60ff60"
-        print(string.format("|c%s[EUI Memory Tracker]|r %+.1f kb/s avg", totalColor, totalAvg))
-        for _, line in ipairs(lines) do print(line) end
+        EllesmereUI.Print(string.format("|c%s[EUI Memory Tracker]|r %+.1f kb/s avg", totalColor, totalAvg))
+        for _, line in ipairs(lines) do EllesmereUI.Print(line) end
     end)
 end
 
 -- Quick-access: /ee opens global settings
 SLASH_EUIQUICK1 = "/ee"
 SlashCmdList.EUIQUICK = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:Toggle()
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:Toggle()
+    end)
 end
 
 -- Quick-access: /epm opens directly to Party Mode settings
 SLASH_EUIPARTYMODE1 = "/epm"
 SlashCmdList.EUIPARTYMODE = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    EllesmereUI:ShowModule("EllesmereUIPartyMode")
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        EllesmereUI:ShowModule("EllesmereUIPartyMode")
+    end)
 end
 
 -- Toggle party mode on/off
 SLASH_PARTYMODETOGGLE1 = "/partymode"
 SlashCmdList.PARTYMODETOGGLE = function()
-    if EllesmereUI_TogglePartyMode then
-        EllesmereUI_TogglePartyMode()
-    else
-        print("|cffff6060[EllesmereUI]|r Party Mode addon is not loaded.")
-    end
+    C_Timer.After(0, function()
+        if EllesmereUI_TogglePartyMode then
+            EllesmereUI_TogglePartyMode()
+        else
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Party Mode addon is not loaded.")
+        end
+    end)
 end
 
 -- Debug: reset preview hint dismissed flag
@@ -7549,48 +7649,54 @@ SLASH_EUIRESETHINT1 = "/euiresethint"
 -- Quick-access: /unlock opens Unlock Mode directly
 SLASH_EUIUNLOCK1 = "/unlock"
 SlashCmdList.EUIUNLOCK = function()
-    if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
-        return
-    end
-    if EllesmereUI.NeedsBetaReset() then EllesmereUI:ShowWelcomePopup(); return end
-    EllesmereUI:EnsureLoaded()
-    if EllesmereUI._openUnlockMode then
-        EllesmereUI._openUnlockMode()
-    else
-        print("|cffff6060[EllesmereUI]|r Unlock Mode is not available.")
-    end
+    C_Timer.After(0, function()
+        if InCombatLockdown() then
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+            return
+        end
+        if EllesmereUI.NeedsBetaReset() then EllesmereUI:ShowWelcomePopup(); return end
+        EllesmereUI:EnsureLoaded()
+        if EllesmereUI._openUnlockMode then
+            EllesmereUI._openUnlockMode()
+        else
+            EllesmereUI.Print("|cffff6060[EllesmereUI]|r Unlock Mode is not available.")
+        end
+    end)
 end
 
 -- Test: /euipopup shows the welcome popup without wiping anything
 SLASH_EUIPOPUP1 = "/euipopup"
 SlashCmdList.EUIPOPUP = function()
-    EllesmereUI:ShowWelcomePopup()
+    C_Timer.After(0, function() EllesmereUI:ShowWelcomePopup() end)
 end
 
 SlashCmdList.EUIRESETHINT = function()
-    if EllesmereUIDB then
-        EllesmereUIDB.previewHintDismissed = nil
-        EllesmereUIDB.unlockTipSeen = nil
-        EllesmereUIDB.sidebarUnlockTipSeen = nil
-    end
-    print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
+    C_Timer.After(0, function()
+        if EllesmereUIDB then
+            EllesmereUIDB.previewHintDismissed = nil
+            EllesmereUIDB.unlockTipSeen = nil
+            EllesmereUIDB.sidebarUnlockTipSeen = nil
+        end
+        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
+    end)
 end
 
 -- Debug: wipe saved UI scale so next reload re-snapshots from Blizzard default
 SLASH_EUIRESETSCALE1 = "/euiresetscale"
 SlashCmdList.EUIRESETSCALE = function()
-    if EllesmereUIDB then
-        EllesmereUIDB.ppUIScale = nil
-        EllesmereUIDB.ppUIScaleAuto = nil
-    end
-    print("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale.")
+    C_Timer.After(0, function()
+        if EllesmereUIDB then
+            EllesmereUIDB.ppUIScale = nil
+            EllesmereUIDB.ppUIScaleAuto = nil
+        end
+        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale.")
+    end)
 end
 
 -- Open the panel with a specific addon's tab selected
 function EllesmereUI:ShowModule(folderName)
     if InCombatLockdown() then
-        print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+        EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
     if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
@@ -7783,7 +7889,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- Add EllesmereUI + Unlock Mode buttons to the Game Menu (pause menu).
     -- Both share a single Layout hook to avoid double-push conflicts.
-    if GameMenuFrame and not GameMenuFrame.EllesmereUI then
+    if GameMenuFrame and not EllesmereUI._GetFFD(GameMenuFrame).euiBtn then
         -- Game menu frame+button skinning lives in EllesmereUIBlizzardSkin.lua
         -- so it only applies when that addon is enabled. Detect whether the
         -- skin is active so EUI's own buttons match the skinned menu style.
@@ -7795,19 +7901,19 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetSize(200, 35)
         btn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
                 return
             end
             HideUIPanel(GameMenuFrame)
             EllesmereUI:Toggle()
         end)
-        GameMenuFrame.EllesmereUI = btn
+        EllesmereUI._GetFFD(GameMenuFrame).euiBtn = btn
 
         local unlockBtn = CreateFrame("Button", "EllesmereUI_UnlockMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         unlockBtn:SetSize(200, 35)
         unlockBtn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot toggle Unlock Mode during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot toggle Unlock Mode during combat.")
                 return
             end
             HideUIPanel(GameMenuFrame)
@@ -7815,7 +7921,7 @@ initFrame:SetScript("OnEvent", function(self, event)
                 EllesmereUI:ToggleUnlockMode()
             end
         end)
-        GameMenuFrame.EllesmereUIUnlock = unlockBtn
+        EllesmereUI._GetFFD(GameMenuFrame).unlockBtn = unlockBtn
 
         -- Skin our custom buttons the same way as pooled Blizzard buttons
         if _reskinMenu then
@@ -8032,7 +8138,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetText("Open EllesmereUI")
         btn:SetScript("OnClick", function()
             if InCombatLockdown() then
-                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
                 return
             end
             -- Close Blizzard settings first, then open ours on next frame to avoid taint
@@ -8322,6 +8428,17 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
 end
 
 -------------------------------------------------------------------------------
+--  External weak-keyed lookup table for frame state (prevents tainting Blizzard
+--  frames). Stored on EllesmereUI to avoid the 200-local cap in this file.
+-------------------------------------------------------------------------------
+EllesmereUI._FFD = EllesmereUI._FFD or setmetatable({}, { __mode = "k" })
+function EllesmereUI._GetFFD(frame)
+    local d = EllesmereUI._FFD[frame]
+    if not d then d = {}; EllesmereUI._FFD[frame] = d end
+    return d
+end
+
+-------------------------------------------------------------------------------
 --  Alpha-Zero Visibility Helper
 --  For anchor-participating container frames: use alpha 0 + EnableMouse(false)
 --  instead of :Hide() so the frame stays in the layout engine with valid bounds.
@@ -8330,13 +8447,13 @@ end
 function EllesmereUI.SetElementVisibility(frame, visible)
     if not frame then return end
     if visible then
-        frame:SetAlpha(frame._euiRestoreAlpha or 1)
-        frame:EnableMouse(frame._euiRestoreMouse or false)
+        frame:SetAlpha(EllesmereUI._GetFFD(frame).restoreAlpha or 1)
+        frame:EnableMouse(EllesmereUI._GetFFD(frame).restoreMouse or false)
     else
         if frame:GetAlpha() > 0 then
-            frame._euiRestoreAlpha = frame:GetAlpha()
+            EllesmereUI._GetFFD(frame).restoreAlpha = frame:GetAlpha()
         end
-        frame._euiRestoreMouse = frame:IsMouseEnabled()
+        EllesmereUI._GetFFD(frame).restoreMouse = frame:IsMouseEnabled()
         frame:SetAlpha(0)
         frame:EnableMouse(false)
     end
@@ -8378,9 +8495,9 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
         end
 
         if blizzBar:GetParent() ~= hiddenParent then
-            blizzBar._euiOrigParent = blizzBar:GetParent()
+            EllesmereUI._GetFFD(blizzBar).origParent = blizzBar:GetParent()
         end
-        blizzBar._euiCastBarSuppressed = true
+        EllesmereUI._GetFFD(blizzBar).castBarSuppressed = true
 
         if blizzBar:GetParent() ~= hiddenParent then
             blizzBar:SetParent(hiddenParent)
@@ -8388,12 +8505,12 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
         -- Edit Mode tries to re-anchor the cast bar during layout changes.
         -- Keep re-applying our hidden parent while any EUI owner suppresses it.
-        if not blizzBar._euiSetParentHooked then
-            blizzBar._euiSetParentHooked = true
+        if not EllesmereUI._GetFFD(blizzBar).setParentHooked then
+            EllesmereUI._GetFFD(blizzBar).setParentHooked = true
             hooksecurefunc(blizzBar, "SetParent", function(self, newParent)
-                if self._euiCastBarSuppressed and newParent ~= EllesmereUI._playerCastBarHiddenParent then
+                if EllesmereUI._GetFFD(self).castBarSuppressed and newParent ~= EllesmereUI._playerCastBarHiddenParent then
                     C_Timer.After(0, function()
-                        if self._euiCastBarSuppressed
+                        if EllesmereUI._GetFFD(self).castBarSuppressed
                            and not InCombatLockdown()
                            and self:GetParent() ~= EllesmereUI._playerCastBarHiddenParent
                         then
@@ -8406,18 +8523,18 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
         local selection = blizzBar.Selection
         if selection then
-            if not selection._euiSuppressed then
-                selection._euiRestoreAlpha = selection:GetAlpha()
-                selection._euiRestoreMouse = selection:IsMouseEnabled()
+            if not EllesmereUI._GetFFD(selection).suppressed then
+                EllesmereUI._GetFFD(selection).restoreAlpha = selection:GetAlpha()
+                EllesmereUI._GetFFD(selection).restoreMouse = selection:IsMouseEnabled()
             end
-            selection._euiSuppressed = true
+            EllesmereUI._GetFFD(selection).suppressed = true
             selection:SetAlpha(0)
             selection:EnableMouse(false)
 
-            if not selection._euiShowHooked then
-                selection._euiShowHooked = true
+            if not EllesmereUI._GetFFD(selection).showHooked then
+                EllesmereUI._GetFFD(selection).showHooked = true
                 hooksecurefunc(selection, "Show", function(self)
-                    if PlayerCastingBarFrame and PlayerCastingBarFrame._euiCastBarSuppressed then
+                    if PlayerCastingBarFrame and EllesmereUI._GetFFD(PlayerCastingBarFrame).castBarSuppressed then
                         self:SetAlpha(0)
                         self:EnableMouse(false)
                     end
@@ -8428,17 +8545,17 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
         return
     end
 
-    blizzBar._euiCastBarSuppressed = false
+    EllesmereUI._GetFFD(blizzBar).castBarSuppressed = false
 
-    if hiddenParent and blizzBar:GetParent() == hiddenParent and blizzBar._euiOrigParent then
-        blizzBar:SetParent(blizzBar._euiOrigParent)
+    if hiddenParent and blizzBar:GetParent() == hiddenParent and EllesmereUI._GetFFD(blizzBar).origParent then
+        blizzBar:SetParent(EllesmereUI._GetFFD(blizzBar).origParent)
     end
 
     local selection = blizzBar.Selection
     if selection then
-        selection._euiSuppressed = false
-        selection:SetAlpha(selection._euiRestoreAlpha or 1)
-        selection:EnableMouse(selection._euiRestoreMouse or false)
+        EllesmereUI._GetFFD(selection).suppressed = false
+        selection:SetAlpha(EllesmereUI._GetFFD(selection).restoreAlpha or 1)
+        selection:EnableMouse(EllesmereUI._GetFFD(selection).restoreMouse or false)
     end
 
     -- Let Blizzard rebuild its normal event wiring and pick up any active cast

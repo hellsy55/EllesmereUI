@@ -188,6 +188,46 @@ do
     end)
 end
 
+-- Override STANDARD_TEXT_FONT when "Reskin Blizzard Elements" is on.
+-- Must be set before login so newly-created Blizzard FontStrings inherit it.
+-- Same direct-assignment approach as ElvUI (no hooks, no metatables).
+do
+    local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\"
+    local FONT_FILES = {
+        ["Expressway"]          = "Expressway.TTF",
+        ["Avant Garde"]         = "AvantGarde.TTF",
+        ["Arial Bold"]          = "arialbd.ttf",
+        ["Poppins"]             = "Poppins-Medium.ttf",
+        ["Fira Sans Medium"]    = "FiraSans-Medium.ttf",
+    }
+
+    local function ApplyGlobalFont()
+        if not EllesmereUIDB then return end
+        -- Master "Reskin Blizzard Elements" toggle (customTooltips key)
+        if EllesmereUIDB.customTooltips == false then return end
+        local globalName = EllesmereUIDB.fontSettings
+            and EllesmereUIDB.fontSettings.global
+            or "Expressway"
+        local file = FONT_FILES[globalName]
+        if file then
+            _G.STANDARD_TEXT_FONT = MEDIA .. file
+        end
+    end
+
+    ApplyGlobalFont()
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_LOADED")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self, event, addonName)
+        if event == "ADDON_LOADED" and addonName ~= ADDON_NAME then return end
+        ApplyGlobalFont()
+        if event == "PLAYER_LOGIN" then
+            self:UnregisterAllEvents()
+        end
+    end)
+end
+
 -- /rl reload shortcut -- only
 if not SlashCmdList["RL"] then
     SlashCmdList["RL"] = function() ReloadUI() end

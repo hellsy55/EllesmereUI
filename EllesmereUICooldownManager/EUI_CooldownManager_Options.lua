@@ -3375,6 +3375,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 function(r, g, b, a)
                     local bd = SelectedTBB(); if not bd then return end
+                    bd.fillColorMode = "custom"
                     bd.fillR, bd.fillG, bd.fillB, bd.fillA = r, g, b, a; RefreshTBB()
                 end,
                 true, 20)
@@ -3985,7 +3986,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local removed = sd.removedSpells
             for _, icon in ipairs(liveIcons) do
-                local _sid = (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID) or icon._spellID
+                local _sid = ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID
                 if _sid and _sid > 0 then
                     _sid = NormalizeToBase(_sid)
                     if not seen[_sid] and not (removed and removed[_sid]) then
@@ -7346,7 +7347,7 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(slot._icon, "BOTTOMRIGHT", slot, "BOTTOMRIGHT", -bSz, bSz)
                 slot._icon:Show()
 
-                if slot._ppBorders then
+                if PP.GetBorders(slot) then
                     PP.SetBorderColor(slot, bR, bG, bB, 1)
                     PP.SetBorderSize(slot, bSz)
                 end
@@ -7453,7 +7454,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Size(addBtn, iconSize, iconH); addBtn:ClearAllPoints()
             PP.Point(addBtn, "TOPLEFT", self, "TOPLEFT", addPx, addPy)
-            if addBtn._ppBorders then PP.SetBorderSize(addBtn, 1) end
+            if PP.GetBorders(addBtn) then PP.SetBorderSize(addBtn, 1) end
             local ar, ag, ab = EllesmereUI.GetAccentColor()
 
             addLbl:SetTextColor(ar, ag, ab, 0.6)
@@ -7502,6 +7503,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 clickFS:SetTextColor(ar, ag, ab, 1)
                 clickFS:SetText("Manage shown buffs through Blizzard CDM Settings")
+                clickBtn._fs = clickFS
                 clickBtn:SetScript("OnEnter", function() clickFS:SetTextColor(1, 1, 1, 1) end)
                 clickBtn:SetScript("OnLeave", function()
                     local r, g, b = EllesmereUI.GetAccentColor()
@@ -7514,7 +7516,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local clickBtn = self._buffInfoClick
                 clickBtn:ClearAllPoints()
                 clickBtn:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
-                clickBtn:SetWidth(self:GetWidth() - 20)
+                local fs = clickBtn._fs
+                local textW = fs and fs:GetStringWidth() or 0
+                clickBtn:SetWidth(math.max(textW + 4, 30))
                 clickBtn:Show()
                 -- Clean up hidden rows from previous implementation
                 if self._hiddenRows then
@@ -8327,6 +8331,7 @@ initFrame:SetScript("OnEvent", function(self)
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
             -- Hide Buffs When Inactive toggle removed: always forced ON.
         end
+
         end -- not isFocusKick (Bar Layout section)
 
         -------------------------------------------------------------------
@@ -9007,6 +9012,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
             UpdateBorderSwatchState()
+
         end
 
         -- (Active Animation UI removed -- active state is now per-icon via spell picker dropdown)

@@ -219,14 +219,14 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.iconStyle = v
-                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
               end },
             { type="toggle", text="Class Color Names",
               getValue=function() local f = FriendsDB(); return f and f.classColorNames end,
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.classColorNames = v
-                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
               end }
         );  y = y - h
 
@@ -307,7 +307,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.factionBanners = v
-                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
               end }
         );  y = y - h
 
@@ -319,7 +319,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local f = FriendsDB(); if not f then return end
                 f.showRegionIcons = v
-                if _G._EBS_RebuildFriendsDP then _G._EBS_RebuildFriendsDP() end
+                if _G._EFR_ProcessFriendButtons then _G._EFR_ProcessFriendButtons() end
               end },
             { type="toggle", text="Auto-Accept Friend Invites",
               tooltip="Auto-accepts all group invites from people on your friends list",

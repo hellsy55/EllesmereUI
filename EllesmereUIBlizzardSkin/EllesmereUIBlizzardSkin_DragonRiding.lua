@@ -24,6 +24,8 @@ ns.EDR_BAR_TEXTURES = {
     ["atrocity"]      = EDR_TEX_BASE .. "atrocity.tga",
     ["divide"]        = EDR_TEX_BASE .. "divide.tga",
     ["glass"]         = EDR_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = EDR_TEX_BASE .. "fade-right.tga",
+    ["fade"]          = EDR_TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = EDR_TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = EDR_TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = EDR_TEX_BASE .. "gradient-bt.tga",
@@ -319,8 +321,8 @@ end
 -------------------------------------------------------------------------------
 local function ApplyFont(fs, size)
     if not fs then return end
-    local font = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts/FRIZQT__.TTF"
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
+    local font = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or "Fonts/FRIZQT__.TTF"
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("blizzardSkin") or ""
     fs:SetFont(font, size or 12, flag)
     if flag == "" then
         fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
