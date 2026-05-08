@@ -409,7 +409,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Hide Great Vault Button | Hide M+ Portals Button
+        -- Hide Great Vault Button | Great Vault Extra Info
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Great Vault Button",
               tooltip="Hides the Great Vault shortcut button from the minimap button stack.",
@@ -419,6 +419,21 @@ initFrame:SetScript("OnEvent", function(self)
                 m.hideGreatVault = v
                 RefreshMinimap()
               end },
+            { type="toggle", text="Great Vault Extra Info",
+              tooltip="Shows a compact weekly progress summary in the Great Vault minimap button tooltip.",
+              getValue=function()
+                local m = MinimapDB()
+                return not m or m.greatVaultExtraInfo ~= false
+              end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.greatVaultExtraInfo = v
+                EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        -- Hide M+ Portals Button
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide M+ Portals Button",
               tooltip="Hides the M+ Portals shortcut button from the minimap button stack.",
               getValue=function() local m = MinimapDB(); return m and m.hidePortals end,
@@ -426,7 +441,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local m = MinimapDB(); if not m then return end
                 m.hidePortals = v
                 RefreshMinimap()
-              end }
+              end },
+            { type="label", text="" }
         );  y = y - h
 
         y = y - 10
