@@ -1131,8 +1131,6 @@ do
     ---------------------------------------------------------------------------
 
     local function SnapBorderTextures(container, frame, borderSize)
-        -- Guard: container may have been recycled by Blizzard (e.g. tooltip
-        -- frames in the renown panel). Bail if it's no longer valid.
         if not container.GetEffectiveScale then return end
         local ok, es = pcall(container.GetEffectiveScale, container)
         if not ok or not es then return end
@@ -1140,18 +1138,37 @@ do
         local bs = borderSize or 1
         local edgeSize = bs > 0 and math.max(onePixel, math.floor(bs + 0.5) * onePixel) or 0
 
+        local t, b, l, r = container._top, container._bottom, container._left, container._right
+        if not t then return end
+
         if edgeSize == 0 then
-            container:SetBackdrop(nil)
+            t:Hide(); b:Hide(); l:Hide(); r:Hide()
             return
         end
 
-        container:SetBackdrop({
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = edgeSize,
-        })
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+        t:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+        t:SetHeight(edgeSize); t:Show()
+        b:ClearAllPoints()
+        b:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+        b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        b:SetHeight(edgeSize); b:Show()
+        l:ClearAllPoints()
+        l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+        l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+        l:SetWidth(edgeSize); l:Show()
+        r:ClearAllPoints()
+        r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+        r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        r:SetWidth(edgeSize); r:Show()
+
         local bc = container._bdColor
         if bc then
-            container:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4])
+            t:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
+            b:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
+            l:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
+            r:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
         end
     end
 
@@ -1174,11 +1191,6 @@ do
             local c, f = entry.container, entry.frame
             if c and f then
                 local bd = _ppBorderData[f]
-                -- Wrapped in pcall: some registered frames can become
-                -- invalid during loading screens (teleports, pool releases)
-                -- and throw "bad self" when methods are called on them.
-                -- Invalidate the entry on failure so we skip it forever
-                -- and don't spam the error on every scale/PEW event.
                 local ok = pcall(SnapBorderTextures, c, f, bd and bd.borderSize or 1)
                 if not ok then
                     entry.container = nil
@@ -1224,53 +1236,40 @@ do
         if bd then return bd.container end
         r = r or 0; g = g or 0; b = b or 0; a = a or 1
         borderSize = borderSize or 1
+        drawLayer = drawLayer or "OVERLAY"
+        subLevel = subLevel or 0
 
-        -- Single native SetBackdrop call replaces 4 texture objects per border.
-        -- BackdropTemplate renders the edge in C++ with one draw call.
-        -- Create a plain intermediary first (pure C-side, no mixin OnLoad)
-        -- so BackdropTemplate's OnLoad never runs on a Blizzard-parented frame.
-        -- This prevents taint propagation when frame is a Blizzard frame.
-        local intermediary = CreateFrame("Frame", nil, frame)
-        intermediary:SetAllPoints(frame)
-        intermediary:SetFrameLevel(frame:GetFrameLevel() + 1)
-        local container = CreateFrame("Frame", nil, intermediary, "BackdropTemplate")
-        container:SetAllPoints(intermediary)
+        -- 4 texture strips instead of BackdropTemplate: avoids NineSlice corner
+        -- sub-frames that render as black boxes on nameplate frames.
+        local container = CreateFrame("Frame", nil, frame)
+        container:SetAllPoints(frame)
+        container:SetFrameLevel(frame:GetFrameLevel() + 1)
 
-        -- Guard: BackdropTemplateMixin.SetupTextureCoordinates does arithmetic
-        -- on frame width/height. In tainted execution (nameplates, combat aura
-        -- updates) those values are secret and the arithmetic errors. Replace
-        -- with a wrapper that skips the call when size is restricted.
-        if container.SetupTextureCoordinates then
-            container.SetupTextureCoordinates = function(self)
-                local ok, w, h = pcall(self.GetSize, self)
-                if not ok then return end
-                if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return end
-                BackdropTemplateMixin.SetupTextureCoordinates(self)
-            end
+        local WHITE = "Interface\\Buttons\\WHITE8X8"
+        local function MakeTex()
+            local tx = container:CreateTexture(nil, drawLayer, nil, subLevel)
+            tx:SetTexture(WHITE)
+            return tx
         end
+        container._top    = MakeTex()
+        container._bottom = MakeTex()
+        container._left   = MakeTex()
+        container._right  = MakeTex()
 
-        -- Store color for SnapBorderTextures to re-apply after SetBackdrop
         container._bdColor = { r, g, b, a }
-
-        -- Store border data externally (avoids tainting secure frames)
         bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
         _ppBorderData[frame] = bd
 
-        -- Initial snap (effective scale may not be final yet)
         SnapBorderTextures(container, frame, borderSize)
 
-        -- Short-lived OnUpdate: re-snap for 2 frames to catch the final
-        -- effective scale after parent frames finish layout, then stop.
+        -- Re-snap for 2 frames to catch final effective scale after layout.
         local ticks = 0
         container:SetScript("OnUpdate", function(self)
             ticks = ticks + 1
             SnapBorderTextures(self, frame, bd.borderSize or 1)
-            if ticks >= 2 then
-                self:SetScript("OnUpdate", nil)
-            end
+            if ticks >= 2 then self:SetScript("OnUpdate", nil) end
         end)
 
-        -- Register for centralized re-snap on scale/resolution changes
         RegisterBorder(container, frame)
 
         return container
@@ -1295,7 +1294,11 @@ do
         a = a or 1
         bd.borderColor = { r, g, b, a }
         bd.container._bdColor = bd.borderColor
-        bd.container:SetBackdropBorderColor(r, g, b, a)
+        local c = bd.container
+        if c._top then c._top:SetVertexColor(r, g, b, a) end
+        if c._bottom then c._bottom:SetVertexColor(r, g, b, a) end
+        if c._left then c._left:SetVertexColor(r, g, b, a) end
+        if c._right then c._right:SetVertexColor(r, g, b, a) end
     end
 
     function PP.UpdateBorder(frame, borderSize, r, g, b, a)
