@@ -207,9 +207,9 @@ local function BuildRightText(entry)
     local castStr = FormatCastTime(entry)
     local outcomeStr = OUTCOME_TEXT[entry.status]
     -- Outcome (Interrupted/Failed) replaces target; otherwise show target.
-    -- Enemy names in M+ are secret values; guard all comparisons.
+    -- Enemy names in M+ are secret values but FontStrings can display them.
     local target = entry.target
-    local hasTarget = target and not (issecretvalue and issecretvalue(target)) and target ~= ""
+    local hasTarget = target and ((issecretvalue and issecretvalue(target)) or target ~= "")
     local rightPart = outcomeStr or (hasTarget and target) or nil
     if castStr ~= "" and rightPart then
         return castStr .. "  " .. rightPart

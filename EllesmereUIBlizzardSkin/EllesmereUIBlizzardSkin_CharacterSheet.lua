@@ -2523,9 +2523,9 @@ local function SkinCharacterSheet()
 
         -- Add border directly on the slot with item color (2px thickness)
         if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 2)
+            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 7)
             local bdrFrame = EllesmereUI.PanelPP.GetBorders(slot)
-            if bdrFrame then bdrFrame:SetFrameLevel(slot:GetFrameLevel() + 1) end
+            if bdrFrame then bdrFrame:SetFrameLevel(slot:GetFrameLevel()) end
         end
     end
 
@@ -3735,11 +3735,11 @@ local function SkinCharacterSheet()
             if not GetFFD(slot).missingEnchBorder then
                 local overlay = CreateFrame("Frame", nil, slot)
                 overlay:SetAllPoints(slot)
-                overlay:SetFrameLevel(slot:GetFrameLevel() + 1)
+                overlay:SetFrameLevel(slot:GetFrameLevel())
                 if EllesmereUI and EllesmereUI.PanelPP then
-                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 2)  -- #e54949
+                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 7)  -- #e54949
                     local enchBdr = EllesmereUI.PanelPP.GetBorders(overlay)
-                    if enchBdr then enchBdr:SetFrameLevel(slot:GetFrameLevel() + 1) end
+                    if enchBdr then enchBdr:SetFrameLevel(slot:GetFrameLevel()) end
                 end
                 GetFFD(slot).missingEnchBorder = overlay
             end

@@ -499,8 +499,12 @@ local function SetupThinLine(fill, edge)
 end
 
 local function ClearThinLine(fill)
+    if not fill._thinLineActive then return end
     fill._thinLineActive = false
     if fill._thinLine then fill._thinLine:Hide() end
+    -- Thin-line mode set the fill to (0,0,0,0) transparent; reset to opaque
+    -- so the bar is visible immediately. The real color is applied by RefreshUI.
+    fill:SetStatusBarColor(1, 1, 1, 1)
 end
 
 local function ApplyBarTexture(fill, texPath, texKey)
@@ -660,6 +664,97 @@ local function ResolveIcon(src, iconTex, barH)
 end
 
 -------------------------------------------------------------------------------
+--  Enemy Damage Taken: aggregate combatSpellDetails into per-player totals
+--  Returns sorted array of { name, class, specIcon, total } or nil on failure.
+-------------------------------------------------------------------------------
+local function AggregateEnemyPlayers(srcData)
+    if not srcData or not srcData.combatSpells or #srcData.combatSpells == 0 then return nil end
+    local byName = {}
+    local list = {}
+    for _, spell in ipairs(srcData.combatSpells) do
+        local det = spell.combatSpellDetails
+        if det then
+            local name = det.unitName
+            if name and not (issecretvalue and issecretvalue(name)) then
+                local ok, amt = pcall(function() return spell.totalAmount end)
+                local amount = (ok and amt) or 0
+                local p = byName[name]
+                if not p then
+                    p = { name = name, class = det.unitClassFilename, specIcon = det.specIconID, total = 0 }
+                    byName[name] = p
+                    list[#list + 1] = p
+                end
+                p.total = p.total + amount
+            end
+        end
+    end
+    if #list == 0 then return nil end
+    table.sort(list, function(a, b) return a.total > b.total end)
+    return list
+end
+
+-------------------------------------------------------------------------------
+--  Damage Done targets: cross-reference EnemyDamageTaken to find which enemies
+--  a specific player hit. Returns sorted { name, total }[1..maxTargets] or nil.
+--  Works between pulls in M+ (player names are not secret even in protected instances).
+-------------------------------------------------------------------------------
+local TARGETS_MAX_ENEMIES = 20  -- cap enemy iterations for perf
+local function BuildPlayerTargets(playerName, session, sessionID, maxTargets)
+    if not playerName or playerName == "" then return nil end
+    if issecretvalue and issecretvalue(playerName) then return nil end
+    if not C_DamageMeter then return nil end
+
+    -- Get EnemyDamageTaken session (list of enemies)
+    local enemySession
+    if sessionID and C_DamageMeter.GetCombatSessionFromID then
+        local ok, s = pcall(C_DamageMeter.GetCombatSessionFromID, sessionID, Enum.DamageMeterType.EnemyDamageTaken)
+        if ok then enemySession = s end
+    elseif C_DamageMeter.GetCombatSessionFromType then
+        local ok, s = pcall(C_DamageMeter.GetCombatSessionFromType, session, Enum.DamageMeterType.EnemyDamageTaken)
+        if ok then enemySession = s end
+    end
+    if not enemySession or not enemySession.combatSources or #enemySession.combatSources == 0 then return nil end
+
+    local targets = {}
+    local enemyCount = math.min(#enemySession.combatSources, TARGETS_MAX_ENEMIES)
+    for ei = 1, enemyCount do
+        local enemy = enemySession.combatSources[ei]
+        local eName = enemy.name
+
+        -- Get this enemy's spell details to find our player
+        local srcData
+        if sessionID and C_DamageMeter.GetCombatSessionSourceFromID then
+            local ok, sd = pcall(C_DamageMeter.GetCombatSessionSourceFromID, sessionID, Enum.DamageMeterType.EnemyDamageTaken, enemy.sourceGUID, enemy.sourceCreatureID)
+            if ok then srcData = sd end
+        elseif C_DamageMeter.GetCombatSessionSourceFromType then
+            local ok, sd = pcall(C_DamageMeter.GetCombatSessionSourceFromType, session, Enum.DamageMeterType.EnemyDamageTaken, enemy.sourceGUID, enemy.sourceCreatureID)
+            if ok then srcData = sd end
+        end
+        if srcData and srcData.combatSpells then
+            local playerTotal = 0
+            for _, spell in ipairs(srcData.combatSpells) do
+                local det = spell.combatSpellDetails
+                if det and det.unitName == playerName then
+                    local ok, amt = pcall(function() return spell.totalAmount end)
+                    playerTotal = playerTotal + ((ok and amt) or 0)
+                end
+            end
+            if playerTotal > 0 then
+                targets[#targets + 1] = { name = eName, total = playerTotal }
+            end
+        end
+    end
+    if #targets == 0 then return nil end
+    table.sort(targets, function(a, b) return a.total > b.total end)
+    if #targets > maxTargets then
+        local trimmed = {}
+        for i = 1, maxTargets do trimmed[i] = targets[i] end
+        return trimmed
+    end
+    return targets
+end
+
+-------------------------------------------------------------------------------
 --  Hover tooltip (shared across all windows)
 -------------------------------------------------------------------------------
 local TT_MAX = 8
@@ -736,7 +831,13 @@ end
 
 local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     if _ttFrame and _ttFrame._combatMsg then _ttFrame._combatMsg:Hide() end
-    if not bar._srcGUID or not bar._src then return false end
+    -- Hide target sub-elements from prior tooltip
+    if _ttFrame and _ttFrame._tgtDivider then
+        _ttFrame._tgtDivider:Hide(); _ttFrame._tgtLabel:Hide()
+        for ti = 1, 3 do _ttFrame._tgtBars[ti].row:Hide() end
+    end
+    if not bar._src then return false end
+    if not bar._srcGUID and not bar._src.sourceCreatureID then return false end
     if not C_DamageMeter then return false end
 
     -- Reposition tooltip bars with physical-pixel spacing
@@ -830,6 +931,59 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         return true
     end
 
+    -- Enemy Damage Taken tooltip: show per-player breakdown
+    if curDMType == Enum.DamageMeterType.EnemyDamageTaken then
+        local guid = bar._srcGUID
+        local cid = bar._src.sourceCreatureID
+        local srcData
+        if curSessionID and C_DamageMeter.GetCombatSessionSourceFromID then
+            srcData = C_DamageMeter.GetCombatSessionSourceFromID(curSessionID, curDMType, guid, cid)
+        elseif C_DamageMeter.GetCombatSessionSourceFromType then
+            srcData = C_DamageMeter.GetCombatSessionSourceFromType(curSession, curDMType, guid, cid)
+        end
+        local players = AggregateEnemyPlayers(srcData)
+        if not players then return false end
+
+        ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", "Damage Taken")
+        local texPath, texKey = GetBarTexturePath()
+        local maxAmt = players[1].total
+        local count = math.min(TT_MAX, #players)
+        for i = 1, TT_MAX do
+            local b = _ttBars[i]
+            if i <= count then
+                local p = players[i]
+                -- Use spec icon if available, else class atlas
+                local specIcon = p.specIcon
+                if specIcon and type(specIcon) == "number" and specIcon ~= 0 then
+                    b.spellIcon:SetTexture(specIcon)
+                    b.spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    b.spellIcon:Show()
+                elseif p.class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[p.class] then
+                    b.spellIcon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+                    b.spellIcon:SetTexCoord(unpack(CLASS_ICON_TCOORDS[p.class]))
+                    b.spellIcon:Show()
+                else
+                    b.spellIcon:Hide()
+                end
+                if b.spellIcon:IsShown() then
+                    b.fill:ClearAllPoints(); b.fill:SetPoint("TOPLEFT", b.spellIcon, "TOPRIGHT", 0, 0); b.fill:SetPoint("BOTTOMRIGHT", b.row, "BOTTOMRIGHT", 0, 0)
+                else
+                    b.fill:ClearAllPoints(); b.fill:SetAllPoints(b.row)
+                end
+                ApplyBarTexture(b.fill, texPath, texKey); b.fill:SetMinMaxValues(0, maxAmt); b.fill:SetValue(p.total)
+                local cc = p.class and RAID_CLASS_COLORS[p.class]
+                if cc then b.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
+                else b.fill:SetStatusBarColor(0x33/255, 0x33/255, 0x33/255) end
+                b.label:SetTextColor(1, 1, 1); b.amount:SetTextColor(1, 1, 1)
+                b.label:SetText(StripRealm(p.name))
+                b.amount:SetText(AbbrevNumber(p.total))
+                b.row:Show()
+            else b.row:Hide() end
+        end
+        _ttFrame:SetSize(250, TT_HDR_H + count * ttStride - (count > 0 and ttSp or 0))
+        return true
+    end
+
     -- Standard spell breakdown tooltip
     local guid = bar._srcGUID
     local cid = bar._src.sourceCreatureID
@@ -851,6 +1005,9 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         sorted[#sorted + 1] = { spell = spell, amount = (ok and amt) or 0 }
     end
     local maxAmt = sorted[1] and sorted[1].amount or 1
+    local totalDmg = 0
+    local canPercent = maxAmt and (not issecretvalue or not issecretvalue(maxAmt)) and type(maxAmt) == "number"
+    if canPercent then for _, e in ipairs(sorted) do totalDmg = totalDmg + e.amount end end
     local texPath, texKey = GetBarTexturePath()
     local count = math.min(TT_MAX, #sorted)
     for i = 1, TT_MAX do
@@ -873,11 +1030,79 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
                 spellName = (okS and sn) or nil
             end
             b.label:SetText(spellName or spell.creatureName or "Unknown")
-            b.amount:SetText(AbbrevNumber(entry.amount))
+            if canPercent and totalDmg > 0 then
+                b.amount:SetText(format("%s  %.1f%%", AbbrevNumber(entry.amount), (entry.amount / totalDmg) * 100))
+            else
+                b.amount:SetText(AbbrevNumber(entry.amount))
+            end
             b.row:Show()
         else b.row:Hide() end
     end
-    _ttFrame:SetSize(250, TT_HDR_H + count * ttStride - (count > 0 and ttSp or 0))
+    -- Targets sub-section (DamageDone only): top 3 enemies this player hit
+    local ttTargetCount = 0
+    if curDMType == Enum.DamageMeterType.DamageDone then
+        local rawName = bar._src and bar._src.name
+        local targets = BuildPlayerTargets(rawName, curSession, curSessionID, 3)
+        if targets then
+            -- Lazy-create tooltip target elements
+            if not _ttFrame._tgtDivider then
+                _ttFrame._tgtDivider = _ttFrame:CreateTexture(nil, "ARTWORK")
+                _ttFrame._tgtDivider:SetHeight(PhysicalPixels(1)); _ttFrame._tgtDivider:SetColorTexture(1, 1, 1, 0.15)
+                _ttFrame._tgtLabel = _ttFrame:CreateFontString(nil, "OVERLAY")
+                SetDMFont(_ttFrame._tgtLabel, 9); _ttFrame._tgtLabel:SetTextColor(0.6, 0.6, 0.6, 1)
+                _ttFrame._tgtLabel:SetText("Targets")
+                _ttFrame._tgtBars = {}
+                for ti = 1, 3 do
+                    local tb = {}
+                    tb.row = CreateFrame("Frame", nil, _ttFrame); tb.row:SetHeight(TT_BAR_H)
+                    tb.fill = CreateFrame("StatusBar", nil, tb.row); tb.fill:SetAllPoints(); tb.fill:SetMinMaxValues(0, 1); tb.fill:SetStatusBarTexture(BAR_TEX)
+                    local tf = CreateFrame("Frame", nil, tb.fill); tf:SetAllPoints(tb.fill); tf:SetFrameLevel(tb.fill:GetFrameLevel() + 2)
+                    tb.label = tf:CreateFontString(nil, "OVERLAY"); tb.label:SetPoint("LEFT", tf, "LEFT", 2, 0); tb.label:SetJustifyH("LEFT"); SetDMFont(tb.label, 10)
+                    tb.amount = tf:CreateFontString(nil, "OVERLAY"); tb.amount:SetPoint("RIGHT", tf, "RIGHT", -2, 0); tb.amount:SetJustifyH("RIGHT"); SetDMFont(tb.amount, 10)
+                    tb.label:SetPoint("RIGHT", tb.amount, "LEFT", -3, 0)
+                    tb.row:Hide()
+                    _ttFrame._tgtBars[ti] = tb
+                end
+            end
+            local baseY = -(TT_HDR_H + count * ttStride + ttSp * 2)
+            _ttFrame._tgtDivider:ClearAllPoints()
+            _ttFrame._tgtDivider:SetPoint("TOPLEFT", _ttFrame, "TOPLEFT", 0, baseY)
+            _ttFrame._tgtDivider:SetPoint("TOPRIGHT", _ttFrame, "TOPRIGHT", 0, baseY)
+            _ttFrame._tgtDivider:Show()
+            local lblY = baseY - 10
+            _ttFrame._tgtLabel:ClearAllPoints()
+            _ttFrame._tgtLabel:SetPoint("LEFT", _ttFrame, "TOPLEFT", 3, lblY)
+            _ttFrame._tgtLabel:Show()
+            local tStartY = lblY - 10
+            local tMaxAmt = targets[1].total
+            for ti = 1, 3 do
+                local tb = _ttFrame._tgtBars[ti]
+                if ti <= #targets then
+                    local t = targets[ti]
+                    tb.row:ClearAllPoints()
+                    tb.row:SetPoint("TOPLEFT", _ttFrame, "TOPLEFT", 0, tStartY - ((ti-1) * ttStride))
+                    tb.row:SetPoint("TOPRIGHT", _ttFrame, "TOPRIGHT", 0, tStartY - ((ti-1) * ttStride))
+                    ApplyBarTexture(tb.fill, texPath, texKey); tb.fill:SetMinMaxValues(0, tMaxAmt); tb.fill:SetValue(t.total)
+                    tb.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
+                    tb.label:SetTextColor(1, 1, 1); tb.amount:SetTextColor(1, 1, 1)
+                    tb.label:SetText(t.name)
+                    tb.amount:SetText(AbbrevNumber(t.total))
+                    tb.row:Show()
+                    ttTargetCount = ttTargetCount + 1
+                else tb.row:Hide() end
+            end
+        end
+    end
+    -- Hide target elements if not used
+    if ttTargetCount == 0 and _ttFrame and _ttFrame._tgtDivider then
+        _ttFrame._tgtDivider:Hide(); _ttFrame._tgtLabel:Hide()
+        for ti = 1, 3 do _ttFrame._tgtBars[ti].row:Hide() end
+    end
+    local totalH = TT_HDR_H + count * ttStride - (count > 0 and ttSp or 0)
+    if ttTargetCount > 0 then
+        totalH = totalH + (ttSp * 2) + 1 + 10 + 10 + (ttTargetCount * ttStride)
+    end
+    _ttFrame:SetSize(250, totalH)
     return true
 end
 
@@ -1183,7 +1408,7 @@ local function CreateDMWindow(winIdx)
         bar.row:SetScript("OnClick", function(_, button)
             if button == "LeftButton" then
                 if InCombatLockdown() then return end
-                if bar._srcGUID and bar._src then
+                if bar._src and (bar._srcGUID or bar._src.sourceCreatureID) then
                     -- Deaths without recap data: block click
                     if W.curDMType == Enum.DamageMeterType.Deaths then
                         local rid = bar._src.deathRecapID
@@ -1193,7 +1418,7 @@ local function CreateDMWindow(winIdx)
                             if not ok or not raw or #raw == 0 then return end
                         end
                     end
-                    W.OpenSource(bar._srcGUID, bar._src.sourceCreatureID, StripRealm(bar._src.name), bar._class, bar._src.deathRecapID)
+                    W.OpenSource(bar._srcGUID, bar._src.sourceCreatureID, StripRealm(bar._src.name), bar._class, bar._src.deathRecapID, bar._src.name)
                 end
             elseif button == "RightButton" then
                 W.ShowHome()
@@ -2247,7 +2472,9 @@ local function CreateDMWindow(winIdx)
             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
             if showClassColor then
                 local cc = classFile and RAID_CLASS_COLORS[classFile]
-                if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b) else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
+                if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
+                elseif W.curDMType == Enum.DamageMeterType.EnemyDamageTaken then bar.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
+                else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
             else
                 if c.barColorUseAccent ~= false then local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2)
                 else local bc = c.barColor; bar.fill:SetStatusBarColor(bc and bc.r or 0.35, bc and bc.g or 0.55, bc and bc.b or 0.8) end
@@ -2389,7 +2616,9 @@ local function CreateDMWindow(winIdx)
                             if classFile ~= bar._cachedColorClass then
                                 bar._cachedColorClass = classFile
                                 local cc = classFile and RAID_CLASS_COLORS[classFile]
-                                if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b) else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
+                                if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
+                                elseif W.curDMType == Enum.DamageMeterType.EnemyDamageTaken then bar.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
+                                else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
                             end
                         elseif fullRebuild or not bar._cachedColorClass then
                             bar._cachedColorClass = false
@@ -2535,7 +2764,8 @@ local function CreateDMWindow(winIdx)
     end
 
     function W.RefreshBreakdown()
-        if not W.sourceOpen or not W.sourceGUID then return end
+        if not W.sourceOpen then return end
+        if not W.sourceGUID and not W.sourceCreatureID then return end
         if not C_DamageMeter then return end
         EnsureSpellPool()
 
@@ -2640,6 +2870,59 @@ local function CreateDMWindow(winIdx)
             return
         end
 
+        -- Enemy Damage Taken: show per-player breakdown instead of per-spell
+        if W.curDMType == Enum.DamageMeterType.EnemyDamageTaken then
+            local guid = W.sourceGUID
+            local cid = W.sourceCreatureID
+            local srcData
+            if W.curSessionID and C_DamageMeter.GetCombatSessionSourceFromID then
+                local ok, sd = pcall(C_DamageMeter.GetCombatSessionSourceFromID, W.curSessionID, W.curDMType, guid, cid)
+                if ok then srcData = sd end
+            elseif C_DamageMeter.GetCombatSessionSourceFromType then
+                local ok, sd = pcall(C_DamageMeter.GetCombatSessionSourceFromType, W.curSession, W.curDMType, guid, cid)
+                if ok then srcData = sd end
+            end
+            local players = AggregateEnemyPlayers(srcData)
+            if not players then
+                if W.spellPool then for i = 1, BAR_POOL_SIZE do W.spellPool[i].row:Hide() end end
+                return
+            end
+            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
+            local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
+            local texPath, texKey = GetBarTexturePath()
+            local maxAmt = players[1].total
+            local pCount = math.min(#players, BAR_POOL_SIZE)
+            for i = 1, BAR_POOL_SIZE do
+                local bar = W.spellPool[i]
+                if i <= pCount then
+                    local p = players[i]; bar.row:Show()
+                    bar.row:ClearAllPoints()
+                    bar.row:SetPoint("TOPLEFT", W.srcContent, "TOPLEFT", 0, -((i-1) * stride))
+                    bar.row:SetPoint("TOPRIGHT", W.srcContent, "TOPRIGHT", 0, -((i-1) * stride))
+                    bar.row:SetHeight(barH)
+                    -- Class/spec icon via ResolveIcon (consistent with main bars)
+                    local fakeSrc = { classFilename = p.class, specIconID = p.specIcon }
+                    local iconOffset = ResolveIcon(fakeSrc, bar.classIcon, barH)
+                    bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
+                    bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
+                    ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, maxAmt); bar.fill:SetValue(p.total)
+                    local cc = p.class and RAID_CLASS_COLORS[p.class]
+                    if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
+                    else local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2) end
+                    SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
+                    bar.label:SetTextColor(1, 1, 1); bar.amount:SetTextColor(1, 1, 1)
+                    bar.label:SetText(StripRealm(p.name))
+                    bar.amount:SetText(AbbrevNumber(p.total)); bar._spellID = nil
+                else bar.row:Hide(); bar._spellID = nil end
+            end
+            local srcTotalH = pCount * stride
+            W.srcContent:SetHeight(math.max(10, srcTotalH))
+            local srcViewH = W.srcViewport:GetHeight(); if srcViewH < 1 then srcViewH = 1 end
+            _srcScrollMax = math.max(0, srcTotalH - srcViewH)
+            return
+        end
+
         -- Standard spell breakdown (non-Deaths)
         -- Pass guid/cid straight through -- API accepts its own secret values
         local guid = W.sourceGUID
@@ -2662,6 +2945,10 @@ local function CreateDMWindow(winIdx)
         for _, spell in ipairs(spells) do local ok, amt = pcall(function() return spell.totalAmount end); sorted[#sorted + 1] = { spell = spell, amount = (ok and amt) or 0 } end
         -- API returns combatSpells pre-sorted; no table.sort needed
         local maxAmt = sorted[1] and sorted[1].amount or 1
+        -- Sum totals for percentage (skip if amounts are secret)
+        local totalDmg = 0
+        local canPercent = maxAmt and (not issecretvalue or not issecretvalue(maxAmt)) and type(maxAmt) == "number"
+        if canPercent then for _, e in ipairs(sorted) do totalDmg = totalDmg + e.amount end end
         local spCount = math.min(#sorted, BAR_POOL_SIZE)
         for i = 1, BAR_POOL_SIZE do
             local bar = W.spellPool[i]
@@ -2688,19 +2975,88 @@ local function CreateDMWindow(winIdx)
                 local spellName
                 if spell.spellID then local okS, sn = pcall(function() return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell.spellID) end); spellName = (okS and sn) or nil end
                 bar.label:SetText(spellName or spell.creatureName or "Unknown")
-                bar.amount:SetText(AbbrevNumber(entry.amount)); bar._spellID = spell.spellID
+                if canPercent and totalDmg > 0 then
+                    bar.amount:SetText(format("%s  %.1f%%", AbbrevNumber(entry.amount), (entry.amount / totalDmg) * 100))
+                else
+                    bar.amount:SetText(AbbrevNumber(entry.amount))
+                end
+                bar._spellID = spell.spellID
             else bar.row:Hide(); bar._spellID = nil end
         end
-        local srcTotalH = spCount * stride
+
+        -- Targets section (DamageDone only): show top 3 enemies this player hit
+        local targetsRendered = 0
+        if W.curDMType == Enum.DamageMeterType.DamageDone then
+            if not W._cachedTargets then
+                W._cachedTargets = BuildPlayerTargets(W.sourceRawName, W.curSession, W.curSessionID, 3) or false
+            end
+            local tList = W._cachedTargets
+            if tList and tList ~= false then
+                -- Divider + "Targets" label
+                local divY = -(spCount * stride + barSp * 2)
+                if not W._targetDivider then
+                    W._targetDivider = W.srcContent:CreateTexture(nil, "ARTWORK")
+                    W._targetDivider:SetHeight(PhysicalPixels(1)); W._targetDivider:SetColorTexture(1, 1, 1, 0.15)
+                    W._targetLabel = W.srcContent:CreateFontString(nil, "OVERLAY")
+                    SetDMFont(W._targetLabel, leftFS - 1)
+                    W._targetLabel:SetTextColor(0.6, 0.6, 0.6, 1); W._targetLabel:SetText("Targets")
+                end
+                W._targetDivider:ClearAllPoints()
+                W._targetDivider:SetPoint("TOPLEFT", W.srcContent, "TOPLEFT", 0, divY)
+                W._targetDivider:SetPoint("TOPRIGHT", W.srcContent, "TOPRIGHT", 0, divY)
+                W._targetDivider:Show()
+                local labelY = divY - barSp - 10
+                W._targetLabel:ClearAllPoints()
+                W._targetLabel:SetPoint("LEFT", W.srcContent, "TOPLEFT", 3, labelY)
+                SetDMFont(W._targetLabel, leftFS - 1)
+                W._targetLabel:Show()
+
+                local tStartY = labelY - 12
+                local tMaxAmt = tList[1].total
+                for ti = 1, #tList do
+                    local tIdx = spCount + ti
+                    if tIdx > BAR_POOL_SIZE then break end
+                    local bar = W.spellPool[tIdx]
+                    local t = tList[ti]; bar.row:Show()
+                    bar.row:ClearAllPoints()
+                    bar.row:SetPoint("TOPLEFT", W.srcContent, "TOPLEFT", 0, tStartY - ((ti-1) * stride))
+                    bar.row:SetPoint("TOPRIGHT", W.srcContent, "TOPRIGHT", 0, tStartY - ((ti-1) * stride))
+                    bar.row:SetHeight(barH)
+                    bar.classIcon:Hide()
+                    bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", 0, 0)
+                    bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
+                    ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, tMaxAmt); bar.fill:SetValue(t.total)
+                    bar.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
+                    SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
+                    bar.label:SetTextColor(1, 1, 1); bar.amount:SetTextColor(1, 1, 1)
+                    bar.label:SetText(t.name)
+                    bar.amount:SetText(AbbrevNumber(t.total)); bar._spellID = nil
+                    targetsRendered = targetsRendered + 1
+                end
+            end
+        end
+        -- Hide divider/label if no targets
+        if targetsRendered == 0 then
+            if W._targetDivider then W._targetDivider:Hide() end
+            if W._targetLabel then W._targetLabel:Hide() end
+        end
+
+        local extraH = 0
+        if targetsRendered > 0 then
+            -- divider gap + label + target bars
+            extraH = (barSp * 2) + 1 + barSp + 10 + 12 + (targetsRendered * stride)
+        end
+        local srcTotalH = spCount * stride + extraH
         W.srcContent:SetHeight(math.max(10, srcTotalH))
         local srcViewH = W.srcViewport:GetHeight(); if srcViewH < 1 then srcViewH = 1 end
         _srcScrollMax = math.max(0, srcTotalH - srcViewH)
     end
 
-    function W.OpenSource(guid, creatureID, name, classFile, recapID)
+    function W.OpenSource(guid, creatureID, name, classFile, recapID, rawName)
         if not W.sourceFrame then return end
         W.sourceGUID = guid; W.sourceCreatureID = creatureID; W.sourceClass = classFile; W.sourceOpen = true
-        W.sourceRecapID = recapID
+        W.sourceRecapID = recapID; W.sourceRawName = rawName
+        W._cachedTargets = nil
         W.HideHome()
         if viewport then viewport:Hide() end
         if W.stickyPlayer then W.stickyPlayer.row:Hide() end
@@ -2710,7 +3066,8 @@ local function CreateDMWindow(winIdx)
     end
 
     function W.CloseSource()
-        W.sourceOpen = false; W.sourceGUID = nil; W.sourceCreatureID = nil; W.sourceRecapID = nil
+        W.sourceOpen = false; W.sourceGUID = nil; W.sourceCreatureID = nil; W.sourceRecapID = nil; W.sourceRawName = nil
+        W._cachedTargets = nil
         if W.sourceFrame then W.sourceFrame:Hide() end
         if viewport then viewport:Show() end
         if frame._bg then frame._bg:Show() end

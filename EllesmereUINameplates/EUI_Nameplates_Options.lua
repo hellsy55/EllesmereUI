@@ -4285,7 +4285,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local healthBarHeightRow
         healthBarHeightRow, h = W:DualRow(parent, y,
-            { type="slider", text="Health Bar Width", min=BAR_W, max=BAR_W+100, step=1,
+            { type="slider", text="Health Bar Width", min=100, max=BAR_W+100, step=1,
               getValue=function() return BAR_W + DBVal("healthBarWidth") end,
               setValue=function(v)
                 local extra = v - BAR_W
