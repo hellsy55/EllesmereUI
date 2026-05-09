@@ -100,6 +100,7 @@ visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 visFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 visFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 
@@ -116,6 +117,17 @@ end)
 --  Mouseover poll
 -------------------------------------------------------------------------------
 local mouseoverPoll = CreateFrame("Frame")
+-- Cursor-in-bounds check (works on hidden frames using saved position/size)
+local function IsCursorOver(frame)
+    if not frame.GetRect then return false end
+    local l, b, w, h = frame:GetRect()
+    if not l then return false end
+    local es = frame:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / es, cy / es
+    return cx >= l and cx <= l + w and cy >= b and cy <= b + h
+end
+
 local moElapsed = 0
 mouseoverPoll:SetScript("OnUpdate", function(_, dt)
     moElapsed = moElapsed + dt
@@ -124,25 +136,22 @@ mouseoverPoll:SetScript("OnUpdate", function(_, dt)
     for i = 1, #mouseoverTargets do
         local t = mouseoverTargets[i]
         local frame = t.frame
-        if frame and frame:IsShown() then
+        if frame then
             if t.isActive() then
                 t._wasActive = true
-                local over = frame:IsMouseOver()
+                local over = IsCursorOver(frame)
                 if over and not t.visible then
                     t.visible = true
-                    frame:SetAlpha(1)
+                    frame:SetAlpha(1); frame:EnableMouse(true); frame:Show()
                 elseif not over and t.visible then
                     t.visible = false
-                    frame:SetAlpha(0)
+                    frame:Hide()
                 end
             elseif t._wasActive then
-                -- isActive just turned off while we had alpha at 0.
-                -- Restore alpha so non-mouseover modes aren't stuck hidden.
+                -- isActive just turned off -- clear tracking state and let
+                -- UpdateVisibility handle the alpha for the new mode.
                 t._wasActive = false
-                if not t.visible then
-                    t.visible = nil
-                    frame:SetAlpha(1)
-                end
+                t.visible = nil
             end
         end
     end

@@ -2270,6 +2270,9 @@ do
                             end
                         elseif event == "ACTIONBAR_UPDATE_USABLE" then
                             for _, btn in ipairs(btns) do
+                                -- Skip buttons with active range tint -- the
+                                -- range system owns vertex color for those.
+                                if not EFD(btn).rangeTinted then
                                 local action = btn:GetAttribute("action")
                                 if action and HasAction(action) then
                                     local isUsable, notEnoughMana = IsUsableAction(action)
@@ -2283,6 +2286,7 @@ do
                                             icon:SetVertexColor(0.4, 0.4, 0.4)
                                         end
                                     end
+                                end
                                 end
                             end
                         elseif event == "ACTIONBAR_UPDATE_STATE" then
@@ -2314,6 +2318,7 @@ do
                             -- form/stance/talent changes.
                             for _, btn in ipairs(btns) do
                                 if btn.UpdateAction then btn:UpdateAction() end
+                                if not EFD(btn).rangeTinted then
                                 local action = btn:GetAttribute("action")
                                 if action and HasAction(action) then
                                     local isUsable, notEnoughMana = IsUsableAction(action)
@@ -2327,6 +2332,35 @@ do
                                             icon:SetVertexColor(0.4, 0.4, 0.4)
                                         end
                                     end
+                                end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- ExtraActionButton1 is a Blizzard button outside our barButtons.
+            -- It relied on ActionBarButtonEventsFrame for cooldown updates,
+            -- which we killed. Dispatch cooldown + slot events to it directly.
+            if event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "ACTIONBAR_SLOT_CHANGED" then
+                local eab1 = ExtraActionButton1
+                if eab1 and eab1:IsShown() then
+                    if event == "ACTIONBAR_SLOT_CHANGED" then
+                        local action = eab1:GetAttribute("action")
+                        if action and (arg1 == 0 or arg1 == action) then
+                            if eab1.UpdateAction then eab1:UpdateAction() end
+                        end
+                    else
+                        local action = eab1:GetAttribute("action")
+                        if action and HasAction(action) then
+                            local cd = eab1.cooldown
+                            if cd then
+                                local cdInfo = C_ActionBar.GetActionCooldown(action)
+                                if cdInfo and cdInfo.isActive then
+                                    local dur = C_ActionBar.GetActionCooldownDuration(action)
+                                    if dur then cd:SetCooldownFromDurationObject(dur) end
+                                else
+                                    cd:Clear()
                                 end
                             end
                         end
@@ -2844,6 +2878,16 @@ local function LayoutBar(key)
                         local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
                         if not bs or not bs.showRankIcon then
                             self:SetShown(false)
+                            return
+                        end
+                        -- Hide stale overlays after spec swap: if the slot
+                        -- no longer holds an item, the overlay is ghost state.
+                        local action = btn:GetAttribute("action") or 0
+                        if action > 0 and GetActionInfo then
+                            local actionType = GetActionInfo(action)
+                            if actionType ~= "item" then
+                                self:SetShown(false)
+                            end
                         end
                     end)
                     EFD(btn).qualityHooked = true
@@ -5335,14 +5379,12 @@ function EAB:UpdateHousingVisibility()
             if s.visHideNoTarget then
                 -- [noexists] in the state driver handles the basic
                 -- has-target check even in combat. Out of combat, we
-                -- additionally hide when the only "target" is a soft
-                -- interact target (NPC in view cone) which the macro
-                -- conditional can't express. Do NOT return true for
-                -- the plain "no target" case here: that would override
-                -- the state driver with a flat "hide" via
-                -- RegisterAttributeDriver, which can't be undone in
-                -- combat when a target appears (auto-target).
-                if UnitExists("target") and UnitIsUnit("target", "softinteract") then return true end
+                -- additionally hide when a soft target is the only
+                -- "target". Macro conditionals treat soft-interact/
+                -- softenemy/softfriend as "target exists" but
+                -- UnitExists("target") does not, so check the soft
+                -- unit tokens directly.
+                if not UnitExists("target") and (UnitExists("softinteract") or UnitExists("softenemy") or UnitExists("softfriend")) then return true end
             end
             if s.visOnlyInstances then
                 local _, iType, diffID = GetInstanceInfo()
@@ -5820,9 +5862,10 @@ local function UpdateFlipbook(btn)
             local maskPath = fd.shapeMaskPath or SHAPE_MASKS[fd.shapeName or ""]
             local borderPath = SHAPE_BORDERS[fd.shapeName or ""]
             _G_Glows.StartShapeGlow(wrapper, min(bW, bH), cr, cg, cb, 1.20, {
-                maskPath   = maskPath,
-                borderPath = borderPath,
-                shapeMask  = fd.shapeMask,
+                maskPath    = maskPath,
+                borderPath  = borderPath,
+                shapeMask   = fd.shapeMask,
+                anchorFrame = btn,
             })
         end
         if wfd.ownMask then
@@ -5898,6 +5941,9 @@ function EAB:HookProcGlow()
 
     -- Check IsSpellOverlayed ground truth for a single button.
     -- Also checks base/override variants for spell transforms.
+    -- Match LAB: only check IsSpellOverlayed on the button's current spell.
+    -- No base/override fallback -- that caused false positives (e.g. Tempest
+    -- glowing because its base spell Lightning Bolt was overlayed by Stormkeeper).
     local function UpdateOverlayGlow(btn)
         local spellID = GetButtonSpellID(btn)
         if not spellID then
@@ -5906,16 +5952,7 @@ function EAB:HookProcGlow()
         end
         local ISO = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
         if not ISO then return end
-        local overlayed = ISO(spellID)
-        if not overlayed and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-            local ovr = C_SpellBook.FindSpellOverrideByID(spellID)
-            if ovr and ovr > 0 and ovr ~= spellID then overlayed = ISO(ovr) end
-        end
-        if not overlayed and C_Spell and C_Spell.GetBaseSpell then
-            local base = C_Spell.GetBaseSpell(spellID)
-            if base and base > 0 and base ~= spellID then overlayed = ISO(base) end
-        end
-        if overlayed then
+        if ISO(spellID) then
             ShowGlow(btn)
         elseif _procState.active[btn] then
             HideGlow(btn)
@@ -5928,8 +5965,9 @@ function EAB:HookProcGlow()
     glowFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
     glowFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
     glowFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    glowFrame:RegisterEvent("SPELL_UPDATE_ICON")
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
-        if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" then
+        if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" or event == "SPELL_UPDATE_ICON" then
             -- Defer re-scan: the bar may not have finished paging yet
             -- when the event fires, so slot->spell mappings are stale.
             C_Timer_After(0, function()
@@ -5971,29 +6009,15 @@ function EAB:HookProcGlow()
             end
         else
             -- SHOW: scan all buttons for the matching spellID.
-            -- Also check base/override variants so spell transforms
-            -- (e.g. Lava Burst override from Lava Surge) still match.
             local blizz2 = IsBlizzStyle()
-            local _FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
             for _, info in ipairs(BAR_CONFIG) do
                 local buttons = barButtons[info.key]
                 if buttons then
                     for _, btn in ipairs(buttons) do
                         if btn and (EFD(btn).squared or blizz2) then
                             local id = GetButtonSpellID(btn)
-                            if id then
-                                local match = (id == arg1)
-                                if not match and _FO then
-                                    local ovr = _FO(id)
-                                    if ovr and ovr == arg1 then match = true end
-                                end
-                                if not match and C_Spell and C_Spell.GetBaseSpell then
-                                    local base = C_Spell.GetBaseSpell(id)
-                                    if base and base == arg1 then match = true end
-                                end
-                                if match then
-                                    ShowGlow(btn)
-                                end
+                            if id and id == arg1 then
+                                ShowGlow(btn)
                             end
                         end
                     end
@@ -7813,6 +7837,11 @@ function EAB:FinishSetup()
             end
             UpdateKeybinds()
         end)
+        -- Re-evaluate visibility options (visOnlyInstances, visHideHousing,
+        -- etc.) after every loading screen. ZONE_CHANGED_NEW_AREA alone is
+        -- insufficient: it can fire before GetInstanceInfo() updates, and
+        -- doesn't fire at all on /reload inside an instance.
+        self:UpdateHousingVisibility()
     end)
 
     local function QueueAlwaysShowButtonsRefresh()
@@ -7860,8 +7889,49 @@ function EAB:FinishSetup()
     self:RegisterEvent("UPDATE_SHAPESHIFT_FORM", function()
         self:UpdateHousingVisibility()
     end)
+    -- Immediate soft-target override: when the only "target" is a soft-
+    -- interact NPC (dialogue in view cone), the [noexists] state driver
+    -- instantly shows the bar. Override to "hide" in the same frame so
+    -- the bar never visibly flashes. The deferred UpdateHousingVisibility
+    -- that follows handles the general case and will restore the normal
+    -- driver string when the soft target clears.
+    local function ImmediateSoftTargetCheck()
+        if InCombatLockdown() then return end
+        -- [noexists] in macro conditionals considers soft-interact/
+        -- softenemy/softfriend as "target exists", but UnitExists("target")
+        -- does NOT. Check the soft-target unit tokens directly.
+        local hasSoftInteract = UnitExists("softinteract")
+        local hasSoftEnemy = UnitExists("softenemy")
+        local hasSoftFriend = UnitExists("softfriend")
+        local hasHardTarget = UnitExists("target")
+        local softOnly = (hasSoftInteract or hasSoftEnemy or hasSoftFriend) and not hasHardTarget
+        for _, info in ipairs(ALL_BARS) do
+            local s = self.db.profile.bars[info.key]
+            if s and s.visHideNoTarget then
+                local frame = barFrames[info.key]
+                if frame then
+                    if softOnly then
+                        if frame._eabLastVisStr ~= "hide" then
+                            frame._eabLastVisStr = "hide"
+                            RegisterAttributeDriver(frame, "state-visibility", "hide")
+                        end
+                    else
+                        local newStr = BuildVisibilityString(info, s)
+                        if frame._eabLastVisStr ~= newStr then
+                            frame._eabLastVisStr = newStr
+                            RegisterAttributeDriver(frame, "state-visibility", newStr)
+                        end
+                    end
+                end
+            end
+        end
+    end
     self:RegisterEvent("PLAYER_TARGET_CHANGED", function()
+        ImmediateSoftTargetCheck()
         self:UpdateHousingVisibility()
+    end)
+    self:RegisterEvent("PLAYER_SOFT_INTERACT_CHANGED", function()
+        ImmediateSoftTargetCheck()
     end)
     self:RegisterEvent("GROUP_ROSTER_UPDATE", function()
         self:UpdateHousingVisibility()
@@ -8893,6 +8963,21 @@ local function SetupBlizzardMovableFrame(barKey)
             if ExtraAbilityContainer:GetParent() ~= holder then
                 RepositionExtraContainer()
             end
+            -- Refresh keybind text on ExtraActionButton1. The broadcaster
+            -- kill at load time prevents Blizzard's UPDATE_BINDINGS from
+            -- reaching the button, so we update it here on show.
+            local eab1 = ExtraActionButton1
+            if eab1 then
+                local hk = eab1.HotKey
+                if hk then
+                    local key1 = GetBindingKey("EXTRAACTIONBUTTON1")
+                    if key1 then
+                        hk:SetText(FormatHotkeyText(key1))
+                        hk:Show()
+                    end
+                end
+                if eab1.UpdateAction then eab1:UpdateAction() end
+            end
         end)
     end
 
@@ -9255,6 +9340,29 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         holder:SetSize(200, 40)
     end
 
+    -- MicroBar/BagBar: position fully owned by Blizzard Edit Mode.
+    -- Don't save or restore positions -- passive-follow handles it.
+    -- Early return skips all position capture/restore code below.
+    if barKey == "MicroBar" or barKey == "BagBar" then
+        EAB.db.profile.barPositions[barKey] = nil
+        local function SyncFollow()
+            local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
+            if fw and fw > 1 and fh and fh > 1 then
+                holder:SetSize(fw, fh)
+            end
+            holder:ClearAllPoints()
+            holder:SetPoint("CENTER", blizzFrame, "CENTER", 0, 0)
+        end
+        SyncFollow()
+        blizzFrame:HookScript("OnSizeChanged", function() SyncFollow() end)
+        if blizzFrame.ApplySystemAnchor then
+            hooksecurefunc(blizzFrame, "ApplySystemAnchor", function()
+                C_Timer_After(0, SyncFollow)
+            end)
+        end
+        return holder
+    end
+
     -- Restore saved position or capture current Blizzard position
     local pos = EAB.db.profile.barPositions[barKey]
     if pos and pos.point then
@@ -9303,29 +9411,33 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         end
     end
 
-    -- QueueStatusButton starts as a child of `MicroMenuContainer`. Reparent it
-    -- so its mouseover/hidden state can diverge from the micro menu while we
-    -- continue using Blizzard's own button logic and animations.
-    --
-    -- TAINT FIX: Do NOT use AttachFrameToHolder here. It hooks SetParent/
-    -- SetPoint on QueueStatusButton, which fires insecure addon code inside
-    -- ActionBarController_UpdateAll during vehicle exit, tainting the context
-    -- and blocking OverrideActionBar:Show(). Instead, reparent once at init
-    -- and re-acquire via UpdatePosition hook only.
+    -- QueueStatusButton: reparent to UIParent so micro menu visibility
+    -- (mouseover/combat hide) doesn't affect the eye. Remove from layout
+    -- so micro menu doesn't shift. Hook UpdatePosition to prevent snap-back.
     if barInfo and barInfo.blizzOwnedVisibility then
-        -- QueueStatusButton: reparent once into our holder so unlock mode
-        -- can position it independently. Do NOT hook SetParent/SetPoint
-        -- (those fire inside ActionBarController_UpdateAll and taint).
-        -- Do NOT replace MicroMenuContainer.Layout. Do NOT call
-        -- SetFrameStrata/SetFrameLevel/EnableMouse on the Blizzard frame.
-        -- Reclaim via UpdatePosition hook only.
         SafeEnableMouse(holder, false)
 
-        local function ReparentQueueIntoHolder()
-            if InCombatLockdown() then return end
-            blizzFrame:ClearAllPoints()
-            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
-            blizzFrame:SetParent(holder)
+        -- Remove from MicroMenuContainer layout flow (no micro menu shift)
+        blizzFrame.ignoreInLayout = true
+        if blizzFrame.SetIsLayoutFrame then
+            blizzFrame:SetIsLayoutFrame(false)
+        end
+        blizzFrame.IsLayoutFrame = nil
+
+        -- Reparent to UIParent (independent of micro menu visibility)
+        if not InCombatLockdown() then
+            blizzFrame:SetParent(UIParent)
+            -- Force MicroMenuContainer to recalculate its layout now that
+            -- the eye is removed. Without this, the container keeps its
+            -- stale width (includes eye) until Edit Mode triggers Layout(),
+            -- causing a visible shift.
+            if MicroMenuContainer and MicroMenuContainer.Layout then
+                C_Timer_After(0, function()
+                    if MicroMenuContainer and MicroMenuContainer.Layout then
+                        MicroMenuContainer:Layout()
+                    end
+                end)
+            end
         end
 
         local function SyncQueueHolderSize()
@@ -9335,23 +9447,24 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
             end
         end
 
-        ReparentQueueIntoHolder()
+        local function RepositionQueue()
+            blizzFrame:ClearAllPoints()
+            blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
+        end
+
+        RepositionQueue()
         SyncQueueHolderSize()
         blizzFrame:HookScript("OnSizeChanged", SyncQueueHolderSize)
 
-        -- Reclaim after Blizzard repositions the button (queue pop, etc.)
-        -- UpdatePosition calls SetPoint relative to MicroMenuContainer.
-        -- Re-center synchronously in the post-hook so there is no frame
-        -- gap where the button renders at MicroMenuContainer's position.
+        -- Prevent Blizzard from snapping the eye back
+        local _upGuard = false
         if type(blizzFrame.UpdatePosition) == "function" then
-            local _upGuard = false
             hooksecurefunc(blizzFrame, "UpdatePosition", function()
                 if _upGuard then return end
                 _upGuard = true
-                blizzFrame:ClearAllPoints()
-                blizzFrame:SetPoint("CENTER", holder, "CENTER", 0, 0)
-                if blizzFrame:GetParent() ~= holder and not InCombatLockdown() then
-                    blizzFrame:SetParent(holder)
+                RepositionQueue()
+                if blizzFrame:GetParent() ~= UIParent and not InCombatLockdown() then
+                    blizzFrame:SetParent(UIParent)
                 end
                 _upGuard = false
             end)
@@ -9360,37 +9473,8 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         return holder
     end
 
-    -- MicroBar: use a dedicated setup path that avoids hooksecurefunc on
-    -- SetParent/SetPoint on MicroMenuContainer. During vehicle transitions,
-    -- Blizzard's ActionBarController_UpdateAll reparents MicroMenuContainer.
-    -- Generic AttachFrameToHolder hooks SetParent/SetPoint which fires
-    -- insecure addon code inside that secure call chain, tainting the context
-    -- and blocking OverrideActionBar:Show(). Instead, re-acquire the micro
-    -- menu via the higher-level ActionBarController_UpdateAll hook and event listeners.
-    -- MicroBar / BagBar: position is fully Blizzard-owned (Edit Mode).
-    -- We only create a passive-follow holder for visibility/mouseover control.
-    -- No position persistence, no Edit Mode hooks, no ApplySystemAnchor hooks.
-    if barKey == "MicroBar" or barKey == "BagBar" then
-        local function SyncFollow()
-            local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
-            if fw and fw > 1 and fh and fh > 1 then
-                holder:SetSize(fw, fh)
-            end
-            holder:ClearAllPoints()
-            holder:SetPoint("CENTER", blizzFrame, "CENTER", 0, 0)
-        end
-        SyncFollow()
-        blizzFrame:HookScript("OnSizeChanged", function() SyncFollow() end)
-        if blizzFrame.ApplySystemAnchor then
-            hooksecurefunc(blizzFrame, "ApplySystemAnchor", function()
-                C_Timer_After(0, SyncFollow)
-            end)
-        end
-        return holder
-    end
-
     -- Remaining extra bars: QueueStatus only reaches here.
-    -- (MicroBar and BagBar return early above with passive-follow holders.)
+    -- (MicroBar and BagBar return early above.)
     local recentering = false
 
     local function SyncSize()

@@ -599,7 +599,7 @@ local defaults = {
             showCastbar = true,
             showCastIcon = true,
             castReverseFill = false,
-            castbarHideWhenInactive = false,
+            castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
             castDurationSize = 10,
@@ -759,6 +759,8 @@ local healthBarTextures = {
     ["atrocity"]      = TEXTURE_BASE .. "atrocity.tga",
     ["divide"]        = TEXTURE_BASE .. "divide.tga",
     ["glass"]         = TEXTURE_BASE .. "glass.tga",
+    ["fade-right"]    = TEXTURE_BASE .. "fade-right.tga",
+    ["fade"]          = TEXTURE_BASE .. "fade.tga",
     ["gradient-lr"]   = TEXTURE_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TEXTURE_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TEXTURE_BASE .. "gradient-bt.tga",
@@ -768,6 +770,7 @@ local healthBarTextures = {
 }
 local healthBarTextureOrder = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -781,6 +784,8 @@ local healthBarTextureNames = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -1028,16 +1033,21 @@ do
   oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end
 
--- eui-perpp: power percent using explicit power type (runs in oUF _PROXY env)
+-- Resolved power type per unit. Updated by GetDisplayPower override so
+-- tags match the power bar when powerTypeOverride is active (e.g. Balance
+-- Druid showing Mana instead of Astral Power).
+_G._EUI_ResolvedPowerType = _G._EUI_ResolvedPowerType or {}
+
+-- eui-perpp: power percent using resolved power type (runs in oUF _PROXY env)
 oUF.Tags.Methods["eui-perpp"] = [[function(u)
-    local pType = UnitPowerType(u)
+    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return string.format('%d', UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
 end]]
 oUF.Tags.Events["eui-perpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
 
 -- eui-curpp: current power as abbreviated number
 oUF.Tags.Methods["eui-curpp"] = [[function(u)
-    local pType = UnitPowerType(u)
+    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return AbbreviateNumbers(UnitPower(u, pType))
 end]]
 oUF.Tags.Events["eui-curpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
@@ -1295,7 +1305,9 @@ local MASK_INSETS = {
 -- uSettings: per-unit DB table
 -- unitToken: the unit this portrait belongs to (e.g. "player", "target")
 local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
-    local isDetached = ((uSettings and uSettings.portraitStyle) or db.profile.portraitStyle or "attached") == "detached"
+    -- Mini frames never use detached portraits
+    local isMini = unitToken and (unitToken == "pet" or unitToken == "targettarget" or unitToken == "focustarget" or unitToken:match("^boss%d$"))
+    local isDetached = not isMini and ((uSettings and uSettings.portraitStyle) or db.profile.portraitStyle or "attached") == "detached"
     local shape = (uSettings and uSettings.detachedPortraitShape) or "portrait"
     local showBorder = true
     local borderOpacity = ((uSettings and uSettings.detachedPortraitBorderOpacity) or 100) / 100
@@ -1731,6 +1743,7 @@ local function UpdateBordersForScale(frame, unit)
     local btbH = (settings.bottomTextBar and btbIsAtt) and (settings.bottomTextBarHeight or 16) or 0
 
     local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    if isMini and pStyle == "detached" then pStyle = "attached" end
     local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local isAttached = pStyle == "attached"
     -- Use the actual side the frame was built with (stored on the frame) so that
@@ -1906,6 +1919,8 @@ end
 local function GetFrameDimensions(unit)
     local settings = GetSettingsForUnit(unit)
     local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    local miniUnit = unit == "pet" or unit == "targettarget" or unit == "focustarget" or (unit and unit:match("^boss%d$"))
+    if miniUnit and pStyle == "detached" then pStyle = "attached" end
     local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local isAttached = pStyle == "attached"
     local pSizeAdj = settings.portraitSize or 0
@@ -2310,7 +2325,7 @@ local function CreatePowerBar(frame, unit, settings)
     -- Parent to frame (not power) so text isn't clipped by the bar clip container
     local ppTextOvr = CreateFrame("Frame", nil, frame)
     ppTextOvr:SetAllPoints(power)
-    ppTextOvr:SetFrameLevel(frame:GetFrameLevel() + 11)
+    ppTextOvr:SetFrameLevel(frame:GetFrameLevel() + 15)
     local ppFS = ppTextOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(ppFS, settings.powerPercentSize or 9)
     ppFS:Hide()
@@ -2455,17 +2470,18 @@ local function CreatePowerBar(frame, unit, settings)
             power.GetDisplayPower = function(self, u)
                 local spec = GetSpecialization and GetSpecialization()
                 if not spec then return nil end
+                local resolved
                 -- Check user override
                 local ps = GetSettingsForUnit("player")
                 local ov = ps and ps.powerTypeOverride
                 if ov and ov[spec] and classAlt then
-                    return classAlt[spec]  -- nil = UnitPowerType, number = forced
+                    resolved = classAlt[spec]  -- nil = UnitPowerType, number = forced
+                elseif classDef and classDef[spec] ~= nil then
+                    resolved = classDef[spec]
                 end
-                -- Addon default for this spec
-                if classDef and classDef[spec] ~= nil then
-                    return classDef[spec]
-                end
-                return nil
+                -- Publish for tags so text matches the bar
+                _G._EUI_ResolvedPowerType[u or "player"] = resolved
+                return resolved
             end
         end
     end
@@ -2478,6 +2494,9 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local uKey = UnitToSettingsKey(unit)
     local uSettings = uKey and db.profile[uKey]
     local portraitStyle = (uSettings and uSettings.portraitStyle) or db.profile.portraitStyle or "attached"
+    -- Mini frames never use detached portraits
+    local isMiniP = unit and (unit == "pet" or unit == "targettarget" or unit == "focustarget" or unit:match("^boss%d$"))
+    if isMiniP and portraitStyle == "detached" then portraitStyle = "attached" end
     local isAttached = (portraitStyle == "attached")
 
     -- Per-unit size/offset adjustments
@@ -2875,6 +2894,8 @@ local function SetupShowOnCastBar(frame, unit)
     -- reflect the current setting rather than a value captured at
     -- frame-creation time.
     local function shouldHideWhenInactive()
+        -- Boss frames always hide castbar when inactive (no user toggle)
+        if unit and unit:match("^boss") then return true end
         local s = GetSettingsForUnit(unit)
         if not s then return true end
         local v = s.castbarHideWhenInactive
@@ -3144,7 +3165,9 @@ local function CreateTargetAuras(frame, unit)
     do
         local debuffs = CreateFrame("Frame", nil, frame)
         local effectiveAnc = (dAnc ~= "none") and dAnc or "bottomleft"
-        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(effectiveAnc, settings and settings.debuffGrowth or "auto")
+        local simpleOn = unitIsBoss and settings and settings.simpleDebuffs ~= false
+        local effectiveGrowth = simpleOn and "auto" or (settings and settings.debuffGrowth or "auto")
+        local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(effectiveAnc, effectiveGrowth)
         local debuffCbOff = 0
         if effectiveAnc == "bottomleft" or effectiveAnc == "bottomright" then
             debuffCbOff = cbOffset
@@ -3152,7 +3175,7 @@ local function CreateTargetAuras(frame, unit)
         -- Simple Debuff Display: anchor to the top of the health bar, not the
         -- frame's vertical center (matches preview layout).
         local simpleAnchorParent = frame
-        if unitIsBoss and settings and settings.simpleDebuffs ~= false then
+        if simpleOn then
             dia = "TOPRIGHT"
             dfp = "TOPLEFT"
             dox = 0
@@ -3165,7 +3188,7 @@ local function CreateTargetAuras(frame, unit)
         debuffs.size = debuffAuraSize
         debuffs.spacing = gap
         debuffs.num = (dAnc ~= "none") and maxDebuffs or 0
-        debuffs.maxCols = AuraMaxCols(settings and settings.debuffGrowth, maxDebuffs)
+        debuffs.maxCols = AuraMaxCols(effectiveGrowth, maxDebuffs)
         debuffs.initialAnchor = dia
         debuffs.growthX = dgx
         debuffs.growthY = dgy
@@ -3713,6 +3736,7 @@ end
 local function StyleSimpleFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
     local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    if pStyle == "detached" then pStyle = "attached" end
     local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local pSide = settings.portraitSide or "left"
     local totalWidth = settings.frameWidth
@@ -3899,6 +3923,7 @@ end
 local function StylePetFrame(frame, unit)
     local settings = GetSettingsForUnit(unit)
     local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    if pStyle == "detached" then pStyle = "attached" end
     local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     local pSide = settings.portraitSide or "left"
     local totalWidth = settings.frameWidth
@@ -4092,6 +4117,7 @@ local function StyleBossFrame(frame, unit)
     local totalWidth = 0
     local portraitHeight = 0
     local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+    if pStyle == "detached" then pStyle = "attached" end
     local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
     if not showPortrait then
         totalWidth = settings.frameWidth
@@ -5071,6 +5097,9 @@ local function ReloadFrames()
             end
             local settings = GetSettingsForUnit(unit)
             local pStyle = settings.portraitStyle or db.profile.portraitStyle or "attached"
+            -- Mini frames never use detached portraits
+            local unitIsMini = unit == "pet" or unit == "targettarget" or unit == "focustarget" or unit:match("^boss%d$")
+            if unitIsMini and pStyle == "detached" then pStyle = "attached" end
             local showPortrait = pStyle ~= "none" and settings.showPortrait ~= false
 
             -- Keep the cached portrait side in sync with user-edited settings.
@@ -7145,6 +7174,7 @@ function InitializeFrames()
         if style == "modern" and position == "above" then
             -- Above health bar, inside the frame ? pips stretch to fill health bar width
             -- Bottom of pips flush with top of health bar, top of pips flush with top of border
+            _cpExpectedParent = frames.player
             bar:SetParent(frames.player)
             local anchorFrame = frames.player.Health
             local pipH = bar._pipH or 3
@@ -7173,6 +7203,7 @@ function InitializeFrames()
             end
         elseif style == "modern" and position == "top" then
             -- "top" floats above the frame (like "bottom" floats below) ? does NOT become part of the frame
+            _cpExpectedParent = frames.player
             bar:SetParent(frames.player)
             ResizeFrameForClassPower(0)
             -- Reset health bar to normal position
@@ -7201,6 +7232,7 @@ function InitializeFrames()
                 frames.player.Health:SetPoint("TOPLEFT", frames.player, "TOPLEFT", frames.player.Health._xOffset or 0, PP.Scale(-btbOff))
                 frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
+            _cpExpectedParent = UIParent
             bar:SetParent(UIParent)
             local pos = db.profile.positions.classPower
             if pos then
@@ -7223,6 +7255,7 @@ function InitializeFrames()
                 frames.player.Health:SetPoint("RIGHT", frames.player, "RIGHT", -(frames.player.Health._rightInset or 0), 0)
             end
             -- "bottom" position -- flush with bottom of frame; shifts below castbar when visible (unless user set Y offset)
+            _cpExpectedParent = frames.player
             bar:SetParent(frames.player)
             if bar._bottomBdrFrame then bar._bottomBdrFrame:Hide() end
             local function AnchorBottom()
@@ -7271,15 +7304,29 @@ function InitializeFrames()
     -- to keep it visible. Only active while classPowerStyle == "blizzard".
     local _blizzCPHooked = false
     local _blizzCPActive = false  -- true while we own the bar
+
+    -- The expected parent for the Blizzard class power bar after positioning.
+    -- Set by PositionClassPowerBar so the SetParent hook knows what's correct.
+    local _cpExpectedParent = nil
+
     local function HookBlizzardClassPower(cpFrame)
         if _blizzCPHooked then return end
         _blizzCPHooked = true
         local _cpSetParentGuard = false
+        -- Re-assert position when Blizzard reparents (form/spec changes).
         hooksecurefunc(cpFrame, "SetParent", function(self, newParent)
             if not _blizzCPActive or _cpSetParentGuard then return end
-            if newParent ~= UIParent then
+            local wanted = _cpExpectedParent or frames.player or UIParent
+            if newParent ~= wanted then
                 _cpSetParentGuard = true
                 PositionClassPowerBar(self)
+                -- Blizzard may have re-stolen during PositionClassPowerBar.
+                -- The anchor is already correct, so just fix the parent directly.
+                local cur = self:GetParent()
+                wanted = _cpExpectedParent or frames.player or UIParent
+                if cur ~= wanted then
+                    self:SetParent(wanted)
+                end
                 _cpSetParentGuard = false
             end
         end)

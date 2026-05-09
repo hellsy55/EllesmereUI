@@ -203,9 +203,27 @@ local function GetReferenceObjectiveTime(run, objectiveIndex, mode)
     if mode == COMPARE_NONE then return nil end
 
     local store = EnsureProfileStore("bestObjectiveSplits")
-    local scopeKey = GetScopeKey(run, mode)
-    local scope = store and scopeKey and store[scopeKey]
-    return scope and scope[objectiveIndex] or nil
+    if not store then return nil end
+
+    -- Try exact scope first, then fall back to broader scopes.
+    -- LEVEL_AFFIX -> LEVEL -> DUNGEON
+    local tryOrder
+    if mode == COMPARE_LEVEL_AFFIX then
+        tryOrder = { COMPARE_LEVEL_AFFIX, COMPARE_LEVEL, COMPARE_DUNGEON }
+    elseif mode == COMPARE_LEVEL then
+        tryOrder = { COMPARE_LEVEL, COMPARE_DUNGEON }
+    else
+        tryOrder = { mode }
+    end
+
+    for _, tryMode in ipairs(tryOrder) do
+        local scopeKey = GetScopeKey(run, tryMode)
+        local scope = scopeKey and store[scopeKey]
+        if scope and scope[objectiveIndex] then
+            return scope[objectiveIndex]
+        end
+    end
+    return nil
 end
 
 local function UpdateBestObjectiveSplits(run, objectiveIndex, elapsed)
@@ -351,6 +369,7 @@ local function UpdateObjectives()
                     end
                 end
 
+                obj.rawQuantity = rawQuantity
                 if obj.totalQuantity and obj.totalQuantity > 0 then
                     local percent = (rawQuantity / obj.totalQuantity) * 100
                     obj.quantity = floor(percent * 100 + 0.5) / 100
@@ -392,49 +411,25 @@ local function NotifyRefresh()
     end)
 end
 
--- Authoritative elapsed value: hook Blizzard's own ChallengeModeBlock
--- UpdateTime callback. Blizzard pushes us the correct elapsed every
--- second; this is the only source that's drift-immune across /reload
--- (GetWorldElapsedTime can latch a stale value right after PEW because
--- WORLD_STATE_TIMER_START fires asynchronously).
-local _blizzElapsed = nil
-local function GetChallengeModeElapsed()
-    if _blizzElapsed then return _blizzElapsed end
-    -- Fallback while Blizzard hasn't pushed yet (e.g. fresh login)
-    return select(2, GetWorldElapsedTime(1))
-end
+-- Elapsed time: read from GetWorldElapsedTime(1) each tick. The Blizzard
+-- hook on ChallengeModeBlock.UpdateTime is the primary tick driver (once
+-- per second, zero cost outside M+). An OnUpdate fallback on our own
+-- standalone frame ensures ticks keep firing even when QT reparents
+-- ObjectiveTrackerFrame to a hidden container (which silences the hook).
+local _lastTickedSec = -1
 
--- Forward-declared so the hook below can call it; OnTimerTick is defined later.
-local _onTimerTick_fwd  -- assigned to OnTimerTick once that local exists
-
-do
-    local _lastTickedSec = -1
-    local function _onUpdateTime(_, elapsedTime)
-        if not (elapsedTime and elapsedTime >= 0) then return end
-        _blizzElapsed = elapsedTime
-        if not currentRun.active then return end
-        -- Blizzard fires UpdateTime several times per second but elapsedTime
-        -- only changes once/sec -- skip duplicates.
-        local sec = math.floor(elapsedTime)
-        if sec == _lastTickedSec then return end
-        _lastTickedSec = sec
-        if _onTimerTick_fwd then _onTimerTick_fwd() end
-    end
-    local block = (ScenarioObjectiveTracker and ScenarioObjectiveTracker.ChallengeModeBlock)
-        or (ScenarioBlocksFrame and ScenarioBlocksFrame.ChallengeModeBlock)
-    if block and block.UpdateTime then
-        hooksecurefunc(block, "UpdateTime", _onUpdateTime)
-    end
-end
-
--- No more polling driver. The single source of timer ticks is the
--- hooksecurefunc on ChallengeModeBlock:UpdateTime above -- Blizzard pushes
--- us the elapsed time once per second of an active key. Outside a key,
--- zero work runs.
 local function OnTimerTick()
     if not currentRun.active then return end
 
-    currentRun.elapsed = GetChallengeModeElapsed() or currentRun.elapsed or 0
+    local elapsed = select(2, GetWorldElapsedTime(1))
+    if not (elapsed and elapsed >= 0) then return end
+
+    -- Deduplicate: only refresh the display once per whole second.
+    local sec = floor(elapsed)
+    if sec == _lastTickedSec then return end
+    _lastTickedSec = sec
+
+    currentRun.elapsed = elapsed
 
     local deathCount, timeLost = C_ChallengeMode.GetDeathCount()
     currentRun.deaths = deathCount or 0
@@ -443,11 +438,43 @@ local function OnTimerTick()
     UpdateObjectives()
     NotifyRefresh()
 end
-_onTimerTick_fwd = OnTimerTick  -- wire the forward-decl so the hook can call us
 
--- Stubs kept for existing callers (StartRun/CompleteRun/ResetRun reference these).
-local function StartTimerLoop() end
-local function StopTimerLoop()  end
+-- Primary driver: hook Blizzard's ChallengeModeBlock.UpdateTime (1/sec).
+do
+    local block = (ScenarioObjectiveTracker and ScenarioObjectiveTracker.ChallengeModeBlock)
+        or (ScenarioBlocksFrame and ScenarioBlocksFrame.ChallengeModeBlock)
+    if block and block.UpdateTime then
+        hooksecurefunc(block, "UpdateTime", function()
+            OnTimerTick()
+        end)
+    end
+end
+
+-- Fallback driver: OnUpdate on the standalone frame, throttled to 1/sec.
+-- Only runs while the frame is shown (active M+ key). Ensures the timer
+-- stays accurate even when the hook is silenced by QT's reparent-to-hidden.
+local _onUpdateAccum = 0
+local function OnUpdateFallback(_, dt)
+    _onUpdateAccum = _onUpdateAccum + dt
+    if _onUpdateAccum < 1 then return end
+    _onUpdateAccum = 0
+    OnTimerTick()
+end
+
+local _timerLoopWanted = false
+local function StartTimerLoop()
+    _timerLoopWanted = true
+    if standaloneFrame then
+        _onUpdateAccum = 0
+        standaloneFrame:SetScript("OnUpdate", OnUpdateFallback)
+    end
+end
+local function StopTimerLoop()
+    _timerLoopWanted = false
+    if standaloneFrame then
+        standaloneFrame:SetScript("OnUpdate", nil)
+    end
+end
 
 -- Hide Blizzard's ObjectiveTrackerFrame whenever our M+ timer is enabled
 -- and we're in an active challenge mode. Permanent hooksecurefunc on Show:
@@ -505,7 +532,7 @@ end
 local function StartRun()
     local mapID = C_ChallengeMode.GetActiveChallengeMapID()
     if not mapID then return end
-    _blizzElapsed = nil  -- discard any stale push from the previous run
+    _lastTickedSec = -1  -- reset dedup so the first tick always fires
 
     local mapName, _, timeLimit = C_ChallengeMode.GetMapUIInfo(mapID)
     local level, affixes = C_ChallengeMode.GetActiveKeystoneInfo()
@@ -550,14 +577,14 @@ local function CompleteRun()
     StopTimerLoop()
 
     -- Use C_ChallengeMode.GetChallengeCompletionInfo() as the authoritative
-    -- completion time (milliseconds). GetWorldElapsedTime / _blizzElapsed can
-    -- return secret or stale values after depletion, producing "99:99" display.
+    -- completion time (milliseconds). GetWorldElapsedTime can return secret
+    -- or stale values after depletion, producing "99:99" display.
     local completionInfo = C_ChallengeMode and C_ChallengeMode.GetChallengeCompletionInfo
         and C_ChallengeMode.GetChallengeCompletionInfo()
     if completionInfo and completionInfo.time and completionInfo.time > 0 then
         currentRun.elapsed = completionInfo.time / 1000
     else
-        local elapsedTime = GetChallengeModeElapsed()
+        local elapsedTime = select(2, GetWorldElapsedTime(1))
         currentRun.elapsed = elapsedTime or currentRun.elapsed
     end
     if currentRun.preciseStart and GetTimePreciseSec then
@@ -569,7 +596,7 @@ local function CompleteRun()
 end
 
 local function ResetRun()
-    _blizzElapsed = nil
+    _lastTickedSec = -1
     currentRun.active    = false
     currentRun.completed = false
     currentRun.mapID     = nil
@@ -828,6 +855,12 @@ local function CreateStandaloneFrame()
     end
 
     standaloneFrame = f
+    -- If a run is already active (e.g. /reload mid-key), wire up the
+    -- OnUpdate fallback now that the frame exists.
+    if _timerLoopWanted then
+        _onUpdateAccum = 0
+        f:SetScript("OnUpdate", OnUpdateFallback)
+    end
     return f
 end
 
@@ -995,10 +1028,20 @@ local function RenderStandalone()
     local timerText
     local timerDetailText
     if run.completed then
-        -- Completed run: just freeze the clock at the final elapsed
-        -- seconds. No milliseconds -- the display format stays consistent
-        -- with the running timer and there's no "99:99.999" glitch.
-        timerText = FormatTime(run.elapsed or completedElapsed or 0)
+        -- Completed run: freeze the clock at the final elapsed seconds
+        -- but preserve the user's chosen display mode so "/33:00" doesn't
+        -- vanish on completion.
+        local mode = p.timerDisplayMode or "REMAINING_TOTAL"
+        local elaStr = FormatTime(run.elapsed or completedElapsed or 0)
+        local maxStr = FormatTime(maxTime)
+        if mode == "REMAINING_TOTAL" then
+            timerText = elaStr .. " / " .. maxStr
+        elseif mode == "ELAPSED_DETAIL" then
+            timerText = elaStr
+            timerDetailText = " (" .. elaStr .. " / " .. maxStr .. ")"
+        else
+            timerText = elaStr
+        end
     else
         local mode = p.timerDisplayMode or "REMAINING_TOTAL"
         local elaStr = FormatTime(elapsed)

@@ -1423,6 +1423,10 @@ ShowWidgetTooltip = function(label, text, opts)
     tt:ClearAllPoints()
     if opts and opts.anchor == "below" then
         tt:SetPoint("TOP", label, "BOTTOM", 0, -4)
+    elseif opts and opts.anchor == "left" then
+        tt:SetPoint("RIGHT", label, "LEFT", -4, 0)
+    elseif opts and opts.anchor == "right" then
+        tt:SetPoint("LEFT", label, "RIGHT", 4, 0)
     else
         tt:SetPoint("BOTTOM", label, "TOP", 0, 4)
     end
@@ -1450,10 +1454,13 @@ ShowWidgetTooltip = function(label, text, opts)
     -- Clamp to screen edges so tooltips don't go off-screen
     -- Skip clamping if frame metrics are secret (tainted execution in M+)
     local ttScale = tt:GetEffectiveScale()
-    if not (issecretvalue and issecretvalue(ttScale)) then
+    local _ttLeft = tt:GetLeft()
+    local _ttRight = tt:GetRight()
+    local _isv = issecretvalue
+    if not (_isv and (_isv(ttScale) or _isv(_ttLeft) or _isv(_ttRight))) then
         local screenW = GetScreenWidth() * UIParent:GetEffectiveScale()
-        local ttLeft = (tt:GetLeft() or 0) * ttScale
-        local ttRight = (tt:GetRight() or 0) * ttScale
+        local ttLeft = (_ttLeft or 0) * ttScale
+        local ttRight = (_ttRight or 0) * ttScale
         if ttLeft < 0 then
             local pt, rel, relPt, px, py = tt:GetPoint(1)
             if pt then
@@ -1463,6 +1470,20 @@ ShowWidgetTooltip = function(label, text, opts)
             local pt, rel, relPt, px, py = tt:GetPoint(1)
             if pt then
                 tt:SetPoint(pt, rel, relPt, (px or 0) - (ttRight - screenW) / ttScale, py or 0)
+            end
+        end
+        local screenH = GetScreenHeight() * UIParent:GetEffectiveScale()
+        local ttTop = (tt:GetTop() or 0) * ttScale
+        local ttBottom = (tt:GetBottom() or 0) * ttScale
+        if ttBottom < 0 then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, px or 0, (py or 0) - ttBottom / ttScale)
+            end
+        elseif ttTop > screenH then
+            local pt, rel, relPt, px, py = tt:GetPoint(1)
+            if pt then
+                tt:SetPoint(pt, rel, relPt, px or 0, (py or 0) - (ttTop - screenH) / ttScale)
             end
         end
     end
@@ -1481,18 +1502,22 @@ ShowWidgetTooltip = function(label, text, opts)
     tt._fadeAG:Play()
 end
 
-HideWidgetTooltip = function()
+HideWidgetTooltip = function(instant)
     local tt = GetTooltipFrame()
     if not tt:IsShown() then return end
-    -- Fade out
     if tt._fadeOutAG then tt._fadeOutAG:Stop() end
+    if tt._fadeAG then tt._fadeAG:Stop() end
+    if instant then
+        tt:SetAlpha(0); tt:Hide()
+        return
+    end
+    -- Fade out
     if not tt._fadeOutAG then
         tt._fadeOutAG = tt:CreateAnimationGroup()
         tt._fadeOut = tt._fadeOutAG:CreateAnimation("Alpha")
         tt._fadeOut:SetDuration(0.25)
         tt._fadeOut:SetSmoothing("IN")
     end
-    if tt._fadeAG then tt._fadeAG:Stop() end
     tt._fadeOut:SetFromAlpha(tt:GetAlpha())
     tt._fadeOut:SetToAlpha(0)
     tt._fadeOutAG:SetScript("OnFinished", function() tt:SetAlpha(0); tt:Hide() end)
@@ -5465,8 +5490,23 @@ local function BuildCursorAnchorRow(opts)
           disabledTooltip = opts.disabledTip,
           getValue = function() return getData().anchorTo == "mouse" end,
           setValue = function(v)
-              getData().anchorTo = v and "mouse" or "none"
-              onApply()
+              local old = getData().anchorTo
+              local new = v and "mouse" or "none"
+              getData().anchorTo = new
+              -- Cursor anchor requires a reload to take effect cleanly
+              -- (Blizzard viewer Layout fights icon positions on live switch).
+              local changed = (old == "mouse") ~= (new == "mouse")
+              if changed then
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Changing cursor anchor requires a UI reload to take effect.",
+                      confirmText = "Reload Now",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
+              else
+                  onApply()
+              end
               EllesmereUI:RefreshPage(true)
           end },
         { type = "dropdown", text = "Cursor Position",

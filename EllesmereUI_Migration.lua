@@ -1880,6 +1880,20 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "charsheet_default_enabled_v1",
+    scope       = "global",
+    description = "Preserve disabled default for existing users when flipping themedCharacterSheet to default-on.",
+    body = function(ctx)
+        -- Existing users who never touched the toggle have nil (old default =
+        -- disabled). Stamp false so the new nil-means-enabled logic doesn't
+        -- flip them on. Users who already set true/false keep their value.
+        if ctx.db.themedCharacterSheet == nil then
+            ctx.db.themedCharacterSheet = false
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

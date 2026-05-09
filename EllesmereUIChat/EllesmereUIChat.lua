@@ -405,22 +405,16 @@ local function ApplyChatPosition()
     _cfIgnoreSetPoint = false
 end
 
--- Chat frame size: apply saved width/height from DB.
+-- Chat frame size: Blizzard is sole authority for chat sizing.
+-- We no longer apply saved width/height.
 local function ApplyChatSize()
-    local cfg = ECHAT.DB()
-    if not cfg then return end
-    local cf1 = _G.ChatFrame1
-    if not cf1 then return end
-    if cfg.chatWidth then cf1:SetWidth(cfg.chatWidth) end
-    if cfg.chatHeight then cf1:SetHeight(cfg.chatHeight) end
+    -- no-op: Blizzard handles all chat frame sizing
 end
 ECHAT.ApplyChatSize = ApplyChatSize
 
 function ECHAT.ApplyLockChatSize()
     local cfg = ECHAT.DB()
-    local cf1 = _G.ChatFrame1
-    if not cf1 or not CFD(cf1).resizeGrip then return end
-    CFD(cf1).resizeGrip:SetShown(not cfg.lockChatSize)
+    -- No-op: custom resize grip removed, Blizzard handles sizing.
 end
 
 -- Flip sidebar to left or right side of chat bg
@@ -1664,6 +1658,23 @@ local TAB_TEX_SUFFIXES = {
     "HighlightLeft", "HighlightMiddle", "HighlightRight",
 }
 
+-- Clip frame for underlines: masks them to the dock manager bounds so
+-- they don't extend past the visible tab row.  Our frame on UIParent,
+-- anchored to gdm -- zero writes to Blizzard frames.
+local _ulClipFrame
+local function GetULClipFrame()
+    if _ulClipFrame then return _ulClipFrame end
+    local gdm = _G.GeneralDockManager
+    if not gdm then return nil end
+    _ulClipFrame = CreateFrame("Frame", nil, UIParent)
+    _ulClipFrame:SetPoint("TOPLEFT", gdm, "TOPLEFT", 0, 0)
+    _ulClipFrame:SetPoint("BOTTOMRIGHT", gdm, "BOTTOMRIGHT", 0, 0)
+    _ulClipFrame:SetClipsChildren(true)
+    _ulClipFrame:SetFrameStrata("MEDIUM")
+    _ulClipFrame:SetFrameLevel(5)
+    return _ulClipFrame
+end
+
 -- Update visual state of one skinned tab (colors, underline, pulse)
 local function UpdateTabStyle(tab)
     if not tab or not CFD(tab).skinned then return end
@@ -1730,7 +1741,7 @@ local function SkinTab(cf)
     -- Accent underline: deferred to avoid pixel snap hooks firing during
     -- chat init's secure window.
     C_Timer.After(0, function()
-        local ulHost = CreateFrame("Frame", nil, UIParent)
+        local ulHost = CreateFrame("Frame", nil, GetULClipFrame() or UIParent)
         ulHost:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
         ulHost:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
         ulHost:SetHeight((PP and PP.mult) or 1)
@@ -1743,6 +1754,7 @@ local function SkinTab(cf)
         ulHost:Hide()
         if EUI.RegAccent then EUI.RegAccent({ type = "solid", obj = underline, a = 1 }) end
         CFD(tab).underline = ulHost
+        UpdateTabStyle(tab)
     end)
 
     -- Hover highlight
@@ -1863,18 +1875,21 @@ local function SkinEditBox(cf)
     eb:SetFont(GetFont(), ebSize, "")
     eb:SetTextInsets(8, 8, 0, 0)
 
-    -- Arrow key history
-    -- Hook UpdateHeader to re-apply custom font on the header ("Say:", etc.)
-    if eb.UpdateHeader then
-        hooksecurefunc(eb, "UpdateHeader", function(self)
-            if self.header then
-                self.header:SetFont(GetFont(), GetFrameFontSize(self:GetParent():GetID()), "")
-            end
-            if self.headerSuffix then
-                self.headerSuffix:SetFont(GetFont(), GetFrameFontSize(self:GetParent():GetID()), "")
-            end
-        end)
+    -- Apply custom font to the header ("Say:", "Party:", etc.) and suffix.
+    -- Called once at skin time and again on focus-gained (covers chat type
+    -- switches). Never from inside UpdateHeader -- calling SetFont in that
+    -- secure chain taints the execution context and blocks SendChatMessage.
+    local function ApplyEditBoxHeaderFont(editBox)
+        local sz = GetFrameFontSize(editBox:GetParent():GetID())
+        if editBox.header then
+            editBox.header:SetFont(GetFont(), sz, "")
+        end
+        if editBox.headerSuffix then
+            editBox.headerSuffix:SetFont(GetFont(), sz, "")
+        end
     end
+    ApplyEditBoxHeaderFont(eb)
+    eb:HookScript("OnEditFocusGained", function(self) ApplyEditBoxHeaderFont(self) end)
 
     eb:SetAltArrowKeyMode(false)
     if not CFD(eb).history then
@@ -1885,7 +1900,7 @@ local function SkinEditBox(cf)
                 local h = CFD(self).history
                 local last = h[#h]
                 if issecretvalue and last and issecretvalue(last) then
-                    h[#h] = nil -- remove stale secret entry
+                    h[#h] = nil
                 end
                 if h[#h] ~= text then
                     h[#h + 1] = text
@@ -1894,6 +1909,14 @@ local function SkinEditBox(cf)
             end)
             eb:HookScript("OnKeyDown", function(self, key)
                 if key ~= "UP" and key ~= "DOWN" then return end
+                -- In M+ keys and boss encounters, Blizzard restricts addon
+                -- chat operations. Calling SetText here taints the edit box
+                -- execution context, blocking SendChatMessage on next Enter.
+                -- Fall back to Blizzard's built-in history in restricted contexts.
+                local restricted = GetCVarBool("addonChatRestrictionsForced")
+                    or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+                        and C_ChallengeMode.IsChallengeModeActive())
+                if restricted then return end
                 local h = CFD(self).history
                 if #h == 0 then return end
                 if key == "UP" then
@@ -2150,7 +2173,10 @@ local function SkinChatFrame(cf)
         -- Friends button toggles FriendsFrame
         if friendsBtn then
         friendsBtn:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
+                return
+            end
             ToggleFriendsFrame()
         end)
         end
@@ -2267,129 +2293,31 @@ local function SkinChatFrame(cf)
         btnFrame:SetParent(_hiddenParent)
     end
 
-    -- Reposition Blizzard's resize button to align with our bg.
-    -- ChatFrame1: hidden (we have our own grip). Others: repositioned.
+    -- Restyle Blizzard's resize button to align with our bg (all chat frames).
     local resizeBtn = _G[name .. "ResizeButton"]
-    if resizeBtn then
-        if name == "ChatFrame1" then
-            resizeBtn:SetParent(_hiddenParent)
-        else
-            -- Restyle with our custom resize texture
-            resizeBtn:SetSize(18, 18)
-            resizeBtn:ClearAllPoints()
-            resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
-            resizeBtn:SetFrameStrata("HIGH")
-            -- Strip default textures and apply ours
-            if resizeBtn.GetRegions then
-                for ri = 1, select("#", resizeBtn:GetRegions()) do
-                    local region = select(ri, resizeBtn:GetRegions())
-                    if region and region:IsObjectType("Texture") then
-                        region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
-                        region:SetDesaturated(true)
-                        region:SetVertexColor(1, 1, 1)
-                        region:SetAllPoints()
-                    end
+    if resizeBtn and CFD(cf).bg then
+        resizeBtn:SetSize(18, 18)
+        resizeBtn:ClearAllPoints()
+        resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
+        resizeBtn:SetFrameStrata("HIGH")
+        if resizeBtn.GetRegions then
+            for ri = 1, select("#", resizeBtn:GetRegions()) do
+                local region = select(ri, resizeBtn:GetRegions())
+                if region and region:IsObjectType("Texture") then
+                    region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
+                    region:SetDesaturated(true)
+                    region:SetVertexColor(1, 1, 1)
+                    region:SetAllPoints()
                 end
             end
-            resizeBtn:SetAlpha(0.2)
-            resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
         end
+        resizeBtn:SetAlpha(0.2)
+        resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+        resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
     end
 
-    -- Custom resize grip on ChatFrame1's bg (bottom-right corner)
-    if name == "ChatFrame1" and CFD(cf).bg and not CFD(cf).resizeGrip then
-        local grip = CreateFrame("Button", nil, UIParent)
-        grip:SetSize(18, 18)
-        grip:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
-        grip:SetFrameStrata("HIGH")
-        grip:SetFrameLevel(100)
-        local gripTex = grip:CreateTexture(nil, "OVERLAY")
-        gripTex:SetAllPoints()
-        gripTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
-        gripTex:SetDesaturated(true)
-        gripTex:SetVertexColor(1, 1, 1)
-        grip:SetAlpha(0.2)
-        grip:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-        grip:SetScript("OnLeave", function(self)
-            if not self._dragging then self:SetAlpha(0.2) end
-        end)
-
-        local function FinishResize(self)
-            self._dragging = false
-            _cfResizing = false
-            self:SetScript("OnUpdate", nil)  -- stop per-frame polling
-            CFD(cf).resizeTarget = nil
-            self:SetAlpha(0.2)
-            -- Save size and update position to reflect new dimensions
-            local cfg = ECHAT.DB()
-            if cfg then
-                cfg.chatWidth = cf:GetWidth()
-                cfg.chatHeight = cf:GetHeight()
-                -- Update saved position from current TOPLEFT anchor
-                local cfS = cf:GetEffectiveScale()
-                local uiS = UIParent:GetEffectiveScale()
-                local cCX, cCY = cf:GetCenter()
-                local uCX, uCY = UIParent:GetCenter()
-                if cCX and uCX then
-                    cfg.chatPosition = {
-                        point = "CENTER", relPoint = "CENTER",
-                        x = (cCX * cfS - uCX * uiS) / uiS,
-                        y = (cCY * cfS - uCY * uiS) / uiS,
-                    }
-                end
-            end
-            ApplyChatPosition()
-        end
-
-        grip:SetScript("OnMouseDown", function(self, button)
-            if button ~= "LeftButton" then return end
-            if InCombatLockdown() then return end
-            self._startCX, self._startCY = GetCursorPosition()
-            self._startW = cf:GetWidth()
-            self._startH = cf:GetHeight()
-            -- Capture current anchor so we can compensate for center-based resize
-            local pt, _, relPt, px, py = cf:GetPoint(1)
-            self._anchorPt = pt
-            self._anchorRelPt = relPt
-            self._anchorX = px or 0
-            self._anchorY = py or 0
-            self._dragging = true
-            _cfResizing = true
-            -- Start OnUpdate only while dragging (zero cost when idle)
-            grip:SetScript("OnUpdate", grip._onUpdate)
-        end)
-        grip:SetScript("OnMouseUp", function(self)
-            if not self._dragging then return end
-            FinishResize(self)
-        end)
-        grip._onUpdate = function(self)
-            if not IsMouseButtonDown("LeftButton") then
-                FinishResize(self)
-                return
-            end
-            local es = cf:GetEffectiveScale()
-            local cx, cy = GetCursorPosition()
-            local dx = (cx - self._startCX) / es
-            local dy = (cy - self._startCY) / es
-            local newW = max(200, self._startW + dx)
-            local newH = max(100, self._startH - dy)
-            -- Compensate position so top-left stays fixed (CENTER anchor
-            -- grows equally in all directions; shift center by half the delta)
-            local dW = newW - self._startW
-            local dH = newH - self._startH
-            local tgtX = self._anchorX + dW / 2
-            local tgtY = self._anchorY - dH / 2
-            -- Store target so the SetPoint hook can enforce it against Blizzard
-            CFD(cf).resizeTarget = { self._anchorPt, self._anchorRelPt, tgtX, tgtY }
-            _cfIgnoreSetPoint = true
-            cf:SetSize(newW, newH)
-            cf:ClearAllPoints()
-            cf:SetPoint(self._anchorPt, UIParent, self._anchorRelPt, tgtX, tgtY)
-            _cfIgnoreSetPoint = false
-        end
-        CFD(cf).resizeGrip = grip
-    end
+    -- Custom resize grip removed: Blizzard is sole authority for chat sizing.
+    -- Blizzard's resize button (restyled above) handles all resizing natively.
 
     -- Hide scroll buttons + scroll-to-bottom
     for _, suffix in ipairs({"BottomButton", "DownButton", "UpButton"}) do
@@ -2722,7 +2650,9 @@ local function SkinChatFrame(cf)
                 self._elapsed = 0
                 local pct = blizSB.GetScrollPercentage and blizSB:GetScrollPercentage()
                 local ext = blizSB.GetVisibleExtentPercentage and blizSB:GetVisibleExtentPercentage()
-                if pct == _lastPct and ext == _lastExt then return end
+                if pct == _lastPct and ext == _lastExt then
+                    return
+                end
                 _lastPct, _lastExt = pct, ext
                 UpdateThumb()
             end
@@ -2797,7 +2727,6 @@ initFrame:SetScript("OnEvent", function(self)
         local cf = _G["ChatFrame" .. i]
         if cf then SkinChatFrame(cf) end
     end
-
     ---------------------------------------------------------------------------
     --  2b. Expanded font size options. Font is applied at skin time only.
     --      The global hooksecurefunc("FCF_SetChatWindowFontSize") was removed
@@ -2901,11 +2830,10 @@ initFrame:SetScript("OnEvent", function(self)
         local gdm2 = _G.GeneralDockManager
         local sf = _G.GeneralDockManagerScrollFrame
         local sfc = _G.GeneralDockManagerScrollFrameChild
-        if sf and gdm2 then
-            sf:ClearAllPoints()
-            sf:SetPoint("BOTTOMLEFT", gdm2, "BOTTOMLEFT", 0, 0)
-            sf:SetPoint("TOPRIGHT", gdm2, "TOPRIGHT", 0, 0)
-        end
+        -- Don't override sf anchoring -- Blizzard's default stops at the
+        -- overflow button, which is what hides overflow tabs natively.
+        -- sf is a child of gdm, so it follows our dock repositioning.
+        -- Height is already set in StyleDockManager.
         if sfc then
             sfc:ClearAllPoints()
             sfc:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, 0)
@@ -2963,8 +2891,6 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
     ECHAT._deferredTabColorUpdate = DeferredTabColorUpdate
-
-
 
 
     ---------------------------------------------------------------------------
@@ -3030,7 +2956,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         idleEventFrame:SetScript("OnEvent", OnActiveMessage)
 
-        -- Reset idle when user types in chat (focus or any keystroke)
         for i = 1, 20 do
             local eb = _G["ChatFrame" .. i .. "EditBox"]
             if eb then
@@ -3094,85 +3019,112 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Hover detection: lightweight ticker checks cursor position for
-        -- idle fade + scrollbar. Fires 4x/sec. Tabs and sidebar use
-        -- OnEnter/OnLeave (they have EnableMouse for click handling).
+        -- Event-driven hover detection: zero CPU when idle.
+        -- Uses EnableMouseMotion on our bg frames + HookScript on tabs.
+        -- EnableMouseMotion captures hover without blocking clicks, but
+        -- does block camera turning. We accept this trade-off for zero-poll.
         local _idleMouseOver = false
-        local _pollFrames = {}
-        for i = 1, 20 do
-            local cf = _G["ChatFrame" .. i]
-            if cf and cf.isTemporary then break end
-            if cf then
-                _pollFrames[#_pollFrames + 1] = {
-                    cf    = cf,
-                    tab   = _G["ChatFrame" .. i .. "Tab"],
-                    bg    = CFD(cf).bg,
-                    track = CFD(cf).scrollTrack,
-                }
+        local _hoverCount = 0
+        local _editFocusCount = 0
+
+        local function UpdateHoverState()
+            local over = (_hoverCount > 0) or (_editFocusCount > 0)
+            if not IsIdleApplicable() then return end
+            if over and not _idleMouseOver then
+                _idleMouseOver = true
+                CancelIdleFade()
+            elseif not over and _idleMouseOver then
+                _idleMouseOver = false
+                ECHAT.ResetIdleTimer()
             end
         end
-        local _pollSidebar = CFD(ChatFrame1).sidebar
 
-        C_Timer.NewTicker(0.15, function()
-            RefreshCursorPos()
-            local over = false
-            local hoverCF = nil
-            local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
-                and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
-            for pi = 1, #_pollFrames do
-                local pf = _pollFrames[pi]
-                local cf = pf.cf
-                -- Check tab hover for ALL docked frames (tabs are visible even
-                -- when the chat frame is hidden). Check bg/cf only for shown frames.
-                if not over and pf.tab and IsCursorOverCached(pf.tab) then
-                    over = true; hoverCF = cf
-                end
-                if cf:IsShown() or cf == selected then
-                    if not over then
-                        if IsCursorOverCached(pf.bg) or IsCursorOverCached(cf) then
-                            over = true; hoverCF = cf
-                        end
-                    end
-                    local track = pf.track
-                    if track then
-                        local isOverThis = (hoverCF == cf)
-                        if isOverThis and not track._isHovered() then
+        local function OnChatEnter(cf)
+            _hoverCount = _hoverCount + 1
+            UpdateHoverState()
+            local track = CFD(cf).scrollTrack
+            if track and track._setHovered then
+                track._setHovered(true)
+                track._showTrack()
+            end
+        end
+        local function OnChatLeave(cf)
+            _hoverCount = max(0, _hoverCount - 1)
+            UpdateHoverState()
+            local track = CFD(cf).scrollTrack
+            if track and track._setHovered and not track._isDragging() then
+                track._setHovered(false)
+                track._hideTrack()
+            end
+        end
+
+        -- Single invisible overlay covering tabs + bg + sidebar.
+        -- EnableMouseMotion detects hover without blocking clicks.
+        -- Placed at BACKGROUND strata so it never intercepts anything.
+        do
+            local cf1 = _G.ChatFrame1
+            local gdm = _G.GeneralDockManager
+            local bg1 = CFD(cf1).bg
+            local sb = CFD(cf1).sidebar
+            if bg1 and gdm then
+                local overlay = CreateFrame("Frame", nil, UIParent)
+                overlay:SetPoint("TOPLEFT", gdm, "TOPLEFT", sb and -40 or 0, 0)
+                overlay:SetPoint("BOTTOMRIGHT", bg1, "BOTTOMRIGHT", 0, 0)
+                overlay:SetFrameStrata("BACKGROUND")
+                overlay:EnableMouseMotion(true)
+                overlay:SetScript("OnEnter", function()
+                    _hoverCount = _hoverCount + 1
+                    UpdateHoverState()
+                    local sel = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+                    if sel then
+                        local track = CFD(sel).scrollTrack
+                        if track and track._setHovered then
                             track._setHovered(true)
                             track._showTrack()
-                        elseif not isOverThis and track._isHovered() and not track._isDragging() then
+                        end
+                    end
+                end)
+                overlay:SetScript("OnLeave", function()
+                    _hoverCount = max(0, _hoverCount - 1)
+                    UpdateHoverState()
+                    local sel = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+                        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+                    if sel then
+                        local track = CFD(sel).scrollTrack
+                        if track and track._setHovered and not track._isDragging() then
                             track._setHovered(false)
                             track._hideTrack()
                         end
                     end
-                end
+                end)
             end
-            if not over and IsCursorOverCached(_pollSidebar) then
-                over = true
-            end
-            -- Check if any edit box has focus (covers temp frames too)
-            if not over then
-                for ei = 1, 20 do
-                    local eb = _G["ChatFrame" .. ei .. "EditBox"]
-                    if eb then
-                        local focused = eb:HasFocus()
-                        if issecretvalue and issecretvalue(focused) then focused = false end
-                        if focused then
-                            over = true
-                            break
-                        end
-                    end
-                end
-            end
-            if IsIdleApplicable() then
-                if over and not _idleMouseOver then
-                    _idleMouseOver = true
-                    CancelIdleFade()
-                elseif not over and _idleMouseOver then
-                    _idleMouseOver = false
-                    ECHAT.ResetIdleTimer()
-                end
-            end
-        end)
+        end
+
+        -- Sidebar has EnableMouse(true) which blocks the overlay beneath it.
+        -- HookScript on our own frame -- safe, no taint.
+        local sidebar = CFD(ChatFrame1).sidebar
+        if sidebar then
+            sidebar:HookScript("OnEnter", function()
+                _hoverCount = _hoverCount + 1; UpdateHoverState()
+            end)
+            sidebar:HookScript("OnLeave", function()
+                _hoverCount = max(0, _hoverCount - 1); UpdateHoverState()
+            end)
+        end
+
+        -- Edit box focus tracking -- only ChatFrame1 (permanent, no secret
+        -- values). Hooking temp whisper edit boxes (11+) taints their
+        -- execution context, causing secret value errors on BN_WHISPER tellTarget.
+        local eb1 = _G["ChatFrame1EditBox"]
+        if eb1 then
+            eb1:HookScript("OnEditFocusGained", function()
+                _editFocusCount = _editFocusCount + 1; UpdateHoverState()
+            end)
+            eb1:HookScript("OnEditFocusLost", function()
+                _editFocusCount = max(0, _editFocusCount - 1); UpdateHoverState()
+            end)
+        end
 
         -- Start the initial timer
         ECHAT.ResetIdleTimer()
@@ -3204,7 +3156,21 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     ECHAT.ApplySidebarVisibility()
     ECHAT.ApplyBorders()
-    -- ECHAT.ApplySidebarIcons() -- causes taint
+    -- ECHAT.ApplySidebarIcons() -- causes taint (full layout chain)
+    -- Apply individual icon visibility from DB without the layout chain.
+    do
+        local _cfg = ECHAT.DB()
+        local _cf1 = _G.ChatFrame1
+        if _cfg and _cf1 then
+            local _sbd = CFD(_cf1)
+            if _sbd.scrollBtn then _sbd.scrollBtn:SetShown(_cfg.showScroll ~= false) end
+            if _sbd.friendsBtn then _sbd.friendsBtn:SetShown(_cfg.showFriends ~= false) end
+            if _sbd.copyBtn then _sbd.copyBtn:SetShown(_cfg.showCopy ~= false) end
+            if _sbd.portalBtn then _sbd.portalBtn:SetShown(_cfg.showPortals ~= false) end
+            if _sbd.voiceBtn then _sbd.voiceBtn:SetShown(_cfg.showVoice ~= false) end
+            if _sbd.settingsBtn then _sbd.settingsBtn:SetShown(_cfg.showSettings ~= false) end
+        end
+    end
     ECHAT.ApplySidebarPosition()
     ECHAT.ApplyIconColor()
     ECHAT.ApplyInputPosition()

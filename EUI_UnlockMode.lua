@@ -3660,7 +3660,10 @@ end
 --  closes unlock mode and opens Blizzard's Edit Mode.
 -------------------------------------------------------------------------------
 local BLIZZ_OWNED_OVERLAY_DEFS = {
-    { label = "Chat", frame = function() return ChatFrame1 end,
+    { label = "Chat", frame = function()
+          if not EllesmereUI._chatCFD then return nil end
+          return ChatFrame1
+      end,
       anchor = function(ov, cf)
           -- Span sidebar + bg + tabs for the full chat region.
           -- Detect sidebar side by comparing screen positions.
@@ -7824,6 +7827,8 @@ local function DoClose()
 
     -- Notify action bars to restore Blizzard-owned frame anchors
     if _G._EAB_UnlockModeClose then pcall(_G._EAB_UnlockModeClose) end
+    -- Notify damage meters
+    if _G._EDM_UnlockModeClose then pcall(_G._EDM_UnlockModeClose) end
 
     -- Recalculate action bar flyout directions after positions are finalized
     if _G._EAB_RecalcFlyouts then pcall(_G._EAB_RecalcFlyouts) end
@@ -7860,7 +7865,10 @@ local function DoClose()
         local objTracker = _G.ObjectiveTrackerFrame
         if objTracker then
             objTracker:SetAlpha(1)
-            if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, true) end
+            local wasEnabled = objTracker._eabMouseWasEnabled
+            if objTracker.EnableMouse then
+                pcall(objTracker.EnableMouse, objTracker, wasEnabled and true or false)
+            end
         end
         objTrackerWasVisible = false
     end
@@ -8452,6 +8460,8 @@ function ns.OpenUnlockMode()
 
     -- Notify action bars to flip Blizzard-owned frame anchors for drag
     if _G._EAB_UnlockModeOpen then pcall(_G._EAB_UnlockModeOpen) end
+    -- Notify damage meters
+    if _G._EDM_UnlockModeOpen then pcall(_G._EDM_UnlockModeOpen) end
 
     -- Remove any stale anchor/match relationships before entering unlock mode.
     -- By this point all elements are registered, so anything not in the registry
@@ -8488,6 +8498,7 @@ function ns.OpenUnlockMode()
     local objTracker = _G.ObjectiveTrackerFrame
     if objTracker and objTracker:IsShown() then
         objTrackerWasVisible = true
+        objTracker._eabMouseWasEnabled = objTracker:IsMouseEnabled()
         objTracker:SetAlpha(0)
         if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, false) end
         if not objTracker._eabUnlockAlphaHooked then
@@ -9097,7 +9108,10 @@ local function SuspendForCombat()
         local objTracker = _G.ObjectiveTrackerFrame
         if objTracker then
             objTracker:SetAlpha(1)
-            if objTracker.EnableMouse then pcall(objTracker.EnableMouse, objTracker, true) end
+            local wasEnabled = objTracker._eabMouseWasEnabled
+            if objTracker.EnableMouse then
+                pcall(objTracker.EnableMouse, objTracker, wasEnabled and true or false)
+            end
         end
     end
 

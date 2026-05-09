@@ -47,6 +47,8 @@ local TBB_TEXTURES = {
     ["atrocity"]      = TBB_TEX_BASE .. "atrocity.tga",
     ["divide"]        = TBB_TEX_BASE .. "divide.tga",
     ["glass"]         = TBB_TEX_BASE .. "glass.tga",
+    ["fade-right"]    = TBB_TEX_BASE .. "fade-right.tga",
+    ["fade"]          = TBB_TEX_BASE .. "fade.tga",
     ["gradient-lr"]   = TBB_TEX_BASE .. "gradient-lr.tga",
     ["gradient-rl"]   = TBB_TEX_BASE .. "gradient-rl.tga",
     ["gradient-bt"]   = TBB_TEX_BASE .. "gradient-bt.tga",
@@ -56,6 +58,7 @@ local TBB_TEXTURES = {
 }
 local TBB_TEXTURE_ORDER = {
     "none", "melli", "atrocity",
+    "fade", "fade-right",
     "beautiful", "plating",
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
@@ -69,6 +72,8 @@ local TBB_TEXTURE_NAMES = {
     ["atrocity"]    = "Atrocity",
     ["divide"]      = "Divide",
     ["glass"]       = "Glass",
+    ["fade-right"]  = "Fade Right",
+    ["fade"]        = "Fade",
     ["gradient-lr"] = "Gradient Right",
     ["gradient-rl"] = "Gradient Left",
     ["gradient-bt"] = "Gradient Up",
@@ -1675,4 +1680,5 @@ function ns.RegisterTBBUnlockElements()
         EllesmereUI:RegisterUnlockElements(elements)
     end
 end
+_G._ECME_RegisterTBBUnlock = ns.RegisterTBBUnlockElements
 

@@ -1151,7 +1151,32 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end,
         onReset = function()
+            if EllesmereUIDB then
+                EllesmereUIDB.hideBlizzardPartyFrame = false
+                EllesmereUIDB.quickLoot = false
+                EllesmereUIDB.quickLootShiftSkip = false
+                EllesmereUIDB.skipCinematics = false
+                EllesmereUIDB.skipCinematicsAuto = false
+                EllesmereUIDB.autoFillDelete = false
+                EllesmereUIDB.autoInsertKeystone = false
+                EllesmereUIDB.instanceResetAnnounce = false
+                EllesmereUIDB.instanceResetAnnounceMsg = ""
+                EllesmereUIDB.quickSignup = false
+                EllesmereUIDB.persistSignupNote = false
+                EllesmereUIDB.ahCurrentExpansion = false
+                EllesmereUIDB.healthMacroEnabled = false
+                EllesmereUIDB.healthMacroPrio1 = 1
+                EllesmereUIDB.healthMacroPrio2 = 2
+                EllesmereUIDB.healthMacroPrio3 = 3
+                EllesmereUIDB.foodMacroEnabled = false
+                EllesmereUIDB.hideScreenshotStatus = false
+                EllesmereUIDB.trainAllButton = false
+                EllesmereUIDB.autoUnwrapCollections = false
+                EllesmereUIDB.autoOpenContainers = false
+                EllesmereUIDB.autoRepairGuild = false
+            end
             if _G._EBS_ResetCursor then _G._EBS_ResetCursor() end
+            if EllesmereUI._applyHideBlizzardPartyFrame then EllesmereUI._applyHideBlizzardPartyFrame() end
             EllesmereUI:InvalidatePageCache()
         end,
     })

@@ -43,6 +43,7 @@ local defaults = {
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
             hideGreatVault       = false,
+            greatVaultExtraInfo  = true,
             hidePortals          = false,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
@@ -542,6 +543,14 @@ local function CreateFlyoutToggle()
     btn:SetScript("OnClick", function(self)
         if GetFFD(self).freeMoveJustDragged then return end
         ToggleFlyoutPanel()
+    end)
+    btn:SetScript("OnEnter", function(self)
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Addon Buttons", { anchor = "left" })
+        end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
 
     -- Safety: ensure mouse stays enabled. Some Blizzard code or addon hooks
@@ -1050,6 +1059,135 @@ local function RegisterVaultEscClose()
     tinsert(UISpecialFrames, "WeeklyRewardsFrame")
 end
 
+local function GetGreatVaultAccentColor()
+    if EllesmereUI and EllesmereUI.GetAccentColor then
+        local r, g, b = EllesmereUI.GetAccentColor()
+        if r and g and b then
+            return r, g, b
+        end
+    end
+    return EG.r, EG.g, EG.b
+end
+
+local function ColorizeVaultText(text, r, g, b)
+    r = math.floor(math.max(0, math.min(1, r or 1)) * 255 + 0.5)
+    g = math.floor(math.max(0, math.min(1, g or 1)) * 255 + 0.5)
+    b = math.floor(math.max(0, math.min(1, b or 1)) * 255 + 0.5)
+    return ("|cff%02x%02x%02x%s|r"):format(r, g, b, tostring(text or ""))
+end
+
+local function GetOrderedWeeklyActivities(activityType)
+    if not C_WeeklyRewards or not C_WeeklyRewards.GetActivities then return nil end
+
+    local activities = C_WeeklyRewards.GetActivities(activityType)
+    if type(activities) ~= "table" or #activities == 0 then
+        return nil
+    end
+
+    local ordered = {}
+    for i = 1, #activities do
+        ordered[i] = activities[i]
+    end
+
+    table.sort(ordered, function(a, b)
+        local aIndex = a and a.index or 0
+        local bIndex = b and b.index or 0
+        if aIndex == bIndex then
+            return (a and a.threshold or 0) < (b and b.threshold or 0)
+        end
+        return aIndex < bIndex
+    end)
+
+    return ordered
+end
+
+local function GetVaultTokenColor(state)
+    if state == "done" then
+        return GetGreatVaultAccentColor()
+    elseif state == "partial" then
+        return 1.00, 0.66, 0.20
+    end
+
+    return 0.58, 0.58, 0.58
+end
+
+local function FormatVaultToken(text, state)
+    local r, g, b = GetVaultTokenColor(state)
+    return ColorizeVaultText(text, r, g, b)
+end
+
+local function BuildRaidVaultSummary()
+    local accentR, accentG, accentB = GetGreatVaultAccentColor()
+    local parts = { ColorizeVaultText("Raids", accentR, accentG, accentB) }
+    local activities = GetOrderedWeeklyActivities((Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Raid) or 3)
+
+    if not activities then
+        parts[#parts + 1] = FormatVaultToken("-", "empty")
+        return table.concat(parts, " ")
+    end
+
+    for i = 1, math.min(#activities, 3) do
+        local info = activities[i]
+        local progress = math.max(0, tonumber(info and info.progress) or 0)
+        local threshold = math.max(0, tonumber(info and info.threshold) or 0)
+        local state = "empty"
+        if threshold > 0 and progress >= threshold then
+            state = "done"
+        elseif progress > 0 then
+            state = "partial"
+        end
+        if threshold > 0 then
+            parts[#parts + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), state)
+        else
+            parts[#parts + 1] = FormatVaultToken("-", "empty")
+        end
+    end
+
+    return table.concat(parts, " ")
+end
+
+local function BuildTieredVaultSummary(label, activityType, completedPrefix)
+    local accentR, accentG, accentB = GetGreatVaultAccentColor()
+    local parts = { ColorizeVaultText(label, accentR, accentG, accentB) }
+    local activities = GetOrderedWeeklyActivities(activityType)
+
+    if not activities then
+        parts[#parts + 1] = FormatVaultToken("-", "empty")
+        return table.concat(parts, " ")
+    end
+
+    for i = 1, math.min(#activities, 3) do
+        local info = activities[i]
+        local progress = math.max(0, tonumber(info and info.progress) or 0)
+        local threshold = math.max(0, tonumber(info and info.threshold) or 0)
+        local level = math.max(0, tonumber(info and info.level) or 0)
+
+        if threshold > 0 and progress >= threshold and level > 0 then
+            parts[#parts + 1] = FormatVaultToken(completedPrefix .. level, "done")
+        else
+            local state = progress > 0 and "partial" or "empty"
+            if threshold > 0 then
+                parts[#parts + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), state)
+            else
+                parts[#parts + 1] = FormatVaultToken("-", "empty")
+            end
+        end
+    end
+
+    return table.concat(parts, " ")
+end
+
+local function BuildGreatVaultTooltipText()
+    local lines = {
+        "Great Vault",
+        BuildRaidVaultSummary(),
+        BuildTieredVaultSummary("Mythic+", (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Activities) or 1, "+"),
+        BuildTieredVaultSummary("World", (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.World) or 6, "T"),
+    }
+
+    return table.concat(lines, "\n")
+end
+
 local function ToggleGreatVault()
     local IsLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
     local Load     = (C_AddOns and C_AddOns.LoadAddOn)     or _G.LoadAddOn
@@ -1097,7 +1235,15 @@ local function CreateGreatVaultBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._whole:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault") end
+        if EllesmereUI.ShowWidgetTooltip then
+            local minimapCfg = EBS and EBS.db and EBS.db.profile and EBS.db.profile.minimap
+            if minimapCfg and minimapCfg.greatVaultExtraInfo == false then
+                EllesmereUI.ShowWidgetTooltip(self, "Great Vault", { anchor = "left" })
+            else
+                EllesmereUI.ShowWidgetTooltip(self, BuildGreatVaultTooltipText(), { anchor = "left" })
+            end
+        end
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "Great Vault", { anchor = "left" }) end
     end)
     btn:SetScript("OnLeave", function(self)
         self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)
@@ -1495,7 +1641,8 @@ local function CreatePortalBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._icon:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "M+ Portals") end
+        if _portalFlyout and _portalFlyout:IsShown() then return end
+        if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(self, "M+ Portals", { anchor = "left" }) end
     end)
     btn:SetScript("OnLeave", function(self)
         self._icon:SetVertexColor(0.85, 0.85, 0.85, 1)
@@ -1511,6 +1658,7 @@ local function CreatePortalBtn(parent)
     end)
     btn:SetScript("OnClick", function(self)
         if GetFFD(self).freeMoveJustDragged then return end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip(true) end
         ToggleMinimapPortalFlyout(self)
     end)
 
@@ -1550,6 +1698,18 @@ local function BuildCustomIndicators(minimap)
                 blizBtn.menu:SetPoint("TOPRIGHT", self, "TOPLEFT", -4, 0)
             end
         end)
+    local trackBaseEnter = _customIndicators.tracking:GetScript("OnEnter")
+    local trackBaseLeave = _customIndicators.tracking:GetScript("OnLeave")
+    _customIndicators.tracking:SetScript("OnEnter", function(self)
+        if trackBaseEnter then trackBaseEnter(self) end
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Tracking", { anchor = "left" })
+        end
+    end)
+    _customIndicators.tracking:SetScript("OnLeave", function(self)
+        if trackBaseLeave then trackBaseLeave(self) end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
 
     -- Calendar (day-of-month atlas)
     local calDay = tonumber(date("%d")) or 1
@@ -1560,6 +1720,18 @@ local function BuildCustomIndicators(minimap)
             if ToggleCalendar then ToggleCalendar() end
         end)
     _customIndicators.calendar._calDay = calDay
+    local calBaseEnter = _customIndicators.calendar:GetScript("OnEnter")
+    local calBaseLeave = _customIndicators.calendar:GetScript("OnLeave")
+    _customIndicators.calendar:SetScript("OnEnter", function(self)
+        if calBaseEnter then calBaseEnter(self) end
+        if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
+            EllesmereUI.ShowWidgetTooltip(self, "Calendar", { anchor = "left" })
+        end
+    end)
+    _customIndicators.calendar:SetScript("OnLeave", function(self)
+        if calBaseLeave then calBaseLeave(self) end
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
 
     -- Mail (informational, tooltip on hover, with hover atlas)
     _customIndicators.mail = CreateIndicatorBtn("_mail", minimap,
@@ -1569,7 +1741,7 @@ local function BuildCustomIndicators(minimap)
     _customIndicators.mail:SetScript("OnEnter", function(self)
         if mailBaseEnter then mailBaseEnter(self) end
         if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
-            EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail")
+            EllesmereUI.ShowWidgetTooltip(self, HAVE_MAIL or "New Mail", { anchor = "left" })
         end
     end)
     _customIndicators.mail:SetScript("OnLeave", function(self)
@@ -1585,7 +1757,24 @@ local function BuildCustomIndicators(minimap)
     _customIndicators.crafting:SetScript("OnEnter", function(self)
         if craftBaseEnter then craftBaseEnter(self) end
         if not GetFFD(self).freeMoveJustDragged and EllesmereUI.ShowWidgetTooltip then
-            EllesmereUI.ShowWidgetTooltip(self, PROFESSIONS_CRAFTING_ORDERS or "Crafting Orders")
+            local label = "Crafting Orders"
+            if C_CraftingOrders and C_CraftingOrders.GetPersonalOrdersInfo then
+                local infos = C_CraftingOrders.GetPersonalOrdersInfo()
+                if type(infos) == "table" then
+                    local lines = {}
+                    for _, info in ipairs(infos) do
+                        local count = tonumber(info.numPersonalOrders) or 0
+                        if count > 0 then
+                            local name = tostring(info.professionName or info.profession or "Unknown")
+                            lines[#lines + 1] = count .. " " .. name .. " Order" .. (count > 1 and "s" or "")
+                        end
+                    end
+                    if #lines > 0 then
+                        label = label .. "\n" .. table.concat(lines, "\n")
+                    end
+                end
+            end
+            EllesmereUI.ShowWidgetTooltip(self, label, { anchor = "left" })
         end
     end)
     _customIndicators.crafting:SetScript("OnLeave", function(self)

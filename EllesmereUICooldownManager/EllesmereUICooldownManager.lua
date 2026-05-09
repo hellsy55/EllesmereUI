@@ -1835,8 +1835,13 @@ local function RestoreBlizzardBuffFrame()
             end
         end
         frame:SetAlpha(1)
-        frame:EnableMouse(true)
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        -- BuffBarCooldownViewer's default is EnableMouse(false); restoring
+        -- it with EnableMouse(true) creates an invisible click-catcher.
+        -- Other viewers need mouse for tooltip hover.
+        if frameName ~= "BuffBarCooldownViewer" then
+            frame:EnableMouse(true)
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        end
         fc.hidden = false
         fc.restoring = nil
     end
@@ -4122,7 +4127,8 @@ _CDMApplyVisibility = function()
                     for ii = 1, #icons do
                         local ic = icons[ii]
                         if ic then
-                            ic:EnableMouse(true)
+                            ic:EnableMouse(false)
+                            if ic.EnableMouseMotion then ic:EnableMouseMotion(true) end
                             local icfc = _ecmeFC[ic]
                             if not (icfc and icfc._cdStateHidden) then
                                 ic:SetAlpha(visAlpha)
@@ -5583,6 +5589,9 @@ end
 
 local _rosterRebuildPending = false
 local function ScheduleRosterRebuild()
+    -- Roster changes (promote, join, leave) don't change spells or bar
+    -- routing. Only party frame anchoring needs a refresh. A full
+    -- BuildAllCDMBars was causing massive single-frame CPU spikes.
     if EllesmereUI and EllesmereUI.InvalidateFrameCache then
         EllesmereUI.InvalidateFrameCache()
     end
@@ -5590,9 +5599,8 @@ local function ScheduleRosterRebuild()
         _rosterRebuildPending = true
         return
     end
-    C_Timer.After(0.2, function()
-        BuildAllCDMBars()
-    end)
+    -- Lightweight: just reanchor bars that depend on party frames
+    if ns.QueueReanchor then ns.QueueReanchor() end
 end
 
 eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
@@ -5694,12 +5702,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if event == "PLAYER_REGEN_ENABLED" and _keybindRebuildPending then
             UpdateCDMKeybinds()
         end
-        -- Flush deferred roster rebuild that was blocked during combat
+        -- Flush deferred roster reanchor that was blocked during combat
         if event == "PLAYER_REGEN_ENABLED" and _rosterRebuildPending then
             _rosterRebuildPending = false
-            C_Timer.After(0.2, function()
-                BuildAllCDMBars()
-            end)
+            if ns.QueueReanchor then ns.QueueReanchor() end
         end
         return
     end
