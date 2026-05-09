@@ -259,6 +259,9 @@ end
 local instanceFrame = CreateFrame("Frame")
 instanceFrame:RegisterEvent("CHALLENGE_MODE_START")
 instanceFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+instanceFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+instanceFrame:RegisterEvent("DAMAGE_METER_RESET")
+instanceFrame:RegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
 instanceFrame:SetScript("OnEvent", function(_, event)
     if event == "CHALLENGE_MODE_START" then
         if C_DamageMeter and C_DamageMeter.ResetAllCombatSessions then
@@ -286,6 +289,37 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                 w.Refresh()
             end
         end
+    elseif event == "DAMAGE_METER_COMBAT_SESSION_UPDATED" then
+        -- Blizzard created or updated a combat session (boss kill, combat end, etc.)
+        -- "Current" may now point to a different session. Debounce since this
+        -- fires per meter type.
+        if not instanceFrame._sessionPending then
+            instanceFrame._sessionPending = true
+            C_Timer.After(0.1, function()
+                instanceFrame._sessionPending = nil
+                for _, w in ipairs(_windows) do
+                    w._barCacheKey = nil
+                    w.Refresh()
+                end
+            end)
+        end
+    elseif event == "DAMAGE_METER_RESET" then
+        -- Blizzard cleared all session data (auto-reset CVar, manual reset, etc.)
+        _combatStartTime = 0; _combatEndTime = 0
+        for _, w in ipairs(_windows) do
+            w._barCacheKey = nil
+            w._barSources = nil
+            w.Refresh()
+        end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Refresh after zone-in to pick up visibility/data changes
+        for _, w in ipairs(_windows) do
+            w._barCacheKey = nil
+            w._barSources = nil
+        end
+        C_Timer.After(0.5, function()
+            for _, w in ipairs(_windows) do w.Refresh() end
+        end)
     end
 end)
 
