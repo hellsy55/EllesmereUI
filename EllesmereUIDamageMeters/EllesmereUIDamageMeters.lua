@@ -627,7 +627,7 @@ local function ResolveIcon(src, iconTex, barH)
     if style == "none" then iconTex:Hide(); return 0 end
 
     local classFile = src.classFilename
-    if not classFile or classFile == "" then iconTex:Hide(); return 0 end
+    if not classFile or (issecretvalue and issecretvalue(classFile)) or classFile == "" then iconTex:Hide(); return 0 end
 
     if style == "spec" then
         local specIcon = src.specIconID
@@ -700,8 +700,9 @@ end
 -------------------------------------------------------------------------------
 local TARGETS_MAX_ENEMIES = 20  -- cap enemy iterations for perf
 local function BuildPlayerTargets(playerName, session, sessionID, maxTargets)
-    if not playerName or playerName == "" then return nil end
+    if not playerName then return nil end
     if issecretvalue and issecretvalue(playerName) then return nil end
+    if playerName == "" then return nil end
     if not C_DamageMeter then return nil end
 
     -- Get EnemyDamageTaken session (list of enemies)
@@ -905,8 +906,8 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
                 local isFatal = (i == count and not isHeal)
                 if isHeal then b.fill:SetStatusBarColor(0.10, 0.50, 0.10)
                 else b.fill:SetStatusBarColor(0.60, 0.08, 0.08) end
-                local spellName = ev.spellName or ""
-                if spellName == "" then
+                local spellName = ev.spellName
+                if not spellName or (issecretvalue and issecretvalue(spellName)) or spellName == "" then
                     if isHeal then spellName = "Heal"
                     elseif evType == "SWING_DAMAGE" then spellName = "Melee"
                     else spellName = "Unknown" end
@@ -1669,7 +1670,7 @@ local function CreateDMWindow(winIdx)
                 for i = startIdx, #sessions do
                     local s = sessions[i]
                     local segName = s.name
-                    if not segName or segName == "" then segName = "Combat" end
+                    if not segName or (issecretvalue and issecretvalue(segName)) or segName == "" then segName = "Combat" end
                     local segTime = FormatTimer(s.durationSeconds or 0)
                     items[#items + 1] = {
                         text = segName, timerText = segTime, compact = true,
@@ -2833,8 +2834,8 @@ local function CreateDMWindow(winIdx)
                     SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
                     bar.label:SetTextColor(1, 1, 1); bar.amount:SetTextColor(1, 1, 1)
                     -- Label: time before death + spell name
-                    local spellName = ev.spellName or ""
-                    if spellName == "" then
+                    local spellName = ev.spellName
+                    if not spellName or (issecretvalue and issecretvalue(spellName)) or spellName == "" then
                         if isHeal then spellName = "Heal"
                         elseif evType == "SWING_DAMAGE" then spellName = "Melee"
                         else spellName = "Unknown" end
