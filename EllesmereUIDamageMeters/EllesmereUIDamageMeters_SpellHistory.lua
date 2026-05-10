@@ -8,51 +8,6 @@
 local _, ns = ...
 local EUI = EllesmereUI
 
--- Profiler: zero cost when off, /shprof to toggle
-local ProfBegin, ProfEnd
-do
-    local _profData, _profActive = {}, false
-    local dps = debugprofilestop
-    ProfBegin = function(label)
-        if not _profActive then return 0 end
-        return dps()
-    end
-    ProfEnd = function(label, t0)
-        if not _profActive then return end
-        local elapsed = dps() - t0
-        local d = _profData[label]
-        if not d then d = { n = 0, total = 0, peak = 0 }; _profData[label] = d end
-        d.n = d.n + 1
-        d.total = d.total + elapsed
-        if elapsed > d.peak then d.peak = elapsed end
-    end
-    SLASH_SHPROF1 = "/shprof"
-    SlashCmdList["SHPROF"] = function(msg)
-        if msg == "reset" then
-            wipe(_profData)
-            print("|cff00ccffSH Prof:|r data cleared")
-            return
-        end
-        _profActive = not _profActive
-        if _profActive then
-            wipe(_profData)
-            print("|cff00ccffSH Prof:|r ON -- type /shprof again to stop and print report")
-        else
-            local sorted = {}
-            for label, d in pairs(_profData) do
-                sorted[#sorted + 1] = { label = label, n = d.n, total = d.total, peak = d.peak }
-            end
-            table.sort(sorted, function(a, b) return a.peak > b.peak end)
-            print("|cff00ccffSH Prof Report:|r")
-            print(string.format("  %-30s %8s %10s %10s", "Label", "Calls", "Avg(ms)", "Peak(ms)"))
-            for _, e in ipairs(sorted) do
-                local avg = e.n > 0 and (e.total / e.n) or 0
-                print(string.format("  %-30s %8d %10.3f %10.3f", e.label, e.n, avg, e.peak))
-            end
-        end
-    end
-end
-
 -------------------------------------------------------------------------------
 --  Constants
 -------------------------------------------------------------------------------
@@ -188,6 +143,19 @@ local function OutcomeColor(status)
     return c and c.r or 0.298, c and c.g or 0.565, c and c.b or 0.494
 end
 
+-- Resolve spell override (base -> active override) for correct name/icon
+local function ResolveOverride(sid)
+    if C_Spell and C_Spell.GetOverrideSpell then
+        local ov = C_Spell.GetOverrideSpell(sid)
+        if ov and ov ~= 0 and ov ~= sid then return ov end
+    end
+    if FindSpellOverrideByID then
+        local ov = FindSpellOverrideByID(sid)
+        if ov and ov ~= 0 and ov ~= sid then return ov end
+    end
+    return sid
+end
+
 local function FormatCastTime(entry)
     if entry.isInstant then return "" end
     local status = entry.status
@@ -209,16 +177,24 @@ local function BuildRightText(entry)
     -- Outcome (Interrupted/Failed) replaces target; otherwise show target.
     -- Enemy names in M+ are secret values but FontStrings can display them.
     local target = entry.target
-    local hasTarget = target and ((issecretvalue and issecretvalue(target)) or target ~= "")
-    local rightPart = outcomeStr or (hasTarget and target) or nil
-    if castStr ~= "" and rightPart then
-        return castStr .. "  " .. rightPart
-    elseif castStr ~= "" then
-        return castStr
-    elseif rightPart then
-        return rightPart
+    local isSecret = target and issecretvalue and issecretvalue(target)
+    local hasTarget = target and (isSecret or target ~= "")
+    -- Strip realm suffix for non-secret names (secret values pass through to FontString as-is)
+    if hasTarget and not isSecret and not outcomeStr and Ambiguate then
+        target = Ambiguate(target, "short")
     end
-    return ""
+    local rightPart = outcomeStr or (hasTarget and target) or nil
+    local result
+    if castStr ~= "" and rightPart then
+        result = castStr .. "  " .. rightPart
+    elseif castStr ~= "" then
+        result = castStr
+    elseif rightPart then
+        result = rightPart
+    else
+        result = ""
+    end
+    return result
 end
 
 -------------------------------------------------------------------------------
@@ -232,11 +208,9 @@ local StartCastAnim
 --  History management
 -------------------------------------------------------------------------------
 local function RefreshViews()
-    local t0 = ProfBegin("RefreshViews")
     local sh = DB()
     if sh.iconEnabled  then BuildIconStrip() end
     if sh.barEnabled   then RefreshBarWindow() end
-    ProfEnd("RefreshViews", t0)
 end
 
 local function PushEntry(entry)
@@ -247,6 +221,7 @@ end
 
 local _pendingTargets = {}  -- castGUID -> target name (from UNIT_SPELLCAST_SENT)
 local _activeChannelSpell = nil  -- spellID of currently channeling spell (suppress tick SUCCEEDEDs)
+local _knownOverrides = {}  -- spellID -> true for override spells that pass IsSpellKnownOrOverridesKnown
 
 local function FinishPending(castGUID, status)
     _pendingTargets[castGUID] = nil
@@ -282,7 +257,6 @@ local eventFrame = CreateFrame("Frame")
 
 local function OnSpellEvent(_, event, unit, ...)
     if unit ~= "player" then return end
-    local t0 = ProfBegin("OnSpellEvent")
 
     -- UNIT_SPELLCAST_SENT has unique args: unit, target, castGUID, spellID
     if event == "UNIT_SPELLCAST_SENT" then
@@ -290,7 +264,6 @@ local function OnSpellEvent(_, event, unit, ...)
         if castGUID2 and target then
             _pendingTargets[castGUID2] = target
         end
-        ProfEnd("OnSpellEvent", t0)
         return
     end
 
@@ -298,7 +271,8 @@ local function OnSpellEvent(_, event, unit, ...)
 
     if event == "UNIT_SPELLCAST_START" then
         local name, _, _, startMS, endMS = UnitCastingInfo("player")
-        if not name or not spellID then ProfEnd("OnSpellEvent", t0); return end
+        if not name or not spellID then return end
+        spellID = ResolveOverride(spellID)
         local info = _spellInfoCache[spellID]
         if not info then info = C_Spell and C_Spell.GetSpellInfo(spellID); if info then _spellInfoCache[spellID] = info end end
         local entry = {
@@ -320,8 +294,8 @@ local function OnSpellEvent(_, event, unit, ...)
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         local name, _, _, startMS, endMS, _, _, chanSpellID = UnitChannelInfo("player")
-        local sid = chanSpellID or spellID
-        if not name then ProfEnd("OnSpellEvent", t0); return end
+        local sid = ResolveOverride(chanSpellID or spellID)
+        if not name then return end
         local info = sid and _spellInfoCache[sid]
         if not info and sid then info = C_Spell and C_Spell.GetSpellInfo(sid); if info then _spellInfoCache[sid] = info end end
         local entry = {
@@ -347,9 +321,21 @@ local function OnSpellEvent(_, event, unit, ...)
             FinishPending(castGUID, "success")
         else
             -- Skip channeled spell ticks (SUCCEEDED fires per tick during a channel)
-            if _activeChannelSpell and spellID == _activeChannelSpell then ProfEnd("OnSpellEvent", t0); return end
+            if _activeChannelSpell and spellID == _activeChannelSpell then return end
             -- Skip internal/system spells (LOGINEFFECT, DNT, etc.)
-            if not IsPlayerSpell(spellID) then ProfEnd("OnSpellEvent", t0); return end
+            -- IsPlayerSpell catches most, but override/transform spells (e.g.
+            -- Lightsmith armaments) fail it. Fall back to IsSpellKnownOrOverridesKnown
+            -- and cache the result (that API is flaky on repeated calls).
+            if not IsPlayerSpell(spellID) then
+                if not _knownOverrides[spellID] then
+                    if IsSpellKnownOrOverridesKnown and IsSpellKnownOrOverridesKnown(spellID) then
+                        _knownOverrides[spellID] = true
+                    else
+                        return
+                    end
+                end
+            end
+            spellID = ResolveOverride(spellID)
             -- Latency race: INTERRUPTED/FAILED can fire before SUCCEEDED at
             -- the end of a cast.  The pending entry is already consumed and
             -- sitting in _history with a wrong status.  Scan recent history
@@ -379,7 +365,7 @@ local function OnSpellEvent(_, event, unit, ...)
             if not dominated then
                 local info = spellID and _spellInfoCache[spellID]
                 if not info and spellID then info = C_Spell and C_Spell.GetSpellInfo(spellID); if info then _spellInfoCache[spellID] = info end end
-                if not info then ProfEnd("OnSpellEvent", t0); return end
+                if not info then return end
                 PushEntry({
                     spellID      = spellID,
                     spellName    = info.name or "?",
@@ -403,7 +389,7 @@ local function OnSpellEvent(_, event, unit, ...)
         if castGUID then FinishPending(castGUID, "interrupted") end
 
     elseif event == "UNIT_SPELLCAST_STOP" then
-        if not castGUID then ProfEnd("OnSpellEvent", t0); return end
+        if not castGUID then return end
         local entry = _pendingCasts[castGUID]
         if entry and entry.status == "casting" then
             local gid = castGUID
@@ -427,7 +413,6 @@ local function OnSpellEvent(_, event, unit, ...)
             end
         end
     end
-    ProfEnd("OnSpellEvent", t0)
 end
 
 local function RegisterEvents()
@@ -512,7 +497,6 @@ local function PlayIconAnim(ic, animType, dir, targetAlpha)
         local t = elapsed / ANIM_DUR
         if t >= 1 then t = 1 end
 
-        -- Ease out cubic: 1 - (1-t)^3
         local inv = 1 - t
         local ease = 1 - inv * inv * inv
 
@@ -599,11 +583,9 @@ local function GetPreviewIcons()
 end
 
 BuildIconStrip = function()
-    local t0 = ProfBegin("BuildIconStrip")
     local sh = DB()
     if not sh.iconEnabled or ShouldHide(sh.iconHideInDungeon, sh.iconHideInRaid, sh.iconHideOutOfInstance) then
         if _iconStrip then _iconStrip:Hide() end
-        ProfEnd("BuildIconStrip", t0)
         return
     end
 
@@ -660,7 +642,7 @@ BuildIconStrip = function()
     local count = showPreview and maxIcons or histCount
 
     -- Nothing to show: hide the strip entirely
-    if count == 0 then _iconStrip:Hide(); ProfEnd("BuildIconStrip", t0); return end
+    if count == 0 then _iconStrip:Hide(); return end
 
     -- Position and size only on layout change (checked after count is known)
     local iconAlphaCheck = sh.iconOpacity or 1
@@ -714,20 +696,34 @@ BuildIconStrip = function()
 
             if i <= histCount then
                 local entry = _history[i]
-                if entry.icon then ic.tex:SetTexture(entry.icon) end
-                if entry.status == "failed" or entry.status == "interrupted" then
-                    ic.tex:SetVertexColor(CLR_STOPPED[1], CLR_STOPPED[2], CLR_STOPPED[3], 1)
-                else
-                    ic.tex:SetVertexColor(1, 1, 1, 1)
+                -- Only update texture/color when entry changes
+                if ic._cachedEntry ~= entry then
+                    ic._cachedEntry = entry
+                    if entry.icon then ic.tex:SetTexture(entry.icon) end
+                    ic._cachedStatus = nil
                 end
-                ic.tex:SetAlpha(1)
+                local st = entry.status
+                if ic._cachedStatus ~= st then
+                    ic._cachedStatus = st
+                    if st == "failed" or st == "interrupted" then
+                        ic.tex:SetVertexColor(CLR_STOPPED[1], CLR_STOPPED[2], CLR_STOPPED[3], 1)
+                    else
+                        ic.tex:SetVertexColor(1, 1, 1, 1)
+                    end
+                    ic.tex:SetAlpha(1)
+                end
             else
-                local previews = GetPreviewIcons()
-                local pIdx = ((i - 1) % #previews) + 1
-                ic.tex:SetTexture(previews[pIdx])
-                ic.tex:SetVertexColor(1, 1, 1, 1)
-                ic.tex:SetAlpha(0.75)
+                if not ic._isPreview then
+                    ic._isPreview = true
+                    ic._cachedEntry = nil
+                    local previews = GetPreviewIcons()
+                    local pIdx = ((i - 1) % #previews) + 1
+                    ic.tex:SetTexture(previews[pIdx])
+                    ic.tex:SetVertexColor(1, 1, 1, 1)
+                    ic.tex:SetAlpha(0.75)
+                end
             end
+            if i <= histCount then ic._isPreview = nil end
             if not layoutChanged then ic.frame:Show() end
 
             if i == 1 and histCount > 0 then
@@ -752,7 +748,6 @@ BuildIconStrip = function()
     end
 
     _iconStrip:Show()
-    ProfEnd("BuildIconStrip", t0)
 end
 
 -------------------------------------------------------------------------------
@@ -762,6 +757,7 @@ local _barWin
 local _barPool = {}
 local _barScroll = 0
 local _barFontCache = ""  -- tracks font changes to avoid per-bar SetFont calls
+local _barLayoutCache = "" -- tracks layout changes (barH, spacing, texture)
 local _lastBarVisible = 0 -- tracks visible bar count for minimal loop
 
 local function MakeHistoryBar(parent)
@@ -1018,7 +1014,6 @@ end
 
 RefreshBarWindow = function()
     if not _barWin or not _barWin:IsShown() then return end
-    local t0 = ProfBegin("RefreshBarWindow")
 
     local dmCfg = ns.EDM.DB()
     local sh = DB()
@@ -1056,21 +1051,55 @@ RefreshBarWindow = function()
     local total = min(#_history, sh.maxBars or 5)
     local loopEnd = max(visSlots, _lastBarVisible)
 
+    -- Layout key: only rebuild positions/sizes when settings change
+    local layoutKey = barH .. "|" .. barSp .. "|" .. texPath
+    local layoutChanged = (layoutKey ~= _barLayoutCache)
+    if layoutChanged then _barLayoutCache = layoutKey end
+
     for i = 1, loopEnd do
         local bar = _barPool[i]
         if not bar then break end
         local idx = _barScroll + i
         if i <= visSlots and idx <= total then
             local entry = _history[idx]
-            local y = -(i - 1) * stride
 
-            bar.row:ClearAllPoints()
-            bar.row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
-            bar.row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, y)
-            bar.row:SetHeight(barH)
+            -- Layout: only on settings change or slot reuse
+            if layoutChanged or bar._cachedSlot ~= i then
+                bar._cachedSlot = i
+                local y = -(i - 1) * stride
+                bar.row:ClearAllPoints()
+                bar.row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
+                bar.row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, y)
+                bar.row:SetHeight(barH)
+                bar.fill:SetStatusBarTexture(texPath)
+                bar.icon:SetSize(barH, barH)
+                bar._cachedEntry = nil -- force content rebuild
+            end
 
-            bar.fill:SetStatusBarTexture(texPath)
+            -- Content: only when entry changes
+            if bar._cachedEntry ~= entry then
+                bar._cachedEntry = entry
+                if entry.icon then bar.icon:SetTexture(entry.icon); bar.icon:Show()
+                else bar.icon:Hide() end
+                bar.label:SetText(entry.spellName or "?")
+                bar._cachedStatus = nil -- force color/fill rebuild
+                bar._cachedFillDone = nil -- force fill value reset
+            end
+
+            -- Color + fill: update when status changes or on active casts
             local status = entry.status
+            if bar._cachedStatus ~= status then
+                bar._cachedStatus = status
+                local cr, cg, cb
+                if status == "failed" or status == "interrupted" then
+                    cr, cg, cb = stR, stG, stB
+                else
+                    cr, cg, cb = nR, nG, nB
+                end
+                bar.fill:SetStatusBarColor(cr, cg, cb, barAlpha)
+            end
+
+            -- Fill value: always set for active casts, once for finished
             if entry.fillProgress then
                 bar.fill:SetValue(entry.fillProgress)
             elseif status == "casting" or status == "channeling" then
@@ -1084,34 +1113,29 @@ RefreshBarWindow = function()
                 else
                     bar.fill:SetValue(1)
                 end
-            else
+            elseif not bar._cachedFillDone then
+                bar._cachedFillDone = true
                 bar.fill:SetValue(1)
             end
-            local cr, cg, cb
-            if status == "failed" or status == "interrupted" then
-                cr, cg, cb = stR, stG, stB
-            else
-                cr, cg, cb = nR, nG, nB
+
+            -- Text color: only on settings change
+            if layoutChanged or not bar._cachedTxColor then
+                bar._cachedTxColor = true
+                bar.label:SetTextColor(txR, txG, txB, 1)
+                bar.rightText:SetTextColor(txR, txG, txB, 1)
             end
-            bar.fill:SetStatusBarColor(cr, cg, cb, barAlpha)
-
-            bar.icon:SetSize(barH, barH)
-            if entry.icon then bar.icon:SetTexture(entry.icon); bar.icon:Show()
-            else bar.icon:Hide() end
-
-            bar.label:SetText(entry.spellName or "?")
-            bar.label:SetTextColor(txR, txG, txB, 1)
 
             bar.rightText:SetText(BuildRightText(entry))
-            bar.rightText:SetTextColor(txR, txG, txB, 1)
-
             bar.row:Show()
         else
-            bar.row:Hide()
+            if bar then
+                bar.row:Hide()
+                bar._cachedSlot = nil; bar._cachedEntry = nil; bar._cachedStatus = nil
+                bar._cachedFillDone = nil; bar._cachedTxColor = nil
+            end
         end
     end
     _lastBarVisible = visSlots
-    ProfEnd("RefreshBarWindow", t0)
 end
 
 -------------------------------------------------------------------------------
@@ -1126,7 +1150,6 @@ _castAnimFrame:Hide()
 _castAnimFrame:SetScript("OnUpdate", function(self)
     if not next(_pendingCasts) then self:Hide(); return end
     if not _barWin or not _barWin:IsShown() then return end
-    local t0 = ProfBegin("CastAnim.OnUpdate")
     local now = GetTime()
     local visSlots = _barWin._visSlots or 5
     local scroll = _barScroll or 0
@@ -1149,7 +1172,6 @@ _castAnimFrame:SetScript("OnUpdate", function(self)
             end
         end
     end
-    ProfEnd("CastAnim.OnUpdate", t0)
 end)
 
 StartCastAnim = function() _castAnimFrame:Show() end
