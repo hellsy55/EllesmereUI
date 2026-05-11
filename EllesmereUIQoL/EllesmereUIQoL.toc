@@ -13,8 +13,10 @@
 EllesmereUIQoL.lua
 EllesmereUIQoL_Cursor.lua
 EllesmereUIQoL_BattleRes.lua
+EllesmereUIQoL_AutoLogging.lua
 
 # Options
 EUI_QoL_Options.lua
 EUI_QoL_Cursor_Options.lua
 EUI_QoL_BattleRes_Options.lua
+EUI_QoL_AutoLogging_Options.lua
