@@ -297,11 +297,11 @@ function _AC.ensureNames()
     end
 end
 
-local function IsUnderDuration(aura)
-    if InMythicZeroDungeon() and db and db.profile.display.showUnderDurationDungeon > 0 and aura['duration'] >= db.profile.display.showUnderDurationDungeon*60 and aura['expirationTime'] - GetTime() < db.profile.display.showUnderDurationDungeon*60 then
+local function IsUnderDuration(duration, expirationTime)
+    if InMythicZeroDungeon() and db and db.profile.display.showUnderDurationDungeon > 0 and duration >= db.profile.display.showUnderDurationDungeon*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationDungeon*60 then
         return true
     end
-    if IsInRaid() and db and db.profile.display.showUnderDurationRaid > 0 and aura['duration'] >= db.profile.display.showUnderDurationRaid*60 and aura['expirationTime'] - GetTime() < db.profile.display.showUnderDurationRaid*60 then
+    if IsInRaid() and db and db.profile.display.showUnderDurationRaid > 0 and duration >= db.profile.display.showUnderDurationRaid*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationRaid*60 then
         return true
     end
     
@@ -319,7 +319,7 @@ local function PlayerHasAuraByID(spellIDs)
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok then
                 if result ~= nil then 
-                    if IsUnderDuration(result) then
+                    if IsUnderDuration(result.duration, result.expirationTime) then
                         return false
                     end
                     return true 
@@ -333,7 +333,7 @@ local function PlayerHasAuraByID(spellIDs)
             -- secret values, but non-nil means the aura exists)
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok and result ~= nil then
-                if IsUnderDuration(result) then
+                if IsUnderDuration(result.duration, result.expirationTime) then
                     return false
                 end
                 return true
@@ -965,7 +965,12 @@ local function PlayerHasWellFed()
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local ic = aura.icon
-        if ic and not isSecret(ic) and ic == 136000 then return true end
+        if ic and not isSecret(ic) and ic == 136000 then 
+            if IsUnderDuration(aura.duration, aura.expirationTime) then
+                return false
+            end
+            return true
+        end
     end
     return false
 end
@@ -977,7 +982,12 @@ local function PlayerHasFlaskBuff()
     -- Direct ID lookup for known flask buff IDs (zero allocation)
     for id in pairs(FLASK_BUFF_ID_SET) do
         local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-        if ok and result ~= nil then return true end
+        if ok and result ~= nil then 
+            if IsUnderDuration(result.duration, result.expirationTime) then
+                return false
+            end
+            return true
+        end
     end
     -- Name-based fallback for flasks not in our ID set (lazy scan)
     if _AC.valid then
