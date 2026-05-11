@@ -30,6 +30,7 @@ local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 -- cast or combat end. OOC falls back to target debuff check.
 local _huntersMarkNeeded = false
 
+local db  -- set in EABR:OnInitialize()
 -- Flask state snapshotted before PvP restriction activates (aura API locked in PvP).
 
 
@@ -137,10 +138,16 @@ local function InMythicPlusKey()
     return C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
 end
 
+local function InMythicZeroDungeon()
+    if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
+    return false
+end
+
+
 -- Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
 local function InMythicZeroDungeonOrMythicRaid()
-    if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
-    if _cachedIType == "raid" and _cachedDiffID == 16 then return true end
+    if InMythicZeroDungeon() then return true end
+    if IsInRaid() and _cachedDiffID == 16 then return true end
     return false
 end
 
@@ -290,6 +297,17 @@ function _AC.ensureNames()
     end
 end
 
+local function IsUnderDuration(aura)
+    if InMythicZeroDungeon() and db and db.profile.display.showUnderDurationDungeon > 0 and aura['duration'] >= db.profile.display.showUnderDurationDungeon*60 and aura['expirationTime'] - GetTime() < db.profile.display.showUnderDurationDungeon*60 then
+        return true
+    end
+    if IsInRaid() and db and db.profile.display.showUnderDurationRaid > 0 and aura['duration'] >= db.profile.display.showUnderDurationRaid*60 and aura['expirationTime'] - GetTime() < db.profile.display.showUnderDurationRaid*60 then
+        return true
+    end
+    
+    return false 
+end
+
 local function PlayerHasAuraByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     local inCombat = InCombat()
@@ -300,7 +318,12 @@ local function PlayerHasAuraByID(spellIDs)
         if NON_SECRET_SPELL_IDS[id] then
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok then
-                if result ~= nil then return true end
+                if result ~= nil then 
+                    if IsUnderDuration(result) then
+                        return false
+                    end
+                    return true 
+                end
                 if inCombat and _preCombatAuraCache[id] then return true end
             else
                 if inCombat and _preCombatAuraCache[id] then return true end
@@ -309,7 +332,12 @@ local function PlayerHasAuraByID(spellIDs)
             -- Non-whitelisted OOC: use GetPlayerAuraBySpellID anyway (may return
             -- secret values, but non-nil means the aura exists)
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            if ok and result ~= nil then return true end
+            if ok and result ~= nil then
+                if IsUnderDuration(result) then
+                    return false
+                end
+                return true
+            end
         else
             if _preCombatAuraCache[id] then return true end
         end
@@ -1121,6 +1149,8 @@ local defaults = {
             opacity = 1.0,
             frameStrata = "MEDIUM",
             cursorAttach = false,
+            showUnderDurationDungeon = 0,
+            showUnderDurationRaid = 0,
         },
         raidBuffs = {
             showNonInstanced = false,
@@ -1171,7 +1201,6 @@ local defaults = {
     },
 }
 
-local db  -- set in EABR:OnInitialize()
 local euiPanelOpen = false
 
 -------------------------------------------------------------------------------
