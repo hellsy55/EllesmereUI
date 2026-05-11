@@ -1870,14 +1870,24 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             -- both weapon slots. GetWeaponEnchantInfo returns the specific
             -- enchant ID on each hand (4th and 8th return values).
             if playerClass == "SHAMAN" then
-                local hasMH, _, _, mhEnchID, hasOH, _, _, ohEnchID = GetWeaponEnchantInfo()
+                local hasMH, mhExpire, _, mhEnchID, hasOH, ohExpire, _, ohEnchID = GetWeaponEnchantInfo()
                 for _, imbue in ipairs(SHAMAN_IMBUES) do
                     if co.enabled[imbue.key] and Known(imbue.castSpell) then
                         local found = false
                         if imbue.wepEnchID then
                             for _, eid in ipairs(imbue.wepEnchID) do
                                 if eid > 0 and ((hasMH and mhEnchID == eid) or (hasOH and ohEnchID == eid)) then
-                                    found = true; break
+                                    if not mhExpire then
+                                        mhExpire = math.huge -- if expiration is missing, assume it's active (pre-9.2 client versions)
+                                    end
+                                    if not ohExpire then
+                                        ohExpire = math.huge
+                                    end
+                                    if IsUnderDuration(3600, math.min(mhExpire, ohExpire)/1000 + GetTime()) then -- the expire duration is different than this function assumes given in ms remaining. Convert to the expected value by dividing by 1000 adding time 
+                                        found = false
+                                    else
+                                        found = true
+                                    end
                                 end
                             end
                         end
