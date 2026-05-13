@@ -622,6 +622,10 @@ initFrame:SetScript("OnEvent", function(self)
                     { type = "toggle", label = "Show in Center of Screen",
                       get = function() return Cfg("breakdownAnchorPoint") == "center" end,
                       set = function(v) Set("breakdownAnchorPoint", v and "center" or "row") end },
+                    { type = "toggle", label = "Show All Spells",
+                      tooltip = "Disable to only show top 8 entries.",
+                      get = function() return Cfg("showAllBreakdownSpells") ~= false end,
+                      set = function(v) Set("showAllBreakdownSpells", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)

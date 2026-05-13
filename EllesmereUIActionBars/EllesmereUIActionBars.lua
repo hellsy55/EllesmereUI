@@ -9530,20 +9530,19 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         blizzFrame.IsLayoutFrame = nil
 
         -- Reparent to UIParent (independent of micro menu visibility)
-        if not InCombatLockdown() then
-            blizzFrame:SetParent(UIParent)
-            -- Force MicroMenuContainer to recalculate its layout now that
-            -- the eye is removed. Without this, the container keeps its
-            -- stale width (includes eye) until Edit Mode triggers Layout(),
-            -- causing a visible shift.
-            if MicroMenuContainer and MicroMenuContainer.Layout then
-                C_Timer_After(0, function()
-                    if MicroMenuContainer and MicroMenuContainer.Layout then
-                        MicroMenuContainer:Layout()
-                    end
-                end)
+        local function EnsureQueueParent()
+            if blizzFrame:GetParent() ~= UIParent and not InCombatLockdown() then
+                blizzFrame:SetParent(UIParent)
+                if MicroMenuContainer and MicroMenuContainer.Layout then
+                    C_Timer_After(0, function()
+                        if MicroMenuContainer and MicroMenuContainer.Layout then
+                            MicroMenuContainer:Layout()
+                        end
+                    end)
+                end
             end
         end
+        EnsureQueueParent()
 
         local function SyncQueueHolderSize()
             local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
@@ -9561,19 +9560,37 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         SyncQueueHolderSize()
         blizzFrame:HookScript("OnSizeChanged", SyncQueueHolderSize)
 
-        -- Prevent Blizzard from snapping the eye back
+        -- Prevent Blizzard from snapping the eye back or reparenting away
         local _upGuard = false
         if type(blizzFrame.UpdatePosition) == "function" then
             hooksecurefunc(blizzFrame, "UpdatePosition", function()
                 if _upGuard then return end
                 _upGuard = true
                 RepositionQueue()
-                if blizzFrame:GetParent() ~= UIParent and not InCombatLockdown() then
-                    blizzFrame:SetParent(UIParent)
-                end
+                EnsureQueueParent()
                 _upGuard = false
             end)
         end
+
+        -- Recover from external Hide() calls (other addons, stale state).
+        -- When Blizzard updates the queue display, re-check parent and
+        -- force Show() if the player is actually in a queue.
+        if type(blizzFrame.UpdateDisplay) == "function" then
+            hooksecurefunc(blizzFrame, "UpdateDisplay", function()
+                EnsureQueueParent()
+            end)
+        end
+
+        -- Safety net: on LFG_UPDATE, re-parent and let Blizzard show the eye
+        local queueWatcher = CreateFrame("Frame")
+        queueWatcher:RegisterEvent("LFG_UPDATE")
+        queueWatcher:RegisterEvent("LFG_QUEUE_STATUS_UPDATE")
+        queueWatcher:RegisterEvent("LFG_ROLE_CHECK_UPDATE")
+        queueWatcher:RegisterEvent("LFG_PROPOSAL_UPDATE")
+        queueWatcher:SetScript("OnEvent", function()
+            EnsureQueueParent()
+            RepositionQueue()
+        end)
 
         return holder
     end
@@ -9800,7 +9817,7 @@ local function SetupExtraBars()
                 local s = EAB.db.profile.bars[info.key]
                 if s then
                     local holder = extraBarHolders[info.key]
-                    if s.alwaysHidden then
+                    if s.alwaysHidden and not info.blizzOwnedVisibility then
                         blizzFrame:Hide()
                         if holder then holder:Hide() end
                     end

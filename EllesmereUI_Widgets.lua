@@ -1427,7 +1427,11 @@ ShowWidgetTooltip = function(label, text, opts)
     end
     tt.text:SetText(text)
     tt:ClearAllPoints()
-    if opts and opts.anchor == "below" then
+    if opts and opts.anchor == "cursor" then
+        local scale = tt:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        tt:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", cx / scale, cy / scale + 4)
+    elseif opts and opts.anchor == "below" then
         tt:SetPoint("TOP", label, "BOTTOM", 0, -4)
     elseif opts and opts.anchor == "left" then
         tt:SetPoint("RIGHT", label, "LEFT", -4, 0)

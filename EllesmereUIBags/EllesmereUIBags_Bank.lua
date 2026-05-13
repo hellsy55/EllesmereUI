@@ -34,6 +34,14 @@ end
 
 local BANK_FONT = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
 local function SetBankFont(fs, size) fs:SetFont(BANK_FONT, size, "") end
+local GetUpgradeTrack = EUI.GetUpgradeTrack
+local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon
+local ITEM_CLASS_ARMOR  = Enum.ItemClass.Armor
+local function IsGearItem(itemLink)
+    if not itemLink then return false end
+    local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
+    return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
+end
 local function GetAccentRGB()
     if EUI.GetAccentColor then return EUI.GetAccentColor() end
     return 0.05, 0.82, 0.62
@@ -956,13 +964,24 @@ local function GetOrCreateBankSlot(idx)
     textOverlay:SetFrameLevel((btn.Cooldown and btn.Cooldown:GetFrameLevel() or btn:GetFrameLevel()) + 2)
     btn._textOverlay = textOverlay
 
+    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(BANK_FONT, 11, "OUTLINE")
+        countFS:SetFont(BANK_FONT, countSize, "OUTLINE")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
+
+    -- Item level text (top-left, gear only)
+    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    if not btn.ItemLevelText then
+        btn.ItemLevelText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
+        btn.ItemLevelText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+        btn.ItemLevelText:SetTextColor(1, 1, 1, 1)
+    end
+    btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE")
+    btn.ItemLevelText:SetText("")
 
     -- Empty bg
     btn._emptyBg = btn:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -1014,6 +1033,17 @@ local function DiscoverBankTabs()
     end
     EUI_Bank._allTabs = _allTabs
 end
+
+-- Fast font size update for bank slots (mirrors bags RefreshTextSizes)
+local function RefreshBankTextSizes()
+    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
+    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    for _, btn in pairs(_bankSlots) do
+        if btn.Count then btn.Count:SetFont(BANK_FONT, countSize, "OUTLINE") end
+        if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE") end
+    end
+end
+EUI_Bank.RefreshTextSizes = RefreshBankTextSizes
 
 local function CountUsedSlots(bagID, numSlots)
     local used = 0
@@ -1283,6 +1313,7 @@ function EUI_Bank:RefreshBank()
             btn:EnableMouse(true)
             SetInsetBorderColor(btn, 0, 0, 0, 0.3)
             if btn.Cooldown then btn.Cooldown:Clear() end
+            if btn.ItemLevelText then btn.ItemLevelText:SetText("") end
             if btn.IconBorder then btn.IconBorder:Hide() end
             if btn.NormalTexture then btn.NormalTexture:SetAlpha(0) end
         else
@@ -1316,6 +1347,33 @@ function EUI_Bank:RefreshBank()
             local c = ITEM_QUALITY_COLORS[quality]
             if c then SetInsetBorderColor(btn, c.r, c.g, c.b, 1)
             else SetInsetBorderColor(btn, 0.25, 0.25, 0.25, 1) end
+            -- Item level (gear only)
+            if btn.ItemLevelText then
+                if itemLink and IsGearItem(itemLink) then
+                    local showIlvl = not EllesmereUIDB or EllesmereUIDB.showItemlevelInBags ~= false
+                    if showIlvl then
+                        local _, _, _, ilvl = GetItemInfo(itemLink)
+                        btn.ItemLevelText:SetText(ilvl or "")
+                        local r, g, b
+                        if GetUpgradeTrack then
+                            local rankText, trackColor = GetUpgradeTrack(itemLink)
+                            if EllesmereUIDB and EllesmereUIDB.itemlevelUseCustomColor and EllesmereUIDB.itemlevelCustomColor then
+                                r, g, b = EllesmereUIDB.itemlevelCustomColor.r, EllesmereUIDB.itemlevelCustomColor.g, EllesmereUIDB.itemlevelCustomColor.b
+                            elseif rankText and rankText ~= "" and trackColor then
+                                r, g, b = trackColor.r, trackColor.g, trackColor.b
+                            end
+                        end
+                        if not r then
+                            r, g, b = GetItemQualityColor(quality)
+                        end
+                        btn.ItemLevelText:SetTextColor(r, g, b, 1)
+                    else
+                        btn.ItemLevelText:SetText("")
+                    end
+                else
+                    btn.ItemLevelText:SetText("")
+                end
+            end
             if btn.Cooldown then
                 local cdS, cdD, cdE = C_Container.GetContainerItemCooldown(bagID, slot)
                 if cdE and cdE ~= 0 and cdS > 0 and cdD > 0 then

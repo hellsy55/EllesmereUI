@@ -833,10 +833,14 @@ end
 -------------------------------------------------------------------------------
 --  Hover tooltip (shared across all windows)
 -------------------------------------------------------------------------------
-local TT_MAX = 8
+local TT_DEFAULT_MAX = 8
 local TT_BAR_H = 18
 local TT_BAR_SP = 1
 local TT_WIDTH = 275
+local function TT_MAX()
+    local cfg = DB and DB()
+    return (cfg and cfg.showAllBreakdownSpells == false) and TT_DEFAULT_MAX or 50
+end
 
 local _ttFrame, _ttBars, _ttVisible = nil, {}, false
 local _activeRow = nil
@@ -881,28 +885,34 @@ local function EnsureTooltipFrame()
     _ttFrame:SetScript("OnShow", function() _ttVisible = true end)
     _ttFrame:SetScript("OnHide", function() _ttVisible = false end)
 
-    for i = 1, TT_MAX do
-        local b = {}
-        b.row = CreateFrame("Frame", nil, _ttFrame)
-        b.row:SetHeight(TT_BAR_H)
-        b.row:SetPoint("TOPLEFT", _ttFrame, "TOPLEFT", 0, -(TT_HDR_H + (i-1) * (TT_BAR_H + TT_BAR_SP)))
-        b.row:SetPoint("TOPRIGHT", _ttFrame, "TOPRIGHT", 0, -(TT_HDR_H + (i-1) * (TT_BAR_H + TT_BAR_SP)))
-        b.fill = CreateFrame("StatusBar", nil, b.row)
-        b.fill:SetAllPoints(); b.fill:SetMinMaxValues(0, 1); b.fill:SetValue(0); b.fill:SetStatusBarTexture(BAR_TEX)
-        b.spellIcon = b.row:CreateTexture(nil, "OVERLAY")
-        b.spellIcon:SetSize(TT_BAR_H, TT_BAR_H)
-        b.spellIcon:SetPoint("LEFT", b.row, "LEFT", 0, 0)
-        b.spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        b.spellIcon:Hide()
-        local tf = CreateFrame("Frame", nil, b.fill)
-        tf:SetAllPoints(b.fill); tf:SetFrameLevel(b.fill:GetFrameLevel() + 2)
-        b.label = tf:CreateFontString(nil, "OVERLAY"); b.label:SetPoint("LEFT", tf, "LEFT", 2, 0); b.label:SetJustifyH("LEFT"); SetDMFont(b.label, 10)
-        b.amount = tf:CreateFontString(nil, "OVERLAY"); b.amount:SetPoint("RIGHT", tf, "RIGHT", -2, 0); b.amount:SetJustifyH("RIGHT"); SetDMFont(b.amount, 10)
-        b.label:SetPoint("RIGHT", b.amount, "LEFT", -3, 0)
-        b.row:Hide()
-        _ttBars[i] = b
-    end
     _ttFrame:Hide()
+end
+
+-- Lazy bar pool: creates bars on demand up to the requested index
+local function EnsureTTBar(i)
+    if _ttBars[i] then return _ttBars[i] end
+    EnsureTooltipFrame()
+    local ttSp = PhysicalPixels(1)
+    local b = {}
+    b.row = CreateFrame("Frame", nil, _ttFrame)
+    b.row:SetHeight(TT_BAR_H)
+    b.row:SetPoint("TOPLEFT", _ttFrame, "TOPLEFT", 0, -(TT_HDR_H + (i-1) * (TT_BAR_H + ttSp)))
+    b.row:SetPoint("TOPRIGHT", _ttFrame, "TOPRIGHT", 0, -(TT_HDR_H + (i-1) * (TT_BAR_H + ttSp)))
+    b.fill = CreateFrame("StatusBar", nil, b.row)
+    b.fill:SetAllPoints(); b.fill:SetMinMaxValues(0, 1); b.fill:SetValue(0); b.fill:SetStatusBarTexture(BAR_TEX)
+    b.spellIcon = b.row:CreateTexture(nil, "OVERLAY")
+    b.spellIcon:SetSize(TT_BAR_H, TT_BAR_H)
+    b.spellIcon:SetPoint("LEFT", b.row, "LEFT", 0, 0)
+    b.spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    b.spellIcon:Hide()
+    local tf = CreateFrame("Frame", nil, b.fill)
+    tf:SetAllPoints(b.fill); tf:SetFrameLevel(b.fill:GetFrameLevel() + 2)
+    b.label = tf:CreateFontString(nil, "OVERLAY"); b.label:SetPoint("LEFT", tf, "LEFT", 2, 0); b.label:SetJustifyH("LEFT"); SetDMFont(b.label, 10)
+    b.amount = tf:CreateFontString(nil, "OVERLAY"); b.amount:SetPoint("RIGHT", tf, "RIGHT", -2, 0); b.amount:SetJustifyH("RIGHT"); SetDMFont(b.amount, 10)
+    b.label:SetPoint("RIGHT", b.amount, "LEFT", -3, 0)
+    b.row:Hide()
+    _ttBars[i] = b
+    return b
 end
 
 local _ttLastSp = -1
@@ -925,7 +935,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     local ttStride = TT_BAR_H + ttSp
     if ttSp ~= _ttLastSp then
         _ttLastSp = ttSp
-        for ti = 1, TT_MAX do
+        for ti = 1, #_ttBars do
             local b = _ttBars[ti]
             if b then
                 b.row:ClearAllPoints()
@@ -967,10 +977,11 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         local texPath, texKey = GetBreakdownBarTexturePath()
         local deathTime = reversed[#reversed] and reversed[#reversed].timestamp or GetTime()
         local total = #reversed
-        local count = math.min(TT_MAX, total)
+        local ttMax = TT_MAX()
+        local count = math.min(ttMax, total)
         local startIdx = total - count  -- skip oldest events, show last N
-        for i = 1, TT_MAX do
-            local b = _ttBars[i]
+        for i = 1, math.max(ttMax, #_ttBars) do
+            local b = EnsureTTBar(i)
             if i <= count then
                 local ev = reversed[startIdx + i]
                 local spID = ev.spellId
@@ -1031,9 +1042,10 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", "Damage Taken")
         local texPath, texKey = GetBreakdownBarTexturePath()
         local maxAmt = players[1].total
-        local count = math.min(TT_MAX, #players)
-        for i = 1, TT_MAX do
-            local b = _ttBars[i]
+        local ttMax = TT_MAX()
+        local count = math.min(ttMax, #players)
+        for i = 1, math.max(ttMax, #_ttBars) do
+            local b = EnsureTTBar(i)
             if i <= count then
                 local p = players[i]
                 -- Use spec icon if available, else class atlas
@@ -1094,9 +1106,10 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     local canPercent = type(maxAmt) == "number" and (not issecretvalue or not issecretvalue(maxAmt))
     if canPercent then for _, e in ipairs(_ttSorted) do totalDmg = totalDmg + e.amount end end
     local texPath, texKey = GetBreakdownBarTexturePath()
-    local count = math.min(TT_MAX, #_ttSorted)
-    for i = 1, TT_MAX do
-        local b = _ttBars[i]
+    local ttMax = TT_MAX()
+    local count = math.min(ttMax, #_ttSorted)
+    for i = 1, math.max(ttMax, #_ttBars) do
+        local b = EnsureTTBar(i)
         if i <= count then
             local entry = _ttSorted[i]
             local spell = entry.spell
@@ -1583,7 +1596,7 @@ local function CreateDMWindow(winIdx)
                     if cfg2.hdrTextUseAccent ~= false then tR, tG, tB = GetAccentRGB()
                     else local tc = cfg2.hdrTextColor; tR = tc and tc.r or 1; tG = tc and tc.g or 1; tB = tc and tc.b or 1 end
                     _ttFrame._hdrText:SetTextColor(tR, tG, tB, 1)
-                    for bi = 1, TT_MAX do _ttBars[bi].row:Hide() end
+                    for bi = 1, #_ttBars do if _ttBars[bi] then _ttBars[bi].row:Hide() end end
                     _ttFrame._combatMsg:SetText("No death recap available")
                     _ttFrame._combatMsg:Show()
                     _ttFrame:SetSize(TT_WIDTH, TT_HDR_H + 40)
@@ -1611,7 +1624,7 @@ local function CreateDMWindow(winIdx)
                 else local tc = cfg2.hdrTextColor; tR = tc and tc.r or 1; tG = tc and tc.g or 1; tB = tc and tc.b or 1 end
                 _ttFrame._hdrText:SetTextColor(tR, tG, tB, 1)
                 -- Hide bars, show combat message
-                for bi = 1, TT_MAX do _ttBars[bi].row:Hide() end
+                for bi = 1, #_ttBars do if _ttBars[bi] then _ttBars[bi].row:Hide() end end
                 _ttFrame._combatMsg:SetText("Detailed information is\nsecret while in combat")
                 _ttFrame._combatMsg:Show()
                 _ttFrame:SetSize(TT_WIDTH, TT_HDR_H + 40)

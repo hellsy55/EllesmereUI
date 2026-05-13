@@ -350,6 +350,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       EllesmereUIDB.bagCountFontSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                      local bank = _G.EUI_BankFrame
+                      if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
                   end },
                 { type="slider", text="Item Level Text Size", min=8, max=16, step=1,
                   tooltip="Font size for item level numbers on equipment items.",
@@ -357,6 +359,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       EllesmereUIDB.itemlevelFontSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                      local bank = _G.EUI_BankFrame
+                      if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
                   end }
             ); y = y - h
 

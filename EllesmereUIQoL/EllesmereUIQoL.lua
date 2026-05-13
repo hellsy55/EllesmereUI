@@ -718,29 +718,41 @@ qolFrame:SetScript("OnEvent", function(self)
     do
         local hookedMgr = false
 
+        local _partyHiddenParent
+        local _partyOrigParent
+
         local function ApplyHideBlizzardPartyFrame()
             local shouldHide = EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
             local mgr = CompactRaidFrameManager or _G["CompactRaidFrameManager"]
             if not mgr then return end
 
             if shouldHide then
-                if not InCombatLockdown() then mgr:Hide() end
+                if not _partyHiddenParent then
+                    _partyHiddenParent = CreateFrame("Frame")
+                    _partyHiddenParent:Hide()
+                end
+                if not _partyOrigParent then
+                    _partyOrigParent = mgr:GetParent()
+                end
+                if not InCombatLockdown() then
+                    mgr:SetParent(_partyHiddenParent)
+                end
                 if not hookedMgr then
                     hookedMgr = true
-                    mgr:HookScript("OnShow", function(self)
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
-                            and not InCombatLockdown() then
-                            self:Hide()
-                        end
-                    end)
                     local regenFrame = CreateFrame("Frame")
                     regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
                     regenFrame:SetScript("OnEvent", function()
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
-                            and mgr:IsShown() then
-                            mgr:Hide()
+                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
+                            if mgr:GetParent() ~= _partyHiddenParent then
+                                mgr:SetParent(_partyHiddenParent)
+                            end
                         end
                     end)
+                end
+            else
+                if _partyOrigParent and not InCombatLockdown() then
+                    mgr:SetParent(_partyOrigParent)
+                    mgr:Show()
                 end
             end
         end

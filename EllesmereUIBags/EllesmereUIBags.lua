@@ -271,7 +271,7 @@ local function PreCacheSortFields(items)
                 d._sortTrackRank = 0
             end
             d._sortGear = d.categoryIndex and IsGearCategory(d.categoryIndex) or false
-            d._sortCached = true
+            if name then d._sortCached = true end
         end
     end
 end
@@ -347,7 +347,7 @@ local function SaveCategoryOrder(key, items)
     local order = GetVisualOrder()
     local list = {}
     for i, data in ipairs(items) do
-        list[i] = data.bag .. ":" .. data.slot
+        list[i] = data.info and data.info.itemID or 0
     end
     order[key] = list
 end
@@ -357,19 +357,32 @@ local function ApplySavedOrder(key, items)
     local saved = order[key]
     if not saved or #saved == 0 then return end
 
-    -- Build lookup: numeric bag*1000+slot -> position in saved order
-    local posMap = {}
-    for i, key in ipairs(saved) do
-        local b, s = key:match("^(%d+):(%d+)$")
-        if b and s then posMap[tonumber(b) * 1000 + tonumber(s)] = i end
+    -- Build position queues per itemID: each ID maps to its saved positions
+    local posQueues = {}
+    for i, id in ipairs(saved) do
+        if not posQueues[id] then posQueues[id] = {} end
+        local q = posQueues[id]
+        q[#q + 1] = i
     end
 
-    -- Items in saved order go first (by saved position), unsaved items go to end
+    -- Assign each item a saved position (consume from queue) or append to end
+    local consumed = {}
     local nextUnsaved = #saved + 1
+    for _, data in ipairs(items) do
+        local id = data.info and data.info.itemID or 0
+        local q = posQueues[id]
+        local ci = consumed[id] or 1
+        if q and ci <= #q then
+            data._savedPos = q[ci]
+            consumed[id] = ci + 1
+        else
+            data._savedPos = nextUnsaved
+            nextUnsaved = nextUnsaved + 1
+        end
+    end
+
     table.sort(items, function(a, b)
-        local pa = posMap[a.bag * 1000 + a.slot] or nextUnsaved
-        local pb = posMap[b.bag * 1000 + b.slot] or nextUnsaved
-        if pa ~= pb then return pa < pb end
+        if a._savedPos ~= b._savedPos then return a._savedPos < b._savedPos end
         if a.bag ~= b.bag then return a.bag < b.bag end
         return a.slot < b.slot
     end)
@@ -380,6 +393,64 @@ local function ClearGroupOrder(groupName)
     if not groupName then return end
     local order = GetVisualOrder()
     order[groupName] = nil
+end
+
+-- Bag snapshot: tracks bag:slot -> itemID between refreshes for swap detection
+local _bagSnapshot = {}
+
+local function TakeBagSnapshot(tempItems)
+    wipe(_bagSnapshot)
+    for _, d in ipairs(tempItems) do
+        if d.info and d.info.itemID then
+            _bagSnapshot[d.bag * 1000 + d.slot] = d.info.itemID
+        end
+    end
+end
+
+-- Detect manual item swaps. When applySwap is true, updates saved visual order.
+-- Returns true if a swap was detected.
+local function DetectAndApplySwaps(tempItems, applySwap)
+    if not next(_bagSnapshot) then return false end
+
+    -- Build current bag:slot -> itemID from scan
+    local current = {}
+    for _, d in ipairs(tempItems) do
+        if d.info and d.info.itemID then
+            current[d.bag * 1000 + d.slot] = d.info.itemID
+        end
+    end
+
+    -- Find slots where one item was replaced by a different item
+    local swapChanges = {}
+    for key, oldID in pairs(_bagSnapshot) do
+        local curID = current[key]
+        if curID and curID ~= oldID then
+            swapChanges[#swapChanges + 1] = { curID = curID, oldID = oldID }
+        end
+    end
+
+    -- Swap pattern: exactly 2 item-to-item changes that cross-match
+    if #swapChanges == 2 then
+        local c1, c2 = swapChanges[1], swapChanges[2]
+        if c1.curID == c2.oldID and c2.curID == c1.oldID and c1.curID ~= c2.curID then
+            if applySwap then
+                local id1, id2 = c1.curID, c2.curID
+                local vo = GetVisualOrder()
+                for _, saved in pairs(vo) do
+                    local idx1, idx2
+                    for i, sid in ipairs(saved) do
+                        if sid == id1 and not idx1 then idx1 = i
+                        elseif sid == id2 and not idx2 then idx2 = i end
+                    end
+                    if idx1 and idx2 then
+                        saved[idx1], saved[idx2] = saved[idx2], saved[idx1]
+                    end
+                end
+            end
+            return true
+        end
+    end
+    return false
 end
 
 -- Pending resort: category indices + group names that need re-sorting.
@@ -521,77 +592,41 @@ local function CreateHeader()
 
     local DoVisualSort  -- forward declaration
 
-    -- After physical moves, update saved visual order with new bag:slot positions
-    -- so category views are unaffected by OneBag sort/randomize.
-    local function RemapVisualOrder()
-        local vo = EllesmereUIDB and EllesmereUIDB.bagVisualOrder
-        if not vo then return end
-        -- Build mapping: itemID -> list of current "bag:slot" positions (scan order)
-        local postQueues = {}
-        for bag = 0, 4 do
-            local numSlots = C_Container.GetContainerNumSlots(bag)
-            for slot = 1, numSlots do
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info and info.itemID then
-                    local id = info.itemID
-                    if not postQueues[id] then postQueues[id] = {} end
-                    postQueues[id][#postQueues[id] + 1] = bag .. ":" .. slot
-                end
-            end
-        end
-        -- For each saved order, translate old positions using preQueues → postQueues
-        local consumed = {}  -- itemID -> next index to consume from postQueues
-        for _, saved in pairs(vo) do
-            for i, oldKey in ipairs(saved) do
-                local preInfo = _remapPre and _remapPre[oldKey]
-                if preInfo then
-                    local id = preInfo
-                    if not consumed[id] then consumed[id] = 1 end
-                    local q = postQueues[id]
-                    if q and q[consumed[id]] then
-                        saved[i] = q[consumed[id]]
-                        consumed[id] = consumed[id] + 1
-                    end
-                end
-            end
-        end
-    end
-
-    local _remapPre  -- "bag:slot" -> itemID snapshot before moves
-
-    local function SnapshotPreMove()
-        _remapPre = {}
-        for bag = 0, 4 do
-            local numSlots = C_Container.GetContainerNumSlots(bag)
-            for slot = 1, numSlots do
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info and info.itemID then
-                    _remapPre[bag .. ":" .. slot] = info.itemID
-                end
-            end
-        end
-    end
-
     local function DoPhysicalSort()
         LockSort()
         EUI_Bags.refreshEnabled = false
-        SnapshotPreMove()
 
-        -- Compute desired order: sorted itemIDs for positions 1..N
-        local function ComputeDesiredOrder()
-            local slots = {}
+        local sfxWas = GetCVar("Sound_EnableSFX")
+        SetCVar("Sound_EnableSFX", "0")
+
+        -- Scan bags, compute sorted order, and execute all moves in one pass.
+        -- Re-scans on every call so retries always work from fresh state.
+        local function ComputeAndExecute()
+            local total = 0
+            local sBag, sSlot, sKey, sID = {}, {}, {}, {}
+
             local items = {}
             for bag = 0, 4 do
                 local numSlots = C_Container.GetContainerNumSlots(bag)
                 for slot = 1, numSlots do
-                    slots[#slots + 1] = { bag = bag, slot = slot }
+                    total = total + 1
+                    sBag[total] = bag
+                    sSlot[total] = slot
                     local info = C_Container.GetContainerItemInfo(bag, slot)
                     if info then
                         local link = C_Container.GetContainerItemLink(bag, slot)
-                        items[#items + 1] = { bag = bag, slot = slot, info = info, itemLink = link }
+                        local key = link .. "\0" .. (info.stackCount or 0)
+                        sKey[total] = key
+                        sID[total] = info.itemID
+                        items[#items + 1] = {
+                            pos = total, bag = bag, slot = slot,
+                            info = info, itemLink = link, key = key,
+                        }
                     end
                 end
             end
+
+            if #items == 0 then return false end
 
             EUI_CategoryManager:ClassifyAll(items)
             local cats = EUI_CategoryManager:GetCategories()
@@ -623,110 +658,67 @@ local function CreateHeader()
                 return VisualSortCompare(a, b)
             end)
 
-            -- Build desired: position index -> sort key (link + count for uniqueness)
-            -- itemLink distinguishes gear at different ilvls; stackCount
-            -- distinguishes two stacks of the same item (e.g. ore x199 vs x76).
-            local desired = {}
-            for i, d in ipairs(items) do
-                desired[i] = d.itemLink .. "\0" .. (d.info.stackCount or 0)
+            -- Compute moves via selection sort on pre-computed data (zero API calls)
+            local atPos = {}
+            local whereIs = {}
+            for idx, d in ipairs(items) do
+                atPos[d.pos] = idx
+                whereIs[idx] = d.pos
             end
-            return slots, desired
-        end
 
-        local slots, desired = ComputeDesiredOrder()
-
-        local function GetSlotKey(bag, slot)
-            local link = C_Container.GetContainerItemLink(bag, slot)
-            if not link then return nil end
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            return link .. "\0" .. (info and info.stackCount or 0)
-        end
-
-        -- Execute one batch: scan current state, move mismatched items.
-        -- Returns true if any moves were made, false if already sorted.
-        local function ExecuteBatch()
-            local moved = false
-            for target = 1, #desired do
-                local s = slots[target]
-                local wantKey = desired[target]
-                local curKey = GetSlotKey(s.bag, s.slot)
-
-                if curKey ~= wantKey then
-                    -- Check if destination has the same itemID as the wanted item.
-                    -- If so, PickupContainerItem would MERGE stacks instead of
-                    -- swapping. Skip this target; the retry will handle it after
-                    -- the destination item gets moved elsewhere by a different swap.
-                    local curInfo = C_Container.GetContainerItemInfo(s.bag, s.slot)
-                    local curID = curInfo and curInfo.itemID
-                    local wantLink = desired[target]:match("^(.+)%z")
-                    local wantID = wantLink and GetItemInfoInstant(wantLink)
-
-                    if curID and wantID and curID == wantID then
-                        -- Same itemID at destination -- skip to avoid merge
+            local moves = {}
+            for t = 1, #items do
+                local s = whereIs[t]
+                if s ~= t then
+                    local displaced = atPos[t]
+                    if displaced and sID[s] and sID[t] and sID[s] == sID[t] then
+                        -- Same itemID: skip to avoid merge, retry will resolve
                     else
-                        -- Find the wanted item somewhere after this position
-                        for si = target + 1, #slots do
-                            local src = slots[si]
-                            local srcKey = GetSlotKey(src.bag, src.slot)
-                            if srcKey == wantKey then
-                                local srcLoc = ItemLocation:CreateFromBagAndSlot(src.bag, src.slot)
-                                if not (C_Item.DoesItemExist(srcLoc) and C_Item.IsLocked(srcLoc)) then
-                                    local dstLoc = ItemLocation:CreateFromBagAndSlot(s.bag, s.slot)
-                                    local dstLocked = C_Item.DoesItemExist(dstLoc) and C_Item.IsLocked(dstLoc)
-                                    if not curKey or not dstLocked then
-                                        C_Container.PickupContainerItem(src.bag, src.slot)
-                                        C_Container.PickupContainerItem(s.bag, s.slot)
-                                        ClearCursor()
-                                        moved = true
-                                    end
-                                end
-                                break
-                            end
-                        end
+                        moves[#moves + 1] = { sBag[s], sSlot[s], sBag[t], sSlot[t] }
+                        whereIs[t] = t
+                        if displaced then whereIs[displaced] = s end
+                        atPos[t] = t
+                        atPos[s] = displaced
+                        sID[s], sID[t] = sID[t], sID[s]
+                        sKey[s], sKey[t] = sKey[t], sKey[s]
                     end
                 end
             end
-            return moved
+
+            for _, m in ipairs(moves) do
+                C_Container.PickupContainerItem(m[1], m[2])
+                C_Container.PickupContainerItem(m[3], m[4])
+                ClearCursor()
+            end
+
+            return #moves > 0
         end
 
-        -- Mute SFX for the entire sort operation
-        local sfxWas = GetCVar("Sound_EnableSFX")
-        SetCVar("Sound_EnableSFX", "0")
-
-        -- First batch
-        local moved = ExecuteBatch()
+        local moved = ComputeAndExecute()
 
         if not moved then
-            -- Already sorted
             SetCVar("Sound_EnableSFX", sfxWas)
             EUI_Bags.refreshEnabled = true
-            RemapVisualOrder()
             EUI_Bags:RefreshInventory()
             C_Timer.After(3, UnlockSort)
             return
         end
 
-        -- Event-driven retry: wait for BAG_UPDATE, then do another batch.
-        -- No OnUpdate polling, no CPU waste between batches.
         local retryCount = 0
         local retryFrame = CreateFrame("Frame")
         retryFrame:RegisterEvent("BAG_UPDATE")
         retryFrame:SetScript("OnEvent", function(self)
             self:UnregisterAllEvents()
             retryCount = retryCount + 1
-            -- Small delay to let all BAG_UPDATEs from this batch fire
             C_Timer.After(0.15, function()
-                local moved = ExecuteBatch()
+                local moved = ComputeAndExecute()
                 if moved and retryCount < 15 then
-                    -- More work to do; re-register for next BAG_UPDATE
                     self:RegisterEvent("BAG_UPDATE")
                 else
-                    -- Done (or max retries)
                     self:SetScript("OnEvent", nil)
                     SetCVar("Sound_EnableSFX", sfxWas)
                     C_Timer.After(0.3, function()
                         EUI_Bags.refreshEnabled = true
-                        RemapVisualOrder()
                         EUI_Bags:RefreshInventory()
                         C_Timer.After(3, UnlockSort)
                     end)
@@ -804,7 +796,6 @@ local function CreateHeader()
     sort:SetScript("OnClick", function()
         if sortLocked then return end
         if selectedCategoryIndex == -1 then
-            -- OneBag: physical sort (direct bag mirror)
             if EllesmereUIDB and EllesmereUIDB.bagSortWarningDismissed then
                 DoPhysicalSort()
             else
@@ -855,9 +846,7 @@ local function CreateHeader()
     local function DoRandomize()
         LockSort()
         EUI_Bags.refreshEnabled = false
-        SnapshotPreMove()
 
-        -- Scan all slots in bags 0-4
         local slots = {}
         local items = {}
         for bag = 0, 4 do
@@ -871,26 +860,19 @@ local function CreateHeader()
             end
         end
 
-        -- Shuffle target positions: pick random slots for items to land in
         local targetSlots = {}
         for i = 1, #slots do targetSlots[i] = i end
         for i = #targetSlots, 2, -1 do
             local j = math.random(1, i)
             targetSlots[i], targetSlots[j] = targetSlots[j], targetSlots[i]
         end
-
-        -- Also shuffle item order
         for i = #items, 2, -1 do
             local j = math.random(1, i)
             items[i], items[j] = items[j], items[i]
         end
 
-        -- Map: item i should go to slots[targetSlots[i]]
-        -- Build moves via selection-sort simulation
         local posFromKey = {}
         for i, s in ipairs(slots) do posFromKey[s.bag * 1000 + s.slot] = i end
-
-        -- current[posIdx] = which item index is there (0 = empty)
         local current = {}
         local whereIs = {}
         for i = 1, #slots do current[i] = 0 end
@@ -904,7 +886,6 @@ local function CreateHeader()
             local dest = targetSlots[si]
             local curPos = whereIs[si]
             if curPos ~= dest then
-                -- Swap what's at dest with what's at curPos
                 local displaced = current[dest]
                 current[dest] = si
                 current[curPos] = displaced
@@ -914,21 +895,17 @@ local function CreateHeader()
             end
         end
 
-        -- Execute all moves in one frame (SFX muted, DetectNewItems suppressed)
         local sfxWas = GetCVar("Sound_EnableSFX")
         SetCVar("Sound_EnableSFX", "0")
-
         for _, m in ipairs(moves) do
             C_Container.PickupContainerItem(m[1], m[2])
             C_Container.PickupContainerItem(m[3], m[4])
             ClearCursor()
         end
-
         SetCVar("Sound_EnableSFX", sfxWas)
 
         C_Timer.After(0.5, function()
             EUI_Bags.refreshEnabled = true
-            RemapVisualOrder()
             EUI_Bags:RefreshInventory()
             C_Timer.After(3, UnlockSort)
         end)
@@ -955,7 +932,7 @@ local function CreateHeader()
             })
         end
     end)
-    dice:Hide()  -- only shown in OneBag mode
+    dice:Hide()
     EUI_Bags._diceBtn = dice
 
     -- Bags Button (icon)
@@ -3783,6 +3760,21 @@ function EUI_Bags:RefreshInventory()
     end
     ProfEnd("BagScan", _t0Scan)
 
+    -- 1b. Detect manual item swaps and update saved visual order
+    local isAllItems = selectedCategoryIndex == 0 and not selectedGroupName
+    local swapDetected = DetectAndApplySwaps(tempItems, isAllItems)
+    TakeBagSnapshot(tempItems)
+
+    -- Show blocked-swap tooltip in category/group views (not All Items, not OneBag)
+    if swapDetected and not isAllItems and selectedCategoryIndex ~= -1 then
+        if EUI.ShowWidgetTooltip then
+            EUI.ShowWidgetTooltip(EUI_Bags, "Positions can only be changed\nin the All Items or OneBag categories", { anchor = "cursor" })
+            C_Timer.After(3, function()
+                if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            end)
+        end
+    end
+
     -- 2. Classify all items and get counts
     local _t0Classify = ProfBegin("ClassifyAll")
     local categoryCounts, totalCount = EUI_CategoryManager:ClassifyAll(tempItems)
@@ -4226,7 +4218,8 @@ function EUI_Bags:RefreshInventory()
                 if not (hideEmpty and #memberItems == 0) then
 
                 if #memberItems > 0 then
-                    ApplySavedOrder(mi, memberItems)
+                    PreCacheSortFields(memberItems)
+                    table.sort(memberItems, VisualSortCompare)
                     memberItems = MergeDuplicates(memberItems)
                 end
 
@@ -4273,7 +4266,8 @@ function EUI_Bags:RefreshInventory()
             local selCat = cats[selectedCategoryIndex]
             if #displayItems > 0 then
                 if not (selCat and selCat.isRecent) then
-                    ApplySavedOrder(selectedCategoryIndex, displayItems)
+                    PreCacheSortFields(displayItems)
+                    table.sort(displayItems, VisualSortCompare)
                 end
                 displayItems = MergeDuplicates(displayItems)
             end
