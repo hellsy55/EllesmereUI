@@ -1712,10 +1712,11 @@ local function GetOrCreateSlot(idx)
     textOverlay:SetFrameLevel((btn.Cooldown and btn.Cooldown:GetFrameLevel() or btn:GetFrameLevel()) + 2)
     btn._textOverlay = textOverlay
 
+    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(GetFont(), 11, "OUTLINE")
+        countFS:SetFont(GetFont(), countSize, "OUTLINE")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
@@ -1736,7 +1737,7 @@ local function GetOrCreateSlot(idx)
         btn.KeystoneText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         btn.KeystoneText:SetTextColor(1, 1, 1, 1)
     end
-    btn.KeystoneText:SetFont(fontPath, fontSize, "OUTLINE")
+    btn.KeystoneText:SetFont(fontPath, countSize, "OUTLINE")
     btn.KeystoneText:SetText("")
     -- Keystone dungeon abbreviation (bottom-right, same position as stack count)
     if not btn.KeystoneDungeonText then
@@ -1745,7 +1746,7 @@ local function GetOrCreateSlot(idx)
         btn.KeystoneDungeonText:SetTextColor(1, 1, 1, 1)
         btn.KeystoneDungeonText:SetJustifyH("RIGHT")
     end
-    btn.KeystoneDungeonText:SetFont(fontPath, fontSize - 2, "OUTLINE")
+    btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), "OUTLINE")
     btn.KeystoneDungeonText:SetText("")
 
     itemSlots[idx] = btn
@@ -1818,7 +1819,7 @@ local function GetOrCreateReagentSlot(idx)
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(GetFont(), 11, "OUTLINE")
+        countFS:SetFont(GetFont(), EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11, "OUTLINE")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
@@ -1847,7 +1848,7 @@ local function GetOrCreateBagSlot(idx)
     btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     btn.icon:SetAllPoints(btn)
     btn.Count = btn:CreateFontString(nil, "OVERLAY")
-    btn.Count:SetFont(GetFont(), 11, "OUTLINE")
+    btn.Count:SetFont(GetFont(), EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11, "OUTLINE")
     btn.Count:SetPoint("BOTTOMRIGHT", -2, 2)
     btn.Count:SetTextColor(1, 1, 1)
     CreateInsetBorder(btn)
@@ -1871,7 +1872,26 @@ local function GetOrCreateBagSlot(idx)
 end
 
 -------------------------------------------------------------------------------
---  Upgrade detection (preserved)
+--  Fast font size update: re-applies text sizes to all existing slots
+--  without a full RefreshInventory. Called by options sliders.
+-------------------------------------------------------------------------------
+local function RefreshTextSizes()
+    local fontPath = GetFont()
+    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
+    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    for _, btn in pairs(itemSlots) do
+        if btn.Count then btn.Count:SetFont(fontPath, countSize, "OUTLINE") end
+        if btn.ItemLevelText then btn.ItemLevelText:SetFont(fontPath, ilvlSize, "OUTLINE") end
+        if btn.KeystoneText then btn.KeystoneText:SetFont(fontPath, countSize, "OUTLINE") end
+        if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), "OUTLINE") end
+    end
+    for _, btn in pairs(reagentSlots) do
+        if btn.Count then btn.Count:SetFont(fontPath, countSize, "OUTLINE") end
+        if btn.ItemLevelText then btn.ItemLevelText:SetFont(STANDARD_TEXT_FONT, ilvlSize, "OUTLINE") end
+    end
+end
+EUI_Bags.RefreshTextSizes = RefreshTextSizes
+
 -------------------------------------------------------------------------------
 --  RenderButton (simplified, no placeholder handling)
 -------------------------------------------------------------------------------
@@ -2566,6 +2586,15 @@ _dragUpdateFrame:SetScript("OnUpdate", function()
         if mode == "group" and target == _dragFromCatIdx then mode = "above" end
 
         local cats = EUI_CategoryManager:GetCategories()
+
+        -- Block drops onto or above special entries (Pinned Items, Recent Items).
+        -- Nothing should be draggable above the divider.
+        local targetCatCheck = cats[target]
+        if targetCatCheck and (targetCatCheck.isPinned or targetCatCheck.isRecent) then
+            line:Hide(); hl:Hide()
+            _dragDropMode = nil; _dragDropTarget = nil
+            return
+        end
         -- Can't group with or from a noGroup category (e.g. Reagent Bag)
         if mode == "group" and cats[target] and cats[target].noGroup then mode = "below" end
         if mode == "group" and cats[_dragFromCatIdx] and cats[_dragFromCatIdx].noGroup then mode = "above" end
@@ -3245,7 +3274,12 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
         else
             local count = categoryCounts and categoryCounts[ci] or 0
             local isUserCreated = not cat.isCatchAll and (not cat.types or #cat.types == 0)
-            displayList[#displayList + 1] = { catIdx = ci, name = cat.name, icon = cat.icon or 134400, isAtlas = cat.isAtlas, count = count, noMove = cat.noMove, isPinned = cat.isPinned, isRecent = cat.isRecent }
+            -- Skip Recent Items if disabled
+            if cat.isRecent and EllesmereUIDB and EllesmereUIDB.bagShowRecentItems == false then
+                -- skip
+            else
+                displayList[#displayList + 1] = { catIdx = ci, name = cat.name, icon = cat.icon or 134400, isAtlas = cat.isAtlas, count = count, noMove = cat.noMove, isPinned = cat.isPinned, isRecent = cat.isRecent }
+            end
         end
     end
 
@@ -3450,8 +3484,11 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
         btn:Show()
         y = y - SIDEBAR_BTN_H - SIDEBAR_PAD
 
-        -- Divider after Recent Items (4th button: All Items, OneBag, Pinned, Recent)
-        if i == 4 and sidebar._catDivider then
+        -- Divider after the last special entry (Pinned or Recent)
+        local isLastSpecial = entry.isPinned or entry.isRecent
+        local nextEntry = displayList[i + 1]
+        local nextIsRegular = nextEntry and not nextEntry.isPinned and not nextEntry.isRecent
+        if isLastSpecial and nextIsRegular and sidebar._catDivider then
             y = y - 4  -- spacing above line
             local div = sidebar._catDivider
             div:SetParent(sidebarChild or sidebar)
@@ -3768,7 +3805,8 @@ function EUI_Bags:RefreshInventory()
         end
     end
     local recentCount = 0
-    if recentCatIdx and EUI_Bags._recentItems then
+    local showRecent = not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false
+    if recentCatIdx and EUI_Bags._recentItems and showRecent then
         for _, data in ipairs(tempItems) do
             if data.info and data.info.itemID and EUI_Bags._recentItems[data.info.itemID] then
                 recentCount = recentCount + 1
@@ -4125,7 +4163,8 @@ function EUI_Bags:RefreshInventory()
         for ci, cat in ipairs(cats) do
             if cat.isRecent then
                 -- Recent Items: duplicate section (items also appear in their normal category)
-                if EUI_Bags._recentItems then
+                if EUI_Bags._recentItems
+                   and (not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false) then
                     local recentItems = {}
                     for _, data in ipairs(displayItems) do
                         if data.info and data.info.itemID and EUI_Bags._recentItems[data.info.itemID] then
@@ -4580,6 +4619,43 @@ local function StartAddon()
     if EUI and EUI.PanelPP then
         EUI.PanelPP.CreateBorder(EUI_Bags, 0.1, 0.1, 0.1, 1, 1, "OVERLAY", 7)
     end
+
+    EUI_Bags:HookScript("OnHide", function()
+        if EUI_Bags._searchBox then
+            EUI_Bags._searchBox:SetText("")
+            EUI_Bags._searchBox:ClearFocus()
+        end
+    end)
+
+    -- Click empty space with an external item on cursor: auto-place in
+    -- first available bag slot (same as looting). Only fires for items
+    -- not already in the player's bags (bank withdrawals, mail, etc.).
+    EUI_Bags:HookScript("OnMouseUp", function(_, button)
+        if button ~= "LeftButton" then return end
+        local cursorType, cursorItemID, cursorLink = GetCursorInfo()
+        if cursorType ~= "item" then return end
+        -- Check if the cursor item is from the player's bags (bag 0-4)
+        for bag = 0, 4 do
+            local numSlots = C_Container.GetContainerNumSlots(bag)
+            for slot = 1, numSlots do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.isLocked then
+                    -- Locked = this slot is the pickup source
+                    return
+                end
+            end
+        end
+        -- External item: place in first empty bag slot
+        for bag = 0, 4 do
+            local numSlots = C_Container.GetContainerNumSlots(bag)
+            for slot = 1, numSlots do
+                if not C_Container.GetContainerItemInfo(bag, slot) then
+                    C_Container.PickupContainerItem(bag, slot)
+                    return
+                end
+            end
+        end
+    end)
 
     CreateHeader()
     CreateFooter()

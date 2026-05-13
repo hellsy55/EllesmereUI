@@ -342,6 +342,24 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
+            -- Item Count Text Size | Item Level Text Size
+            _, h = W:DualRow(parent, y,
+                { type="slider", text="Item Count Text Size", min=8, max=16, step=1,
+                  tooltip="Font size for stack counts, keystone levels, and dungeon abbreviations.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11 end,
+                  setValue=function(v)
+                      EllesmereUIDB.bagCountFontSize = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                  end },
+                { type="slider", text="Item Level Text Size", min=8, max=16, step=1,
+                  tooltip="Font size for item level numbers on equipment items.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12 end,
+                  setValue=function(v)
+                      EllesmereUIDB.itemlevelFontSize = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                  end }
+            ); y = y - h
+
             ---------------------------------------------------------------------------
             --  EXTRAS
             ---------------------------------------------------------------------------
@@ -376,7 +394,7 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v) EllesmereUIDB.enableGoldTracking = v end }
             ); y = y - h
 
-            -- Show Pinned & Recent Tips | (empty)
+            -- Show Pinned & Recent Tips | Show Recent Items
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Pinned & Recent Tips",
                   tooltip="Show helpful tip text on Pinned Items and Recent Items category headers.",
@@ -385,57 +403,14 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUIDB.bagShowPinRecentTips = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
-                { type="label", text="" }
+                { type="toggle", text="Show Recent Items",
+                  tooltip="Show the Recent Items category in the sidebar and content grid for newly acquired items.",
+                  getValue=function() return not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false end,
+                  setValue=function(v)
+                      EllesmereUIDB.bagShowRecentItems = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
             ); y = y - h
-
-            -- Item Level inline cog (font size only)
-            do
-                local leftRgn = bagsRow._leftRegion
-                local function itemlevelOff()
-                    return not (EllesmereUIDB and EllesmereUIDB.showItemlevelInBags ~= false)
-                end
-
-                local _, itemlevelCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Item Level Settings",
-                    rows = {
-                        { type="slider", label="Font Size", min=8, max=16, step=1,
-                          get=function() return EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12 end,
-                          set=function(v)
-                              EllesmereUIDB.itemlevelFontSize = v
-                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                          end },
-                    },
-                })
-
-                local itemlevelCogBtn = CreateFrame("Button", nil, leftRgn)
-                itemlevelCogBtn:SetSize(26, 26)
-                itemlevelCogBtn:SetPoint("RIGHT", leftRgn._control, "LEFT", -9, 0)
-                itemlevelCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-                itemlevelCogBtn:SetAlpha(itemlevelOff() and 0.15 or 0.4)
-                local itemlevelCogTex = itemlevelCogBtn:CreateTexture(nil, "OVERLAY")
-                itemlevelCogTex:SetAllPoints()
-                itemlevelCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-                itemlevelCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                itemlevelCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(itemlevelOff() and 0.15 or 0.4) end)
-                itemlevelCogBtn:SetScript("OnClick", function(self) itemlevelCogShow(self) end)
-
-                local itemlevelCogBlock = CreateFrame("Frame", nil, itemlevelCogBtn)
-                itemlevelCogBlock:SetAllPoints()
-                itemlevelCogBlock:SetFrameLevel(itemlevelCogBtn:GetFrameLevel() + 10)
-                itemlevelCogBlock:EnableMouse(true)
-                itemlevelCogBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(itemlevelCogBtn, EllesmereUI.DisabledTooltip("Show Item Level"))
-                end)
-                itemlevelCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-                EllesmereUI.RegisterWidgetRefresh(function()
-                    local off = itemlevelOff()
-                    itemlevelCogBtn:SetAlpha(off and 0.15 or 0.4)
-                    if off then itemlevelCogBlock:Show() else itemlevelCogBlock:Hide() end
-                end)
-                if itemlevelOff() then itemlevelCogBlock:Show() else itemlevelCogBlock:Hide() end
-            end
-
 
             _, h = W:Spacer(parent, y, 20); y = y - h
             return math.abs(y)

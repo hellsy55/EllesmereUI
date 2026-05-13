@@ -841,7 +841,23 @@ EUI_Bank._bankSlots = _bankSlots
 
 --- Returns the bagID of the currently selected bank tab, or nil if viewing
 --- "All Tabs" / "OneBank" (in which case default Blizzard routing applies).
+--- For aggregate warband views (-2, -3), returns the first warband tab
+--- with an empty slot so right-click deposits go to warband, not character bank.
 function EUI_Bank:GetSelectedTabBagID()
+    if _selectedView == -2 or _selectedView == -3 then
+        -- Aggregate warband view: find first warband tab with space
+        for _, tab in ipairs(_allTabs) do
+            if tab.isWarband then
+                local numSlots = C_Container.GetContainerNumSlots(tab.bagID)
+                for slot = 1, numSlots do
+                    if not C_Container.GetContainerItemInfo(tab.bagID, slot) then
+                        return tab.bagID
+                    end
+                end
+            end
+        end
+        return nil
+    end
     if _selectedView <= 0 then return nil end
     local tab = _allTabs[_selectedView]
     return tab and tab.bagID or nil
@@ -901,15 +917,6 @@ local function GetOrCreateBankSlot(idx)
         local bagID = self:GetParent():GetID()
         local slotID = self:GetID()
         C_Container.PickupContainerItem(bagID, slotID)
-    end)
-
-    -- OnMouseUp: handles our custom OnUpdate-based drag from the bags module.
-    -- When the bags drag tracker releases over a bank slot, the cursor still
-    -- holds the item. Detect that and place it.
-    btn:HookScript("OnMouseUp", function(self)
-        if GetCursorInfo() == "item" then
-            C_Container.PickupContainerItem(self:GetParent():GetID(), self:GetID())
-        end
     end)
 
     -- Hide template decorations
@@ -1038,8 +1045,8 @@ function EUI_Bank:RefreshBank()
     end
     local hasSearch = searchQuery ~= ""
 
-    -- Hide all slots and headers
-    for _, btn in pairs(_bankSlots) do btn:GetParent():Hide() end
+    -- Don't hide slots upfront: the batch renderer overwrites them in place.
+    -- Excess slots are hidden after all batches complete (prevents blink).
     for _, hdr in pairs(_bankHeaders) do hdr:Hide() end
 
     -- Update sidebar and scroll frame widths
@@ -1353,19 +1360,28 @@ function EUI_Bank:RefreshBank()
         rendered = batchEnd
     end
 
-    -- Render all batches deferred via OnUpdate (avoids 200ms peak on open frame).
-    -- Frame is already sized and scroll child height is set, so the window
-    -- appears immediately; slot content fills in starting next frame.
+    -- Render first batch immediately (same frame) so item moves don't blink.
+    -- Remaining batches deferred via OnUpdate for large refreshes (tab open).
+    RenderBatch()
     if not EUI_Bank._batchFrame then
         EUI_Bank._batchFrame = CreateFrame("Frame")
     end
     EUI_Bank._batchFrame:SetScript("OnUpdate", function(self)
         if rendered >= #_layout or not EUI_Bank:IsVisible() then
             self:SetScript("OnUpdate", nil)
+            -- Hide excess slots that weren't used this refresh
+            for si = slotIdx + 1, #_bankSlots do
+                if _bankSlots[si] then _bankSlots[si]:GetParent():Hide() end
+            end
             return
         end
         RenderBatch()
-        if rendered >= #_layout then self:SetScript("OnUpdate", nil) end
+        if rendered >= #_layout then
+            self:SetScript("OnUpdate", nil)
+            for si = slotIdx + 1, #_bankSlots do
+                if _bankSlots[si] then _bankSlots[si]:GetParent():Hide() end
+            end
+        end
     end)
 
     sf:SetVerticalScroll(math.min(sf:GetVerticalScroll(), sf:GetVerticalScrollRange()))

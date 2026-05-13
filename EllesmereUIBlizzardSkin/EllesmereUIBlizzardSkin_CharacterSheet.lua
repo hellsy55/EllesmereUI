@@ -299,7 +299,7 @@ local function PreSkinCharacterSheet()
     GetFFD(frame).bg:SetAllPoints(frame)
     GetFFD(frame).bg:SetAlpha(1)
     GetFFD(frame).bgOverlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
-    GetFFD(frame).bgOverlay:SetColorTexture(0, 0, 0, 0.72)
+    GetFFD(frame).bgOverlay:SetColorTexture(0, 0, 0, 0.7)
     GetFFD(frame).bgOverlay:SetAllPoints(frame)
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)

@@ -1379,6 +1379,7 @@ local function GetTooltipFrame()
     if tooltipFrame then return tooltipFrame end
     tooltipFrame = CreateFrame("Frame", nil, UIParent)
     tooltipFrame:SetFrameStrata("TOOLTIP")
+    tooltipFrame:SetFrameLevel(200)
     tooltipFrame:SetSize(250, 40)
     local bg = tooltipFrame:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()

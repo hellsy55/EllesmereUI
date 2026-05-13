@@ -309,8 +309,12 @@ local function SkinInspectSheet()
         GetFFD(frame).bg:Show()
     else
         GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-        GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+        GetFFD(frame).bg:SetAtlas("housing-basic-panel--stone-background")
         GetFFD(frame).bg:SetAllPoints(frame)
+        GetFFD(frame).bg:SetAlpha(1)
+        GetFFD(frame).bgOverlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+        GetFFD(frame).bgOverlay:SetColorTexture(0, 0, 0, 0.7)
+        GetFFD(frame).bgOverlay:SetAllPoints(frame)
     end
 
     -- Hide Blizzard backgrounds and borders
@@ -323,37 +327,75 @@ local function SkinInspectSheet()
     end
 
 
-    -- Style InspectFrameBg with EUI colors
-    if InspectFrameBg then
-        InspectFrameBg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-    end
+    -- Hide Blizzard Bg textures (our atlas bg covers everything)
+    if InspectFrameBg then InspectFrameBg:SetAlpha(0) end
+    if InspectFrameInset and InspectFrameInset.Bg then InspectFrameInset.Bg:SetAlpha(0) end
 
-    -- Style InspectFrameInset.Bg with EUI colors
-    if InspectFrameInset and InspectFrameInset.Bg then
-        InspectFrameInset.Bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
-    end
-
-    -- Create model background directly on InspectFrame
-    if not GetFFD(frame).modelBgFrame then
-        -- Main background texture
-        local bgTex = frame:CreateTexture(nil, "BACKGROUND", nil, 5)
+    -- Create model background (identical pattern to character sheet)
+    -- Model scene bg: deferred until InspectModelScene exists (created lazily by Blizzard)
+    local function TryCreateModelBg()
+        if GetFFD(frame).modelBgFrame then return end
+        local myModel = _G.InspectModelFrame
+        if not myModel then return end
+        local bgFrame = CreateFrame("Frame", nil, myModel)
+        bgFrame:SetFrameLevel(math.max(1, myModel:GetFrameLevel() - 1))
+        bgFrame:ClearAllPoints()
+        local headSlot = _G.InspectHeadSlot
+        local handsSlot = _G.InspectHandsSlot
+        local mainHandSlot = _G.InspectMainHandSlot
+        if headSlot then
+            bgFrame:SetPoint("TOPLEFT", headSlot, "TOPRIGHT", 0, 0)
+        else
+            bgFrame:SetPoint("TOPLEFT", myModel, "TOPLEFT", 0, 0)
+        end
+        if handsSlot then
+            bgFrame:SetPoint("TOPRIGHT", handsSlot, "TOPLEFT", 0, 0)
+        else
+            bgFrame:SetPoint("TOPRIGHT", myModel, "TOPRIGHT", 0, 0)
+        end
+        if mainHandSlot then
+            bgFrame:SetPoint("BOTTOM", mainHandSlot, "TOP", 0, 0)
+        else
+            bgFrame:SetPoint("BOTTOM", myModel, "BOTTOM", 0, 0)
+        end
+        local bgTex = bgFrame:CreateTexture(nil, "BACKGROUND")
+        bgTex:SetAllPoints(bgFrame)
         bgTex:SetAtlas("transmog-locationBG")
-        bgTex:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -40)
-        bgTex:SetSize(280, 380)
+        bgTex:SetAlpha(0.5)
 
-        -- Glow effect at bottom
-        local bgGlowTex = frame:CreateTexture(nil, "BACKGROUND", nil, 6)
-        bgGlowTex:SetAtlas("transmog-locationBG-glow")
-        bgGlowTex:SetPoint("BOTTOMLEFT", bgTex, "BOTTOMLEFT", 0, 0)
-        bgGlowTex:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT", 0, 0)
         local GLOW_HEIGHT_RATIO = 386 / 860
-        bgGlowTex:SetHeight(math.max(1, bgTex:GetHeight() * GLOW_HEIGHT_RATIO))
+        local bgGlowTex = bgFrame:CreateTexture(nil, "BORDER")
+        bgGlowTex:SetAtlas("transmog-locationBG-glow")
+        bgGlowTex:SetPoint("BOTTOMLEFT",  bgFrame, "BOTTOMLEFT",  0, 0)
+        bgGlowTex:SetPoint("BOTTOMRIGHT", bgFrame, "BOTTOMRIGHT", 0, 0)
+        bgGlowTex:SetHeight(math.max(1, (bgFrame:GetHeight() or 0) * GLOW_HEIGHT_RATIO))
         bgGlowTex:SetAlpha(0.5)
+        bgFrame:HookScript("OnSizeChanged", function(_, _, h)
+            bgGlowTex:SetHeight(math.max(1, (h or 0) * GLOW_HEIGHT_RATIO))
+        end)
 
-        GetFFD(frame).modelBg = bgTex
-        GetFFD(frame).modelBgGlow = bgGlowTex
-        GetFFD(frame).modelBgFrame = true  -- Just mark it as created
+        -- Top fade: gradient overlay matching bgFrame bounds
+        local fadeFrame = CreateFrame("Frame", nil, bgFrame)
+        fadeFrame:SetFrameLevel(bgFrame:GetFrameLevel() + 1)
+        fadeFrame:SetAllPoints()
+        fadeFrame:EnableMouse(false)
+        local topFade = fadeFrame:CreateTexture(nil, "ARTWORK")
+        topFade:SetTexture("Interface\\AddOns\\EllesmereUIBlizzardSkin\\Media\\top-gradient-mask.tga")
+        topFade:SetPoint("TOPLEFT", fadeFrame, "TOPLEFT", 0, 0)
+        topFade:SetPoint("TOPRIGHT", fadeFrame, "TOPRIGHT", 0, 0)
+        topFade:SetHeight(60)
+        topFade:SetAlpha(0.5)
+
+        GetFFD(frame).modelBg      = bgTex
+        GetFFD(frame).modelBgGlow  = bgGlowTex
+        GetFFD(frame).modelBgFrame = bgFrame
+        GetFFD(frame).modelTopFade = fadeFrame
     end
+    TryCreateModelBg()
+    -- Retry on show in case model scene wasn't ready on first skin
+    frame:HookScript("OnShow", function()
+        C_Timer.After(0, TryCreateModelBg)
+    end)
 
     -- Hide portrait (separate handling to ensure it's fully hidden)
     if InspectFramePortrait then
@@ -706,8 +748,18 @@ local function SkinInspectSheet()
     do
         local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
+        -- Text overlay frame above model bg and fade
+        if not GetFFD(frame).textOverlay then
+            local txo = CreateFrame("Frame", nil, frame)
+            txo:SetAllPoints(frame)
+            txo:SetFrameLevel((_G.InspectModelFrame and _G.InspectModelFrame:GetFrameLevel() or frame:GetFrameLevel()) + 5)
+            txo:EnableMouse(false)
+            GetFFD(frame).textOverlay = txo
+        end
+        local txo = GetFFD(frame).textOverlay
+
         if not GetFFD(frame).avgIlvlText then
-            local ilvlFS = frame:CreateFontString(nil, "OVERLAY")
+            local ilvlFS = txo:CreateFontString(nil, "OVERLAY")
             ilvlFS:SetFont(fontPath, 16, "")
             ilvlFS:SetTextColor(0.6, 0.2, 1, 1)
             ilvlFS:SetJustifyH("CENTER")
@@ -716,7 +768,7 @@ local function SkinInspectSheet()
         end
 
         if not GetFFD(frame).mPlusScoreText then
-            local mpFS = frame:CreateFontString(nil, "OVERLAY")
+            local mpFS = txo:CreateFontString(nil, "OVERLAY")
             mpFS:SetFont(fontPath, 12, "")
             mpFS:SetTextColor(0.8, 0.8, 0.8, 1)
             mpFS:SetJustifyH("CENTER")
@@ -781,22 +833,21 @@ local function SkinInspectSheet()
             local hl = tab:GetHighlightTexture()
             if hl then hl:SetTexture("") end
 
-            -- Add custom background
+            -- Add custom background (matches character sheet tab color)
             if not GetFFD(tab).bg then
-                GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND", nil, 1)
+                GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND")
                 GetFFD(tab).bg:SetAllPoints()
-                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+                GetFFD(tab).bg:SetColorTexture(0.043, 0.031, 0.027, 1)
             else
-                -- Ensure it stays visible
                 GetFFD(tab).bg:Show()
-                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+                GetFFD(tab).bg:SetColorTexture(0.043, 0.031, 0.027, 1)
             end
 
             -- Add active highlight
             if not GetFFD(tab).activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
-                activeHL:SetColorTexture(1, 1, 1, 0.05)
+                activeHL:SetColorTexture(1, 1, 1, 0.02)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
                 GetFFD(tab).activeHL = activeHL
