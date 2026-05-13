@@ -23,6 +23,15 @@ end
 
 local EUI = EllesmereUI
 local GetUpgradeTrack = EUI.GetUpgradeTrack
+-- Locale-safe gear detection: GetItemInfo returns localized type strings
+-- ("Armor"/"Weapon" only on enUS). Use GetItemInfoInstant's numeric classID.
+local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon  -- 2
+local ITEM_CLASS_ARMOR  = Enum.ItemClass.Armor   -- 4
+local function IsGearItem(itemLink)
+    if not itemLink then return false end
+    local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
+    return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
+end
 local function GetFont() return (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF" end
 local function GetOutline() return (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or "" end
 local function SetBagFont(fs, size)
@@ -1577,8 +1586,7 @@ local function GetOrCreateSlot(idx)
         if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
         local pinned = EllesmereUIDB.bagPinnedItems
         local itemLink = C_Container.GetContainerItemLink(bagID, slotID)
-        local _, _, _, _, _, iType = GetItemInfo(itemLink or "")
-        local isGear = iType == "Armor" or iType == "Weapon"
+        local isGear = IsGearItem(itemLink)
         local cur = pinned[info.itemID] or 0
         if isGear then
             -- Gear: per-stack count toggle
@@ -1877,7 +1885,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
 
         -- Item Level + Upgrade Rank (gear only)
         if btn.ItemLevelText then
-            if iType == "Armor" or iType == "Weapon" then
+            if data._isGear then
                 local showIlvl = not EllesmereUIDB or EllesmereUIDB.showItemlevelInBags ~= false
                 if showIlvl then
                     btn.ItemLevelText:SetText(data._giIlvl or "")
@@ -2021,8 +2029,8 @@ local function GetOrCreatePinOverlay()
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
             if not pinned[itemID] or pinned[itemID] == 0 then
-                local _, _, _, _, _, iType = GetItemInfo(itemID)
-                pinned[itemID] = (iType == "Armor" or iType == "Weapon") and 1 or 999
+                local itemLink = select(2, GetCursorInfo())
+                pinned[itemID] = IsGearItem(itemLink) and 1 or 999
             end
             ClearCursor()
             if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
@@ -2036,8 +2044,8 @@ local function GetOrCreatePinOverlay()
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
             if not pinned[itemID] or pinned[itemID] == 0 then
-                local _, _, _, _, _, iType = GetItemInfo(itemID)
-                pinned[itemID] = (iType == "Armor" or iType == "Weapon") and 1 or 999
+                local itemLink = select(2, GetCursorInfo())
+                pinned[itemID] = IsGearItem(itemLink) and 1 or 999
             end
             ClearCursor()
             if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
@@ -3615,12 +3623,12 @@ function EUI_Bags:RefreshInventory()
                 d.bag = bag; d.slot = slot; d.info = info; d.itemLink = itemLink
                 -- Pre-cache per-item data for RenderButton (zero API calls at render time)
                 if itemLink then
-                    local _, _, q, ilvl, _, iType = GetItemInfo(itemLink)
+                    local _, _, q, ilvl = GetItemInfo(itemLink)
                     d._giQuality = q
                     d._giIlvl = ilvl
-                    d._giType = iType
                     -- Track rank + cooldown: only for types that need them
-                    local isGear = iType == "Armor" or iType == "Weapon"
+                    local isGear = IsGearItem(itemLink)
+                    d._isGear = isGear
                     if isGear and GetUpgradeTrack then
                         local rankText, trackColor = GetUpgradeTrack(itemLink)
                         if rankText and rankText ~= "" then
@@ -4298,8 +4306,8 @@ function EUI_BagsReagent:RefreshInventory()
                 if showItemlevel then
                     local itemLink = C_Container.GetContainerItemLink(data.bag, data.slot)
                     if itemLink then
-                        local _, _, quality, level, _, iType = GetItemInfo(itemLink)
-                        if iType == "Armor" or iType == "Weapon" then
+                        local _, _, quality, level = GetItemInfo(itemLink)
+                        if IsGearItem(itemLink) then
                             local fs = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
                             btn.ItemLevelText:SetFont(STANDARD_TEXT_FONT, fs, "OUTLINE")
                             btn.ItemLevelText:SetText(level or "")
