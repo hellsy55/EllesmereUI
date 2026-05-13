@@ -1,0 +1,565 @@
+-------------------------------------------------------------------------------
+--  EllesmereUIBags_Categories.lua
+--  Category system based on GetItemInfo() type auto-classification.
+--  Categories are hardcoded definitions. Users can rename, reorder, and group
+--  them via sidebar context menus. Icons and type rules are not customizable.
+-------------------------------------------------------------------------------
+
+local CategoryManager = {}
+
+-- Hardcoded category definitions. Order here is the default order.
+-- types = list of GetItemInfo() type strings to match
+-- Empty types = catch-all (Uncategorized)
+local DEFAULT_CATEGORIES = {
+    { name = "Pinned Items",       types = {}, isPinned = true, noGroup = true, noMove = true, icon = "friendslist-recentallies-Pin-yellow", isAtlas = true },
+    { name = "Recent Items",       types = {}, isRecent = true, noGroup = true, noMove = true, icon = "auctionhouse-icon-clock", isAtlas = true },
+    { name = "Reagent Bag",        types = {}, isReagentBag = true, noGroup = true, icon = 3622222 },
+    { name = "Item Set Gear",      types = { "Armor", "Weapon" }, isSetGear = true, icon = 4871338 },
+    { name = "Quest Items",        types = { "Quest" },                     icon = "Crosshair_Quest_64", isAtlas = true },
+    { name = "Weapons / Trinkets", types = { "Weapon" }, equipSlots = { "INVTYPE_TRINKET" }, icon = 3751725 },
+    { name = "Armor",              types = { "Armor" }, excludeEquipSlots = { "INVTYPE_TRINKET" }, icon = 4382688 },
+    { name = "Consumables",        types = { "Consumable" },                icon = 7548911 },
+    { name = "Trade Goods",        types = { "Tradeskill", "Reagent" },     icon = 132996 },
+    { name = "Gear Enhancements",    types = { "Gem", "Item Enhancement" },   icon = 7549094 },
+    { name = "Professions",          types = { "Profession", "Recipe" },    icon = 7548925 },
+    { name = "Housing",            types = { "Housing" },                   icon = 7726459 },
+    { name = "Miscellaneous",      types = { "Miscellaneous", "Container" }, isCatchAll = true, icon = 5524917 },
+}
+
+-------------------------------------------------------------------------------
+--  Init
+--  Builds the runtime category list from hardcoded defaults + saved user state
+--  (renames, reorder, grouping). Saved state keyed by default name.
+-------------------------------------------------------------------------------
+function CategoryManager:InitCategories()
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+
+    -- User state: { [defaultName] = { rename, groupName, groupNameCustom } }
+    local userState = EllesmereUIDB.bagCategoryState or {}
+    -- User order: list of default names in display order
+    local userOrder = EllesmereUIDB.bagCategoryOrder
+
+    -- Build ordered list of default names
+    local orderedDefs = {}
+    if userOrder and #userOrder > 0 then
+        -- Use saved order, appending any new defaults not in the list
+        local seen = {}
+        for _, defName in ipairs(userOrder) do
+            for _, def in ipairs(DEFAULT_CATEGORIES) do
+                if def.name == defName then
+                    orderedDefs[#orderedDefs + 1] = def
+                    seen[defName] = true
+                    break
+                end
+            end
+        end
+        for _, def in ipairs(DEFAULT_CATEGORIES) do
+            if not seen[def.name] then
+                if def.noMove then
+                    -- noMove categories always go to the top
+                    table.insert(orderedDefs, 1, def)
+                else
+                    -- Insert before catch-all
+                    local insertIdx = #orderedDefs
+                    for i, od in ipairs(orderedDefs) do
+                        if od.isCatchAll then insertIdx = i; break end
+                    end
+                    table.insert(orderedDefs, insertIdx, def)
+                end
+            end
+        end
+    else
+        for _, def in ipairs(DEFAULT_CATEGORIES) do
+            orderedDefs[#orderedDefs + 1] = def
+        end
+    end
+
+    -- Force noMove categories to the top (in their DEFAULT_CATEGORIES order)
+    local pinnedSet = {}
+    for _, def in ipairs(orderedDefs) do
+        if def.noMove then pinnedSet[def.name] = true end
+    end
+    local pinned = {}
+    -- Use DEFAULT_CATEGORIES order for noMove items (not saved order)
+    for _, def in ipairs(DEFAULT_CATEGORIES) do
+        if def.noMove and pinnedSet[def.name] then pinned[#pinned + 1] = def end
+    end
+    local rest = {}
+    for _, def in ipairs(orderedDefs) do
+        if not def.noMove then rest[#rest + 1] = def end
+    end
+    orderedDefs = {}
+    for _, d in ipairs(pinned) do orderedDefs[#orderedDefs + 1] = d end
+    for _, d in ipairs(rest) do orderedDefs[#orderedDefs + 1] = d end
+
+    -- Build runtime categories from ordered defaults + user state
+    local cats = {}
+    for _, def in ipairs(orderedDefs) do
+        local state = userState[def.name]
+        cats[#cats + 1] = {
+            _defaultName      = def.name,
+            name              = (state and state.rename) or def.name,
+            types             = def.types,
+            icon              = def.icon,
+            isAtlas           = def.isAtlas,
+            equipSlots        = def.equipSlots,
+            excludeEquipSlots = def.excludeEquipSlots,
+            isCatchAll        = def.isCatchAll,
+            isSetGear         = def.isSetGear,
+            isReagentBag      = def.isReagentBag,
+            isPinned          = def.isPinned,
+            isRecent          = def.isRecent,
+            noGroup           = def.noGroup,
+            noMove            = def.noMove,
+            groupName         = state and state.groupName,
+            groupNameCustom   = state and state.groupNameCustom,
+        }
+    end
+
+    self._categories = cats
+
+    -- Clean up legacy DB keys
+    EllesmereUIDB.bagCategoryDefs = nil
+    EllesmereUIDB.customCategories = nil
+    EllesmereUIDB.categoryItems = nil
+    EllesmereUIDB.categoryPositions = nil
+    EllesmereUIDB.categoryColumns = nil
+end
+
+-- Save user state (renames, grouping) and order back to DB
+function CategoryManager:SaveState()
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    local cats = self._categories
+    if not cats then return end
+
+    local userState = {}
+    local userOrder = {}
+    for _, cat in ipairs(cats) do
+        userOrder[#userOrder + 1] = cat._defaultName
+        local hasState = false
+        local entry = {}
+        if cat.name ~= cat._defaultName then
+            entry.rename = cat.name
+            hasState = true
+        end
+        if cat.groupName then
+            entry.groupName = cat.groupName
+            hasState = true
+        end
+        if cat.groupNameCustom then
+            entry.groupNameCustom = cat.groupNameCustom
+            hasState = true
+        end
+        if hasState then
+            userState[cat._defaultName] = entry
+        end
+    end
+    EllesmereUIDB.bagCategoryState = userState
+    EllesmereUIDB.bagCategoryOrder = userOrder
+end
+
+-------------------------------------------------------------------------------
+--  Accessors
+-------------------------------------------------------------------------------
+function CategoryManager:GetCategories()
+    if not self._categories then
+        self:InitCategories()
+    end
+    return self._categories
+end
+
+function CategoryManager:GetCategoryCount()
+    local cats = self:GetCategories()
+    return #cats
+end
+
+-------------------------------------------------------------------------------
+--  Classification
+-------------------------------------------------------------------------------
+-- Equipment set lookup: built once per ClassifyAll pass, maps "bag:slot" -> true
+local _setGearLookup = {}
+
+local function BuildSetGearLookup()
+    wipe(_setGearLookup)
+    local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
+    if not setIDs then return end
+    for _, setID in ipairs(setIDs) do
+        local locs = C_EquipmentSet.GetItemLocations(setID)
+        if locs then
+            for _, loc in pairs(locs) do
+                if loc and loc ~= 0 and loc ~= 1 and loc ~= -1 then
+                    local data = EquipmentManager_GetLocationData(loc)
+                    if data.isBags then
+                        _setGearLookup[data.bag * 1000 + data.slot] = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Manual overrides: itemID -> type string
+local ITEM_TYPE_OVERRIDES = {
+    [180653] = "Miscellaneous",
+}
+
+-- Classify a single item. Returns category index (1-based) or nil for empty slots.
+-- bag/slot are needed for C_Container.GetContainerItemQuestInfo
+function CategoryManager:ClassifyItem(itemLink, itemID, bag, slot)
+    if not itemLink then return nil end
+
+    local cats = self:GetCategories()
+
+    -- Reagent bag items always go to the Reagent Bag category
+    if bag == 5 then
+        for i, cat in ipairs(cats) do
+            if cat.isReagentBag then return i end
+        end
+    end
+
+    -- Check manual overrides first
+    if itemID and ITEM_TYPE_OVERRIDES[itemID] then
+        local overrideType = ITEM_TYPE_OVERRIDES[itemID]
+        for i, cat in ipairs(cats) do
+            if cat.types then
+                for _, t in ipairs(cat.types) do
+                    if t == overrideType then return i end
+                end
+            end
+        end
+    end
+
+    -- Check quest status via dedicated API (catches "begins a quest" items too)
+    if bag and slot then
+        local questInfo = C_Container.GetContainerItemQuestInfo(bag, slot)
+        if questInfo and (questInfo.isQuestItem or questInfo.questID) then
+            for i, cat in ipairs(cats) do
+                if cat.types then
+                    for _, t in ipairs(cat.types) do
+                        if t == "Quest" then return i end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Get item type + equip slot from GetItemInfo
+    local _, _, _, _, _, itemType, _, _, equipSlot = GetItemInfo(itemLink)
+    if not itemType then
+        -- Item data not yet cached; classify as catch-all for now
+        for i, cat in ipairs(cats) do
+            if cat.isCatchAll then return i end
+        end
+        return #cats
+    end
+
+    -- Equipment set gear check: if item is Armor/Weapon AND in an equipment set,
+    -- route to the "Item Set Gear" category before normal type matching
+    if bag and slot and (itemType == "Armor" or itemType == "Weapon") then
+        if _setGearLookup[bag * 1000 + slot] then
+            for i, cat in ipairs(cats) do
+                if cat.isSetGear then return i end
+            end
+        end
+    end
+
+    -- Walk categories and check if item type + equip slot matches
+    for i, cat in ipairs(cats) do
+        if cat.types and #cat.types > 0 and not cat.isSetGear then
+            local typeMatch = false
+            for _, t in ipairs(cat.types) do
+                if t == itemType then typeMatch = true; break end
+            end
+
+            -- equipSlots: match items of OTHER types that have these equip slots
+            -- (e.g. trinkets are type "Armor" but equipSlot "INVTYPE_TRINKET")
+            if not typeMatch and cat.equipSlots and equipSlot then
+                for _, es in ipairs(cat.equipSlots) do
+                    if es == equipSlot then typeMatch = true; break end
+                end
+            end
+
+            -- excludeEquipSlots: reject items that match the type but have excluded equip slots
+            if typeMatch and cat.excludeEquipSlots and equipSlot then
+                for _, es in ipairs(cat.excludeEquipSlots) do
+                    if es == equipSlot then typeMatch = false; break end
+                end
+            end
+
+            if typeMatch then return i end
+        end
+    end
+
+    -- No match: use catch-all category
+    for i, cat in ipairs(cats) do
+        if cat.isCatchAll then return i end
+    end
+    return #cats
+end
+
+-- Classify all items and return counts per category + total.
+-- Each item in the array gets a .categoryIndex field set.
+-- Reusable tables for ClassifyAll (wiped each call, avoids per-refresh allocation)
+local _claCounts = {}
+local _claPinRemaining = {}
+local _claDisabledIdxSet = {}
+
+function CategoryManager:ClassifyAll(items)
+    BuildSetGearLookup()
+    local cats = self:GetCategories()
+    wipe(_claCounts)
+    for i = 1, #cats do _claCounts[i] = 0 end
+    local counts = _claCounts
+    local total = 0
+
+    -- Pin counts: track remaining pins per itemID
+    local pinnedCatIdx
+    for i, cat in ipairs(cats) do
+        if cat.isPinned then pinnedCatIdx = i; break end
+    end
+    wipe(_claPinRemaining)
+    local pinRemaining = _claPinRemaining
+    local pinnedSet = EllesmereUIDB and EllesmereUIDB.bagPinnedItems
+    if pinnedSet and pinnedCatIdx then
+        for id, count in pairs(pinnedSet) do
+            if type(count) == "number" and count > 0 then
+                pinRemaining[id] = count
+            elseif count == true then
+                pinRemaining[id] = 1  -- legacy boolean format
+            end
+        end
+    end
+
+    -- Disabled categories: items route to catch-all instead (keyed by _defaultName)
+    local disabledCats = EllesmereUIDB and EllesmereUIDB.bagDisabledCategories
+    local catchAllIdx
+    wipe(_claDisabledIdxSet)
+    local disabledIdxSet
+    if disabledCats then
+        disabledIdxSet = _claDisabledIdxSet
+        for i, cat in ipairs(cats) do
+            if cat.isCatchAll then catchAllIdx = i end
+            if cat._defaultName and disabledCats[cat._defaultName] then
+                disabledIdxSet[i] = true
+            end
+        end
+    end
+
+    for _, data in ipairs(items) do
+        if data.info and data.itemLink then
+            -- Check pin count before normal classification
+            local idx
+            local id = data.info.itemID
+            if pinnedCatIdx and id and pinRemaining[id] and pinRemaining[id] > 0 then
+                pinRemaining[id] = pinRemaining[id] - 1
+                idx = pinnedCatIdx
+            else
+                idx = self:ClassifyItem(data.itemLink, id, data.bag, data.slot)
+            end
+            -- Reroute disabled categories to catch-all
+            if disabledIdxSet and idx and disabledIdxSet[idx] and catchAllIdx then
+                idx = catchAllIdx
+            end
+            data.categoryIndex = idx
+            if idx then
+                counts[idx] = (counts[idx] or 0) + 1
+            end
+            total = total + 1
+        end
+    end
+
+    return counts, total
+end
+
+-------------------------------------------------------------------------------
+--  Rename / Reorder (user-facing operations)
+-------------------------------------------------------------------------------
+function CategoryManager:RenameCategory(index, newName)
+    local cats = self:GetCategories()
+    if not cats[index] then return false end
+    if cats[index].isCatchAll then return false end
+    if not newName or newName == "" then return false end
+    local oldGroup = cats[index].groupName
+    local shouldRegenerate = oldGroup and not self:IsGroupNameCustom(oldGroup)
+    cats[index].name = newName
+    if shouldRegenerate then
+        self:RegenerateGroupName(oldGroup)
+    end
+    self:SaveState()
+    return true
+end
+
+-- Move category from fromIndex to toIndex.
+-- Callers should NOT adjust for remove/insert -- this function handles it internally.
+function CategoryManager:ReorderCategory(fromIndex, toIndex)
+    local cats = self:GetCategories()
+    if not cats[fromIndex] or fromIndex == toIndex then return end
+    if toIndex < 1 or toIndex > #cats + 1 then return end
+    local entry = table.remove(cats, fromIndex)
+    local insertAt = toIndex
+    if fromIndex < toIndex then insertAt = toIndex - 1 end
+    table.insert(cats, insertAt, entry)
+    self:SaveState()
+end
+
+-------------------------------------------------------------------------------
+--  Grouping
+-------------------------------------------------------------------------------
+-- Group two or more categories together under a shared name.
+function CategoryManager:GroupCategories(indices, groupName)
+    local cats = self:GetCategories()
+    if not indices or #indices < 2 then return end
+    if not groupName then
+        local names = {}
+        for _, idx in ipairs(indices) do
+            if cats[idx] then names[#names + 1] = cats[idx].name end
+        end
+        if #names == 2 then
+            groupName = names[1] .. " & " .. names[2]
+        elseif #names >= 3 then
+            local last = names[#names]
+            names[#names] = nil
+            groupName = table.concat(names, ", ") .. ", & " .. last
+        else
+            groupName = "Group"
+        end
+    end
+    for _, idx in ipairs(indices) do
+        if cats[idx] then
+            cats[idx].groupName = groupName
+            cats[idx].groupNameCustom = nil
+        end
+    end
+    self:SaveState()
+end
+
+-- Add a category to an existing group.
+function CategoryManager:AddToGroup(catIndex, groupName)
+    local cats = self:GetCategories()
+    if not cats[catIndex] or not groupName then return end
+    cats[catIndex].groupName = groupName
+    self:RegenerateGroupName(groupName)
+    self:SaveState()
+end
+
+-- Remove a category from its group.
+function CategoryManager:UngroupCategory(catIndex)
+    local cats = self:GetCategories()
+    if not cats[catIndex] or not cats[catIndex].groupName then return end
+    local oldGroup = cats[catIndex].groupName
+    local wasCustom = self:IsGroupNameCustom(oldGroup)
+    cats[catIndex].groupName = nil
+    local remaining = {}
+    for i, cat in ipairs(cats) do
+        if cat.groupName == oldGroup then remaining[#remaining + 1] = i end
+    end
+    if #remaining == 0 then
+        -- No members left, nothing to do
+    elseif #remaining == 1 then
+        -- Only 1 member left, auto-disband
+        cats[remaining[1]].groupName = nil
+    elseif not wasCustom then
+        self:RegenerateGroupName(oldGroup)
+    end
+    self:SaveState()
+end
+
+-- Ungroup all members of a group.
+function CategoryManager:DisbandGroup(groupName)
+    local cats = self:GetCategories()
+    for _, cat in ipairs(cats) do
+        if cat.groupName == groupName then cat.groupName = nil end
+    end
+    self:SaveState()
+end
+
+-- Rename a group (updates all members).
+function CategoryManager:RenameGroup(oldName, newName)
+    if not newName or newName == "" then return end
+    local cats = self:GetCategories()
+    for _, cat in ipairs(cats) do
+        if cat.groupName == oldName then cat.groupName = newName end
+    end
+    self:SaveState()
+end
+
+-- Check if the group name was manually customized by the user.
+function CategoryManager:IsGroupNameCustom(groupName)
+    local cats = self:GetCategories()
+    for _, cat in ipairs(cats) do
+        if cat.groupName == groupName and cat.groupNameCustom then return true end
+    end
+    return false
+end
+
+-- Mark a group name as manually customized (set on all members).
+function CategoryManager:SetGroupNameCustom(groupName, isCustom)
+    local cats = self:GetCategories()
+    for _, cat in ipairs(cats) do
+        if cat.groupName == groupName then
+            cat.groupNameCustom = isCustom or nil
+        end
+    end
+    self:SaveState()
+end
+
+-- Auto-regenerate group name from member names.
+function CategoryManager:RegenerateGroupName(groupName)
+    local cats = self:GetCategories()
+    local names = {}
+    for _, cat in ipairs(cats) do
+        if cat.groupName == groupName then names[#names + 1] = cat.name end
+    end
+    local newName
+    if #names == 2 then
+        newName = names[1] .. " & " .. names[2]
+    elseif #names >= 3 then
+        local last = names[#names]
+        newName = table.concat(names, ", ", 1, #names - 1) .. ", & " .. last
+    else
+        return
+    end
+    if newName ~= groupName then
+        self:RenameGroup(groupName, newName)
+        self:SetGroupNameCustom(newName, false)
+    end
+end
+
+-- Get all unique group names.
+function CategoryManager:GetGroupNames()
+    local cats = self:GetCategories()
+    local seen = {}
+    local groups = {}
+    for _, cat in ipairs(cats) do
+        if cat.groupName and not seen[cat.groupName] then
+            seen[cat.groupName] = true
+            groups[#groups + 1] = cat.groupName
+        end
+    end
+    return groups
+end
+
+-- Get all member indices for a group.
+function CategoryManager:GetGroupMembers(groupName)
+    local cats = self:GetCategories()
+    local members = {}
+    for i, cat in ipairs(cats) do
+        if cat.groupName == groupName then members[#members + 1] = i end
+    end
+    return members
+end
+
+-- Check if a category is in a group.
+function CategoryManager:IsGrouped(catIndex)
+    local cats = self:GetCategories()
+    return cats[catIndex] and cats[catIndex].groupName or nil
+end
+
+-------------------------------------------------------------------------------
+--  Global accessor
+-------------------------------------------------------------------------------
+if not _G.EUI_CategoryManager then
+    _G.EUI_CategoryManager = CategoryManager
+end
+
+CategoryManager:InitCategories()

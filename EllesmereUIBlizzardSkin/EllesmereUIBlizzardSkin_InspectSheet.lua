@@ -233,7 +233,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
                 upgradeLabel:SetPoint("LEFT", GetFFD(slot).iLvlText, "RIGHT", 3, 0)
             end
 
-            upgradeLabel:SetText(upgradeText)
+            upgradeLabel:SetText("(" .. upgradeText .. ")")
             GetFFD(slot).upgradeText = upgradeLabel
         end
     end

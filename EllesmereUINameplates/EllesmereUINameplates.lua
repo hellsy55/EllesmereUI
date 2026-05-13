@@ -5433,6 +5433,11 @@ manager:SetScript("OnEvent", function(self, event, unit)
                         uf:SetAlpha(1)
                         uf:Show()
                     end
+                    -- Restore RaidTargetFrame if it was moved offscreen by a
+                    -- previous enemy plate on this recycled nameplate.
+                    if uf.RaidTargetFrame then
+                        RestoreFromOffscreen(uf.RaidTargetFrame)
+                    end
                 end
                 -- Apply Y-offset
                 local yOff = db.friendlyNameOnlyYOffset or 0
@@ -5453,6 +5458,12 @@ manager:SetScript("OnEvent", function(self, event, unit)
         end
         ns.plates[unit] = plate
         plate:SetUnit(unit, nameplate)
+        -- If this plate is the current target, update the cached ref so
+        -- class power pips track it immediately (no PLAYER_TARGET_CHANGED
+        -- fires when a nameplate is recycled for the same target unit).
+        if UnitIsUnit(unit, "target") then
+            ns._cachedTargetPlate = plate
+        end
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         questMobCache[unit] = nil
         -- Restore Blizzard UnitFrame elements so the recycled nameplate is clean

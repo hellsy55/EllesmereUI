@@ -365,7 +365,7 @@ local function LayoutFlyoutButtons()
             icon:ClearAllPoints()
             icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
             icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
-            icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+            pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
         end
         -- Add atlas ring border overlay
         if not GetFFD(btn).flyoutRing then
@@ -1052,11 +1052,9 @@ local _greatVaultBtn = nil
 local GREAT_VAULT_WHOLE_ATLAS = "greatVault-whole-normal"
 
 local function RegisterVaultEscClose()
-    if not UISpecialFrames then return end
-    for _, name in ipairs(UISpecialFrames) do
-        if name == "WeeklyRewardsFrame" then return end
-    end
-    tinsert(UISpecialFrames, "WeeklyRewardsFrame")
+    local wrf = _G.WeeklyRewardsFrame
+    if not wrf or not EllesmereUI.RegisterEscapeClose then return end
+    EllesmereUI.RegisterEscapeClose(wrf)
 end
 
 local function ColorizeVaultText(text, r, g, b)
@@ -1106,62 +1104,172 @@ local function FormatVaultToken(text, state)
     return ColorizeVaultText(text, r, g, b)
 end
 
-local function PadLabel(label)
-    local PAD = {
-        ["Raids"]   = 6,
-        ["Mythic+"] = 5,
-        ["World"]   = 6,
-    }
-    return label .. string.rep(" ", PAD[label] or 5)
+-- Build vault row data: { label, isRaid, tokens = { {text, state}, ... } }
+local function BuildVaultRowData(label, activityType, isRaid)
+    local activities = GetOrderedWeeklyActivities(activityType)
+    local tokens = {}
+    for i = 1, 3 do
+        local info = activities and activities[i]
+        if not info then
+            tokens[i] = { text = "-", state = "empty" }
+        else
+            local progress = math.max(0, tonumber(info.progress) or 0)
+            local threshold = math.max(0, tonumber(info.threshold) or 0)
+            local level = math.max(0, tonumber(info.level) or 0)
+            if threshold <= 0 then
+                tokens[i] = { text = "-", state = "empty" }
+            elseif progress >= threshold then
+                if isRaid then
+                    tokens[i] = { text = ("%d/%d"):format(progress, threshold), state = "done" }
+                elseif level > 0 then
+                    tokens[i] = { text = "+" .. level, state = "done" }
+                else
+                    tokens[i] = { text = ("%d/%d"):format(progress, threshold), state = "done" }
+                end
+            else
+                tokens[i] = { text = ("%d/%d"):format(progress, threshold), state = progress > 0 and "partial" or "empty" }
+            end
+        end
+    end
+    return { label = label, tokens = tokens }
 end
 
-local function BuildVaultLine(label, activityType, isRaid)
-    local paddedLabel = ColorizeVaultText(PadLabel(label), 0.812, 0.592, 0.212)
-    local activities = GetOrderedWeeklyActivities(activityType)
+-- Custom multi-column vault tooltip (pixel-aligned columns via FontStrings)
+local _vaultTT
+local _vaultTTRows = {}  -- [row][col] = FontString
+local VAULT_COL_GAP = 8
+local VAULT_ROW_H = 14
+local VAULT_PAD = 6
 
-    if not activities then
-        return paddedLabel .. FormatVaultToken("-", "empty")
-    end
+local function GetVaultTooltip()
+    if _vaultTT then return _vaultTT end
+    local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    f:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeSize = 1 })
+    f:SetBackdropColor(0.06, 0.06, 0.06, 0.90)
+    f:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    f:SetFrameStrata("TOOLTIP")
+    f:Hide()
 
-    local tokens = {}
-    for i = 1, math.min(#activities, 3) do
-        local info = activities[i]
-        local progress = math.max(0, tonumber(info and info.progress) or 0)
-        local threshold = math.max(0, tonumber(info and info.threshold) or 0)
-        local level = math.max(0, tonumber(info and info.level) or 0)
+    -- Fade animations (matches ShowWidgetTooltip/HideWidgetTooltip)
+    local fadeInAG = f:CreateAnimationGroup()
+    local fadeIn = fadeInAG:CreateAnimation("Alpha")
+    fadeIn:SetDuration(0.25); fadeIn:SetSmoothing("OUT")
+    fadeInAG:SetScript("OnFinished", function() f:SetAlpha(1) end)
+    f._fadeInAG = fadeInAG; f._fadeIn = fadeIn
 
-        if threshold <= 0 then
-            tokens[#tokens + 1] = FormatVaultToken("-", "empty")
-        elseif progress >= threshold then
-            if isRaid then
-                tokens[#tokens + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), "done")
-            elseif level > 0 then
-                tokens[#tokens + 1] = FormatVaultToken("+" .. level, "done")
-            else
-                tokens[#tokens + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), "done")
-            end
-        else
-            local state = progress > 0 and "partial" or "empty"
-            tokens[#tokens + 1] = FormatVaultToken(("%d/%d"):format(progress, threshold), state)
+    local fadeOutAG = f:CreateAnimationGroup()
+    local fadeOut = fadeOutAG:CreateAnimation("Alpha")
+    fadeOut:SetDuration(0.25); fadeOut:SetSmoothing("IN")
+    fadeOutAG:SetScript("OnFinished", function() f:SetAlpha(0); f:Hide() end)
+    f._fadeOutAG = fadeOutAG; f._fadeOut = fadeOut
+
+    -- Title row (font set at show-time)
+    local title = f:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 11, "")  -- placeholder, updated on show
+    title:SetTextColor(0.80, 0.80, 0.80, 1)
+    title:SetPoint("TOP", f, "TOP", 0, -VAULT_PAD)
+    title:SetText("Great Vault")
+    f._title = title
+
+    -- 3 data rows x 4 columns (label + 3 tokens)
+    for row = 1, 3 do
+        _vaultTTRows[row] = {}
+        for col = 0, 3 do
+            local fs = f:CreateFontString(nil, "OVERLAY")
+            fs:SetFont("Fonts\\FRIZQT__.TTF", 11, "")  -- placeholder, updated on show
+            fs:SetJustifyH("LEFT")
+            _vaultTTRows[row][col] = fs
         end
     end
 
-    return paddedLabel .. table.concat(tokens, "   ")
+    _vaultTT = f
+    return f
 end
 
-local function BuildGreatVaultTooltipText()
+local function ShowVaultTooltip(anchor)
     local raidType = (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Raid) or 3
     local dungeonType = (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.Activities) or 1
     local worldType = (Enum and Enum.WeeklyRewardChestThresholdType and Enum.WeeklyRewardChestThresholdType.World) or 6
 
-    local lines = {
-        ColorizeVaultText("Great Vault", 0.80, 0.80, 0.80),
-        BuildVaultLine("Raids", raidType, true),
-        BuildVaultLine("Mythic+", dungeonType, false),
-        BuildVaultLine("World", worldType, false),
+    local rows = {
+        BuildVaultRowData("Raids", raidType, true),
+        BuildVaultRowData("Mythic+", dungeonType, false),
+        BuildVaultRowData("World", worldType, false),
     }
 
-    return table.concat(lines, "\n")
+    local tt = GetVaultTooltip()
+
+    -- Apply user's current font to all FontStrings
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontFlags = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    tt._title:SetFont(fontPath, 11, fontFlags)
+    for r = 1, 3 do
+        _vaultTTRows[r][0]:SetFont(fontPath, 11, fontFlags)
+        for c = 1, 3 do
+            _vaultTTRows[r][c]:SetFont(fontPath, 10, fontFlags)
+        end
+    end
+
+    -- Populate text and measure column widths
+    local colWidths = { 0, 0, 0, 0 }
+    for r = 1, 3 do
+        local rd = rows[r]
+        local labelFS = _vaultTTRows[r][0]
+        labelFS:SetText(rd.label)
+        labelFS:SetTextColor(0.812, 0.592, 0.212, 1)
+        local w = labelFS:GetStringWidth() or 0
+        if w > colWidths[1] then colWidths[1] = w end
+
+        for c = 1, 3 do
+            local tk = rd.tokens[c]
+            local fs = _vaultTTRows[r][c]
+            fs:SetText(tk.text)
+            local tr, tg, tb = GetVaultTokenColor(tk.state)
+            fs:SetTextColor(tr, tg, tb, 1)
+            local tw = fs:GetStringWidth() or 0
+            if tw > colWidths[c + 1] then colWidths[c + 1] = tw end
+        end
+    end
+
+    -- Position columns at measured offsets
+    local titleTop = VAULT_PAD + (tt._title:GetStringHeight() or 14) + 4
+    local colX = { VAULT_PAD }
+    for c = 2, 4 do
+        colX[c] = colX[c - 1] + colWidths[c - 1] + VAULT_COL_GAP
+    end
+    local totalW = colX[4] + colWidths[4] + VAULT_PAD
+
+    for r = 1, 3 do
+        local y = -(titleTop + (r - 1) * VAULT_ROW_H)
+        for c = 0, 3 do
+            _vaultTTRows[r][c]:ClearAllPoints()
+            _vaultTTRows[r][c]:SetPoint("TOPLEFT", tt, "TOPLEFT", colX[c + 1], y)
+        end
+    end
+
+    local totalH = titleTop + 3 * VAULT_ROW_H + VAULT_PAD
+    tt:SetSize(totalW, totalH)
+    tt:ClearAllPoints()
+    tt:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+
+    -- Fade in
+    tt._fadeOutAG:Stop()
+    tt._fadeInAG:Stop()
+    tt:SetAlpha(0)
+    tt:Show()
+    tt._fadeIn:SetFromAlpha(0)
+    tt._fadeIn:SetToAlpha(1)
+    tt._fadeInAG:Play()
+end
+
+local function HideVaultTooltip()
+    if not _vaultTT or not _vaultTT:IsShown() then return end
+    _vaultTT._fadeInAG:Stop()
+    _vaultTT._fadeOutAG:Stop()
+    _vaultTT._fadeOut:SetFromAlpha(_vaultTT:GetAlpha())
+    _vaultTT._fadeOut:SetToAlpha(0)
+    _vaultTT._fadeOutAG:Play()
 end
 
 local function ToggleGreatVault()
@@ -1211,17 +1319,18 @@ local function CreateGreatVaultBtn(parent)
 
     btn:SetScript("OnEnter", function(self)
         self._whole:SetVertexColor(1, 1, 1, 1)
-        if EllesmereUI.ShowWidgetTooltip then
-            local minimapCfg = EBS and EBS.db and EBS.db.profile and EBS.db.profile.minimap
-            if minimapCfg and minimapCfg.greatVaultExtraInfo == false then
+        local minimapCfg = EBS and EBS.db and EBS.db.profile and EBS.db.profile.minimap
+        if minimapCfg and minimapCfg.greatVaultExtraInfo == false then
+            if EllesmereUI.ShowWidgetTooltip then
                 EllesmereUI.ShowWidgetTooltip(self, "Great Vault", { anchor = "left" })
-            else
-                EllesmereUI.ShowWidgetTooltip(self, BuildGreatVaultTooltipText(), { anchor = "left", color = {1, 1, 1, 1} })
             end
+        else
+            ShowVaultTooltip(self)
         end
     end)
     btn:SetScript("OnLeave", function(self)
         self._whole:SetVertexColor(0.85, 0.85, 0.85, 1)
+        HideVaultTooltip()
         if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     end)
     btn:SetScript("OnMouseDown", function(self)
@@ -1561,7 +1670,7 @@ local function CreateMinimapPortalFlyout()
         end
     end)
 
-    tinsert(UISpecialFrames, "EUIMinimapPortalFlyout")
+    EllesmereUI.RegisterEscapeClose(flyout)
 
     _portalFlyout = flyout
     return flyout
@@ -2004,7 +2113,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     icon:ClearAllPoints()
                     icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
                     icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
-                    icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+                    pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
                 end
                 -- Black square background
                 if not GetFFD(btn).ungroupBg then

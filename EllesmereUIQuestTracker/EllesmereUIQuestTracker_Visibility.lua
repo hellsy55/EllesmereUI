@@ -424,10 +424,25 @@ function EQT.InitVisibility()
             if _bgFrame and _bgFrame:IsShown() and _bgFrame:IsMouseOver() then return true end
             return false
         end
+        moProxy.GetRect = function()
+            if _bgFrame and _bgFrame:IsShown() then return _bgFrame:GetRect() end
+            if otf then return otf:GetRect() end
+            return nil
+        end
+        moProxy.GetEffectiveScale = function()
+            if otf then return otf:GetEffectiveScale() end
+            return 1
+        end
         moProxy.SetAlpha = function(_, a)
             if otf then otf:SetAlpha(a) end
             if _bgFrame then _bgFrame:SetAlpha(a) end
         end
+        moProxy.Show = function() end
+        moProxy.Hide = function()
+            if otf then otf:SetAlpha(0) end
+            if _bgFrame then _bgFrame:SetAlpha(0) end
+        end
+        moProxy.EnableMouse = function() end
         EllesmereUI.RegisterMouseoverTarget(moProxy, function()
             if ShouldAutoHide() then return false end
             if _eqtSuppressed then return false end

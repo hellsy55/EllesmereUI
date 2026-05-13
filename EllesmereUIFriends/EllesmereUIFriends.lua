@@ -136,12 +136,25 @@ local function SkinRaidTabButton(btn)
         local region = select(i, btn:GetRegions())
         if region and region:IsObjectType("Texture") then
             region:SetTexture("")
+            region:SetAlpha(0)
         end
     end
     if btn.SetNormalTexture then btn:SetNormalTexture("") end
     if btn.SetPushedTexture then btn:SetPushedTexture("") end
     if btn.SetHighlightTexture then btn:SetHighlightTexture("") end
     if btn.SetDisabledTexture then btn:SetDisabledTexture("") end
+    local nt = btn.GetNormalTexture and btn:GetNormalTexture()
+    if nt then nt:SetTexture(""); nt:SetAlpha(0) end
+    local pt = btn.GetPushedTexture and btn:GetPushedTexture()
+    if pt then pt:SetTexture(""); pt:SetAlpha(0) end
+    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if ht then ht:SetTexture(""); ht:SetAlpha(0) end
+    local dt = btn.GetDisabledTexture and btn:GetDisabledTexture()
+    if dt then dt:SetTexture(""); dt:SetAlpha(0) end
+    -- Left/Middle/Right chrome (UIPanelButtonTemplate)
+    if btn.Left then btn.Left:SetAlpha(0) end
+    if btn.Right then btn.Right:SetAlpha(0) end
+    if btn.Middle then btn.Middle:SetAlpha(0) end
     if BackdropTemplateMixin then
         Mixin(btn, BackdropTemplateMixin)
         btn:SetBackdrop({
@@ -410,7 +423,7 @@ local function SkinRaidTab()
         if raidInfoBtn then
             raidInfoBtn:ClearAllPoints()
             raidInfoBtn:SetSize(btnW, 20)
-            raidInfoBtn:SetPoint("TOPRIGHT", scrollBox, "TOPRIGHT", 12, 48)
+            raidInfoBtn:SetPoint("TOPRIGHT", scrollBox, "TOPRIGHT", 0, 48)
         end
     end
 
@@ -1320,6 +1333,23 @@ local function UpdateBottomButtonAccent()
             ApplyAccentToBtn(btn, btn:GetFontString())
         end
     end
+
+    -- Send Message button: text + separate border overlay (skinned outside SkinBottomButton)
+    local msgBtn = _G.FriendsFrameSendMessageButton
+    if msgBtn then
+        local text = msgBtn:GetFontString()
+        if text then
+            if useAccent then text:SetTextColor(EG.r, EG.g, EG.b, 0.7)
+            else text:SetTextColor(1, 1, 1, 0.5) end
+        end
+    end
+    local ffd = FriendsFrame and GetFFD(FriendsFrame)
+    if ffd then
+        if ffd.msgBdr then
+            if useAccent then PP.SetBorderColor(ffd.msgBdr, EG.r, EG.g, EG.b, 0.5)
+            else PP.SetBorderColor(ffd.msgBdr, 1, 1, 1, 0.4) end
+        end
+    end
 end
 
 -- Frame background color
@@ -2127,9 +2157,8 @@ local function SkinFriendsFrame()
     end
     SkinSubTabs()
 
-    -- Skin scrollbars
-    -- Restyle Blizzard's scrollbar in-place (no SetScript, no RegisterCallback).
-    -- Just visual modifications like ElvUI's HandleTrimScrollBar.
+    -- Skin scrollbars. Do NOT register callbacks or setScript
+    -- on Blizzard's Scrollbar. This was the taint source
     do
         local bar = FriendsListFrame and FriendsListFrame.ScrollBar
         if bar then
@@ -2223,8 +2252,12 @@ local function SkinFriendsFrame()
         clearBtn:Hide()
         search:SetTextInsets(6, 18, 0, 0)
         search:SetScript("OnEditFocusLost", function(self)
-            self:SetText("")
-            clearBtn:Hide()
+            C_Timer.After(0.15, function()
+                if not search:HasFocus() then
+                    search:SetText("")
+                    clearBtn:Hide()
+                end
+            end)
         end)
 
         -- Dropdown results frame
@@ -3215,6 +3248,18 @@ end
 
 function EBS:OnEnable()
     ApplyAll()
+
+    -- Live accent color update: re-apply friends skin when accent changes
+    if EllesmereUI._accentElements then
+        EllesmereUI._accentElements[#EllesmereUI._accentElements + 1] = {
+            type = "callback",
+            fn = function()
+                if FriendsFrame and EBS.db.profile.friends.enabled then
+                    ApplyFriends()
+                end
+            end,
+        }
+    end
 
     local loginRefresh = CreateFrame("Frame")
     loginRefresh:RegisterEvent("PLAYER_ENTERING_WORLD")

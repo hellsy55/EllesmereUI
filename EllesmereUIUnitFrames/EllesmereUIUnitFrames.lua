@@ -2086,6 +2086,51 @@ end
 -- arithmetic on the absorb value is ever performed. Wired into oUF via
 -- HealthPrediction.Override so oUF still owns event registration
 -- (UNIT_HEALTH, UNIT_ABSORB_AMOUNT_CHANGED, etc.) and enable/disable.
+
+-- Re-anchor existing absorb bars for the current reverse fill state.
+-- Called from the live-update path when the user toggles reverse fill.
+local function UpdateAbsorbBarReverseFill(frame, isReversed)
+    if not frame or not frame.HealthPrediction then return end
+    local ab = frame.HealthPrediction.damageAbsorb
+    if not ab then return end
+    local fw = ab._forward
+    local curClip = ab._curClip
+    local missClip = ab._missClip
+    local hpBar = ab._hpBar
+    if not (fw and curClip and missClip and hpBar) then return end
+    local hpTex = hpBar:GetStatusBarTexture()
+    if not hpTex then return end
+
+    curClip:ClearAllPoints()
+    missClip:ClearAllPoints()
+    ab:ClearAllPoints()
+    fw:ClearAllPoints()
+
+    if isReversed then
+        curClip:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT", 0, 0)
+        curClip:SetPoint("BOTTOMLEFT",  hpTex, "BOTTOMLEFT", 0, 0)
+        missClip:SetPoint("TOPRIGHT",    hpTex, "TOPLEFT", 1, 0)
+        missClip:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT", 0, 0)
+        ab:SetReverseFill(false)
+        ab:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
+        ab:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+        fw:SetReverseFill(true)
+        fw:SetPoint("TOPRIGHT",    hpTex, "TOPLEFT",    0, 0)
+        fw:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMLEFT", 0, 0)
+    else
+        curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
+        curClip:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+        missClip:SetPoint("TOPLEFT",     hpTex, "TOPRIGHT", -1, 0)
+        missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        ab:SetReverseFill(true)
+        ab:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+        ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        fw:SetReverseFill(false)
+        fw:SetPoint("TOPLEFT",    hpTex, "TOPRIGHT",    0, 0)
+        fw:SetPoint("BOTTOMLEFT", hpTex, "BOTTOMRIGHT", 0, 0)
+    end
+end
+
 local function CreateAbsorbBar(frame, unit, settings)
     if not frame.Health then return end
 
@@ -2098,52 +2143,64 @@ local function CreateAbsorbBar(frame, unit, settings)
     absorbMask:SetAllPoints(hpBar)
     absorbMask:SetTexture("Interface\\Buttons\\WHITE8X8")
 
+    -- Reverse fill: when health fills right-to-left, mirror all absorb anchors.
+    local isReversed = settings.healthReverseFill and true or false
+
     -- Current HP clip: bounds the backfill bar to the filled health area.
-    -- The BOTTOMRIGHT anchor tracks healthTexture.BOTTOMRIGHT, so as the
-    -- health value changes the clip's right edge follows the fill edge.
     local curClip = CreateFrame("Frame", nil, hpBar)
-    curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
-    curClip:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    if isReversed then
+        curClip:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT", 0, 0)
+        curClip:SetPoint("BOTTOMLEFT",  hpBar:GetStatusBarTexture(), "BOTTOMLEFT", 0, 0)
+    else
+        curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
+        curClip:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    end
     curClip:SetClipsChildren(true)
 
     -- Missing HP clip: bounds the forward bar to the empty health area.
-    -- TOPLEFT anchor tracks healthTexture.TOPRIGHT, so the clip's left edge
-    -- follows the fill edge as current HP changes. The -1 overlap prevents
-    -- a 1px gap at subpixel health values where the texture edge and clip
-    -- edge round to different pixels.
     local missClip = CreateFrame("Frame", nil, hpBar)
-    missClip:SetPoint("TOPLEFT",     hpBar:GetStatusBarTexture(), "TOPRIGHT", -1, 0)
-    missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    if isReversed then
+        missClip:SetPoint("TOPRIGHT",    hpBar:GetStatusBarTexture(), "TOPLEFT", 1, 0)
+        missClip:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT", 0, 0)
+    else
+        missClip:SetPoint("TOPLEFT",     hpBar:GetStatusBarTexture(), "TOPRIGHT", -1, 0)
+        missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    end
     missClip:SetClipsChildren(true)
 
-    -- Backfill bar (overflow): grows leftward from hpBar.RIGHT. curClip cuts
-    -- off anything right of the current-HP edge, so only the portion that
-    -- extends past the missing-health area renders (= max(0, absorb -
-    -- missing) visible). Appears only when shield > missing-health.
+    -- Backfill bar (overflow): grows into filled health from the edge.
     local backfillBar = CreateFrame("StatusBar", nil, curClip)
     backfillBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local bfFill = backfillBar:GetStatusBarTexture()
     if bfFill then bfFill:SetDrawLayer("ARTWORK", 1); bfFill:AddMaskTexture(absorbMask) end
     backfillBar:SetStatusBarColor(1, 1, 1, 0.8)
-    backfillBar:SetReverseFill(true)
-    backfillBar:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
-    backfillBar:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    backfillBar:SetReverseFill(not isReversed)
+    if isReversed then
+        backfillBar:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
+        backfillBar:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+    else
+        backfillBar:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+        backfillBar:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    end
     backfillBar:SetWidth(hpBar:GetWidth())
     backfillBar:SetHeight(hpBar:GetHeight())
     backfillBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
     backfillBar:Hide()
 
-    -- Forward bar (primary): grows rightward from the current-HP edge into
-    -- missing health. missClip cuts off anything right of hpBar.RIGHT, so
-    -- the visible portion is exactly min(absorb, missing) pixels wide.
+    -- Forward bar (primary): grows into missing health from the HP edge.
     local forwardBar = CreateFrame("StatusBar", nil, missClip)
     forwardBar:SetStatusBarTexture(ABSORB_SHIELD_TEX)
     local fwFill = forwardBar:GetStatusBarTexture()
     if fwFill then fwFill:SetDrawLayer("ARTWORK", 1); fwFill:AddMaskTexture(absorbMask) end
     forwardBar:SetStatusBarColor(1, 1, 1, 0.8)
-    forwardBar:SetReverseFill(false)
-    forwardBar:SetPoint("TOPLEFT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
-    forwardBar:SetPoint("BOTTOMLEFT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    forwardBar:SetReverseFill(isReversed)
+    if isReversed then
+        forwardBar:SetPoint("TOPRIGHT",    hpBar:GetStatusBarTexture(), "TOPLEFT",    0, 0)
+        forwardBar:SetPoint("BOTTOMRIGHT", hpBar:GetStatusBarTexture(), "BOTTOMLEFT", 0, 0)
+    else
+        forwardBar:SetPoint("TOPLEFT",    hpBar:GetStatusBarTexture(), "TOPRIGHT",    0, 0)
+        forwardBar:SetPoint("BOTTOMLEFT", hpBar:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    end
     forwardBar:SetWidth(hpBar:GetWidth())
     forwardBar:SetHeight(hpBar:GetHeight())
     forwardBar:SetFrameLevel(hpBar:GetFrameLevel() + 1)
@@ -6614,6 +6671,7 @@ local function ReloadFrames()
             end
             ApplyDarkTheme(frame.Health)
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
+            UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false)
             if frame.Health.ForceUpdate then
                 frame.Health:ForceUpdate()
             end

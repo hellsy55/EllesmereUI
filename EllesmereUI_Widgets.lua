@@ -2396,7 +2396,7 @@ local function BuildColorPickerPopup()
         else hexBox:SetText(lastValidHex) end
     end
     local hexEscaping = false
-    hexBox:SetScript("OnEnterPressed", function() CommitHex(); hexBox:ClearFocus(); popup:Hide() end)
+    hexBox:SetScript("OnEnterPressed", function() CommitHex(); hexBox:ClearFocus(); _confirmed = true; popup:Hide() end)
     hexBox:SetScript("OnEscapePressed", function()
         hexEscaping = true
         hexBox:SetText(lastValidHex)
@@ -2424,7 +2424,8 @@ local function BuildColorPickerPopup()
     okBtn:SetSize(RIGHT_W, 21)
     okBtn:SetPoint("BOTTOMLEFT", rightCol, "BOTTOMLEFT", 0, 0)
     okBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
-    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function() popup:Hide() end)
+    local _confirmed = false
+    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function() _confirmed = true; popup:Hide() end)
 
     -- Cancel text above OK button
     local cancelBtn = CreateFrame("Button", nil, rightCol)
@@ -2439,13 +2440,15 @@ local function BuildColorPickerPopup()
     cancelBtn:SetScript("OnEnter", function() cancelText:SetTextColor(1, 1, 1, 0.7) end)
     cancelBtn:SetScript("OnLeave", function() cancelText:SetTextColor(1, 1, 1, 0.4) end)
     cancelBtn:SetScript("OnClick", function()
-        if cancelFunc then cancelFunc() end
+        _confirmed = false
         popup:Hide()
     end)
 
     -- Hide / Escape
     popup:SetScript("OnHide", function()
         EllesmereUI._colorPickerOpen = false
+        if not _confirmed and cancelFunc then cancelFunc() end
+        _confirmed = false
         svDragging = false; hueDragging = false; alphaDragging = false
         svPad:SetScript("OnUpdate", nil)
         hueBar:SetScript("OnUpdate", nil)
@@ -2454,14 +2457,7 @@ local function BuildColorPickerPopup()
         EllesmereUI._deferredDriftChecks = nil
         if checks then for fn in pairs(checks) do fn() end end
     end)
-    tinsert(UISpecialFrames, "EllesmereUIColorPicker")
-    popup:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then
-            popup:SetPropagateKeyboardInput(false)
-            if cancelFunc then cancelFunc() end
-            popup:Hide()
-        else popup:SetPropagateKeyboardInput(true) end
-    end)
+    EllesmereUI.RegisterEscapeClose(popup)
 
     -- Open API
     function popup:Open(info, anchorFrame)
@@ -5535,7 +5531,7 @@ end  -- end deferred init
 --  getFn(key) -> bool, setFn(key, bool)
 --  Returns: ddBtn, refreshFn
 -------------------------------------------------------------------------------
-function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, getFn, setFn, onChanged)
+function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, getFn, setFn, onChanged, maxVisibleItems, searchable)
     local PP = EllesmereUI.PP or EllesmereUI.PanelPP
     local ddBtn = CreateFrame("Button", nil, parentFrame)
     PP.Size(ddBtn, ddW, 30)
@@ -5558,11 +5554,15 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
     local menu
     local function SummaryLabel()
         local names = {}
+        local total = 0
         for _, item in ipairs(items) do
-            if getFn(item.key) then names[#names + 1] = item.label end
+            if not item.isHeader then
+                total = total + 1
+                if getFn(item.key) then names[#names + 1] = item.label end
+            end
         end
         if #names == 0 then return "None" end
-        if #names == #items then return "All" end
+        if #names == total then return "All" end
         return table.concat(names, ", ")
     end
     local function UpdateLabel()
@@ -5573,7 +5573,16 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
     local function EnsureMenu()
         if menu then return end
         local ITEM_H = 28
-        local menuH = 4 + #items * ITEM_H + 4
+        local HDR_H = 22
+        local checkableCount = 0
+        local contentH = 8
+        for _, item in ipairs(items) do
+            if item.isHeader then contentH = contentH + HDR_H
+            else contentH = contentH + ITEM_H; checkableCount = checkableCount + 1 end
+        end
+        local SEARCH_H = searchable and 26 or 0
+        local needsScroll = maxVisibleItems and checkableCount > maxVisibleItems
+        local menuH = (needsScroll and (4 + maxVisibleItems * ITEM_H + 4) or contentH) + SEARCH_H
         menu = CreateFrame("Frame", nil, UIParent)
         menu:SetFrameStrata("FULLSCREEN_DIALOG")
         menu:SetFrameLevel(200)
@@ -5589,9 +5598,75 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local ppScale = EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale() or 1
         menu:SetScale(ppScale)
 
+        -- Search box (optional)
+        local searchEdit, searchPlaceholder
+        if searchable then
+            searchEdit = CreateFrame("EditBox", nil, menu)
+            searchEdit:SetSize(ddW - 16, SEARCH_H)
+            searchEdit:SetPoint("TOP", menu, "TOP", 0, -4)
+            searchEdit:SetFrameLevel(menu:GetFrameLevel() + 3)
+            searchEdit:SetFont(fontPath, 11, "")
+            searchEdit:SetTextColor(1, 1, 1, 0.9)
+            searchEdit:SetJustifyH("LEFT")
+            searchEdit:SetAutoFocus(false)
+            searchEdit:SetMaxLetters(30)
+            searchEdit:SetTextInsets(4, 4, 0, 0)
+            local sBg = searchEdit:CreateTexture(nil, "BACKGROUND")
+            sBg:SetAllPoints()
+            sBg:SetColorTexture(0, 0, 0, 0.4)
+            searchPlaceholder = searchEdit:CreateFontString(nil, "OVERLAY")
+            searchPlaceholder:SetFont(fontPath, 11, "")
+            searchPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.6)
+            searchPlaceholder:SetPoint("LEFT", searchEdit, "LEFT", 4, 0)
+            searchPlaceholder:SetText("Search...")
+            searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        end
+
+        -- Scroll frame for items
+        local sf = CreateFrame("ScrollFrame", nil, menu)
+        local sfTop = -(SEARCH_H > 0 and (SEARCH_H + 8) or 1)
+        sf:SetPoint("TOPLEFT", 1, sfTop)
+        sf:SetPoint("BOTTOMRIGHT", -1, 1)
+        sf:EnableMouseWheel(true)
+        local child = CreateFrame("Frame", nil, sf)
+        child:SetWidth(ddW - 2)
+        child:SetHeight(contentH)
+        sf:SetScrollChild(child)
+        sf:SetScript("OnMouseWheel", function(self, delta)
+            local maxScroll = child:GetHeight() - self:GetHeight()
+            if maxScroll <= 0 then return end
+            local cur = self:GetVerticalScroll()
+            self:SetVerticalScroll(math.max(0, math.min(maxScroll, cur - delta * ITEM_H)))
+        end)
+        local itemParent = child
+
         local yOff = -4
+        local _allRows = {}  -- { frame, isHeader, label(string), height }
         for _, item in ipairs(items) do
-            local row = CreateFrame("Button", nil, menu)
+            -- Header/divider items: non-interactive label
+            if item.isHeader then
+                local hdrH = 22
+                local hdr = CreateFrame("Frame", nil, itemParent)
+                hdr:SetHeight(hdrH)
+                hdr:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, yOff)
+                hdr:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -1, yOff)
+                hdr:SetFrameLevel(menu:GetFrameLevel() + 2)
+                local hdrLbl = hdr:CreateFontString(nil, "OVERLAY")
+                hdrLbl:SetFont(fontPath, 10, "")
+                hdrLbl:SetTextColor(0.5, 0.5, 0.5, 1)
+                hdrLbl:SetPoint("LEFT", hdr, "LEFT", 10, 0)
+                hdrLbl:SetJustifyH("LEFT")
+                hdrLbl:SetText(item.label)
+                local hdrLine = hdr:CreateTexture(nil, "ARTWORK")
+                hdrLine:SetHeight(1)
+                hdrLine:SetPoint("LEFT", hdrLbl, "RIGHT", 6, 0)
+                hdrLine:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
+                hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+                _allRows[#_allRows + 1] = { frame = hdr, isHeader = true, label = item.label, height = hdrH }
+                yOff = yOff - hdrH
+            else
+
+            local row = CreateFrame("Button", nil, itemParent)
             row:SetHeight(ITEM_H)
             row:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, yOff)
             row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -1, yOff)
@@ -5645,6 +5720,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
             end)
             row:SetScript("OnClick", function()
+                if item.locked then return end
                 setFn(item.key, not getFn(item.key))
                 UpdateCheck(); UpdateLabel()
                 if onChanged then
@@ -5659,8 +5735,68 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     onChanged()
                 end
             end)
+            _allRows[#_allRows + 1] = { frame = row, isHeader = false, label = item.label, height = ITEM_H }
             yOff = yOff - ITEM_H
+
+            end -- isHeader else
         end
+
+        -- Wire search filtering
+        if searchEdit then
+            searchEdit:SetScript("OnTextChanged", function(self)
+                local t = strlower(strtrim(self:GetText()))
+                searchPlaceholder:SetShown(t == "")
+                local visY = -4
+                local lastHdr = nil
+                local lastHdrY = 0
+                local hdrHasVisible = false
+                for _, r in ipairs(_allRows) do
+                    if r.isHeader then
+                        -- Defer header: show only if a child is visible
+                        if lastHdr and not hdrHasVisible then lastHdr:Hide() end
+                        lastHdr = r.frame
+                        lastHdrY = visY
+                        hdrHasVisible = false
+                        if t == "" then
+                            lastHdr:Show()
+                            lastHdr:ClearAllPoints()
+                            lastHdr:SetPoint("TOPLEFT", child, "TOPLEFT", 1, visY)
+                            lastHdr:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, visY)
+                            visY = visY - r.height
+                            hdrHasVisible = true
+                        end
+                    else
+                        if t == "" or strfind(strlower(r.label), t, 1, true) then
+                            -- Show header if this is the first visible child
+                            if lastHdr and not hdrHasVisible then
+                                lastHdr:Show()
+                                lastHdr:ClearAllPoints()
+                                lastHdr:SetPoint("TOPLEFT", child, "TOPLEFT", 1, lastHdrY)
+                                lastHdr:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, lastHdrY)
+                                visY = lastHdrY - HDR_H
+                                hdrHasVisible = true
+                            end
+                            r.frame:Show()
+                            r.frame:ClearAllPoints()
+                            r.frame:SetPoint("TOPLEFT", child, "TOPLEFT", 1, visY)
+                            r.frame:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, visY)
+                            visY = visY - r.height
+                        else
+                            r.frame:Hide()
+                        end
+                    end
+                end
+                -- Hide trailing header with no visible children
+                if lastHdr and not hdrHasVisible then lastHdr:Hide() end
+                child:SetHeight(math.max(1, math.abs(visY)))
+                sf:SetVerticalScroll(0)
+            end)
+            menu:HookScript("OnShow", function()
+                searchEdit:SetText("")
+                searchEdit:SetFocus()
+            end)
+        end
+
         ddBtn._ddMenu = menu
     end
 

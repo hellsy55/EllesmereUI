@@ -61,7 +61,7 @@ local GROUPS = {
             { label = "Friends List",      addon = "EllesmereUIFriends" },
             { label = "Damage Meters",     addon = "EllesmereUIDamageMeters" },
             { label = "Chat",              addon = "EllesmereUIChat" },
-            { label = "Bags",              comingSoon = true },
+            { label = "Bags",              addon = "EllesmereUIBags" },
             { label = "Mythic+ Timer",     addon = "EllesmereUIMythicTimer" },
             { label = "Quest Tracker",     addon = "EllesmereUIQuestTracker" },
         },
@@ -395,6 +395,7 @@ local function ShowFirstInstallPopup()
     local function Close(triggerReload)
         if not EllesmereUIDB then EllesmereUIDB = {} end
         EllesmereUIDB.firstInstallPopupShown = true
+        EllesmereUIDB.bagsUserChosen = true
 
         -- Write QoL cursor setting directly into the profile table so it
         -- survives even if the user also disables the QoL addon. NewDB merges

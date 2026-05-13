@@ -2760,8 +2760,31 @@ function ns.SetupViewerHooks()
                                 local sid = fc and fc.resolvedSid
                                 local fd = hookFrameData[frame]
 
-                                -- Buff glow
-                                if buffGlowType > 0 and fd then
+                                local isActiveBuff = (frame.wasSetFromAura == true
+                                    or frame.auraInstanceID ~= nil)
+
+                                -- Desaturate inactive buff icons when Always
+                                -- Show Buffs is on and Desaturate Off CD is
+                                -- enabled. When Always Show Buffs is off,
+                                -- desaturation is ignored (no inactive icons
+                                -- should be visible anyway).
+                                if isBuff and bd.barType ~= "custom_buff" and fd and fd.tex then
+                                    if p.cdmBars.showInactiveBuffIcons
+                                       and (p.cdmBars.desaturateInactiveBuffs ~= false)
+                                       and not isActiveBuff then
+                                        fd.tex:SetDesaturated(true)
+                                    elseif fd.tex:IsDesaturated() then
+                                        fd.tex:SetDesaturated(false)
+                                    end
+                                end
+
+                                -- Buff glow (only on active auras).
+                                -- Custom aura bars use their own frames
+                                -- without wasSetFromAura/auraInstanceID;
+                                -- treat shown custom aura frames as active.
+                                local glowActive = isActiveBuff
+                                    or (bd.barType == "custom_buff" and frame:IsShown())
+                                if buffGlowType > 0 and fd and glowActive then
                                     if not fd.buffGlowActive then
                                         if not fd.buffGlowOverlay then
                                             local ov = CreateFrame("Frame", nil, frame)

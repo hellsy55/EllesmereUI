@@ -370,6 +370,8 @@ local DEFAULTS = {
             enabled = true,
             hideBlizzard = true,
             hideBuffsWhenInactive = true,
+            showInactiveBuffIcons = false,
+            desaturateInactiveBuffs = true,
             -- The 3 default bars (match Blizzard CDM)
             bars = {
                 {
@@ -1642,6 +1644,7 @@ end
 --  which happens when SaveLayouts triggers a layout reapply from addon code.
 -------------------------------------------------------------------------------
 local _editModePolicyApplied = false
+local _suppressPolicyPopup = false
 local function EnforceCooldownViewerEditModeSettings()
     if _editModePolicyApplied then return end
     if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
@@ -1695,8 +1698,17 @@ local function EnforceCooldownViewerEditModeSettings()
             if UpsertSetting(sysInfo.settings, visSetting, visAlways) then
                 changed = true
             end
-            -- HideWhenInactive=1 on buff viewers only
-            if sysInfo.systemIndex == buffIconIdx or sysInfo.systemIndex == buffBarIdx then
+            -- HideWhenInactive on buff icon viewer: 0 if user wants
+            -- always-visible buff icons, 1 otherwise. BuffBar viewer
+            -- (tracked bars) always stays at 1 -- "Always Show Buffs"
+            -- only applies to icon-based buff bars.
+            if sysInfo.systemIndex == buffIconIdx then
+                local p = ECME.db and ECME.db.profile
+                local hideVal = (p and p.cdmBars and p.cdmBars.showInactiveBuffIcons) and 0 or 1
+                if UpsertSetting(sysInfo.settings, hideEnum, hideVal) then
+                    changed = true
+                end
+            elseif sysInfo.systemIndex == buffBarIdx then
                 if UpsertSetting(sysInfo.settings, hideEnum, 1) then
                     changed = true
                 end
@@ -1711,7 +1723,9 @@ local function EnforceCooldownViewerEditModeSettings()
     -- the next login/reload, so we force a reload via popup.
     C_EditMode.SaveLayouts(layoutInfo)
 
-    -- Show a forced (non-dismissable) reload popup
+    -- Show a forced (non-dismissable) reload popup (suppressed when called
+    -- from ReapplyEditModePolicy -- caller shows its own dismissable prompt)
+    if _suppressPolicyPopup then return end
     C_Timer.After(0, function()
         if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then
             ReloadUI()
@@ -1719,7 +1733,7 @@ local function EnforceCooldownViewerEditModeSettings()
         end
         EllesmereUI:ShowConfirmPopup({
             title = "Edit Mode Update",
-            message = "EllesmereUI has updated your Cooldown Manager Edit Mode settings to ensure cooldown tracking works correctly.\n\nA UI reload is required for the changes to take effect.",
+            message = "EllesmereUI has updated your CDM Edit Mode settings to ensure cooldown tracking works correctly.\n\nA UI reload is required for the changes to take effect.",
             confirmText = "Reload UI",
             onConfirm = function() ReloadUI() end,
         })
@@ -1743,6 +1757,16 @@ local function EnforceCooldownViewerEditModeSettings()
             end
         end
     end)
+end
+
+--- Re-apply EditMode CDM settings (called when showInactiveBuffIcons changes).
+--- Resets the one-shot guard so the enforce function re-evaluates the layout.
+--- Suppresses the built-in reload popup (caller shows its own).
+function ns.ReapplyEditModePolicy()
+    _editModePolicyApplied = false
+    _suppressPolicyPopup = true
+    EnforceCooldownViewerEditModeSettings()
+    _suppressPolicyPopup = false
 end
 
 -------------------------------------------------------------------------------

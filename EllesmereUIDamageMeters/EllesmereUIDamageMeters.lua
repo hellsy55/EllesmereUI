@@ -302,19 +302,20 @@ instanceFrame:SetScript("OnEvent", function(_, event)
         end
     elseif event == "DAMAGE_METER_COMBAT_SESSION_UPDATED" then
         -- Blizzard created or updated a combat session (boss kill, combat end, etc.)
-        -- "Current" may now point to a different session. Debounce since this
-        -- fires per meter type.
+        -- "Current" may now point to a different session. Invalidate cache so the
+        -- next ticker-driven refresh picks up fresh data. Only force an immediate
+        -- refresh when NOT in combat (the shared ticker handles combat refreshes
+        -- at the user's configured refreshRate).
         if not instanceFrame._sessionPending then
             instanceFrame._sessionPending = true
             C_Timer.After(0.1, function()
                 instanceFrame._sessionPending = nil
-                -- Don't wipe _targetsCache here; the cache key includes session
-                -- so stale data is never returned. Wiping causes repeated API
-                -- bursts when hovering between frequent session update events.
                 for _, w in ipairs(_windows) do
                     w._barCacheKey = nil
                     w._cachedTargets = nil
-                    w.Refresh()
+                end
+                if not _inCombat then
+                    for _, w in ipairs(_windows) do w.Refresh() end
                 end
             end)
         end
@@ -329,6 +330,15 @@ instanceFrame:SetScript("OnEvent", function(_, event)
             w.Refresh()
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Zone transition (hearth, teleport, etc.): if player is out of combat,
+        -- force-end the combat state. Covers the case where the player leaves
+        -- an instance mid-combat (hearthing out of a dungeon).
+        if not InCombatLockdown() and (_inCombat or _needsFinalRefresh) then
+            _combatEndTime = GetTime()
+            _inCombat = false
+            _needsFinalRefresh = false
+            StopSharedTicker()
+        end
         -- Refresh after zone-in to pick up visibility/data changes
         for _, w in ipairs(_windows) do
             w._barCacheKey = nil
@@ -754,7 +764,8 @@ local function BuildAllPlayerTargets(session, sessionID)
     local byPlayer = {}    -- unitName -> { [creatureID] = totalDamage }
     for ei = 1, #enemySession.combatSources do
         local enemy = enemySession.combatSources[ei]
-        local eKey = enemy.sourceCreatureID or ei
+        local rawCID = enemy.sourceCreatureID
+        local eKey = (rawCID and not (issecretvalue and issecretvalue(rawCID))) and rawCID or ei
         enemyNames[eKey] = enemy.name
         local srcData
         if sessionID and C_DamageMeter.GetCombatSessionSourceFromID then
@@ -1007,6 +1018,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     if curDMType == Enum.DamageMeterType.EnemyDamageTaken then
         local guid = bar._srcGUID
         local cid = bar._src.sourceCreatureID
+        if issecretvalue and (issecretvalue(guid) or issecretvalue(cid)) then return false end
         local srcData
         if curSessionID and C_DamageMeter.GetCombatSessionSourceFromID then
             srcData = C_DamageMeter.GetCombatSessionSourceFromID(curSessionID, curDMType, guid, cid)
@@ -1057,9 +1069,9 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     end
 
     -- Standard spell breakdown tooltip
-    -- Pass guid/cid straight through -- API accepts its own secret values
     local guid = bar._srcGUID
     local cid = bar._src.sourceCreatureID
+    if issecretvalue and (issecretvalue(guid) or issecretvalue(cid)) then return false end
     local srcData
     if curSessionID and C_DamageMeter.GetCombatSessionSourceFromID then
         srcData = C_DamageMeter.GetCombatSessionSourceFromID(curSessionID, curDMType, guid, cid)
@@ -1237,6 +1249,8 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
             _ttLastAnchor = barRow
         end
         _ttFrame:Show()
+    else
+        HideBarTooltip()
     end
 
 end
@@ -1479,6 +1493,7 @@ end
 --  Returns a window table W with all state and a Destroy method.
 -------------------------------------------------------------------------------
 local UpdateSATimerText  -- forward declaration (defined in standalone timer section)
+
 local function CreateDMWindow(winIdx)
     local wdb = WinDB(winIdx)
     local W = {}
@@ -2659,9 +2674,16 @@ local function CreateDMWindow(winIdx)
             local isDeaths = (W.curDMType == Enum.DamageMeterType.Deaths)
             local isCount = (W.curDMType == Enum.DamageMeterType.Interrupts or W.curDMType == Enum.DamageMeterType.Dispels)
             -- Deaths: reverse to chronological (API returns most recent first)
+            -- Filter out feign deaths (deathRecapID <= 0 = no valid recap)
             if isDeaths then
                 local rev = {}
-                for ri = #sources, 1, -1 do rev[#rev + 1] = sources[ri] end
+                for ri = #sources, 1, -1 do
+                    local s = sources[ri]
+                    local rid = s.deathRecapID
+                    if not (issecretvalue and issecretvalue(rid)) and rid and rid > 0 then
+                        rev[#rev + 1] = s
+                    end
+                end
                 sources = rev
             end
             W._barSources = sources  -- share with sticky (may be reversed for Deaths)
@@ -3847,6 +3869,10 @@ local function SharedRefreshTick()
     for _, w in ipairs(_windows) do w.Refresh() end
 end
 
+-- Feign death cache: tracks hunter feign deaths via UNIT_FLAGS so they
+-- can be filtered from the C_DamageMeter Deaths session (which sometimes
+-- assigns a valid deathRecapID to feign deaths).
+-- Only active during combat to avoid idle CPU cost.
 local function StartSharedTicker()
     if _sharedTicker then _sharedTicker:Cancel() end
     local rate = DB().refreshRate or TICK_COMBAT

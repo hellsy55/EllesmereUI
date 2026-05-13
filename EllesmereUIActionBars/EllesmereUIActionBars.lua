@@ -90,8 +90,8 @@ for _, info in ipairs(BAR_CONFIG) do
 end
 
 local EXTRA_BARS = {
-    { key = "MicroBar", label = "Micro Menu Bar", frameName = "MicroMenuContainer", hoverFrame = "MicroMenu", visibilityOnly = true },
-    { key = "BagBar",   label = "Bag Bar",        frameName = "BagsBar", visibilityOnly = true },
+    { key = "MicroBar", label = "Micro Menu Bar", frameName = "MicroMenuContainer", hoverFrame = "MicroMenu", visibilityOnly = true, blizzOwnedVisibility = true },
+    { key = "BagBar",   label = "Bag Bar",        frameName = "BagsBar", visibilityOnly = true, blizzOwnedVisibility = true },
     { key = "QueueStatus", label = "Queue Status", frameName = "QueueStatusButton", visibilityOnly = true, blizzOwnedVisibility = true, noManagedVisibility = true },
     { key = "XPBar",    label = "XP Bar",         visibilityOnly = true, isDataBar = true },
     { key = "RepBar",   label = "Reputation Bar",  visibilityOnly = true, isDataBar = true },
@@ -722,7 +722,22 @@ do
             end
 
             (frame.HideBase or frame.Hide)(frame)
-            frame:SetParent(hiddenParent)
+            -- MainActionBar stays in Blizzard's parent chain so pet battle
+            -- restoration of MicroMenu works. All others safely reparent.
+            if frameName ~= "MainActionBar" then
+                frame:SetParent(hiddenParent)
+            else
+                -- Prevent Blizzard from re-showing MainActionBar (spec/zone change)
+                hooksecurefunc(frame, "Show", function(self)
+                    if not InCombatLockdown() then self:Hide() end
+                end)
+                -- Hide Edit Mode selection/mover frame
+                if frame.Selection then frame.Selection:Hide(); frame.Selection:SetAlpha(0) end
+                -- Hide artwork children (gryphons/endcaps/border)
+                if frame.EndCaps then frame.EndCaps:Hide() end
+                if frame.BorderArt then frame.BorderArt:Hide() end
+                frame:SetAlpha(0)
+            end
 
             if frame.actionButtons and type(frame.actionButtons) == "table" then
                 for _, button in pairs(frame.actionButtons) do
@@ -730,11 +745,19 @@ do
                     button:SetAttributeNoHandler("statehidden", true)
                     button:Hide()
                 end
-                -- Keep Blizzard's actionButtons tables intact because the
-                -- stock grid/highlight helpers still drive some state there.
             end
         end
     end
+
+    -- Blizzard reparents MicroMenu into PetBattleFrame's hierarchy during
+    -- pet battle. Normally it reparents back, but our MainActionBar disposal
+    -- breaks that restoration. Fix: reparent MicroMenu back after pet battle.
+    local petBattleRestore = CreateFrame("Frame")
+    petBattleRestore:RegisterEvent("PET_BATTLE_CLOSE")
+    petBattleRestore:SetScript("OnEvent", function()
+        -- No-op: Blizzard restores MicroMenu naturally when MainActionBar
+        -- stays in its original parent chain (see disposal loop fix below).
+    end)
 
     -- Hide ActionBarParent (the top-level container for stock action bars).
     -- All individual bar frames are already reparented above, so this is
@@ -5209,8 +5232,8 @@ function EAB:ApplyExtraBarVisibility()
             -- state is "hide" during pet battle, "show" otherwise
             local shouldHide = (state == "hide")
             for _, info in ipairs(EXTRA_BARS) do
-                if info.noManagedVisibility then
-                    -- skip
+                if info.noManagedVisibility or info.blizzOwnedVisibility then
+                    -- skip: Blizzard handles pet battle visibility for these
                 else
                 local key = info.key
                 local s = EAB.db and EAB.db.profile.bars[key]
@@ -5260,10 +5283,19 @@ function EAB:ApplyCombatVisibility()
         if s then
             local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
             if frame and not info.visibilityOnly then
+                local newStr
                 if s.alwaysHidden then
-                    RegisterAttributeDriver(frame, "state-visibility", "hide")
+                    newStr = "hide"
+                elseif EllesmereUI.CheckVisibilityOptionsNonMacro and EllesmereUI.CheckVisibilityOptionsNonMacro(s) then
+                    newStr = "hide"
                 else
-                    RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
+                    newStr = BuildVisibilityString(info, s)
+                end
+                -- Skip re-registration if driver string is unchanged (avoids blink from re-evaluation)
+                if frame._eabLastVisStr ~= newStr then
+
+                    frame._eabLastVisStr = newStr
+                    RegisterAttributeDriver(frame, "state-visibility", newStr)
                 end
             end
         end
@@ -5297,7 +5329,11 @@ function EAB:RefreshRuntimeVisibility()
                 -- an explicit "Never" visibility mode.
             elseif isHidden then
                 if not info.visibilityOnly and not InCombatLockdown() then
-                    RegisterAttributeDriver(frame, "state-visibility", "hide")
+                    if frame._eabLastVisStr ~= "hide" then
+
+                        frame._eabLastVisStr = "hide"
+                        RegisterAttributeDriver(frame, "state-visibility", "hide")
+                    end
                 elseif info.visibilityOnly then
                     frame:Hide()
                     if info.blizzOwnedVisibility then
@@ -5310,13 +5346,23 @@ function EAB:RefreshRuntimeVisibility()
                 end
             else
                 if not info.visibilityOnly and not InCombatLockdown() then
-                    RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
+                    local newStr
+                    if EllesmereUI.CheckVisibilityOptionsNonMacro and EllesmereUI.CheckVisibilityOptionsNonMacro(s) then
+                        newStr = "hide"
+                    else
+                        newStr = BuildVisibilityString(info, s)
+                    end
+                    if frame._eabLastVisStr ~= newStr then
+
+                        frame._eabLastVisStr = newStr
+                        RegisterAttributeDriver(frame, "state-visibility", newStr)
+                    end
                 end
                 if not InCombatLockdown() then
                     if vis ~= "in_combat" and vis ~= "out_of_combat" and not s.combatShowEnabled then
-                        -- ExtraActionButton and EncounterBar holders manage
-                        -- their own visibility based on active content.
-                        if not info.isBlizzardMovable and not info.blizzOwnedVisibility then
+                        -- Only Show frames without a state-visibility driver.
+                        -- Frames with a driver (any _eabLastVisStr) are managed by the driver.
+                        if not info.isBlizzardMovable and not info.blizzOwnedVisibility and not frame._eabLastVisStr then
                             frame:Show()
                         end
                     end
@@ -5473,6 +5519,7 @@ function EAB:UpdateHousingVisibility()
                     if shouldHide then
                         if isSecure then
                             if frame._eabLastVisStr ~= "hide" then
+
                                 frame._eabLastVisStr = "hide"
                                 RegisterAttributeDriver(frame, "state-visibility", "hide")
                             end
@@ -5489,6 +5536,7 @@ function EAB:UpdateHousingVisibility()
                         if isSecure then
                             local newStr = BuildVisibilityString(info, s)
                             if frame._eabLastVisStr ~= newStr then
+
                                 frame._eabLastVisStr = newStr
                                 RegisterAttributeDriver(frame, "state-visibility", newStr)
                             end
@@ -6746,7 +6794,11 @@ local function ApplyAll()
             if s.enabled == false then
                 frame:Hide()
             elseif not s.alwaysHidden then
-                frame:Show()
+                -- Skip Show if a state-visibility driver is managing this frame
+                -- (the driver handles show/hide; calling Show() causes a one-frame blink)
+                if not frame._eabLastVisStr then
+                    frame:Show()
+                end
             end
         end
 
@@ -6783,6 +6835,17 @@ local function SaveBarPosition(barKey)
     if not frame then return end
     local point, _, relPoint, x, y = frame:GetPoint(1)
     if point then
+        -- Pixel-perfect snapping can produce sub-pixel offsets (e.g. 0.5)
+        -- on CENTER-anchored bars. Re-snapping on restore drifts by 1px at
+        -- certain UI scales. Clamp near-zero CENTER offsets to exactly 0 so
+        -- the restore-skip at RestoreBarPositions fires correctly.
+        if point == "CENTER" and relPoint == "CENTER" then
+            local es = frame:GetEffectiveScale() or 1
+            local PPa = EllesmereUI and EllesmereUI.PP
+            local onePx = PPa and PPa.perfect and (PPa.perfect / es) or 1
+            if math.abs(x) < onePx then x = 0 end
+            if math.abs(y) < onePx then y = 0 end
+        end
         EAB.db.profile.barPositions[barKey] = {
             point = point, relPoint = relPoint, x = x, y = y,
         }
@@ -9456,7 +9519,7 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
     -- QueueStatusButton: reparent to UIParent so micro menu visibility
     -- (mouseover/combat hide) doesn't affect the eye. Remove from layout
     -- so micro menu doesn't shift. Hook UpdatePosition to prevent snap-back.
-    if barInfo and barInfo.blizzOwnedVisibility then
+    if barKey == "QueueStatus" then
         SafeEnableMouse(holder, false)
 
         -- Remove from MicroMenuContainer layout flow (no micro menu shift)
@@ -9700,19 +9763,8 @@ local function RegisterExtraBarsWithUnlockMode()
                     local pos = EAB.db.profile.barPositions[bk]
                     local holder = extraBarHolders[bk]
                     if not holder then return end
-                    if bk == "MicroBar" then
-                        local bf = holder._eabMicroBlizzFrame
-                        if not bf or InCombatLockdown() then return end
-                        -- Move MicroMenuContainer to saved position
-                        if pos and pos.point then
-                            bf:ClearAllPoints()
-                            bf:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-                        end
-                        -- Restore passive follow (holder tracks blizzFrame)
-                        holder._eabMicroFlipped = false
-                        holder._eabMicroPassiveFollow()
-                        return
-                    end
+                    -- MicroBar/BagBar: Blizzard owns position, never move
+                    if bk == "MicroBar" or bk == "BagBar" then return end
                     holder:ClearAllPoints()
                     if pos and pos.point then
                         holder:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)

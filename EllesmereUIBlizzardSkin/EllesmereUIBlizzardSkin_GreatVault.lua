@@ -43,7 +43,7 @@ local STYLE = {
     offsets = {
         progressBar = { x = 0, y = 0 },
         lockIcon = { x = 0, y = -7 },
-        selectRewardButton = { x = 0, y = 30 },
+        selectRewardButton = { x = 0, y = -4 },
     },
     alpha = {
         selectedGlow = 0.08,
@@ -68,7 +68,7 @@ local STYLE = {
     },
     colors = {
         white = { r = 1, g = 1, b = 1 },
-        buttonBackground = { r = 0.08, g = 0.09, b = 0.10, a = 0.92 },
+        buttonBackground = { r = 0x18/255, g = 0x14/255, b = 0x11/255, a = 1 },
         buttonDisabledText = { r = 0.45, g = 0.45, b = 0.45, a = 1 },
         buttonDisabledBorder = { r = 0.35, g = 0.35, b = 0.35, a = 0.4 },
         itemSlotBackground = { r = 0.5, g = 0.5, b = 0.5, a = 0.7 },
@@ -502,6 +502,13 @@ local function RefreshButtonState(button, theme)
     HideButtonTextures(button)
 
     local d = GetFFD(button)
+    if not d.sizeAdjusted then
+        d.sizeAdjusted = true
+        local w, h = button:GetSize()
+        if w and w > 0 and h and h > 0 then
+            button:SetSize(w + 4, h + 4)
+        end
+    end
     ApplyColorTexture(d.bg, STYLE.colors.buttonBackground)
     ApplyColorTexture(d.highlight, STYLE.colors.white, STYLE.alpha.buttonHighlight)
 
@@ -518,7 +525,7 @@ local function RefreshButtonState(button, theme)
     end
 
     if d.bg then
-        d.bg:SetAlpha(enabled and 1 or STYLE.alpha.buttonDisabledBackground)
+        d.bg:SetAlpha(enabled and 1 or 0.9)
     end
 
     if enabled then
@@ -575,7 +582,7 @@ local function GetActivityState(frame, selectedActivity)
     local hasRewards = frame and frame.hasRewards or false
     local progress = frame and frame.info and frame.info.progress or 0
     local threshold = frame and frame.info and frame.info.threshold or 0
-    local isComplete = threshold > 0 and progress >= threshold
+    local isComplete = hasRewards or (threshold > 0 and progress >= threshold)
 
     return {
         hasRewards = hasRewards,
@@ -703,7 +710,7 @@ local function RefreshActivityVisualState(frame, selectedActivity, theme)
         skinFrame._euiDarkOverlay = overlay
     end
     if activityState.isComplete then
-        skinFrame._euiDarkOverlay:SetAlpha(0.4)
+        skinFrame._euiDarkOverlay:SetAlpha(0.2)
     else
         skinFrame._euiDarkOverlay:SetAlpha(0.4)
     end
@@ -733,8 +740,11 @@ local function RefreshActivityVisualState(frame, selectedActivity, theme)
 
     if frame.Progress then
         if activityState.isComplete then
-            -- Read existing difficulty text before overwriting
-            local diffText = frame.Progress:GetText() or ""
+            -- Cache Blizzard's original difficulty text before we prepend ilvl
+            local d2 = GetFFD(frame)
+            if not d2._origDiffText then
+                d2._origDiffText = frame.Progress:GetText() or ""
+            end
             ApplyFont(frame.Progress, theme, STYLE.sizes.progress, complete.r, complete.g, complete.b, 1)
 
             local info = frame.info
@@ -746,7 +756,7 @@ local function RefreshActivityVisualState(frame, selectedActivity, theme)
                 end
             end
             if ilvl then
-                frame.Progress:SetText(ilvl .. " (" .. diffText .. ")")
+                frame.Progress:SetText(ilvl .. " (" .. d2._origDiffText .. ")")
             end
         else
             local progressColor = activityState.progressColor

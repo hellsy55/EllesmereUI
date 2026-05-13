@@ -1004,7 +1004,7 @@ local function CreatePortalFlyout()
     end)
 
     -- Escape to close
-    tinsert(UISpecialFrames, "EUIChatPortalFlyout")
+    EllesmereUI.RegisterEscapeClose(flyout)
 
     _portalFlyout = flyout
     return flyout

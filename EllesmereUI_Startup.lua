@@ -188,9 +188,9 @@ do
     end)
 end
 
--- Override STANDARD_TEXT_FONT when "Reskin Blizzard Elements" is on.
--- Must be set before login so newly-created Blizzard FontStrings inherit it.
--- Same direct-assignment approach as ElvUI (no hooks, no metatables).
+-- Override WoW's default font objects so Blizzard elements
+-- inherit our font without per-frame SetFont calls (taint-safe)
+
 do
     local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\"
     local FONT_FILES = {
@@ -225,6 +225,43 @@ do
         if event == "PLAYER_LOGIN" then
             self:UnregisterAllEvents()
         end
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Auto-disable EllesmereUIBags when a dedicated bag addon is present.
+--  Once the user manually toggles the Bags module (sidebar power button or
+--  first-install popup), we set EllesmereUIDB.bagsUserChosen and never
+--  override their preference again.
+-------------------------------------------------------------------------------
+do
+    local BAG_ADDONS = {
+        "AdiBags", "ArkInventory", "Baganator", "Bagnon", "BetterBags", "Sorted",
+    }
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function(self, event, addonName)
+        if addonName ~= ADDON_NAME then return end
+        self:UnregisterAllEvents()
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if EllesmereUIDB.bagsUserChosen then return end
+        if not C_AddOns or not C_AddOns.GetAddOnEnableState then return end
+        -- If we previously auto-disabled bags but the user re-enabled it
+        -- (via Blizzard addon list or any other means), respect their choice.
+        local bagsEnabled = C_AddOns.GetAddOnEnableState("EllesmereUIBags") > 0
+        if EllesmereUIDB.bagsAutoDisabled and bagsEnabled then
+            EllesmereUIDB.bagsUserChosen = true
+            EllesmereUIDB.bagsAutoDisabled = nil
+            return
+        end
+        for _, name in ipairs(BAG_ADDONS) do
+            if C_AddOns.GetAddOnEnableState(name) > 0 then
+                C_AddOns.DisableAddOn("EllesmereUIBags")
+                EllesmereUIDB.bagsAutoDisabled = true
+                return
+            end
+        end
+        EllesmereUIDB.bagsAutoDisabled = nil
     end)
 end
 

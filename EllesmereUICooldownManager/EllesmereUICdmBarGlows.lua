@@ -204,7 +204,7 @@ local function SetupOverlays()
                         overlay:SetParent(btn)
                     end
                     overlay:SetAllPoints(btn)
-                    overlay:SetFrameLevel(btn:GetFrameLevel() + 10)
+                    overlay:SetFrameLevel(btn:GetFrameLevel() + 15)
                     overlay:SetAlpha(1)
                     overlay._assignEntry = entry
                     overlay:Show()

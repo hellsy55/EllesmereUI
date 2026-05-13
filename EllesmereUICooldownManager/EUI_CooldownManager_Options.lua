@@ -7147,32 +7147,38 @@ initFrame:SetScript("OnEvent", function(self)
             local isCustomBuffBar = (bd.barType == "custom_buff")
             local isFocusKick = (bd.key == "focuskick")
 
-            -- CD/utility and extra buff bars read from assignedSpells (user intent).
-            -- The DEFAULT buff bar reads from live cdmBarIcons (Blizzard viewer
-            -- is the authority; there is no ghost buff bar to divert from).
+            -- All bars read from assignedSpells (user intent). The DEFAULT
+            -- buff bar enumerates the viewer pool directly so the preview
+            -- shows every tracked buff regardless of active state, minus
+            -- spells diverted to other buff-family bars.
             local tracked
-            local liveTextures  -- spell ID -> texture from live frame (buff bar only)
             if bd.key == "buffs" then
-                local liveIcons = ns.cdmBarIcons and ns.cdmBarIcons[bd.key]
-                if liveIcons then
-                    tracked = {}
-                    liveTextures = {}
-                    local ecmeFC = ns._ecmeFC
-                    for _, icon in ipairs(liveIcons) do
-                        local fc = ecmeFC and ecmeFC[icon]
-                        local sid = fc and fc.spellID
-                        if sid and sid > 0 then
-                            tracked[#tracked + 1] = sid
-                            -- Read texture directly from Blizzard's frame
-                            local iconWidget = icon.Icon or icon._tex
-                            if iconWidget and iconWidget.GetTexture then
-                                liveTextures[sid] = iconWidget:GetTexture()
+                -- Build exclusion set: spells claimed by other buff bars
+                local diverted = {}
+                local pp = DB()
+                if pp and pp.cdmBars and pp.cdmBars.bars then
+                    for _, otherBd in ipairs(pp.cdmBars.bars) do
+                        if otherBd.enabled and otherBd.key ~= "buffs"
+                           and (otherBd.barType == "buffs" or otherBd.barType == "custom_buff") then
+                            local otherSd = ns.GetBarSpellData(otherBd.key)
+                            if otherSd and otherSd.assignedSpells then
+                                for _, sid in ipairs(otherSd.assignedSpells) do
+                                    if type(sid) == "number" and sid > 0 then
+                                        diverted[sid] = true
+                                    end
+                                end
                             end
                         end
                     end
-                else
-                    local sdUpd = EnsureAssignedSpells(bd.key)
-                    tracked = sdUpd and sdUpd.assignedSpells or {}
+                end
+                -- Enumerate all buff viewer pool spells (active + inactive)
+                local entries = ns.EnumerateCDMViewerSpells
+                    and ns.EnumerateCDMViewerSpells(true) or {}
+                tracked = {}
+                for _, e in ipairs(entries) do
+                    if not diverted[e.sid] then
+                        tracked[#tracked + 1] = e.sid
+                    end
                 end
             else
                 local sdUpd = EnsureAssignedSpells(bd.key)
@@ -7315,17 +7321,11 @@ initFrame:SetScript("OnEvent", function(self)
                             local itemID = GetInventoryItemID("player", -id)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
-                            -- Default buff bar: read texture from the live Blizzard
-                            -- frame (always correct, even for untalented spells).
-                            -- CD/utility + extra buff bars: resolve to live override.
-                            if liveTextures and liveTextures[id] then
-                                tex = liveTextures[id]
-                            else
-                                local displayID = ResolveToLive(id)
-                                tex = C_Spell.GetSpellTexture(displayID)
-                                if not tex and displayID ~= id then
-                                    tex = C_Spell.GetSpellTexture(id)
-                                end
+                            -- Resolve to live override for texture lookup.
+                            local displayID = ResolveToLive(id)
+                            tex = C_Spell.GetSpellTexture(displayID)
+                            if not tex and displayID ~= id then
+                                tex = C_Spell.GetSpellTexture(id)
                             end
                             slot._previewSpellID = id
                         end
@@ -8695,20 +8695,39 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 1: Icon Scale | Buff Glow (buff/custom_buff) or Active Animation (others)
         local isBuffGlowBar = isBuffBar or (barData.barType == "custom_buff")
         local scaleAnimRow
         if isBuffGlowBar then
+            -- Row 1: Always Show Buffs (default buffs bar only) | Icon Scale
+            local row1Left
+            if barData.key == "buffs" then
+                row1Left = { type="toggle", text="Always Show Buffs",
+                    getValue=function() return DB().cdmBars.showInactiveBuffIcons == true end,
+                    setValue=function(v)
+                        DB().cdmBars.showInactiveBuffIcons = v
+                        if ns.ReapplyEditModePolicy then
+                            ns.ReapplyEditModePolicy()
+                        end
+                        EllesmereUI:ShowConfirmPopup({
+                            title = "Reload Required",
+                            message = "This setting requires a UI reload to take effect.",
+                            confirmText = "Reload UI",
+                            cancelText = "Later",
+                            onConfirm = function() ReloadUI() end,
+                        })
+                        EllesmereUI:RefreshPage()
+                    end }
+            else
+                row1Left = { type="label", text="" }
+            end
             scaleAnimRow, h = W:DualRow(parent, y,
+                row1Left,
                 { type="slider", text="Icon Scale",
                   min=16, max=80, step=1,
                   getValue=function() return BD().iconSize or 36 end,
                   setValue=function(v)
                       local bd = BD()
                       bd.iconSize = v
-                      -- Manual iconSize override -- clear ALL match cache
-                      -- (legacy + new) so LayoutCDMBar uses bd.iconSize
-                      -- instead of deriving from a stored target width/height.
                       bd._matchPhysWidth = nil
                       bd._matchPhysHeight = nil
                       bd._matchIconPhys = nil
@@ -8717,7 +8736,40 @@ initFrame:SetScript("OnEvent", function(self)
                       bd._matchExtraPixelsH = nil
                       bd._matchStrideH = nil
                       ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-                  end },
+                  end });  y = y - h
+
+            -- Inline cog on Always Show Buffs toggle
+            if barData.key == "buffs" then
+                local _, asbCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Always Show Buffs",
+                    rows = {
+                        { type="toggle", label="Desaturate Off CD",
+                          get=function() return DB().cdmBars.desaturateInactiveBuffs ~= false end,
+                          set=function(v)
+                              DB().cdmBars.desaturateInactiveBuffs = v
+                          end },
+                    },
+                })
+                local leftRgn = scaleAnimRow._leftRegion
+                local asbCog = MakeCogBtn(leftRgn, asbCogShow, leftRgn._control, EllesmereUI.COGS_ICON)
+                local function asbCogOff() return not DB().cdmBars.showInactiveBuffIcons end
+                asbCog:SetAlpha(asbCogOff() and 0.15 or 0.4)
+                local asbBlock = CreateFrame("Frame", nil, asbCog)
+                asbBlock:SetAllPoints(); asbBlock:SetFrameLevel(asbCog:GetFrameLevel() + 10); asbBlock:EnableMouse(true)
+                asbBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(asbCog, EllesmereUI.DisabledTooltip("Always Show Buffs must be enabled"))
+                end)
+                asbBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                if asbCogOff() then asbBlock:Show() else asbBlock:Hide() end
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    if asbCogOff() then asbCog:SetAlpha(0.15); asbBlock:Show()
+                    else asbCog:SetAlpha(0.4); asbBlock:Hide() end
+                end)
+            end
+
+            -- Row 2: Buff Glow + swatches | Icon Spacing
+            local buffGlowRow
+            buffGlowRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Buff Glow",
                   values=BUFF_GLOW_VALUES, order=BUFF_GLOW_ORDER,
                   disabled=function() return IsCustomShape() end,
@@ -8729,16 +8781,28 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       BD().buffGlowType = v; ns.BuildAllCDMBars(); Refresh()
                       C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+                  end },
+                { type="slider", text="Icon Spacing",
+                  min=-10, max=20, step=1,
+                  getValue=function() return BD().spacing or 2 end,
+                  setValue=function(v)
+                      local bd = BD()
+                      bd.spacing = v
+                      bd._matchIconPhys = nil
+                      bd._matchExtraPixels = nil
+                      bd._matchStride = nil
+                      bd._matchExtraPixelsH = nil
+                      bd._matchStrideH = nil
+                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   end });  y = y - h
 
-            -- Inline buff glow color swatches (right of row 1)
-            -- Order right-to-left: [class swatch] [custom swatch]
+            -- Inline buff glow color swatches (left of row 2)
             do
-                local rightRgn = scaleAnimRow._rightRegion
-                local ctrl = rightRgn._control
+                local leftRgn = buffGlowRow._leftRegion
+                local ctrl = leftRgn._control
 
                 local classSwatch, updateClassSwatch = EllesmereUI.BuildColorSwatch(
-                    rightRgn, scaleAnimRow:GetFrameLevel() + 3,
+                    leftRgn, buffGlowRow:GetFrameLevel() + 3,
                     function()
                         local _, classFile = UnitClass("player")
                         local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
@@ -8758,7 +8822,7 @@ initFrame:SetScript("OnEvent", function(self)
                 classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
                 local glowSwatch, updateGlowSwatch = EllesmereUI.BuildColorSwatch(
-                    rightRgn, scaleAnimRow:GetFrameLevel() + 3,
+                    leftRgn, buffGlowRow:GetFrameLevel() + 3,
                     function() return BD().buffGlowR or 1.0, BD().buffGlowG or 0.776, BD().buffGlowB or 0.376 end,
                     function(r, g, b)
                         BD().buffGlowR = r; BD().buffGlowG = g; BD().buffGlowB = b
@@ -8806,15 +8870,23 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdateBuffGlowState()
             end
 
-            -- Icon Spacing | Icon Zoom row for buff bars
-            _, h = W:DualRow(parent, y,
-                { type="slider", text="Icon Spacing",
-                  min=-10, max=20, step=1,
-                  getValue=function() return BD().spacing or 2 end,
+            -- Row 3: Custom Icon Shape | Border Size + swatches
+            local buffZoomBorderRow
+            buffZoomBorderRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Custom Icon Shape",
+                  values=SHAPE_VALUES, order=SHAPE_ORDER,
+                  getValue=function() return BD().iconShape or "none" end,
                   setValue=function(v)
                       local bd = BD()
-                      bd.spacing = v
-                      -- Spacing change invalidates the width/height match cache.
+                      bd.iconShape = v
+                      bd.iconZoom = ns.CDM_SHAPE_ZOOM_DEFAULTS[v] or 0.08
+                      local isCS = (v ~= "none" and v ~= "cropped")
+                      if isCS then
+                          bd.borderThickness = "strong"; bd.borderSize = BORDER_SIZES["strong"]
+                          bd.activeStateAnim = "blizzard"
+                      else
+                          bd.borderThickness = "thin"; bd.borderSize = BORDER_SIZES["thin"]
+                      end
                       bd._matchIconPhys = nil
                       bd._matchExtraPixels = nil
                       bd._matchStride = nil
@@ -8822,13 +8894,138 @@ initFrame:SetScript("OnEvent", function(self)
                       bd._matchStrideH = nil
                       ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                   end },
-                { type="slider", text="Icon Zoom",
-                  min=0, max=0.20, step=0.01,
-                  getValue=function() return BD().iconZoom or 0.08 end,
+                { type="dropdown", text="Border Size",
+                  values=BORDER_LABELS, order=BORDER_ORDER,
+                  disabled=function() return IsCustomShape() end,
+                  disabledTooltip="This option is not available for custom shapes",
+                  getValue=function() return BD().borderThickness or "thin" end,
                   setValue=function(v)
-                      BD().iconZoom = v
-                      ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                      BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
+                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                   end });  y = y - h
+
+            -- Inline border color swatches on Border Size (right of row 3)
+            do
+                local rightRgn = buffZoomBorderRow._rightRegion
+                local ctrl = rightRgn._control
+
+                local classBorderSwatch, updateClassBorderSwatch = EllesmereUI.BuildColorSwatch(
+                    rightRgn, buffZoomBorderRow:GetFrameLevel() + 3,
+                    function()
+                        local _, classFile = UnitClass("player")
+                        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+                        if cc then return cc.r, cc.g, cc.b end
+                        return 1, 1, 1
+                    end,
+                    function() end,
+                    false, 20)
+                PP.Point(classBorderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                classBorderSwatch:SetScript("OnClick", function()
+                    BD().borderClassColor = true
+                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                    EllesmereUI:RefreshPage()
+                end)
+                classBorderSwatch:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(classBorderSwatch, "Class Colored")
+                end)
+                classBorderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                    rightRgn, buffZoomBorderRow:GetFrameLevel() + 3,
+                    function() return BD().borderR or 0, BD().borderG or 0, BD().borderB or 0 end,
+                    function(r, g, b)
+                        BD().borderR, BD().borderG, BD().borderB = r, g, b
+                        ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                    end,
+                    false, 20)
+                PP.Point(swatch, "RIGHT", classBorderSwatch, "LEFT", -8, 0)
+                swatch:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, "Custom Colored")
+                end)
+                swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local swatchBlock = CreateFrame("Button", nil, swatch)
+                swatchBlock:SetAllPoints()
+                swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                swatchBlock:EnableMouse(true)
+                swatchBlock:SetScript("OnClick", function()
+                    if BD().borderClassColor then
+                        BD().borderClassColor = false
+                        ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                        EllesmereUI:RefreshPage()
+                    end
+                end)
+                swatchBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
+                end)
+                swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                local function UpdateBorderState()
+                    local noShape = not IsCustomShape()
+                    local isClassColored = BD().borderClassColor
+                    local customDis = isClassColored or not noShape
+                    if customDis then swatch:SetAlpha(0.3); swatchBlock:Show()
+                    else swatch:SetAlpha(1); swatchBlock:Hide() end
+                    classBorderSwatch:SetAlpha((isClassColored and noShape) and 1 or 0.3)
+                end
+                EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderState() end)
+                UpdateBorderState()
+            end
+
+            -- Sync icon on Custom Icon Shape (left of row 3)
+            EllesmereUI.BuildSyncIcon({
+                region  = buffZoomBorderRow._leftRegion,
+                tooltip = "Apply Icon Shape to all Bars",
+                isSynced = function()
+                    local bd = BD()
+                    local v = bd.iconShape or "none"
+                    local zoom = bd.iconZoom or 0.08
+                    local synced = true
+                    ForEachSyncBar(function(b) if (b.iconShape or "none") ~= v or (b.iconZoom or 0.08) ~= zoom then synced = false end end)
+                    return synced
+                end,
+                onClick = function()
+                    local bd = BD()
+                    local v = bd.iconShape or "none"
+                    local zoom = bd.iconZoom or 0.08
+                    ForEachSyncBar(function(b)
+                        b.iconShape = v; b.iconZoom = zoom
+                        local isCS = (v ~= "none" and v ~= "cropped")
+                        if isCS then b.borderThickness = "strong"; b.borderSize = BORDER_SIZES["strong"]
+                        else b.borderThickness = "thin"; b.borderSize = BORDER_SIZES["thin"] end
+                        b._matchIconPhys = nil
+                        b._matchExtraPixels = nil
+                        b._matchStride = nil
+                        b._matchExtraPixelsH = nil
+                        b._matchStrideH = nil
+                    end)
+                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
+                end,
+            })
+            -- Sync icon on Border Size (right of row 3)
+            EllesmereUI.BuildSyncIcon({
+                region  = buffZoomBorderRow._rightRegion,
+                tooltip = "Apply Border Size to all Bars",
+                isSynced = function()
+                    local bd = BD()
+                    local v = bd.borderThickness or "thin"
+                    local cc = bd.borderClassColor
+                    local synced = true
+                    ForEachSyncBar(function(b) if (b.borderThickness or "thin") ~= v or b.borderClassColor ~= cc then synced = false end end)
+                    return synced
+                end,
+                onClick = function()
+                    local bd = BD()
+                    local v = bd.borderThickness or "thin"
+                    local sz = bd.borderSize or 1
+                    local cc = bd.borderClassColor
+                    ForEachSyncBar(function(b)
+                        b.borderThickness = v; b.borderSize = sz
+                        b.borderClassColor = cc
+                    end)
+                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                end,
+            })
 
         else
         scaleAnimRow, h = W:DualRow(parent, y,
@@ -8893,7 +9090,9 @@ initFrame:SetScript("OnEvent", function(self)
         })
         end -- isBuffBar else
 
-        -- Row 2: (Sync) Border Size (swatch) | Suppress GCD (cd/utility only)
+        -- Border Size row (CD/utility and non-buff bars only; buff bars
+        -- include Border Size in their own Row 3 above)
+        if not isBuffGlowBar then
         local isCDOrUtility = (barData.barType == "cooldowns" or barData.barType == "utility")
         local rightSlot
         if isCDOrUtility then
@@ -9015,91 +9214,123 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateBorderSwatchState()
 
         end
+        end -- not isBuffGlowBar
 
         -- (Active Animation UI removed -- active state is now per-icon via spell picker dropdown)
 
         -- (Sync) Custom Icon Shape | (Sync) Icon Zoom
+        -- Buff bars have Custom Icon Shape in their own Row 3, so this row
+        -- becomes Icon Zoom | empty for buffs. Non-buff bars keep the
+        -- original Custom Icon Shape | Icon Zoom layout.
+        local shapeLeftSlot, shapeRightSlot
+        if isBuffGlowBar then
+            shapeLeftSlot = { type="slider", text="Icon Zoom",
+                min=0, max=0.20, step=0.01,
+                getValue=function() return BD().iconZoom or 0.08 end,
+                setValue=function(v)
+                    BD().iconZoom = v
+                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                end }
+            shapeRightSlot = { type="label", text="" }
+        else
+            shapeLeftSlot = { type="dropdown", text="Custom Icon Shape",
+                values=SHAPE_VALUES, order=SHAPE_ORDER,
+                getValue=function() return BD().iconShape or "none" end,
+                setValue=function(v)
+                    local bd = BD()
+                    bd.iconShape = v
+                    bd.iconZoom = ns.CDM_SHAPE_ZOOM_DEFAULTS[v] or 0.08
+                    local isCS = (v ~= "none" and v ~= "cropped")
+                    if isCS then
+                        bd.borderThickness = "strong"; bd.borderSize = BORDER_SIZES["strong"]
+                        bd.activeStateAnim = "blizzard"
+                    else
+                        bd.borderThickness = "thin"; bd.borderSize = BORDER_SIZES["thin"]
+                    end
+                    bd._matchIconPhys = nil
+                    bd._matchExtraPixels = nil
+                    bd._matchStride = nil
+                    bd._matchExtraPixelsH = nil
+                    bd._matchStrideH = nil
+                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                end }
+            shapeRightSlot = { type="slider", text="Icon Zoom",
+                min=0, max=0.20, step=0.01,
+                getValue=function() return BD().iconZoom or 0.08 end,
+                setValue=function(v)
+                    BD().iconZoom = v
+                    ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                end }
+        end
         local shapeRow
         shapeRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Custom Icon Shape",
-              values=SHAPE_VALUES, order=SHAPE_ORDER,
-              getValue=function() return BD().iconShape or "none" end,
-              setValue=function(v)
-                  local bd = BD()
-                  bd.iconShape = v
-                  bd.iconZoom = ns.CDM_SHAPE_ZOOM_DEFAULTS[v] or 0.08
-                  local isCS = (v ~= "none" and v ~= "cropped")
-                  if isCS then
-                      bd.borderThickness = "strong"; bd.borderSize = BORDER_SIZES["strong"]
-                      bd.activeStateAnim = "blizzard"
-                  else
-                      bd.borderThickness = "thin"; bd.borderSize = BORDER_SIZES["thin"]
-                  end
-                  -- Shape change affects iconH (cropped vs square), so any
-                  -- height-axis match cache computed against the old crop
-                  -- factor is now invalid. Clear all match caches to be safe.
-                  bd._matchIconPhys = nil
-                  bd._matchExtraPixels = nil
-                  bd._matchStride = nil
-                  bd._matchExtraPixelsH = nil
-                  bd._matchStrideH = nil
-                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-              end },
-            { type="slider", text="Icon Zoom",
-              min=0, max=0.20, step=0.01,
-              getValue=function() return BD().iconZoom or 0.08 end,
-              setValue=function(v)
-                  BD().iconZoom = v
-                  ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
-              end });  y = y - h
+            shapeLeftSlot, shapeRightSlot);  y = y - h
 
-        -- Sync icons on Custom Icon Shape and Icon Zoom
+        -- Sync icons: buff bars have Icon Zoom on the left (Shape is in
+        -- their Row 3); non-buff bars have Shape left / Zoom right.
         do
-            EllesmereUI.BuildSyncIcon({
-                region  = shapeRow._leftRegion,
-                tooltip = "Apply Icon Shape to all Bars",
-                isSynced = function()
-                    local bd = BD()
-                    local v = bd.iconShape or "none"
-                    local zoom = bd.iconZoom or 0.08
-                    local synced = true
-                    ForEachSyncBar(function(b) if (b.iconShape or "none") ~= v or (b.iconZoom or 0.08) ~= zoom then synced = false end end)
-                    return synced
-                end,
-                onClick = function()
-                    local bd = BD()
-                    local v = bd.iconShape or "none"
-                    local zoom = bd.iconZoom or 0.08
-                    ForEachSyncBar(function(b)
-                        b.iconShape = v; b.iconZoom = zoom
-                        local isCS = (v ~= "none" and v ~= "cropped")
-                        if isCS then b.borderThickness = "strong"; b.borderSize = BORDER_SIZES["strong"]
-                        else b.borderThickness = "thin"; b.borderSize = BORDER_SIZES["thin"] end
-                        -- Shape change invalidates each bar's match cache.
-                        b._matchIconPhys = nil
-                        b._matchExtraPixels = nil
-                        b._matchStride = nil
-                        b._matchExtraPixelsH = nil
-                        b._matchStrideH = nil
-                    end)
-                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
-                end,
-            })
-            EllesmereUI.BuildSyncIcon({
-                region  = shapeRow._rightRegion,
-                tooltip = "Apply Icon Zoom to all Bars",
-                isSynced = function()
-                    local v = BD().iconZoom or 0.08
-                    local synced = true
-                    ForEachSyncBar(function(b) if (b.iconZoom or 0.08) ~= v then synced = false end end)
-                    return synced
-                end,
-                onClick = function()
-                    local v = BD().iconZoom or 0.08
-                    ForEachSyncBar(function(b) b.iconZoom = v end)
-                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
-                end,
-            })
+            if isBuffGlowBar then
+                EllesmereUI.BuildSyncIcon({
+                    region  = shapeRow._leftRegion,
+                    tooltip = "Apply Icon Zoom to all Bars",
+                    isSynced = function()
+                        local v = BD().iconZoom or 0.08
+                        local synced = true
+                        ForEachSyncBar(function(b) if (b.iconZoom or 0.08) ~= v then synced = false end end)
+                        return synced
+                    end,
+                    onClick = function()
+                        local v = BD().iconZoom or 0.08
+                        ForEachSyncBar(function(b) b.iconZoom = v end)
+                        ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                    end,
+                })
+            else
+                EllesmereUI.BuildSyncIcon({
+                    region  = shapeRow._leftRegion,
+                    tooltip = "Apply Icon Shape to all Bars",
+                    isSynced = function()
+                        local bd = BD()
+                        local v = bd.iconShape or "none"
+                        local zoom = bd.iconZoom or 0.08
+                        local synced = true
+                        ForEachSyncBar(function(b) if (b.iconShape or "none") ~= v or (b.iconZoom or 0.08) ~= zoom then synced = false end end)
+                        return synced
+                    end,
+                    onClick = function()
+                        local bd = BD()
+                        local v = bd.iconShape or "none"
+                        local zoom = bd.iconZoom or 0.08
+                        ForEachSyncBar(function(b)
+                            b.iconShape = v; b.iconZoom = zoom
+                            local isCS = (v ~= "none" and v ~= "cropped")
+                            if isCS then b.borderThickness = "strong"; b.borderSize = BORDER_SIZES["strong"]
+                            else b.borderThickness = "thin"; b.borderSize = BORDER_SIZES["thin"] end
+                            b._matchIconPhys = nil
+                            b._matchExtraPixels = nil
+                            b._matchStride = nil
+                            b._matchExtraPixelsH = nil
+                            b._matchStrideH = nil
+                        end)
+                        ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize(); EllesmereUI:RefreshPage()
+                    end,
+                })
+                EllesmereUI.BuildSyncIcon({
+                    region  = shapeRow._rightRegion,
+                    tooltip = "Apply Icon Zoom to all Bars",
+                    isSynced = function()
+                        local v = BD().iconZoom or 0.08
+                        local synced = true
+                        ForEachSyncBar(function(b) if (b.iconZoom or 0.08) ~= v then synced = false end end)
+                        return synced
+                    end,
+                    onClick = function()
+                        local v = BD().iconZoom or 0.08
+                        ForEachSyncBar(function(b) b.iconZoom = v end)
+                        ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                    end,
+                })
+            end
         end
 
         -- Row 4: Duration Size (swatch + cog) | Stack Size (swatch + cog)

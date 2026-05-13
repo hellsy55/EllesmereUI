@@ -53,64 +53,9 @@ local function EUI_ScanInventoryItem(slotID, unit)
     return data
 end
 
--- Shared (immutable) so EUI_GetUpgradeTrack doesn't allocate a fresh
--- {r,g,b} per slot on every PLAYER_EQUIPMENT_CHANGED.
-local _TRACK_WHITE  = { r = 1.00, g = 1.00, b = 1.00 }
-local _TRACK_CHAMP  = { r = 0.00, g = 0.44, b = 0.87 }
-local _TRACK_MYTH   = { r = 1.00, g = 0.50, b = 0.00 }
-local _TRACK_HERO   = { r = 1.00, g = 0.30, b = 1.00 }
-local _TRACK_VET    = { r = 0.12, g = 1.00, b = 0.00 }
-local _TRACK_GRAY   = { r = 0.62, g = 0.62, b = 0.62 }
-
--- Returns "(n/m)" (or "") + color, sourced from C_Item.GetItemUpgradeInfo
--- so no tooltip scan is needed.
--- Locale-agnostic track color lookup. All known localized trackString values
-local _trackColorMap = {
-    -- Explorer (gray)
-    Explorer = _TRACK_GRAY, Expedicionario = _TRACK_GRAY, Forscher = _TRACK_GRAY,
-    Explorateur = _TRACK_GRAY, Esploratore = _TRACK_GRAY, Explorador = _TRACK_GRAY,
-    Delve = _TRACK_GRAY,
-    -- Adventurer (white)
-    Adventurer = _TRACK_WHITE, Aventurero = _TRACK_WHITE, Abenteurer = _TRACK_WHITE,
-    Aventurier = _TRACK_WHITE, Avventuriero = _TRACK_WHITE, Aventureiro = _TRACK_WHITE,
-    -- Veteran (green)
-    Veteran = _TRACK_VET, Veterano = _TRACK_VET, ["Vétéran"] = _TRACK_VET,
-    -- Champion (blue)
-    Champion = _TRACK_CHAMP, ["Campeón"] = _TRACK_CHAMP, Campione = _TRACK_CHAMP,
-    ["Campeão"] = _TRACK_CHAMP,
-    -- Hero (purple)
-    Hero = _TRACK_HERO, ["Héroe"] = _TRACK_HERO, Held = _TRACK_HERO,
-    ["Héros"] = _TRACK_HERO, Eroe = _TRACK_HERO, ["Herói"] = _TRACK_HERO,
-    -- Myth (orange)
-    Myth = _TRACK_MYTH, Mito = _TRACK_MYTH, Mythos = _TRACK_MYTH,
-    Mythe = _TRACK_MYTH,
-    -- ruRU
-    ["Исследователь"] = _TRACK_GRAY, ["Искатель приключений"] = _TRACK_WHITE,
-    ["Ветеран"] = _TRACK_VET, ["Защитник"] = _TRACK_CHAMP,
-    ["Герой"] = _TRACK_HERO, ["Легенда"] = _TRACK_MYTH,
-    -- koKR
-    ["탐험가"] = _TRACK_GRAY, ["모험가"] = _TRACK_WHITE, ["노련가"] = _TRACK_VET,
-    ["챔피언"] = _TRACK_CHAMP, ["영웅"] = _TRACK_HERO, ["신화"] = _TRACK_MYTH,
-    -- zhCN
-    ["探索者"] = _TRACK_GRAY, ["冒险者"] = _TRACK_WHITE, ["老兵"] = _TRACK_VET,
-    ["勇士"] = _TRACK_CHAMP, ["英雄"] = _TRACK_HERO, ["神话"] = _TRACK_MYTH,
-    -- zhTW
-    ["探險者"] = _TRACK_GRAY, ["冒險者"] = _TRACK_WHITE, ["精兵"] = _TRACK_VET,
-    ["神話"] = _TRACK_MYTH,
-}
-
-local function EUI_GetUpgradeTrack(itemLink)
-    if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
-        return "", _TRACK_WHITE
-    end
-    local info = C_Item.GetItemUpgradeInfo(itemLink)
-    if not info then return "", _TRACK_WHITE end
-    local trk = info.trackString or ""
-    local cur, maxL = info.currentLevel, info.maxLevel
-    local text = (cur and maxL and maxL > 0) and ("(" .. cur .. "/" .. maxL .. ")") or ""
-    local color = _trackColorMap[trk] or _TRACK_WHITE
-    return text, color
-end
+-- Upgrade track lookup lives in parent addon (EllesmereUI.lua) so Bags can
+-- share it.  Local alias for the hot path.
+local EUI_GetUpgradeTrack = EllesmereUI.GetUpgradeTrack
 
 -- Language-agnostic: prefers line-type match
 -- (Enum.TooltipDataLineType.ItemEnchantmentPermanent / 15), falls back to a
@@ -188,7 +133,6 @@ local function EUI_GetEnchantText(slotID, unit)
     return ""
 end
 
-EllesmereUI.GetUpgradeTrack = EUI_GetUpgradeTrack
 EllesmereUI.GetEnchantText  = EUI_GetEnchantText
 
 -- Empty-socket atlas map (key names come from GetItemStats return keys).
@@ -351,9 +295,12 @@ local function PreSkinCharacterSheet()
         end
     end
     GetFFD(frame).bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    GetFFD(frame).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B)
+    GetFFD(frame).bg:SetAtlas("housing-basic-panel--stone-background")
     GetFFD(frame).bg:SetAllPoints(frame)
     GetFFD(frame).bg:SetAlpha(1)
+    GetFFD(frame).bgOverlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+    GetFFD(frame).bgOverlay:SetColorTexture(0, 0, 0, 0.72)
+    GetFFD(frame).bgOverlay:SetAllPoints(frame)
     if EllesmereUI and EllesmereUI.PanelPP then
         EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
     end
@@ -384,6 +331,7 @@ local function PreSkinCharacterSheet()
         local bgTex = bgFrame:CreateTexture(nil, "BACKGROUND")
         bgTex:SetAllPoints(bgFrame)
         bgTex:SetAtlas("transmog-locationBG")
+        bgTex:SetAlpha(0.5)
 
         local GLOW_HEIGHT_RATIO = 386 / 860
         local bgGlowTex = bgFrame:CreateTexture(nil, "BORDER")
@@ -396,9 +344,22 @@ local function PreSkinCharacterSheet()
             bgGlowTex:SetHeight(math.max(1, (h or 0) * GLOW_HEIGHT_RATIO))
         end)
 
+        -- Top fade: gradient overlay ABOVE the model that blends into the frame bg
+        local fadeFrame = CreateFrame("Frame", nil, frame)
+        fadeFrame:SetFrameLevel(myModel:GetFrameLevel() + 1)
+        fadeFrame:SetAllPoints(myModel)
+        local topFade = fadeFrame:CreateTexture(nil, "ARTWORK")
+        topFade:SetTexture("Interface\\AddOns\\EllesmereUIBlizzardSkin\\Media\\top-gradient-mask.tga")
+        topFade:SetPoint("TOPLEFT", fadeFrame, "TOPLEFT", 0, 0)
+        topFade:SetPoint("TOPRIGHT", fadeFrame, "TOPRIGHT", 0, 0)
+        topFade:SetHeight(60)
+        topFade:SetAlpha(0.5)
+        fadeFrame:EnableMouse(false)
+
         GetFFD(frame).modelBg      = bgTex
         GetFFD(frame).modelBgGlow  = bgGlowTex
         GetFFD(frame).modelBgFrame = bgFrame
+        GetFFD(frame).modelTopFade = fadeFrame
 
         myModel:SetUnit("player")
         local zoomLevel = 0  -- 0 = full body, 1 = tight portrait
@@ -815,13 +776,13 @@ local function SkinCharacterSheet()
             if not GetFFD(tab).bg then
                 GetFFD(tab).bg = tab:CreateTexture(nil, "BACKGROUND")
                 GetFFD(tab).bg:SetAllPoints()
-                GetFFD(tab).bg:SetColorTexture(FRAME_BG_R, FRAME_BG_G, FRAME_BG_B, 1)
+                GetFFD(tab).bg:SetColorTexture(0.043, 0.031, 0.027, 1)
             end
 
             if not GetFFD(tab).activeHL then
                 local activeHL = tab:CreateTexture(nil, "ARTWORK", nil, -6)
                 activeHL:SetAllPoints()
-                activeHL:SetColorTexture(1, 1, 1, 0.05)
+                activeHL:SetColorTexture(1, 1, 1, 0.02)
                 activeHL:SetBlendMode("ADD")
                 activeHL:Hide()
                 GetFFD(tab).activeHL = activeHL
@@ -925,10 +886,9 @@ local function SkinCharacterSheet()
         if not pane or GetFFD(pane).bg then return end
         local anchor = pane.ScrollBox or pane.scrollFrame or pane
         local tex = pane:CreateTexture(nil, "BACKGROUND", nil, -7)
-        tex:SetTexture("Interface\\Credits\\CreditsScreenBackground11Midnight")
+        tex:SetColorTexture(0, 0, 0, 0.1)
         tex:SetPoint("TOPLEFT",     anchor, "TOPLEFT",     10, -10)
         tex:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -10,  0)
-        tex:SetAlpha(0.25)
         GetFFD(pane).bg = tex
     end
     _ensureTabBg(_G.ReputationFrame)
@@ -966,6 +926,7 @@ local function SkinCharacterSheet()
             if btn then btn:SetShown(isCharacterTab) end
         end
 
+        if GetFFD(frame).modelTopFade     then GetFFD(frame).modelTopFade:SetShown(isCharacterTab)     end
         if GetFFD(frame).statsPanel       then GetFFD(frame).statsPanel:SetShown(isCharacterTab)       end
         if GetFFD(frame).iLvlText         then GetFFD(frame).iLvlText:SetShown(isCharacterTab)         end
         if GetFFD(frame).statsBg          then GetFFD(frame).statsBg:SetShown(isCharacterTab)          end
@@ -1015,7 +976,7 @@ local function SkinCharacterSheet()
 
     -- Stats panel background: fills the whole panel.
     local statsBg = statsPanel:CreateTexture(nil, "BACKGROUND")
-    statsBg:SetColorTexture(0.03, 0.045, 0.05, 0.95)
+    statsBg:SetColorTexture(0, 0, 0, 0)
     statsBg:SetAllPoints(statsPanel)
     GetFFD(frame).statsBg = statsBg
 
@@ -1926,17 +1887,30 @@ local function SkinCharacterSheet()
             -- Collapsed sections keep all rows hidden regardless of
             -- per-stat filters. Let the collapse/expand path own visibility.
             if not sectionData.isCollapsed then
-                for _, stat in ipairs(sectionData.stats) do
+                local visibleCount = 0
+                for si = 1, #sectionData.stats do
+                    local stat = sectionData.stats[si]
                     if stat.label and (stat.showWhen or stat.showCrestKey) then
                         local shouldShow = ShouldShowStat(stat.showWhen)
                                        and ShouldShowCrest(stat)
                         stat.label:SetShown(shouldShow)
                         if stat.value then stat.value:SetShown(shouldShow) end
                         if stat.button then stat.button:SetShown(shouldShow) end
+                        -- Hide/show the divider that follows this stat
+                        local nextEntry = sectionData.stats[si + 1]
+                        if nextEntry and nextEntry.divider then
+                            nextEntry.divider:SetShown(shouldShow)
+                        end
+                        if shouldShow then visibleCount = visibleCount + 1 end
+                    elseif stat.label then
+                        visibleCount = visibleCount + 1
                     end
                 end
+                -- Recalculate section height based on visible stats
+                sectionData.height = 22 + (visibleCount * 16)
             end
         end
+        GetFFD(frame).recalculateSections()
     end
     EllesmereUI._refreshStatsVisibility = RefreshStatsVisibility
 
@@ -1965,6 +1939,14 @@ local function SkinCharacterSheet()
         if EllesmereUI._updateStatCategoryVisibility then
             EllesmereUI._updateStatCategoryVisibility()
         end
+        -- Deferred re-layout: scroll child bounds may not be finalized on
+        -- the same frame as OnShow, causing sections to stack on first open.
+        C_Timer.After(0, function()
+            RefreshStatsVisibility()
+            if EllesmereUI._updateStatCategoryVisibility then
+                EllesmereUI._updateStatCategoryVisibility()
+            end
+        end)
     end)
 
     -- Function to update visibility of stat categories
@@ -1979,6 +1961,8 @@ local function SkinCharacterSheet()
                 sectionData.container:Show()
             else
                 sectionData.container:Hide()
+                sectionData.container:ClearAllPoints()
+                sectionData.container:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 10000)
             end
         end
         GetFFD(frame).recalculateSections()
@@ -4178,7 +4162,7 @@ local function SkinCharacterSheet()
             local showUpgradeTrack = (not EllesmereUIDB) or (EllesmereUIDB.showUpgradeTrack ~= false)
 
             if showUpgradeTrack then
-                GetFFD(slot).upgradeTrackLabel:SetText(upgradeTrackText or "")
+                GetFFD(slot).upgradeTrackLabel:SetText(upgradeTrackText ~= "" and ("(" .. upgradeTrackText .. ")") or "")
                 GetFFD(slot).upgradeTrackLabel:SetShown(isCharTab)
 
                 -- Determine color to use
@@ -4231,6 +4215,12 @@ local function SkinCharacterSheet()
         -- above is installed mid-show -- it won't fire for the current open
         -- event. Run a refresh now so first-open gets decorated immediately.
         RefreshAllSlotLabels()
+    end
+
+    -- Same deferred-skin timing issue for gem icons: the OnShow hook at
+    -- line ~3997 is installed mid-show and won't fire for the first open.
+    if (frame.selectedTab or 1) == 1 then
+        RefreshAllSocketIcons()
     end
 
     -- Re-apply tab visibility now that all elements exist. The early call

@@ -51,7 +51,7 @@ local SH_DEFAULTS = {
     textColorUseAccent = false,
     textColor       = { r = 1, g = 1, b = 1 },
     shBarHeight     = 20,
-    bgR = 0, bgG = 0, bgB = 0, bgAlpha = 0.75,
+    bgR = 0, bgG = 0, bgB = 0, bgAlpha = 0.25,
     iconHideInDungeon    = false,
     iconHideInRaid       = false,
     iconHideOutOfInstance = false,
@@ -969,7 +969,7 @@ local function BuildBarWindow()
     end
 
     -- Apply styling (bg from spell history settings, header from DM settings)
-    _barWin._bg:SetColorTexture(sh.bgR or 0, sh.bgG or 0, sh.bgB or 0, sh.bgAlpha or 0.75)
+    _barWin._bg:SetColorTexture(sh.bgR or 0, sh.bgG or 0, sh.bgB or 0, sh.bgAlpha or 0.25)
 
     local hc = dmCfg.hdrBgColor
     local hR, hG, hB = hc and hc.r or 0x1B/255, hc and hc.g or 0x1B/255, hc and hc.b or 0x1B/255

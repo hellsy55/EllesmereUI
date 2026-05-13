@@ -289,7 +289,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
     { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
     { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",        comingSoon = true },
+    { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
     { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
 }
 
@@ -342,7 +342,7 @@ EllesmereUI.ADDON_GROUPS = {
             "EllesmereUIFriends",
             "EllesmereUIMinimap",
             "EllesmereUIChat",
-            "EllesmereUIBags",            -- comingSoon
+            "EllesmereUIBags",
         },
     },
 }
@@ -771,6 +771,80 @@ EllesmereUI.TRIPLE_GAP    = TRIPLE_GAP
 -- Table constants
 EllesmereUI.CLASS_COLOR_MAP = CLASS_COLOR_MAP
 EllesmereUI.CLASS_ART_MAP   = CLASS_ART_MAP
+
+-- Upgrade track color data (shared by BlizzardSkin character/inspect sheets + Bags)
+-- Only initialized when a consumer feature is actually enabled.
+do
+    local en = C_AddOns and C_AddOns.GetAddOnEnableState
+    local need = en and (
+        (en("EllesmereUIBags") or 0) > 0
+        or ((en("EllesmereUIBlizzardSkin") or 0) > 0
+            and (not EllesmereUIDB
+                 or EllesmereUIDB.themedCharacterSheet ~= false
+                 or EllesmereUIDB.themedInspectSheet ~= false))
+    )
+    if need then
+        local W  = { r = 1.00, g = 1.00, b = 1.00 }
+        local CH = { r = 0.00, g = 0.44, b = 0.87 }
+        local MY = { r = 1.00, g = 0.50, b = 0.00 }
+        local HE = { r = 1.00, g = 0.30, b = 1.00 }
+        local VE = { r = 0.12, g = 1.00, b = 0.00 }
+        local GR = { r = 0.62, g = 0.62, b = 0.62 }
+
+        EllesmereUI._TRACK_WHITE = W
+        EllesmereUI._TRACK_RANK = { [GR] = 1, [W] = 2, [VE] = 3, [CH] = 4, [HE] = 5, [MY] = 6 }
+
+        -- Locale-agnostic track color lookup (all known localized trackString values)
+        local map = {
+            -- Explorer / Delve (gray)
+            Explorer = GR, Expedicionario = GR, Forscher = GR,
+            Explorateur = GR, Esploratore = GR, Explorador = GR, Delve = GR,
+            -- Adventurer (white)
+            Adventurer = W, Aventurero = W, Abenteurer = W,
+            Aventurier = W, Avventuriero = W, Aventureiro = W,
+            -- Veteran (green)
+            Veteran = VE, Veterano = VE, ["V\195\169t\195\169ran"] = VE,
+            -- Champion (blue)
+            Champion = CH, ["Campe\195\179n"] = CH, Campione = CH,
+            ["Campe\195\163o"] = CH,
+            -- Hero (purple)
+            Hero = HE, ["H\195\169roe"] = HE, Held = HE,
+            ["H\195\169ros"] = HE, Eroe = HE, ["Hero\195\173"] = HE,
+            -- Myth (orange)
+            Myth = MY, Mito = MY, Mythos = MY, Mythe = MY,
+            -- ruRU
+            ["\208\152\209\129\209\129\208\187\208\181\208\180\208\190\208\178\208\176\209\130\208\181\208\187\209\140"] = GR,
+            ["\208\152\209\129\208\186\208\176\209\130\208\181\208\187\209\140 \208\191\209\128\208\184\208\186\208\187\209\142\209\135\208\181\208\189\208\184\208\185"] = W,
+            ["\208\146\208\181\209\130\208\181\209\128\208\176\208\189"] = VE,
+            ["\208\151\208\176\209\137\208\184\209\130\208\189\208\184\208\186"] = CH,
+            ["\208\147\208\181\209\128\208\190\208\185"] = HE,
+            ["\208\155\208\181\208\179\208\181\208\189\208\180\208\176"] = MY,
+            -- koKR
+            ["\237\131\144\237\151\152\234\176\128"] = GR, ["\235\170\168\237\151\152\234\176\128"] = W,
+            ["\235\133\184\235\160\168\234\176\128"] = VE, ["\236\177\148\237\148\188\236\150\184"] = CH,
+            ["\236\152\129\236\155\133"] = HE, ["\236\139\160\237\153\148"] = MY,
+            -- zhCN
+            ["\230\142\162\231\180\162\232\128\133"] = GR, ["\229\134\146\233\153\169\232\128\133"] = W,
+            ["\232\128\129\229\133\181"] = VE, ["\229\139\135\229\163\171"] = CH,
+            ["\232\139\177\233\155\132"] = HE, ["\231\165\158\232\175\157"] = MY,
+            -- zhTW
+            ["\230\142\162\233\154\170\232\128\133"] = GR, ["\229\134\146\233\154\170\232\128\133"] = W,
+            ["\231\178\190\229\133\181"] = VE, ["\231\165\158\232\169\177"] = MY,
+        }
+
+        function EllesmereUI.GetUpgradeTrack(itemLink)
+            if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
+                return "", W
+            end
+            local info = C_Item.GetItemUpgradeInfo(itemLink)
+            if not info then return "", W end
+            local cur, maxL = info.currentLevel, info.maxLevel
+            local text = (cur and maxL and maxL > 0) and (cur .. "/" .. maxL) or ""
+            local color = map[info.trackString or ""] or W
+            return text, color
+        end
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Pixel Perfect System
@@ -1735,7 +1809,7 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
     else
         mode = db.outlineMode or "none"
     end
-    if mode == "outline" then return "OUTLINE"
+    if mode == "outline" then return "OUTLINE, SLUG"
     elseif mode == "thick" then return "THICKOUTLINE"
     else return "" end
 end
@@ -2804,7 +2878,7 @@ local function CreateConfirmPopup()
     popup._baseH = POPUP_H
 
     -- Button dimensions
-    local BTN_W, BTN_H = 135, 29
+    local BTN_W, BTN_H = 125, 27
     local BTN_GAP = 16
     local BTN_Y = 13
     local FADE_DUR = 0.1
@@ -2814,16 +2888,15 @@ local function CreateConfirmPopup()
     -- texture (which fills the full button) peeks out as a 1px border on all sides.
     local function MakePopupButton(parent, anchorPoint, anchorTo, anchorRef, xOff, yOff, defR, defG, defB, defA, hovR, hovG, hovB, hovA, bDefR, bDefG, bDefB, bDefA, bHovR, bHovG, bHovB, bHovA)
         local btn = CreateFrame("Button", nil, parent)
-        btn:SetSize(BTN_W + 2, BTN_H + 2)
+        btn:SetSize(BTN_W, BTN_H)
         btn:SetPoint(anchorPoint, anchorTo, anchorRef, xOff, yOff)
         btn:SetFrameLevel(parent:GetFrameLevel() + 2)
 
-        -- Border: full-size background texture (peeks out 1px on every side)
-        local brd = SolidTex(btn, "BACKGROUND", bDefR, bDefG, bDefB, bDefA)
-        brd:SetAllPoints()
-        -- Fill: inset by 1px on each side to reveal the border
-        local bg = SolidTex(btn, "BORDER", 0.06, 0.08, 0.10, .92)
-        bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1)
+        -- Background fill
+        local bg = SolidTex(btn, "BACKGROUND", 0.06, 0.08, 0.10, .92)
+        bg:SetAllPoints()
+        -- Physical-pixel border (matches MakeStyledButton pattern)
+        local brd = MakeBorder(btn, bDefR, bDefG, bDefB, bDefA)
 
         local lbl = MakeFont(btn, 12, nil, defR, defG, defB)
         lbl:SetAlpha(defA)
@@ -2832,7 +2905,7 @@ local function CreateConfirmPopup()
         local progress, target = 0, 0
         local function Apply(t)
             lbl:SetTextColor(lerp(defR, hovR, t), lerp(defG, hovG, t), lerp(defB, hovB, t), lerp(defA, hovA, t))
-            brd:SetColorTexture(lerp(bDefR, bHovR, t), lerp(bDefG, bHovG, t), lerp(bDefB, bHovB, t), lerp(bDefA, bHovA, t))
+            brd:SetColor(lerp(bDefR, bHovR, t), lerp(bDefG, bHovG, t), lerp(bDefB, bHovB, t), lerp(bDefA, bHovA, t))
         end
 
         local function OnUpdate(self, elapsed)
@@ -2874,6 +2947,37 @@ local function CreateConfirmPopup()
 
     popup._cancelBtn  = cancelBtn
     popup._confirmBtn = confirmBtn
+
+    -- Optional checkbox (above buttons, centered)
+    local cbRow = CreateFrame("Button", nil, popup)
+    cbRow:SetSize(POPUP_W - 60, 18)
+    cbRow:SetPoint("BOTTOM", popup, "BOTTOM", 0, BTN_Y + BTN_H + 10)
+    cbRow:SetFrameLevel(popup:GetFrameLevel() + 2)
+
+    local cbBox = CreateFrame("Frame", nil, cbRow)
+    cbBox:SetSize(14, 14)
+    cbBox:SetPoint("LEFT", cbRow, "LEFT", 0, 0)
+    cbBox:SetFrameLevel(cbRow:GetFrameLevel() + 1)
+    local cbBoxBg = SolidTex(cbBox, "BACKGROUND", 0.075, 0.113, 0.141, 1)
+    cbBoxBg:SetAllPoints()
+    MakeBorder(cbBox, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.25)
+    local cbCheck = SolidTex(cbBox, "ARTWORK", EG.r, EG.g, EG.b, 1)
+    cbCheck:SetPoint("TOPLEFT", 3, -3)
+    cbCheck:SetPoint("BOTTOMRIGHT", -3, 3)
+    cbCheck:Hide()
+
+    local cbLabel = MakeFont(cbRow, 11, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+    cbLabel:SetPoint("LEFT", cbBox, "RIGHT", 6, 0)
+
+    popup._cbChecked = false
+    cbRow:SetScript("OnClick", function()
+        popup._cbChecked = not popup._cbChecked
+        if popup._cbChecked then cbCheck:Show() else cbCheck:Hide() end
+    end)
+    cbRow:Hide()
+    popup._cbRow = cbRow
+    popup._cbCheck = cbCheck
+    popup._cbLabel = cbLabel
 
     -- Close on dimmer click (only when clicking outside the popup).
     -- Modal popups ignore dimmer clicks entirely.
@@ -2937,7 +3041,23 @@ function EllesmereUI:ShowConfirmPopup(opts)
         popup._scaleWarnLabel:SetText("")
         popup._scaleWarnLabel:Hide()
     end
-    popup:SetHeight((popup._baseH or 176) + scaleWarnH)
+    -- Optional checkbox
+    local cbH = 0
+    if opts.checkbox then
+        popup._cbChecked = false
+        popup._cbCheck:Hide()
+        popup._cbLabel:SetText(opts.checkbox)
+        local rowW = 14 + 6 + popup._cbLabel:GetStringWidth()
+        popup._cbRow:SetWidth(rowW)
+        popup._cbRow:ClearAllPoints()
+        popup._cbRow:SetPoint("BOTTOM", popup, "BOTTOM", 0, 13 + 27 + 10)
+        popup._cbRow:Show()
+        cbH = 28
+    else
+        popup._cbRow:Hide()
+    end
+
+    popup:SetHeight((popup._baseH or 176) + scaleWarnH + cbH)
     popup._cancelBtn._lbl:SetText(opts.cancelText or "Cancel")
     popup._confirmBtn._lbl:SetText(opts.confirmText or "Confirm")
     -- onDismiss: called on escape/click-outside. Falls back to onCancel if not provided.
@@ -2982,7 +3102,7 @@ function EllesmereUI:ShowConfirmPopup(opts)
         if popup._macroOverlay then popup._macroOverlay:Hide() end
         popup._confirmBtn:SetScript("OnClick", function()
             popup._dimmer:Hide()
-            if opts.onConfirm then opts.onConfirm() end
+            if opts.onConfirm then opts.onConfirm(popup._cbChecked) end
         end)
     end
 
@@ -2996,6 +3116,7 @@ function EllesmereUI:ShowConfirmPopup(opts)
     else
         popup:SetScale(1)
     end
+
 
     popup._dimmer:Show()
 end
@@ -3493,15 +3614,13 @@ function EllesmereUI:ShowInputPopup(opts)
 
         local INPUT_W, INPUT_H = 270, 28
         local inputFrame = CreateFrame("Frame", nil, popup)
-        inputFrame:SetSize(INPUT_W + 2, INPUT_H + 2)
+        inputFrame:SetSize(INPUT_W, INPUT_H)
         inputFrame:SetPoint("TOP", msg, "BOTTOM", 0, -12)
         inputFrame:SetFrameLevel(popup:GetFrameLevel() + 2)
 
-        local iBrdTex = SolidTex(inputFrame, "BACKGROUND", 1, 1, 1, 0.2)
-        iBrdTex:SetAllPoints()
-        local iBg = SolidTex(inputFrame, "BORDER", 0.06, 0.08, 0.10, 1)
-        iBg:SetPoint("TOPLEFT", 1, -1); iBg:SetPoint("BOTTOMRIGHT", -1, 1)
-        popup._iBrdTex = iBrdTex
+        local iBg = SolidTex(inputFrame, "BACKGROUND", 0.06, 0.08, 0.10, 1)
+        iBg:SetAllPoints()
+        local iBrd = MakeBorder(inputFrame, 1, 1, 1, 0.2)
 
         -- Red flash animation for empty-input validation
         local FLASH_DUR = 0.7
@@ -3514,22 +3633,21 @@ function EllesmereUI:ShowInputPopup(opts)
             if flashElapsed >= FLASH_DUR then
                 flashing = false
                 self:Hide()
-                iBrdTex:SetColorTexture(1, 1, 1, 0.2)
+                iBrd:SetColor(1, 1, 1, 0.2)
                 return
             end
             local t = flashElapsed / FLASH_DUR
-            -- Fade from red back to default border
             local r = lerp(0.9, 1, t)
             local g = lerp(0.15, 1, t)
             local b = lerp(0.15, 1, t)
             local a = lerp(0.7, 0.2, t)
-            iBrdTex:SetColorTexture(r, g, b, a)
+            iBrd:SetColor(r, g, b, a)
         end)
 
         popup._flashEmpty = function()
             flashElapsed = 0
             flashing = true
-            iBrdTex:SetColorTexture(0.9, 0.15, 0.15, 0.7)
+            iBrd:SetColor(0.9, 0.15, 0.15, 0.7)
             flashFrame:Show()
             popup._editBox:SetFocus()
         end
@@ -3609,27 +3727,26 @@ function EllesmereUI:ShowInputPopup(opts)
         popup._extraBtn = extraBtn
         popup._extraLbl = extraLbl
 
-        local BTN_W, BTN_H = 150, 32
+        local BTN_W, BTN_H = 125, 27
         local BTN_GAP = 16
         local BTN_Y = 18
         local FADE_DUR = 0.1
 
         local function MakePopupButton(parent, anchorPoint, anchorTo, anchorRef, xOff, yOff, defR, defG, defB, defA, hovR, hovG, hovB, hovA, bDefR, bDefG, bDefB, bDefA, bHovR, bHovG, bHovB, bHovA)
             local btn = CreateFrame("Button", nil, parent)
-            btn:SetSize(BTN_W + 2, BTN_H + 2)
+            btn:SetSize(BTN_W, BTN_H)
             btn:SetPoint(anchorPoint, anchorTo, anchorRef, xOff, yOff)
             btn:SetFrameLevel(parent:GetFrameLevel() + 2)
-            local brd = SolidTex(btn, "BACKGROUND", bDefR, bDefG, bDefB, bDefA)
-            brd:SetAllPoints()
-            local bg = SolidTex(btn, "BORDER", 0.06, 0.08, 0.10, .92)
-            bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1)
+            local bg = SolidTex(btn, "BACKGROUND", 0.06, 0.08, 0.10, .92)
+            bg:SetAllPoints()
+            local brd = MakeBorder(btn, bDefR, bDefG, bDefB, bDefA)
             local lbl = MakeFont(btn, 12, nil, defR, defG, defB)
             lbl:SetAlpha(defA)
             lbl:SetPoint("CENTER")
             local progress, target = 0, 0
             local function Apply(t)
                 lbl:SetTextColor(lerp(defR, hovR, t), lerp(defG, hovG, t), lerp(defB, hovB, t), lerp(defA, hovA, t))
-                brd:SetColorTexture(lerp(bDefR, bHovR, t), lerp(bDefG, bHovG, t), lerp(bDefB, bHovB, t), lerp(bDefA, bHovA, t))
+                brd:SetColor(lerp(bDefR, bHovR, t), lerp(bDefG, bHovG, t), lerp(bDefB, bHovB, t), lerp(bDefA, bHovA, t))
             end
             local function OnUpdate(self, elapsed)
                 local dir = (target == 1) and 1 or -1
@@ -3840,7 +3957,7 @@ local function CreateMainFrame()
     -- Initialize PanelPP mult for the saved user scale
     if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
 
-    table.insert(UISpecialFrames, "EllesmereUIFrame")
+    EllesmereUI.RegisterEscapeClose(mainFrame)
 
     -----------------------------------------------------------------------
     --  Background texture  (dual-layer crossfade for smooth transitions)
@@ -4540,6 +4657,9 @@ local function CreateMainFrame()
                     confirmText = enabled and "Disable & Reload" or "Enable & Reload",
                     cancelText  = "Cancel",
                     onConfirm   = function()
+                        if folder == "EllesmereUIBags" and EllesmereUIDB then
+                            EllesmereUIDB.bagsUserChosen = true
+                        end
                         if enabled then
                             C_AddOns.DisableAddOn(folder)
                         else
@@ -6360,6 +6480,7 @@ function EllesmereUI:RegisterModule(folderName, config)
             EllesmereUIFriends = true,
             EllesmereUIChat = true,
             EllesmereUIDamageMeters = true,
+            EllesmereUIBags = true,
         }
         if not ALLOWED[callerFolder] then return end
     end
@@ -7200,7 +7321,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.6.1"
+EllesmereUI.VERSION = "7.6.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7391,12 +7512,12 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "Chatter",                  label = "Chatter",                    targets = { "EllesmereUIChat" } },
             { addon = "Chattynator",              label = "Chattynator",                targets = { "EllesmereUIChat" } },
             { addon = "Glass",                    label = "Glass",                      targets = { "EllesmereUIChat" } },
-            -- { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBags" } },
-            -- { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBags" } },
-            -- { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBags" } },
-            -- { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBags" } },
-            -- { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBags" } },
-            -- { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBags" } },
+            { addon = "AdiBags",                  label = "AdiBags",                    targets = { "EllesmereUIBags" } },
+            { addon = "ArkInventory",             label = "ArkInventory",               targets = { "EllesmereUIBags" } },
+            { addon = "Baganator",                label = "Baganator",                  targets = { "EllesmereUIBags" } },
+            { addon = "Bagnon",                   label = "Bagnon",                     targets = { "EllesmereUIBags" } },
+            { addon = "BetterBags",               label = "BetterBags",                 targets = { "EllesmereUIBags" } },
+            { addon = "Sorted",                   label = "Sorted",                     targets = { "EllesmereUIBags" } },
             { addon = "UltimateMouseCursor",      label = "Ultimate Mouse Cursor",      targets = { "EllesmereUIQoL" } },
             { addon = "BetterCooldownManager",    label = "Better Cooldown Manager",    targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
             { addon = "CooldownManagerCentered",    label = "Cooldown Manager Centered",    targets = { "EllesmereUICooldownManager" } },
@@ -7885,6 +8006,42 @@ initFrame:SetScript("OnEvent", function(self, event)
         C_Timer.After(1.5, function() EllesmereUI:ShowWelcomePopup() end)
     end
 
+    ---------------------------------------------------------------------------
+    --  Escape proxy: single UISpecialFrames entry for all EUI frames.
+    --  Child addons call EllesmereUI.RegisterEscapeClose(frame) to opt in.
+    ---------------------------------------------------------------------------
+    do
+        local escFrames = {}
+        local proxy = CreateFrame("Frame", "EllesmereUI_EscapeProxy", UIParent)
+        proxy:Hide()
+        tinsert(UISpecialFrames, "EllesmereUI_EscapeProxy")
+
+        proxy:SetScript("OnHide", function(self)
+            for i = #escFrames, 1, -1 do
+                if escFrames[i]:IsShown() then
+                    escFrames[i]:Hide()
+                    for j = 1, #escFrames do
+                        if escFrames[j]:IsShown() then self:Show(); return end
+                    end
+                    return
+                end
+            end
+        end)
+
+        local function RefreshProxy()
+            for i = 1, #escFrames do
+                if escFrames[i]:IsShown() then proxy:Show(); return end
+            end
+            proxy:Hide()
+        end
+
+        function EllesmereUI.RegisterEscapeClose(frame)
+            escFrames[#escFrames + 1] = frame
+            frame:HookScript("OnShow", RefreshProxy)
+            frame:HookScript("OnHide", RefreshProxy)
+        end
+    end
+
     -- Create native minimap button
     EllesmereUI.CreateMinimapButton()
 
@@ -8094,26 +8251,38 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
     end
 
-    -- Spell ID + Icon ID on Tooltip (developer option)
+    -- Spell ID / Item ID + Icon ID on Tooltip (developer option)
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
         -- Register per-type callbacks instead of AllTypes to avoid firing on
-        -- every item/unit/currency tooltip in the game (major CPU savings).
-        local function SpellIDTooltipHook(tooltip, data)
-            if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
-            if not data or not data.id then return end
-            if not tooltip or not tooltip.GetName then return end
-            -- Avoid duplicate lines
-            local ok, name = pcall(tooltip.GetName, tooltip)
-            if not ok or not name then return end
-            if name then
-                for i = tooltip:NumLines(), 1, -1 do
-                    local fs = _G[name .. "TextLeft" .. i]
-                    if fs then
-                        local txt = fs:GetText()
-                        if txt and (not issecretvalue or not issecretvalue(txt)) and txt:find("SpellID") then return end
+        -- every unit/currency tooltip in the game (major CPU savings).
+        local _isSecret = issecretvalue  -- cache global once
+
+        -- Shared dedup check: only scan last 4 lines (we add at most 2)
+        local function hasDupLine(tooltip, name, tag)
+            local n = tooltip:NumLines()
+            local start = n - 3
+            if start < 1 then start = 1 end
+            for i = n, start, -1 do
+                local fs = _G[name .. "TextLeft" .. i]
+                if fs then
+                    local txt = fs:GetText()
+                    if txt then
+                        if _isSecret and _isSecret(txt) then return true end
+                        if txt:find(tag) then return true end
                     end
                 end
             end
+            return false
+        end
+
+        local function SpellIDTooltipHook(tooltip, data)
+            if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            if not data or not data.id then return end
+            if _isSecret and _isSecret(data.id) then return end
+            if not tooltip or not tooltip.GetName then return end
+            local ok, name = pcall(tooltip.GetName, tooltip)
+            if not ok or not name then return end
+            if hasDupLine(tooltip, name, "SpellID") then return end
             tooltip:AddDoubleLine("SpellID", tostring(data.id), 1, 1, 1, 1, 1, 1)
             local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(data.id)
                 or (GetSpellTexture and GetSpellTexture(data.id))
@@ -8122,11 +8291,30 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             tooltip:Show()
         end
+
+        local function ItemIDTooltipHook(tooltip, data)
+            if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            if not data or not data.id then return end
+            if _isSecret and _isSecret(data.id) then return end
+            if not tooltip or not tooltip.GetName then return end
+            local ok, name = pcall(tooltip.GetName, tooltip)
+            if not ok or not name then return end
+            if hasDupLine(tooltip, name, "ItemID") then return end
+            tooltip:AddDoubleLine("ItemID", tostring(data.id), 1, 1, 1, 1, 1, 1)
+            local iconID = C_Item.GetItemIconByID and C_Item.GetItemIconByID(data.id)
+                or (GetItemIcon and GetItemIcon(data.id))
+            if iconID then
+                tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+            end
+            tooltip:Show()
+        end
+
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, SpellIDTooltipHook)
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.UnitAura, SpellIDTooltipHook)
         if Enum.TooltipDataType.PetAction then
             TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.PetAction, SpellIDTooltipHook)
         end
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ItemIDTooltipHook)
     end
 
     -- Consolidated Blizzard AddOns > Options panel (single entry for all Ellesmere addons)
