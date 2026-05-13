@@ -10,7 +10,7 @@ local EUI = EllesmereUI
 -------------------------------------------------------------------------------
 local SLOT_SIZE, SPACING = 34, 4
 local HEADER_H    = 35
-local FOOTER_H    = 28
+local FOOTER_H    = 32
 local SIDEBAR_W   = 160
 local SIDEBAR_W_COLLAPSED = 32
 local SIDEBAR_BTN_H   = 26
@@ -358,23 +358,11 @@ do
         return BreakUpLargeNumbers(gold) .. GOLD_ICON
     end
 
-    -- Gold displays: both right-aligned, separated by a 1px divider
-    -- Layout: ... [warband gold] [10px] [1px div] [10px] [player gold] [10px] |
+    -- Layout: | [10px] [player gold] ... [withdraw] [deposit] [10px] [warband gold] [10px] |
     local playerGold = footer:CreateFontString(nil, "OVERLAY")
     SetBankFont(playerGold, 11)
-    playerGold:SetPoint("RIGHT", footer, "RIGHT", -10, 0)
+    playerGold:SetPoint("LEFT", footer, "LEFT", 10, 0)
     playerGold:SetTextColor(1, 1, 1)
-
-    local goldDiv = footer:CreateTexture(nil, "ARTWORK")
-    goldDiv:SetWidth(px)
-    goldDiv:SetHeight(14)
-    goldDiv:SetPoint("RIGHT", playerGold, "LEFT", -10, 0)
-    goldDiv:SetColorTexture(0.3, 0.3, 0.3, 1)
-
-    local warbandGold = footer:CreateFontString(nil, "OVERLAY")
-    SetBankFont(warbandGold, 11)
-    warbandGold:SetPoint("RIGHT", goldDiv, "LEFT", -10, 0)
-    warbandGold:SetTextColor(1, 1, 1)
 
     local playerHitbox = CreateFrame("Frame", nil, footer)
     playerHitbox:SetPoint("TOPLEFT", playerGold, "TOPLEFT", -4, 4)
@@ -390,6 +378,11 @@ do
         if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
     end)
 
+    local warbandGold = footer:CreateFontString(nil, "OVERLAY")
+    SetBankFont(warbandGold, 11)
+    warbandGold:SetPoint("RIGHT", footer, "RIGHT", -10, 0)
+    warbandGold:SetTextColor(1, 1, 1)
+
     local warbandHitbox = CreateFrame("Frame", nil, footer)
     warbandHitbox:SetPoint("TOPLEFT", warbandGold, "TOPLEFT", -4, 4)
     warbandHitbox:SetPoint("BOTTOMRIGHT", warbandGold, "BOTTOMRIGHT", 4, -4)
@@ -404,27 +397,97 @@ do
         if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
     end)
 
-    -- Deposit button (center)
-    local depositBtn = CreateFrame("Button", nil, footer)
-    depositBtn:SetHeight(18)
-    depositBtn:SetPoint("CENTER", footer, "CENTER", 0, 0)
-    depositBtn:EnableMouse(true)
-
-    local depositLabel = depositBtn:CreateFontString(nil, "OVERLAY")
-    SetBankFont(depositLabel, 10)
-    depositLabel:SetPoint("CENTER", depositBtn, "CENTER", 0, 0)
+    -- Withdraw / Deposit styled buttons (next to warband gold)
+    local PP = EUI and EUI.PP
     local ar, ag, ab = GetAccentRGB()
-    depositLabel:SetTextColor(ar, ag, ab, 1)
-    depositBtn._label = depositLabel
 
-    depositBtn:SetScript("OnEnter", function(self)
+    local function MakeStyledFooterBtn(label, tooltipText)
+        local btn = CreateFrame("Button", nil, footer)
+        btn:SetSize(70, 18)
+        btn:EnableMouse(true)
+        btn:SetFrameLevel(footer:GetFrameLevel() + 2)
+
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(btn, 1, 1, 1, 0.4, 1, "OVERLAY", 7)
+        end
+
+        local lbl = btn:CreateFontString(nil, "OVERLAY")
+        SetBankFont(lbl, 9)
+        lbl:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        lbl:SetText(label)
+        lbl:SetTextColor(1, 1, 1, 0.5)
+        btn._label = lbl
+
+        btn:SetScript("OnEnter", function(self)
+            self._label:SetTextColor(1, 1, 1, 0.75)
+            if PP and PP.SetBorderColor then PP.SetBorderColor(self, 1, 1, 1, 0.7) end
+            if EUI.ShowWidgetTooltip then EUI.ShowWidgetTooltip(self, tooltipText) end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            self._label:SetTextColor(1, 1, 1, 0.5)
+            if PP and PP.SetBorderColor then PP.SetBorderColor(self, 1, 1, 1, 0.4) end
+            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+        end)
+        return btn
+    end
+
+    local depositMoneyBtn = MakeStyledFooterBtn("Deposit", "Deposit to Warbank")
+    depositMoneyBtn:SetPoint("RIGHT", warbandGold, "LEFT", -14, 0)
+    local withdrawMoneyBtn = MakeStyledFooterBtn("Withdraw", "Withdraw from Warbank")
+    withdrawMoneyBtn:SetPoint("RIGHT", depositMoneyBtn, "LEFT", -8, 0)
+
+    local function ShowMoneyPopup(title, onAccept)
+        if not EUI.ShowInputPopup then return end
+        EUI:ShowInputPopup({
+            title = title,
+            message = "Enter amount in gold:",
+            placeholder = "1137",
+            confirmText = ACCEPT,
+            cancelText = CANCEL,
+            onConfirm = function(text)
+                local gold = tonumber(text)
+                if gold and gold > 0 then
+                    onAccept(gold * 10000)
+                end
+            end,
+        })
+    end
+
+    withdrawMoneyBtn:SetScript("OnClick", function()
+        if not C_Bank or not C_Bank.CanWithdrawMoney then return end
+        if not C_Bank.CanWithdrawMoney(Enum.BankType.Account) then return end
+        ShowMoneyPopup("Withdraw from Warbank", function(copper)
+            C_Bank.WithdrawMoney(Enum.BankType.Account, copper)
+        end)
+    end)
+    depositMoneyBtn:SetScript("OnClick", function()
+        if not C_Bank or not C_Bank.CanDepositMoney then return end
+        if not C_Bank.CanDepositMoney(Enum.BankType.Account) then return end
+        ShowMoneyPopup("Deposit to Warbank", function(copper)
+            C_Bank.DepositMoney(Enum.BankType.Account, copper)
+        end)
+    end)
+
+    -- Deposit Warbound Items / Deposit Reagents button (center)
+    local depositItemsBtn = CreateFrame("Button", nil, footer)
+    depositItemsBtn:SetHeight(18)
+    depositItemsBtn:SetPoint("CENTER", footer, "CENTER", 0, 0)
+    depositItemsBtn:EnableMouse(true)
+
+    local depositItemsLabel = depositItemsBtn:CreateFontString(nil, "OVERLAY")
+    SetBankFont(depositItemsLabel, 10)
+    depositItemsLabel:SetPoint("CENTER", depositItemsBtn, "CENTER", 0, 0)
+    depositItemsLabel:SetTextColor(ar, ag, ab, 1)
+    depositItemsBtn._label = depositItemsLabel
+
+    depositItemsBtn:SetScript("OnEnter", function(self)
         self._label:SetTextColor(1, 1, 1, 1)
     end)
-    depositBtn:SetScript("OnLeave", function(self)
+    depositItemsBtn:SetScript("OnLeave", function(self)
         local r, g, b = GetAccentRGB()
         self._label:SetTextColor(r, g, b, 1)
     end)
-    depositBtn:SetScript("OnClick", function(self)
+    depositItemsBtn:SetScript("OnClick", function(self)
         if not C_Bank or not C_Bank.AutoDepositItemsIntoBank then return end
         local bankType = self._bankType
         if bankType then
@@ -441,14 +504,16 @@ do
 
     function EUI_Bank:UpdateDepositButton(isWarband)
         if isWarband then
-            depositLabel:SetText("Deposit Warbound Items")
-            depositBtn._bankType = Enum.BankType.Account
+            depositItemsLabel:SetText("Deposit Warbound Items")
+            depositItemsBtn._bankType = Enum.BankType.Account
         else
-            depositLabel:SetText("Deposit Reagents")
-            depositBtn._bankType = Enum.BankType.Character
+            depositItemsLabel:SetText("Deposit Reagents")
+            depositItemsBtn._bankType = Enum.BankType.Character
         end
-        depositBtn:SetWidth(depositLabel:GetStringWidth() + 16)
-        depositBtn:Show()
+        depositItemsBtn:SetWidth(depositItemsLabel:GetStringWidth() + 16)
+        depositItemsBtn:Show()
+        withdrawMoneyBtn:Show()
+        depositMoneyBtn:Show()
     end
 end
 
@@ -772,6 +837,55 @@ EUI_Bank._updateThumb = UpdateThumb
 -------------------------------------------------------------------------------
 local _bankSlots = {}
 local _bankSlotIdx = 0
+EUI_Bank._bankSlots = _bankSlots
+
+--- Returns the bagID of the currently selected bank tab, or nil if viewing
+--- "All Tabs" / "OneBank" (in which case default Blizzard routing applies).
+function EUI_Bank:GetSelectedTabBagID()
+    if _selectedView <= 0 then return nil end
+    local tab = _allTabs[_selectedView]
+    return tab and tab.bagID or nil
+end
+
+--- Returns true if the current view is any warband view (all warbank,
+--- onewarbank, or an individual warband tab).
+function EUI_Bank:IsWarbandView()
+    if _selectedView == -2 or _selectedView == -3 then return true end
+    if _selectedView > 0 and _allTabs[_selectedView] then
+        return _allTabs[_selectedView].isWarband
+    end
+    return false
+end
+
+--- Find the first empty slot in a specific bank bag and deposit the cursor
+--- item into it. If no empty slot, try stacking with an existing partial stack.
+--- Returns true if placement was attempted, false if no space found.
+function EUI_Bank:DepositCursorItemIntoTab(bagID)
+    if not bagID then return false end
+    local numSlots = C_Container.GetContainerNumSlots(bagID)
+    if numSlots == 0 then return false end
+    -- Try stacking first (same itemID, not full stack)
+    local cursorType, cursorItemID = GetCursorInfo()
+    if cursorType ~= "item" or not cursorItemID then return false end
+    local maxStack = C_Item.GetItemMaxStackSizeByID(cursorItemID) or 1
+    if maxStack > 1 then
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bagID, slot)
+            if info and info.itemID == cursorItemID and info.stackCount < maxStack then
+                C_Container.PickupContainerItem(bagID, slot)
+                return true
+            end
+        end
+    end
+    -- Then try first empty slot
+    for slot = 1, numSlots do
+        if not C_Container.GetContainerItemInfo(bagID, slot) then
+            C_Container.PickupContainerItem(bagID, slot)
+            return true
+        end
+    end
+    return false
+end
 
 local function GetOrCreateBankSlot(idx)
     if _bankSlots[idx] then return _bankSlots[idx] end
@@ -781,6 +895,22 @@ local function GetOrCreateBankSlot(idx)
     btn:SetAllPoints(slotParent)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:RegisterForDrag("LeftButton")
+
+    -- OnReceiveDrag: handles native Blizzard drags (shift-click pickup etc.)
+    btn:SetScript("OnReceiveDrag", function(self)
+        local bagID = self:GetParent():GetID()
+        local slotID = self:GetID()
+        C_Container.PickupContainerItem(bagID, slotID)
+    end)
+
+    -- OnMouseUp: handles our custom OnUpdate-based drag from the bags module.
+    -- When the bags drag tracker releases over a bank slot, the cursor still
+    -- holds the item. Detect that and place it.
+    btn:HookScript("OnMouseUp", function(self)
+        if GetCursorInfo() == "item" then
+            C_Container.PickupContainerItem(self:GetParent():GetID(), self:GetID())
+        end
+    end)
 
     -- Hide template decorations
     if btn.NewItemTexture then btn.NewItemTexture:Hide(); btn.NewItemTexture:SetAlpha(0) end
@@ -875,6 +1005,7 @@ local function DiscoverBankTabs()
         t.isWarband = true
         _allTabs[#_allTabs + 1] = t
     end
+    EUI_Bank._allTabs = _allTabs
 end
 
 local function CountUsedSlots(bagID, numSlots)
@@ -1300,6 +1431,10 @@ function BuildBankSidebar()
             _selectedView = self._viewIdx
             if EUI_Bank._scrollFrame then EUI_Bank._scrollFrame:SetVerticalScroll(0) end
             EUI_Bank:RefreshBank()
+            -- Refresh bags so warbank dim overlay updates immediately
+            if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
+                _G.EUI_Bags:RefreshInventory()
+            end
         end)
         _sidebarBtns[idx] = btn
         return btn
@@ -1347,6 +1482,7 @@ function BuildBankSidebar()
         secBtn:SetParent(sidebarChild)
         secBtn:ClearAllPoints()
         secBtn:SetAllPoints(btn)
+        secBtn:SetFrameLevel(btn:GetFrameLevel() + 20)
         secBtn:Show()
         y = y - SIDEBAR_BTN_H - SIDEBAR_PAD
     end
@@ -1558,6 +1694,10 @@ eventFrame:SetScript("OnEvent", function(_, event)
             EUI_Bank._autoOpenedBags = true
         else
             EUI_Bank._autoOpenedBags = false
+            -- Refresh bags so warbank dim overlay applies immediately
+            if EUI_Bags and EUI_Bags:IsVisible() and EUI_Bags.RefreshInventory then
+                EUI_Bags:RefreshInventory()
+            end
         end
         -- Set initial size so frame is visible immediately
         local gridW = COLUMNS * (SLOT_SIZE + SPACING)
@@ -1644,6 +1784,10 @@ end
 -- Close bank when pressing Escape
 EUI_Bank:SetScript("OnHide", function()
     if C_Bank then C_Bank.CloseBankFrame() end
+    -- Clear warbank dim overlays on bags
+    if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
+        _G.EUI_Bags:RefreshInventory()
+    end
 end)
 
 -------------------------------------------------------------------------------

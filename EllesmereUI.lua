@@ -2835,9 +2835,13 @@ local function CreateConfirmPopup()
     -- Popups render at default UI scale — no custom scaling needed.
     -- (Dimmer stays at scale 1 so it covers the full screen.)
 
-    -- Background
-    local popBg = SolidTex(popup, "BACKGROUND", 0.06, 0.08, 0.10, 1)
-    popBg:SetAllPoints()
+    -- Background: stone texture with dark overlay
+    local popBgAtlas = popup:CreateTexture(nil, "BACKGROUND")
+    popBgAtlas:SetAtlas("housing-basic-panel--stone-background")
+    popBgAtlas:SetAllPoints()
+    local popBgOverlay = popup:CreateTexture(nil, "BACKGROUND", nil, 1)
+    popBgOverlay:SetColorTexture(0, 0, 0, 0.75)
+    popBgOverlay:SetAllPoints()
 
     -- Pixel-perfect border
     MakeBorder(popup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
@@ -2892,10 +2896,8 @@ local function CreateConfirmPopup()
         btn:SetPoint(anchorPoint, anchorTo, anchorRef, xOff, yOff)
         btn:SetFrameLevel(parent:GetFrameLevel() + 2)
 
-        -- Background fill
-        local bg = SolidTex(btn, "BACKGROUND", 0.06, 0.08, 0.10, .92)
+        local bg = SolidTex(btn, "BACKGROUND", 0, 0, 0, 0.5)
         bg:SetAllPoints()
-        -- Physical-pixel border (matches MakeStyledButton pattern)
         local brd = MakeBorder(btn, bDefR, bDefG, bDefB, bDefA)
 
         local lbl = MakeFont(btn, 12, nil, defR, defG, defB)
@@ -3595,8 +3597,12 @@ function EllesmereUI:ShowInputPopup(opts)
         popup:SetFrameStrata("FULLSCREEN_DIALOG")
         popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
 
-        local popBg = SolidTex(popup, "BACKGROUND", 0.06, 0.08, 0.10, 1)
-        popBg:SetAllPoints()
+        local popBgAtlas = popup:CreateTexture(nil, "BACKGROUND")
+        popBgAtlas:SetAtlas("housing-basic-panel--stone-background")
+        popBgAtlas:SetAllPoints()
+        local popBgOverlay = popup:CreateTexture(nil, "BACKGROUND", nil, 1)
+        popBgOverlay:SetColorTexture(0, 0, 0, 0.75)
+        popBgOverlay:SetAllPoints()
 
         MakeBorder(popup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
 
@@ -3618,7 +3624,7 @@ function EllesmereUI:ShowInputPopup(opts)
         inputFrame:SetPoint("TOP", msg, "BOTTOM", 0, -12)
         inputFrame:SetFrameLevel(popup:GetFrameLevel() + 2)
 
-        local iBg = SolidTex(inputFrame, "BACKGROUND", 0.06, 0.08, 0.10, 1)
+        local iBg = SolidTex(inputFrame, "BACKGROUND", 0, 0, 0, 0.5)
         iBg:SetAllPoints()
         local iBrd = MakeBorder(inputFrame, 1, 1, 1, 0.2)
 
@@ -3697,10 +3703,9 @@ function EllesmereUI:ShowInputPopup(opts)
         extraBtn:SetSize(EXTRA_BTN_W, EXTRA_BTN_H)
         extraBtn:SetPoint("TOP", inputFrame, "BOTTOM", 0, -6)
         extraBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
-        local extraBrd = SolidTex(extraBtn, "BACKGROUND", 1, 1, 1, 0.25)
-        extraBrd:SetAllPoints()
-        local extraBg = SolidTex(extraBtn, "BORDER", 0.06, 0.08, 0.10, 0.92)
-        extraBg:SetPoint("TOPLEFT", 1, -1); extraBg:SetPoint("BOTTOMRIGHT", -1, 1)
+        local extraBg = SolidTex(extraBtn, "BACKGROUND", 0, 0, 0, 0.5)
+        extraBg:SetAllPoints()
+        MakeBorder(extraBtn, 1, 1, 1, 0.25)
         local extraLbl = MakeFont(extraBtn, 12, nil, 1, 1, 1)
         extraLbl:SetAlpha(0.6)
         extraLbl:SetPoint("CENTER")
@@ -3737,7 +3742,7 @@ function EllesmereUI:ShowInputPopup(opts)
             btn:SetSize(BTN_W, BTN_H)
             btn:SetPoint(anchorPoint, anchorTo, anchorRef, xOff, yOff)
             btn:SetFrameLevel(parent:GetFrameLevel() + 2)
-            local bg = SolidTex(btn, "BACKGROUND", 0.06, 0.08, 0.10, .92)
+            local bg = SolidTex(btn, "BACKGROUND", 0, 0, 0, 0.5)
             bg:SetAllPoints()
             local brd = MakeBorder(btn, bDefR, bDefG, bDefB, bDefA)
             local lbl = MakeFont(btn, 12, nil, defR, defG, defB)
@@ -7321,7 +7326,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.6.6"
+EllesmereUI.VERSION = "7.6.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

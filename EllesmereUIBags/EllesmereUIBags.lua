@@ -1537,8 +1537,10 @@ _itemDragFrame:Hide()
 _itemDragFrame:SetScript("OnUpdate", function(self)
     if IsMouseButtonDown("LeftButton") then return end
     self:Hide()
+    -- Blizzard's OnReceiveDrag on action bars / equipment slots fires
+    -- BEFORE OnUpdate in the same frame. If they consumed the item,
+    -- GetCursorInfo returns nil and we exit immediately.
     if GetCursorInfo() ~= "item" then return end
-    -- Find bag slot under cursor
     local scale = UIParent:GetEffectiveScale()
     local cx, cy = GetCursorPosition()
     cx, cy = cx / scale, cy / scale
@@ -1555,8 +1557,28 @@ _itemDragFrame:SetScript("OnUpdate", function(self)
             end
         end
     end
-    -- Released over empty space: return item
-    ClearCursor()
+    -- Check bank slots (if bank is open)
+    local bankFrame = _G.EUI_BankFrame
+    local bankSlots = bankFrame and bankFrame._bankSlots
+    if bankSlots and bankFrame:IsVisible() then
+        for _, btn in pairs(bankSlots) do
+            if btn:IsShown() and btn:GetParent():IsShown() then
+                local l, b, w, h = btn:GetRect()
+                if l and b and cx >= l and cx <= l + w and cy >= b and cy <= b + h then
+                    local destBag = btn:GetParent():GetID()
+                    local destSlot = btn:GetID()
+                    if destSlot > 0 then
+                        C_Container.PickupContainerItem(destBag, destSlot)
+                    end
+                    return
+                end
+            end
+        end
+    end
+    -- Not over any bag/bank slot: leave item on cursor. Blizzard already
+    -- handled action bars / equipment via OnReceiveDrag above. If dropped
+    -- over empty space, item stays on cursor (click to place or right-click
+    -- to cancel — standard WoW pickup behavior).
 end)
 
 -------------------------------------------------------------------------------
@@ -1573,6 +1595,36 @@ local function GetOrCreateSlot(idx)
     btn:RegisterForDrag("LeftButton")
     btn:HookScript("OnDragStart", function()
         _itemDragFrame:Show()
+    end)
+
+    -- Right-click deposit routing: when a specific bank tab is selected,
+    -- intercept right-click and deposit into that tab instead of letting
+    -- Blizzard route to the first available slot across all tabs.
+    btn:HookScript("PreClick", function(self, button)
+        if button ~= "RightButton" then return end
+        local bank = _G.EUI_BankFrame
+        if not bank or not bank:IsVisible() then return end
+        local targetBag = bank:GetSelectedTabBagID()
+        if not targetBag then return end
+        -- Pick up the item from this bag slot
+        local srcBag = self:GetParent():GetID()
+        local srcSlot = self:GetID()
+        if not srcBag or not srcSlot or srcSlot == 0 then return end
+        local info = C_Container.GetContainerItemInfo(srcBag, srcSlot)
+        if not info then return end
+        C_Container.PickupContainerItem(srcBag, srcSlot)
+        -- Place into the selected bank tab
+        if bank:DepositCursorItemIntoTab(targetBag) then
+            -- Handled; clear the template's pending click so it doesn't
+            -- double-process. The item is already moved.
+            self._euiBankRouted = true
+        end
+    end)
+    btn:HookScript("OnClick", function(self, button)
+        if button == "RightButton" and self._euiBankRouted then
+            self._euiBankRouted = nil
+            ClearCursor()
+        end
     end)
 
     btn:HookScript("OnMouseUp", function(self, button)
@@ -1870,6 +1922,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         if btn.ProfessionQualityOverlay then btn.ProfessionQualityOverlay:Hide() end
         if btn.IconBorder then btn.IconBorder:Hide() end
         if btn.NormalTexture then btn.NormalTexture:SetAlpha(0) end
+        if btn._warbankDim then btn._warbankDim:Hide() end
         btn:SetAlpha(1)
     else
         btn:EnableMouse(true)
@@ -1978,6 +2031,28 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
             SetInsetBorderColor(btn, c.r, c.g, c.b, 1)
         else
             SetInsetBorderColor(btn, 0.25, 0.25, 0.25, 1)
+        end
+
+        -- Warbank dim overlay: when a warband bank tab is selected,
+        -- dim non-warbound items so the user can see what's eligible.
+        if not btn._warbankDim then
+            local dimFrame = CreateFrame("Frame", nil, btn)
+            dimFrame:SetAllPoints()
+            dimFrame:SetFrameLevel((btn._textOverlay and btn._textOverlay:GetFrameLevel() or btn:GetFrameLevel()) + 3)
+            local dim = dimFrame:CreateTexture(nil, "OVERLAY")
+            dim:SetAllPoints()
+            dim:SetColorTexture(0, 0, 0, 0.75)
+            dimFrame:Hide()
+            btn._warbankDim = dimFrame
+        end
+        local bank = _G.EUI_BankFrame
+        local showDim = bank and bank:IsVisible()
+            and bank.IsWarbandView and bank:IsWarbandView()
+            and not data._isWarbound
+        if showDim then
+            btn._warbankDim:Show()
+        else
+            btn._warbankDim:Hide()
         end
 
         -- Cooldown
@@ -3230,7 +3305,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
             btn:SetScript("OnEnter", function(self)
                 if _dragFromCatIdx then return end
                 local isSel = (self._isGroupHeader and self._groupName == selectedGroupName)
-                    or (not self._isGroupHeader and not self._isGroupMember and self._catIdx == selectedCategoryIndex)
+                    or (not self._isGroupHeader and self._catIdx == selectedCategoryIndex and not selectedGroupName)
                 if not isSel then self._bg:SetColorTexture(1, 1, 1, 0.06) end
                 if (EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed) and EUI.ShowWidgetTooltip then
                     EUI.ShowWidgetTooltip(self, (self._catName or "?") .. " (" .. (self._catCount or 0) .. ")")
@@ -3238,7 +3313,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
             end)
             btn:SetScript("OnLeave", function(self)
                 local isSel = (self._isGroupHeader and self._groupName == selectedGroupName)
-                    or (not self._isGroupHeader and not self._isGroupMember and self._catIdx == selectedCategoryIndex)
+                    or (not self._isGroupHeader and self._catIdx == selectedCategoryIndex and not selectedGroupName)
                 if not isSel then self._bg:SetColorTexture(1, 1, 1, 0) end
                 if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
             end)
@@ -3634,6 +3709,13 @@ function EUI_Bags:RefreshInventory()
                         if rankText and rankText ~= "" then
                             d._giTrackRank = rankText
                             d._giTrackColor = trackColor
+                        end
+                    end
+                    -- Warbound check (for warbank dim overlay)
+                    if C_Bank and C_Bank.IsItemAllowedInBankType then
+                        local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+                        if loc and C_Item.DoesItemExist(loc) then
+                            d._isWarbound = C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, loc)
                         end
                     end
                     -- Keystone data (rare, fast string match gates the API calls)
