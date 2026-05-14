@@ -305,6 +305,63 @@ local function VisualSortCompare(a, b)
 end
 
 -------------------------------------------------------------------------------
+--  Expansion nesting (All Items view): C_Item.GetItemInfo expansionID + labels
+-------------------------------------------------------------------------------
+local function GetItemExpansionIDFromLink(itemLink)
+    if not itemLink then return nil end
+    if C_Item and C_Item.GetItemInfo then
+        local _, _, _, _, _, _, _, _, _, _, _, _, _, _, expID = C_Item.GetItemInfo(itemLink)
+        return expID
+    end
+    return select(15, GetItemInfo(itemLink))
+end
+
+-- sortKey: higher = newer expansion, shown first. Unknown / uncached last.
+local function GetExpansionBucketKeyAndLabel(itemLink)
+    local expID = GetItemExpansionIDFromLink(itemLink)
+    if expID == nil then
+        return -999, (UNKNOWN or "Unknown")
+    end
+    local id = tonumber(expID)
+    if id == nil then
+        return -999, (UNKNOWN or "Unknown")
+    end
+    -- Classic-era sentinel from some clients / items
+    if id == 254 or id == 255 then
+        local name = _G["EXPANSION_NAME0"] or "Classic"
+        return 0, name
+    end
+    local name = _G["EXPANSION_NAME" .. id]
+    if name and name ~= "" then
+        return id, name
+    end
+    return id, "Expansion " .. tostring(id)
+end
+
+local function BuildExpansionBuckets(itemList)
+    local byKey = {}
+    for _, data in ipairs(itemList) do
+        local sk, label = GetExpansionBucketKeyAndLabel(data.itemLink)
+        local b = byKey[sk]
+        if not b then
+            b = { sortKey = sk, label = label, items = {} }
+            byKey[sk] = b
+        end
+        b.items[#b.items + 1] = data
+    end
+    local keys = {}
+    for sk in pairs(byKey) do
+        keys[#keys + 1] = sk
+    end
+    table.sort(keys, function(a, b) return a > b end)
+    local out = {}
+    for _, sk in ipairs(keys) do
+        out[#out + 1] = byKey[sk]
+    end
+    return out
+end
+
+-------------------------------------------------------------------------------
 --  Slot data table pool (avoids ~200 table allocations per refresh)
 -------------------------------------------------------------------------------
 local _slotPool = {}
@@ -3515,6 +3572,22 @@ local function GetOrCreateCatHeader(idx)
     return f
 end
 
+-- Indented subheaders under a category (expansion names) — All Items nesting
+local _expSubHeaders = {}
+
+local function GetOrCreateExpSubHeader(idx)
+    if _expSubHeaders[idx] then return _expSubHeaders[idx] end
+    local f = CreateFrame("Frame", nil, EUI_Bags)
+    f:SetHeight(16)
+    f._label = f:CreateFontString(nil, "OVERLAY")
+    SetBagFont(f._label, 9)
+    f._label:SetPoint("LEFT", f, "LEFT", 12, 0)
+    f._label:SetTextColor(0.55, 0.55, 0.55)
+    f._label:SetJustifyH("LEFT")
+    _expSubHeaders[idx] = f
+    return f
+end
+
 -------------------------------------------------------------------------------
 --  Scroll Frame + Scrollbar for item grid
 -------------------------------------------------------------------------------
@@ -3912,6 +3985,9 @@ function EUI_Bags:RefreshInventory()
         SetBagFont(hdr._label, catTitleSize)
         SetBagFont(hdr._hint, catTitleSize - 1)
     end
+    for _, sh in pairs(_expSubHeaders) do
+        sh:Hide()
+    end
     if EUI_Bags._pinOverlayBtn then EUI_Bags._pinOverlayBtn:Hide() end
     if EUI_Bags._oneBagWarning then EUI_Bags._oneBagWarning:Hide() end
 
@@ -4262,10 +4338,47 @@ function EUI_Bags:RefreshInventory()
         -- Build render sections: ungrouped = individual, grouped = merged under group name
         local renderedGroups = {}
         local headerIdx = 0
+        local expSubIdx = 0
 
-        local function RenderSection(sectionName, sectionItems, isUserCreated, showPinAdd, alwaysShow)
+        local function RenderItemBlock(blockItems)
+            local n = #blockItems
+            for j, data in ipairs(blockItems) do
+                local _t0RB = ProfBegin("RenderButton")
+                slotIdx = slotIdx + 1
+                local btn = GetOrCreateSlot(slotIdx)
+                btn:GetParent():SetParent(child)
+                local col = (j - 1) % columns
+                local row = math.floor((j - 1) / columns)
+                RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                ProfEnd("RenderButton", _t0RB)
+            end
+            local remainder = n % columns
+            local padCount
+            if n == 0 then
+                padCount = columns
+            elseif remainder == 0 then
+                padCount = 0
+            else
+                padCount = columns - remainder
+            end
+            padCount = math.min(padCount, #emptySlots - emptyIdx)
+            if padCount > 0 then
+                RenderEmptyPad(n, padCount)
+            end
+            local totalInBlock = n + math.max(padCount, 0)
+            local blockRows = math.ceil(totalInBlock / columns)
+            curY = curY - (blockRows * (SLOT_SIZE + SPACING))
+        end
+
+        local function RenderSection(sectionName, sectionItems, isUserCreated, showPinAdd, alwaysShow, nestByExpansion)
             local itemCount = #sectionItems
             if itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow then return end
+
+            local useExpNest = nestByExpansion
+                and EllesmereUIDB and EllesmereUIDB.bagNestByExpansion
+                and itemCount > 0
+                and not showPinAdd
+                and not alwaysShow
 
             headerIdx = headerIdx + 1
             local hdr = GetOrCreateCatHeader(headerIdx)
@@ -4322,6 +4435,29 @@ function EUI_Bags:RefreshInventory()
             end
             hdr:Show()
             curY = curY - 22
+
+            if useExpNest then
+                local buckets = BuildExpansionBuckets(sectionItems)
+                if #buckets > 0 then
+                    for _, buck in ipairs(buckets) do
+                        if #buck.items > 0 then
+                            expSubIdx = expSubIdx + 1
+                            local sh = GetOrCreateExpSubHeader(expSubIdx)
+                            sh:SetParent(child)
+                            sh:ClearAllPoints()
+                            sh:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
+                            sh:SetWidth(gridW)
+                            sh._label:SetText(buck.label .. " (" .. #buck.items .. ")")
+                            SetBagFont(sh._label, math.max(8, catTitleSize - 2))
+                            sh:Show()
+                            curY = curY - 18
+                            RenderItemBlock(buck.items)
+                        end
+                    end
+                    curY = curY - 6
+                    return
+                end
+            end
 
             for j, data in ipairs(sectionItems) do
                 local _t0RB = ProfBegin("RenderButton")
@@ -4414,14 +4550,14 @@ function EUI_Bags:RefreshInventory()
                             ApplySavedOrder(cat.groupName, merged)
                             merged = MergeDuplicates(merged)
                         end
-                        RenderSection(cat.groupName, merged, false)
+                    RenderSection(cat.groupName, merged, false, false, false, true)
                     end
                 end
             else
                 if not hiddenSet[cat._defaultName] then
                     local catItems = itemsByCat[ci] or {}
                     local isUserCreated = not cat.isCatchAll and (not cat.types or #cat.types == 0)
-                    RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent)
+                    RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent, true)
                 end
             end
         end

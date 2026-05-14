@@ -515,7 +515,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
             end
 
-            -- Show Pinned & Recent Tips
+            -- Show Pinned & Recent Tips | Nest by Expansion
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Pinned & Recent Tips",
                   tooltip="Show helpful tip text on Pinned Items and Recent Items category headers.",
@@ -524,7 +524,13 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUIDB.bagShowPinRecentTips = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
-                { type="label", text="" }
+                { type="toggle", text="Nest by Expansion",
+                  tooltip="In the All Items bag view, show each category's items under indented expansion sub-headers (newest expansions first), even when everything in that category is from one expansion.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagNestByExpansion == true end,
+                  setValue=function(v)
+                      EllesmereUIDB.bagNestByExpansion = v and true or false
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
             ); y = y - h
 
             _, h = W:Spacer(parent, y, 20); y = y - h
