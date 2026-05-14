@@ -2159,22 +2159,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 content = "\"" .. name .. "\" was saved but cannot be loaded because this spec has an assigned profile. Switch specs or remove the spec assignment to use it.",
                             })
                         elseif ok then
-                            do
-                                local fontWillChange = EllesmereUI.ProfileChangesFont(payload and payload.data)
-                                EllesmereUI.RefreshAllAddons()
-                                ddLabel:SetText(EllesmereUI.GetActiveProfileName())
-                                if fontWillChange then
-                                    EllesmereUI:ShowConfirmPopup({
-                                        title       = "Reload Required",
-                                        message     = "Font changed. A UI reload is needed to apply the new font.",
-                                        confirmText = "Reload Now",
-                                        cancelText  = "Later",
-                                        onConfirm   = function() ReloadUI() end,
-                                    })
-                                else
-                                    EllesmereUI:RefreshPage()
-                                end
-                            end
+                            ReloadUI()
                         else
                             EllesmereUI:ShowInfoPopup({ title = "Import Failed", content = err or "Unknown error" })
                         end
