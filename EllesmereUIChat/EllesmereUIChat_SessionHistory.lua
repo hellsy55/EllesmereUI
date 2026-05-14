@@ -6,6 +6,8 @@
 --  Blizzard's COMBATLOG frame and IsCombatLog() when present (see
 --  FloatingChatFrame.lua), not a hard-coded ChatFrame index. Taint-safe
 --  post-hook on AddMessage only; no search / indexing.
+--  Restore is deferred until PLAYER_REGEN_ENABLED if still InCombatLockdown
+--  when the replay timer fires (team policy: avoid extra work during lockdown).
 -------------------------------------------------------------------------------
 local _, ns = ...
 local ECHAT = ns.ECHAT
@@ -124,7 +126,36 @@ function ECHAT.InitChatSessionHistory()
 end
 
 local restoreToken = 0
+local regenDeferFrame = CreateFrame("Frame")
+
+local function RunRestoreReplay(token)
+    if token ~= restoreToken then return end
+    local sv = GetSV()
+    if not sv.byFrame then
+        captureReady = true
+        return
+    end
+    restoring = true
+    for i = 1, 50 do
+        local frameName = "ChatFrame" .. i
+        local cf = _G[frameName]
+        local lines = sv.byFrame[frameName]
+        if cf and cf.AddMessage and type(lines) == "table" and #lines > 0
+            and ShouldTrackFrame(cf) then
+            for _, L in ipairs(lines) do
+                if L.t then
+                    cf:AddMessage(L.t, L.r or 1, L.g or 1, L.b or 1, L.id or 1)
+                end
+            end
+        end
+    end
+    restoring = false
+    captureReady = true
+end
+
 function ECHAT.RestoreChatSessionHistory()
+    regenDeferFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    regenDeferFrame:SetScript("OnEvent", nil)
     if not ECHAT.DB().persistChatHistory then
         captureReady = true
         return
@@ -134,24 +165,23 @@ function ECHAT.RestoreChatSessionHistory()
     local token = restoreToken
     C_Timer.After(RESTORE_DELAY_SEC, function()
         if token ~= restoreToken then return end
-        local sv = GetSV()
-        if not sv.byFrame then return end
-        restoring = true
-        for i = 1, 50 do
-            local frameName = "ChatFrame" .. i
-            local cf = _G[frameName]
-            local lines = sv.byFrame[frameName]
-            if cf and cf.AddMessage and type(lines) == "table" and #lines > 0
-                and ShouldTrackFrame(cf) then
-                for _, L in ipairs(lines) do
-                    if L.t then
-                        cf:AddMessage(L.t, L.r or 1, L.g or 1, L.b or 1, L.id or 1)
-                    end
+        if InCombatLockdown() then
+            regenDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            regenDeferFrame:SetScript("OnEvent", function(_, ev)
+                if ev ~= "PLAYER_REGEN_ENABLED" then return end
+                if token ~= restoreToken then
+                    regenDeferFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    regenDeferFrame:SetScript("OnEvent", nil)
+                    return
                 end
-            end
+                if InCombatLockdown() then return end
+                RunRestoreReplay(token)
+                regenDeferFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                regenDeferFrame:SetScript("OnEvent", nil)
+            end)
+            return
         end
-        restoring = false
-        captureReady = true
+        RunRestoreReplay(token)
     end)
 end
 
