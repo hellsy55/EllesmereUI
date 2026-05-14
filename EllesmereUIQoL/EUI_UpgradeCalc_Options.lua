@@ -63,7 +63,6 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
     _, h = W:WideButton(parent, "Clear Upgrade Cache", y, function()
         if EUIUpgCalc and EUIUpgCalc.ClearCache then
             EUIUpgCalc:ClearCache()
-            EllesmereUI.Print("|cff20ff20EUIItemCalc|r Cache cleared.")
         end
     end); y = y - h
 

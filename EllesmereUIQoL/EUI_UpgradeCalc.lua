@@ -435,18 +435,15 @@ end
 -- same tick, so a single-pass approach always misses most slots on the first run.
 function Calc:ScanEquippedAtUpgrader(onDone)
     if InCombatLockdown() then
-        EllesmereUI.Print("|cffff4444EUIItemCalc|r Cannot scan during combat.")
         if onDone then onDone(false) end
         return
     end
     if Calc._scanning then
-        EllesmereUI.Print("|cffff4444EUIItemCalc|r Scan already in progress.")
         if onDone then onDone(false) end
         return
     end
     local db = DB()
     if not self:IsUpgraderOpen() then
-        EllesmereUI.Print("|cffff4444EUIItemCalc|r Open the Item Upgrade window first.")
         if onDone then onDone(false) end
         return
     end
@@ -464,8 +461,6 @@ function Calc:ScanEquippedAtUpgrader(onDone)
         if ok then
             db.cache      = { slots = newSlots, ts = time() }
             db.calibrated = true
-            EllesmereUI.Print(string.format(
-                "|cff20ff20EUIItemCalc|r Scan complete (%d/%d). Costs are now accurate.", total, total))
         end
         if onDone then onDone(ok) end
     end
@@ -524,7 +519,6 @@ function Calc:ScanEquippedAtUpgrader(onDone)
         C_Timer.After(0.12, doSelectPass)
     end
 
-    EllesmereUI.Print("|cff20ff20EUIItemCalc|r Scanning equipped items at Upgrader...")
     doSelectPass()
 end
 
@@ -1549,10 +1543,7 @@ end)
 SLASH_EUIUPGCALC1 = "/euic"
 SLASH_EUIUPGCALC2 = "/upgcalc"
 SlashCmdList["EUIUPGCALC"] = function()
-    if InCombatLockdown() then
-        EllesmereUI.Print("|cffff4444EUIItemCalc|r Cannot open during combat.")
-        return
-    end
+    if InCombatLockdown() then return end
     if f:IsShown() then f:Hide() else f:Show() end
 end
 
