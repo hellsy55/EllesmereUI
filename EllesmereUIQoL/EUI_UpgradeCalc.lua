@@ -552,10 +552,12 @@ local G    = EUI.ELLESMERE_GREEN
 local ROW_H, HDR_H, FRAME_W, FRAME_H = 20, 20, 860, 730
 
 -- Tile layout constants
-local TILE_W, TILE_H = 183, 50
-local TILE_COLS      = 3
-local TILE_GAP       = 5
-local TILE_ROW_W     = TILE_COLS * TILE_W + (TILE_COLS - 1) * TILE_GAP  -- 559
+local TILE_W    = 183
+local TILE_H    = 50   -- tile frame height
+local TILE_STEP = TILE_H + 5  -- row stride: tile height + gap (used in all layout math)
+local TILE_COLS = 3
+local TILE_GAP  = 5
+local TILE_ROW_W = TILE_COLS * TILE_W + (TILE_COLS - 1) * TILE_GAP  -- 559
 local QUEUE_X_OFF    = TILE_ROW_W + 16                                    -- 575
 local QUEUE_W        = FRAME_W - 20 - QUEUE_X_OFF                        -- 265
 
@@ -1103,8 +1105,28 @@ end
 PopulateGear = function()
     local gear  = Calc:GetEquippedGear()
     local owned = Calc:GetPlayerCrests()
-    local totalMissing, totalGold, crestNeeds, maxTotal = 0, 0, {}, 0
+    local totalMissing, totalGold, crestNeeds = 0, 0, {}
     local tileEntries = {}
+
+    -- Pre-pass: compute the theoretical max ilvl across ALL equipped slots,
+    -- deliberately ignoring slotFilter and hideCrafted so the timeline bar and
+    -- "Max Possible" stat always reflect the full character potential.
+    -- Running this first also warms _tipCache so the display loop below pays no
+    -- extra tooltip scanning cost.
+    local maxTotal = 0
+    for _, item in ipairs(gear) do
+        local pOk, _, _, _, _, maxIlvl = pcall(Calc.GetItemUpgradeCost, Calc, item)
+        if pOk and type(maxIlvl) == "number" then
+            maxTotal = maxTotal + maxIlvl
+        elseif Calc:IsVoidforged(item.link) then
+            maxTotal = maxTotal + item.ilvl
+        elseif item.ilvl >= 200 then
+            local _, maxI = CraftedBandFromIlvl(item.ilvl)
+            maxTotal = maxTotal + maxI
+        else
+            maxTotal = maxTotal + item.ilvl
+        end
+    end
 
     -- Pre-build per-slot crest breakdown from scan data.
     -- Done once here from a single DB snapshot so every item in the loop
@@ -1183,7 +1205,6 @@ PopulateGear = function()
             end
 
             if shouldAdd then
-                maxTotal = maxTotal + (type(dm) == "number" and dm or item.ilvl)
                 tileEntries[#tileEntries + 1] = {
                     slotName = sn,       slotID  = item.slot,
                     ilvl     = item.ilvl, max    = dm,
@@ -1275,7 +1296,7 @@ PopulateGear = function()
         sHdrNeeds:SetText(""); sHdrNeeds:Hide()
     end
 
-    local atMaxHdrY = -36 - (needsCount > 0 and needsRows * 55 + 18 or 0)
+    local atMaxHdrY = -36 - (needsCount > 0 and needsRows * TILE_STEP + 18 or 0)
     if maxCount > 0 and showMaxed then
         groupSepLine:ClearAllPoints()
         PP.Point(groupSepLine, "TOPLEFT", cc, "TOPLEFT", 0, atMaxHdrY - 2)
@@ -1292,11 +1313,11 @@ PopulateGear = function()
     local function getTilePos(group_start_y, local_idx)
         local row = math.floor(local_idx / TILE_COLS)
         local col = local_idx % TILE_COLS
-        return col * (TILE_W + TILE_GAP), group_start_y - row * 55
+        return col * (TILE_W + TILE_GAP), group_start_y - row * TILE_STEP
     end
 
-    local needsStartY = -54
-    local atMaxStartY = needsStartY - needsRows * 55 - (needsCount > 0 and 34 or 18)
+    local needsStartY = -54  -- below timeline bar(16) + labels(18) + section header(20)
+    local atMaxStartY = needsStartY - needsRows * TILE_STEP - (needsCount > 0 and 34 or 18)
 
     for _, btn in ipairs(tileFrames) do btn:Hide() end
 
@@ -1351,15 +1372,13 @@ PopulateGear = function()
     end
 
     -- Reposition the crest section immediately below the last rendered tile row.
-    -- needsRows already computed above; maxRows only adds if showMaxed is on.
-    local maxRows = (showMaxed and maxCount > 0) and math.ceil(maxCount / TILE_COLS) or 0
-    local totalTileRows = needsRows + maxRows
-    -- tile area starts at cc y=-54 and each row is 55px; add 20px gap before crest section
-    local crestY = -54 - totalTileRows * 55 - 20
-    -- atMaxHdrY already accounts for the header gap; push crest below it when showing maxed
+    local crestY
     if showMaxed and maxCount > 0 then
-        local atMaxRows = math.ceil(maxCount / TILE_COLS)
-        crestY = atMaxStartY - atMaxRows * 55 - 20
+        -- atMaxStartY is where the at-max group starts; offset by its rows + gap.
+        crestY = atMaxStartY - math.ceil(maxCount / TILE_COLS) * TILE_STEP - 20
+    else
+        -- Only needs-upgrade tiles are visible (or none at all).
+        crestY = needsStartY - needsRows * TILE_STEP - 20
     end
     crestSection:ClearAllPoints()
     PP.Point(crestSection, "TOPLEFT",  cc, "TOPLEFT",  0, crestY)
