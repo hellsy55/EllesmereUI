@@ -299,6 +299,7 @@ function Calc:IsVoidforged(link)
 end
 
 -- Returns the ilvl gain from the next upgrade step, or nil if already at max.
+-- (Reserved for future use; not currently called by PopulateGear.)
 function Calc:GetNextUpgradeGain(item)
     local track, rank = self:GetItemTrackAndRank(item.link)
     if not track or not rank then return nil end
@@ -1126,9 +1127,9 @@ PopulateGear = function()
                     du = "Crafted"
                 end
             elseif track then
-                totalMissing = totalMissing + (6 - (rank or 0))
-                totalGold    = totalGold + (goldCost or 0)
                 local td = Data.tracks[track]
+                totalMissing = totalMissing + ((td and #td.ranks or 6) - (rank or 0))
+                totalGold    = totalGold + (goldCost or 0)
                 local cn_map = slotCrestMap[item.slot]
                 if cn_map then
                     for cn, amt in pairs(cn_map) do
@@ -1204,6 +1205,24 @@ PopulateGear = function()
         end
     end
 
+    -- On every refresh, sync queue item references to the current tileEntries so
+    -- UpdateQueueDisplay shows live costs rather than costs snapshotted at session open.
+    -- Safe to run on the first PopulateGear call too (entries are already fresh then).
+    if #queueItems > 0 then
+        local slotToEntry = {}
+        for _, e in ipairs(tileEntries) do slotToEntry[e.slotID] = e end
+        local newQueue, newSet = {}, {}
+        for _, old in ipairs(queueItems) do
+            local fresh = slotToEntry[old.slotID]
+            if fresh then
+                newQueue[#newQueue + 1] = fresh
+                newSet[fresh.slotName] = #newQueue
+            end
+        end
+        queueItems   = newQueue
+        queueSlotSet = newSet
+    end
+
     -- Timeline bar
     local curAvg = select(2, GetAverageItemLevel()) or 0
     -- Blizzard counts 2H weapons as two slots; clamp so max never shows below current.
@@ -1222,7 +1241,7 @@ PopulateGear = function()
     local needsCount = 0
     for _, e in ipairs(tileEntries) do if not e.isAtMax then needsCount = needsCount + 1 end end
     local maxCount  = #tileEntries - needsCount
-    local needsRows = math.ceil(math.max(1, needsCount) / TILE_COLS)
+    local needsRows = needsCount > 0 and math.ceil(needsCount / TILE_COLS) or 0
 
     if needsCount > 0 then
         sHdrNeeds:ClearAllPoints()
@@ -1260,7 +1279,7 @@ PopulateGear = function()
 
     local ni, mi = 0, 0
     for idx, entry in ipairs(tileEntries) do
-        if idx > 18 then break end
+        if idx > #tileFrames then break end  -- tileFrames has 18 slots; equipSlots has 16
         local btn = tileFrames[idx]
         local tx, ty
         if not entry.isAtMax then
@@ -1482,6 +1501,13 @@ scanBtn:SetScript("OnClick", function()
     end)
 end)
 
+-- Debounce timer handle for PLAYER_EQUIPMENT_CHANGED: coalesces rapid gear swaps
+-- (e.g. multiple pieces at once) into a single PopulateGear call.
+-- Declared before equipListener so both the OnEvent and OnHide closures capture
+-- the same upvalue (declaring it after would cause OnEvent to use the global slot
+-- instead, making OnHide unable to cancel a pending debounce timer).
+local _equipDebounce = nil
+
 local equipListener = CreateFrame("Frame")
 equipListener:SetScript("OnEvent", function(_, event, slotID)
     if event == "PLAYER_REGEN_DISABLED" then
@@ -1521,9 +1547,6 @@ equipListener:SetScript("OnEvent", function(_, event, slotID)
 end)
 
 -- Show / Hide
--- Debounce timer handle for PLAYER_EQUIPMENT_CHANGED: coalesces rapid gear swaps
--- (e.g. multiple pieces at once) into a single PopulateGear call.
-local _equipDebounce = nil
 
 f:SetScript("OnShow", function()
     if InCombatLockdown() then f:Hide(); return end
@@ -1601,7 +1624,8 @@ _firstRunEvt:SetScript("OnEvent", function(self)
             local link = GetInventoryItemLink("player", slotID)
             if link then
                 local r = Calc:ScanItemLink(link)
-                if r and r.track and (r.rank or 0) < 6 then
+                local td = r and r.track and Data.tracks[r.track]
+                if td and (r.rank or 0) < #td.ranks then
                     tracksNeeded[r.track] = true
                 end
             end
