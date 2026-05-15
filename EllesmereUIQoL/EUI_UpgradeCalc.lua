@@ -84,6 +84,19 @@ end
 -- Referenced in GetCraftedInfo; hoisted here so it is allocated once, not per call.
 Data.craftedTierSteps = { 246, 249, 252, 255, 259 }
 
+-- SEASON UPDATE: update minIlvl/maxIlvl each new season to match crafted item ilvl caps.
+-- minIlvl: lowest ilvl at which an item belongs to this crafted band (checked highest-first).
+-- maxIlvl: ilvl ceiling for crafted items in this band.
+-- Ordered highest-first so CraftedBandFromIlvl can short-circuit on the first match.
+Data.craftedBands = {
+    { name = "Myth", minIlvl = 272, maxIlvl = 285 },
+    { name = "Hero", minIlvl = 259, maxIlvl = 272 },
+    { name = "None", minIlvl = 0,   maxIlvl = 259 },
+}
+-- Reverse lookup: band name → band data (for O(1) access in ScanItemLink).
+Data.craftedBandByName = {}
+for _, b in ipairs(Data.craftedBands) do Data.craftedBandByName[b.name] = b end
+
 -------------------------------------------------------------------------------
 --  CORE
 -------------------------------------------------------------------------------
@@ -231,13 +244,10 @@ function Calc:ScanItemLink(link)
         result.isCrafted = isCrafted
 
         if isCrafted then
-            if sawMyth then
-                result.craftBand = "Myth"; result.craftMaxIlvl = 285
-            elseif sawHero then
-                result.craftBand = "Hero"; result.craftMaxIlvl = 272
-            else
-                result.craftBand = "None"; result.craftMaxIlvl = 259
-            end
+            local bname = sawMyth and "Myth" or sawHero and "Hero" or "None"
+            local bdata = Data.craftedBandByName[bname]
+            result.craftBand    = bname
+            result.craftMaxIlvl = bdata and bdata.maxIlvl or 259
         end
     end
 
@@ -254,15 +264,16 @@ end
 -- Shared helper: given an ilvl, returns band ("Myth"/"Hero"/"None") and maxIlvl.
 -- Called by both GetCraftedInfo (tooltip fallback) and the PopulateGear heuristic
 -- so the two code paths can never silently diverge on a season update.
--- SEASON UPDATE: update these thresholds and maxIlvl caps each new season.
+-- Thresholds are read from Data.craftedBands — update that table each new season.
 local function CraftedBandFromIlvl(ilvl)
-    if ilvl >= 272 then
-        return "Myth", math.max(285, ilvl)
-    elseif ilvl >= 259 then
-        return "Hero", math.max(272, ilvl)
-    else
-        return "None", math.max(259, ilvl)
+    for _, band in ipairs(Data.craftedBands) do
+        if ilvl >= band.minIlvl then
+            return band.name, math.max(band.maxIlvl, ilvl)
+        end
     end
+    -- Fallback: treat as base crafted (should never be reached; ilvl < 0 is impossible).
+    local base = Data.craftedBandByName["None"]
+    return "None", math.max(base and base.maxIlvl or 259, ilvl)
 end
 
 -- Returns: isCrafted, band, tier, maxIlvl.
