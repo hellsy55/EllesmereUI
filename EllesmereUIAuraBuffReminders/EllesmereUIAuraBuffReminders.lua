@@ -30,6 +30,7 @@ local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 -- cast or combat end. OOC falls back to target debuff check.
 local _huntersMarkNeeded = false
 
+local db  -- set in EABR:OnInitialize()
 -- Flask state snapshotted before PvP restriction activates (aura API locked in PvP).
 
 
@@ -137,10 +138,16 @@ local function InMythicPlusKey()
     return C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
 end
 
+local function InMythicZeroDungeon()
+    if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
+    return false
+end
+
+
 -- Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
 local function InMythicZeroDungeonOrMythicRaid()
-    if _cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8) then return true end
-    if _cachedIType == "raid" and _cachedDiffID == 16 then return true end
+    if InMythicZeroDungeon() then return true end
+    if IsInRaid() and _cachedDiffID == 16 then return true end
     return false
 end
 
@@ -290,6 +297,17 @@ function _AC.ensureNames()
     end
 end
 
+local function IsUnderDuration(duration, expirationTime)
+    if InMythicZeroDungeon() and db and db.profile.display.showUnderDurationDungeon > 0 and duration >= db.profile.display.showUnderDurationDungeon*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationDungeon*60 then
+        return true
+    end
+    if IsInRaid() and db and db.profile.display.showUnderDurationRaid > 0 and duration >= db.profile.display.showUnderDurationRaid*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationRaid*60 then
+        return true
+    end
+    
+    return false 
+end
+
 local function PlayerHasAuraByID(spellIDs)
     if not spellIDs or not spellIDs[1] then return true end
     local inCombat = InCombat()
@@ -300,7 +318,12 @@ local function PlayerHasAuraByID(spellIDs)
         if NON_SECRET_SPELL_IDS[id] then
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
             if ok then
-                if result ~= nil then return true end
+                if result ~= nil then 
+                    if IsUnderDuration(result.duration, result.expirationTime) then
+                        return false
+                    end
+                    return true 
+                end
                 if inCombat and _preCombatAuraCache[id] then return true end
             else
                 if inCombat and _preCombatAuraCache[id] then return true end
@@ -309,7 +332,12 @@ local function PlayerHasAuraByID(spellIDs)
             -- Non-whitelisted OOC: use GetPlayerAuraBySpellID anyway (may return
             -- secret values, but non-nil means the aura exists)
             local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-            if ok and result ~= nil then return true end
+            if ok and result ~= nil then
+                if IsUnderDuration(result.duration, result.expirationTime) then
+                    return false
+                end
+                return true
+            end
         else
             if _preCombatAuraCache[id] then return true end
         end
@@ -937,7 +965,12 @@ local function PlayerHasWellFed()
         local aura = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
         if not aura then break end
         local ic = aura.icon
-        if ic and not isSecret(ic) and ic == 136000 then return true end
+        if ic and not isSecret(ic) and ic == 136000 then 
+            if IsUnderDuration(aura.duration, aura.expirationTime) then
+                return false
+            end
+            return true
+        end
     end
     return false
 end
@@ -949,7 +982,12 @@ local function PlayerHasFlaskBuff()
     -- Direct ID lookup for known flask buff IDs (zero allocation)
     for id in pairs(FLASK_BUFF_ID_SET) do
         local ok, result = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-        if ok and result ~= nil then return true end
+        if ok and result ~= nil then 
+            if IsUnderDuration(result.duration, result.expirationTime) then
+                return false
+            end
+            return true
+        end
     end
     -- Name-based fallback for flasks not in our ID set (lazy scan)
     if _AC.valid then
@@ -1121,6 +1159,8 @@ local defaults = {
             opacity = 1.0,
             frameStrata = "MEDIUM",
             cursorAttach = false,
+            showUnderDurationDungeon = 0,
+            showUnderDurationRaid = 0,
         },
         raidBuffs = {
             showNonInstanced = false,
@@ -1171,7 +1211,6 @@ local defaults = {
     },
 }
 
-local db  -- set in EABR:OnInitialize()
 local euiPanelOpen = false
 
 -------------------------------------------------------------------------------
@@ -1831,14 +1870,24 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             -- both weapon slots. GetWeaponEnchantInfo returns the specific
             -- enchant ID on each hand (4th and 8th return values).
             if playerClass == "SHAMAN" then
-                local hasMH, _, _, mhEnchID, hasOH, _, _, ohEnchID = GetWeaponEnchantInfo()
+                local hasMH, mhExpire, _, mhEnchID, hasOH, ohExpire, _, ohEnchID = GetWeaponEnchantInfo()
                 for _, imbue in ipairs(SHAMAN_IMBUES) do
                     if co.enabled[imbue.key] and Known(imbue.castSpell) then
                         local found = false
                         if imbue.wepEnchID then
                             for _, eid in ipairs(imbue.wepEnchID) do
                                 if eid > 0 and ((hasMH and mhEnchID == eid) or (hasOH and ohEnchID == eid)) then
-                                    found = true; break
+                                    if not mhExpire then
+                                        mhExpire = math.huge -- if expiration is missing, assume it's active (pre-9.2 client versions)
+                                    end
+                                    if not ohExpire then
+                                        ohExpire = math.huge
+                                    end
+                                    if IsUnderDuration(3600, math.min(mhExpire, ohExpire)/1000 + GetTime()) then -- the expire duration is different than this function assumes given in ms remaining. Convert to the expected value by dividing by 1000 adding time 
+                                        found = false
+                                    else
+                                        found = true
+                                    end
                                 end
                             end
                         end

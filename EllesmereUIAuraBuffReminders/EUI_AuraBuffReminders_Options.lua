@@ -945,6 +945,31 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 5: Opacity | Frame Strata
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Dungeon: Show Buffs With Duration Less Than:", min=0, max=60, step=1,
+              tooltip="In a Mythic 0 dungeon, Show buffs when the duration is less than this many minutes. Set to 0 to disable.",
+              getValue=function() local d = DDB(); return  d and d.showUnderDurationDungeon or 0 end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.showUnderDurationDungeon = v
+                  RefreshAll()
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
+        
+        -- Row 6: Opacity | Frame Strata
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Raid: Show Buffs With Duration Less Than:", min=0, max=15, step=1,
+              tooltip="In a Raid, Show buffs when the duration is less than this many minutes. Set to 0 to disable.",
+              getValue=function() local d = DDB(); return  d and d.showUnderDurationRaid or 0 end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.showUnderDurationRaid = v
+                  RefreshAll()
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
