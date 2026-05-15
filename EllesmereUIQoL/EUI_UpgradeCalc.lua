@@ -109,7 +109,6 @@ local function DB()
     store.upgradeCalc       = store.upgradeCalc      or {}
     local db                = store.upgradeCalc
     db.cache                = db.cache               or { slots = {}, ts = 0 }
-    db.discounts            = db.discounts           or {}
     db.calibrated           = db.calibrated          or false
     db.queue                = db.queue               or {}
     db.crestManualAdds      = db.crestManualAdds     or {}
@@ -367,25 +366,10 @@ function Calc:GetItemUpgradeCost(item)
         return track, rank, exactCrests, exactGold, expectedMax
     end
 
-    -- Priority 2: estimate using watermark discount data.
-    -- SEASON UPDATE: 20 crests per upgrade step is the MN S1/S2 constant.
-    -- Update if Blizzard changes the crest cost per rank in a future season.
-    local rankCap      = #td.ranks
-    local upgradesLeft = rankCap - rank
-    local crestCost    = upgradesLeft * 20
-
-    if db.calibrated and td.currID and td.currID > 0 then
-        local wm = self:GetDiscountWatermark(item.slot, td.currID)
-        if wm and wm > 0 then
-            crestCost = 0
-            for step = rank + 1, rankCap do
-                if (td.ranks[step] or 0) > wm then crestCost = crestCost + 20 end
-            end
-        end
-    end
-
-    -- Priority 3: raw estimate.
-    return track, rank, crestCost, upgradesLeft * td.goldPer, expectedMax
+    -- Priority 2: raw estimate (upgrader scan not available for this slot).
+    -- SEASON UPDATE: full price = 20 crests/step. Update if Blizzard changes this.
+    local upgradesLeft = #td.ranks - rank
+    return track, rank, upgradesLeft * 20, upgradesLeft * td.goldPer, expectedMax
 end
 
 function Calc:IsUpgraderOpen()
@@ -407,32 +391,26 @@ local function SelectSlotInUpgrader(loc)
 end
 
 local function TallySlotCosts(info)
-    local crestAmounts, copper, watermarks = {}, 0, {}
+    local crestAmounts, copper = {}, 0
     local curr = info.currUpgrade or 0
     for _, lvl in ipairs(info.upgradeLevelInfos or {}) do
         if (lvl.upgradeLevel or 0) > curr then
             copper = copper + (lvl.moneyCost or 0)
             for _, cc in ipairs(lvl.currencyCostsToUpgrade or {}) do
+                -- cc.cost is already the correct amount to pay (Blizzard returns 10 for
+                -- discounted steps, 20 for full-price steps). No halving needed here.
                 crestAmounts[cc.currencyID] = (crestAmounts[cc.currencyID] or 0) + (cc.cost or 0)
-                local di = cc.discountInfo
-                if di and (di.discountHighWatermark or 0) > 0 then
-                    watermarks[cc.currencyID] = di.discountHighWatermark
-                end
             end
         end
     end
-    return crestAmounts, copper, watermarks
+    return crestAmounts, copper
 end
 
 -- Scans every equipped slot at the Upgrader NPC, building an accurate cost cache.
--- Two-pass design:
---   Pass 1 (select): cycles through all slots via SelectSlotInUpgrader so the
---     Upgrader frame loads each item's upgrade cost data into the client cache.
---   Pass 2 (collect): after a short wait, reads GetItemUpgradeItemInfo for every
---     slot — data is now reliably present for all slots.
--- Without the pre-warm, GetItemUpgradeItemInfo returns nil for slots not already
--- shown in the frame; the select triggers an async load that isn't ready on the
--- same tick, so a single-pass approach always misses most slots on the first run.
+-- Single-pass: selects each slot via SelectSlotInUpgrader, waits 0.3 s for the
+-- Upgrader frame to populate async data for that slot, then reads the result via
+-- C_ItemUpgrade.GetItemUpgradeItemInfo() (no arguments — returns data for the
+-- currently-selected slot). Passing a loc argument is silently ignored by the API.
 function Calc:ScanEquippedAtUpgrader(onDone)
     if InCombatLockdown() then
         if onDone then onDone(false) end
@@ -467,71 +445,82 @@ function Calc:ScanEquippedAtUpgrader(onDone)
 
     local function saveSlotInfo(slotID, info)
         if not (info and info.upgradeLevelInfos) then return end
-        local crestAmounts, copperTotal, watermarks = TallySlotCosts(info)
+        local crestAmounts, copperTotal = TallySlotCosts(info)
         newSlots[slotID] = {
-            trackName    = info.customUpgradeString,
-            rankCurrent  = info.currUpgrade,
-            rankMax      = info.maxUpgrade,
-            ilvlCap      = info.maxItemLevel,
             crestAmounts = crestAmounts,
             copperTotal  = copperTotal,
         }
-        if next(watermarks) then
-            db.discounts[slotID] = db.discounts[slotID] or {}
-            for cid, wm in pairs(watermarks) do
-                local prev = db.discounts[slotID][cid] or 0
-                if wm > prev then db.discounts[slotID][cid] = wm end
-            end
-        end
     end
 
-    -- Pass 2: harvest upgrade data for every slot (all now in client cache).
-    local function doCollectPass()
-        local ci = 1
-        local function collectNext()
-            if InCombatLockdown() then onScanDone(false); return end
-            if ci > total then onScanDone(true); return end
-            local slotID = slots[ci]
-            local loc    = ItemLocation and ItemLocation:CreateFromEquipmentSlot(slotID)
-            if loc then
-                local info = C_ItemUpgrade and C_ItemUpgrade.GetItemUpgradeItemInfo
-                    and C_ItemUpgrade.GetItemUpgradeItemInfo(loc)
-                saveSlotInfo(slotID, info)
-            end
-            ci = ci + 1
-            C_Timer.After(0.05, collectNext)
-        end
-        collectNext()
-    end
-
-    -- Pass 1: select each slot so the Upgrader frame loads its cost data async.
-    -- After all slots are selected, wait 0.5 s before collecting.
+    -- Single-pass scan: select each slot, wait 0.3 s for the Upgrader frame to
+    -- populate async data, then call GetItemUpgradeItemInfo() with NO arguments
+    -- (the API returns data for whichever slot is currently selected; passing a
+    -- loc argument is silently ignored and the call returns nil).
     local si = 1
-    local function doSelectPass()
+    local function scanNext()
         if InCombatLockdown() then onScanDone(false); return end
-        if si > total then
-            C_Timer.After(0.5, doCollectPass)
-            return
+        if si > total then onScanDone(true); return end
+        local slotID = slots[si]
+        local loc    = ItemLocation and ItemLocation:CreateFromEquipmentSlot(slotID)
+        if loc and SelectSlotInUpgrader(loc) then
+            -- Wait for the Upgrader frame to load this slot's data, then read it.
+            C_Timer.After(0.3, function()
+                if InCombatLockdown() then onScanDone(false); return end
+                local info = C_ItemUpgrade and C_ItemUpgrade.GetItemUpgradeItemInfo
+                    and C_ItemUpgrade.GetItemUpgradeItemInfo()
+                saveSlotInfo(slotID, info)
+                si = si + 1
+                scanNext()
+            end)
+        else
+            -- Slot has no item or select failed; skip it.
+            si = si + 1
+            C_Timer.After(0.05, scanNext)
         end
-        local loc = ItemLocation and ItemLocation:CreateFromEquipmentSlot(slots[si])
-        if loc then SelectSlotInUpgrader(loc) end
-        si = si + 1
-        C_Timer.After(0.12, doSelectPass)
     end
 
-    doSelectPass()
-end
-
-function Calc:GetDiscountWatermark(slotID, currencyID)
-    local t = DB().discounts[slotID]
-    return (t and t[currencyID]) or 0
+    scanNext()
 end
 
 function Calc:ClearCache()
     local db = DB()
-    db.cache     = { slots = {}, ts = 0 }
-    db.discounts = {}
+    db.cache      = { slots = {}, ts = 0 }
     db.calibrated = false
+end
+
+-- Rescans a single slot at the Upgrader NPC and updates the cache entry for it.
+-- Used after an upgrade so the display reflects the new remaining cost immediately.
+-- Calls onDone(ok) when finished; ok=false if the NPC is closed, combat fires, or
+-- the API returns no data for the slot.
+function Calc:RescanSlot(slotID, onDone)
+    if InCombatLockdown() or Calc._scanning then
+        if onDone then onDone(false) end; return
+    end
+    if not self:IsUpgraderOpen() then
+        if onDone then onDone(false) end; return
+    end
+    local loc = ItemLocation and ItemLocation:CreateFromEquipmentSlot(slotID)
+    if not loc or not SelectSlotInUpgrader(loc) then
+        if onDone then onDone(false) end; return
+    end
+    local db = DB()
+    C_Timer.After(0.3, function()
+        if InCombatLockdown() then
+            if onDone then onDone(false) end; return
+        end
+        local info = C_ItemUpgrade and C_ItemUpgrade.GetItemUpgradeItemInfo
+            and C_ItemUpgrade.GetItemUpgradeItemInfo()
+        if info and info.upgradeLevelInfos then
+            local crestAmounts, copperTotal = TallySlotCosts(info)
+            db.cache        = db.cache or { slots = {}, ts = 0 }
+            db.cache.slots  = db.cache.slots or {}
+            db.cache.slots[slotID] = {
+                crestAmounts = crestAmounts,
+                copperTotal  = copperTotal,
+            }
+        end
+        if onDone then onDone(true) end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -1461,6 +1450,7 @@ end)
 scanBtn:HookScript("OnEnter", function(self)
     if EUI.ShowWidgetTooltip then
         local tip = "Scan all equipped gear costs at the Item Upgrade NPC.\n"
+                 .. "Scans each slot one at a time — this can take up to 10 seconds.\n"
                  .. "Requires the Item Upgrade window to be open."
         if not Calc:IsUpgraderOpen() then
             tip = tip .. "\n|cffff6060Item Upgrade window is not open.|r"
@@ -1502,9 +1492,23 @@ equipListener:SetScript("OnEvent", function(_, event, slotID)
     else
         Calc._tipCache = {}
     end
+    if not f:IsShown() then return end
+    -- If the Upgrader NPC is open and we have a valid slot ID, rescan just that
+    -- slot so the exact post-upgrade cost is shown without a full re-scan.
+    if slotID and slotID > 0 and Calc:IsUpgraderOpen() and not Calc._scanning then
+        -- Invalidate the slot's cache entry so PopulateGear won't stale-serve
+        -- the old data while the rescan is in flight.
+        local db = DB()
+        if db.cache and db.cache.slots then
+            db.cache.slots[slotID] = nil
+        end
+        Calc:RescanSlot(slotID, function()
+            if f:IsShown() then PopulateGear() end
+        end)
+        return
+    end
     -- Debounce: wait 0.3 s after the last equip event before refreshing.
     -- This prevents hammering PopulateGear when the user swaps multiple pieces.
-    if not f:IsShown() then return end
     if _equipDebounce then _equipDebounce:Cancel() end
     _equipDebounce = C_Timer.NewTimer(0.3, function()
         _equipDebounce = nil
@@ -1565,7 +1569,6 @@ _firstRunEvt:SetScript("OnEvent", function(self)
                 upgradeCalcOpts = {},
                 upgradeCalc     = {
                     cache      = { slots = {}, ts = 0 },
-                    discounts  = {},
                     calibrated = false,
                 },
             },
@@ -1577,7 +1580,6 @@ _firstRunEvt:SetScript("OnEvent", function(self)
         store.upgradeCalc       = store.upgradeCalc      or {}
         local db                = store.upgradeCalc
         db.cache                = db.cache               or { slots = {}, ts = 0 }
-        db.discounts            = db.discounts           or {}
         db.calibrated           = db.calibrated          or false
         db.queue                = db.queue               or {}
         db.crestManualAdds      = db.crestManualAdds     or {}
