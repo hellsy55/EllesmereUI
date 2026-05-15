@@ -174,11 +174,11 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
     ); y = y - h
 
     _, h = W:Toggle(parent,
-        "Show Weekly Remaining Column",
+        "Show Still Available Column",
         y,
         function() return GetAddonDB().showWeeklyRemaining or false end,
         function(v) GetAddonDB().showWeeklyRemaining = v; LiveRefresh() end,
-        "Show how many crests you can still earn this week (weekly cap minus earned so far)."
+        "Show how many crests you can still earn before hitting the season cap (cap minus earned so far)."
     ); y = y - h
 
     ---------------------------------------------------------------------------

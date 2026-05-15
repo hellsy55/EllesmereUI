@@ -575,7 +575,7 @@ local CREST_COLS = {
     {key="owned",     label="Owned",           x=220, w=70,  align="CENTER"},
     {key="missing",   label="Missing",         x=290, w=70,  align="CENTER"},
     {key="cap",       label="Earned / Cap",    x=360, w=130, align="CENTER"},
-    {key="weeklyRem", label="Left This Week",  x=490, w=110, align="CENTER"},
+    {key="weeklyRem", label="Still Available", x=490, w=110, align="CENTER"},
 }
 
 local f = CreateFrame("Frame", "EUIUpgCalcFrame", UIParent)
@@ -1397,7 +1397,7 @@ PopulateGear = function()
     local showCap      = opts.showEarnedCap
     local showWeeklyRem = opts.showWeeklyRemaining
     if showCap      then capHdrLbl:Show()      else capHdrLbl:Hide()      end
-    -- When Earned/Cap is hidden, Left This Week slides into that column's space.
+    -- When Earned/Cap is hidden, Still Available slides into that column's space.
     local weeklyRemX = (showWeeklyRem and not showCap) and CREST_COLS[5].x or CREST_COLS[6].x
     if showWeeklyRem then
         weeklyRemHdrLbl:ClearAllPoints()
