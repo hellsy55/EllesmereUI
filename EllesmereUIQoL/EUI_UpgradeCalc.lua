@@ -331,7 +331,7 @@ function Calc:GetPlayerCrests()
                     cap         = (info.maxQuantity and info.maxQuantity > 0) and info.maxQuantity or nil,
                     earned      = info.totalEarned or 0,
                     weeklyEarned = info.quantityEarnedThisWeek or 0,
-                    weeklyCap   = (info.maxWeeklyQuantity and info.maxWeeklyQuantity > 0) and info.maxWeeklyQuantity or nil,
+                    weeklyCap   = (info.maxEarnablePerWeek and info.maxEarnablePerWeek > 0) and info.maxEarnablePerWeek or nil,
                 }
             end
         end
