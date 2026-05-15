@@ -319,7 +319,7 @@ function Calc:GetNextUpgradeGain(item)
     return (td.ranks[rank + 1] or 0) - (td.ranks[rank] or 0)
 end
 
--- Returns a table mapping crestName -> { quantity, cap, earned } for each track.
+-- Returns a table mapping crestName -> { quantity, cap, earned, weeklyEarned, weeklyCap } for each track.
 function Calc:GetPlayerCrests()
     local owned = {}
     for _, td in pairs(Data.tracks) do
@@ -327,9 +327,11 @@ function Calc:GetPlayerCrests()
             local info = C_CurrencyInfo.GetCurrencyInfo(td.currID)
             if info then
                 owned[td.crestName] = {
-                    quantity = info.quantity    or 0,
-                    cap      = (info.maxQuantity and info.maxQuantity > 0) and info.maxQuantity or nil,
-                    earned   = info.totalEarned or 0,
+                    quantity    = info.quantity    or 0,
+                    cap         = (info.maxQuantity and info.maxQuantity > 0) and info.maxQuantity or nil,
+                    earned      = info.totalEarned or 0,
+                    weeklyEarned = info.quantityEarnedThisWeek or 0,
+                    weeklyCap   = (info.maxWeeklyQuantity and info.maxWeeklyQuantity > 0) and info.maxWeeklyQuantity or nil,
                 }
             end
         end
@@ -568,11 +570,12 @@ local TRACK_RGB = {
 }
 
 local CREST_COLS = {
-    {key="crest",   label="Crest",        x=0,   w=150, align="LEFT"  },
-    {key="need",    label="Need",          x=150, w=70,  align="CENTER"},
-    {key="owned",   label="Owned",         x=220, w=70,  align="CENTER"},
-    {key="missing", label="Missing",       x=290, w=70,  align="CENTER"},
-    {key="cap",     label="Earned / Cap",  x=360, w=140, align="CENTER"},
+    {key="crest",     label="Crest",          x=0,   w=150, align="LEFT"  },
+    {key="need",      label="Need",            x=150, w=70,  align="CENTER"},
+    {key="owned",     label="Owned",           x=220, w=70,  align="CENTER"},
+    {key="missing",   label="Missing",         x=290, w=70,  align="CENTER"},
+    {key="cap",       label="Earned / Cap",    x=360, w=130, align="CENTER"},
+    {key="weeklyRem", label="Left This Week",  x=490, w=110, align="CENTER"},
 }
 
 local f = CreateFrame("Frame", "EUIUpgCalcFrame", UIParent)
@@ -1005,6 +1008,13 @@ capHdrLbl:SetJustifyH(CREST_COLS[5].align)
 capHdrLbl:SetText(CREST_COLS[5].label)
 capHdrLbl:Hide()
 
+local weeklyRemHdrLbl = MFont(crestSection, 10, "OUTLINE", G.r, G.g, G.b, 1)
+PP.Point(weeklyRemHdrLbl, "TOPLEFT", crestSection, "TOPLEFT", CREST_COLS[6].x + 4, -2)
+PP.Width(weeklyRemHdrLbl, CREST_COLS[6].w)
+weeklyRemHdrLbl:SetJustifyH(CREST_COLS[6].align)
+weeklyRemHdrLbl:SetText(CREST_COLS[6].label)
+weeklyRemHdrLbl:Hide()
+
 -- Forward-declared so crest-row +/-80 buttons can call it.
 local PopulateGear
 
@@ -1070,7 +1080,9 @@ end
 -- Summary label and action buttons — initially anchored at y=0; repositioned
 -- every PopulateGear call to sit below the last visible crest row.
 local summaryLbl = MFont(crestSection, 11, "OUTLINE", G.r, G.g, G.b, 1)
-PP.Point(summaryLbl, "TOPLEFT", crestSection, "TOPLEFT", 4, 0)
+PP.Point(summaryLbl, "TOPLEFT",  crestSection, "TOPLEFT",  4, 0)
+PP.Point(summaryLbl, "TOPRIGHT", crestSection, "TOPRIGHT", 0, 0)
+summaryLbl:SetJustifyH("LEFT")
 summaryLbl:SetText("Missing Upgrades: -   Gold Needed: -")
 
 local refreshBtn               = MakeButton(crestSection, "Refresh",            140, 22, 0, 0)
@@ -1378,8 +1390,10 @@ PopulateGear = function()
     -- Crest table — compact visible rows to consecutive y positions so that
     -- filtered-out rows leave no gap, and +/-80 buttons/summary/action buttons
     -- always appear immediately below the last visible row.
-    local showCap = opts.showEarnedCap
-    if showCap then capHdrLbl:Show() else capHdrLbl:Hide() end
+    local showCap      = opts.showEarnedCap
+    local showWeeklyRem = opts.showWeeklyRemaining
+    if showCap      then capHdrLbl:Show()      else capHdrLbl:Hide()      end
+    if showWeeklyRem then weeklyRemHdrLbl:Show() else weeklyRemHdrLbl:Hide() end
     local visualIdx = 0
     for i, trackName in ipairs(Data.trackOrder) do
         local td      = Data.tracks[trackName]
@@ -1428,12 +1442,26 @@ PopulateGear = function()
             else
                 rowFrame.cap:Hide()
             end
+            if showWeeklyRem then
+                local wCap  = info and info.weeklyCap
+                local wEarn = info and info.weeklyEarned or 0
+                if wCap then
+                    local rem = math.max(0, wCap - wEarn)
+                    local remStr = rem > 0 and tostring(rem) or "|cff20ff200|r"
+                    rowFrame.weeklyRem:SetText(remStr)
+                else
+                    rowFrame.weeklyRem:SetText("-")
+                end
+                rowFrame.weeklyRem:Show()
+            else
+                rowFrame.weeklyRem:Hide()
+            end
             rowFrame.crest:Show(); rowFrame.need:Show()
             rowFrame.owned:Show(); rowFrame.missing:Show()
             visualIdx = visualIdx + 1
         else
             rowFrame.crest:Hide(); rowFrame.need:Hide()
-            rowFrame.owned:Hide(); rowFrame.missing:Hide(); rowFrame.cap:Hide()
+            rowFrame.owned:Hide(); rowFrame.missing:Hide(); rowFrame.cap:Hide(); rowFrame.weeklyRem:Hide()
             if rowFrame.altBg then rowFrame.altBg:Hide() end
             if rowFrame.mBtn then
                 rowFrame.mBtn:Hide()
@@ -1465,6 +1493,9 @@ PopulateGear = function()
     summaryLbl:SetText(string.format(
         "Missing Upgrades: |cffffffff%d|r%s     Gold: |cffffffff%dg|r",
         totalMissing, crestStr, totalGold))
+
+    -- Sync queue panel text to match restored/refreshed queue state.
+    UpdateQueueDisplay()
 end
 
 refreshBtn:SetScript("OnClick", PopulateGear)

@@ -173,6 +173,14 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
         "Show the seasonal Earned / Cap column in the crest table."
     ); y = y - h
 
+    _, h = W:Toggle(parent,
+        "Show Weekly Remaining Column",
+        y,
+        function() return GetAddonDB().showWeeklyRemaining or false end,
+        function(v) GetAddonDB().showWeeklyRemaining = v; LiveRefresh() end,
+        "Show how many crests you can still earn this week (weekly cap minus earned so far)."
+    ); y = y - h
+
     ---------------------------------------------------------------------------
     --  APPEARANCE
     ---------------------------------------------------------------------------
