@@ -1399,7 +1399,15 @@ PopulateGear = function()
     local showCap      = opts.showEarnedCap
     local showWeeklyRem = opts.showWeeklyRemaining
     if showCap      then capHdrLbl:Show()      else capHdrLbl:Hide()      end
-    if showWeeklyRem then weeklyRemHdrLbl:Show() else weeklyRemHdrLbl:Hide() end
+    -- When Earned/Cap is hidden, Left This Week slides into that column's space.
+    local weeklyRemX = (showWeeklyRem and not showCap) and CREST_COLS[5].x or CREST_COLS[6].x
+    if showWeeklyRem then
+        weeklyRemHdrLbl:ClearAllPoints()
+        PP.Point(weeklyRemHdrLbl, "TOPLEFT", crestSection, "TOPLEFT", weeklyRemX + 4, -2)
+        weeklyRemHdrLbl:Show()
+    else
+        weeklyRemHdrLbl:Hide()
+    end
     local visualIdx = 0
     for i, trackName in ipairs(Data.trackOrder) do
         local td      = Data.tracks[trackName]
@@ -1419,7 +1427,8 @@ PopulateGear = function()
             for _, col in ipairs(CREST_COLS) do
                 local cell = rowFrame[col.key]
                 cell:ClearAllPoints()
-                PP.Point(cell, "TOPLEFT", crestSection, "TOPLEFT", col.x + 4, rowY - 2)
+                local cellX = (col.key == "weeklyRem") and weeklyRemX or col.x
+                PP.Point(cell, "TOPLEFT", crestSection, "TOPLEFT", cellX + 4, rowY - 2)
             end
             -- Reposition and show +/-80 buttons if this row has them
             if rowFrame.mBtn then
