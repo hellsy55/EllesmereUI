@@ -153,33 +153,22 @@ local EUI_EMPTY_SOCKET_ATLAS = {
     EMPTY_SOCKET_TINKER     = "socket-tinker",
 }
 
--- Returns { icon = fileID-or-atlas, isAtlas = bool } per socket -- gem
--- icons for filled, empty-socket atlas for empty. Pure GetItemStats +
--- C_Item.GetItemGem; no tooltip scan.
-local function EUI_GetSocketTextures(itemLink)
-    local result = {}
-    if not itemLink then return result end
+-- Gem socket icons: one pass over GetItemStats + C_Item.GetItemGem (no tooltip).
+-- Enchants use EUI_ScanInventoryItem; no GameTooltipTemplate (CLAUDE.md).
 
-    local stats = C_Item.GetItemStats(itemLink)
-    -- Filled gems via C_Item.GetItemGem (per-socket index, no link splitting).
-    local filledCount = 0
-    for i = 1, 4 do
-        local _, gemLink = C_Item.GetItemGem(itemLink, i)
-        if gemLink then
-            local icon = C_Item.GetItemIconByID(gemLink)
-            if icon then
-                result[#result + 1] = { icon = icon, isAtlas = false }
-                filledCount = filledCount + 1
-            end
-        end
+-- paintPasses: current euiGemPaintPasses for this slot (suppress empty-socket
+-- atlas rows for the first frames after /reload while gem bytes hydrate).
+local function EUI_BuildSocketIconRow(itemLink, paintPasses)
+    local row = {}
+    local gemLinks = {}
+    if not itemLink or not C_Item or not C_Item.GetItemGem or not C_Item.GetItemStats then
+        return row, 0, 0, gemLinks
     end
 
-    -- EMPTY_SOCKET_* counts TOTAL sockets, not empty ones. Subtract the
-    -- filled count to get the real empty count; use the first socket-type
-    -- key we saw for the atlas.
+    local stats = C_Item.GetItemStats(itemLink)
+    local totalSockets = 0
+    local firstAtlas
     if stats then
-        local totalSockets = 0
-        local firstAtlas
         for key, count in pairs(stats) do
             local atlas = EUI_EMPTY_SOCKET_ATLAS[key]
             if atlas and count and count > 0 then
@@ -187,15 +176,34 @@ local function EUI_GetSocketTextures(itemLink)
                 firstAtlas = firstAtlas or atlas
             end
         end
-        local emptyCount = math.max(0, totalSockets - filledCount)
-        if emptyCount > 0 and firstAtlas then
+    end
+
+    for i = 1, 4 do
+        local _, gemLink = C_Item.GetItemGem(itemLink, i)
+        if gemLink then
+            gemLinks[#gemLinks + 1] = gemLink
+            local icon = C_Item.GetItemIconByID(gemLink)
+            if not icon and GetItemInfoInstant then
+                icon = select(5, GetItemInfoInstant(gemLink))
+            end
+            row[#row + 1] = { icon = icon or 134400, isAtlas = false }
+        end
+    end
+    local nGems = #gemLinks
+
+    -- EMPTY_SOCKET_* counts total sockets; subtract filled for empty atlas rows.
+    local suppressEmptyAtlas = (totalSockets > 0 and nGems == 0
+        and (paintPasses or 0) < 40)
+    if stats and not suppressEmptyAtlas and firstAtlas then
+        local emptyCount = math.max(0, totalSockets - nGems)
+        if emptyCount > 0 then
             for _ = 1, emptyCount do
-                result[#result + 1] = { icon = firstAtlas, isAtlas = true }
+                row[#row + 1] = { icon = firstAtlas, isAtlas = true }
             end
         end
     end
 
-    return result
+    return row, totalSockets, nGems, gemLinks
 end
 
 -- Default the themed character sheet + its sub-displays to enabled on first
@@ -3818,34 +3826,33 @@ local function SkinCharacterSheet()
 
         local socketIcons = GetOrCreateSocketIcons(slot, side, slotIndex)
 
-        local link = GetInventoryItemLink("player", slotIndex)
+        local invLink = GetInventoryItemLink("player", slotIndex)
         local gemsEnabled = not (EllesmereUIDB and EllesmereUIDB.showGems == false)
-        if not link or not gemsEnabled then
+        if not invLink or not gemsEnabled then
             for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
                 gemFrame:Hide()
             end
             return
         end
 
-        -- Derive socket textures (filled gems + empty-socket atlases) WITHOUT
-        -- creating a GameTooltipTemplate (CLAUDE.md taint rule). Uses
-        -- GetItemStats for empty-socket counts + the item link's gem IDs.
-        local socketData = EUI_GetSocketTextures(link)
-        -- Legacy alias kept for the length check below; actual rendering uses
-        -- socketData directly so we can distinguish atlas vs. fileID.
-        local socketTextures = socketData
+        local passes = GetFFD(slot).euiGemPaintPasses or 0
+        local socketTextures, totalSockets, nGems, gemLinks =
+            EUI_BuildSocketIconRow(invLink, passes)
 
-        -- Build gem links directly from the item link for tooltip-on-hover.
-        -- Gem links via C_Item.GetItemGem (no link-parsing required).
-        GetFFD(slot).gemLinks = {}
-        if link and C_Item and C_Item.GetItemGem then
-            for i = 1, 4 do
-                local _, gemLink = C_Item.GetItemGem(link, i)
-                if gemLink then
-                    table.insert(GetFFD(slot).gemLinks, gemLink)
-                end
+        if totalSockets > 0 and nGems == 0 then
+            local iid = GetInventoryItemID("player", slotIndex)
+            if iid and iid > 0 and C_Item and C_Item.RequestLoadItemDataByID then
+                C_Item.RequestLoadItemDataByID(iid)
             end
+            GetFFD(slot).euiGemPaintPasses = passes + 1
+        else
+            GetFFD(slot).euiGemPaintPasses = 0
         end
+
+        -- TOOLTIP_DATA_UPDATE / GET_ITEM_INFO_RECEIVED → QueueSocketRefresh until
+        -- gem bytes on the link match GetItemStats (CLAUDE.md: no tooltip scrape).
+
+        GetFFD(slot).gemLinks = gemLinks
 
         -- Position and show gem frames inside the slot's bottom-right, with
         -- extra gems stacking leftward. Border color reflects gem rank:
@@ -3857,14 +3864,28 @@ local function SkinCharacterSheet()
                 if socketTextures[i] and gemFrame then
                     local entry = socketTextures[i]
                     if entry.isAtlas then
-                        -- Empty socket: solid red fill behind the border so
-                        -- the slot reads as "missing gem" even if Blizzard's
-                        -- empty-socket atlas fails to resolve in this client.
-                        icon:SetTexture(nil)
+                        -- Empty socket: prefer Blizzard's socket atlas. Avoid a
+                        -- bright red fill on first open — the inventory link can
+                        -- lack gem bytes while GetItemStats still reports sockets,
+                        -- which made solid red read as "missing gem" on gemmed gear.
                         if icon.SetAtlas then icon:SetAtlas(nil) end
-                        icon:SetColorTexture(0.7, 0.1, 0.1, 1)
+                        icon:SetTexture(nil)
+                        if icon.SetVertexColor then icon:SetVertexColor(1, 1, 1, 1) end
+                        if icon.SetAtlas and entry.icon then
+                            icon:SetColorTexture(0, 0, 0, 0)
+                            icon:SetAtlas(entry.icon)
+                        else
+                            if icon.SetAtlas then icon:SetAtlas(nil) end
+                            icon:SetColorTexture(0.22, 0.22, 0.26, 0.85)
+                        end
                     else
+                        -- Must clear atlas / color-texture mode before applying a
+                        -- fileID; otherwise the frame shows only the PP border after
+                        -- a prior empty-socket atlas paint on the same texture.
+                        if icon.SetAtlas then icon:SetAtlas(nil) end
                         icon:SetColorTexture(0, 0, 0, 0)
+                        icon:SetTexture(nil)
+                        if icon.SetVertexColor then icon:SetVertexColor(1, 1, 1, 1) end
                         icon:SetTexture(entry.icon)
                     end
 
@@ -3921,6 +3942,7 @@ local function SkinCharacterSheet()
     -- with an empty socket previously left the old gem icon until /reload).
     local function ClearSlotGems(slot)
         if not slot then return end
+        GetFFD(slot).euiGemPaintPasses = 0
         GetFFD(slot).gemLinks = {}
         if GetFFD(slot).charSocketsFrames then
             for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames) do
@@ -3946,30 +3968,39 @@ local function SkinCharacterSheet()
         end
     end
 
-    -- Hook into equipment changes. Debounced via a pending flag so rapid
-    -- swaps (e.g. equipping a full gear set) coalesce into one refresh
-    -- instead of stacking N 0.1s timers that each do an 18-slot scan.
-    local _socketRefreshPending = false
+    -- Equipment / item-load hooks: trailing debounce so bursts of
+    -- GET_ITEM_INFO_RECEIVED schedule one refresh after data settles (a
+    -- leading debounce can fire once on stale links right after /reload).
+    local _socketRefreshTimer
     local function QueueSocketRefresh()
-        if _socketRefreshPending then return end
-        _socketRefreshPending = true
-        C_Timer.After(0.1, function()
-            _socketRefreshPending = false
-            RefreshAllSocketIcons()
+        if _socketRefreshTimer then
+            _socketRefreshTimer:Cancel()
+            _socketRefreshTimer = nil
+        end
+        _socketRefreshTimer = C_Timer.NewTimer(0.12, function()
+            _socketRefreshTimer = nil
+            if frame and frame:IsShown() and (frame.selectedTab or 1) == 1 then
+                RefreshAllSocketIcons()
+            end
         end)
     end
 
     local socketWatcher = CreateFrame("Frame")
     socketWatcher:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     socketWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
-    socketWatcher:SetScript("OnEvent", function(_, event, slotID)
+    socketWatcher:RegisterEvent("UNIT_INVENTORY_CHANGED")
+    socketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    socketWatcher:RegisterEvent("SOCKET_INFO_UPDATE")
+    socketWatcher:RegisterEvent("TOOLTIP_DATA_UPDATE")
+    socketWatcher:SetScript("OnEvent", function(_, event, arg1)
         if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+        if event == "UNIT_INVENTORY_CHANGED" and arg1 ~= "player" then return end
         -- Clear stale gem art for the slot that just changed BEFORE the
         -- debounced refresh runs. Without this, the old item's gem icons
         -- can remain visible until /reload if the refresh path somehow
         -- picks up cached gem data.
-        if event == "PLAYER_EQUIPMENT_CHANGED" and slotID then
-            local slotName = _invSlotToName[slotID]
+        if event == "PLAYER_EQUIPMENT_CHANGED" and arg1 then
+            local slotName = _invSlotToName[arg1]
             if slotName then ClearSlotGems(_G[slotName]) end
         end
         if frame:IsShown() and (frame.selectedTab or 1) == 1 then
@@ -3983,6 +4014,12 @@ local function SkinCharacterSheet()
         local isCharacterTab = (frame.selectedTab or 1) == 1
         if isCharacterTab then
             RefreshAllSocketIcons()
+            QueueSocketRefresh()
+            C_Timer.After(0.75, function()
+                if frame and frame:IsShown() and (frame.selectedTab or 1) == 1 then
+                    RefreshAllSocketIcons()
+                end
+            end)
             globalSocketContainer:Show()
         else
             globalSocketContainer:Hide()
@@ -4004,6 +4041,16 @@ local function SkinCharacterSheet()
     end)
 
     frame:HookScript("OnHide", function()
+        if _socketRefreshTimer then
+            _socketRefreshTimer:Cancel()
+            _socketRefreshTimer = nil
+        end
+        for _, sn in ipairs(itemSlots) do
+            local sl = _G[sn]
+            if sl then
+                GetFFD(sl).euiGemPaintPasses = 0
+            end
+        end
         globalSocketContainer:Hide()
         if GetFFD(frame).scrollBar then GetFFD(frame).scrollBar:Hide() end
     end)
@@ -4325,6 +4372,95 @@ if EllesmereUI then
             -- prevents Rep/Currency ScrollBox from completing its data render.
             if not EllesmereUIDB or EllesmereUIDB.themedCharacterSheet ~= false then
                 PreSkinCharacterSheet()
+                -- PreSkin hides the portrait once; Blizzard's CharacterFrameMixin:UpdatePortrait
+                -- (RefreshDisplay / UNIT_PORTRAIT_UPDATE / spec icon) runs after OnShow hooks and
+                -- redraws it. Re-hide via secure hook + deferred passes on GetPortrait() as well.
+                if not GetFFD(CharacterFrame)._euiPortraitSuppressRegistered then
+                    local function SuppressCharacterFramePortrait()
+                        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                        if not CharacterFrame then return end
+                        -- Blizzard re-anchors CharacterFrameInsetRight on each open; it parents
+                        -- PaperDollSidebarTabs (Tab1 uses a circular player/spec portrait). Re-apply
+                        -- the same off-screen park as PreSkin so that chrome cannot snap back.
+                        local inset = _G.CharacterFrameInsetRight
+                        if inset then
+                            if inset.NineSlice then inset.NineSlice:Hide() end
+                            inset:ClearAllPoints()
+                            inset:SetPoint("TOPLEFT", CharacterFrame, "TOPLEFT", 10000, -10000)
+                        end
+                        if CharacterFrame.Portrait then
+                            CharacterFrame.Portrait:SetShown(false)
+                            CharacterFrame.Portrait:SetAlpha(0)
+                        end
+                        local named = _G.CharacterFramePortrait
+                        if named then
+                            named:SetShown(false)
+                            named:SetAlpha(0)
+                            if named.EnableMouse then named:EnableMouse(false) end
+                        end
+                        if CharacterFrame.GetPortrait then
+                            local tex = CharacterFrame:GetPortrait()
+                            if tex then
+                                if tex.SetShown then tex:SetShown(false) end
+                                if tex.SetAlpha then tex:SetAlpha(0) end
+                            end
+                        end
+                    end
+
+                    local function RegisterPortraitSuppression()
+                        if not CharacterFrame or not CharacterFrame.UpdatePortrait then return false end
+                        if GetFFD(CharacterFrame)._euiPortraitSuppressRegistered then return true end
+                        GetFFD(CharacterFrame)._euiPortraitSuppressRegistered = true
+
+                        CharacterFrame:HookScript("OnShow", function()
+                            SuppressCharacterFramePortrait()
+                            C_Timer.After(0, SuppressCharacterFramePortrait)
+                            C_Timer.After(0.05, SuppressCharacterFramePortrait)
+                        end)
+
+                        hooksecurefunc(CharacterFrame, "UpdatePortrait", function()
+                            if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                            SuppressCharacterFramePortrait()
+                        end)
+
+                        if CharacterFrame.RefreshDisplay then
+                            hooksecurefunc(CharacterFrame, "RefreshDisplay", function()
+                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                SuppressCharacterFramePortrait()
+                            end)
+                        end
+
+                        if CharacterFrame.SetPortraitToSpecIcon then
+                            hooksecurefunc(CharacterFrame, "SetPortraitToSpecIcon", function()
+                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                SuppressCharacterFramePortrait()
+                            end)
+                        end
+
+                        local portrait = _G.CharacterFramePortrait
+                        if portrait then
+                            portrait:HookScript("OnShow", function(self)
+                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                self:SetShown(false)
+                                self:SetAlpha(0)
+                            end)
+                        end
+
+                        SuppressCharacterFramePortrait()
+                        return true
+                    end
+
+                    if not RegisterPortraitSuppression() then
+                        local tries = 0
+                        local ticker
+                        ticker = C_Timer.NewTicker(0.25, function()
+                            tries = tries + 1
+                            if RegisterPortraitSuppression() or tries >= 40 then
+                                ticker:Cancel()
+                            end
+                        end)
+                    end
+                end
             end
 
             -- Heavy skin (model, slots, stats, tabs) defers to first OnShow.
