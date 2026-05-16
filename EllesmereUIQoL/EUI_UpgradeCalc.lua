@@ -583,7 +583,7 @@ local CREST_COLS = {
 
 local f = CreateFrame("Frame", "EUIUpgCalcFrame", UIParent)
 PP.Size(f, FRAME_W, FRAME_H)
-f:SetPoint("LEFT", UIParent, "LEFT", 30, 0)
+f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -40)
 f:SetFrameStrata("DIALOG")
 f:SetMovable(true)
 f:EnableMouse(true)
@@ -600,6 +600,13 @@ function Calc.ApplyBgOpacity()
     local alpha = opts and opts.bgOpacity
     if alpha == nil then alpha = 96 end
     fBg:SetColorTexture(0.05, 0.07, 0.09, alpha / 100)
+end
+
+function Calc.ApplyScale()
+    local opts  = Opts()
+    local scale = opts and opts.uiScale
+    if scale == nil then scale = 100 end
+    f:SetScale(scale / 100)
 end
 
 local brd = EUI.MakeBorder(f, 0.13, 0.75, 0.55, 1)
@@ -1609,6 +1616,7 @@ end)
 f:SetScript("OnShow", function()
     if InCombatLockdown() then f:Hide(); return end
     Calc.ApplyBgOpacity()
+    Calc.ApplyScale()
     -- Reload persisted crest manual-add offsets each time the frame opens,
     -- so that values the user set before logging out are visible immediately.
     local dbAdds = DB().crestManualAdds

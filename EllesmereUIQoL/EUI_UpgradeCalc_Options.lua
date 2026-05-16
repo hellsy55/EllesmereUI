@@ -187,6 +187,20 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
     _, h = W:SectionHeader(parent, "APPEARANCE", y); y = y - h
 
     _, h = W:Slider(parent,
+        "UI Scale",
+        y,
+        50, 150, 5,
+        function() return GetAddonDB().uiScale or 100 end,
+        function(v)
+            GetAddonDB().uiScale = v
+            if EUIUpgCalc and EUIUpgCalc.ApplyScale then
+                EUIUpgCalc.ApplyScale()
+            end
+        end,
+        "Scales the entire Upgrade Calculator window up or down."
+    ); y = y - h
+
+    _, h = W:Slider(parent,
         "Background Opacity",
         y,
         10, 100, 5,
