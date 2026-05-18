@@ -3,6 +3,14 @@
 --  Enhanced Bags System for EllesmereUI (Midnight)
 --  Sidebar category filter + flat item grid layout.
 -------------------------------------------------------------------------------
+-- Guard: old Bags saved variables file may contain a stale EllesmereUIDB
+-- that overwrites the parent's current data (profiles vanish). Detect by
+-- checking if the table reference changed from what the parent saved, and
+-- restore it. After one logout the stale entry is purged from the file.
+if EllesmereUI and EllesmereUI._parentDBRef and EllesmereUIDB ~= EllesmereUI._parentDBRef then
+    EllesmereUIDB = EllesmereUI._parentDBRef
+end
+
 EUI_Bags = CreateFrame("Frame", "EUI_MainBagFrame", UIParent)
 EUI_Bags:Hide()
 
@@ -13,6 +21,10 @@ EUI_BagsWindow = CreateFrame("Frame", "EUI_BagsWindowFrame", UIParent)
 EUI_BagsWindow:Hide()
 
 local SLOT_SIZE, SPACING = 34, 4
+-- Weak-keyed table for bank-deposit routing state. Writing custom keys onto
+-- ContainerFrameItemButtonTemplate frames during PreClick taints the secure
+-- execution chain and causes UseContainerItem() ADDON_ACTION_FORBIDDEN.
+local _bankRouted = setmetatable({}, { __mode = "k" })
 
 local function ApplyBagScale()
     local s = EllesmereUIDB and EllesmereUIDB.bagScale or 1
@@ -1650,6 +1662,10 @@ local function GetOrCreateSlot(idx)
     -- queue the transfer instead of letting Blizzard route to the first
     -- available slot across all tabs. The queue handles locked items and
     -- slot allocation so rapid clicks don't collide.
+    -- State stored in external weak table (NOT on the frame) to avoid
+    -- tainting the ContainerFrameItemButtonTemplate secure execution chain.
+    -- Writing custom keys onto template buttons during PreClick taints the
+    -- frame table, causing UseContainerItem() to be blocked as ADDON_ACTION_FORBIDDEN.
     btn:HookScript("PreClick", function(self, button)
         if button ~= "RightButton" then return end
         local bank = _G.EUI_BankFrame
@@ -1662,11 +1678,11 @@ local function GetOrCreateSlot(idx)
         local info = C_Container.GetContainerItemInfo(srcBag, srcSlot)
         if not info then return end
         bank:QueueTransfer(srcBag, srcSlot)
-        self._euiBankRouted = true
+        _bankRouted[self] = true
     end)
     btn:HookScript("OnClick", function(self, button)
-        if button == "RightButton" and self._euiBankRouted then
-            self._euiBankRouted = nil
+        if button == "RightButton" and _bankRouted[self] then
+            _bankRouted[self] = nil
             ClearCursor()
         end
     end)

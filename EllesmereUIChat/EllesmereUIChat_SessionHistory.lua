@@ -13,6 +13,9 @@ local _, ns = ...
 local ECHAT = ns.ECHAT
 if not ECHAT then return end
 
+-- Disabled for now; keeping code for future use.
+do return end
+
 -- Saved var name unchanged so existing character data keeps working.
 local SV_NAME = "EllesmereUIChatScrollDB"
 local MAX_TEXT_LEN = 4096
@@ -165,7 +168,7 @@ function ECHAT.RestoreChatSessionHistory()
     local token = restoreToken
     C_Timer.After(RESTORE_DELAY_SEC, function()
         if token ~= restoreToken then return end
-        if InCombatLockdown() then
+        if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then
             regenDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
             regenDeferFrame:SetScript("OnEvent", function(_, ev)
                 if ev ~= "PLAYER_REGEN_ENABLED" then return end
@@ -174,7 +177,7 @@ function ECHAT.RestoreChatSessionHistory()
                     regenDeferFrame:SetScript("OnEvent", nil)
                     return
                 end
-                if InCombatLockdown() then return end
+                if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then return end
                 RunRestoreReplay(token)
                 regenDeferFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
                 regenDeferFrame:SetScript("OnEvent", nil)
