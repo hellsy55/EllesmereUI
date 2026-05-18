@@ -109,9 +109,8 @@ local _euicProfileRef = nil
 -- every subsequent DB()/Opts() call is a simple local read with no table traversal.
 local _dbCache   = nil
 local _optsCache = nil
--- Character key ("Name - Realm") set at PLAYER_LOGIN; used to scope DB() data
--- per character so alts on the same profile don't share queue/scan data.
-local _charKey   = nil
+-- (Character key used only locally in PLAYER_LOGIN to index per-character storage;
+--  not retained as a module variable since _dbCache is set directly.)
 
 local function DB()
     if _dbCache then return _dbCache end
@@ -373,8 +372,11 @@ function Calc:GetItemUpgradeCost(item)
     end
 
     -- Priority 1: exact costs from Upgrader NPC API (calibrated).
+    -- Only use if the cached link matches the current item (guards against stale
+    -- data after a gear swap before the next Upgrader scan).
     local slotCache = db.calibrated and db.cache.slots[item.slot]
-    if slotCache and slotCache.crestAmounts then
+    if slotCache and slotCache.crestAmounts
+            and slotCache.link == item.link then
         local exactCrests = 0
         for _, v in pairs(slotCache.crestAmounts) do exactCrests = exactCrests + v end
         local exactGold = math.floor((slotCache.copperTotal or 0) / 10000)
@@ -461,7 +463,9 @@ function Calc:ScanEquippedAtUpgrader(onDone)
     local function saveSlotInfo(slotID, info)
         if not (info and info.upgradeLevelInfos) then return end
         local crestAmounts, copperTotal = TallySlotCosts(info)
+        local link = GetInventoryItemLink("player", slotID)
         newSlots[slotID] = {
+            link         = link,
             crestAmounts = crestAmounts,
             copperTotal  = copperTotal,
         }
@@ -534,6 +538,7 @@ function Calc:RescanSlot(slotID, onDone)
             db.cache        = db.cache or { slots = {}, ts = 0 }
             db.cache.slots  = db.cache.slots or {}
             db.cache.slots[slotID] = {
+                link         = GetInventoryItemLink("player", slotID),
                 crestAmounts = crestAmounts,
                 copperTotal  = copperTotal,
             }
@@ -573,12 +578,12 @@ local TRACK_RGB = {
 }
 
 local CREST_COLS = {
-    {key="crest",     label="Crest",          x=0,   w=150, align="LEFT"  },
-    {key="need",      label="Need",            x=150, w=70,  align="CENTER"},
-    {key="owned",     label="Owned",           x=220, w=70,  align="CENTER"},
-    {key="missing",   label="Missing",         x=290, w=70,  align="CENTER"},
-    {key="cap",       label="Earned / Cap",    x=360, w=130, align="CENTER"},
-    {key="weeklyRem", label="Still Available", x=490, w=110, align="CENTER"},
+    {key="crest",     label="Crest",          x=0,   w=135, align="LEFT"  },
+    {key="need",      label="Need",            x=135, w=60,  align="CENTER"},
+    {key="owned",     label="Owned",           x=195, w=60,  align="CENTER"},
+    {key="missing",   label="Missing",         x=255, w=65,  align="CENTER"},
+    {key="cap",       label="Earned / Cap",    x=320, w=120, align="CENTER"},
+    {key="weeklyRem", label="Still Available", x=440, w=119, align="CENTER"},
 }
 
 local f = CreateFrame("Frame", "EUIUpgCalcFrame", UIParent)
@@ -624,7 +629,8 @@ titleTxt:SetText("EllesmereUI  |cffffffff- Upgrade Calculator|r")
 local closeBtn = CreateFrame("Button", nil, f)
 PP.Size(closeBtn, 18, 18)
 PP.Point(closeBtn, "TOPRIGHT", f, "TOPRIGHT", -8, -8)
-SolidTex(closeBtn, "ARTWORK", 0.7, 0.2, 0.2, 0.9)
+local closeBg = SolidTex(closeBtn, "ARTWORK", 0.7, 0.2, 0.2, 0.9)
+closeBg:SetAllPoints()
 local closeTxt = MFont(closeBtn, 11, "OUTLINE", 1, 1, 1, 1)
 closeTxt:SetAllPoints()
 closeTxt:SetJustifyH("CENTER")
@@ -647,7 +653,7 @@ local function MakeTableHeader(parent, cols, yOffset)
     PP.Point(hdrBg, "TOPRIGHT", parent, "TOPRIGHT", 0, yOffset)
     PP.Height(hdrBg, HDR_H)
     for _, col in ipairs(cols) do
-        local lbl = MFont(parent, 10, "OUTLINE", G.r, G.g, G.b, 1)
+        local lbl = MFont(parent, 11, "OUTLINE", G.r, G.g, G.b, 1)
         PP.Point(lbl, "TOPLEFT", parent, "TOPLEFT", col.x + 4, yOffset - 2)
         PP.Width(lbl, col.w)
         lbl:SetJustifyH(col.align)
@@ -665,7 +671,7 @@ local function MakeRow(parent, cols, yOffset, isAlt)
         row.altBg = bg  -- stored so PopulateGear can reposition and hide/show it
     end
     for _, col in ipairs(cols) do
-        local cell = MFont(parent, 10, nil, 0.85, 0.85, 0.85, 1)
+        local cell = MFont(parent, 11, nil, 0.85, 0.85, 0.85, 1)
         PP.Point(cell, "TOPLEFT", parent, "TOPLEFT", col.x + 4, yOffset - 2)
         PP.Width(cell, col.w - 8)
         cell:SetJustifyH(col.align)
@@ -678,7 +684,8 @@ local function MakeButton(parent, label, w, h, yOff, xOff)
     local btn = CreateFrame("Button", nil, parent)
     PP.Size(btn, w, h)
     PP.Point(btn, "TOPLEFT", parent, "TOPLEFT", xOff, yOff)
-    SolidTex(btn, "BACKGROUND", 0.1, 0.14, 0.18, 1)
+    local btnBg = SolidTex(btn, "BACKGROUND", 0.1, 0.14, 0.18, 1)
+    btnBg:SetAllPoints()
     local bb = EUI.MakeBorder(btn, 0.13, 0.75, 0.55, 0.6)
     if bb.SetColor then bb:SetColor(0.13, 0.75, 0.55, 0.6) end
     local txt = MFont(btn, 10, "OUTLINE", G.r, G.g, G.b, 1)
@@ -692,7 +699,7 @@ end
 f.charPane = CreateFrame("Frame", nil, f)
 f.charPane:SetAllPoints(f)
 
-local ilvlStatLbl = MFont(f.charPane, 11, "OUTLINE", G.r, G.g, G.b, 1)
+local ilvlStatLbl = MFont(f.charPane, 12, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(ilvlStatLbl, "TOPLEFT", f.charPane, "TOPLEFT", 14, tabY - 26)
 ilvlStatLbl:SetText("Current iLvl: -   Max Possible: -")
 
@@ -712,9 +719,9 @@ PP.Point(tlFill, "TOPLEFT", cc, "TOPLEFT", 0, -2)
 PP.Height(tlFill, 16)
 tlFill:SetWidth(1)  -- updated each refresh
 
-local tlCurLbl = MFont(cc, 9, "OUTLINE", 0.65, 0.65, 0.65, 1)
+local tlCurLbl = MFont(cc, 10, "OUTLINE", 0.65, 0.65, 0.65, 1)
 PP.Point(tlCurLbl, "TOPLEFT", cc, "TOPLEFT", 2, -20)
-local tlMaxLbl = MFont(cc, 9, "OUTLINE", G.r, G.g, G.b, 1)
+local tlMaxLbl = MFont(cc, 10, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(tlMaxLbl, "TOPRIGHT", cc, "TOPRIGHT", -2, -20)
 -- ── Tile frames ──────────────────────────────────────────────────────────────────
 local ToggleTileQueue  -- forward declaration (defined in queue section)
@@ -739,25 +746,25 @@ for i = 1, 18 do
     selHL:Hide()
     btn.selHL = selHL
     -- Top-left: slot name
-    local sLbl = MFont(btn, 11, "OUTLINE", 0.9, 0.9, 0.9, 1)
+    local sLbl = MFont(btn, 12, "OUTLINE", 0.9, 0.9, 0.9, 1)
     PP.Point(sLbl, "TOPLEFT", btn, "TOPLEFT", 7, -4)
     PP.Width(sLbl, TILE_W - 82)
     sLbl:SetJustifyH("LEFT")
     btn.sLbl = sLbl
     -- Top-right: current ^ max ilvl
-    local iLbl = MFont(btn, 10, "OUTLINE", 0.8, 0.8, 0.8, 1)
+    local iLbl = MFont(btn, 11, "OUTLINE", 0.8, 0.8, 0.8, 1)
     PP.Point(iLbl, "TOPRIGHT", btn, "TOPRIGHT", -5, -4)
     PP.Width(iLbl, 76)
     iLbl:SetJustifyH("RIGHT")
     btn.iLbl = iLbl
     -- Bottom-left: track name
-    local tLbl = MFont(btn, 10, "OUTLINE", 0.55, 0.55, 0.55, 1)
+    local tLbl = MFont(btn, 11, "OUTLINE", 0.55, 0.55, 0.55, 1)
     PP.Point(tLbl, "BOTTOMLEFT", btn, "BOTTOMLEFT", 7, 5)
     PP.Width(tLbl, TILE_W - 82)
     tLbl:SetJustifyH("LEFT")
     btn.tLbl = tLbl
     -- Bottom-right: rank badge
-    local rLbl = MFont(btn, 10, "OUTLINE", 0.8, 0.8, 0.8, 1)
+    local rLbl = MFont(btn, 11, "OUTLINE", 0.8, 0.8, 0.8, 1)
     PP.Point(rLbl, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -5, 5)
     PP.Width(rLbl, 76)
     rLbl:SetJustifyH("RIGHT")
@@ -782,6 +789,10 @@ for i = 1, 18 do
             local td = Data.tracks[e.trackKey]
             local snap = DB()
             local sc = snap.calibrated and snap.cache.slots[e.slotID] or nil
+            -- Discard cached entry if the item in that slot has changed since the scan.
+            if sc and sc.link and sc.link ~= (GetInventoryItemLink("player", e.slotID) or "") then
+                sc = nil
+            end
             if sc and sc.crestAmounts and next(sc.crestAmounts) then
                 for cid, amt in pairs(sc.crestAmounts) do
                     local cn = _currIDToCrestName[cid]
@@ -822,8 +833,8 @@ for i = 1, 18 do
 end
 
 -- Section header labels and group separator line (repositioned each refresh)
-local sHdrNeeds    = MFont(cc, 9, "OUTLINE", G.r, G.g, G.b, 1)
-local sHdrMax      = MFont(cc, 9, "OUTLINE", 0.48, 0.48, 0.48, 1)
+local sHdrNeeds    = MFont(cc, 10, "OUTLINE", G.r, G.g, G.b, 1)
+local sHdrMax      = MFont(cc, 10, "OUTLINE", 0.48, 0.48, 0.48, 1)
 local groupSepLine = SolidTex(cc, "BORDER", 0.25, 0.28, 0.32, 1)
 PP.Height(groupSepLine, 1)
 PP.Width(groupSepLine, TILE_ROW_W)
@@ -838,14 +849,30 @@ local qHdrBg = SolidTex(queuePane, "BACKGROUND", 0.08, 0.11, 0.15, 1)
 PP.Point(qHdrBg, "TOPLEFT",  queuePane, "TOPLEFT",  0, 0)
 PP.Point(qHdrBg, "TOPRIGHT", queuePane, "TOPRIGHT", 0, 0)
 PP.Height(qHdrBg, 20)
-local qHdrLbl = MFont(queuePane, 10, "OUTLINE", G.r, G.g, G.b, 1)
+local qHdrLbl = MFont(queuePane, 11, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(qHdrLbl, "TOPLEFT", queuePane, "TOPLEFT", 4, -2)
 qHdrLbl:SetText("UPGRADE QUEUE")
-local qSubLbl = MFont(queuePane, 9, "OUTLINE", 0.38, 0.38, 0.38, 1)
+local qSubLbl = MFont(queuePane, 10, "OUTLINE", 0.38, 0.38, 0.38, 1)
 PP.Point(qSubLbl, "TOPRIGHT", queuePane, "TOPRIGHT", -4, -2)
 qSubLbl:SetText("click tiles to plan")
 
-local qEmptyLbl = MFont(queuePane, 9, "OUTLINE", 0.32, 0.32, 0.32, 1)
+-- Sort-by-crest button sits in the header bar, right-aligned (swaps with qSubLbl)
+local qSortBtn = CreateFrame("Button", nil, queuePane)
+PP.Size(qSortBtn, 50, 16)
+PP.Point(qSortBtn, "TOPRIGHT", queuePane, "TOPRIGHT", -4, -2)
+local qSortBg = SolidTex(qSortBtn, "BACKGROUND", 0.1, 0.14, 0.2, 1)
+qSortBg:SetAllPoints(qSortBtn)
+local qSortTxt = MFont(qSortBtn, 9, "OUTLINE", G.r, G.g, G.b, 1)
+qSortTxt:SetAllPoints(); qSortTxt:SetJustifyH("CENTER"); qSortTxt:SetText("Sort")
+qSortBtn:SetScript("OnEnter", function(self)
+    if EUI.ShowWidgetTooltip then EUI.ShowWidgetTooltip(self, "Sort queue by crest type (cheapest first)") end
+end)
+qSortBtn:SetScript("OnLeave", function()
+    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+end)
+qSortBtn:Hide()  -- shown only when queue has items
+
+local qEmptyLbl = MFont(queuePane, 10, "OUTLINE", 0.32, 0.32, 0.32, 1)
 PP.Point(qEmptyLbl, "TOPLEFT", queuePane, "TOPLEFT", 4, -24)
 qEmptyLbl:SetText("No items queued.")
 
@@ -860,11 +887,11 @@ for i = 1, 16 do
         local ebg = SolidTex(ef, "BACKGROUND", 0.07, 0.09, 0.12, 0.5)
         ebg:SetAllPoints(ef)
     end
-    local nLbl = MFont(ef, 9, "OUTLINE", 0.8, 0.8, 0.8, 1)
+    local nLbl = MFont(ef, 10, "OUTLINE", 0.8, 0.8, 0.8, 1)
     PP.Point(nLbl, "TOPLEFT", ef, "TOPLEFT", 4, -2)
     PP.Width(nLbl, QUEUE_W - 84)
     nLbl:SetJustifyH("LEFT")
-    local cLbl = MFont(ef, 9, nil, 0.8, 0.8, 0.8, 1)
+    local cLbl = MFont(ef, 10, nil, 0.8, 0.8, 0.8, 1)
     PP.Point(cLbl, "TOPRIGHT", ef, "TOPRIGHT", -4, -2)
     PP.Width(cLbl, 82)
     cLbl:SetJustifyH("RIGHT")
@@ -878,7 +905,7 @@ PP.Point(qTotalSep, "TOPRIGHT", queuePane, "TOPRIGHT", 0, -42)
 PP.Height(qTotalSep, 1)
 qTotalSep:Hide()
 
-local qTotalLbl = MFont(queuePane, 9, "OUTLINE", G.r, G.g, G.b, 1)
+local qTotalLbl = MFont(queuePane, 10, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(qTotalLbl, "TOPLEFT", queuePane, "TOPLEFT", 4, -46)
 qTotalLbl:SetText("")
 qTotalLbl:Hide()
@@ -910,6 +937,7 @@ end
 local function UpdateQueueDisplay()
     local n = #queueItems
     qEmptyLbl:SetText(n == 0 and "No items queued." or "")
+    if n > 0 then qSortBtn:Show(); qSubLbl:Hide() else qSortBtn:Hide(); qSubLbl:Show() end
 
     local totalGoldQ, totalCrests = 0, {}
     for i, entry in ipairs(queueItems) do
@@ -963,6 +991,26 @@ local function UpdateQueueDisplay()
     end
 end
 
+-- Sort the queue by crest tier (cheapest/lowest first: Adventurer→Myth→Crafted).
+local function SortQueueByCrest()
+    if #queueItems == 0 then return end
+    local trackIdx = {}
+    for i, tn in ipairs(Data.trackOrder) do trackIdx[tn] = i end
+    table.sort(queueItems, function(a, b)
+        -- Gold (no crest cost) sorts first (0), then by track order, unknowns last.
+        local ia = (a.crestCost or 0) == 0 and 0 or (trackIdx[a.trackKey] or 99)
+        local ib = (b.crestCost or 0) == 0 and 0 or (trackIdx[b.trackKey] or 99)
+        if ia ~= ib then return ia < ib end
+        return (a.slotID or 0) < (b.slotID or 0)
+    end)
+    queueSlotSet = {}
+    for i, it in ipairs(queueItems) do queueSlotSet[it.slotName] = i end
+    UpdateQueueDisplay()
+    SaveQueue()
+end
+
+qSortBtn:SetScript("OnClick", SortQueueByCrest)
+
 ToggleTileQueue = function(entry, btn)
     local sn = entry.slotName
     if queueSlotSet[sn] then
@@ -1001,7 +1049,7 @@ PP.Point(gearSep, "TOPRIGHT", crestSection, "TOPRIGHT", 0, 4)
 PP.Height(gearSep, 1)
 
 -- Accuracy label floats right of the separator line; updated each PopulateGear.
-local crestAccuracyLbl = MFont(crestSection, 9, "OUTLINE", 0.38, 0.38, 0.38, 1)
+local crestAccuracyLbl = MFont(crestSection, 10, "OUTLINE", 0.38, 0.38, 0.38, 1)
 PP.Point(crestAccuracyLbl, "TOPRIGHT", crestSection, "TOPRIGHT", -4, 12)
 crestAccuracyLbl:SetText("")
 
@@ -1011,14 +1059,14 @@ do
     local baseCols = { CREST_COLS[1], CREST_COLS[2], CREST_COLS[3], CREST_COLS[4] }
     MakeTableHeader(crestSection, baseCols, 0)
 end
-local capHdrLbl = MFont(crestSection, 10, "OUTLINE", G.r, G.g, G.b, 1)
+local capHdrLbl = MFont(crestSection, 11, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(capHdrLbl, "TOPLEFT", crestSection, "TOPLEFT", CREST_COLS[5].x + 4, -2)
 PP.Width(capHdrLbl, CREST_COLS[5].w)
 capHdrLbl:SetJustifyH(CREST_COLS[5].align)
 capHdrLbl:SetText(CREST_COLS[5].label)
 capHdrLbl:Hide()
 
-local weeklyRemHdrLbl = MFont(crestSection, 10, "OUTLINE", G.r, G.g, G.b, 1)
+local weeklyRemHdrLbl = MFont(crestSection, 11, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(weeklyRemHdrLbl, "TOPLEFT", crestSection, "TOPLEFT", CREST_COLS[6].x + 4, -2)
 PP.Width(weeklyRemHdrLbl, CREST_COLS[6].w)
 weeklyRemHdrLbl:SetJustifyH(CREST_COLS[6].align)
@@ -1038,7 +1086,7 @@ for i = 1, #Data.trackOrder do
         local ckey = Data.tracks[tn].crestName  -- "Hero Crest" / "Myth Crest"
         local mBtn = CreateFrame("Button", nil, crestSection)
         PP.Size(mBtn, 26, 16)
-        PP.Point(mBtn, "TOPLEFT", crestSection, "TOPLEFT", 143, rowY - 2)
+        PP.Point(mBtn, "TOPLEFT", crestSection, "TOPLEFT", 79, rowY - 2)
         local mBg = SolidTex(mBtn, "ARTWORK", 0.18, 0.08, 0.08, 0.9)
         mBg:SetAllPoints(mBtn)
         local mTxt = MFont(mBtn, 8, "OUTLINE", 0.9, 0.45, 0.45, 1)
@@ -1061,7 +1109,7 @@ for i = 1, #Data.trackOrder do
         end)
         local pBtn = CreateFrame("Button", nil, crestSection)
         PP.Size(pBtn, 26, 16)
-        PP.Point(pBtn, "TOPLEFT", crestSection, "TOPLEFT", 200, rowY - 2)
+        PP.Point(pBtn, "TOPLEFT", crestSection, "TOPLEFT", 107, rowY - 2)
         local pBg = SolidTex(pBtn, "ARTWORK", 0.06, 0.18, 0.08, 0.9)
         pBg:SetAllPoints(pBtn)
         local pTxt = MFont(pBtn, 8, "OUTLINE", 0.45, 0.9, 0.45, 1)
@@ -1084,12 +1132,14 @@ for i = 1, #Data.trackOrder do
         end)
         crestRows[i].mBtn = mBtn
         crestRows[i].pBtn = pBtn
+        -- Cap the crest-name label to leave room for the ±80 buttons on this row.
+        crestRows[i].crest:SetWidth(73)
     end
 end
 
 -- Summary label and action buttons — initially anchored at y=0; repositioned
 -- every PopulateGear call to sit below the last visible crest row.
-local summaryLbl = MFont(crestSection, 11, "OUTLINE", G.r, G.g, G.b, 1)
+local summaryLbl = MFont(crestSection, 12, "OUTLINE", G.r, G.g, G.b, 1)
 PP.Point(summaryLbl, "TOPLEFT",  crestSection, "TOPLEFT",  4, 0)
 PP.Point(summaryLbl, "TOPRIGHT", crestSection, "TOPRIGHT", 0, 0)
 summaryLbl:SetJustifyH("LEFT")
@@ -1128,11 +1178,13 @@ PopulateGear = function()
     -- Pre-build per-slot crest breakdown from scan data.
     -- Done once here from a single DB snapshot so every item in the loop
     -- sees a consistent view of the cache with no per-item DB reads.
+    -- Link validation: skip any slot whose cached link doesn't match current gear.
     local slotCrestMap = {}
     local dbSnap = DB()
     if dbSnap.calibrated then
         for slotID, sc in pairs(dbSnap.cache.slots or {}) do
-            if sc and sc.crestAmounts then
+            local currentLink = GetInventoryItemLink("player", slotID)
+            if sc and sc.crestAmounts and sc.link == currentLink then
                 local byName = {}
                 for cid, amt in pairs(sc.crestAmounts) do
                     local cn = _currIDToCrestName[cid]
@@ -1246,6 +1298,8 @@ PopulateGear = function()
 
     -- On every refresh, sync queue item references to the current tileEntries so
     -- UpdateQueueDisplay shows live costs rather than costs snapshotted at session open.
+    -- Also prunes entries whose slot is now at max rank (tile hidden, can't be clicked
+    -- to dequeue — e.g. equipped a fully-upgraded item in that slot).
     -- Safe to run on the first PopulateGear call too (entries are already fresh then).
     if #queueItems > 0 then
         local slotToEntry = {}
@@ -1253,13 +1307,18 @@ PopulateGear = function()
         local newQueue, newSet = {}, {}
         for _, old in ipairs(queueItems) do
             local fresh = slotToEntry[old.slotID]
-            if fresh then
+            if fresh and not fresh.isAtMax then
                 newQueue[#newQueue + 1] = fresh
                 newSet[fresh.slotName] = #newQueue
             end
         end
+        local pruned = (#newQueue ~= #queueItems)
         queueItems   = newQueue
         queueSlotSet = newSet
+        if pruned then
+            -- At least one entry was pruned; persist the trimmed queue.
+            SaveQueue()
+        end
     end
 
     -- Timeline bar
@@ -1377,7 +1436,7 @@ PopulateGear = function()
     end
     crestSection:ClearAllPoints()
     PP.Point(crestSection, "TOPLEFT",  cc, "TOPLEFT",  0, crestY)
-    PP.Point(crestSection, "TOPRIGHT", cc, "TOPRIGHT", 0, crestY)
+    PP.Width(crestSection, TILE_ROW_W)
 
     -- Resize the outer frame to fit content: title(32) + tabY(-36) + cc offset(46) +
     -- tile area + crest section (rows + summary + buttons) + bottom padding
@@ -1390,8 +1449,13 @@ PopulateGear = function()
     local crestSectionH = HDR_H + visibleCrestRows * ROW_H + 10 + 22 + 38  -- hdr+rows+gap+summary+btns
     local contentH      = math.abs(crestY) + crestSectionH
     -- cc is anchored at y = tabY - 46 = -82 from frame top; add title bar (32) + padding (12)
-    local newFrameH     = contentH + 82 + 32 + 12
+    -- Also ensure the frame is tall enough to show the full queue panel (queue is at y=-36,
+    -- 590px tall → needs 36+590=626px of cc height → 626+82+32+12=752px minimum).
+    local queueH = HDR_H + 24 + #queueItems * 20 + (#queueItems > 0 and 54 or 0) + 30
+    local minFrameH = queueH + 82 + 32 + 12 + 36
+    local newFrameH = math.max(contentH + 82 + 32 + 12, minFrameH)
     PP.Size(f, FRAME_W, newFrameH)
+    PP.Size(queuePane, QUEUE_W, newFrameH - 140)
 
     -- Crest accuracy label
     local db = DB()
@@ -1441,9 +1505,9 @@ PopulateGear = function()
             -- Reposition and show +/-80 buttons if this row has them
             if rowFrame.mBtn then
                 rowFrame.mBtn:ClearAllPoints()
-                PP.Point(rowFrame.mBtn, "TOPLEFT", crestSection, "TOPLEFT", 143, rowY - 2)
+                PP.Point(rowFrame.mBtn, "TOPLEFT", crestSection, "TOPLEFT", 79, rowY - 2)
                 rowFrame.pBtn:ClearAllPoints()
-                PP.Point(rowFrame.pBtn, "TOPLEFT", crestSection, "TOPLEFT", 200, rowY - 2)
+                PP.Point(rowFrame.pBtn, "TOPLEFT", crestSection, "TOPLEFT", 107, rowY - 2)
                 rowFrame.mBtn:Show()
                 rowFrame.pBtn:Show()
             end
@@ -1639,6 +1703,7 @@ end)
 
 SLASH_EUIUPGCALC1 = "/euic"
 SLASH_EUIUPGCALC2 = "/upgcalc"
+SLASH_EUIUPGCALC3 = "/eec"
 SlashCmdList["EUIUPGCALC"] = function()
     if InCombatLockdown() then return end
     if f:IsShown() then f:Hide() else f:Show() end
@@ -1667,7 +1732,6 @@ _firstRunEvt:SetScript("OnEvent", function(self)
         -- Store character data under a per-character key so alts on the same
         -- profile each have their own queue, scan cache, and crest offsets.
         local charKey = UnitName("player") .. " - " .. GetRealmName()
-        _charKey = charKey
         local store = _euicProfileRef
         store.chars             = store.chars           or {}
         store.chars[charKey]    = store.chars[charKey]  or {}
