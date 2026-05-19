@@ -3081,18 +3081,18 @@ end
 do
     _G._ECDM_ScanSwiftmend = nil
     local function ScanCDMSwiftmend()
+        local _, cls = UnitClass("player")
+        if cls ~= "DRUID" then return end
         local hook = EllesmereUI and EllesmereUI._HookSwiftmendIcon
-        local iconID = EllesmereUI and EllesmereUI._SWIFTMEND_ICON
-        if not hook or not iconID then return end
+        local spellID = EllesmereUI and EllesmereUI._SWIFTMEND_SPELL
+        if not hook or not spellID then return end
         local root = _G["EssentialCooldownViewer"]
         if not root or not root.GetChildren then return end
         for _, child in ipairs({ root:GetChildren() }) do
-            local ico = child.Icon
-            if ico and ico.GetTexture then
-                local t = ico:GetTexture()
-                if t == iconID or tostring(t) == tostring(iconID) then
-                    hook(ico)
-                end
+            local id = child.cooldownID
+            if id and not issecretvalue(id) and id == spellID then
+                local ico = child.Icon
+                if ico then hook(ico) end
             end
         end
     end

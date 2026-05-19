@@ -10503,6 +10503,8 @@ end)
 -------------------------------------------------------------------------------
 ;(function()
     local function ScanABSwiftmend()
+        local _, cls = UnitClass("player")
+        if cls ~= "DRUID" then return end
         local hook   = EllesmereUI and EllesmereUI._HookSwiftmendIcon
         local iconID = EllesmereUI and EllesmereUI._SWIFTMEND_ICON
         if not hook or not iconID then return end
@@ -10510,7 +10512,7 @@ end)
             local btn = _G["EABButton" .. slot]
             if btn and btn.icon then
                 local t = btn.icon:GetTexture()
-                if t == iconID then hook(btn.icon) end
+                if not issecretvalue(t) and t == iconID then hook(btn.icon) end
             end
         end
     end
