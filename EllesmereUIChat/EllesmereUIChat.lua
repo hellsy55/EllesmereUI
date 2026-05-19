@@ -74,7 +74,7 @@ local CHAT_DEFAULTS = {
                 showVoice = 3,
                 showSettings = 4,
             },
-            -- Session chat history (see EllesmereUIChat_SessionHistory.lua, SavedVariablesPerCharacter)
+            -- Session chat history (EllesmereUIChat_SessionHistory.lua, SavedVariablesPerCharacter)
             persistChatHistory = true,
             persistChatHistoryMaxLines = 100,
         },
