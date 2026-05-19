@@ -22,10 +22,8 @@ local type = type
 local pcall = pcall
 
 local SV_NAME = "EllesmereUIChatScrollDB"
-local SV_VERSION = 2
 local MAX_TEXT_LEN = 4096
 local RESTORE_DELAY_SEC = 2.0
-local DIVIDER_PLAIN = "--- Previous session ---"
 
 local lifecycleHooksInstalled = false
 local restoreToken = 0
@@ -38,10 +36,6 @@ local UnarmDeferredRestore
 -------------------------------------------------------------------------------
 --  Helpers
 -------------------------------------------------------------------------------
-local function InProtectedInstance()
-    return EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance()
-end
-
 local function PersistEnabled()
     if not ECHAT.DB then return true end
     local db = ECHAT.DB()
@@ -51,7 +45,7 @@ end
 
 local function SessionHistorySafe()
     if not PersistEnabled() then return false end
-    if InProtectedInstance() then return false end
+    if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then return false end
     if GetCVarBool and GetCVarBool("addonChatRestrictionsForced") then return false end
     return true
 end
@@ -85,7 +79,7 @@ local function IsCombatLogChatFrame(cf)
     return false
 end
 
-function ECHAT.ShouldTrackChatFrameForHistory(cf)
+local function ShouldTrackFrame(cf)
     if not cf or not cf.GetName then return false end
     if cf.isTemporary then return false end
     local name = cf:GetName()
@@ -93,18 +87,15 @@ function ECHAT.ShouldTrackChatFrameForHistory(cf)
     return not IsCombatLogChatFrame(cf)
 end
 
-local ShouldTrackFrame = ECHAT.ShouldTrackChatFrameForHistory
-
 local function GetSV()
     local sv = _G[SV_NAME]
     if type(sv) ~= "table" then
-        sv = { v = SV_VERSION, byFrame = {} }
+        sv = { byFrame = {} }
         _G[SV_NAME] = sv
     end
     if type(sv.byFrame) ~= "table" then
         sv.byFrame = {}
     end
-    sv.v = SV_VERSION
     return sv
 end
 
@@ -112,15 +103,6 @@ local function IsValidMessage(msg)
     if type(msg) ~= "string" or msg == "" then return false end
     if issecretvalue and issecretvalue(msg) then return false end
     return true
-end
-
-local function IsDividerMessage(msg)
-    if not msg then return true end
-    return msg:find(DIVIDER_PLAIN, 1, true) ~= nil
-end
-
-local function ShouldPersistLine(msg)
-    return IsValidMessage(msg) and not IsDividerMessage(msg)
 end
 
 local TrimLinesToMax
@@ -153,8 +135,8 @@ local function SanitizeLineList(lines)
     local out = {}
     for _, L in ipairs(lines) do
         if type(L) == "table" then
-            local msg = L.message or L.t
-            if ShouldPersistLine(msg) then
+            local msg = L.message
+            if IsValidMessage(msg) then
                 local entry = {
                     message = (#msg > MAX_TEXT_LEN) and strsub(msg, 1, MAX_TEXT_LEN) or msg,
                     r = (type(L.r) == "number" and L.r) or 1,
@@ -186,8 +168,8 @@ end
 
 local function NormalizeStoredLine(L)
     if type(L) ~= "table" then return nil end
-    local msg = L.message or L.t
-    if not ShouldPersistLine(msg) then return nil end
+    local msg = L.message
+    if not IsValidMessage(msg) then return nil end
     if #msg > MAX_TEXT_LEN then
         msg = strsub(msg, 1, MAX_TEXT_LEN)
     end
@@ -205,7 +187,7 @@ end
 local function CopyBufferEntryForStorage(entry)
     if type(entry) ~= "table" then return nil end
     local msg = entry.message
-    if not ShouldPersistLine(msg) then return nil end
+    if not IsValidMessage(msg) then return nil end
     if #msg > MAX_TEXT_LEN then
         msg = strsub(msg, 1, MAX_TEXT_LEN)
     end
@@ -275,7 +257,7 @@ local function SnapshotFrame(cf)
             local t0 = GetTime() - n * 0.05
             for i = 1, n do
                 local mok, text = pcall(cf.GetMessageInfo, cf, i)
-                if mok and ShouldPersistLine(text) then
+                if mok and IsValidMessage(text) then
                     if #text > MAX_TEXT_LEN then
                         text = strsub(text, 1, MAX_TEXT_LEN)
                     end
@@ -397,11 +379,6 @@ local function RestoreFrame(cf, frameName, rawLines)
     end
 
     RefreshFrameDisplay(cf)
-    C_Timer.After(0, function()
-        if cf and cf.ScrollToBottom then
-            pcall(cf.ScrollToBottom, cf)
-        end
-    end)
     return true
 end
 
