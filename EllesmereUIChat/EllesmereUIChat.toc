@@ -16,5 +16,5 @@ EllesmereUIChat.lua
 # Options
 EUI_Chat_Options.lua
 
-# Recent lines persisted across sessions (combat log excluded)
+# Session scrollback via historyBuffer snapshot (combat log excluded)
 EllesmereUIChat_SessionHistory.lua
