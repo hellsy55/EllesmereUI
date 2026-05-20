@@ -4118,18 +4118,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         local function TextSlotSetValue(slotKey, v)
             SetTextElementAtSlot(slotKey, v)
-            for _, plate in pairs(plates) do
-                plate:RefreshNamePosition()
-                plate:UpdateHealthValues()
-            end
+            ns.RefreshAllSettings()
             UpdatePreview(); EllesmereUI:RefreshPage()
         end
 
         local function TextOffsetRefresh()
-            for _, plate in pairs(plates) do
-                plate:RefreshNamePosition()
-                plate:UpdateHealthValues()
-            end
+            ns.RefreshAllSettings()
             UpdatePreview()
         end
 
@@ -4208,10 +4202,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local function setColor(r, g, b)
                 DB()[colorKey] = { r = r, g = g, b = b }
-                for _, plate in pairs(plates) do
-                    plate:RefreshNamePosition()
-                    plate:UpdateHealthValues()
-                end
+                ns.RefreshAllSettings()
                 UpdatePreview()
             end
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, getColor, setColor, nil, 20)

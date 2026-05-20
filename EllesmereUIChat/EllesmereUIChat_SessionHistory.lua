@@ -12,6 +12,9 @@ local _, ns = ...
 local ECHAT = ns.ECHAT
 if not ECHAT then return end
 
+-- Disabled for now; keeping code for future use.
+do return end
+
 local strsub = string.sub
 local wipe = wipe
 local GetTime = GetTime

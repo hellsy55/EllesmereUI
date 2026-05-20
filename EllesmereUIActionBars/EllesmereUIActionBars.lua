@@ -8312,6 +8312,32 @@ function EAB:FinishSetup()
     self:RegisterEvent("GROUP_ROSTER_UPDATE", function()
         self:UpdateHousingVisibility()
     end)
+    -- Combat exit: synchronously restore all visHideNoTarget bar state drivers.
+    -- During combat, ImmediateSoftTargetCheck and UpdateHousingVisibility are
+    -- blocked by InCombatLockdown. If a bar's driver was overridden to "hide"
+    -- (soft-target override) before combat started, it stays stuck the entire
+    -- fight. The shared visibility dispatcher uses a double-deferred path that
+    -- can miss rapid combat re-entry. This handler runs at the exact frame
+    -- lockdown lifts, with no deferral, guaranteeing restoration.
+    do
+        local regenFrame = CreateFrame("Frame")
+        regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regenFrame:SetScript("OnEvent", function()
+            for _, info in ipairs(ALL_BARS) do
+                local s = self.db.profile.bars[info.key]
+                if s and s.visHideNoTarget then
+                    local frame = barFrames[info.key]
+                    if frame then
+                        local newStr = BuildVisibilityString(info, s)
+                        if frame._eabLastVisStr ~= newStr then
+                            frame._eabLastVisStr = newStr
+                            RegisterAttributeDriver(frame, "state-visibility", newStr)
+                        end
+                    end
+                end
+            end
+        end)
+    end
 
     -- Grid hide: restore empty slot visibility
     local function OnGridHide()

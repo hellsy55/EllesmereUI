@@ -619,6 +619,7 @@ local DEFAULTS = {
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
             textSize    = 11,
+            textR       = 1, textG = 1, textB = 1,
             textXOffset = 0,
             textYOffset = 0,
             barBgR      = 0, barBgG = 0, barBgB = 0, barBgA = 0.5,
@@ -2128,13 +2129,13 @@ local function BuildBars()
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
                         0, 0, 0, 0, 0)
                     local cdText = runeFrames[i]:CreateFontString(nil, "OVERLAY")
-                    cdText:SetTextColor(1, 1, 1, 0.8)
                     runeFrames[i]._cdText = cdText
                 end
-                -- Re-apply font size and offsets every rebuild so textSize,
+                -- Re-apply font size, color, and offsets every rebuild so textSize,
                 -- textXOffset, and textYOffset changes take effect live
                 local cdText = runeFrames[i]._cdText
                 if cdText then
+                    cdText:SetTextColor(sp.textR or 1, sp.textG or 1, sp.textB or 1, 0.8)
                     SetRBFont(cdText, GetRBFont(), sp.textSize or 9)
                     cdText:ClearAllPoints()
                     cdText:SetPoint("CENTER", runeFrames[i], "CENTER",
@@ -2281,8 +2282,8 @@ local function BuildBars()
                 end
                 secondaryFrame._countTextOverlay:SetFrameLevel(25)
                 secondaryFrame._countText = secondaryFrame._countTextOverlay:CreateFontString(nil, "OVERLAY")
-                secondaryFrame._countText:SetTextColor(1, 1, 1, 0.9)
             end
+            secondaryFrame._countText:SetTextColor(sp.textR or 1, sp.textG or 1, sp.textB or 1, 0.9)
             -- Keep overlay level current in case frame levels shifted
             if secondaryFrame._countTextOverlay then
                 secondaryFrame._countTextOverlay:SetFrameLevel(25)
@@ -4817,6 +4818,16 @@ local function OnEvent(self, event, ...)
     elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
         UpdateVisibility()
     elseif event == "ZONE_CHANGED_NEW_AREA" then
+        -- Re-check secondary max power: UnitPowerMax can change across zone
+        -- transitions (e.g. Prot Paladin holy power reporting 3 vs 5).
+        -- UNIT_MAXPOWER doesn't always fire reliably on zone change.
+        local newSec = GetSecondaryResource()
+        local oldMax = cachedSecondary and cachedSecondary.max
+        local newMax = newSec and newSec.max
+        if oldMax ~= newMax then
+            cachedSecondary = newSec
+            BuildBars()
+        end
         UpdateVisibility()
     elseif event == "GROUP_ROSTER_UPDATE" then
         UpdateVisibility()

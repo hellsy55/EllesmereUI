@@ -28,6 +28,8 @@ local GetCDMFont          = ns.GetCDMFont
 
 local floor   = math.floor
 local GetTime = GetTime
+local _, _playerClass = UnitClass("player")
+local _isDruid = (_playerClass == "DRUID")
 
 -------------------------------------------------------------------------------
 --  Memory Profiling (temporary)
@@ -432,6 +434,25 @@ local function DecorateFrame(frame, barData)
     end
     fd.tex = iconWidget
     fd.cooldown = frame.Cooldown
+
+    -- Swiftmend brightness: Blizzard dims the icon via SetVertexColor when
+    -- Efflorescence / HoTs drop. Hook the texture once per frame to force
+    -- bright. Recursion guard only -- never compare incoming args (secret values).
+    -- Class check is cached at file scope so non-Druids skip entirely.
+    if iconWidget and not fd._smVCHooked and _isDruid then
+        local _, baseSID = ResolveFrameSpellID(frame)
+        if baseSID == 18562 then
+            fd._smVCHooked = true
+            local smGuard = false
+            hooksecurefunc(iconWidget, "SetVertexColor", function()
+                if smGuard then return end
+                smGuard = true
+                iconWidget:SetVertexColor(1, 1, 1)
+                smGuard = false
+            end)
+            iconWidget:SetVertexColor(1, 1, 1)
+        end
+    end
 
     HideBlizzardDecorations(frame)
 
@@ -3075,31 +3096,6 @@ function ns.SetupEditModeLock()
     end
 end
 
--------------------------------------------------------------------------------
---  Swiftmend Brightness Fix (CDM scan)
--------------------------------------------------------------------------------
-do
-    _G._ECDM_ScanSwiftmend = nil
-    local function ScanCDMSwiftmend()
-        local _, cls = UnitClass("player")
-        if cls ~= "DRUID" then return end
-        local hook = EllesmereUI and EllesmereUI._HookSwiftmendIcon
-        local spellID = EllesmereUI and EllesmereUI._SWIFTMEND_SPELL
-        if not hook or not spellID then return end
-        local root = _G["EssentialCooldownViewer"]
-        if not root or not root.GetChildren then return end
-        for _, child in ipairs({ root:GetChildren() }) do
-            local id = child.cooldownID
-            if id and not issecretvalue(id) and id == spellID then
-                local ico = child.Icon
-                if ico then hook(ico) end
-            end
-        end
-    end
-    _G._ECDM_ScanSwiftmend = ScanCDMSwiftmend
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("PLAYER_ENTERING_WORLD")
-    f:SetScript("OnEvent", function()
-        C_Timer.After(1, ScanCDMSwiftmend)
-    end)
-end
+-- Swiftmend Brightness Fix (CDM): handled inside DecorateFrame via
+-- ResolveFrameSpellID. No external scan needed.
+_G._ECDM_ScanSwiftmend = nil
