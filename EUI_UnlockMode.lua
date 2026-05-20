@@ -2514,7 +2514,8 @@ local function ApplySavedPositions()
     local inCombat = InCombatLockdown()
 
     -- Action bars: apply from barPositions DB with lazy migration
-    -- Skip during combat (action bar frames are protected)
+    -- Skip during combat (action bar frames use SecureHandlerStateTemplate
+    -- and are genuinely protected -- SetPoint is blocked by combat lockdown).
     local db = GetPositionDB()
     if db and not inCombat then
         for barKey, pos in pairs(db) do

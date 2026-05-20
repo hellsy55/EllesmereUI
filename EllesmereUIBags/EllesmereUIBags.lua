@@ -1720,6 +1720,29 @@ local function GetOrCreateSlot(idx)
         if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
     end)
 
+    -- Shift-click split hint: when the user shift-clicks an item while
+    -- viewing a category (not OneBag), show a brief tooltip that stacks
+    -- auto-merge in categories and splitting should be done in OneBag.
+    btn:HookScript("PostClick", function(self, button)
+        if button ~= "LeftButton" then return end
+        if not IsShiftKeyDown() then return end
+        if selectedCategoryIndex == -1 then return end
+        local bagID = self:GetParent():GetID()
+        local slotID = self:GetID()
+        if not bagID or not slotID or slotID == 0 then return end
+        local itemInfo = C_Container.GetContainerItemInfo(bagID, slotID)
+        if not itemInfo or not itemInfo.stackCount or itemInfo.stackCount <= 1 then return end
+        if not EUI.ShowWidgetTooltip then return end
+        EUI.ShowWidgetTooltip(self,
+            "Items in categories auto-merge,\nsplit stacks in OneBag", { anchor = "TOP", scale = 1.25 })
+        -- Cancel any previous auto-hide timer
+        if EUI_Bags._splitHintTimer then EUI_Bags._splitHintTimer:Cancel() end
+        EUI_Bags._splitHintTimer = C_Timer.NewTimer(4, function()
+            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            EUI_Bags._splitHintTimer = nil
+        end)
+    end)
+
     -- Hide template decorations via methods only (never write properties onto
     -- Blizzard template sub-objects -- causes taint)
     if btn.NewItemTexture then btn.NewItemTexture:Hide(); btn.NewItemTexture:SetAlpha(0) end

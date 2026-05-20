@@ -772,6 +772,14 @@ do
                 hooksecurefunc(frame, "Show", function(self)
                     if not InCombatLockdown() then self:Hide() end
                 end)
+                -- Disable mouse on MainActionBar so it never eats clicks.
+                -- During combat, Blizzard can Show() this frame (mount/dismount
+                -- transitions) and our hook can't re-hide it. At alpha 0 and
+                -- frame level 50 it would invisibly intercept all clicks above
+                -- our EABButtons.
+                frame:EnableMouse(false)
+                if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
+                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
                 -- Hide Edit Mode selection/mover frame
                 if frame.Selection then frame.Selection:Hide(); frame.Selection:SetAlpha(0) end
                 -- Hide artwork children (gryphons/endcaps/border)

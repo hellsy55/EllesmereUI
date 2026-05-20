@@ -1081,6 +1081,97 @@ crestsLbl:SetText("Total Crests Needed: -")
 local refreshBtn               = MakeButton(crestSection, "Refresh",            140, 22, 0, 0)
 local scanBtn, scanBtnTxt      = MakeButton(crestSection, "Update at Upgrader", 160, 22, 0, 150)
 
+-- ── Per-track crest breakdown table ─────────────────────────────────────────
+-- Rows are pre-created once; repositioned and populated each PopulateGear.
+local CROW_H   = 20
+local CROW_STEP = CROW_H + 1
+
+local CC_NAME_X, CC_NAME_W = 0,   110
+local CC_NEED_X, CC_NEED_W = 115,  65
+local CC_OWN_X,  CC_OWN_W  = 185,  65
+local CC_EARN_X, CC_EARN_W = 255, 100
+local CC_REM_X,  CC_REM_W  = 360,  90
+local CC_BTN_W             = 40
+local CC_MINUS_X           = TILE_ROW_W - CC_BTN_W * 2 - 5
+local CC_PLUS_X            = TILE_ROW_W - CC_BTN_W
+
+local crestTblHdr = CreateFrame("Frame", nil, crestSection)
+PP.Size(crestTblHdr, TILE_ROW_W, CROW_H)
+local cHdrBg = SolidTex(crestTblHdr, "BACKGROUND", 0, 0, 0, 0.35)
+cHdrBg:SetAllPoints()
+local function MakeCHdr(parent, text, x, w, align)
+    local lbl = MFont(parent, 10, "OUTLINE", 1, 1, 1, 0.9)
+    PP.Point(lbl, "LEFT", parent, "TOPLEFT", x + 4, -CROW_H / 2)
+    PP.Width(lbl, w - 8)
+    lbl:SetJustifyH(align or "LEFT")
+    lbl:SetText(text)
+    return lbl
+end
+MakeCHdr(crestTblHdr, "Crest",       CC_NAME_X, CC_NAME_W, "LEFT")
+MakeCHdr(crestTblHdr, "Needed",      CC_NEED_X, CC_NEED_W, "RIGHT")
+MakeCHdr(crestTblHdr, "Owned",       CC_OWN_X,  CC_OWN_W,  "RIGHT")
+local cHdrEarn = MakeCHdr(crestTblHdr, "Earned/Cap",  CC_EARN_X, CC_EARN_W, "RIGHT")
+local cHdrRem  = MakeCHdr(crestTblHdr, "Still Avail", CC_REM_X,  CC_REM_W,  "RIGHT")
+crestTblHdr:Hide()
+
+local crestTableRows = {}
+for ri, trackName in ipairs(Data.trackOrder) do
+    local td       = Data.tracks[trackName]
+    local crestKey = td and td.crestName or (trackName .. " Crest")
+    local row      = CreateFrame("Frame", nil, crestSection)
+    PP.Size(row, TILE_ROW_W, CROW_H)
+    if ri % 2 == 0 then
+        local altBg = SolidTex(row, "BACKGROUND", 0, 0, 0, 0.15)
+        altBg:SetAllPoints()
+    end
+    local function MakeCell(x, w, align)
+        local lbl = MFont(row, 11, nil, 0.85, 0.85, 0.85, 1)
+        PP.Point(lbl, "TOPLEFT", row, "TOPLEFT", x + 4, -3)
+        PP.Width(lbl, w - 8)
+        lbl:SetJustifyH(align or "LEFT")
+        lbl:SetText("-")
+        return lbl
+    end
+    local hexColor = td and td.hexColor or "|cffffffff"
+    local nameLbl  = MFont(row, 11, nil, 0.85, 0.85, 0.85, 1)
+    PP.Point(nameLbl, "TOPLEFT", row, "TOPLEFT", CC_NAME_X + 4, -3)
+    PP.Width(nameLbl, CC_NAME_W - 8)
+    nameLbl:SetJustifyH("LEFT")
+    nameLbl:SetText(hexColor .. trackName .. "|r")
+    local needLbl = MakeCell(CC_NEED_X, CC_NEED_W, "RIGHT")
+    local ownLbl  = MakeCell(CC_OWN_X,  CC_OWN_W,  "RIGHT")
+    local earnLbl = MakeCell(CC_EARN_X, CC_EARN_W, "RIGHT")
+    local remLbl  = MakeCell(CC_REM_X,  CC_REM_W,  "RIGHT")
+    local minusBtn, plusBtn
+    if trackName == "Hero" or trackName == "Myth" then
+        minusBtn = MakeButton(row, "-80", CC_BTN_W, CROW_H - 4, -2, CC_MINUS_X)
+        plusBtn  = MakeButton(row, "+80", CC_BTN_W, CROW_H - 4, -2, CC_PLUS_X)
+        do
+            local ck = crestKey
+            minusBtn:SetScript("OnClick", function()
+                crestManualAdds[ck] = math.max(0, (crestManualAdds[ck] or 0) - 80)
+                SaveCrestManualAdds(); PopulateGear()
+            end)
+            plusBtn:SetScript("OnClick", function()
+                crestManualAdds[ck] = (crestManualAdds[ck] or 0) + 80
+                SaveCrestManualAdds(); PopulateGear()
+            end)
+        end
+    end
+    row:Hide()
+    crestTableRows[ri] = {
+        frame     = row,
+        trackName = trackName,
+        crestKey  = crestKey,
+        needLbl   = needLbl,
+        ownLbl    = ownLbl,
+        earnLbl   = earnLbl,
+        remLbl    = remLbl,
+        minusBtn  = minusBtn,
+        plusBtn   = plusBtn,
+    }
+end
+
 -- ── PopulateGear ──────────────────────────────────────────────────────────────
 PopulateGear = function()
     local gear  = Calc:GetEquippedGear()
@@ -1132,7 +1223,9 @@ PopulateGear = function()
     local hideCrafted  = opts.hideCrafted
     local showMaxed    = opts.showMaxed
     local slotFilter   = opts.slotFilter   -- table of group -> bool (nil = all shown)
-    local crestFilter  = opts.crestFilter  -- table of trackName -> bool (nil/true = shown)
+    local crestFilter         = opts.crestFilter         -- table of trackName -> bool (nil/true = shown)
+    local showEarnedCap       = opts.showEarnedCap
+    local showWeeklyRemaining = opts.showWeeklyRemaining
 
     -- Build per-slot data
     for _, item in ipairs(gear) do
@@ -1399,15 +1492,68 @@ PopulateGear = function()
     local accuracyTag = db.calibrated and " |cff20ff20(exact)|r" or " |cff888888(est)|r"
     crestsLbl:SetText("Total Crests Needed" .. accuracyTag .. ": " .. crestStr)
 
-    -- Reposition buttons below text
-    refreshBtn:ClearAllPoints()
-    PP.Point(refreshBtn, "TOPLEFT", crestsLbl, "BOTTOMLEFT", -4, -10)
+    -- Crest breakdown table: populate rows, apply filter and optional columns
+    cHdrEarn:SetShown(showEarnedCap or false)
+    cHdrRem:SetShown(showWeeklyRemaining or false)
+
+    local visRowCount = 0
+    for _, rowData in ipairs(crestTableRows) do
+        local tn    = rowData.trackName
+        local shown = not (crestFilter and crestFilter[tn] == false)
+        if shown then
+            local needed  = crestNeeds[rowData.crestKey] or 0
+            local ownInfo = owned[rowData.crestKey]
+            rowData.needLbl:SetText(needed > 0 and tostring(needed) or "-")
+            rowData.ownLbl:SetText(ownInfo and tostring(ownInfo.quantity) or "-")
+            if showEarnedCap then
+                if ownInfo then
+                    local capStr = ownInfo.cap and tostring(ownInfo.cap) or "-"
+                    rowData.earnLbl:SetText(ownInfo.earned .. " / " .. capStr)
+                else
+                    rowData.earnLbl:SetText("-")
+                end
+                rowData.earnLbl:Show()
+            else
+                rowData.earnLbl:Hide()
+            end
+            if showWeeklyRemaining then
+                if ownInfo and ownInfo.cap then
+                    rowData.remLbl:SetText(tostring(math.max(0, ownInfo.cap - ownInfo.earned)))
+                else
+                    rowData.remLbl:SetText("-")
+                end
+                rowData.remLbl:Show()
+            else
+                rowData.remLbl:Hide()
+            end
+            rowData.frame:ClearAllPoints()
+            PP.Point(rowData.frame, "TOPLEFT", crestTblHdr, "BOTTOMLEFT", 0, -(visRowCount * CROW_STEP))
+            rowData.frame:Show()
+            visRowCount = visRowCount + 1
+        else
+            rowData.frame:Hide()
+        end
+    end
+
+    -- Table sits above the buttons when rows are visible; buttons fall back to crestsLbl otherwise
+    if visRowCount > 0 then
+        crestTblHdr:ClearAllPoints()
+        PP.Point(crestTblHdr, "TOPLEFT", crestsLbl, "BOTTOMLEFT", 4, -8)
+        crestTblHdr:Show()
+        refreshBtn:ClearAllPoints()
+        PP.Point(refreshBtn, "TOPLEFT", crestTblHdr, "BOTTOMLEFT", -4, -(visRowCount * CROW_STEP + 10))
+    else
+        crestTblHdr:Hide()
+        refreshBtn:ClearAllPoints()
+        PP.Point(refreshBtn, "TOPLEFT", crestsLbl, "BOTTOMLEFT", -4, -10)
+    end
     scanBtn:ClearAllPoints()
     PP.Point(scanBtn, "TOPLEFT", refreshBtn, "TOPRIGHT", 10, 0)
 
     -- Resize frame to fit content
     local CC_TOP = 66  -- distance from frame top to cc top
-    local crestSectionH = 14 + 14 + 10 + 22 + 10  -- two text lines + gap + buttons + padding
+    local crestTblH     = visRowCount > 0 and (CROW_H + visRowCount * CROW_STEP + 8) or 0
+    local crestSectionH = 14 + 14 + 10 + 22 + 10 + crestTblH  -- two text lines + gap + buttons + padding + table
     local contentH = math.abs(crestY) + crestSectionH
     local queueH = 22 + #queueItems * Q_ROW_STEP + (#queueItems > 0 and 50 or 0)
     local newFrameH = math.max(contentH, queueH) + CC_TOP + 10

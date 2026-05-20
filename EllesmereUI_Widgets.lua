@@ -1440,6 +1440,8 @@ ShowWidgetTooltip = function(label, text, opts)
     else
         tt:SetPoint("BOTTOM", label, "TOP", 0, 4)
     end
+    -- Apply scale override (reset in HideWidgetTooltip)
+    tt:SetScale(opts and opts.scale or 1)
     -- Show at alpha 0 BEFORE measuring so WoW computes font geometry
     -- on a visible frame (GetStringHeight returns wrong values on hidden frames).
     tt:SetAlpha(0)
@@ -1515,6 +1517,7 @@ end
 HideWidgetTooltip = function(instant)
     local tt = GetTooltipFrame()
     if not tt:IsShown() then return end
+    tt:SetScale(1)
     if tt._fadeOutAG then tt._fadeOutAG:Stop() end
     if tt._fadeAG then tt._fadeAG:Stop() end
     if instant then

@@ -7667,7 +7667,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.8"
+EllesmereUI.VERSION = "7.8.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -8847,7 +8847,7 @@ EllesmereUI.VIS_OPT_ITEMS = {
     { key = "visHideHousing",      label = "Hide in Housing" },
     { key = "visHideMounted",      label = "Hide when Mounted" },
     { key = "visHideNoTarget",     label = "Hide without Target",
-      tooltip = "This bar will only show if you have a target" },
+      tooltip = "*Blizzard's auto targeting (soft target) setting can cause brief flickering when your actual target dies but a soft-target is still active." },
     { key = "visHideNoEnemy",      label = "Hide without Enemy Target",
       tooltip = "This bar will only show if you have an enemy targeted" },
 }
