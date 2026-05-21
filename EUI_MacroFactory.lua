@@ -12,11 +12,6 @@ local HEALTH_RECOVERY_POTS = {
     241304, 241305, -- Midnight: Silvermoon Health Potion
 }
 
-local function HealthMacroInstancedPvP()
-    local inInstance, instanceType = IsInInstance()
-    return inInstance and (instanceType == "pvp" or instanceType == "arena")
-end
-
 local function HealthMacroItemCount(itemID)
     return GetItemCount(itemID, false) or 0
 end
@@ -31,12 +26,10 @@ local function CollectHealthRecoveryItems()
             end
         end
     end
-    if not HealthMacroInstancedPvP() then
-        for _, itemID in ipairs(HEALTH_RECOVERY_POTS) do
-            if HealthMacroItemCount(itemID) > 0 then
-                items[#items + 1] = itemID
-                break
-            end
+    for _, itemID in ipairs(HEALTH_RECOVERY_POTS) do
+        if HealthMacroItemCount(itemID) > 0 then
+            items[#items + 1] = itemID
+            break
         end
     end
     return items
@@ -80,28 +73,20 @@ function EllesmereUI.BuildHealthRecoveryMacroBody(db, items)
     db = db or {}
     items = items or CollectHealthRecoveryItems()
     local lines = {}
-    local useRecuperate = not HealthMacroInstancedPvP()
 
     if db.showTooltip ~= false then
-        local tip = (items[1] and ("item:" .. items[1])) or (useRecuperate and "Recuperate" or nil)
-        if tip then
-            lines[#lines + 1] = "#showtooltip " .. tip
-        else
-            lines[#lines + 1] = "#showtooltip"
-        end
+        local tip = (items[1] and ("item:" .. items[1])) or "Recuperate"
+        lines[#lines + 1] = "#showtooltip " .. tip
     end
 
-    if useRecuperate then
-        lines[#lines + 1] = "/cast [nocombat] Recuperate"
-    end
+    lines[#lines + 1] = "/cast [nocombat] Recuperate"
 
     if #items > 0 then
         local seqParts = {}
         for _, itemID in ipairs(items) do
             seqParts[#seqParts + 1] = "item:" .. itemID
         end
-        local combatCond = useRecuperate and ",combat" or ""
-        lines[#lines + 1] = "/castsequence [@player" .. combatCond .. "] reset=combat "
+        lines[#lines + 1] = "/castsequence [@player,combat] reset=combat "
             .. table.concat(seqParts, ", ")
     end
 
