@@ -4,6 +4,15 @@
 --  Called by BuildQoLPage via EllesmereUI.BuildMacroFactory(parent, y, PP)
 -------------------------------------------------------------------------------
 
+-- Retail healthstones: 5512 (Healthstone), 224464 (Demonic Healthstone) — see AutoPotion Core/Potions.lua
+local EUI_HEALTH_MACRO_BODY = table.concat({
+    "/cast [nocombat] Recuperate",
+    "/use [combat] item:5512",
+    "/use [combat] item:224464",
+    "/use [combat] item:241304",
+    "/use [combat] item:241305",
+}, "\n")
+
 -- One-time migration: update EUI_Health macro body to use spell name instead of ID.
 -- Runs once per account (v2 flag).
 do
@@ -16,9 +25,26 @@ do
         local idx = GetMacroIndexByName("EUI_Health")
         if idx == 0 then EllesmereUIDB._healthMacroMigratedV2 = true; return end
         if InCombatLockdown() then return end
-        local body = "#showtooltip item:241304\n/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305"
+        local body = "#showtooltip item:241304\n" .. EUI_HEALTH_MACRO_BODY
         EditMacro(idx, nil, nil, body)
         EllesmereUIDB._healthMacroMigratedV2 = true
+    end)
+end
+
+-- One-time migration: add Midnight retail healthstones before healing potions (v3 flag).
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if EllesmereUIDB._healthMacroMigratedV3 then return end
+        local idx = GetMacroIndexByName("EUI_Health")
+        if idx == 0 then EllesmereUIDB._healthMacroMigratedV3 = true; return end
+        if InCombatLockdown() then return end
+        local body = "#showtooltip item:5512\n" .. EUI_HEALTH_MACRO_BODY
+        EditMacro(idx, nil, nil, body)
+        EllesmereUIDB._healthMacroMigratedV3 = true
     end)
 end
 
@@ -53,8 +79,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             name = "EUI_Health",
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
-            fixedBody = "/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
-            fixedTooltip = "item:241304",
+            fixedBody = EUI_HEALTH_MACRO_BODY,
+            fixedTooltip = "item:5512",
         },
         {
             name = "EUI_Food",
