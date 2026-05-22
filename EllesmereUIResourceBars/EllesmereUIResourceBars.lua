@@ -1077,7 +1077,7 @@ local function BuildMainFrame()
     mainFrame = CreateFrame("Frame", "EllesmereUIResourceBarsFrame", UIParent)
     mainFrame:SetPoint("CENTER", UIParent, "CENTER", g.anchorX or 0, g.anchorY or -100)
     mainFrame:SetSize(1, 1)  -- invisible anchor point
-    mainFrame:SetFrameStrata("MEDIUM")
+    mainFrame:SetFrameStrata(g.frameStrata or "MEDIUM")
     mainFrame:SetFrameLevel(5)
 
     return mainFrame
@@ -1406,7 +1406,8 @@ local function ApplyBarAnchor(frame, anchorKey, anchorPos, offsetX, offsetY, gro
     if frame._erbMouseTrack then
         frame:SetScript("OnUpdate", nil)
         frame._erbMouseTrack = nil
-        frame:SetFrameStrata("MEDIUM")
+        local g = ERB.db and ERB.db.profile and ERB.db.profile.general
+        frame:SetFrameStrata(g and g.frameStrata or "MEDIUM")
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
         SetFrameClickThrough(frame, false)
@@ -1701,7 +1702,7 @@ local function BuildBars()
         if not healthBar then
             healthBar = CreateStatusBar(mainFrame, "ERB_HealthBar", hpWidth, hpHeight,
                 hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA)
-            healthBar:SetFrameStrata("MEDIUM")
+            healthBar:SetFrameStrata(g.frameStrata or "MEDIUM")
             healthBar:SetFrameLevel(10)
         end
         if not hp.enabled then
@@ -1836,7 +1837,7 @@ local function BuildBars()
     if not primaryBar then
         primaryBar = CreateStatusBar(mainFrame, "ERB_PrimaryBar", ppWidth, ppHeight,
             pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
-        primaryBar:SetFrameStrata("MEDIUM")
+        primaryBar:SetFrameStrata(g.frameStrata or "MEDIUM")
         primaryBar:SetFrameLevel(10)
     end
     if pp.enabled ~= false and cachedPrimary then
@@ -1958,7 +1959,7 @@ local function BuildBars()
     -- Always create the frame when enabled so anchored elements have a target
     if sp.enabled ~= false and not secondaryFrame then
         secondaryFrame = CreateFrame("Frame", "ERB_SecondaryFrame", mainFrame)
-        secondaryFrame:SetFrameStrata("MEDIUM")
+        secondaryFrame:SetFrameStrata(g.frameStrata or "MEDIUM")
         secondaryFrame:SetFrameLevel(10)
     end
     if sp.enabled ~= false and cachedSecondary then
@@ -3596,7 +3597,7 @@ BuildCastBar = function()
 
     if not castBarFrame then
         castBarFrame = CreateFrame("Frame", "ERB_CastBarFrame", UIParent)
-        castBarFrame:SetFrameStrata("MEDIUM")
+        castBarFrame:SetFrameStrata(cb.frameStrata or "MEDIUM")
         castBarFrame:SetFrameLevel(15)
 
         -- Background
@@ -4650,7 +4651,8 @@ local function BuildTotemBar()
 
     if not totemBarFrame then
         totemBarFrame = CreateFrame("Frame", "ERB_TotemBarFrame", UIParent)
-        totemBarFrame:SetFrameStrata("MEDIUM")
+        local tb = ERB.db and ERB.db.profile and ERB.db.profile.totemBar
+        totemBarFrame:SetFrameStrata(tb and tb.frameStrata or "MEDIUM")
         totemBarFrame:SetFrameLevel(15)
         totemBarFrame:SetSize(120, 30)
         -- Re-register unlock elements so unlock mode picks up the new frame
@@ -4727,6 +4729,18 @@ function ERB:ApplyAll()
     BuildBars()
     BuildCastBar()
     BuildTotemBar()
+
+    -- Apply frame strata to all existing bar frames (covers live changes)
+    local g = ERB.db.profile.general or DEFAULTS.profile.general
+    local barStrata = g.frameStrata or "MEDIUM"
+    if mainFrame then mainFrame:SetFrameStrata(barStrata) end
+    if healthBar then healthBar:SetFrameStrata(barStrata) end
+    if primaryBar then primaryBar:SetFrameStrata(barStrata) end
+    if secondaryFrame then secondaryFrame:SetFrameStrata(barStrata) end
+    local tb = ERB.db.profile.totemBar
+    if totemBarFrame then totemBarFrame:SetFrameStrata(tb and tb.frameStrata or "MEDIUM") end
+    local cb = ERB.db.profile.castBar
+    if castBarFrame then castBarFrame:SetFrameStrata(cb and cb.frameStrata or "MEDIUM") end
     UpdateHealthBar()
     UpdatePrimaryBar()
     UpdateSecondaryResource()

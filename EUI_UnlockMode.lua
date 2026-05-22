@@ -8060,6 +8060,10 @@ local function DoClose()
     -- Restore EllesmereUI QT background
     local qtBg = _G.EllesmereUIQTBackground
     if qtBg then qtBg:SetAlpha(1) end
+    -- Re-apply user visibility setting (handles "never" mode for both tracker + bg)
+    if _G.EllesmereUIQuestTracker and _G.EllesmereUIQuestTracker.UpdateVisibility then
+        _G.EllesmereUIQuestTracker.UpdateVisibility()
+    end
 
     if not unlockFrame then return end
 
@@ -9299,6 +9303,10 @@ local function SuspendForCombat()
                 pcall(objTracker.EnableMouse, objTracker, wasEnabled and true or false)
             end
         end
+    end
+    -- Re-apply user visibility setting (handles "never" mode for both tracker + bg)
+    if _G.EllesmereUIQuestTracker and _G.EllesmereUIQuestTracker.UpdateVisibility then
+        _G.EllesmereUIQuestTracker.UpdateVisibility()
     end
 
     -- Notify beacon reminders to restore

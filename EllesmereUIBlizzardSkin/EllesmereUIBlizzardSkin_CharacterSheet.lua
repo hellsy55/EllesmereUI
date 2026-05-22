@@ -1138,20 +1138,14 @@ local function SkinCharacterSheet()
         return true
     end
 
-    -- This data is only consumed by the iLvl text and its hover tooltip --
-    -- both are invisible unless CharacterFrame is open. So: zero event
-    -- listeners while closed. On panel open, mark dirty. First call after
-    -- that recomputes; subsequent calls hit the cache. Combat-guarded so
-    -- we never scan during a pull.
+    -- Cached scan of bag items that are upgrades over equipped gear.
+    -- Invalidated by gear/bag changes while the character sheet is open.
     local _betterCache = nil
     local _betterDirty = true
 
     local _ComputeBetterInventoryItems  -- defined below
 
     local function GetBetterInventoryItems()
-        if InCombatLockdown() then
-            return _betterCache or {}
-        end
         if _betterDirty or not _betterCache then
             _betterCache = _ComputeBetterInventoryItems()
             _betterDirty = false
@@ -1159,15 +1153,9 @@ local function SkinCharacterSheet()
         return _betterCache
     end
 
-    -- Mark dirty on every sheet open so the bag contents are re-scanned
-    -- once when the user actually looks at it.
-    if CharacterFrame then
-        CharacterFrame:HookScript("OnShow", function()
-            _betterDirty = true
-        end)
-    end
+    -- Cache is invalidated by the iLvlUpdateFrame event handler below
+    -- (PLAYER_EQUIPMENT_CHANGED, BAG_UPDATE) and on CharacterFrame OnShow.
 
-    -- Function to get better items from inventory (equipment only)
     _ComputeBetterInventoryItems = function()
         local betterItems = {}
 
@@ -1357,7 +1345,6 @@ local function SkinCharacterSheet()
     -- Function to update itemlevel, PvP ilvl, and mythic+ rating
     local function UpdateItemLevelDisplay()
         local avgItemLevel, avgItemLevelEquipped, avgItemLevelPvP = GetAverageItemLevel()
-
         -- Format with two decimals
         local avgFormatted = format("%.2f", avgItemLevel)
         local avgEquippedFormatted = format("%.2f", avgItemLevelEquipped)
@@ -1417,19 +1404,20 @@ local function SkinCharacterSheet()
     local iLvlUpdateFrame = CreateFrame("Frame")
     iLvlUpdateFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     iLvlUpdateFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-    -- BAG_UPDATE_DELAYED removed: the "avg / max" upgrade-suffix now
-    -- derives from a cache that refreshes on CharacterFrame OnShow, so no
-    -- need to re-display on every bag change while the sheet is closed.
+    iLvlUpdateFrame:RegisterEvent("BAG_UPDATE")
     iLvlUpdateFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     iLvlUpdateFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    iLvlUpdateFrame:RegisterEvent("PLAYER_AVG_ITEM_LEVEL_UPDATE")
     iLvlUpdateFrame:SetScript("OnEvent", function(_, event, unit)
         if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
-        -- Skip work when the character sheet is closed; OnShow refresh
-        -- below covers the next-open case.
         if not (frame and frame:IsShown()) then return end
+        _betterDirty = true
         UpdateItemLevelDisplay()
     end)
-    frame:HookScript("OnShow", UpdateItemLevelDisplay)
+    frame:HookScript("OnShow", function()
+        _betterDirty = true
+        UpdateItemLevelDisplay()
+    end)
     UpdateItemLevelDisplay()
 
     -- Store callback for option changes (M+ rating and PvP ilvl)

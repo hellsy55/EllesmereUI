@@ -181,17 +181,18 @@ qolFrame:SetScript("OnEvent", function(self)
                                 local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
                                 if info and info.itemID and _openableCache[info.itemID] and not _failedItems[info.itemID] then
                                     local prevID = info.itemID
+                                    local prevCount = info.stackCount or 1
                                     C_Container.UseContainerItem(item.bag, item.slot)
-                                    C_Timer.After(0.15, function()
+                                    C_Timer.After(0.5, function()
                                         local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                                        if after and after.itemID == prevID then
+                                        if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
                                             _failedItems[prevID] = true
                                         end
                                         OpenNext(idx + 1)
                                     end)
                                     return
                                 end
-                                C_Timer.After(0.15, function() OpenNext(idx + 1) end)
+                                C_Timer.After(0.5, function() OpenNext(idx + 1) end)
                             end
                             OpenNext(1)
                         end
@@ -251,19 +252,20 @@ qolFrame:SetScript("OnEvent", function(self)
                 local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
                 if info2 and info2.itemID and _openableCache[info2.itemID] and not _failedItems[info2.itemID] then
                     local prevID = info2.itemID
+                    local prevCount = info2.stackCount or 1
                     C_Container.UseContainerItem(item.bag, item.slot)
-                    C_Timer.After(0.15, function()
+                    C_Timer.After(0.5, function()
                         local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                        if after and after.itemID == prevID then
+                        if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
                             _failedItems[prevID] = true
                         end
                         OpenNext(idx + 1)
                     end)
                     return
                 end
-                C_Timer.After(0.15, function() OpenNext(idx + 1) end)
+                C_Timer.After(0.5, function() OpenNext(idx + 1) end)
             end
-            C_Timer.After(0.3, function() OpenNext(1) end)
+            C_Timer.After(0.5, function() OpenNext(1) end)
         end)
     end
 

@@ -1272,8 +1272,13 @@ initFrame:SetScript("OnEvent", function(self)
                 castSpellIcon = 136197  -- Shadow Bolt icon as generic
             end
 
+            -- Text overlay above both castbar border (+1) and main frame border
+            local cbTextOvr = CreateFrame("Frame", nil, castbar)
+            cbTextOvr:SetAllPoints(castbar)
+            cbTextOvr:SetFrameLevel(pf:GetFrameLevel() + 11)
+
             -- Three-zone layout: all zones truncate (no word wrap)
-            castNameFS2 = castbar:CreateFontString(nil, "OVERLAY")
+            castNameFS2 = cbTextOvr:CreateFontString(nil, "OVERLAY")
             SetPVFont(castNameFS2, PREVIEW_FONT, 11)
             castNameFS2:SetJustifyH("LEFT")
             castNameFS2:SetWordWrap(false)
@@ -1281,7 +1286,7 @@ initFrame:SetScript("OnEvent", function(self)
             castNameFS2:SetTextColor(1, 1, 1)
             castNameFS2:SetText(castSpellName)
 
-            castTimeFS = castbar:CreateFontString(nil, "OVERLAY")
+            castTimeFS = cbTextOvr:CreateFontString(nil, "OVERLAY")
             SetPVFont(castTimeFS, PREVIEW_FONT, 11)
             castTimeFS:SetJustifyH("RIGHT")
             castTimeFS:SetWordWrap(false)
@@ -1291,7 +1296,7 @@ initFrame:SetScript("OnEvent", function(self)
             castTimeFS:SetText(string.format("%.1f", spellCastTime * (1 - (_previewCastFill or 0.6))))
 
             if unitKey ~= "player" then
-                castTargetFS = castbar:CreateFontString(nil, "OVERLAY")
+                castTargetFS = cbTextOvr:CreateFontString(nil, "OVERLAY")
                 SetPVFont(castTargetFS, PREVIEW_FONT, 10)
                 castTargetFS:SetJustifyH("RIGHT")
                 castTargetFS:SetWordWrap(false)
@@ -3565,7 +3570,9 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch(); updateHlSwatch() end)
         end
 
-        -- Row 4: Show Tooltip | empty
+        -- Row 4: Show Tooltip | Frame Strata
+        local ufStrataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+        local ufStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Tooltip",
               getValue=function() return SVal("showUnitTooltip", true) end,
@@ -3576,7 +3583,14 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ReloadAndUpdate()
               end },
-            { type="label", text="" });  y = y - h
+            { type="dropdown", text="Frame Strata",
+              tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements.",
+              values = ufStrataValues, order = ufStrataOrder,
+              getValue=function() return db.profile.frameStrata or "MEDIUM" end,
+              setValue=function(v)
+                  db.profile.frameStrata = v
+                  ReloadAndUpdate()
+              end });  y = y - h
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 

@@ -1819,7 +1819,9 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 3: Texture | (empty)
+        -- Row 3: Texture | Frame Strata
+        local strataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+        local strataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
         _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Texture", values = hbtValues, order = hbtOrder,
               getValue = function()
@@ -1830,7 +1832,16 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB(); if not p then return end
                   p.general.barTexture = v; SmoothRefresh()
               end },
-            { type = "label", text = "" }
+            { type = "dropdown", text = "Frame Strata",
+              tooltip = "Controls the order that overlapping elements display in. Set higher to show above other elements.",
+              values = strataValues, order = strataOrder,
+              getValue = function()
+                  local p = DB(); return p and p.general.frameStrata or "MEDIUM"
+              end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.general.frameStrata = v; SmoothRefresh()
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 16);  y = y - h
@@ -4870,6 +4881,25 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 3: Frame Strata | (empty)
+        local cbStrataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+        local cbStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Frame Strata",
+              tooltip = "Controls the order that overlapping elements display in. Set higher to show above other elements.",
+              disabled = castOff,
+              disabledTooltip = "Enable Player Cast Bar",
+              values = cbStrataValues, order = cbStrataOrder,
+              getValue = function()
+                  local p = DB(); return p and p.castBar.frameStrata or "MEDIUM"
+              end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.frameStrata = v; RefreshCast()
+              end },
+            { type = "label", text = "" }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -5736,6 +5766,25 @@ initFrame:SetScript("OnEvent", function(self)
                 }, rgn, totemOff)
             end
         end
+
+        -- Row 4: Frame Strata | (empty)
+        local tmStrataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+        local tmStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Frame Strata",
+              tooltip = "Controls the order that overlapping elements display in. Set higher to show above other elements.",
+              disabled = totemOff,
+              disabledTooltip = "Select a class above",
+              values = tmStrataValues, order = tmStrataOrder,
+              getValue = function()
+                  local p = DB(); return p and p.totemBar.frameStrata or "MEDIUM"
+              end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.totemBar.frameStrata = v; RefreshTotem()
+              end },
+            { type = "label", text = "" }
+        );  y = y - h
 
         return math.abs(y)
     end

@@ -2920,7 +2920,12 @@ local function CreateCastBar(frame, unit, settings)
     -- Three-zone cast bar text layout matching nameplates:
     -- [spell name LEFT 42%] [target RIGHT-of-center 42%] [timer RIGHT]
     -- All zones truncate with ellipsis (WordWrap off, MaxLines 1).
-    local text = castbar:CreateFontString(nil, "OVERLAY")
+    -- Text overlay must sit above the unified border (frame +10).
+    local textOverlay = CreateFrame("Frame", nil, castbar)
+    textOverlay:SetAllPoints(castbar)
+    textOverlay:SetFrameLevel(frame:GetFrameLevel() + 11)
+
+    local text = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(text, settings.castSpellNameSize or 11)
     text:SetJustifyH("LEFT")
     text:SetWordWrap(false)
@@ -2928,7 +2933,7 @@ local function CreateCastBar(frame, unit, settings)
     text:SetTextColor(1, 1, 1)
     castbar.Text = text
 
-    local time = castbar:CreateFontString(nil, "OVERLAY")
+    local time = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(time, settings.castDurationSize or 10)
     time:SetJustifyH("RIGHT")
     time:SetWordWrap(false)
@@ -2936,7 +2941,7 @@ local function CreateCastBar(frame, unit, settings)
     time:SetTextColor(1, 1, 1)
     castbar.Time = time
 
-    local target = castbar:CreateFontString(nil, "OVERLAY")
+    local target = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(target, settings.castSpellTargetSize or 11)
     target:SetJustifyH("RIGHT")
     target:SetWordWrap(false)
@@ -3837,10 +3842,12 @@ local function StyleFocusFrame(frame, unit)
         end
     end
 
-    -- Text overlay frame -- sits above the StatusBar for clean text rendering.
-    local textOverlay = CreateFrame("Frame", nil, frame.Health)
+    -- Text overlay frame -- sits above the StatusBar and unified border.
+    -- Parented to frame (not Health) so text is not clipped by the health bar.
+    local textOverlay = CreateFrame("Frame", nil, frame)
     textOverlay:SetAllPoints(frame.Health)
-    textOverlay:SetFrameLevel(frame.Health:GetFrameLevel() + 12)
+    textOverlay:SetFrameStrata(frame:GetFrameStrata())
+    textOverlay:SetFrameLevel(math.max(frame:GetFrameLevel() + 20, frame.Health:GetFrameLevel() + 12))
     frame._textOverlay = textOverlay
 
     local leftContent = settings.leftTextContent or "name"
@@ -5258,6 +5265,14 @@ local function ReloadFrames()
     local castbarColor = GetCastbarColor()
     local castbarOpacity = profile.castbarOpacity
     local enabled = profile.enabledFrames
+
+    -- Apply frame strata to all spawned unit frames
+    local ufStrata = profile.frameStrata or "MEDIUM"
+    for _, frame in pairs(frames) do
+        if type(frame) == "table" and frame.SetFrameStrata then
+            frame:SetFrameStrata(ufStrata)
+        end
+    end
 
     -- Uses global font
     local donorFontPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")
@@ -7877,6 +7892,14 @@ function InitializeFrames()
         if blizzBoss then
             blizzBoss:UnregisterAllEvents()
             blizzBoss:Hide()
+        end
+    end
+
+    -- Apply user-selected frame strata to all unit frames
+    local ufStrata = db.profile.frameStrata or "MEDIUM"
+    for _, frame in pairs(frames) do
+        if type(frame) == "table" and frame.SetFrameStrata then
+            frame:SetFrameStrata(ufStrata)
         end
     end
 

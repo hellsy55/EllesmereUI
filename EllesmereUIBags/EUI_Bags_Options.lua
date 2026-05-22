@@ -137,8 +137,7 @@ initFrame:SetScript("OnEvent", function(self)
             ); y = y - h
 
             -- Category Title Size | Default Open to OneBag
-            local catTitleOneBagRow
-            catTitleOneBagRow, h = W:DualRow(parent, y,
+            _, h = W:DualRow(parent, y,
                 { type="slider", text="Category Title Size", min=8, max=16, step=1,
                   tooltip="Font size for category titles in the sidebar and content grid.",
                   getValue=function() return EllesmereUIDB and EllesmereUIDB.bagCatTitleSize or 11 end,
@@ -151,69 +150,12 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag == true end,
                   setValue=function(v)
                       EllesmereUIDB.bagDefaultOneBag = v
-                      if _G.EUI_Bags and _G.EUI_Bags.SetSelectedView then
-                          _G.EUI_Bags:SetSelectedView(v and -1 or 0)
-                          if _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
-                              _G.EUI_Bags:RefreshInventory()
-                          end
+                      if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
+                          _G.EUI_Bags:RefreshInventory()
                       end
                       EllesmereUI:RefreshPage()
                   end }
             ); y = y - h
-
-            -- Inline cog for Default Open to OneBag
-            do
-                local _, obCogShow = EllesmereUI.BuildCogPopup({
-                    title = "OneBag Options",
-                    rows = {
-                        { type="toggle", label="Hide Top Warning",
-                          get=function() return EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning == true end,
-                          set=function(v)
-                              EllesmereUIDB.bagHideOneBagWarning = v
-                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                          end },
-                        { type="toggle", label="Hide Randomize Button",
-                          get=function() return EllesmereUIDB and EllesmereUIDB.bagHideRandomize == true end,
-                          set=function(v)
-                              EllesmereUIDB.bagHideRandomize = v
-                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                          end },
-                    },
-                })
-                local rightRgn = catTitleOneBagRow._rightRegion
-                local obCog = CreateFrame("Button", nil, rightRgn)
-                obCog:SetSize(26, 26)
-                obCog:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
-                obCog:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-                local obCogTex = obCog:CreateTexture(nil, "OVERLAY")
-                obCogTex:SetAllPoints()
-                obCogTex:SetTexture(EllesmereUI.COGS_ICON)
-                local function obCogOff() return not (EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag) end
-                obCog:SetAlpha(obCogOff() and 0.15 or 0.4)
-                obCog:SetScript("OnEnter", function(self)
-                    if obCogOff() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Default Open to OneBag must be enabled"))
-                    else self:SetAlpha(0.7) end
-                end)
-                obCog:SetScript("OnLeave", function(self)
-                    self:SetAlpha(obCogOff() and 0.15 or 0.4)
-                    EllesmereUI.HideWidgetTooltip()
-                end)
-                obCog:SetScript("OnClick", function(self)
-                    if not obCogOff() then obCogShow(self) end
-                end)
-                local obBlock = CreateFrame("Frame", nil, obCog)
-                obBlock:SetAllPoints(); obBlock:SetFrameLevel(obCog:GetFrameLevel() + 10); obBlock:EnableMouse(true)
-                obBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(obCog, EllesmereUI.DisabledTooltip("Default Open to OneBag must be enabled"))
-                end)
-                obBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                if obCogOff() then obBlock:Show() else obBlock:Hide() end
-                EllesmereUI.RegisterWidgetRefresh(function()
-                    if obCogOff() then obCog:SetAlpha(0.15); obBlock:Show()
-                    else obCog:SetAlpha(0.4); obBlock:Hide() end
-                end)
-            end
 
             -- Enabled Categories | Enabled Currencies
             local catCurrRow
@@ -566,6 +508,24 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return EllesmereUIDB and EllesmereUIDB.bagNestByExpansion == true end,
                   setValue=function(v)
                       EllesmereUIDB.bagNestByExpansion = v and true or false
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
+            ); y = y - h
+
+            -- Hide OneBag Warning | Hide Randomize Button
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Hide OneBag Warning",
+                  tooltip="Hide the warning text at the top of the OneBag view.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning == true end,
+                  setValue=function(v)
+                      EllesmereUIDB.bagHideOneBagWarning = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="toggle", text="Hide OneBag Randomize Button",
+                  tooltip="Hide the randomize (dice) button in the OneBag view.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagHideRandomize == true end,
+                  setValue=function(v)
+                      EllesmereUIDB.bagHideRandomize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h

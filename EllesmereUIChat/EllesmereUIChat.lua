@@ -2474,44 +2474,13 @@ local function SkinChatFrame(cf)
         if inMPlus or inRaidCombat or inPvP then return end
     end
 
-    -- Reskin Blizzard's ScrollBar in-place. Keeps the bar in its native
-    -- position in the frame hierarchy so Blizzard's secure display-refresh
-    -- chain (CallOnDisplayRefreshed -> RefreshDisplay -> trackExtent math)
-    -- never encounters a broken parent chain. Taint introduced by other
-    -- addons (DBM, Plumber, etc.) stays invisible instead of surfacing as
-    -- "secret number value" errors on trackExtent.
+    -- Hide scrollbar arrow buttons by reparenting to hidden container.
+    -- The scrollbar itself stays untouched in the frame hierarchy to
+    -- avoid both trackExtent errors and HistoryKeeper taint.
     if cf.ScrollBar and not CFD(cf).scrollBarSkinned then
         local bar = cf.ScrollBar
-        if bar.Background then bar.Background:Hide() end
-        -- Collapse arrow buttons so track fills the full length
-        if bar.Back then bar.Back:SetAlpha(0); bar.Back:SetSize(1, 0.001) end
-        if bar.Forward then bar.Forward:SetAlpha(0); bar.Forward:SetSize(1, 0.001) end
-        -- Strip track artwork
-        local track = bar.Track
-        if track then
-            track:DisableDrawLayer("ARTWORK")
-            track:DisableDrawLayer("BACKGROUND")
-            track:ClearAllPoints()
-            track:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-            track:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
-        end
-        -- Thin 3px thumb
-        local thumb = bar.GetThumb and bar:GetThumb()
-        if thumb then
-            thumb:DisableDrawLayer("ARTWORK")
-            thumb:DisableDrawLayer("BACKGROUND")
-            local thumbTex = thumb:CreateTexture(nil, "OVERLAY")
-            thumbTex:SetColorTexture(1, 1, 1, 0.4)
-            thumbTex:SetWidth(3)
-            thumbTex:SetPoint("TOP", thumb, "TOP", 0, 0)
-            thumbTex:SetPoint("BOTTOM", thumb, "BOTTOM", 0, 0)
-            thumbTex:SetPoint("RIGHT", thumb, "RIGHT", 0, 0)
-        end
-        -- Narrow the bar and position to match our chat bg edge
-        bar:SetWidth(4)
-        bar:ClearAllPoints()
-        bar:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
-        bar:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 5, 2)
+        if bar.Back then bar.Back:SetParent(_hiddenParent) end
+        if bar.Forward then bar.Forward:SetParent(_hiddenParent) end
         CFD(cf).scrollBarSkinned = true
     end
 end

@@ -2020,6 +2020,15 @@ local function CreateBarFrame(info)
     end
 
     barFrames[key] = frame
+
+    -- Empower re-check: when addon code sets "eab-empower-trigger", dispatch
+    -- ChildUpdate to re-evaluate pressAndHoldAction on all child buttons.
+    frame:SetAttributeNoHandler("_onattributechanged", [[
+        if name == "eab-empower-trigger" then
+            self:ChildUpdate("eab-empower", "")
+        end
+    ]])
+
     -- Install a secure visibility handler so we can show/hide the frame
     -- even during combat by setting the state attribute directly.
     -- RegisterStateDriver installs the _onstate snippet at creation time
@@ -2254,6 +2263,12 @@ local function SetupBar(info, skipProtected)
                     btn:SetAttributeNoHandler("_childupdate-eab-page",
                         ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. empowerSnippet)
                 end
+                -- Empower re-check on slot change (spec swap, drag, etc.)
+                -- The bar header's _onattributechanged dispatches ChildUpdate
+                -- when addon code sets "eab-empower-trigger" on slot change.
+                if not btn:GetAttribute("_childupdate-eab-empower") then
+                    btn:SetAttributeNoHandler("_childupdate-eab-empower", empowerSnippet)
+                end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
             end
@@ -2437,6 +2452,12 @@ do
                     end
                 end
             end
+            -- On spec swap (arg1=0), re-evaluate keybind routing so empower
+            -- slots switch from native commands to click bindings.
+            if event == "ACTIONBAR_SLOT_CHANGED" and arg1 == 0 and not InCombatLockdown() then
+                if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
+            end
+
             -- ExtraActionButton1 is a Blizzard button outside our barButtons.
             -- It relied on ActionBarButtonEventsFrame for cooldown updates,
             -- which we killed. Dispatch cooldown + slot events to it directly.
@@ -6673,13 +6694,30 @@ local function UpdateKeybinds()
                 if btn then
                     local cmd = prefix .. i
                     local k1, k2 = GetBindingKey(cmd)
-                    -- Flyout buttons need SetOverrideBindingClick so the
-                    -- flyout popup anchors to our visible EABButton frame.
-                    -- Native SetOverrideBinding anchors to Blizzard's hidden
-                    -- original button, so the flyout never appears.
+                    -- Empower spells need SetOverrideBindingClick so our
+                    -- button's pressAndHoldAction/typerelease handle the
+                    -- hold-and-release. Non-empower spells use native
+                    -- SetOverrideBinding for press-and-hold repeat casting.
                     local slot = btn:GetAttribute("action")
-                    local isFlyout = slot and GetActionInfo and GetActionInfo(slot) == "flyout"
-                    if isFlyout then
+                    local useClick = false
+                    if slot and HasAction(slot) then
+                        local actionType, id, subType = GetActionInfo(slot)
+                        if actionType == "flyout" then
+                            useClick = true
+                        elseif C_Spell and C_Spell.IsPressHoldReleaseSpell then
+                            local spellID
+                            if actionType == "spell" then
+                                spellID = id
+                            elseif actionType == "macro" and subType == "spell" then
+                                spellID = id
+                            end
+                            if spellID and not (issecretvalue and issecretvalue(spellID))
+                               and C_Spell.IsPressHoldReleaseSpell(spellID) then
+                                useClick = true
+                            end
+                        end
+                    end
+                    if useClick then
                         local btnName = btn:GetName()
                         if k1 and btnName then
                             SetOverrideBindingClick(_eabBindOwner, false, k1, btnName)
@@ -6700,6 +6738,7 @@ local function UpdateKeybinds()
         end
     end
 end
+_G._EAB_UpdateKeybinds = UpdateKeybinds
 
 
 

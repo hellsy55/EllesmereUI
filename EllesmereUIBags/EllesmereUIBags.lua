@@ -244,7 +244,8 @@ local function IsGearCategory(catIdx)
     return _gearCatSet[catIdx]
 end
 
--- Merge duplicate non-gear items by itemID within an already-ordered list.
+-- Merge duplicate non-gear items by itemLink within an already-ordered list.
+-- itemLink encodes stats/bonuses, so items with different stats stay separate.
 -- Must run AFTER ApplySavedOrder so the first occurrence in visual order wins.
 -- Returns a new list; originals are not modified (except _mergedCount on winners).
 local function MergeDuplicates(items)
@@ -254,13 +255,13 @@ local function MergeDuplicates(items)
     local seen = {}
     local out = {}
     for _, data in ipairs(items) do
-        local id = data.info and data.info.itemID
-        if id and not IsGearCategory(data.categoryIndex or 0) then
-            local prev = seen[id]
+        local key = data.itemLink
+        if key and not IsGearCategory(data.categoryIndex or 0) then
+            local prev = seen[key]
             if prev then
                 prev._mergedCount = (prev._mergedCount or prev.info.stackCount) + (data.info.stackCount or 1)
             else
-                seen[id] = data
+                seen[key] = data
                 out[#out + 1] = data
             end
         else
@@ -994,7 +995,6 @@ local function CreateHeader()
     -- Randomize Button (dice icon, OneBag only, top-right of bag frame)
     local dice = CreateFrame("Button", nil, EUI_Bags)
     dice:SetSize(20, 20)
-    dice:SetPoint("TOPRIGHT", EUI_Bags, "TOPRIGHT", -12, -(HEADER_H + 6))
     dice:SetFrameLevel(EUI_Bags:GetFrameLevel() + 20)
     dice.icon = dice:CreateTexture(nil, "OVERLAY")
     dice.icon:SetAllPoints()
@@ -4858,7 +4858,8 @@ function EUI_Bags:RefreshInventory()
             EUI_Bags._oneBagWarning = warn
         end
         local warn = EUI_Bags._oneBagWarning
-        if not (EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning) then
+        local _warnHidden = EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning
+        if not _warnHidden then
             warn:SetParent(child)
             warn:ClearAllPoints()
             curY = curY - 5
@@ -4909,7 +4910,7 @@ function EUI_Bags:RefreshInventory()
                 pinHdr._hideBtn = hb
             end
             pinHdr._hideBtn:ClearAllPoints()
-            pinHdr._hideBtn:SetPoint("RIGHT", pinHdr, "RIGHT", 0, 0)
+            pinHdr._hideBtn:SetPoint("RIGHT", pinHdr, "RIGHT", _warnHidden and -5 or 0, 0)
             pinHdr._hideBtn:SetScript("OnClick", function()
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.bagPinnedInOneBag = false
@@ -5000,7 +5001,7 @@ function EUI_Bags:RefreshInventory()
                 recHdr._hideBtn = hb
             end
             recHdr._hideBtn:ClearAllPoints()
-            recHdr._hideBtn:SetPoint("RIGHT", recHdr, "RIGHT", 0, 0)
+            recHdr._hideBtn:SetPoint("RIGHT", recHdr, "RIGHT", (_warnHidden and not showPinnedOneBag) and -5 or 0, 0)
             recHdr._hideBtn:SetScript("OnClick", function()
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.bagRecentInOneBag = false
@@ -5693,12 +5694,21 @@ function EUI_Bags:RefreshInventory()
         end
     end
 
-    -- Show dice button only in OneBag mode (unless hidden by setting)
+    -- Show dice button only in OneBag mode (unless hidden by setting).
+    -- Parented to scroll child and anchored to the first category header.
     if EUI_Bags._diceBtn then
         local showDice = selectedCategoryIndex == -1
             and not (EllesmereUIDB and EllesmereUIDB.bagHideRandomize)
-        if showDice then EUI_Bags._diceBtn:Show()
-        else EUI_Bags._diceBtn:Hide() end
+        if showDice and EUI_Bags._scrollChild then
+            local child = EUI_Bags._scrollChild
+            EUI_Bags._diceBtn:SetParent(child)
+            EUI_Bags._diceBtn:ClearAllPoints()
+            EUI_Bags._diceBtn:SetPoint("TOPRIGHT", child, "TOPRIGHT", -9, -5)
+            EUI_Bags._diceBtn:SetFrameLevel(child:GetFrameLevel() + 20)
+            EUI_Bags._diceBtn:Show()
+        else
+            EUI_Bags._diceBtn:Hide()
+        end
     end
 
     UpdateBagMoneyDisplay()

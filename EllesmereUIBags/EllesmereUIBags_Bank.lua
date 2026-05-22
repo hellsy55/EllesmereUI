@@ -2028,4 +2028,25 @@ loader:SetScript("OnEvent", function(self)
     if EUI and EUI.RegisterEscapeClose then
         EUI.RegisterEscapeClose(EUI_Bank)
     end
+
+    -- Auto-shift DressUpFrame to the right of the bank when both are open
+    local dressUp = _G.DressUpFrame
+    if dressUp then
+        local _duIgnoreSP = false
+        local function ShiftDressUp()
+            if not EUI_Bank:IsVisible() or InCombatLockdown() then return end
+            _duIgnoreSP = true
+            dressUp:ClearAllPoints()
+            dressUp:SetPoint("TOPLEFT", EUI_Bank, "TOPRIGHT", 4, 0)
+            _duIgnoreSP = false
+        end
+        dressUp:HookScript("OnShow", ShiftDressUp)
+        hooksecurefunc(dressUp, "SetPoint", function()
+            if _duIgnoreSP then return end
+            ShiftDressUp()
+        end)
+        EUI_Bank:HookScript("OnShow", function()
+            if dressUp:IsVisible() then ShiftDressUp() end
+        end)
+    end
 end)

@@ -73,7 +73,7 @@ initFrame:SetScript("OnEvent", function(self)
               values = chatVisValues,
               order  = chatVisOrder,
               getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); RefreshAll() end },
+              setValue=function(v) Set("visibility", v); if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end; RefreshAll() end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,

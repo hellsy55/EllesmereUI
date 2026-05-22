@@ -118,7 +118,8 @@ end
         -- Update tooltip if still showing for this GUID (and ilvl not already shown)
         if _GameTooltip:IsShown() and not _GameTooltip._euiIlvlShown and EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false then
             local ok2, _, ttUnit = pcall(_GameTooltip.GetUnit, _GameTooltip)
-            if not ok2 or not ttUnit then
+            if not ok2 or not ttUnit or (_isSecret and _isSecret(ttUnit)) then
+                ttUnit = nil
                 if UnitExists("mouseover") then ttUnit = "mouseover" end
             end
             if ttUnit then

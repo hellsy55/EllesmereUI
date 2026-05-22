@@ -2042,6 +2042,15 @@ local function ShowFriendsTooltip(anchor)
     tt:ClearAllPoints()
     tt:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, 0)
     tt:Show()
+    -- Clamp to screen: if the bottom edge goes off-screen, shift up
+    local bottom = tt:GetBottom()
+    if bottom and bottom < 0 then
+        local top = tt:GetTop()
+        if top then
+            tt:ClearAllPoints()
+            tt:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, -bottom)
+        end
+    end
     return total
 end
 
@@ -3326,10 +3335,6 @@ do
         if HousingFramesUtil and HousingFramesUtil.ToggleHousingDashboard then
             root:CreateButton("Housing", function() HousingFramesUtil.ToggleHousingDashboard() end)
         end
-        root:CreateButton("Group Finder", function()
-            if ToggleLFDParentFrame then ToggleLFDParentFrame()
-            elseif PVEFrame_ToggleFrame then PVEFrame_ToggleFrame() end
-        end)
         root:CreateDivider()
         root:CreateButton("Game Menu", function()
             if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame)
