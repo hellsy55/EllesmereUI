@@ -65,6 +65,10 @@ local function SessionHistorySafe()
 end
 
 local function InOpenWorld()
+    -- Housing plots register as "scenario" but chat is unrestricted there
+    if C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot() then
+        return true
+    end
     local inInstance, instanceType = IsInInstance()
     if not inInstance then return true end
     return instanceType == "none" or instanceType == ""
@@ -151,9 +155,13 @@ local function MessageForStorage(msg)
 end
 
 -- Strip timestamp text baked into legacy saves (older builds prefixed on store).
+-- Matches: "12:34 ...", "12:34:56 ...", "1:23 AM ...", "12:34:56 PM ..."
 local function StripLegacyTimestampPrefix(msg)
     if type(msg) ~= "string" then return msg end
-    local rest = msg:match("^%d%d?:%d%d(?::%d%d)?%s*([AP]M)?%s+(.*)$")
+    local rest = msg:match("^%d%d?:%d%d:%d%d%s*[AP]M%s+(.+)$")
+        or msg:match("^%d%d?:%d%d:%d%d%s+(.+)$")
+        or msg:match("^%d%d?:%d%d%s*[AP]M%s+(.+)$")
+        or msg:match("^%d%d?:%d%d%s+(.+)$")
     if rest and rest ~= "" then return rest end
     return msg
 end
@@ -205,33 +213,6 @@ end
 
 local function IsEmoteChatType(chatType)
     return chatType == "EMOTE" or chatType == "TEXT_EMOTE"
-end
-
-local function IsEmoteChatEvent(event)
-    if type(event) ~= "string" then return false end
-    return IsEmoteChatType(strsub(event, 10))
-end
-
-local function IsPlayerChatLine(msg, chatType)
-    if type(msg) ~= "string" then return false end
-    if chatType and IsEmoteChatType(chatType) then return true end
-    if msg:find("|Hplayer:", 1, true) or msg:find("|HBNplayer:", 1, true) then
-        return true
-    end
-    if msg:find("|Hchannel:", 1, true) then return true end
-    if msg:find(" says:", 1, true) or msg:find(" yells:", 1, true) then
-        return true
-    end
-    if msg:find(" whispers:", 1, true) or msg:find("To [", 1, true) then
-        return true
-    end
-    if msg:match("^%[%d+%.") or msg:match("^%[[^%]]+%]:") then
-        return true
-    end
-    if msg:match("^%[[^%]]+%] %[[^%]]+%]:") then
-        return true
-    end
-    return false
 end
 
 local function NormalizeForDedup(msg)
@@ -290,8 +271,7 @@ local function SanitizeLineList(lines)
         if type(L) == "table" then
             local msg = MessageForStorage(L.message)
             if msg then msg = MessageBodyOnly(msg) end
-            local chatType = type(L.event) == "string" and strsub(L.event, 10) or nil
-            if msg and (IsPlayerChatLine(msg, chatType) or IsEmoteChatEvent(L.event)) then
+            if msg then
                 out[#out + 1] = {
                     message = msg,
                     event = L.event,
@@ -410,9 +390,12 @@ end
 local function AppendLogEntry(entry)
     local sv = GetSV()
     local log = sv.sessionLog
-    local last = log[#log]
-    if last and NormalizeForDedup(last.message) == NormalizeForDedup(entry.message) then
-        return
+    local norm = NormalizeForDedup(entry.message)
+    if norm then
+        local checkN = math.min(#log, 10)
+        for i = #log, #log - checkN + 1, -1 do
+            if NormalizeForDedup(log[i].message) == norm then return end
+        end
     end
     log[#log + 1] = entry
     sv.sessionLog = TrimLinesToMax(log, MaxLines())
@@ -427,7 +410,7 @@ local function SaveChatEvent(event, ...)
 
     local chatType = strsub(event, 10)
     local line = BuildLineFromChatEvent(event, ...)
-    if not line or not IsPlayerChatLine(line, chatType) then return end
+    if not line then return end
 
     local serverTime = GetServerTime()
     local message = MessageForStorage(line)
@@ -473,31 +456,29 @@ local function RefreshFrameDisplay(cf)
     if cf.ScrollToBottom then pcall(cf.ScrollToBottom, cf) end
 end
 
-local function FrameAlreadyHasMessage(cf, msg)
-    if not cf or not msg then return false end
-    local core = NormalizeForDedup(msg)
-    if not core or core == "" then return false end
-    if cf.GetNumMessages and cf.GetMessageInfo then
-        local ok, n = pcall(cf.GetNumMessages, cf)
-        if ok and type(n) == "number" then
-            for i = 1, n do
-                local mok, raw = pcall(cf.GetMessageInfo, cf, i)
-                local stored = mok and MessageForStorage(raw) or nil
-                if stored and NormalizeForDedup(stored) == core then
-                    return true
-                end
-            end
+-- Build a set of normalized message hashes already in the frame (O(n) once)
+local function BuildFrameMessageSet(cf)
+    local set = {}
+    if not cf or not cf.GetNumMessages or not cf.GetMessageInfo then return set end
+    local ok, n = pcall(cf.GetNumMessages, cf)
+    if not ok or type(n) ~= "number" then return set end
+    for i = 1, n do
+        local mok, raw = pcall(cf.GetMessageInfo, cf, i)
+        local stored = mok and MessageForStorage(raw) or nil
+        if stored then
+            local norm = NormalizeForDedup(stored)
+            if norm then set[norm] = true end
         end
     end
-    return false
+    return set
 end
 
-local function ShouldRestoreEntry(cf, entry)
-    return entry
-        and entry.event
-        and entry.message
-        and FrameShowsEvent(cf, entry.event)
-        and not FrameAlreadyHasMessage(cf, entry.message)
+local function ShouldRestoreEntry(entry, eventFilter, existingSet)
+    if not entry or not entry.event or not entry.message then return false end
+    if not eventFilter(entry.event) then return false end
+    local norm = NormalizeForDedup(entry.message)
+    if norm and existingSet[norm] then return false end
+    return true
 end
 
 local function PushRestoreEntry(cf, buf, entry, baseTs, pushIndex, tsStep)
@@ -531,6 +512,10 @@ local function RestoreFrame(cf, frameName, log)
         return false
     end
 
+    -- Build hash set of existing messages once (O(n)), then O(1) lookups
+    local existingSet = BuildFrameMessageSet(cf)
+    local function eventFilter(event) return FrameShowsEvent(cf, event) end
+
     local pushed = 0
     local baseTs = OldestFrameTimestamp(cf)
     local tsStep = 0.001
@@ -538,7 +523,7 @@ local function RestoreFrame(cf, frameName, log)
 
     for i = #lines, 1, -1 do
         local entry = lines[i]
-        if ShouldRestoreEntry(cf, entry) then
+        if ShouldRestoreEntry(entry, eventFilter, existingSet) then
             pushIndex = pushIndex + 1
             if PushRestoreEntry(cf, buf, entry, baseTs, pushIndex, tsStep) then
                 pushed = pushed + 1
@@ -583,6 +568,8 @@ local function RunRestore(token)
     return any
 end
 
+local TryRestore  -- forward declaration (mutually recursive with ArmDeferredRestore)
+
 local function ArmDeferredRestore(token)
     UnarmDeferredRestore()
     local function onDefer(_, deferEvent, ...)
@@ -606,7 +593,7 @@ local function ArmDeferredRestore(token)
     end
 end
 
-local function TryRestore(token, attempt)
+TryRestore = function(token, attempt)
     if token ~= restoreToken then return end
     if not PersistEnabled() then return end
     if not SessionHistorySafe() then

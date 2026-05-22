@@ -1114,7 +1114,11 @@ if EllesmereUI then
         local frame = InspectFrame
         if frame and frame.unit and guid then
             local currentGUID = UnitGUID(frame.unit)
-            if currentGUID and currentGUID ~= guid then return end
+            if issecretvalue and issecretvalue(currentGUID) then
+                -- Can't validate; allow the reskin
+            elseif currentGUID and currentGUID ~= guid then
+                return
+            end
         end
         skinned = false
         ApplyThemedInspectSheet()

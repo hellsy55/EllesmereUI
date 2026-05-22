@@ -439,25 +439,47 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateResetVis)
         end
 
-        -- Hide Great Vault Button | Hide M+ Portals Button
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Great Vault Button",
-              tooltip="Hides the Great Vault shortcut button from the minimap button stack.",
-              getValue=function() local m = MinimapDB(); return m and m.hideGreatVault end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.hideGreatVault = v
-                RefreshMinimap()
-              end },
-            { type="toggle", text="Hide M+ Portals Button",
-              tooltip="Hides the M+ Portals shortcut button from the minimap button stack.",
-              getValue=function() local m = MinimapDB(); return m and m.hidePortals end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.hidePortals = v
-                RefreshMinimap()
-              end }
+        -- Hide Extra Buttons (checkbox dropdown)
+        local extraBtnRow
+        extraBtnRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Hide Extra Buttons",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end },
+            { type="label", text="" }
         );  y = y - h
+
+        -- Replace placeholder with checkbox dropdown
+        do
+            local leftRgn = extraBtnRow._leftRegion
+            if leftRgn._control then leftRgn._control:Hide() end
+
+            local EXTRA_BTN_ITEMS = {
+                { key = "greatVault",    label = "Great Vault" },
+                { key = "portals",       label = "M+ Portals" },
+                { key = "friendsOnline", label = "Friends Online" },
+            }
+
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                leftRgn, 210, leftRgn:GetFrameLevel() + 2,
+                EXTRA_BTN_ITEMS,
+                function(k)
+                    local m = MinimapDB(); if not m then return false end
+                    local heb = m.hideExtraBtns
+                    return heb and heb[k] and true or false
+                end,
+                function(k, v)
+                    local m = MinimapDB(); if not m then return end
+                    if not m.hideExtraBtns then m.hideExtraBtns = {} end
+                    m.hideExtraBtns[k] = v
+                    RefreshMinimap()
+                end)
+            local PP = EllesmereUI.PP
+            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            leftRgn._control = cbDD
+            leftRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
 
         y = y - 10
 

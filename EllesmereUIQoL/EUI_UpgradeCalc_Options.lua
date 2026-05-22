@@ -203,6 +203,18 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
           setValue = function(v) GetAddonDB().showWeeklyRemaining = v; LiveRefresh() end }
     ); y = y - h
 
+    -- Row 5: Show Calc Button on Character Sheet | Open with Crest Upgrader
+    _, h = W:DualRow(parent, y,
+        { type = "toggle", text = "Show Calc Button on Character Sheet",
+          tooltip = "Adds a Calc toggle button to the character sheet that opens and closes the Upgrade Calculator.",
+          getValue = function() return GetAddonDB().showCalcButton or false end,
+          setValue = function(v) GetAddonDB().showCalcButton = v end },
+        { type = "toggle", text = "Open with Crest Upgrader",
+          tooltip = "Automatically opens the Upgrade Calculator when the Crest Upgrade NPC window is opened.",
+          getValue = function() return GetAddonDB().openWithUpgrader or false end,
+          setValue = function(v) GetAddonDB().openWithUpgrader = v end }
+    ); y = y - h
+
     _, h = W:Spacer(parent, y, 20); y = y - h
 
     parent:SetHeight(math.abs(y - yOffset))

@@ -3182,6 +3182,22 @@ initFrame:SetScript("OnEvent", function(self)
                       end },
                     { type = "label", text = "" }); y = y - h
             end
+            if playerClass == "HUNTER" then
+                _, h = W:DualRow(parent, y,
+                    { type = "toggle", text = "Show Focus as Power Bar (BM/MM)",
+                      tooltip = "When enabled, BM and MM specs show Focus as the standard power bar instead of a class resource bar.",
+                      getValue = function()
+                          local p = DB(); if not p then return false end
+                          return p.secondary.hunterFocusAsPower or false
+                      end,
+                      setValue = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.hunterFocusAsPower = v
+                          RebuildPower(); RebuildClass()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type = "label", text = "" }); y = y - h
+            end
         end
 
         _, h = W:Spacer(parent, y, 16);  y = y - h

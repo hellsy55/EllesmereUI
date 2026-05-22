@@ -5716,7 +5716,8 @@ local function StartAddon()
         EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", newLeft, newTop)
     end)
     EUI_Bags:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" or not IsKeyDown("LSHIFT") then return end
+        local noShift = EllesmereUIDB and EllesmereUIDB.bagMoveNoShift
+        if button ~= "LeftButton" or (not noShift and not IsKeyDown("LSHIFT")) then return end
         local cx, cy = GetCursorPosition()
         local es = self:GetEffectiveScale()
         _bagDragStartCX = cx / es

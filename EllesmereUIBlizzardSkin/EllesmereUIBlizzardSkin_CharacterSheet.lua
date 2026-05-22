@@ -1283,8 +1283,16 @@ local function SkinCharacterSheet()
     iLvlText:SetTextColor(0.6, 0.2, 1, 1)
     GetFFD(frame).iLvlText = iLvlText  -- Store for tab visibility control
 
-    -- M+ Score sits directly below the iLvl text, also centered.
-    mythicRatingLabel:SetPoint("TOP", iLvlText, "BOTTOM", 0, -4)
+    -- PvP Item Level: sits directly below the iLvl text when enabled.
+    local pvpIlvlText = statsPanel:CreateFontString(nil, "OVERLAY")
+    pvpIlvlText:SetFont(fontPath, 12, "")
+    pvpIlvlText:SetTextColor(0.8, 0.8, 0.8, 1)
+    pvpIlvlText:SetPoint("TOP", iLvlText, "BOTTOM", 0, -4)
+    pvpIlvlText:Hide()
+    GetFFD(frame).pvpIlvlText = pvpIlvlText
+
+    -- M+ Score sits below PvP ilvl (or iLvl if PvP is hidden).
+    mythicRatingLabel:SetPoint("TOP", pvpIlvlText, "BOTTOM", 0, -4)
 
     -- Button overlay for itemlevel tooltip
     local iLvlButton = CreateFrame("Button", nil, statsPanel)
@@ -1346,9 +1354,9 @@ local function SkinCharacterSheet()
         GameTooltip:Hide()
     end)
 
-    -- Function to update itemlevel and mythic+ rating
+    -- Function to update itemlevel, PvP ilvl, and mythic+ rating
     local function UpdateItemLevelDisplay()
-        local avgItemLevel, avgItemLevelEquipped = GetAverageItemLevel()
+        local avgItemLevel, avgItemLevelEquipped, avgItemLevelPvP = GetAverageItemLevel()
 
         -- Format with two decimals
         local avgFormatted = format("%.2f", avgItemLevel)
@@ -1365,11 +1373,29 @@ local function SkinCharacterSheet()
             iLvlText:SetText(avgEquippedFormatted)
         end
 
+        -- Update PvP Item Level if option is enabled
+        local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
+        local showPvP = EllesmereUIDB and EllesmereUIDB.showPvpItemLevel
+        local pvpVisible = false
+        if showPvP and avgItemLevelPvP and avgItemLevelPvP > 0 and GetFFD(frame).pvpIlvlText then
+            GetFFD(frame).pvpIlvlText:SetText(format("PvP iLvl: |cff00cc66%d|r", math.floor(avgItemLevelPvP)))
+            GetFFD(frame).pvpIlvlText:SetShown(isCharTab)
+            pvpVisible = isCharTab
+        elseif GetFFD(frame).pvpIlvlText then
+            GetFFD(frame).pvpIlvlText:Hide()
+        end
+
+        -- Re-anchor M+ Score: below PvP ilvl when visible, below iLvl when not
+        if GetFFD(frame).mythicRatingLabel then
+            GetFFD(frame).mythicRatingLabel:ClearAllPoints()
+            local anchor = pvpVisible and pvpIlvlText or iLvlText
+            GetFFD(frame).mythicRatingLabel:SetPoint("TOP", anchor, "BOTTOM", 0, -4)
+        end
+
         -- Update M+ Score if option is enabled. Tab guard mirrors the slot-
         -- label fix: PaperDollFrame:IsShown() is the truth-source for whether
         -- the Character sub-pane is active (selectedTab is unreliable on the
         -- initial open path).
-        local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
         if EllesmereUIDB and EllesmereUIDB.showMythicRating and GetFFD(frame).mythicRatingLabel then
             local mythicRating = C_ChallengeMode.GetOverallDungeonScore()
             if mythicRating and mythicRating > 0 then
@@ -1406,13 +1432,14 @@ local function SkinCharacterSheet()
     frame:HookScript("OnShow", UpdateItemLevelDisplay)
     UpdateItemLevelDisplay()
 
-    -- Store callback for option changes
+    -- Store callback for option changes (M+ rating and PvP ilvl)
     EllesmereUI._updateMythicRatingDisplay = function()
         UpdateItemLevelDisplay()
         if EllesmereUI._updateScrollHeaderOffset then
             EllesmereUI._updateScrollHeaderOffset()
         end
     end
+    EllesmereUI._updatePvpIlvlDisplay = EllesmereUI._updateMythicRatingDisplay
 
     --[[ Stats panel border
     if EllesmereUI and EllesmereUI.PanelPP then
@@ -1562,15 +1589,24 @@ local function SkinCharacterSheet()
     GetFFD(frame).updateScrollThumb = scrollTrack._update
 
     -- Re-anchor the scroll frame + track top edge based on whether the
-    -- M+ Score line is visible. When hidden, collapse 16px of dead space
-    -- so the stat sections start higher.
+    -- PvP iLvl and M+ Score lines are visible. Each hidden line collapses
+    -- 16px of dead space so the stat sections start higher.
     EllesmereUI._updateScrollHeaderOffset = function()
         local showMP = EllesmereUIDB and EllesmereUIDB.showMythicRating
         if showMP and C_ChallengeMode and C_ChallengeMode.GetOverallDungeonScore then
             local score = C_ChallengeMode.GetOverallDungeonScore()
             if not score or score <= 0 then showMP = false end
         end
-        local h = showMP and HEADER_H or (HEADER_H - 16)
+        local showPvP = EllesmereUIDB and EllesmereUIDB.showPvpItemLevel
+        if showPvP and GetAverageItemLevel then
+            local _, _, pvp = GetAverageItemLevel()
+            if not pvp or pvp <= 0 then showPvP = false end
+        end
+        -- HEADER_H includes space for M+ (one extra line). Each hidden
+        -- line collapses 16px; each additional line beyond M+ adds 16px.
+        local h = HEADER_H
+        if not showMP then h = h - 16 end
+        if showPvP then h = h + 16 end
         scrollFrame:ClearAllPoints()
         scrollFrame:SetPoint("TOPLEFT",     statsPanel, "TOPLEFT",     0,  -h)
         scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 2)
@@ -3496,6 +3532,101 @@ local function SkinCharacterSheet()
 
     -- Character tab is the default active view
     SetActiveTopButton(characterBtn)
+
+    -- Calc toggle tab: fake bottom tab on the right side of the character
+    -- sheet, visually identical to the Blizzard Character/Rep/Currency tabs.
+    do
+        local calcDb = EUIUpgCalc and EUIUpgCalc.GetOptsDB and EUIUpgCalc.GetOptsDB()
+        if calcDb and calcDb.showCalcButton then
+            -- Match Blizzard tab dimensions from CharacterFrameTab1
+            local refTab = _G["CharacterFrameTab1"]
+            local tabW = refTab and refTab:GetWidth() or 80
+            local tabH = refTab and refTab:GetHeight() or 32
+
+            local calcTab = CreateFrame("Button", "EUI_CharSheet_CalcTab", frame)
+            calcTab:SetSize(tabW, tabH)
+            calcTab:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, -30)
+            calcTab:SetFrameLevel(frame:GetFrameLevel() + 5)
+            calcTab:EnableMouse(true)
+
+            -- Dark background (matches skinned Blizzard tabs)
+            local bg = calcTab:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(0.068, 0.056, 0.052, 1)
+
+            -- Active highlight overlay
+            local activeHL = calcTab:CreateTexture(nil, "ARTWORK", nil, -6)
+            activeHL:SetAllPoints()
+            activeHL:SetColorTexture(1, 1, 1, 0.02)
+            activeHL:SetBlendMode("ADD")
+            activeHL:Hide()
+
+            -- Label
+            local label = calcTab:CreateFontString(nil, "OVERLAY")
+            label:SetFont(fontPath, 9, "")
+            label:SetPoint("CENTER", calcTab, "CENTER", 0, 0)
+            label:SetJustifyH("CENTER")
+            label:SetText("Upgrades")
+
+            -- Accent underline (matches Blizzard tab underline)
+            local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+            local underline = calcTab:CreateTexture(nil, "OVERLAY", nil, 6)
+            if PP and PP.DisablePixelSnap then
+                PP.DisablePixelSnap(underline)
+                underline:SetHeight(PP.mult or 1)
+            else
+                underline:SetHeight(1)
+            end
+            underline:SetPoint("BOTTOMLEFT", calcTab, "BOTTOMLEFT", 0, 0)
+            underline:SetPoint("BOTTOMRIGHT", calcTab, "BOTTOMRIGHT", 0, 0)
+            underline:SetColorTexture(EG.r, EG.g, EG.b, 1)
+            underline:Hide()
+            if EllesmereUI.RegAccent then
+                EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
+            end
+
+            local function RefreshCalcTab()
+                local fr = _G["EUIUpgCalcFrame"]
+                local isOpen = fr and fr:IsShown()
+                label:SetTextColor(1, 1, 1, isOpen and 1 or 0.5)
+                underline:SetShown(isOpen)
+                activeHL:SetShown(isOpen)
+            end
+            RefreshCalcTab()
+
+            calcTab:SetScript("OnEnter", function()
+                label:SetTextColor(1, 1, 1, 1)
+            end)
+            calcTab:SetScript("OnLeave", function()
+                RefreshCalcTab()
+            end)
+            calcTab:SetScript("OnClick", function()
+                local fr = _G["EUIUpgCalcFrame"]
+                if fr then
+                    if fr:IsShown() then fr:Hide() else fr:Show() end
+                    RefreshCalcTab()
+                end
+            end)
+
+            frame:HookScript("OnShow", RefreshCalcTab)
+            -- Hook the calc frame itself so the tab updates when it's
+            -- opened/closed by any means (slash cmd, NPC hook, etc.)
+            local function HookCalcFrame()
+                local fr = _G["EUIUpgCalcFrame"]
+                if not fr or GetFFD(calcTab)._calcHooked then return end
+                GetFFD(calcTab)._calcHooked = true
+                fr:HookScript("OnShow", RefreshCalcTab)
+                fr:HookScript("OnHide", RefreshCalcTab)
+            end
+            HookCalcFrame()
+            -- Deferred: calc frame may not exist yet at skin time
+            if not _G["EUIUpgCalcFrame"] then
+                C_Timer.After(1, HookCalcFrame)
+            end
+            GetFFD(frame).calcToggleBtn = calcTab
+            GetFFD(frame).updateCalcBtnColor = RefreshCalcTab
+        end
+    end
 
     -- Left column slots (show itemlevel on right)
     local leftColumnSlots = {

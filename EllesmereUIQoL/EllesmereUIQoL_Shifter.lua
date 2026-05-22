@@ -8,6 +8,12 @@ local GetFFD = EllesmereUI._GetFFD
 -- Temporary positions (per-frame, cleared on hide, not persisted)
 local tempPos = {}
 
+-- Frames that loaded during combat and need SetMovable/SetClampedToScreen deferred
+local deferredMovable = {}
+
+-- Forward-declare; created in the event-driven initialization section below
+local eventFrame
+
 -------------------------------------------------------------------------------
 --  Frame registry
 -------------------------------------------------------------------------------
@@ -130,8 +136,13 @@ local function HookFrame(frame, name)
     if ffd._shHooked then return end
     ffd._shHooked = true
 
-    frame:SetMovable(true)
-    frame:SetClampedToScreen(true)
+    if InCombatLockdown() and frame:IsProtected() then
+        deferredMovable[#deferredMovable + 1] = frame
+        eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    else
+        frame:SetMovable(true)
+        frame:SetClampedToScreen(true)
+    end
 
     -- Determine drag target (header child or the frame itself)
     local headerName = DRAG_HEADERS[name]
@@ -143,7 +154,8 @@ local function HookFrame(frame, name)
         if not IsEnabled() then return end
         if button ~= "LeftButton" then return end
         if InCombatLockdown() and frame:IsProtected() then return end
-        if IsShiftKeyDown() then
+        local noShift = EllesmereUIDB and EllesmereUIDB.shifterNoShift
+        if IsShiftKeyDown() or noShift then
             dragging = "save"
         elseif IsControlKeyDown() then
             dragging = "temp"
@@ -204,7 +216,7 @@ end
 --  Event-driven initialization
 -------------------------------------------------------------------------------
 local pendingAddons = {}
-local eventFrame = CreateFrame("Frame")
+eventFrame = CreateFrame("Frame")
 
 local function InitShifter()
     for i = 1, #PRELOADED do
@@ -236,6 +248,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 self:UnregisterEvent("ADDON_LOADED")
             end
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        for i = 1, #deferredMovable do
+            local f = deferredMovable[i]
+            f:SetMovable(true)
+            f:SetClampedToScreen(true)
+        end
+        wipe(deferredMovable)
     end
 end)
 

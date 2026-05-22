@@ -4015,6 +4015,8 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         return
     end
     if event == "PLAYER_REGEN_DISABLED" then
+        -- Ignore post-match cleanup combat after a PvP match ends
+        if _G._EUIDM_PvpBlocked and _G._EUIDM_PvpBlocked() then return end
         _inCombat = true
         _combatEndTime = 0
         _needsFinalRefresh = false
@@ -4057,6 +4059,47 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
     end
 end)
 
+
+-------------------------------------------------------------------------------
+--  PvP match end detection
+--  Arenas and solo shuffle don't reliably fire PLAYER_REGEN_ENABLED when the
+--  match ends (IsGroupInCombat() stays true between rounds). Track the match
+--  active state via C_PvP and force-end the segment when the match finishes.
+-------------------------------------------------------------------------------
+do
+    local _pvpMatchActive = false
+    local _pvpBlockUntil = 0
+
+    local pvpFrame = CreateFrame("Frame")
+    pvpFrame:RegisterEvent("PVP_MATCH_COMPLETE")
+    pvpFrame:RegisterEvent("PVP_MATCH_STATE_CHANGED")
+    pvpFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    pvpFrame:SetScript("OnEvent", function()
+        if not C_PvP or not C_PvP.IsMatchActive then return end
+        local active = C_PvP.IsMatchActive()
+        if active and not _pvpMatchActive then
+            _pvpMatchActive = true
+        elseif not active and _pvpMatchActive then
+            _pvpMatchActive = false
+            C_Timer.After(1.5, function()
+                if _pvpMatchActive then return end
+                if _combatEndTime > 0 then return end
+                _combatEndTime = GetTime()
+                _inCombat = false
+                _needsFinalRefresh = false
+                for _, w in ipairs(_windows) do w.Refresh() end
+                C_Timer.After(0.5, function() StopSharedTicker() end)
+                -- Block new segments from post-match cleanup damage
+                _pvpBlockUntil = GetTime() + 20
+            end)
+        end
+    end)
+
+    -- Expose the block check so combat start can respect it
+    _G._EUIDM_PvpBlocked = function()
+        return GetTime() < _pvpBlockUntil
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Reset Data keybind button (hidden, receives override binding click)

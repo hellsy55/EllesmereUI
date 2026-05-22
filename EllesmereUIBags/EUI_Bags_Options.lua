@@ -552,6 +552,17 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Move Bags Without Shift",
+                  tooltip="When enabled, left-click dragging the bag window will move it without needing to hold Shift.",
+                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagMoveNoShift or false end,
+                  setValue=function(v)
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.bagMoveNoShift = v
+                  end },
+                { type="label", text="" }
+            ); y = y - h
+
             _, h = W:Spacer(parent, y, 20); y = y - h
             return math.abs(y)
             end) -- end pcall

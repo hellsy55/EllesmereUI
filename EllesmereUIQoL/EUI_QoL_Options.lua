@@ -239,6 +239,77 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 5: Show Coordinates on Map (left, with cog) | empty
+        local coordRow
+        coordRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Coordinates on Map",
+              tooltip="Displays cursor and player coordinates at the bottom of the world map.",
+              getValue=function()
+                  if not EllesmereUIDB then return true end
+                  return EllesmereUIDB.mapCoords ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.mapCoords = v
+                  if EllesmereUI._applyMapCoords then EllesmereUI._applyMapCoords() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" }
+        );  y = y - h
+
+        -- Cog on Show Coordinates on Map (left region)
+        do
+            local leftRgn = coordRow._leftRegion
+            local function coordsOff()
+                return EllesmereUIDB and EllesmereUIDB.mapCoords == false
+            end
+
+            local _, coordCogShow = EllesmereUI.BuildCogPopup({
+                title = "Map Coordinates Settings",
+                rows = {
+                    { type = "slider", label = "Text Size", min = 8, max = 24, step = 1,
+                      get = function()
+                          return (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
+                      end,
+                      set = function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.mapCoordsTextSize = v
+                          if EllesmereUI._applyMapCoords then EllesmereUI._applyMapCoords() end
+                      end },
+                },
+            })
+            local coordCogBtn = CreateFrame("Button", nil, leftRgn)
+            coordCogBtn:SetSize(26, 26)
+            coordCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = coordCogBtn
+            coordCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            coordCogBtn:SetAlpha(coordsOff() and 0.15 or 0.4)
+            local coordCogTex = coordCogBtn:CreateTexture(nil, "OVERLAY")
+            coordCogTex:SetAllPoints()
+            coordCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            coordCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            coordCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(coordsOff() and 0.15 or 0.4) end)
+            coordCogBtn:SetScript("OnClick", function(self) coordCogShow(self) end)
+
+            local coordCogBlock = CreateFrame("Frame", nil, coordCogBtn)
+            coordCogBlock:SetAllPoints()
+            coordCogBlock:SetFrameLevel(coordCogBtn:GetFrameLevel() + 10)
+            coordCogBlock:EnableMouse(true)
+            coordCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(coordCogBtn, EllesmereUI.DisabledTooltip("Show Coordinates on Map"))
+            end)
+            coordCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = coordsOff()
+                coordCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then coordCogBlock:Show() else coordCogBlock:Hide() end
+            end)
+            local coordInitOff = coordsOff()
+            coordCogBtn:SetAlpha(coordInitOff and 0.15 or 0.4)
+            if coordInitOff then coordCogBlock:Show() else coordCogBlock:Hide() end
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         ---------------------------------------------------------------------------
@@ -1125,8 +1196,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Auto Open Containers",
               tooltip="Automatically opens bags, boxes and parcels in your inventory when they are added to your bags.",
               getValue=function()
-                  if not EllesmereUIDB then return true end
-                  return EllesmereUIDB.autoOpenContainers ~= false
+                  if not EllesmereUIDB then return false end
+                  return EllesmereUIDB.autoOpenContainers == true
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end

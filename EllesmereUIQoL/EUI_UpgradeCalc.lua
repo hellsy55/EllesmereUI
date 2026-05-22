@@ -644,10 +644,7 @@ closeBtn:SetScript("OnClick", function() f:Hide() end)
 
 local tabY = -36
 
-local tabSep = SolidTex(f, "BORDER", 0.2, 0.2, 0.2, 1)
-PP.Point(tabSep, "TOPLEFT",  f, "TOPLEFT",  10,  tabY - 22)
-PP.Point(tabSep, "TOPRIGHT", f, "TOPRIGHT", -10, tabY - 22)
-tabSep:SetHeight(PP.mult)
+-- Top divider removed for cleaner look
 
 -- Row helpers
 local function MakeTableHeader(parent, cols, yOffset)
@@ -1758,3 +1755,47 @@ _firstRunEvt:SetScript("OnEvent", function(self)
         end
     end)
 end)
+
+-------------------------------------------------------------------------------
+--  Open/close with Crest Upgrader NPC
+--  Detects the upgrade NPC via PLAYER_INTERACTION_MANAGER_FRAME_SHOW/HIDE
+--  (type 10 = ItemUpgrade). Falls back to ITEM_UPGRADE_MASTER_UPDATE.
+-------------------------------------------------------------------------------
+do
+    local UPGRADE_INTERACTION = Enum and Enum.PlayerInteractionType and Enum.PlayerInteractionType.ItemUpgrade or 10
+    local _upgraderOpen = false
+
+    local evtFrame = CreateFrame("Frame")
+    evtFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+    evtFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+    evtFrame:RegisterEvent("ITEM_UPGRADE_MASTER_UPDATE")
+    evtFrame:SetScript("OnEvent", function(_, event, interactionType)
+        local opts = Calc.GetOptsDB and Calc.GetOptsDB()
+        if not opts or not opts.openWithUpgrader then return end
+
+        if event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
+            if interactionType == UPGRADE_INTERACTION then
+                _upgraderOpen = true
+                local fr = _G["EUIUpgCalcFrame"]
+                if fr and not fr:IsShown() then fr:Show() end
+            end
+            return
+        end
+
+        if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+            if interactionType == UPGRADE_INTERACTION then
+                _upgraderOpen = false
+                local fr = _G["EUIUpgCalcFrame"]
+                if fr and fr:IsShown() then fr:Hide() end
+            end
+            return
+        end
+
+        -- ITEM_UPGRADE_MASTER_UPDATE fallback (fires when NPC sends data)
+        if not _upgraderOpen and Calc:IsUpgraderOpen() then
+            _upgraderOpen = true
+            local fr = _G["EUIUpgCalcFrame"]
+            if fr and not fr:IsShown() then fr:Show() end
+        end
+    end)
+end

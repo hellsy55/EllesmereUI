@@ -113,5 +113,19 @@ _G._EUI_BuildShifterPage = function(pageName, parent, yOffset)
           end }
     );  y = y - h
 
+    -- Row 2: Move windows without shift
+    _, h = W:DualRow(parent, y,
+        { type = "toggle", text = "Move Windows Without Shift",
+          tooltip = "When enabled, left-click dragging a window will save its position without needing to hold Shift. Ctrl+drag still does a temporary move.",
+          getValue = function()
+              return EllesmereUIDB and EllesmereUIDB.shifterNoShift or false
+          end,
+          setValue = function(v)
+              if not EllesmereUIDB then EllesmereUIDB = {} end
+              EllesmereUIDB.shifterNoShift = v
+          end },
+        { type = "label", text = "" }
+    );  y = y - h
+
     return math.abs(y)
 end

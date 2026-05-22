@@ -287,7 +287,12 @@ local function GetPrimaryPowerType()
     if classFile == "HUNTER" then
         -- BM and MM: Focus is displayed as a class resource bar (secondary),
         -- not the power bar. Survival keeps Focus as the power bar.
-        if spec == 1 or spec == 2 then return nil end
+        -- Users can override this with hunterFocusAsPower.
+        if spec == 1 or spec == 2 then
+            local pp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
+            if pp and pp.hunterFocusAsPower then return PT.FOCUS end
+            return nil
+        end
     end
     if classFile == "MONK" then
         if spec == 1 then return PT.ENERGY end  -- Brewmaster
@@ -422,7 +427,9 @@ local function GetSecondaryResource()
     elseif classFile == "HUNTER" and spec == 3 then
         return { power = "TIP_OF_THE_SPEAR", max = 3, type = "custom" }
     elseif classFile == "HUNTER" and (spec == 1 or spec == 2) then
-        -- BM and MM: Focus as a class resource bar
+        -- BM and MM: Focus as a class resource bar (unless overridden)
+        local pp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
+        if pp and pp.hunterFocusAsPower then return nil end
         local mx = UnitPowerMax("player", PT.FOCUS)
         if issecretvalue and issecretvalue(mx) then mx = 100 end
         if not mx or mx <= 0 then mx = 100 end
@@ -536,8 +543,13 @@ end
 -- per-element scale, border, colors, text, alerts
 -------------------------------------------------------------------------------
 local _, playerClassFile = UnitClass("player")
-local playerCC = CLASS_COLORS[playerClassFile] or { 0.15, 0.75, 0.30 }
-local playerPowerCC = POWER_COLORS[PRIMARY_CLASS_MAP[playerClassFile]] or { 0, 0.55, 1 }
+-- Static neutral defaults for custom fill colors. Class/power colors are
+-- applied at runtime when customColored=false; these only matter as the
+-- initial custom color when the user first enables "Custom Colored."
+-- IMPORTANT: Using class-specific values caused StripDefaults on logout
+-- to nil-out any channel that matched the current class's default, then
+-- DeepMergeDefaults on a different class filled it with the wrong color.
+local CUSTOM_FILL_DEFAULT = { 1, 1, 1 }
 
 local DEFAULTS = {
     profile = {
@@ -550,7 +562,7 @@ local DEFAULTS = {
             borderTexture = "solid",
             darkTheme   = false,
             customColored = false,
-            fillR       = playerCC[1], fillG = playerCC[2], fillB = playerCC[3], fillA = 1,
+            fillR       = CUSTOM_FILL_DEFAULT[1], fillG = CUSTOM_FILL_DEFAULT[2], fillB = CUSTOM_FILL_DEFAULT[3], fillA = 1,
             bgR         = 0x11/255, bgG = 0x11/255, bgB = 0x11/255, bgA = 0.75,
             textFormat  = "none",  -- "none","both","curhpshort","perhp"
             textSize    = 11,
@@ -580,7 +592,7 @@ local DEFAULTS = {
             borderTexture = "solid",
             darkTheme   = false,
             customColored = false,
-            fillR       = playerPowerCC[1], fillG = playerPowerCC[2], fillB = playerPowerCC[3], fillA = 1,
+            fillR       = CUSTOM_FILL_DEFAULT[1], fillG = CUSTOM_FILL_DEFAULT[2], fillB = CUSTOM_FILL_DEFAULT[3], fillA = 1,
             bgR         = 0x11/255, bgG = 0x11/255, bgB = 0x11/255, bgA = 0.75,
             textFormat  = "perpp",  -- "none","smart","curpp","perpp","both"
             showPercent = true,
@@ -650,7 +662,7 @@ local DEFAULTS = {
             anchorX       = 0,
             anchorY       = -54,
             classColored  = false,
-            fillR         = playerCC[1], fillG = playerCC[2], fillB = playerCC[3], fillA = 1,
+            fillR         = CUSTOM_FILL_DEFAULT[1], fillG = CUSTOM_FILL_DEFAULT[2], fillB = CUSTOM_FILL_DEFAULT[3], fillA = 1,
             gradientEnabled = false,
             gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"

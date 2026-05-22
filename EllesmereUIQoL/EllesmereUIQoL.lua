@@ -132,7 +132,7 @@ qolFrame:SetScript("OnEvent", function(self)
         local _failedItems = {}   -- itemID -> true (items that failed to open, skip forever)
         local _cacheBuilt = false
         local function IsEnabled()
-            return EllesmereUIDB and EllesmereUIDB.autoOpenContainers ~= false
+            return EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true
         end
         local SLOTS_PER_FRAME = 3  -- check 3 slots per OnUpdate tick
 
@@ -221,7 +221,7 @@ qolFrame:SetScript("OnEvent", function(self)
 
         -- After cache is built, BAG_UPDATE_DELAYED only checks changed slots
         local containerFrame = CreateFrame("Frame")
-        if not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers == false) then
+        if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true then
             containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         end
         containerFrame:SetScript("OnEvent", function()
@@ -1724,4 +1724,135 @@ do
             EllesmereUI._applyCrosshair()
         end
     end)
+
+    ---------------------------------------------------------------------------
+    --  Map Coordinates
+    ---------------------------------------------------------------------------
+    do
+        local coordFrame
+        local coordText
+
+        local function CreateCoordFrame()
+            if coordFrame then return end
+            local mapLoaded = C_AddOns.IsAddOnLoaded("Blizzard_WorldMap")
+            if not mapLoaded or not WorldMapFrame then return end
+
+            coordFrame = CreateFrame("Frame", nil, WorldMapFrame.ScrollContainer)
+            coordFrame:SetFrameStrata("HIGH")
+            coordFrame:SetSize(1, 1)
+            coordFrame:SetPoint("BOTTOM", WorldMapFrame.ScrollContainer, "BOTTOM", 0, 10)
+
+            local PP = EllesmereUI.PanelPP
+            local fp = EllesmereUI.GetFontPath()
+            local outF = EllesmereUI.GetFontOutlineFlag()
+            local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
+
+            local divider = coordFrame:CreateTexture(nil, "OVERLAY")
+            divider:SetColorTexture(1, 1, 1, 0.9)
+            PP.Size(divider, 2, sz)
+            divider:SetPoint("BOTTOM", coordFrame, "BOTTOM", 0, 0)
+
+            local useShadow = EllesmereUI.GetFontUseShadow()
+
+            local cursorFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            cursorFS:SetFont(fp, sz, outF)
+            cursorFS:SetTextColor(1, 1, 1, 0.9)
+            cursorFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+            cursorFS:SetJustifyH("RIGHT")
+            cursorFS:SetPoint("RIGHT", divider, "LEFT", -10, 0)
+
+            local playerFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            playerFS:SetFont(fp, sz, outF)
+            playerFS:SetTextColor(1, 1, 1, 0.9)
+            playerFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+            playerFS:SetJustifyH("LEFT")
+            playerFS:SetPoint("LEFT", divider, "RIGHT", 10, 0)
+
+            coordText = { cursor = cursorFS, player = playerFS, divider = divider }
+
+            local elapsed = 0
+            coordFrame:SetScript("OnUpdate", function(_, dt)
+                elapsed = elapsed + dt
+                if elapsed < 0.05 then return end
+                elapsed = 0
+                local mapID = WorldMapFrame:GetMapID()
+                if not mapID then
+                    cursorFS:SetText("")
+                    playerFS:SetText("")
+                    divider:Hide()
+                    return
+                end
+                divider:Show()
+
+                -- Player position
+                local pText = "?, ?"
+                local playerPos = C_Map.GetPlayerMapPosition(mapID, "player")
+                if playerPos then
+                    local px, py = playerPos:GetXY()
+                    if px and py and px > 0 and py > 0 then
+                        pText = format("%.0f, %.0f", px * 100, py * 100)
+                    end
+                end
+
+                -- Cursor position
+                local cText = "0, 0"
+                local child = WorldMapFrame.ScrollContainer.Child
+                if child and child:IsMouseOver() then
+                    local cx, cy = child:GetSize()
+                    if cx and cx > 0 and cy and cy > 0 then
+                        local scale = child:GetEffectiveScale()
+                        local left = child:GetLeft()
+                        local top = child:GetTop()
+                        if scale and left and top then
+                            local curX, curY = GetCursorPosition()
+                            local nx = (curX / scale - left) / cx
+                            local ny = (top - curY / scale) / cy
+                            if nx >= 0 and nx <= 1 and ny >= 0 and ny <= 1 then
+                                cText = format("%.0f, %.0f", nx * 100, ny * 100)
+                            end
+                        end
+                    end
+                end
+
+                cursorFS:SetText("C: " .. cText)
+                playerFS:SetText("P: " .. pText)
+            end)
+        end
+
+        EllesmereUI._applyMapCoords = function()
+            local enabled = not EllesmereUIDB or EllesmereUIDB.mapCoords ~= false
+            if enabled then
+                CreateCoordFrame()
+                if coordFrame then
+                    local PP = EllesmereUI.PanelPP
+                    local fp = EllesmereUI.GetFontPath()
+                    local outF = EllesmereUI.GetFontOutlineFlag()
+                    local useShadow = EllesmereUI.GetFontUseShadow()
+                    local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
+                    coordText.cursor:SetFont(fp, sz, outF)
+                    coordText.cursor:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+                    coordText.player:SetFont(fp, sz, outF)
+                    coordText.player:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+                    PP.Size(coordText.divider, 2, sz)
+                    coordFrame:Show()
+                end
+            elseif coordFrame then
+                coordFrame:Hide()
+            end
+        end
+
+        -- WorldMapFrame is load-on-demand; hook when it loads
+        if C_AddOns.IsAddOnLoaded("Blizzard_WorldMap") then
+            EllesmereUI._applyMapCoords()
+        else
+            local loader = CreateFrame("Frame")
+            loader:RegisterEvent("ADDON_LOADED")
+            loader:SetScript("OnEvent", function(self, _, addonName)
+                if addonName == "Blizzard_WorldMap" then
+                    self:UnregisterEvent("ADDON_LOADED")
+                    EllesmereUI._applyMapCoords()
+                end
+            end)
+        end
+    end
 end

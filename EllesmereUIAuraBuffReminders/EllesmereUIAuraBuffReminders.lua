@@ -1986,15 +1986,25 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             if IsSpellKnown(sid) then _hasImbueSpell = true; break end
         end
         if co.enabled.weapon_enchant and not _hasImbueSpell then
-            local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
+            local hasMH, mhExpire, _, _, hasOH, ohExpire = GetWeaponEnchantInfo()
             local mhCat = GetWeaponCategory(16)
             local ohCat = GetWeaponCategory(17)
 
-            -- Check each weapon slot independently (both can show at once)
+            -- Check each weapon slot independently (both can show at once).
+            -- Remind if: no enchant, OR enchant is under the duration threshold.
             local preferredKey = co.preferredWeaponEnchant or "last_used"
             local lastUsedID = db.char and db.char.lastUsedWeaponEnchant or nil
-            for _, si in ipairs({{slot=16, cat=mhCat, has=hasMH}, {slot=17, cat=ohCat, has=hasOH}}) do
+            for _, si in ipairs({{slot=16, cat=mhCat, has=hasMH, expire=mhExpire}, {slot=17, cat=ohCat, has=hasOH, expire=ohExpire}}) do
+                local shouldRemind = false
                 if si.cat and not si.has then
+                    shouldRemind = true
+                elseif si.cat and si.has and si.expire and si.expire > 0 then
+                    local expireTime = si.expire / 1000 + GetTime()
+                    if IsUnderDuration(3600, expireTime) then
+                        shouldRemind = true
+                    end
+                end
+                if shouldRemind then
                     local bestItemID = FindWeaponEnchantItem(preferredKey, lastUsedID, si.cat)
                     local hasBags = (bestItemID ~= nil)
                     if not bestItemID then

@@ -424,22 +424,37 @@ ShowKeystonePopup = function()
     local body = p._body
     local contentW = POPUP_W - PAD * 2
 
-    -- Collect party keys
+    -- Collect party keys (only current group members)
+    local currentMembers = {}
+    currentMembers[PlayerName("player")] = true
+    if IsInGroup() then
+        local prefix = IsInRaid() and "raid" or "party"
+        local count = GetNumGroupMembers()
+        for i = 1, (IsInRaid() and count or count - 1) do
+            local name = PlayerName(prefix .. i)
+            if name then currentMembers[name] = true end
+        end
+    end
     local partyEntries = {}
     for name, info in pairs(partyKeys) do
-        local dName = DungeonNameFromMap(info.dungeon)
-        partyEntries[#partyEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile }
+        if currentMembers[name] or currentMembers[StripRealm(name)] then
+            local dName = DungeonNameFromMap(info.dungeon)
+            partyEntries[#partyEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile }
+        end
     end
     table.sort(partyEntries, function(a, b)
         if a.lvl ~= b.lvl then return a.lvl > b.lvl end
         return a.name < b.name
     end)
 
-    -- Collect guild keys
+    -- Collect guild keys (exclude ourselves)
     local guildEntries = {}
+    local myName = PlayerName("player")
     for name, info in pairs(guildKeys) do
-        local dName = DungeonNameFromMap(info.dungeon)
-        guildEntries[#guildEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile }
+        if name ~= myName and StripRealm(name) ~= StripRealm(myName) and (info.keyLevel or 0) > 0 then
+            local dName = DungeonNameFromMap(info.dungeon)
+            guildEntries[#guildEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel, rating = info.rating or 0, classFile = info.classFile }
+        end
     end
     table.sort(guildEntries, function(a, b)
         if a.lvl ~= b.lvl then return a.lvl > b.lvl end
@@ -655,17 +670,10 @@ SLASH_EUIKEYS2 = "/key"
 SLASH_EUIKEYS3 = "/ekeys"
 SlashCmdList["EUIKEYS"] = function()
     local cfg = EllesmereUIDB and EllesmereUIDB.keystonePopup
-    if cfg and cfg.enabled == false then
-        EllesmereUI.Print("|cff0cd29d[EllesmereUI]|r Keystone popup is disabled. Enable it in QoL > Keys & Logs.")
-        return
-    end
+    if cfg and cfg.enabled == false then return end
     RegisterKeyEvents()
     RecordOwnKey()
-    if IsInGroup() then
-        QueryPartyKeys()
-        ShowKeystonePopup()
-        C_Timer.After(1.0, ShowKeystonePopup)
-    else
-        ShowKeystonePopup()
-    end
+    QueryPartyKeys()
+    ShowKeystonePopup()
+    C_Timer.After(1.0, ShowKeystonePopup)
 end

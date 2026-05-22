@@ -468,14 +468,20 @@ local ANIM_SLIDE_PX = 6
 
 -- Plays a one-shot intro animation on an icon frame.
 -- Uses dt-accumulated OnUpdate for smooth sub-frame interpolation.
+-- Only called on icon 1, which always rests at CENTER of _iconStrip.
 local function PlayIconAnim(ic, animType, dir, targetAlpha)
     local f = ic.frame
     targetAlpha = targetAlpha or 1
 
-    -- Capture the resting anchor before animation starts
-    local p1, rel, relP, origX, origY = f:GetPoint(1)
-    if not p1 then return end
-    origX = origX or 0; origY = origY or 0
+    -- Kill any in-progress animation and snap to rest position.
+    -- Using hardcoded rest anchor (icon 1 = CENTER,0,0) instead of
+    -- GetPoint, which returns mid-animation displacement on rapid casts.
+    f:SetScript("OnUpdate", nil)
+    f:SetScale(1)
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", _iconStrip, "CENTER", 0, 0)
+
+    local p1, rel, relP, origX, origY = "CENTER", _iconStrip, "CENTER", 0, 0
 
     -- Compute starting displacement for slide types
     local dx, dy = 0, 0
@@ -549,6 +555,10 @@ local function MakeIcon(parent)
             end
         end
     end)
+    local bg = ic.frame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0, 0, 0, 0.4)
+    ic.bg = bg
     ic.tex = ic.frame:CreateTexture(nil, "ARTWORK")
     ic.tex:SetAllPoints()
     ic.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -630,10 +640,8 @@ BuildIconStrip = function()
                 end
             end
         end)
-        -- Background so the strip is visible even with faded preview icons
-        _iconStrip._bg = _iconStrip:CreateTexture(nil, "BACKGROUND")
-        _iconStrip._bg:SetAllPoints()
-        _iconStrip._bg:SetColorTexture(0, 0, 0, 0.4)
+        -- Per-icon backgrounds (created in MakeIcon) travel with each icon
+        -- during animation. No strip-level background needed.
     end
 
     local iconSz = PhysicalPixels(sh.iconSize or 24)
