@@ -4,21 +4,132 @@
 --  Called by BuildQoLPage via EllesmereUI.BuildMacroFactory(parent, y, PP)
 -------------------------------------------------------------------------------
 
--- One-time migration: update EUI_Health macro body to use spell name instead of ID.
--- Runs once per account (v2 flag).
+local EUI_HEALTH_MACRO_NAME = "EUI_Health"
+
+-- Retail recovery consumables (priority order). Stones before pots; one pot rank if multiple in bags.
+local HEALTH_RECOVERY_STONES = { 5512, 224464 }
+local HEALTH_RECOVERY_POTS = {
+    241304, 241305, -- Midnight: Silvermoon Health Potion
+}
+
+local function HealthMacroItemCount(itemID)
+    return GetItemCount(itemID, false) or 0
+end
+
+local function CollectHealthRecoveryItems()
+    local items = {}
+    for _, itemID in ipairs(HEALTH_RECOVERY_STONES) do
+        if HealthMacroItemCount(itemID) > 0 then
+            items[#items + 1] = itemID
+            if #items >= #HEALTH_RECOVERY_STONES then
+                break
+            end
+        end
+    end
+    for _, itemID in ipairs(HEALTH_RECOVERY_POTS) do
+        if HealthMacroItemCount(itemID) > 0 then
+            items[#items + 1] = itemID
+            break
+        end
+    end
+    return items
+end
+
+local function HealthRecoverySequenceKey(items)
+    return table.concat(items, ",")
+end
+
+local function GetHealthMacroDB()
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    if not EllesmereUIDB.macroFactory then EllesmereUIDB.macroFactory = {} end
+    if not EllesmereUIDB.macroFactory[EUI_HEALTH_MACRO_NAME] then
+        EllesmereUIDB.macroFactory[EUI_HEALTH_MACRO_NAME] = {}
+    end
+    return EllesmereUIDB.macroFactory[EUI_HEALTH_MACRO_NAME]
+end
+
+local lastHealthRecoveryKey = nil
+local healthMacroPendingUpdate = false
+
+local function ApplyHealthRecoveryMacro(items)
+    items = items or CollectHealthRecoveryItems()
+    local key = HealthRecoverySequenceKey(items)
+
+    local idx = GetMacroIndexByName(EUI_HEALTH_MACRO_NAME)
+    if idx == 0 then
+        lastHealthRecoveryKey = key
+        healthMacroPendingUpdate = false
+        return
+    end
+
+    if InCombatLockdown() then
+        if key ~= lastHealthRecoveryKey then
+            healthMacroPendingUpdate = true
+        end
+        return
+    end
+
+    if key == lastHealthRecoveryKey then
+        healthMacroPendingUpdate = false
+        return
+    end
+
+    EditMacro(idx, nil, nil, EllesmereUI.BuildHealthRecoveryMacroBody(GetHealthMacroDB(), items))
+    lastHealthRecoveryKey = key
+    healthMacroPendingUpdate = false
+end
+
+function EllesmereUI.BuildHealthRecoveryMacroBody(db, items)
+    db = db or {}
+    items = items or CollectHealthRecoveryItems()
+    local lines = {}
+
+    if db.showTooltip ~= false then
+        local tip = (items[1] and ("item:" .. items[1])) or "Recuperate"
+        lines[#lines + 1] = "#showtooltip " .. tip
+    end
+
+    lines[#lines + 1] = "/cast [nocombat] Recuperate"
+
+    if #items > 0 then
+        local seqParts = {}
+        for _, itemID in ipairs(items) do
+            seqParts[#seqParts + 1] = "item:" .. itemID
+        end
+        lines[#lines + 1] = "/castsequence [@player,combat] reset=combat "
+            .. table.concat(seqParts, ", ")
+    end
+
+    if #lines == 0 then return "" end
+    return table.concat(lines, "\n")
+end
+
+-- Keep EUI_Health in sync with bags / login without opening the Macro Factory UI.
 do
     local f = CreateFrame("Frame")
+    local bagPending = false
     f:RegisterEvent("PLAYER_LOGIN")
-    f:SetScript("OnEvent", function(self)
-        self:UnregisterAllEvents()
-        if not EllesmereUIDB then EllesmereUIDB = {} end
-        if EllesmereUIDB._healthMacroMigratedV2 then return end
-        local idx = GetMacroIndexByName("EUI_Health")
-        if idx == 0 then EllesmereUIDB._healthMacroMigratedV2 = true; return end
-        if InCombatLockdown() then return end
-        local body = "#showtooltip item:241304\n/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305"
-        EditMacro(idx, nil, nil, body)
-        EllesmereUIDB._healthMacroMigratedV2 = true
+    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    f:RegisterEvent("PLAYER_REGEN_ENABLED")
+    f:RegisterEvent("BAG_UPDATE")
+    f:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            if healthMacroPendingUpdate then
+                healthMacroPendingUpdate = false
+                ApplyHealthRecoveryMacro()
+            end
+            return
+        end
+        if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
+            C_Timer.After(1, ApplyHealthRecoveryMacro)
+            return
+        end
+        if bagPending then return end
+        bagPending = true
+        C_Timer.After(0.5, function()
+            bagPending = false
+            ApplyHealthRecoveryMacro()
+        end)
     end)
 end
 
@@ -50,11 +161,10 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             },
         },
         {
-            name = "EUI_Health",
+            name = EUI_HEALTH_MACRO_NAME,
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
-            fixedBody = "/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
-            fixedTooltip = "item:241304",
+            healthRecovery = true,
         },
         {
             name = "EUI_Food",
@@ -456,6 +566,13 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         return nil
     end
 
+    local function GetMacroInventoryKey(def, db)
+        if def.healthRecovery then
+            return lastHealthRecoveryKey or HealthRecoverySequenceKey(CollectHealthRecoveryItems())
+        end
+        return GetFirstAvailableItemID(def, db)
+    end
+
     local function BuildMacroBody(def, db)
         if def.checkboxes then
             local cbs = def.checkboxes
@@ -491,6 +608,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             end
             if #lines == 0 then return "" end
             return body .. table.concat(lines, "\n")
+        elseif def.healthRecovery then
+            return EllesmereUI.BuildHealthRecoveryMacroBody(db, nil)
         elseif def.fixedBody then
             local body = ""
             if db.showTooltip ~= false and def.fixedTooltip then
@@ -506,6 +625,10 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local pendingMacroUpdates = {}
 
     local function UpdateMacro(def, db)
+        if def.healthRecovery then
+            ApplyHealthRecoveryMacro()
+            return
+        end
         local idx = GetMacroIndexByName(def.name)
         if idx ~= 0 then
             if InCombatLockdown() then
@@ -805,6 +928,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                             if icon then break end
                         end
                     end
+                elseif def.healthRecovery then
+                    local tipID = tonumber((lastHealthRecoveryKey or ""):match("^(%d+)"))
+                    if tipID and C_Item.GetItemIconByID then
+                        icon = C_Item.GetItemIconByID(tipID)
+                    end
                 elseif def.fixedTooltip then
                     local slot = tonumber(def.fixedTooltip)
                     if slot then
@@ -860,10 +988,15 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     if InCombatLockdown() then return end
                     if MacroExists() then
                         DeleteMacro(def.name)
+                        if def.healthRecovery then lastHealthRecoveryKey = nil end
                     else
                         local db = GetDB()
                         CreateMacro(def.name, def.macroIcon or "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
-                        lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
+                        if def.healthRecovery then
+                            lastHealthRecoveryKey = nil
+                            ApplyHealthRecoveryMacro()
+                        end
+                        lastAvailableItems[def.name] = GetMacroInventoryKey(def, db)
                         PlayFlash()
                         C_Timer.After(0.15, function()
                             if not InCombatLockdown() then ShowMacroFrame() end
@@ -1094,7 +1227,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 if InCombatLockdown() then return end
                 local db = GetDB()
                 CreateMacro(def.name, def.macroIcon or "INV_MISC_QUESTIONMARK", BuildMacroBody(def, db), nil)
-                lastAvailableItems[def.name] = GetFirstAvailableItemID(def, db)
+                if def.healthRecovery then
+                    lastHealthRecoveryKey = nil
+                    ApplyHealthRecoveryMacro()
+                end
+                lastAvailableItems[def.name] = GetMacroInventoryKey(def, db)
                 self._playFlash()
                 C_Timer.After(0.1, RefreshState)
                 C_Timer.After(0.15, function()
@@ -1131,16 +1268,21 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local function UpdateInventoryDependentMacros()
         for _, btn in ipairs(allMacroButtons) do
             local mdef = btn._def
-            if mdef and mdef.checkboxes and btn._tex then
+            if mdef and btn._tex and mdef.checkboxes then
                 local idx = GetMacroIndexByName(mdef.name)
                 if idx ~= 0 then
                     local db = GetMacroDB(mdef.name)
-                    local newAvailableItemID = GetFirstAvailableItemID(mdef, db)
-                    local oldAvailableItemID = lastAvailableItems[mdef.name]
-                    if newAvailableItemID ~= oldAvailableItemID then
-                        lastAvailableItems[mdef.name] = newAvailableItemID
+                    local newKey = GetMacroInventoryKey(mdef, db)
+                    if newKey ~= lastAvailableItems[mdef.name] then
+                        lastAvailableItems[mdef.name] = newKey
                         UpdateMacro(mdef, db)
                     end
+                end
+            elseif mdef and btn._tex and mdef.healthRecovery then
+                local newKey = lastHealthRecoveryKey or GetMacroInventoryKey(mdef, GetMacroDB(mdef.name))
+                if newKey ~= lastAvailableItems[mdef.name] then
+                    lastAvailableItems[mdef.name] = newKey
+                    if btn._refreshIcon then btn._refreshIcon() end
                 end
             end
         end
@@ -1157,9 +1299,16 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             local mdef = btn._def
             if mdef and btn._tex then
                 local ex = GetMacroIndexByName(mdef.name) ~= 0
-                if btn._isGray and not ex then btn._tex:SetDesaturated(false); btn._isGray = false
-                elseif not btn._isGray and ex then btn._tex:SetDesaturated(true); btn._isGray = true end
-                if btn._refreshIcon then btn._refreshIcon() end
+                local wasCreated = btn._isGray
+                if wasCreated and not ex then
+                    btn._tex:SetDesaturated(false)
+                    btn._isGray = false
+                    if btn._refreshIcon then btn._refreshIcon() end
+                elseif not wasCreated and ex then
+                    btn._tex:SetDesaturated(true)
+                    btn._isGray = true
+                    if btn._refreshIcon then btn._refreshIcon() end
+                end
                 if btn._cogPopup and btn._cogPopup:IsShown() and btn._cogPopup._refreshAction then
                     btn._cogPopup._refreshAction()
                 end
