@@ -5,6 +5,9 @@
 --  in open world only (instances cannot provide storable text). Stores message
 --  body plus serverTime/timestamp; restore prepends timestamp from that format.
 -------------------------------------------------------------------------------
+-- Chat session history disabled for now
+do return end
+
 local _, ns = ...
 local ECHAT = ns.ECHAT
 if not ECHAT then return end
@@ -51,10 +54,10 @@ local CAPTURE_EVENTS = {
 --  Helpers
 -------------------------------------------------------------------------------
 local function PersistEnabled()
-    if not ECHAT.DB then return true end
+    if not ECHAT.DB then return false end
     local db = ECHAT.DB()
-    if not db then return true end
-    return db.persistChatHistory ~= false
+    if not db then return false end
+    return db.persistChatHistory == true
 end
 
 local function SessionHistorySafe()

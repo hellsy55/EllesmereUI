@@ -1782,16 +1782,22 @@ do
                     divider:Hide()
                     return
                 end
-                divider:Show()
-
-                -- Player position
-                local pText = "?, ?"
+                -- Player position (hidden in instances)
                 local playerPos = C_Map.GetPlayerMapPosition(mapID, "player")
+                local hasPlayer = false
                 if playerPos then
                     local px, py = playerPos:GetXY()
                     if px and py and px > 0 and py > 0 then
-                        pText = format("%.0f, %.0f", px * 100, py * 100)
+                        playerFS:SetText("P: " .. format("%.0f, %.0f", px * 100, py * 100))
+                        hasPlayer = true
                     end
+                end
+                if hasPlayer then
+                    divider:Show()
+                    playerFS:Show()
+                else
+                    divider:Hide()
+                    playerFS:Hide()
                 end
 
                 -- Cursor position
@@ -1815,12 +1821,11 @@ do
                 end
 
                 cursorFS:SetText("C: " .. cText)
-                playerFS:SetText("P: " .. pText)
             end)
         end
 
         EllesmereUI._applyMapCoords = function()
-            local enabled = not EllesmereUIDB or EllesmereUIDB.mapCoords ~= false
+            local enabled = EllesmereUIDB and EllesmereUIDB.mapCoords
             if enabled then
                 CreateCoordFrame()
                 if coordFrame then

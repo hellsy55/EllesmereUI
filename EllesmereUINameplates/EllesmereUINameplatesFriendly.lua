@@ -1167,6 +1167,21 @@ end
 --  PLAYER_LOGIN enables the system; PLAYER_ENTERING_WORLD does a follow-up
 --  sweep because some friendly nameplates may not be queryable yet at
 --  PLAYER_LOGIN time (the world isn't fully loaded).
+-- Re-sweep after NamePlateDriverFrame.UpdateNamePlateOptions fires.
+-- TRP3 hooks this and calls UpdateAllNamePlates which can reset our
+-- suppression on friendly plates. Debounced to batch multiple calls.
+if C_AddOns.IsAddOnLoaded("totalRP3") or C_AddOns.DoesAddOnExist("totalRP3") then
+    local _npOptsPending = false
+    hooksecurefunc(NamePlateDriverFrame, "UpdateNamePlateOptions", function()
+        if _npOptsPending then return end
+        _npOptsPending = true
+        C_Timer.After(0, function()
+            _npOptsPending = false
+            ns.UpdateFriendlyNameplateSystem()
+        end)
+    end)
+end
+
 -------------------------------------------------------------------------------
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")

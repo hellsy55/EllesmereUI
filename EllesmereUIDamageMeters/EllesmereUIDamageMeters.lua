@@ -315,6 +315,8 @@ local function IsGroupInCombat()
     return false
 end
 
+local StopSharedTicker  -- forward declaration (defined in refresh section)
+
 -- Keystone start: wipe data so Overall = this dungeon run
 -- Keystone end: auto-swap windows from Current to Overall (if enabled)
 local instanceFrame = CreateFrame("Frame")
@@ -3964,7 +3966,7 @@ local function StartSharedTicker()
     _sharedTicker = C_Timer.NewTicker(rate, SharedRefreshTick)
 end
 
-local function StopSharedTicker()
+StopSharedTicker = function()
     if _sharedTicker then _sharedTicker:Cancel(); _sharedTicker = nil end
 end
 

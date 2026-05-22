@@ -4,12 +4,15 @@
 --  Called by BuildQoLPage via EllesmereUI.BuildMacroFactory(parent, y, PP)
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+--  Dynamic Health Recovery (disabled -- kept for future use)
+-------------------------------------------------------------------------------
+--[[ DYNAMIC_HEALTH_RECOVERY
 local EUI_HEALTH_MACRO_NAME = "EUI_Health"
 
--- Retail recovery consumables (priority order). Stones before pots; one pot rank if multiple in bags.
 local HEALTH_RECOVERY_STONES = { 5512, 224464 }
 local HEALTH_RECOVERY_POTS = {
-    241304, 241305, -- Midnight: Silvermoon Health Potion
+    241304, 241305,
 }
 
 local function HealthMacroItemCount(itemID)
@@ -89,6 +92,7 @@ function EllesmereUI.BuildHealthRecoveryMacroBody(db, items)
         lines[#lines + 1] = "#showtooltip " .. tip
     end
 
+    lines[#lines + 1] = "/stopcasting"
     lines[#lines + 1] = "/cast [nocombat] Recuperate"
 
     if #items > 0 then
@@ -104,7 +108,6 @@ function EllesmereUI.BuildHealthRecoveryMacroBody(db, items)
     return table.concat(lines, "\n")
 end
 
--- Keep EUI_Health in sync with bags / login without opening the Macro Factory UI.
 do
     local f = CreateFrame("Frame")
     local bagPending = false
@@ -132,6 +135,8 @@ do
         end)
     end)
 end
+DYNAMIC_HEALTH_RECOVERY]]
+
 
 function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local ICON_SIZE = 40
@@ -161,10 +166,11 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             },
         },
         {
-            name = EUI_HEALTH_MACRO_NAME,
+            name = "EUI_Health",
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
-            healthRecovery = true,
+            fixedBody = "/stopcasting\n/cast [nocombat] Recuperate\n/use [combat] item:241304\n/use [combat] item:241305",
+            fixedTooltip = "item:241304",
         },
         {
             name = "EUI_Food",

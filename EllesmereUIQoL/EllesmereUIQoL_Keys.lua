@@ -18,6 +18,36 @@ local LKS_PREFIX      = "LibKS"
 
 local myRealm = (GetRealmName():gsub("%s", ""))
 local partyKeys = {}  -- [playerName] = { dungeon = mapID, keyLevel = N, rating = N }
+
+-- Dungeon mapID -> teleport spellID
+-- mapIDs here match what C_ChallengeMode returns and what keystone links store.
+-- Built dynamically from C_ChallengeMode.GetMapTable + spell lookup.
+local MAP_TELEPORT_SPELLS = {}
+do
+    -- Spell IDs indexed by dungeon name (case-insensitive matching)
+    local TELEPORT_BY_NAME = {
+        ["magisters' terrace"]         = 1254572,
+        ["maisara caverns"]            = 1254559,
+        ["nexus-point xenas"]          = 1254563,
+        ["windrunner spire"]           = 1254400,
+        ["algeth'ar academy"]          = 393273,
+        ["pit of saron"]               = 1254555,
+        ["seat of the triumvirate"]    = 1254551,
+        ["skyreach"]                   = 159898,
+    }
+    if C_ChallengeMode and C_ChallengeMode.GetMapTable then
+        local maps = C_ChallengeMode.GetMapTable()
+        for _, mapID in ipairs(maps) do
+            local name = C_ChallengeMode.GetMapUIInfo(mapID)
+            if name then
+                local spellID = TELEPORT_BY_NAME[name:lower()]
+                if spellID then
+                    MAP_TELEPORT_SPELLS[mapID] = spellID
+                end
+            end
+        end
+    end
+end
 local guildKeys = {}  -- [playerName] = { dungeon = mapID, keyLevel = N, rating = N }
 local deferredBroadcast = false
 local deferredQuery     = false
@@ -352,6 +382,36 @@ local function AcquireRow(i)
     r._dungeonFS:SetPoint("LEFT", r._ratingFS, "RIGHT", 4, 0); r._dungeonFS:SetWidth(130); r._dungeonFS:SetJustifyH("LEFT")
     r._dungeonFS:SetWordWrap(false)
 
+    -- Teleport button overlaying the dungeon name
+    local tpBtn = CreateFrame("Button", nil, r, "InsecureActionButtonTemplate")
+    tpBtn:SetPoint("TOPLEFT", r._dungeonFS, "TOPLEFT", 0, 0)
+    tpBtn:SetPoint("BOTTOMLEFT", r._dungeonFS, "BOTTOMLEFT", 0, 0)
+    tpBtn:SetWidth(130)
+    tpBtn:SetFrameLevel(r:GetFrameLevel() + 5)
+    tpBtn:RegisterForClicks("AnyUp", "AnyDown")
+    tpBtn:SetAttribute("type", "spell")
+    local EG = EllesmereUI.ELLESMERE_GREEN
+    tpBtn:SetScript("OnEnter", function()
+        local sid = tpBtn._spellID
+        if not sid then return end
+        local known = IsPlayerSpell(sid)
+        if known then
+            if EG then r._dungeonFS:SetTextColor(EG.r, EG.g, EG.b, 1) end
+            local cdInfo = C_Spell.GetSpellCooldown(sid)
+            if cdInfo and cdInfo.duration and cdInfo.duration > 0 then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(tpBtn, "Portal on Cooldown")
+                end
+            end
+        end
+    end)
+    tpBtn:SetScript("OnLeave", function()
+        r._dungeonFS:SetTextColor(0.7, 0.7, 0.7, 1)
+        if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+    end)
+    tpBtn:Hide()
+    r._tpBtn = tpBtn
+
     r._levelFS = MakeLabel(r, 11, "OUTLINE", 1, 1, 1, 1)
     r._levelFS:SetPoint("RIGHT", -2, 0); r._levelFS:SetJustifyH("RIGHT")
 
@@ -412,9 +472,20 @@ local function PopulateRow(r, e)
         elseif e.lvl >= 7 then    r._levelFS:SetTextColor(0, 0.44, 0.87, 1)
         elseif e.lvl >= 4 then    r._levelFS:SetTextColor(0.12, 1, 0, 1)
         else                      r._levelFS:SetTextColor(1, 1, 1, 1) end
+        -- Teleport button
+        local spellID = e.mapID and MAP_TELEPORT_SPELLS[e.mapID]
+        if spellID and r._tpBtn then
+            r._tpBtn._spellID = spellID
+            r._tpBtn:SetAttribute("spell", spellID)
+            r._tpBtn:Show()
+        elseif r._tpBtn then
+            r._tpBtn._spellID = nil
+            r._tpBtn:Hide()
+        end
     else
         r._dungeonFS:SetText("No keystone"); r._dungeonFS:SetTextColor(0.5, 0.5, 0.5, 0.7)
         r._levelFS:SetText("")
+        if r._tpBtn then r._tpBtn:Hide() end
     end
 end
 
@@ -439,7 +510,7 @@ ShowKeystonePopup = function()
     for name, info in pairs(partyKeys) do
         if currentMembers[name] or currentMembers[StripRealm(name)] then
             local dName = DungeonNameFromMap(info.dungeon)
-            partyEntries[#partyEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile }
+            partyEntries[#partyEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile, mapID = info.dungeon }
         end
     end
     table.sort(partyEntries, function(a, b)
@@ -453,7 +524,7 @@ ShowKeystonePopup = function()
     for name, info in pairs(guildKeys) do
         if name ~= myName and StripRealm(name) ~= StripRealm(myName) and (info.keyLevel or 0) > 0 then
             local dName = DungeonNameFromMap(info.dungeon)
-            guildEntries[#guildEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel, rating = info.rating or 0, classFile = info.classFile }
+            guildEntries[#guildEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel, rating = info.rating or 0, classFile = info.classFile, mapID = info.dungeon }
         end
     end
     table.sort(guildEntries, function(a, b)

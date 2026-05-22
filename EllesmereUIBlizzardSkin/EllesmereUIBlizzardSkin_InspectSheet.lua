@@ -379,11 +379,15 @@ local function SkinInspectSheet()
     -- Retry on show in case model frame wasn't ready on first skin.
     -- Staggered retries: Blizzard creates InspectModelFrame lazily
     -- after the inspect target is set, which can take multiple frames.
-    frame:HookScript("OnShow", function()
-        C_Timer.After(0, TryCreateModelBg)
-        C_Timer.After(0.2, TryCreateModelBg)
-        C_Timer.After(0.5, TryCreateModelBg)
-    end)
+    -- HookScript only once to prevent accumulation on repeated reskins.
+    if not GetFFD(frame)._modelBgHooked then
+        GetFFD(frame)._modelBgHooked = true
+        frame:HookScript("OnShow", function()
+            C_Timer.After(0, TryCreateModelBg)
+            C_Timer.After(0.2, TryCreateModelBg)
+            C_Timer.After(0.5, TryCreateModelBg)
+        end)
+    end
 
     -- Hide portrait (separate handling to ensure it's fully hidden)
     if InspectFramePortrait then
@@ -689,14 +693,18 @@ local function SkinInspectSheet()
     local gridStartY = -60
 
     -- Create overlay frame for text labels (above items, transparent, no mouse input)
-    local textOverlayFrame = CreateFrame("Frame", "EUI_InspectSheet_TextOverlay", frame)
-    textOverlayFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-    textOverlayFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-    textOverlayFrame:SetFrameLevel(frame:GetFrameLevel() + 10)  -- Ensure it's above the frame
-    textOverlayFrame:EnableMouse(false)
-    textOverlayFrame:SetAlpha(1)  -- Always visible by default
+    -- Reuse existing overlay to prevent frame multiplication on repeated reskins
+    local textOverlayFrame = GetFFD(frame).textOverlayFrame
+    if not textOverlayFrame then
+        textOverlayFrame = CreateFrame("Frame", "EUI_InspectSheet_TextOverlay", frame)
+        textOverlayFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+        textOverlayFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        textOverlayFrame:SetFrameLevel(frame:GetFrameLevel() + 10)
+        textOverlayFrame:EnableMouse(false)
+        GetFFD(frame).textOverlayFrame = textOverlayFrame
+    end
+    textOverlayFrame:SetAlpha(1)
     textOverlayFrame:Show()
-    GetFFD(frame).textOverlayFrame = textOverlayFrame
 
     -- Position slots and style them
     if InspectPaperDollItemsFrame then
@@ -926,26 +934,24 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Hook to update tabs when they change
-    if frame.HookScript then
+    -- Hook to update tabs when they change (once only)
+    if frame.HookScript and not GetFFD(frame)._tabHooked then
+        GetFFD(frame)._tabHooked = true
         frame:HookScript("OnShow", function()
             UpdateTabVisuals()
         end)
-    end
 
-    -- Hook to tabs to hide/show labels when clicked
-    for i = 1, 3 do
-        local tab = _G["InspectFrameTab" .. i]
-        if tab then
-            tab:HookScript("OnClick", function()
-                UpdateTabVisuals()
-                -- Check current tab dynamically
-                local isTab1 = (frame.selectedTab or 1) == 1
-                ApplyTabVisibility(isTab1)
-            end)
+        for i = 1, 3 do
+            local tab = _G["InspectFrameTab" .. i]
+            if tab then
+                tab:HookScript("OnClick", function()
+                    UpdateTabVisuals()
+                    local isTab1 = (frame.selectedTab or 1) == 1
+                    ApplyTabVisibility(isTab1)
+                end)
+            end
         end
     end
-
 
     UpdateTabVisuals()
 
@@ -1019,46 +1025,56 @@ end
 if EllesmereUI then
     EllesmereUI.ApplyThemedInspectSheet = ApplyThemedInspectSheet
 
-    -- Setup at PLAYER_LOGIN to register drag hooks early
+    -- Register hooks when Blizzard_InspectUI loads (it's load-on-demand,
+    -- so InspectFrame doesn't exist at PLAYER_LOGIN)
     local initFrame = CreateFrame("Frame")
-    initFrame:RegisterEvent("PLAYER_LOGIN")
-    initFrame:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_LOGIN")
+    local _inspHooked = false
 
-        if InspectFrame then
-            InspectFrame:HookScript("OnShow", function()
-                skinned = false
-                ApplyThemedInspectSheet()
-                -- Apply visibility settings when frame opens
-                C_Timer.After(0.1, function()
-                    if EllesmereUI._refreshInspectItemLevelVisibility then
-                        EllesmereUI._refreshInspectItemLevelVisibility()
-                    end
-                    if EllesmereUI._refreshInspectUpgradeTrackVisibility then
-                        EllesmereUI._refreshInspectUpgradeTrackVisibility()
-                    end
-                    if EllesmereUI._refreshInspectEnchantsVisibility then
-                        EllesmereUI._refreshInspectEnchantsVisibility()
-                    end
-                end)
-            end)
+    local function HookInspectFrame()
+        if _inspHooked or not InspectFrame then return end
+        _inspHooked = true
 
-            InspectFrame:HookScript("OnHide", function()
-                skinned = false
-            end)
-
-            -- Event listener to keep NineSlice hidden even when Blizzard events fire
-            local nineSliceHiddenFrame = CreateFrame("Frame")
-            nineSliceHiddenFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-            nineSliceHiddenFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-            nineSliceHiddenFrame:SetScript("OnEvent", function(self, event, ...)
-                if InspectFrame and InspectFrame:IsShown() then
-                    EnsureInspectNineSliceHidden()
+        InspectFrame:HookScript("OnShow", function()
+            skinned = false
+            ApplyThemedInspectSheet()
+            C_Timer.After(0.1, function()
+                if not InspectFrame or not InspectFrame:IsShown() then return end
+                if EllesmereUI._refreshInspectItemLevelVisibility then
+                    EllesmereUI._refreshInspectItemLevelVisibility()
+                end
+                if EllesmereUI._refreshInspectUpgradeTrackVisibility then
+                    EllesmereUI._refreshInspectUpgradeTrackVisibility()
+                end
+                if EllesmereUI._refreshInspectEnchantsVisibility then
+                    EllesmereUI._refreshInspectEnchantsVisibility()
                 end
             end)
+        end)
 
-            -- Hook OnShow to ensure NineSlice stays hidden
-            InspectFrame:HookScript("OnShow", EnsureInspectNineSliceHidden)
+        InspectFrame:HookScript("OnHide", function()
+            skinned = false
+        end)
+
+        local nineSliceHiddenFrame = CreateFrame("Frame")
+        nineSliceHiddenFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+        nineSliceHiddenFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
+        nineSliceHiddenFrame:SetScript("OnEvent", function(self, event, ...)
+            if InspectFrame and InspectFrame:IsShown() then
+                EnsureInspectNineSliceHidden()
+            end
+        end)
+
+        InspectFrame:HookScript("OnShow", EnsureInspectNineSliceHidden)
+    end
+
+    initFrame:RegisterEvent("PLAYER_LOGIN")
+    initFrame:RegisterEvent("ADDON_LOADED")
+    initFrame:SetScript("OnEvent", function(self, event, arg1)
+        if event == "PLAYER_LOGIN" then
+            HookInspectFrame()
+        elseif event == "ADDON_LOADED" and arg1 == "Blizzard_InspectUI" then
+            self:UnregisterEvent("ADDON_LOADED")
+            HookInspectFrame()
         end
     end)
 
@@ -1108,12 +1124,9 @@ if EllesmereUI then
     local inspectHook = CreateFrame("Frame")
     inspectHook:RegisterEvent("INSPECT_READY")
     inspectHook:SetScript("OnEvent", function(self, event, guid)
-        -- GUID validation: abort if this INSPECT_READY is for a stale target.
-        -- Late arrivals from a previous inspect would overwrite the current
-        -- target's data with the old player's gear/name.
-        local frame = InspectFrame
-        if frame and frame.unit and guid then
-            local currentGUID = UnitGUID(frame.unit)
+        if not InspectFrame or not InspectFrame:IsShown() then return end
+        if InspectFrame.unit and guid then
+            local currentGUID = UnitGUID(InspectFrame.unit)
             if issecretvalue and issecretvalue(currentGUID) then
                 -- Can't validate; allow the reskin
             elseif currentGUID and currentGUID ~= guid then

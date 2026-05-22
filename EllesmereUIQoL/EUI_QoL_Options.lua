@@ -7,7 +7,7 @@
 local PAGE_QOL      = "Quality of Life"
 local PAGE_CURSOR   = "Cursor"
 local PAGE_BREZ     = "BattleRes"
-local PAGE_AUTOLOG  = "Keys & Logs"
+local PAGE_AUTOLOG  = "Keys, Logs & Brez"
 local PAGE_UPGCALC  = "Upgrade Calc"
 local PAGE_SHIFTER  = "Shifter"
 
@@ -245,8 +245,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Show Coordinates on Map",
               tooltip="Displays cursor and player coordinates at the bottom of the world map.",
               getValue=function()
-                  if not EllesmereUIDB then return true end
-                  return EllesmereUIDB.mapCoords ~= false
+                  return EllesmereUIDB and EllesmereUIDB.mapCoords or false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -1211,7 +1210,7 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIQoL", {
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
-        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_BREZ, PAGE_AUTOLOG, PAGE_UPGCALC, PAGE_SHIFTER },
+        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_AUTOLOG, PAGE_UPGCALC, PAGE_SHIFTER },
         searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs", "upgrade", "ilvl", "item level", "crest", "upgrade calculator", "shifter", "move", "drag", "position", "demodal", "drift" },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_QOL then
@@ -1219,9 +1218,6 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pageName == PAGE_CURSOR and _G._EBS_BuildCursorPage then
                 return _G._EBS_BuildCursorPage(pageName, parent, yOffset)
-            end
-            if pageName == PAGE_BREZ and _G._EUI_BuildBattleResPage then
-                return _G._EUI_BuildBattleResPage(pageName, parent, yOffset)
             end
             if pageName == PAGE_AUTOLOG and _G._EUI_BuildAutoLoggingPage then
                 return _G._EUI_BuildAutoLoggingPage(pageName, parent, yOffset)

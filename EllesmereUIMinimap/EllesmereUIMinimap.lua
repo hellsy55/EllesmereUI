@@ -3151,14 +3151,21 @@ local function ApplyMinimap()
         if locationFrame then locationFrame:Hide() end
     end
 
-    -- Coordinates -- top-right, always visible on hover
+    -- Coordinates -- hover mode (inside minimap) or always-on below minimap
     if not coordFrame then
         coordFrame = minimap:CreateFontString(nil, "OVERLAY")
         ApplyMinimapFont(coordFrame, 11)
-        coordFrame:SetPoint("TOPLEFT", minimap, "TOPLEFT", 4, -4)
         coordFrame:SetTextColor(1, 1, 1, 0.9)
     end
-    coordFrame:Hide()  -- hidden by default, shown on hover
+    local coordsBelow = p and p.coordsBelow
+    coordFrame:ClearAllPoints()
+    if coordsBelow then
+        local cx = p and p.coordsBelowOffsetX or 0
+        local cy = p and p.coordsBelowOffsetY or 0
+        coordFrame:SetPoint("TOP", minimap, "BOTTOM", cx, -5 + cy)
+    else
+        coordFrame:SetPoint("TOPLEFT", minimap, "TOPLEFT", 4, -4)
+    end
     if not coordTicker then
         coordTicker = CreateFrame("Frame")  -- kept for Show/Hide API
         coordTicker._ticker = nil
@@ -3172,16 +3179,28 @@ local function ApplyMinimap()
             if self._ticker then self._ticker:Cancel(); self._ticker = nil end
         end
     end
-    -- Coords ticker only runs while hovering the minimap
+    if coordsBelow then
+        coordFrame:Show()
+        coordTicker:Show()
+        UpdateCoords()
+    else
+        coordFrame:Hide()
+        coordTicker:Hide()
+    end
+    -- Coords ticker only runs while hovering the minimap (when not in below mode)
     if not GetFFD(minimap).coordsHooked then
         minimap:HookScript("OnEnter", function(self)
             if not GetFFD(self).active then return end
+            local mp = EBS.db and EBS.db.profile.minimap
+            if mp and mp.coordsBelow then return end
             if coordFrame then coordFrame:Show() end
             coordTicker:Show()
             UpdateCoords()
         end)
         minimap:HookScript("OnLeave", function(self)
             if not GetFFD(self).active then return end
+            local mp = EBS.db and EBS.db.profile.minimap
+            if mp and mp.coordsBelow then return end
             if coordFrame and not self:IsMouseOver() then coordFrame:Hide() end
             coordTicker:Hide()
         end)
@@ -3281,115 +3300,42 @@ end
 --  Lifecycle
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
---  Minimap Micro Menu (middle-click context menu)
+--  Minimap Micro Menu (middle-click context menu via MenuUtil)
 -------------------------------------------------------------------------------
 do
-    local _microMenu, _microMenuItems
+    local _microMenuAnchor
 
-    local function BuildMicroMenuItems()
-        local items = {
-            { text = "Character",       onClick = function() ToggleCharacter("PaperDollFrame") end },
-            { text = "Talents",         onClick = function()
-                if PlayerSpellsUtil and PlayerSpellsUtil.ToggleClassTalentFrame then
-                    PlayerSpellsUtil.ToggleClassTalentFrame()
-                elseif ToggleTalentFrame then ToggleTalentFrame() end
-            end },
-            { text = "Professions",     onClick = function()
-                if ToggleProfessionsBook then ToggleProfessionsBook() end
-            end },
-            { text = "Spellbook",       onClick = function()
-                if PlayerSpellsUtil and PlayerSpellsUtil.ToggleSpellBookFrame then
-                    PlayerSpellsUtil.ToggleSpellBookFrame()
-                elseif ToggleSpellBook then ToggleSpellBook("spell") end
-            end },
-            "---",
-            { text = "Adventure Guide", onClick = function()
-                if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
-                    C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
-                end
-                if ToggleEncounterJournal then ToggleEncounterJournal() end
-            end },
-            { text = "Achievements",    onClick = function() ToggleAchievementFrame() end },
-            { text = "Collections",     onClick = function() if ToggleCollectionsJournal then ToggleCollectionsJournal() end end },
-            { text = "Quest Log",       onClick = function() if ToggleQuestLog then ToggleQuestLog() end end },
-            { text = "Map",             onClick = function() ToggleWorldMap() end },
-            "---",
-            { text = "Friends",         onClick = function() ToggleFriendsFrame() end },
-            { text = "Guild",           onClick = function() if ToggleGuildFrame then ToggleGuildFrame() end end },
-        }
+    local function PopulateMicroMenu(_, root)
+        root:CreateButton("Character", function() ToggleCharacter("PaperDollFrame") end)
+        root:CreateButton("Professions", function()
+            if ToggleProfessionsBook then ToggleProfessionsBook() end
+        end)
+        root:CreateDivider()
+        root:CreateButton("Adventure Guide", function()
+            if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+                C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
+            end
+            if ToggleEncounterJournal then ToggleEncounterJournal() end
+        end)
+        root:CreateButton("Achievements", function() ToggleAchievementFrame() end)
+        root:CreateButton("Collections", function() if ToggleCollectionsJournal then ToggleCollectionsJournal() end end)
+        root:CreateButton("Quest Log", function() if ToggleQuestLog then ToggleQuestLog() end end)
+        root:CreateDivider()
+        root:CreateButton("Friends", function() ToggleFriendsFrame() end)
+        root:CreateButton("Guild", function() if ToggleGuildFrame then ToggleGuildFrame() end end)
         if HousingFramesUtil and HousingFramesUtil.ToggleHousingDashboard then
-            items[#items + 1] = { text = "Housing", onClick = function() HousingFramesUtil.ToggleHousingDashboard() end }
+            root:CreateButton("Housing", function() HousingFramesUtil.ToggleHousingDashboard() end)
         end
-        items[#items + 1] = { text = "Group Finder", onClick = function()
+        root:CreateButton("Group Finder", function()
             if ToggleLFDParentFrame then ToggleLFDParentFrame()
             elseif PVEFrame_ToggleFrame then PVEFrame_ToggleFrame() end
-        end }
-        items[#items + 1] = { text = "PvP", onClick = function() if TogglePVPFrame then TogglePVPFrame() end end }
-        items[#items + 1] = "---"
-        items[#items + 1] = { text = "Game Menu", onClick = function()
+        end)
+        root:CreateDivider()
+        root:CreateButton("Game Menu", function()
             if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame)
             else ShowUIPanel(GameMenuFrame) end
-        end }
-        if StoreMicroButton and StoreMicroButton.Click then
-            items[#items + 1] = { text = "Shop", onClick = function() StoreMicroButton:Click() end }
-        end
-        items[#items + 1] = { text = "Calendar", onClick = function() if ToggleCalendar then ToggleCalendar() end end }
-        return items
-    end
-
-    local function MakeMicroMenuPanel()
-        local EUI = EllesmereUI
-        local f = CreateFrame("Frame", nil, UIParent)
-        f:SetFrameStrata("FULLSCREEN_DIALOG")
-        f:SetFrameLevel(200)
-        f:SetClampedToScreen(true)
-        f:EnableMouse(true)
-        local bg = f:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.045, 0.045, 0.045, 0.98)
-        if EUI.PP and EUI.PP.CreateBorder then
-            EUI.PP.CreateBorder(f, 1, 1, 1, 0.18, 1)
-        end
-        f._pool = {}
-        f:Hide()
-        f:RegisterEvent("PLAYER_REGEN_DISABLED")
-        f:SetScript("OnEvent", function(self) self:Hide() end)
-        -- Click-outside dismiss
-        local acc = 0
-        f:SetScript("OnUpdate", function(self, dt)
-            acc = acc + dt
-            if acc < 0.1 then return end
-            acc = 0
-            if not self:IsMouseOver() and IsMouseButtonDown("LeftButton") then
-                self:Hide()
-            end
         end)
-        return f
-    end
-
-    local function EnsureMicroRow(menu, idx)
-        local row = menu._pool[idx]
-        if row then return row end
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
-        row = CreateFrame("Button", nil, menu)
-        row._hl = row:CreateTexture(nil, "BACKGROUND", nil, 1)
-        row._hl:SetAllPoints()
-        row._lbl = row:CreateFontString(nil, "OVERLAY")
-        row._lbl:SetFont(fontPath, 11, outline)
-        row._lbl:SetPoint("LEFT", row, "LEFT", 8, 0)
-        row._lbl:SetJustifyH("LEFT")
-        row._sep = row:CreateTexture(nil, "ARTWORK")
-        local PP = EllesmereUI.PP
-        row._sep:SetHeight(PP and PP.mult or 1)
-        if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(row._sep) end
-        row._sep:SetPoint("LEFT", row, "LEFT", 6, 0)
-        row._sep:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-        row._sep:SetColorTexture(1, 1, 1, 0.12)
-        row._sep:SetPoint("CENTER")
-        row._sep:Hide()
-        menu._pool[idx] = row
-        return row
+        root:CreateButton("Calendar", function() if ToggleCalendar then ToggleCalendar() end end)
     end
 
     local function ShowMicroMenu()
@@ -3397,89 +3343,8 @@ do
             UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
             return
         end
-        if not _microMenu then _microMenu = MakeMicroMenuPanel() end
-        if _microMenu:IsShown() then _microMenu:Hide(); return end
-
-        local items = BuildMicroMenuItems()
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
-        local EG = EllesmereUI.ELLESMERE_GREEN
-        local hlAlpha = 0.08
-        local ITEM_H = 22
-        local SEP_H = 7
-        local MIN_W = 140
-
-        for _, r in ipairs(_microMenu._pool) do r:Hide() end
-
-        -- Measure widths
-        if not _microMenu._mfs then _microMenu._mfs = _microMenu:CreateFontString(nil, "OVERLAY") end
-        _microMenu._mfs:SetFont(fontPath, 11, outline)
-        local maxW = 0
-        for _, item in ipairs(items) do
-            if type(item) == "table" and item.text then
-                _microMenu._mfs:SetText(item.text)
-                local w = _microMenu._mfs:GetStringWidth() or 0
-                if w > maxW then maxW = w end
-            end
-        end
-        _microMenu._mfs:SetText("")
-        _microMenu._mfs:Hide()
-        local menuW = math.max(MIN_W, maxW + 30)
-
-        local y = 0
-        for idx, item in ipairs(items) do
-            local row = EnsureMicroRow(_microMenu, idx)
-            row._sep:Hide()
-            row._hl:SetColorTexture(1, 1, 1, 0)
-            if item == "---" then
-                row:SetSize(menuW, SEP_H)
-                row:ClearAllPoints()
-                row:SetPoint("TOPLEFT", _microMenu, "TOPLEFT", 0, y)
-                row._lbl:SetText("")
-                row._sep:Show()
-                row:EnableMouse(false)
-                row:SetScript("OnEnter", nil)
-                row:SetScript("OnLeave", nil)
-                row:SetScript("OnClick", nil)
-                row:Show()
-                y = y - SEP_H
-            else
-                row:SetSize(menuW, ITEM_H)
-                row:ClearAllPoints()
-                row:SetPoint("TOPLEFT", _microMenu, "TOPLEFT", 0, y)
-                row._lbl:SetFont(fontPath, 11, outline)
-                row._lbl:SetText(item.text)
-                row._lbl:SetTextColor(1, 1, 1, 1)
-                row:EnableMouse(true)
-                local itemRef = item
-                row:SetScript("OnEnter", function(self)
-                    self._hl:SetColorTexture(1, 1, 1, hlAlpha)
-                    if EG then self._lbl:SetTextColor(EG.r, EG.g, EG.b, 1) end
-                end)
-                row:SetScript("OnLeave", function(self)
-                    self._hl:SetColorTexture(1, 1, 1, 0)
-                    self._lbl:SetTextColor(1, 1, 1, 1)
-                end)
-                row:SetScript("OnClick", function()
-                    _microMenu:Hide()
-                    if itemRef.onClick then itemRef.onClick() end
-                end)
-                row:Show()
-                y = y - ITEM_H
-            end
-        end
-
-        _microMenu:SetSize(menuW, math.abs(y))
-        _microMenu:ClearAllPoints()
-        local minimap = Minimap
-        if minimap then
-            _microMenu:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, 0)
-        else
-            local scale = _microMenu:GetEffectiveScale()
-            local cx, cy = GetCursorPosition()
-            _microMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
-        end
-        _microMenu:Show()
+        _microMenuAnchor = _microMenuAnchor or CreateFrame("Frame", nil, UIParent)
+        MenuUtil.CreateContextMenu(_microMenuAnchor, PopulateMicroMenu)
     end
 
     -- Hook middle-click on Minimap

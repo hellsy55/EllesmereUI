@@ -223,3 +223,115 @@ local function BuildBattleResPage(pageName, parent, yOffset)
 end
 
 _G._EUI_BuildBattleResPage = BuildBattleResPage
+
+-- Section-only builder for embedding in the Keys, Logs & Brez tab.
+-- Returns total height consumed.
+_G._EUI_BuildBattleResSection = function(parent, yOffset, W, PP)
+    local y = yOffset
+    local _, h, row
+
+    _, h = W:SectionHeader(parent, "BATTLE RES", y); y = y - h
+
+    row, h = W:DualRow(parent, y,
+        { type="dropdown", text="Enable BattleRes Icon",
+          values=VIS_VALUES, order=VIS_ORDER,
+          getValue=function() return Cfg("visibility") or "MPLUS_AND_RAID" end,
+          setValue=function(v) Set("visibility", v); Refresh(); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Icon Size",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          min=16, max=120, step=1, isPercent=false,
+          getValue=function() return Cfg("iconSize") or 40 end,
+          setValue=function(v) Set("iconSize", v); Refresh() end })
+    y = y - h
+
+    row, h = W:DualRow(parent, y,
+        { type="dropdown", text="Icon Shape",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          values=SHAPE_VALUES, order=SHAPE_ORDER,
+          getValue=function() return Cfg("shape") or "none" end,
+          setValue=function(v) Set("shape", v); Refresh() end },
+        { type="multiSwatch", text="Border Color",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          swatches = MakeBorderColorSwatches() })
+    y = y - h
+
+    row, h = W:DualRow(parent, y,
+        { type="dropdown", text="Border Size",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          values=BORDER_VALUES, order=BORDER_ORDER,
+          getValue=function() return Cfg("borderSize") or "thin" end,
+          setValue=function(v) Set("borderSize", v); Refresh() end },
+        { type="slider", text="Icon Zoom",
+          disabled=function()
+              if Cfg("visibility") == "NEVER" then return true end
+              local s = Cfg("shape") or "none"
+              return s ~= "none" and s ~= "cropped"
+          end,
+          disabledTooltip=function()
+              if Cfg("visibility") == "NEVER" then return "Enable BattleRes Icon" end
+              return "Icon Shape: None or Cropped"
+          end,
+          min=0, max=20, step=0.5, isPercent=false,
+          getValue=function() return Cfg("iconZoom") or 11 end,
+          setValue=function(v) Set("iconZoom", v); Refresh() end })
+    y = y - h
+
+    row, h = W:DualRow(parent, y,
+        { type="slider", text="Duration Size",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          min=8, max=24, step=1, isPercent=false,
+          getValue=function() return Cfg("durationSize") or 12 end,
+          setValue=function(v) Set("durationSize", v); Refresh() end },
+        { type="slider", text="Count Size",
+          disabled=function() return Cfg("visibility") == "NEVER" end,
+          disabledTooltip="Enable BattleRes Icon",
+          min=8, max=20, step=1, isPercent=false,
+          getValue=function() return Cfg("countSize") or 11 end,
+          setValue=function(v) Set("countSize", v); Refresh() end })
+    y = y - h
+
+    do
+        local function _attachOffsetCog(rgn, popupTitle, xKey, yKey)
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = popupTitle,
+                rows = {
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return Cfg(xKey) or 0 end,
+                      set=function(v) Set(xKey, v); Refresh() end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return Cfg(yKey) or 0 end,
+                      set=function(v) Set(yKey, v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            PP.Point(cogBtn, "RIGHT", rgn._control or rgn, "LEFT", -6, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function isDisabled() return Cfg("visibility") == "NEVER" end
+            local function UpdateAlpha() cogBtn:SetAlpha(isDisabled() and 0.15 or 0.4) end
+            EllesmereUI.RegisterWidgetRefresh(UpdateAlpha)
+            UpdateAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not isDisabled() then cogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not isDisabled() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateAlpha() end)
+        end
+        _attachOffsetCog(row._leftRegion,  "Duration Position", "durationOffsetX", "durationOffsetY")
+        _attachOffsetCog(row._rightRegion, "Count Position",    "countOffsetX",    "countOffsetY")
+    end
+
+    _, h = W:Spacer(parent, y, 20); y = y - h
+
+    return math.abs(y - yOffset)
+end

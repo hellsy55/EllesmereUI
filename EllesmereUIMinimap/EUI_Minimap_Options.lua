@@ -625,8 +625,65 @@ initFrame:SetScript("OnEvent", function(self)
                 local bg = _G._EBS_LocationBg
                 if bg then bg:SetScale(v) end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Show Coordinates Below Minimap",
+              tooltip="Always display player coordinates centered below the minimap instead of only on hover.",
+              getValue=function() local m = MinimapDB(); return m and m.coordsBelow end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.coordsBelow = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
+
+        -- Inline directions icon on Show Coordinates Below for X/Y offset
+        do
+            local rgn = locScaleRow._rightRegion
+            local function coordsOff()
+                local m = MinimapDB(); return not (m and m.coordsBelow)
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Coordinates Position",
+                rows = {
+                    { type = "slider", label = "X Offset", min = -500, max = 500, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.coordsBelowOffsetX or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.coordsBelowOffsetX = v
+                          RefreshMinimap()
+                      end },
+                    { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
+                      get = function() local m = MinimapDB(); return m and m.coordsBelowOffsetY or 0 end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.coordsBelowOffsetY = v
+                          RefreshMinimap()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -9, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(coordsOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(coordsOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local cogBlock = CreateFrame("Frame", nil, cogBtn)
+            cogBlock:SetAllPoints(); cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10); cogBlock:EnableMouse(true)
+            cogBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Show Coordinates Below Minimap")) end)
+            cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = coordsOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then cogBlock:Show() else cogBlock:Hide() end
+            end)
+            if coordsOff() then cogBlock:Show() else cogBlock:Hide() end
+        end
 
         -- Inline cog on Location Scale for X/Y offset
         do

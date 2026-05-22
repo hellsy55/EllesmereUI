@@ -2097,6 +2097,18 @@ EllesmereUI.RegisterMigration({
 })
 
 
+EllesmereUI.RegisterMigration({
+    id          = "auto_open_containers_preserve_v1",
+    scope       = "global",
+    description = "Preserve autoOpenContainers for existing users after default changed from on to off.",
+    body = function(ctx)
+        local db = ctx.db
+        if db.autoOpenContainers == nil then
+            db.autoOpenContainers = true
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

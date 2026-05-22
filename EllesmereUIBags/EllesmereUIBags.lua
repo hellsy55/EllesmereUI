@@ -319,8 +319,16 @@ end
 -------------------------------------------------------------------------------
 --  Expansion nesting (All Items view): C_Item.GetItemInfo expansionID + labels
 -------------------------------------------------------------------------------
+local EXPANSION_ID_OVERRIDES = {
+    [180653] = 11,
+}
+
 local function GetItemExpansionIDFromLink(itemLink)
     if not itemLink then return nil end
+    local itemID = tonumber(itemLink:match("item:(%d+)")) or tonumber(itemLink:match("keystone:(%d+)"))
+    if itemID and EXPANSION_ID_OVERRIDES[itemID] then
+        return EXPANSION_ID_OVERRIDES[itemID]
+    end
     if C_Item and C_Item.GetItemInfo then
         local _, _, _, _, _, _, _, _, _, _, _, _, _, _, expID = C_Item.GetItemInfo(itemLink)
         return expID
@@ -347,13 +355,23 @@ local function GetExpansionBucketKeyAndLabel(itemLink)
     if name and name ~= "" then
         return id, name
     end
+    if id == 11 then return id, "Midnight" end
     return id, "Expansion " .. tostring(id)
 end
 
 local function BuildExpansionBuckets(itemList)
     local byKey = {}
     for _, data in ipairs(itemList) do
-        local sk, label = GetExpansionBucketKeyAndLabel(data.itemLink)
+        local sk, label
+        if data.itemLink then
+            local _, _, _, ilvl = GetItemInfo(data.itemLink)
+            if ilvl and ilvl >= 180 then
+                sk, label = 11, "Midnight"
+            end
+        end
+        if not sk then
+            sk, label = GetExpansionBucketKeyAndLabel(data.itemLink)
+        end
         local b = byKey[sk]
         if not b then
             b = { sortKey = sk, label = label, items = {} }
@@ -4355,7 +4373,7 @@ local function GetOrCreateExpSubHeader(idx)
     f:SetHeight(16)
     f._label = f:CreateFontString(nil, "OVERLAY")
     SetBagFont(f._label, 9)
-    f._label:SetPoint("LEFT", f, "LEFT", 12, 0)
+    f._label:SetPoint("LEFT", f, "LEFT", 0, 0)
     f._label:SetTextColor(0.55, 0.55, 0.55)
     f._label:SetJustifyH("LEFT")
     _expSubHeaders[idx] = f
@@ -5214,6 +5232,9 @@ function EUI_Bags:RefreshInventory()
             if useExpNest then
                 local buckets = BuildExpansionBuckets(sectionItems)
                 if #buckets > 0 then
+                    local showAssign = assignCatIdx and EUI_CategoryManager
+                        and EUI_CategoryManager:CanAssignToCategory(assignCatIdx)
+                    local assignShown = false
                     for _, buck in ipairs(buckets) do
                         if #buck.items > 0 then
                             expSubIdx = expSubIdx + 1
@@ -5227,6 +5248,38 @@ function EUI_Bags:RefreshInventory()
                             sh:Show()
                             curY = curY - 18
                             RenderItemBlock(buck.items)
+                            -- Place assign "+" after the first bucket's items (newest expansion)
+                            if showAssign and not assignShown then
+                                assignShown = true
+                                local cats = EUI_CategoryManager:GetCategories()
+                                local aCat = cats[assignCatIdx]
+                                if aCat then
+                                    -- RenderItemBlock already advanced curY past the items;
+                                    -- back up one row block and place at the next slot after items
+                                    local n = #buck.items
+                                    local remainder = n % columns
+                                    if remainder == 0 then
+                                        -- Items filled the last row exactly; button goes on a new row
+                                        -- curY is already at the right spot
+                                    else
+                                        -- Back up to the row the items are on
+                                        curY = curY + (SLOT_SIZE + SPACING)
+                                    end
+                                    slotIdx = slotIdx + 1
+                                    local aSlot = GetOrCreateSlot(slotIdx)
+                                    aSlot:GetParent():SetParent(child)
+                                    local col = remainder
+                                    RenderButton(aSlot, { bag = 0, slot = 0 }, slotIdx, col, 0, startX, curY, columns)
+                                    local aOv = GetOrCreateAssignOverlay()
+                                    aOv._assignCatKey = aCat._defaultName
+                                    aOv:SetParent(child)
+                                    aOv:ClearAllPoints()
+                                    aOv:SetAllPoints(aSlot)
+                                    aOv:Show()
+                                    -- Re-advance curY for the row
+                                    curY = curY - (SLOT_SIZE + SPACING)
+                                end
+                            end
                         end
                     end
                     curY = curY - 6

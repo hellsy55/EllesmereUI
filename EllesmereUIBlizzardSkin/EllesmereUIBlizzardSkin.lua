@@ -86,10 +86,62 @@ end
         return EllesmereUIDB and EllesmereUIDB.accentReskinElements
     end
 
-    -- Item level cache: guid -> { ilvl = number, time = GetTime() }
-    local _ilvlCache = {}
-    local ILVL_CACHE_TTL = 120  -- seconds
-    local _lastInspectGUID = nil
+    -- Unified inspect system: one NotifyInspect per GUID, one INSPECT_READY
+    -- handler that feeds both tooltip ilvl cache and inspect sheet reskin.
+    local _ilvlCache = {}       -- guid -> { ilvl = number, time = GetTime() }
+    local _ilvlCacheTTL = 120
+    local _inspectPendingGUID = nil
+    local _userInspectUntil = 0
+    hooksecurefunc("InspectUnit", function()
+        _userInspectUntil = GetTime() + 2
+    end)
+    local _inspectFrame = CreateFrame("Frame")
+    _inspectFrame:SetScript("OnEvent", function(self, _, guid)
+        self:UnregisterEvent("INSPECT_READY")
+        if not guid or (_isSecret and _isSecret(guid)) then return end
+        -- Cache ilvl for tooltip
+        if C_PaperDollInfo and C_PaperDollInfo.GetInspectItemLevel then
+            local unit
+            if UnitExists("mouseover") then
+                local moGUID = UnitGUID("mouseover")
+                if moGUID and not (_isSecret and _isSecret(moGUID)) and moGUID == guid then
+                    unit = "mouseover"
+                end
+            end
+            if unit then
+                local val = C_PaperDollInfo.GetInspectItemLevel(unit)
+                if val and val > 0 then
+                    _ilvlCache[guid] = { ilvl = math.floor(val), time = GetTime() }
+                end
+            end
+        end
+        -- Update tooltip if still showing for this GUID (and ilvl not already shown)
+        if _GameTooltip:IsShown() and not _GameTooltip._euiIlvlShown and EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false then
+            local ok2, _, ttUnit = pcall(_GameTooltip.GetUnit, _GameTooltip)
+            if not ok2 or not ttUnit then
+                if UnitExists("mouseover") then ttUnit = "mouseover" end
+            end
+            if ttUnit then
+                local ttGUID = UnitGUID(ttUnit)
+                if ttGUID and not (_isSecret and _isSecret(ttGUID)) and ttGUID == guid then
+                    local cached = _ilvlCache[guid]
+                    if cached then
+                        local nBefore = _GameTooltip:NumLines() or 0
+                        _GameTooltip:AddDoubleLine("Item Level:", cached.ilvl, 1, 1, 1, 1, 1, 1)
+                        _ttFonts(_GameTooltip, nBefore + 1)
+                        _GameTooltip:Show()
+                        _GameTooltip._euiIlvlShown = true
+                    end
+                end
+            end
+        end
+        _inspectPendingGUID = nil
+    end)
+    -- Guard InspectGuildFrame_Update against nil guildName (our NotifyInspect
+    -- can trigger LOD load before guild data is available from server).
+
+    -- Expose for inspect sheet to use
+    EllesmereUI._inspectCache = _ilvlCache
 
     local function _ttUnitColor(tt)
         if tt ~= _GameTooltip or tt:IsForbidden() then return end
@@ -136,20 +188,18 @@ end
                 tt:AddDoubleLine("M+ Score:", score, 1, 1, 1, r, g, b)
             end
         end
-        -- Item Level (cached inspect approach)
+        -- Item Level (single-shot inspect, cached)
+        tt._euiIlvlShown = false
         if EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false then
             local ilvl
             if UnitIsUnit(unit, "player") then
                 local _, equipped = GetAverageItemLevel()
-                if equipped and equipped > 0 then
-                    ilvl = math.floor(equipped)
-                end
+                if equipped and equipped > 0 then ilvl = math.floor(equipped) end
             else
                 local guid = UnitGUID(unit)
                 if guid and not (_isSecret and _isSecret(guid)) then
-                    -- Check cache first
                     local cached = _ilvlCache[guid]
-                    if cached and (GetTime() - cached.time) < ILVL_CACHE_TTL then
+                    if cached and (GetTime() - cached.time) < _ilvlCacheTTL then
                         ilvl = cached.ilvl
                     else
                         -- Try already-available inspect data
@@ -160,9 +210,13 @@ end
                                 _ilvlCache[guid] = { ilvl = ilvl, time = GetTime() }
                             end
                         end
-                        -- Request inspect if we don't have data yet
-                        if not ilvl and CanInspect(unit) and not InCombatLockdown() then
-                            _lastInspectGUID = guid
+                        -- Request inspect if no cached data, not already pending,
+                        -- inspect frame not open, and no user-initiated inspect in flight
+                        local inspOpen = InspectFrame and InspectFrame:IsShown()
+                        if not ilvl and not inspOpen and GetTime() > _userInspectUntil and guid ~= _inspectPendingGUID and CanInspect(unit) and not InCombatLockdown() then
+                            _inspectPendingGUID = guid
+                            ClearInspectPlayer()
+                            _inspectFrame:RegisterEvent("INSPECT_READY")
                             NotifyInspect(unit)
                         end
                     end
@@ -170,6 +224,7 @@ end
             end
             if ilvl then
                 tt:AddDoubleLine("Item Level:", ilvl, 1, 1, 1, 1, 1, 1)
+                tt._euiIlvlShown = true
             end
         end
         -- Apply our font to lines added after the OnShow pass
@@ -222,43 +277,6 @@ end
         else
             _GameTooltip:HookScript("OnTooltipSetUnit", _ttUnitColor)
             _GameTooltip:HookScript("OnTooltipSetSpell", _ttAccentTitle)
-        end
-        -- INSPECT_READY: cache the ilvl and update tooltip if still hovering
-        do
-            local inspFrame = CreateFrame("Frame")
-            inspFrame:RegisterEvent("INSPECT_READY")
-            inspFrame:SetScript("OnEvent", function(_, _, guid)
-                if not (EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false) then return end
-                if not guid or (_isSecret and _isSecret(guid)) then return end
-                -- Read ilvl from the inspect data
-                local unit
-                if UnitExists("mouseover") then
-                    local moGUID = UnitGUID("mouseover")
-                    if moGUID and not (_isSecret and _isSecret(moGUID)) and moGUID == guid then
-                        unit = "mouseover"
-                    end
-                end
-                if not unit then return end
-                if not C_PaperDollInfo or not C_PaperDollInfo.GetInspectItemLevel then return end
-                local val = C_PaperDollInfo.GetInspectItemLevel(unit)
-                if not val or val <= 0 then return end
-                local ilvl = math.floor(val)
-                _ilvlCache[guid] = { ilvl = ilvl, time = GetTime() }
-                -- Update the visible tooltip if still showing for this unit
-                if _GameTooltip:IsShown() then
-                    local ok2, _, ttUnit = pcall(_GameTooltip.GetUnit, _GameTooltip)
-                    if not ok2 or not ttUnit then
-                        if UnitExists("mouseover") then ttUnit = "mouseover" end
-                    end
-                    local ttGUID = ttUnit and UnitGUID(ttUnit)
-                    if ttGUID and not (_isSecret and _isSecret(ttGUID)) and ttGUID == guid then
-                        local before = _GameTooltip:NumLines() or 0
-                        _GameTooltip:AddDoubleLine("Item Level:", ilvl, 1, 1, 1, 1, 1, 1)
-                        _ttFonts(_GameTooltip, before + 1)
-                        _GameTooltip:Show()
-                    end
-                end
-            end)
         end
     end
 

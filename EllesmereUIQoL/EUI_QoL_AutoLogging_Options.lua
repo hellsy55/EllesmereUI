@@ -57,7 +57,7 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
 
     _, h = W:DualRow(parent, y,
         { type    = "toggle",
-          text    = "Enable /keys Popup",
+          text    = "Enable /keys Popup (or /ekeys)",
           tooltip = "Shows a popup with party and guild keystones when typing /keys.",
           getValue = function() return KeysCfg().enabled ~= false end,
           setValue = function(v)
@@ -150,6 +150,16 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           end },
         { type = "label", text = "" }
     ); y = y - h
+
+    _, h = W:Spacer(parent, y, 20); y = y - h
+
+    ---------------------------------------------------------------------------
+    --  BATTLE RES
+    ---------------------------------------------------------------------------
+    if _G._EUI_BuildBattleResSection then
+        local brezH = _G._EUI_BuildBattleResSection(parent, y, W, EllesmereUI.PP)
+        y = y - brezH
+    end
 
     parent:SetHeight(math.abs(y - yOffset))
 end
