@@ -1570,9 +1570,9 @@ end
 
 local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
 
--- Keybinds now route to native ACTIONBUTTON commands via SetOverrideBinding,
--- so the engine handles press-and-hold/empowered spells natively. No need
--- for pressAndHoldAction/typerelease attribute management on our buttons.
+-- Hybrid keybind routing: empower spells use SetOverrideBindingClick so our
+-- buttons' pressAndHoldAction/typerelease handle hold-and-release. Non-empower
+-- spells use SetOverrideBinding to native commands for press-and-hold repeat.
 
 -- Safe API wrappers: 12.0.5 may move these globals to C_ActionBar.
 -- Stored on EAB_VTABLE to avoid 200-local Lua 5.1 limit.
@@ -2209,13 +2209,11 @@ local function SetupBar(info, skipProtected)
                     end
                 end
                 if not info.isStance and not info.isPetBar then
-                    local keyDown = GetCVarBool("ActionButtonUseKeyDown")
-                    if keyDown then
-                        btn:RegisterForClicks("AnyDown", "AnyUp")
-                    else
-                        btn:RegisterForClicks("AnyUp")
-                    end
-                    btn:SetAttribute("useOnKeyDown", keyDown)
+                    -- Always register both so empower spells (hold-and-release)
+                    -- receive the key-down event even when CVar is key-up mode.
+                    -- useOnKeyDown controls which event fires normal spells.
+                    btn:RegisterForClicks("AnyDown", "AnyUp")
+                    btn:SetAttribute("useOnKeyDown", GetCVarBool("ActionButtonUseKeyDown"))
                 elseif btn.RegisterForClicks then
                     btn:RegisterForClicks("AnyUp")
                 end
@@ -2298,6 +2296,7 @@ end
 -------------------------------------------------------------------------------
 do
     local _dispatcherSetup = false
+    local _empowerReroutePending = false
     function EAB:SetupEventDispatcher()
         if _dispatcherSetup then return end
         _dispatcherSetup = true
@@ -2452,10 +2451,23 @@ do
                     end
                 end
             end
-            -- On spec swap (arg1=0), re-evaluate keybind routing so empower
-            -- slots switch from native commands to click bindings.
-            if event == "ACTIONBAR_SLOT_CHANGED" and arg1 == 0 and not InCombatLockdown() then
-                if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
+            -- Re-evaluate keybind routing when any slot changes (spec swap,
+            -- spell drag, etc.) so empower slots use click bindings and
+            -- non-empower slots use native commands. Debounced because
+            -- page swaps fire 12+ ACTIONBAR_SLOT_CHANGED events.
+            if event == "ACTIONBAR_SLOT_CHANGED" and not _empowerReroutePending then
+                _empowerReroutePending = true
+                C_Timer_After(0, function()
+                    _empowerReroutePending = false
+                    if InCombatLockdown() then return end
+                    if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
+                    for _, info in ipairs(BAR_CONFIG) do
+                        local frame = barFrames[info.key]
+                        if frame then
+                            frame:SetAttribute("eab-empower-trigger", GetTime())
+                        end
+                    end
+                end)
             end
 
             -- ExtraActionButton1 is a Blizzard button outside our barButtons.
@@ -6671,9 +6683,10 @@ end
 
 -------------------------------------------------------------------------------
 --  Keybind System
---  All bars use SetOverrideBindingClick to route keybinds to our buttons.
---  Press-and-hold / empowered spells are handled by the pressAndHoldAction
---  and typerelease attributes on each button (set by UpdateReleaseCasting).
+--  Hybrid routing: empower/flyout slots use SetOverrideBindingClick so our
+--  buttons' pressAndHoldAction/typerelease handle hold-and-release. All other
+--  slots use SetOverrideBinding to native commands (ACTIONBUTTON1, etc.) so
+--  the engine handles press-and-hold repeat casting natively.
 -------------------------------------------------------------------------------
 local _bindState = { housingCleared = false }
 
@@ -6743,8 +6756,10 @@ _G._EAB_UpdateKeybinds = UpdateKeybinds
 
 
 
--- Update RegisterForClicks on all action buttons to match the CVar.
--- Must be called out of combat (RegisterForClicks is protected).
+-- Update useOnKeyDown on all action buttons to match the CVar.
+-- RegisterForClicks is always ("AnyDown", "AnyUp") so empower spells
+-- receive key-down even in key-up mode. Only the attribute changes.
+-- Must be called out of combat (SetAttribute on secure buttons).
 local function ApplyClickRegistration()
     local keyDown = GetCVarBool("ActionButtonUseKeyDown")
     for _, info in ipairs(BAR_CONFIG) do
@@ -6753,11 +6768,6 @@ local function ApplyClickRegistration()
             if btns then
                 for _, btn in ipairs(btns) do
                     if btn then
-                        if keyDown then
-                            btn:RegisterForClicks("AnyDown", "AnyUp")
-                        else
-                            btn:RegisterForClicks("AnyUp")
-                        end
                         btn:SetAttribute("useOnKeyDown", keyDown)
                     end
                 end
