@@ -517,7 +517,8 @@ initFrame:SetScript("OnEvent", function(self)
                 pc._countText:ClearAllPoints()
                 pc._countText:SetPoint("CENTER", pc, "CENTER", sp.textXOffset or 0, sp.textYOffset or 0)
                 if isBar then
-                    pc._countText:SetText(tostring(_previewBarFillPct))
+                    local percentSuffix = (sp.showPercent == false) and "" or "%"
+                    pc._countText:SetText(tostring(_previewBarFillPct) .. percentSuffix)
                 else
                     local _pvTsE3 = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(sp) or nil
                     local _pvE3Enabled = _pvTsE3 and (_pvTsE3.thresholdEnabled ~= false) or false
@@ -2333,6 +2334,15 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Resource Text",
                 rows = {
+                    { type = "toggle", label = "Show %",
+                      get = function()
+                          local p = DB()
+                          return (not p) or p.secondary.showPercent ~= false
+                      end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.showPercent = v; RefreshClass()
+                      end },
                     { type = "slider", label = "Size", min = 8, max = 24, step = 1,
                       get = function() local p = DB(); return p and p.secondary.textSize or 11 end,
                       set = function(v)

@@ -630,6 +630,7 @@ local DEFAULTS = {
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
+            showPercent = true,
             textSize    = 11,
             textR       = 1, textG = 1, textB = 1,
             textXOffset = 0,
@@ -2920,11 +2921,12 @@ local function UpdateSecondaryResource()
             end
             -- Count text
             if sp.showText and secondaryFrame._countText then
+                local percentSuffix = (sp.showPercent == false) and "" or "%"
                 if not tainted then
                     if powerType == "BREWMASTER_STAGGER" then
                         -- Show stagger as percentage of max health
                         local pct = maxC > 0 and (cur / maxC * 100) or 0
-                        secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                        secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                     else
                         secondaryFrame._countText:SetText(tostring(cur) .. " / " .. tostring(maxC))
                     end
@@ -2933,28 +2935,28 @@ local function UpdateSecondaryResource()
                     if powerType == "MAELSTROM_BAR" then
                         local pct = UnitPowerPercent and UnitPowerPercent("player", PT.MAELSTROM) or 0
                         if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                         else
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
                     elseif powerType == "INSANITY_BAR" then
                         local pct = UnitPowerPercent and UnitPowerPercent("player", PT.INSANITY) or 0
                         if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                         else
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
                     elseif powerType == "FOCUS_BAR" then
                         local pct = UnitPowerPercent and UnitPowerPercent("player", PT.FOCUS) or 0
                         if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                         else
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
                     elseif powerType == "LUNAR_POWER_BAR" then
                         local pct = UnitPowerPercent and UnitPowerPercent("player", PT.LUNAR_POWER) or 0
                         if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                         else
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
