@@ -1666,7 +1666,8 @@ do
     local function CreateCrosshair()
         if crosshairFrame then return end
         crosshairFrame = CreateFrame("Frame", "EUI_CharacterCrosshair", UIParent)
-        crosshairFrame:SetFrameStrata("HIGH")
+        -- MEDIUM sits above gameplay HUD but below DIALOG/HIGH panels (talents, character, etc.).
+        crosshairFrame:SetFrameStrata("MEDIUM")
         crosshairFrame:SetFrameLevel(100)
         crosshairFrame:EnableMouse(false)
         crosshairFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
