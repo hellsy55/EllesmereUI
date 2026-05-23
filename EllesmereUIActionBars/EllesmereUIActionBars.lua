@@ -7037,7 +7037,7 @@ local function ApplyAll()
         if not inCombat then
             LayoutBar(key)
         end
-        EAB:ApplyBordersForBar(key)
+        if not inCombat then EAB:ApplyBordersForBar(key) end
         if not inCombat then EAB:ApplyShapesForBar(key) end
         EAB:ApplyFontsForBar(key)
         EAB:ApplyBackgroundForBar(key)
