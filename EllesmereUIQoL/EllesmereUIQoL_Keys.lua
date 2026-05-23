@@ -736,15 +736,22 @@ end)
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-SLASH_EUIKEYS1 = "/keys"
-SLASH_EUIKEYS2 = "/key"
-SLASH_EUIKEYS3 = "/ekeys"
-SlashCmdList["EUIKEYS"] = function()
+do
     local cfg = EllesmereUIDB and EllesmereUIDB.keystonePopup
-    if cfg and cfg.enabled == false then return end
-    RegisterKeyEvents()
-    RecordOwnKey()
-    QueryPartyKeys()
-    ShowKeystonePopup()
-    C_Timer.After(1.0, ShowKeystonePopup)
+    local enabled = not cfg or cfg.enabled ~= false
+
+    SLASH_EUIKEYS1 = "/keys"
+    SLASH_EUIKEYS2 = "/ekeys"
+    if enabled then
+        SLASH_EUIKEYS3 = "/key"
+    end
+
+    SlashCmdList["EUIKEYS"] = function()
+        if not enabled then return end
+        RegisterKeyEvents()
+        RecordOwnKey()
+        QueryPartyKeys()
+        ShowKeystonePopup()
+        C_Timer.After(1.0, ShowKeystonePopup)
+    end
 end

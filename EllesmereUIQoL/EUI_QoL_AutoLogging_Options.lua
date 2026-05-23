@@ -63,6 +63,13 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           setValue = function(v)
               KeysCfg().enabled = v
               EllesmereUI:RefreshPage()
+              EllesmereUI:ShowConfirmPopup({
+                  title = "Reload Required",
+                  message = "Changing the /keys popup requires a reload to update slash command registration.",
+                  confirmText = "Reload",
+                  cancelText = "Later",
+                  onConfirm = function() ReloadUI() end,
+              })
           end },
         { type    = "slider",
           text    = "Text Size",

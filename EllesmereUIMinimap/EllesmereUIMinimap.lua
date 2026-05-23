@@ -3309,50 +3309,172 @@ end
 --  Lifecycle
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
---  Minimap Micro Menu (middle-click context menu via MenuUtil)
+--  Minimap Micro Menu (middle-click popup, taint-free)
+--  SecureActionButtonTemplate buttons with click passthrough to Blizzard
+--  MicroButtons via RegisterStateDriver (secure environment activation).
+--  NEVER call EnableMouse/SetAlpha on the secure buttons from addon code
+--  after creation -- that breaks the secure trust chain.
+--  Show/hide is done by moving the parent frame offscreen.
 -------------------------------------------------------------------------------
 do
-    local _microMenuAnchor
+    local menuFrame
+    local menuOpen    = false
+    local MENU_WIDTH  = 160
+    local BUTTON_H    = 20
+    local PADDING     = 6
+    local DIVIDER_H   = 9
 
-    local function PopulateMicroMenu(_, root)
-        root:CreateButton("Character", function() ToggleCharacter("PaperDollFrame") end)
-        root:CreateButton("Professions", function()
-            if ToggleProfessionsBook then ToggleProfessionsBook() end
-        end)
-        root:CreateDivider()
-        root:CreateButton("Adventure Guide", function()
-            if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
-                C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
-            end
-            if ToggleEncounterJournal then ToggleEncounterJournal() end
-        end)
-        root:CreateButton("Achievements", function() ToggleAchievementFrame() end)
-        root:CreateButton("Collections", function() if ToggleCollectionsJournal then ToggleCollectionsJournal() end end)
-        root:CreateButton("Quest Log", function() if ToggleQuestLog then ToggleQuestLog() end end)
-        root:CreateDivider()
-        root:CreateButton("Friends", function() ToggleFriendsFrame() end)
-        root:CreateButton("Guild", function() if ToggleGuildFrame then ToggleGuildFrame() end end)
-        if HousingFramesUtil and HousingFramesUtil.ToggleHousingDashboard then
-            root:CreateButton("Housing", function() HousingFramesUtil.ToggleHousingDashboard() end)
+    local menuItems = {
+        { text = "Character",       microButton = "CharacterMicroButton" },
+        { text = "Talents",         microButton = "PlayerSpellsMicroButton" },
+        { text = "Professions",     microButton = "ProfessionMicroButton" },
+        { divider = true },
+        { text = "Group Finder",    microButton = "LFDMicroButton" },
+        { text = "Adventure Guide", microButton = "EJMicroButton" },
+        { text = "Achievements",    microButton = "AchievementMicroButton" },
+        { text = "Collections",     microButton = "CollectionsMicroButton" },
+        { text = "Quest Log",       microButton = "QuestLogMicroButton" },
+        { divider = true },
+        { text = "Friends",         microButton = "QuickJoinToastButton" },
+        { text = "Guild",           microButton = "GuildMicroButton" },
+        { text = "Housing",         microButton = "HousingMicroButton" },
+        { text = "Calendar",        fn = function() if ToggleCalendar then ToggleCalendar() end end },
+        { divider = true },
+        { text = "Game Menu",       fn = function() ToggleFrame(GameMenuFrame) end },
+        { text = "Shop",            microButton = "StoreMicroButton" },
+        { text = "Support",         microButton = "HelpMicroButton" },
+    }
+
+    local function SetMenuVisible(visible)
+        if not menuFrame then return end
+        menuOpen = visible
+        menuFrame:ClearAllPoints()
+        if visible then
+            menuFrame:SetClampedToScreen(true)
+            menuFrame:SetPoint("TOPRIGHT", Minimap, "TOPLEFT", -4, 0)
+        else
+            menuFrame:SetClampedToScreen(false)
+            menuFrame:SetPoint("TOPLEFT", UIParent, "TOPRIGHT", 10000, 0)
         end
-        root:CreateDivider()
-        root:CreateButton("Game Menu", function()
-            if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame)
-            else ShowUIPanel(GameMenuFrame) end
-        end)
-        root:CreateButton("Calendar", function() if ToggleCalendar then ToggleCalendar() end end)
     end
 
-    local function ShowMicroMenu()
+    local function CreateMenuFrame()
+        menuFrame = CreateFrame("Frame", "EllesmereUIMicroMenu", UIParent, "BackdropTemplate")
+        menuFrame:SetFrameStrata("TOOLTIP")
+        menuFrame:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+        })
+        menuFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.97)
+        menuFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+        menuFrame:EnableMouse(true)
+
+        -- Close when clicking elsewhere
+        menuFrame:RegisterEvent("GLOBAL_MOUSE_DOWN")
+        menuFrame:SetScript("OnEvent", function(self, event)
+            if event == "GLOBAL_MOUSE_DOWN" and menuOpen then
+                if not self:IsMouseOver() then SetMenuVisible(false) end
+            end
+        end)
+
+        local y = -PADDING
+        for _, item in ipairs(menuItems) do
+            if item.divider then
+                local div = menuFrame:CreateTexture(nil, "ARTWORK")
+                div:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", 8, y - 4)
+                div:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -8, y - 4)
+                div:SetHeight(1)
+                div:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+                y = y - DIVIDER_H
+            elseif item.fn then
+                -- Plain button (no secure template needed)
+                local btn = CreateFrame("Button", nil, menuFrame)
+                btn:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", 1, y)
+                btn:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, y)
+                btn:SetHeight(BUTTON_H)
+
+                local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0.08)
+
+                local label = btn:CreateFontString(nil, "OVERLAY")
+                label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+                label:SetShadowOffset(1, -1)
+                label:SetShadowColor(0, 0, 0, 1)
+                label:SetPoint("LEFT", btn, "LEFT", 10, 0)
+                label:SetTextColor(0.9, 0.9, 0.9)
+                label:SetText(item.text)
+
+                local itemFn = item.fn
+                btn:SetScript("OnClick", function()
+                    SetMenuVisible(false)
+                    itemFn()
+                end)
+
+                y = y - BUTTON_H
+            else
+                -- Secure click passthrough to a Blizzard MicroButton
+                local microRef = item.microButton and _G[item.microButton]
+                local btnName = "EUI_MicroMenu_" .. item.text:gsub("%s", "")
+                local btn = CreateFrame("Button", btnName, menuFrame, "SecureActionButtonTemplate,SecureHandlerStateTemplate")
+                btn:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", 1, y)
+                btn:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, y)
+                btn:SetHeight(BUTTON_H)
+
+                if microRef then
+                    btn:SetAttribute("*clickbutton1", microRef)
+                end
+                btn:SetAttribute("useOnKeyDown", false)
+                btn:SetAttribute("*type1", "click")
+                btn:EnableMouse(true)
+                btn:RegisterForClicks("AnyUp")
+
+                -- Activate secure click from the restricted secure environment.
+                -- Without this, addon-set attributes are not trusted.
+                RegisterStateDriver(btn, "combatlock", "[combat] combat; nocombat")
+                btn:SetAttribute("_onstate-combatlock", [[
+                    if newstate == 'combat' then
+                        self:SetAttribute('*type1', nil)
+                        self:EnableMouse(false)
+                    else
+                        self:SetAttribute('*type1', 'click')
+                        self:EnableMouse(true)
+                    end
+                ]])
+
+                local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0.08)
+
+                local label = btn:CreateFontString(nil, "OVERLAY")
+                label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+                label:SetShadowOffset(1, -1)
+                label:SetShadowColor(0, 0, 0, 1)
+                label:SetPoint("LEFT", btn, "LEFT", 10, 0)
+                label:SetTextColor(0.9, 0.9, 0.9)
+                label:SetText(item.text)
+
+                btn:HookScript("OnClick", function() C_Timer.After(0, function() SetMenuVisible(false) end) end)
+
+                y = y - BUTTON_H
+            end
+        end
+
+        menuFrame:SetSize(MENU_WIDTH, -y + PADDING)
+        menuFrame:Show()
+        SetMenuVisible(false)
+    end
+
+    local function ToggleMicroMenu()
         if InCombatLockdown() then
             UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
             return
         end
-        _microMenuAnchor = _microMenuAnchor or CreateFrame("Frame", nil, UIParent)
-        MenuUtil.CreateContextMenu(_microMenuAnchor, PopulateMicroMenu)
+        if not menuFrame then CreateMenuFrame() end
+        SetMenuVisible(not menuOpen)
     end
 
-    -- Hook middle-click on Minimap
     local _microMenuHooked = false
     local function HookMinimapMiddleClick()
         if _microMenuHooked then return end
@@ -3360,15 +3482,15 @@ do
         if not minimap then return end
         _microMenuHooked = true
         minimap:HookScript("OnMouseUp", function(_, btn)
-            if btn == "MiddleButton" then ShowMicroMenu() end
+            if btn == "MiddleButton" then ToggleMicroMenu() end
         end)
     end
 
-    -- Deferred: Minimap may not be ready at file parse time
     local hookFrame = CreateFrame("Frame")
     hookFrame:RegisterEvent("PLAYER_LOGIN")
     hookFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
+        CreateMenuFrame()
         HookMinimapMiddleClick()
     end)
 end
