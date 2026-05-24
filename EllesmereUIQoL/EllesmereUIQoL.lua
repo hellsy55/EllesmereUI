@@ -1462,11 +1462,12 @@ do
     local function CreateDurabilityWarning()
         if durWarnOverlay then return end
 
-        durWarnOverlay = CreateFrame("Frame", "EUI_DurabilityWarning", UIParent)
+        durWarnOverlay = CreateFrame("Frame", nil, UIParent)
         durWarnOverlay:SetSize(400, 40)
-        durWarnOverlay:SetFrameStrata("DIALOG")
-        durWarnOverlay:SetFrameLevel(99)
+        durWarnOverlay:SetFrameStrata("HIGH")
+        durWarnOverlay:SetFrameLevel(50)
         durWarnOverlay:EnableMouse(false)
+        durWarnOverlay:SetMouseClickEnabled(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
         fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag("extras"))
@@ -1541,7 +1542,7 @@ do
         if durWarnOverlay then durWarnOverlay:Hide() end
     end
 
-    local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)
+    local repairWarnFrame = CreateFrame("Frame", nil, UIParent)
     if not (EllesmereUIDB and EllesmereUIDB.repairWarning == false) then
         repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")

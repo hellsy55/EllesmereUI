@@ -2710,6 +2710,24 @@ local function ApplyMinimap()
     end
     minimap:Show()
 
+    -- Middle-click interceptor: prevent minimap ping on middle-click,
+    -- route middle-click to our micro menu instead.
+    -- Transparent frame on top of minimap that passes left/right clicks through
+    -- but intercepts middle-click. Zero taint risk.
+    if not GetFFD(minimap).pingBlocker then
+        local blocker = CreateFrame("Frame", nil, minimap)
+        blocker:SetAllPoints()
+        blocker:SetFrameLevel(minimap:GetFrameLevel() + 10)
+        blocker:EnableMouse(true)
+        blocker:SetPassThroughButtons("LeftButton", "RightButton")
+        blocker:SetScript("OnMouseUp", function(_, btn)
+            if btn == "MiddleButton" and EBS._ToggleMicroMenu then
+                EBS._ToggleMicroMenu()
+            end
+        end)
+        GetFFD(minimap).pingBlocker = blocker
+    end
+
     -- Hide default decorations
     for _, name in ipairs(minimapDecorations) do
         local frame = _G[name]
@@ -3474,24 +3492,13 @@ do
         if not menuFrame then CreateMenuFrame() end
         SetMenuVisible(not menuOpen)
     end
-
-    local _microMenuHooked = false
-    local function HookMinimapMiddleClick()
-        if _microMenuHooked then return end
-        local minimap = Minimap
-        if not minimap then return end
-        _microMenuHooked = true
-        minimap:HookScript("OnMouseUp", function(_, btn)
-            if btn == "MiddleButton" then ToggleMicroMenu() end
-        end)
-    end
+    EBS._ToggleMicroMenu = ToggleMicroMenu
 
     local hookFrame = CreateFrame("Frame")
     hookFrame:RegisterEvent("PLAYER_LOGIN")
     hookFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
         CreateMenuFrame()
-        HookMinimapMiddleClick()
     end)
 end
 

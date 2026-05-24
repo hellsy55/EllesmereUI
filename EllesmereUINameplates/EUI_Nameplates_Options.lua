@@ -3191,6 +3191,34 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Max Debuffs | (empty)
+        local maxDbfOriginal = DBVal("maxDebuffs") or defaults.maxDebuffs
+        local maxDbfPendingPopup
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Max Debuffs", min=1, max=10, step=1,
+              getValue=function() return DBVal("maxDebuffs") or defaults.maxDebuffs end,
+              setValue=function(v)
+                DB().maxDebuffs = v
+                -- Show reload popup once after slider drag ends (debounced)
+                if v ~= maxDbfOriginal then
+                    if maxDbfPendingPopup then maxDbfPendingPopup:Cancel() end
+                    maxDbfPendingPopup = C_Timer.NewTimer(0.5, function()
+                        maxDbfPendingPopup = nil
+                        if (DB().maxDebuffs or defaults.maxDebuffs) ~= maxDbfOriginal then
+                            EllesmereUI:ShowConfirmPopup({
+                                title = "Reload Required",
+                                message = "Changing Max Debuffs requires a UI reload to take effect.",
+                                confirmText = "Reload Now",
+                                cancelText = "Later",
+                                onConfirm = function() ReloadUI() end,
+                            })
+                        end
+                    end)
+                end
+              end,
+              tooltip="Maximum number of debuff icons shown on enemy nameplates." },
+            { type="label", text="" });  y = y - h
+
         return math.abs(y)
     end
 
