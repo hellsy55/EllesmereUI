@@ -81,37 +81,37 @@ initFrame:SetScript("OnEvent", function(self)
     local PP = EllesmereUI.PP
     local function BuildVisibilityRow(W, parent, y, getCfg, refreshFn)
         local visRow, visH = W:DualRow(parent, y,
-                { type="dropdown", text="Visibility",
-                  values = EllesmereUI.VIS_VALUES,
-                  order  = EllesmereUI.VIS_ORDER,
-                  getValue=function()
-                      local c = getCfg(); if not c then return "always" end
-                      return c.visibility or "always"
-                  end,
-                  setValue=function(v)
-                      local c = getCfg(); if not c then return end
-                      c.visibility = v
-                      if refreshFn then refreshFn() end
-                      if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="dropdown", text="Visibility Options",
-                  values={ __placeholder = "..." }, order={ "__placeholder" },
-                  getValue=function() return "__placeholder" end,
-                  setValue=function() end })
+            { type="dropdown", text="Visibility",
+              values = EllesmereUI.VIS_VALUES,
+              order  = EllesmereUI.VIS_ORDER,
+              getValue=function()
+                  local c = getCfg(); if not c then return "always" end
+                  return c.visibility or "always"
+              end,
+              setValue=function(v)
+                  local c = getCfg(); if not c then return end
+                  c.visibility = v
+                  if refreshFn then refreshFn() end
+                  if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="dropdown", text="Visibility Options",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end })
         do
             local rightRgn = visRow._rightRegion
             if rightRgn._control then rightRgn._control:Hide() end
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                    rightRgn, 210, rightRgn:GetFrameLevel() + 2,
-                    EllesmereUI.VIS_OPT_ITEMS,
-                    function(k) local c = getCfg(); return c and c[k] or false end,
-                    function(k, v)
-                        local c = getCfg(); if not c then return end
-                        c[k] = v
-                        if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
-                        EllesmereUI:RefreshPage()
-                    end)
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                EllesmereUI.VIS_OPT_ITEMS,
+                function(k) local c = getCfg(); return c and c[k] or false end,
+                function(k, v)
+                    local c = getCfg(); if not c then return end
+                    c[k] = v
+                    if _G._EBS_UpdateVisibility then _G._EBS_UpdateVisibility() end
+                    EllesmereUI:RefreshPage()
+                end)
             PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
@@ -158,10 +158,10 @@ initFrame:SetScript("OnEvent", function(self)
                   return ar, ag, ab
               end,
               setValue = function() end,
-                -- Flag name stays `useClassColor` for backwards compat with
-                -- users who already have it stamped in their SavedVariables.
-                -- Only the color resolution changes -- the flag now means
-                -- "use live accent" rather than "use class color".
+              -- Flag name stays `useClassColor` for backwards compat with
+              -- users who already have it stamped in their SavedVariables.
+              -- Only the color resolution changes -- the flag now means
+              -- "use live accent" rather than "use class color".
               onClick = function()
                   local c = getCfg(); if not c then return end
                   c.useClassColor = true
@@ -192,64 +192,64 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, SECTION_MINIMAP, y);  y = y - h
 
         _, h = W:DualRow(parent, y,
-                { type="slider", text="Size", min=100, max=600, step=5,
-                  getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.mapSize = v
-                      -- Cover the map render during drag to mask the zoom-nudge blink.
-                      -- Borders, buttons, etc. remain visible above the overlay.
-                      local minimap = _G.Minimap
-                      if minimap then
-                          if not minimap._dragOverlay then
-                              local ov = minimap:CreateTexture(nil, "BACKGROUND", nil, 7)
-                              ov:SetAllPoints(minimap)
-                              minimap._dragOverlay = ov
-                          end
-                          local shape = m.shape or "square"
-                          if shape == "circle" or shape == "textured_circle" then
-                              minimap._dragOverlay:SetTexture("Interface\\Common\\CommonMaskCircle")
-                              minimap._dragOverlay:SetVertexColor(0, 0, 0, 1)
-                          else
-                              minimap._dragOverlay:SetColorTexture(0, 0, 0, 1)
-                          end
-                          minimap._dragOverlay:Show()
-                      end
-                      RefreshMinimap()
-                      if not _G._EBS_SizeDragTimer then
-                          _G._EBS_SizeDragTimer = C_Timer.NewTimer(0, function() end)
-                      end
-                      _G._EBS_SizeDragTimer:Cancel()
-                      _G._EBS_SizeDragTimer = C_Timer.NewTimer(0.15, function()
-                          if minimap and minimap._dragOverlay then
-                              minimap._dragOverlay:Hide()
-                          end
-                      end)
-                  end },
-                { type="multiSwatch", text="Accent Color",
-                  swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) })
+            { type="slider", text="Size", min=100, max=600, step=5,
+              getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.mapSize = v
+                -- Cover the map render during drag to mask the zoom-nudge blink.
+                -- Borders, buttons, etc. remain visible above the overlay.
+                local minimap = _G.Minimap
+                if minimap then
+                    if not minimap._dragOverlay then
+                        local ov = minimap:CreateTexture(nil, "BACKGROUND", nil, 7)
+                        ov:SetAllPoints(minimap)
+                        minimap._dragOverlay = ov
+                    end
+                    local shape = m.shape or "square"
+                    if shape == "circle" or shape == "textured_circle" then
+                        minimap._dragOverlay:SetTexture("Interface\\Common\\CommonMaskCircle")
+                        minimap._dragOverlay:SetVertexColor(0, 0, 0, 1)
+                    else
+                        minimap._dragOverlay:SetColorTexture(0, 0, 0, 1)
+                    end
+                    minimap._dragOverlay:Show()
+                end
+                RefreshMinimap()
+                if not _G._EBS_SizeDragTimer then
+                    _G._EBS_SizeDragTimer = C_Timer.NewTimer(0, function() end)
+                end
+                _G._EBS_SizeDragTimer:Cancel()
+                _G._EBS_SizeDragTimer = C_Timer.NewTimer(0.15, function()
+                    if minimap and minimap._dragOverlay then
+                        minimap._dragOverlay:Hide()
+                    end
+                end)
+              end },
+            { type="multiSwatch", text="Accent Color",
+              swatches = MakeBorderSwatch(MinimapDB, RefreshMinimap) })
         y = y - h
 
         h = BuildVisibilityRow(W, parent, y, MinimapDB, RefreshMinimap);  y = y - h
 
         -- Shape | Border Thickness
         _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Shape",
-                  values = { square = "Square", circle = "Circle", textured_circle = "Textured Circle" },
-                  order  = { "square", "circle", "textured_circle" },
-                  getValue=function() local m = MinimapDB(); return m and m.shape or "square" end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.shape = v
-                      RefreshMinimap()
-                  end },
-                { type="slider", text="Border Thickness", min=0, max=5, step=1,
-                  getValue=function() local m = MinimapDB(); return m and m.borderSize or 1 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.borderSize = v
-                      RefreshMinimap()
-                  end }
+            { type="dropdown", text="Shape",
+              values = { square = "Square", circle = "Circle", textured_circle = "Textured Circle" },
+              order  = { "square", "circle", "textured_circle" },
+              getValue=function() local m = MinimapDB(); return m and m.shape or "square" end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.shape = v
+                RefreshMinimap()
+              end },
+            { type="slider", text="Border Thickness", min=0, max=5, step=1,
+              getValue=function() local m = MinimapDB(); return m and m.borderSize or 1 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.borderSize = v
+                RefreshMinimap()
+              end }
         );  y = y - h
 
         y = y - 10
@@ -260,18 +260,18 @@ initFrame:SetScript("OnEvent", function(self)
         -- Ungroup Minimap Buttons | In-Group Button Size
         local ungroupRow
         ungroupRow, h = W:DualRow(parent, y,
-                { type="dropdown", text="Ungroup Minimap Buttons",
-                  values = { __placeholder = "..." }, order = { "__placeholder" },
-                  getValue = function() return "__placeholder" end,
-                  setValue = function() end },
-                { type="slider", text="In-Group Button Size", min=14, max=40, step=1,
-                  tooltip="Size of addon minimap buttons in the flyout grid",
-                  getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 24 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.addonBtnSize = v
-                      RefreshMinimap()
-                  end }
+            { type="dropdown", text="Ungroup Minimap Buttons",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end },
+            { type="slider", text="In-Group Button Size", min=14, max=40, step=1,
+              tooltip="Size of addon minimap buttons in the flyout grid",
+              getValue=function() local m = MinimapDB(); return m and m.addonBtnSize or 24 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.addonBtnSize = v
+                RefreshMinimap()
+              end }
         );  y = y - h
 
         -- Replace placeholder dropdown with checkbox dropdown
@@ -296,26 +296,26 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                    leftRgn, 210, leftRgn:GetFrameLevel() + 2,
-                    GetUngroupItems(),
-                    function(k)
-                        local m = MinimapDB(); if not m then return false end
-                        return m.ungroupedButtons and m.ungroupedButtons[k] and true or false
-                    end,
-                    function(k, v)
-                        local m = MinimapDB(); if not m then return end
-                        if not m.ungroupedButtons then m.ungroupedButtons = {} end
-                        if v then
-                            local maxOrder = 0
-                            for _, ord in pairs(m.ungroupedButtons) do
-                                if type(ord) == "number" and ord > maxOrder then maxOrder = ord end
-                            end
-                            m.ungroupedButtons[k] = maxOrder + 1
-                        else
-                            m.ungroupedButtons[k] = nil
+                leftRgn, 210, leftRgn:GetFrameLevel() + 2,
+                GetUngroupItems(),
+                function(k)
+                    local m = MinimapDB(); if not m then return false end
+                    return m.ungroupedButtons and m.ungroupedButtons[k] and true or false
+                end,
+                function(k, v)
+                    local m = MinimapDB(); if not m then return end
+                    if not m.ungroupedButtons then m.ungroupedButtons = {} end
+                    if v then
+                        local maxOrder = 0
+                        for _, ord in pairs(m.ungroupedButtons) do
+                            if type(ord) == "number" and ord > maxOrder then maxOrder = ord end
                         end
-                        FullRebuildMinimap()
-                    end)
+                        m.ungroupedButtons[k] = maxOrder + 1
+                    else
+                        m.ungroupedButtons[k] = nil
+                    end
+                    FullRebuildMinimap()
+                end)
             local PP = EllesmereUI.PP
             PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
@@ -326,23 +326,23 @@ initFrame:SetScript("OnEvent", function(self)
         -- Interactable Button Size | Outer-Group MM Button Size (toggle + cog)
         local customBtnRow
         customBtnRow, h = W:DualRow(parent, y,
-                { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
-                  tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
-                  getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.interactableBtnSize = v
-                      RefreshMinimap()
-                  end },
-                { type="toggle", text="Outer-Group MM Button Size",
-                  tooltip="Override the size of ungrouped minimap buttons independently from the interactable button size.",
-                  getValue=function() local m = MinimapDB(); return m and m.customBtnSizeEnabled end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.customBtnSizeEnabled = v
-                      RefreshMinimap()
-                      EllesmereUI:RefreshPage()
-                  end }
+            { type="slider", text="Interactable Button Size", min=16, max=40, step=1,
+              tooltip="Size of mail, calendar, tracking, and minimap button group toggle",
+              getValue=function() local m = MinimapDB(); return m and m.interactableBtnSize or 21 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.interactableBtnSize = v
+                RefreshMinimap()
+              end },
+            { type="toggle", text="Outer-Group MM Button Size",
+              tooltip="Override the size of ungrouped minimap buttons independently from the interactable button size.",
+              getValue=function() local m = MinimapDB(); return m and m.customBtnSizeEnabled end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.customBtnSizeEnabled = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
 
         -- Inline cog on Outer-Group MM Button Size for size slider
@@ -389,26 +389,26 @@ initFrame:SetScript("OnEvent", function(self)
         -- Free Move Buttons | Button Backgrounds
         local fmRow
         fmRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Free Move Buttons",
-                  tooltip="When enabled, Shift+Click any minimap button (mail, calendar, tracking, addon buttons) to drag it to a custom position.",
-                  getValue=function() local m = MinimapDB(); return m and m.freeMoveBtns end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.freeMoveBtns = v
-                      if not v then
-                          m.btnPositions = {}
-                      end
-                      RefreshMinimap()
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="toggle", text="Button Backgrounds",
-                  tooltip="Show black backgrounds behind minimap indicator buttons (tracking, calendar, mail, crafting, addon buttons, flyout toggle).",
-                  getValue=function() local m = MinimapDB(); return m and m.btnBackgrounds ~= false end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.btnBackgrounds = v
-                      FullRebuildMinimap()
-                  end }
+            { type="toggle", text="Free Move Buttons",
+              tooltip="When enabled, Shift+Click any minimap button (mail, calendar, tracking, addon buttons) to drag it to a custom position.",
+              getValue=function() local m = MinimapDB(); return m and m.freeMoveBtns end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.freeMoveBtns = v
+                if not v then
+                    m.btnPositions = {}
+                end
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Button Backgrounds",
+              tooltip="Show black backgrounds behind minimap indicator buttons (tracking, calendar, mail, crafting, addon buttons, flyout toggle).",
+              getValue=function() local m = MinimapDB(); return m and m.btnBackgrounds ~= false end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.btnBackgrounds = v
+                FullRebuildMinimap()
+              end }
         );  y = y - h
 
         -- "Reset" label next to the Free Move toggle (only visible when enabled)
@@ -442,11 +442,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- Hide Extra Buttons (checkbox dropdown)
         local extraBtnRow
         extraBtnRow, h = W:DualRow(parent, y,
-                { type="dropdown", text="Hide Extra Buttons",
-                  values = { __placeholder = "..." }, order = { "__placeholder" },
-                  getValue = function() return "__placeholder" end,
-                  setValue = function() end },
-                { type="label", text="" }
+            { type="dropdown", text="Hide Extra Buttons",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end },
+            { type="label", text="" }
         );  y = y - h
 
         -- Replace placeholder with checkbox dropdown
@@ -461,19 +461,19 @@ initFrame:SetScript("OnEvent", function(self)
             }
 
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                    leftRgn, 210, leftRgn:GetFrameLevel() + 2,
-                    EXTRA_BTN_ITEMS,
-                    function(k)
-                        local m = MinimapDB(); if not m then return false end
-                        local heb = m.hideExtraBtns
-                        return heb and heb[k] and true or false
-                    end,
-                    function(k, v)
-                        local m = MinimapDB(); if not m then return end
-                        if not m.hideExtraBtns then m.hideExtraBtns = {} end
-                        m.hideExtraBtns[k] = v
-                        RefreshMinimap()
-                    end)
+                leftRgn, 210, leftRgn:GetFrameLevel() + 2,
+                EXTRA_BTN_ITEMS,
+                function(k)
+                    local m = MinimapDB(); if not m then return false end
+                    local heb = m.hideExtraBtns
+                    return heb and heb[k] and true or false
+                end,
+                function(k, v)
+                    local m = MinimapDB(); if not m then return end
+                    if not m.hideExtraBtns then m.hideExtraBtns = {} end
+                    m.hideExtraBtns[k] = v
+                    RefreshMinimap()
+                end)
             local PP = EllesmereUI.PP
             PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
@@ -483,14 +483,14 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Friends Online: per-section row cap (0 = no cap)
         _, h = W:DualRow(parent, y,
-                { type="slider", text="Friends List Cap", min=0, max=50, step=1,
-                  tooltip="Max rows shown per section in the Friends Online tooltip. 0 = no cap.",
-                  getValue=function() local m = MinimapDB(); return m and m.friendsMaxRows or 0 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.friendsMaxRows = v
-                  end },
-                { type="label", text="" }
+            { type="slider", text="Friends List Cap", min=0, max=50, step=1,
+              tooltip="Max rows shown per section in the Friends Online tooltip. 0 = no cap.",
+              getValue=function() local m = MinimapDB(); return m and m.friendsMaxRows or 0 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.friendsMaxRows = v
+              end },
+            { type="label", text="" }
         );  y = y - h
 
         y = y - 10
@@ -500,68 +500,68 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Show Zone | Show Clock
         _, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Zone",
-                  getValue=function() local m = MinimapDB(); return not (m and m.hideZoneText) end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.hideZoneText = not v
-                      RefreshMinimap()
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="toggle", text="Show Clock",
-                  getValue=function() local m = MinimapDB(); return m and m.showClock end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.showClock = v
-                      RefreshMinimap()
-                      EllesmereUI:RefreshPage()
-                  end }
+            { type="toggle", text="Show Zone",
+              getValue=function() local m = MinimapDB(); return not (m and m.hideZoneText) end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.hideZoneText = not v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Show Clock",
+              getValue=function() local m = MinimapDB(); return m and m.showClock end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.showClock = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
 
         -- Zone Inside | Clock Inside
         _, h = W:DualRow(parent, y,
-                { type="toggle", text="Zone Inside",
-                  tooltip="Display the zone text inside the minimap instead of below it",
-                  disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
-                  disabledTooltip="Enable Show Zone first",
-                  getValue=function() local m = MinimapDB(); return m and m.zoneInside end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.zoneInside = v
-                      RefreshMinimap()
-                  end },
-                { type="toggle", text="Clock Inside",
-                  tooltip="Display the clock inside the minimap instead of above it",
-                  disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
-                  disabledTooltip="Enable Show Clock first",
-                  getValue=function() local m = MinimapDB(); return m and m.clockInside end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.clockInside = v
-                      RefreshMinimap()
-                  end }
+            { type="toggle", text="Zone Inside",
+              tooltip="Display the zone text inside the minimap instead of below it",
+              disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
+              disabledTooltip="Enable Show Zone first",
+              getValue=function() local m = MinimapDB(); return m and m.zoneInside end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.zoneInside = v
+                RefreshMinimap()
+              end },
+            { type="toggle", text="Clock Inside",
+              tooltip="Display the clock inside the minimap instead of above it",
+              disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
+              disabledTooltip="Enable Show Clock first",
+              getValue=function() local m = MinimapDB(); return m and m.clockInside end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.clockInside = v
+                RefreshMinimap()
+              end }
         );  y = y - h
 
         -- Scroll to Zoom | Clock Scale (with cog: X/Y offset)
         local clockScaleRow
         clockScaleRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Scroll to Zoom",
-                  getValue=function() local m = MinimapDB(); return m and m.scrollZoom end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.scrollZoom = v
-                      RefreshMinimap()
-                  end },
-                { type="slider", text="Clock Scale", min=0.5, max=2.0, step=0.01,
-                  disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
-                  disabledTooltip="Enable Show Clock first",
-                  getValue=function() local m = MinimapDB(); return m and m.clockScale or 1.15 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.clockScale = v
-                      local bg = _G._EBS_ClockBg
-                      if bg then bg:SetScale(v) end
-                  end }
+            { type="toggle", text="Scroll to Zoom",
+              getValue=function() local m = MinimapDB(); return m and m.scrollZoom end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.scrollZoom = v
+                RefreshMinimap()
+              end },
+            { type="slider", text="Clock Scale", min=0.5, max=2.0, step=0.01,
+              disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
+              disabledTooltip="Enable Show Clock first",
+              getValue=function() local m = MinimapDB(); return m and m.clockScale or 1.15 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.clockScale = v
+                local bg = _G._EBS_ClockBg
+                if bg then bg:SetScale(v) end
+              end }
         );  y = y - h
 
         -- Inline cog on Clock Scale for X/Y offset
@@ -627,25 +627,25 @@ initFrame:SetScript("OnEvent", function(self)
         -- Location Scale (with cog: X/Y offset) | (spacer)
         local locScaleRow
         locScaleRow, h = W:DualRow(parent, y,
-                { type="slider", text="Location Scale", min=0.5, max=2.0, step=0.01,
-                  disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
-                  disabledTooltip="Enable Show Zone first",
-                  getValue=function() local m = MinimapDB(); return m and m.locationScale or 1.15 end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.locationScale = v
-                      local bg = _G._EBS_LocationBg
-                      if bg then bg:SetScale(v) end
-                  end },
-                { type="toggle", text="Show Coordinates Below Minimap",
-                  tooltip="Always display player coordinates centered below the minimap instead of only on hover.",
-                  getValue=function() local m = MinimapDB(); return m and m.coordsBelow end,
-                  setValue=function(v)
-                      local m = MinimapDB(); if not m then return end
-                      m.coordsBelow = v
-                      RefreshMinimap()
-                      EllesmereUI:RefreshPage()
-                  end }
+            { type="slider", text="Location Scale", min=0.5, max=2.0, step=0.01,
+              disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
+              disabledTooltip="Enable Show Zone first",
+              getValue=function() local m = MinimapDB(); return m and m.locationScale or 1.15 end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.locationScale = v
+                local bg = _G._EBS_LocationBg
+                if bg then bg:SetScale(v) end
+              end },
+            { type="toggle", text="Show Coordinates Below Minimap",
+              tooltip="Always display player coordinates centered below the minimap instead of only on hover.",
+              getValue=function() local m = MinimapDB(); return m and m.coordsBelow end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.coordsBelow = v
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
 
         -- Inline directions icon on Show Coordinates Below for X/Y offset
