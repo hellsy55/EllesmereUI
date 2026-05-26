@@ -1852,6 +1852,17 @@ local function GatherOnlineFriends()
         if guildSet[favorites[i].name] then table.remove(favorites, i) end
     end
 
+    -- Sort by zone (empty zones last), then name -- groups same-location together
+    local function byZone(a, b)
+        local az, bz = a.zone or "", b.zone or ""
+        if (az == "") ~= (bz == "") then return az ~= "" end
+        if az ~= bz then return az < bz end
+        return (a.name or "") < (b.name or "")
+    end
+    table.sort(guild, byZone)
+    table.sort(favorites, byZone)
+    table.sort(friends, byZone)
+
     return guild, favorites, friends
 end
 
