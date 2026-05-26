@@ -1962,16 +1962,6 @@ local function FTTInviteEntry(e)
     end
 end
 
-local function FTTVisitHouse(e)
-    if not e then return end
-    local target = e.full or e.name
-    if not target then return end
-    local eb = (ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend()) or ChatFrame1EditBox
-    if not eb or not ChatEdit_SendText then return end
-    eb:SetText("/visit " .. target)
-    ChatEdit_SendText(eb, 0)
-end
-
 local function FTTReportEntry(e)
     if not e then return end
     local target = e.full or e.name
@@ -2025,7 +2015,6 @@ local function FTTShowRowMenu(rowBtn, e)
 
         root:CreateButton("Whisper", function() FTTWhisperEntry(e) end)
         root:CreateButton("Invite", function() FTTInviteEntry(e) end)
-        root:CreateButton("View House", function() FTTVisitHouse(e) end)
         root:CreateButton("View Friends List", FTTViewFriendsFrame)
 
         if e.kind == "bnet" or e.kind == "char" then
