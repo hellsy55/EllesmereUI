@@ -363,7 +363,7 @@ local function LayoutFlyoutButtons()
         if not icon then
             for _, region in ipairs({ btn:GetRegions() }) do
                 if region:IsObjectType("Texture") and region:IsShown()
-                   and region:GetAlpha() > 0 and not IsJunkTexture(region) then
+                        and region:GetAlpha() > 0 and not IsJunkTexture(region) then
                     icon = region
                     break
                 end
@@ -894,7 +894,7 @@ local function GatherMinimapButtons()
                 elseif IsPinFrame(name) then
                     -- skip pin/POI frames
                 elseif child:IsObjectType("Button") and name
-                    and not name:match("%d+$") then
+                        and not name:match("%d+$") then
                     local w = child:GetWidth() or 0
                     -- Width gate only for first discovery; once a button is
                     -- tracked in _addonVisible it is always re-collected so
@@ -1153,7 +1153,7 @@ local function GetVaultTooltip()
     if _vaultTT then return _vaultTT end
     local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     f:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeSize = 1 })
+                    edgeFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeSize = 1 })
     f:SetBackdropColor(0.06, 0.06, 0.06, 0.90)
     f:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     f:SetFrameStrata("TOOLTIP")
@@ -1436,8 +1436,8 @@ local function CreateMinimapPortalFlyout()
         local btn = CreateFrame("Button", "EUIMinimapPortal" .. i, flyout, "SecureActionButtonTemplate")
         btn:SetSize(BTN_SIZE, BTN_SIZE)
         btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
-            PADDING + col * (BTN_SIZE + SPACING),
-            -(PADDING + row * (BTN_SIZE + SPACING)))
+                PADDING + col * (BTN_SIZE + SPACING),
+                -(PADDING + row * (BTN_SIZE + SPACING)))
 
         btn.spellID = spellID
 
@@ -1505,8 +1505,8 @@ local function CreateMinimapPortalFlyout()
         local btn = CreateFrame("Button", "EUIMinimapHearth" .. i, flyout, "SecureActionButtonTemplate")
         btn:SetSize(HS_H, HS_H)
         btn:SetPoint("TOPLEFT", flyout, "TOPLEFT",
-            hsX,
-            -(PADDING + (i - 1) * (HS_H + SPACING)))
+                hsX,
+                -(PADDING + (i - 1) * (HS_H + SPACING)))
 
         local icon = btn:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints()
@@ -1605,9 +1605,9 @@ local function CreateMinimapPortalFlyout()
             btn._hsID = id
             btn.icon:SetTexture(iconTex)
             btn.icon:SetTexCoord(aType == "housing" and 0 or 6/64,
-                                 aType == "housing" and 1 or 58/64,
-                                 aType == "housing" and 0 or 6/64,
-                                 aType == "housing" and 1 or 58/64)
+                    aType == "housing" and 1 or 58/64,
+                    aType == "housing" and 0 or 6/64,
+                    aType == "housing" and 1 or 58/64)
             if aType == "housing" then
                 btn:SetAttribute("type", nil)
                 btn:SetAttribute("macrotext", nil)
@@ -1774,7 +1774,7 @@ local function GatherOnlineFriends()
             if online and name then
                 local short = name:match("^([^%-]+)") or name
                 if short ~= myName then
-                    guild[#guild + 1] = { name = short, full = name, class = classFile, zone = zone or "", level = level }
+                    guild[#guild + 1] = { name = short, full = name, class = classFile, zone = zone or "", level = level, kind = "guild" }
                 end
             end
         end
@@ -1808,6 +1808,9 @@ local function GatherOnlineFriends()
                     level = gameInfo.characterLevel,
                     bnetTag = acct.accountName,
                     bnetID = acct.bnetAccountID,
+                    isFavorite = acct.isFavorite,
+                    note = acct.note,
+                    kind = "bnet",
                 }
                 if charName then seenBNet[charName] = true end
                 if acct.isFavorite then
@@ -1832,6 +1835,8 @@ local function GatherOnlineFriends()
                     class = info.className and info.className:upper():gsub(" ", ""),
                     zone = info.area or "",
                     level = info.level,
+                    note = info.notes,
+                    kind = "char",
                 }
             end
         end
@@ -1866,17 +1871,69 @@ end
 
 -- Hover-stable hide: small grace period so cursor can travel from button to tooltip
 local _fttHideToken = 0
+local _fttMenuOpen = false
 local function CancelFTTHide()
     _fttHideToken = _fttHideToken + 1
 end
 local function ScheduleFTTHide()
     _fttHideToken = _fttHideToken + 1
+    if _fttMenuOpen then return end
     local mine = _fttHideToken
     C_Timer.After(0.15, function()
         if mine ~= _fttHideToken then return end
+        if _fttMenuOpen then return end
         if _friendsTT then _friendsTT:Hide() end
     end)
 end
+
+StaticPopupDialogs["EBS_SET_FRIEND_NOTE"] = {
+    text = "Set note for %s:",
+    button1 = OKAY or "OK",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    maxLetters = 48,
+    OnShow = function(self, data)
+        self.editBox:SetText((data and data.note) or "")
+        self.editBox:HighlightText()
+        self.editBox:SetFocus()
+    end,
+    OnAccept = function(self, data)
+        local txt = self.editBox:GetText() or ""
+        if not data then return end
+        if data.kind == "bnet" and data.bnetID and BNSetFriendNote then
+            BNSetFriendNote(data.bnetID, txt)
+        elseif data.kind == "char" and C_FriendList and C_FriendList.SetFriendNotes then
+            C_FriendList.SetFriendNotes(data.name, txt)
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        if parent and parent.button1 then parent.button1:Click() end
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+StaticPopupDialogs["EBS_REMOVE_FRIEND"] = {
+    text = "Remove %s from your friends list?",
+    button1 = YES or "Yes",
+    button2 = NO or "No",
+    OnAccept = function(_, data)
+        if not data then return end
+        if data.kind == "bnet" and data.bnetID and BNRemoveFriend then
+            BNRemoveFriend(data.bnetID)
+        elseif data.kind == "char" and C_FriendList and C_FriendList.RemoveFriend then
+            C_FriendList.RemoveFriend(data.name)
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
 
 local function FTTWhisperEntry(e)
     if not e then return end
@@ -1902,6 +1959,107 @@ local function FTTInviteEntry(e)
         C_PartyInfo.InviteUnit(target)
     elseif InviteUnit then
         InviteUnit(target)
+    end
+end
+
+local function FTTVisitHouse(e)
+    if not e then return end
+    local target = e.full or e.name
+    if not target then return end
+    local eb = (ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend()) or ChatFrame1EditBox
+    if not eb or not ChatEdit_SendText then return end
+    eb:SetText("/visit " .. target)
+    ChatEdit_SendText(eb, 0)
+end
+
+local function FTTReportEntry(e)
+    if not e then return end
+    local target = e.full or e.name
+    if not target then return end
+    local rt = PLAYER_REPORT_TYPE_NAME
+    if not rt and Enum and Enum.ReportType then rt = Enum.ReportType.PlayerName end
+    if C_ReportSystem and C_ReportSystem.OpenReportPlayerDialog then
+        C_ReportSystem.OpenReportPlayerDialog(rt or "name", target)
+    elseif ReportPlayer then
+        ReportPlayer("name", target)
+    end
+end
+
+local function FTTToggleFavorite(e)
+    if not e or not e.bnetID or not BNSetFriendFavoriteFlag then return end
+    BNSetFriendFavoriteFlag(e.bnetID, not e.isFavorite)
+end
+
+local function FTTViewFriendsFrame()
+    if ToggleFriendsFrame then ToggleFriendsFrame(1) end
+end
+
+local function FTTPromptSetNote(e)
+    if not e then return end
+    StaticPopup_Show("EBS_SET_FRIEND_NOTE", e.name or "", nil, {
+        kind = e.kind,
+        bnetID = e.bnetID,
+        name = (e.kind == "char") and (e.full or e.name) or e.name,
+        note = e.note or "",
+    })
+end
+
+local function FTTPromptRemoveFriend(e)
+    if not e then return end
+    StaticPopup_Show("EBS_REMOVE_FRIEND", e.name or "", nil, {
+        kind = e.kind,
+        bnetID = e.bnetID,
+        name = (e.kind == "char") and (e.full or e.name) or e.name,
+    })
+end
+
+local function FTTShowRowMenu(rowBtn, e)
+    if not e or not e.kind then return end
+    if not MenuUtil or not MenuUtil.CreateContextMenu then return end
+    _fttMenuOpen = true
+    CancelFTTHide()
+    local menu = MenuUtil.CreateContextMenu(rowBtn, function(_, root)
+        local cc = e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class]
+        local title = cc and cc:WrapTextInColorCode(e.name or "") or (e.name or "")
+        root:CreateTitle(title)
+
+        root:CreateButton("Whisper", function() FTTWhisperEntry(e) end)
+        root:CreateButton("Invite", function() FTTInviteEntry(e) end)
+        root:CreateButton("View House", function() FTTVisitHouse(e) end)
+        root:CreateButton("View Friends List", FTTViewFriendsFrame)
+
+        if e.kind == "bnet" or e.kind == "char" then
+            root:CreateButton("Set Note", function() FTTPromptSetNote(e) end)
+        end
+        if e.kind == "bnet" and e.bnetID then
+            local label = e.isFavorite and "Remove Favorite" or "Add to Favorites"
+            root:CreateButton(label, function() FTTToggleFavorite(e) end)
+        end
+        if e.kind == "bnet" or e.kind == "char" then
+            root:CreateButton("Remove Friend", function() FTTPromptRemoveFriend(e) end)
+        end
+
+        root:CreateButton("Report Player", function() FTTReportEntry(e) end)
+    end)
+    if menu and menu.HookScript then
+        menu:HookScript("OnHide", function()
+            _fttMenuOpen = false
+            ScheduleFTTHide()
+        end)
+    else
+        -- Fallback: poll menu manager for close, since some Blizzard versions
+        -- return a non-frame proxy from CreateContextMenu.
+        local function pollClose()
+            local mgr = Menu and Menu.GetManager and Menu:GetManager()
+            local open = mgr and mgr.IsMenuOpen and mgr:IsMenuOpen()
+            if open then
+                C_Timer.After(0.1, pollClose)
+            else
+                _fttMenuOpen = false
+                ScheduleFTTHide()
+            end
+        end
+        C_Timer.After(0.1, pollClose)
     end
 end
 
@@ -1945,6 +2103,10 @@ local function EnsureFTTRow(idx)
     btn:SetScript("OnClick", function(self, mouseButton)
         local e = self._entry
         if not e then return end
+        if mouseButton == "RightButton" then
+            FTTShowRowMenu(self, e)
+            return
+        end
         if mouseButton ~= "LeftButton" then return end
         if IsAltKeyDown() then
             FTTInviteEntry(e)
@@ -2163,30 +2325,30 @@ local function BuildCustomIndicators(minimap)
 
     -- Tracking
     _customIndicators.tracking = CreateIndicatorBtn("_tracking", minimap,
-        "UI-HUD-Minimap-Tracking-Up", "UI-HUD-Minimap-Tracking-Mouseover", "UI-HUD-Minimap-Tracking-Down",
-        function(self)
-            local blizBtn = MinimapCluster and MinimapCluster.Tracking and MinimapCluster.Tracking.Button
-            if not blizBtn or not blizBtn.OpenMenu then return end
+            "UI-HUD-Minimap-Tracking-Up", "UI-HUD-Minimap-Tracking-Mouseover", "UI-HUD-Minimap-Tracking-Down",
+            function(self)
+                local blizBtn = MinimapCluster and MinimapCluster.Tracking and MinimapCluster.Tracking.Button
+                if not blizBtn or not blizBtn.OpenMenu then return end
 
-            -- Toggle: close if already open
-            if blizBtn.menu and blizBtn.menu:IsShown() then
-                blizBtn.menu:Hide()
-                return
-            end
+                -- Toggle: close if already open
+                if blizBtn.menu and blizBtn.menu:IsShown() then
+                    blizBtn.menu:Hide()
+                    return
+                end
 
-            -- Position hidden Blizzard button at our custom button
-            blizBtn:ClearAllPoints()
-            blizBtn:SetPoint("CENTER", self, "CENTER", 0, 0)
-            blizBtn:SetAlpha(0)
-            blizBtn:EnableMouse(false)
-            blizBtn:OpenMenu()
+                -- Position hidden Blizzard button at our custom button
+                blizBtn:ClearAllPoints()
+                blizBtn:SetPoint("CENTER", self, "CENTER", 0, 0)
+                blizBtn:SetAlpha(0)
+                blizBtn:EnableMouse(false)
+                blizBtn:OpenMenu()
 
-            -- Reposition menu so its top aligns with our button's top
-            if blizBtn.menu then
-                blizBtn.menu:ClearAllPoints()
-                blizBtn.menu:SetPoint("TOPRIGHT", self, "TOPLEFT", -4, 0)
-            end
-        end)
+                -- Reposition menu so its top aligns with our button's top
+                if blizBtn.menu then
+                    blizBtn.menu:ClearAllPoints()
+                    blizBtn.menu:SetPoint("TOPRIGHT", self, "TOPLEFT", -4, 0)
+                end
+            end)
     local trackBaseEnter = _customIndicators.tracking:GetScript("OnEnter")
     local trackBaseLeave = _customIndicators.tracking:GetScript("OnLeave")
     _customIndicators.tracking:SetScript("OnEnter", function(self)
@@ -2204,10 +2366,10 @@ local function BuildCustomIndicators(minimap)
     local calDay = tonumber(date("%d")) or 1
     local calPrefix = "UI-HUD-Calendar-" .. calDay
     _customIndicators.calendar = CreateIndicatorBtn("_gameTime", minimap,
-        calPrefix .. "-Up", calPrefix .. "-Mouseover", calPrefix .. "-Down",
-        function()
-            if ToggleCalendar then ToggleCalendar() end
-        end)
+            calPrefix .. "-Up", calPrefix .. "-Mouseover", calPrefix .. "-Down",
+            function()
+                if ToggleCalendar then ToggleCalendar() end
+            end)
     _customIndicators.calendar._calDay = calDay
     local calBaseEnter = _customIndicators.calendar:GetScript("OnEnter")
     local calBaseLeave = _customIndicators.calendar:GetScript("OnLeave")
@@ -2224,7 +2386,7 @@ local function BuildCustomIndicators(minimap)
 
     -- Mail (informational, tooltip on hover, with hover atlas)
     _customIndicators.mail = CreateIndicatorBtn("_mail", minimap,
-        "UI-HUD-Minimap-Mail-Up", "UI-HUD-Minimap-Mail-Mouseover", nil, nil)
+            "UI-HUD-Minimap-Mail-Up", "UI-HUD-Minimap-Mail-Mouseover", nil, nil)
     local mailBaseEnter = _customIndicators.mail:GetScript("OnEnter")
     local mailBaseLeave = _customIndicators.mail:GetScript("OnLeave")
     _customIndicators.mail:SetScript("OnEnter", function(self)
@@ -2240,7 +2402,7 @@ local function BuildCustomIndicators(minimap)
 
     -- Crafting Order (informational, tooltip on hover, with hover atlas)
     _customIndicators.crafting = CreateIndicatorBtn("_crafting", minimap,
-        "UI-HUD-Minimap-CraftingOrder-Up-2x", "UI-HUD-Minimap-CraftingOrder-Over-2x", "UI-HUD-Minimap-CraftingOrder-Down-2x", nil)
+            "UI-HUD-Minimap-CraftingOrder-Up-2x", "UI-HUD-Minimap-CraftingOrder-Over-2x", "UI-HUD-Minimap-CraftingOrder-Down-2x", nil)
     local craftBaseEnter = _customIndicators.crafting:GetScript("OnEnter")
     local craftBaseLeave = _customIndicators.crafting:GetScript("OnLeave")
     _customIndicators.crafting:SetScript("OnEnter", function(self)
@@ -2273,14 +2435,14 @@ local function BuildCustomIndicators(minimap)
 
     -- Friends Online button
     _customIndicators.friends = CreateIndicatorBtn("_friends", minimap,
-        FRIENDS_ATLAS, FRIENDS_ATLAS, nil,
-        function()
-            if InCombatLockdown() then
-                UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
-                return
-            end
-            ToggleFriendsFrame()
-        end)
+            FRIENDS_ATLAS, FRIENDS_ATLAS, nil,
+            function()
+                if InCombatLockdown() then
+                    UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
+                    return
+                end
+                ToggleFriendsFrame()
+            end)
     -- Atlas is not in INDICATOR_ATLAS_RATIO so icon uses inset anchoring
     -- (TOPLEFT/BOTTOMRIGHT). Desaturate slightly for idle state.
     if _customIndicators.friends._icon then
@@ -2543,8 +2705,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 if not icon then
                     for _, region in ipairs({ btn:GetRegions() }) do
                         if region:IsObjectType("Texture") and region:IsShown()
-                           and region:GetAlpha() > 0 and not IsJunkTexture(region)
-                           and region ~= GetFFD(btn).ungroupBg then
+                                and region:GetAlpha() > 0 and not IsJunkTexture(region)
+                                and region ~= GetFFD(btn).ungroupBg then
                             icon = region
                             break
                         end
@@ -2626,7 +2788,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.friends:ClearAllPoints()
                 if freeMove then
                     local idx = #ungrouped + (flyoutVisible and 1 or 0)
-                        + ((_greatVaultBtn and not heb.greatVault) and 1 or 0)
+                            + ((_greatVaultBtn and not heb.greatVault) and 1 or 0)
                     local yOff = idx * ungroupBtnSize
                     ci.friends:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
                 elseif anchor then
@@ -2650,8 +2812,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 _portalBtn:ClearAllPoints()
                 if freeMove then
                     local idx = #ungrouped + (flyoutVisible and 1 or 0)
-                        + ((_greatVaultBtn and not heb.greatVault) and 1 or 0)
-                        + ((ci.friends and not heb.friendsOnline) and 1 or 0)
+                            + ((_greatVaultBtn and not heb.greatVault) and 1 or 0)
+                            + ((ci.friends and not heb.friendsOnline) and 1 or 0)
                     local yOff = idx * ungroupBtnSize
                     _portalBtn:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMLEFT", 0, yOff)
                 elseif anchor then
@@ -3373,7 +3535,7 @@ local function ApplyMinimap()
             if PPa and px and py then
                 local es = minimap:GetEffectiveScale()
                 local isCenterAnchor = (p.position.point == "CENTER")
-                    and (p.position.relPoint == "CENTER" or p.position.relPoint == nil)
+                        and (p.position.relPoint == "CENTER" or p.position.relPoint == nil)
                 if isCenterAnchor and PPa.SnapCenterForDim then
                     px = PPa.SnapCenterForDim(px, minimap:GetWidth() or 0, es)
                     py = PPa.SnapCenterForDim(py, minimap:GetHeight() or 0, es)
