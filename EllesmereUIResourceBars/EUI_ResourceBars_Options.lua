@@ -1884,6 +1884,10 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline cog on Show Class Resource: Spacing + Hide Power Bar
         do
             local rgn = classEnableRow._leftRegion
+            local function IsEnhanceShaman()
+                local _, cf = UnitClass("player")
+                return cf == "SHAMAN" and GetSpecialization() == 2
+            end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Class Resource",
                 rows = {
@@ -1898,6 +1902,29 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local p = DB(); if not p then return end
                           p.secondary.hidePowerIfResource = v; RebuildClass()
+                      end },
+                    { type = "toggle", label = "Enhance 5 Bar Style",
+                      disabled = function() return not IsEnhanceShaman() end,
+                      disabledTooltip = "Enhancement Shaman only",
+                      get = function() local p = DB(); return p and p.secondary.enhanceFiveBar end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.enhanceFiveBar = v; RebuildClass()
+                      end },
+                    { type = "colorpicker", label = "Enhance Overflow Bars",
+                      disabled = function() return not IsEnhanceShaman() or not (DB() and DB().secondary.enhanceFiveBar) end,
+                      disabledTooltip = "Enable Enhance 5 Bar Style",
+                      get = function()
+                          local p = DB(); if not p then return 1, 0.6, 0.2 end
+                          local s = p.secondary
+                          return s.enhanceOverflowR or 1, s.enhanceOverflowG or 0.6, s.enhanceOverflowB or 0.2
+                      end,
+                      set = function(r, g, b)
+                          local p = DB(); if not p then return end
+                          p.secondary.enhanceOverflowR = r
+                          p.secondary.enhanceOverflowG = g
+                          p.secondary.enhanceOverflowB = b
+                          SmoothRefresh()
                       end },
                 },
             })

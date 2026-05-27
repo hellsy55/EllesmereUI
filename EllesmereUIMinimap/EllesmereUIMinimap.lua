@@ -42,7 +42,7 @@ local defaults = {
             hideMail             = false,
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
-            hideExtraBtns        = { greatVault = false, portals = false, friendsOnline = false },
+            hideExtraBtns        = { greatVault = false, portals = false, friendsOnline = false, groupButton = false },
             greatVaultExtraInfo  = true,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
@@ -2563,6 +2563,24 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 anchor = _portalBtn
             end
         end
+
+        -- Minimap Group Button (Blizzard native)
+        local groupBtn = _G.MinimapGroupButton
+        if groupBtn then
+            if heb.groupButton then
+                groupBtn:Hide()
+                if not GetFFD(groupBtn)._onShowHooked then
+                    GetFFD(groupBtn)._onShowHooked = true
+                    groupBtn:HookScript("OnShow", function(self)
+                        local m = MinimapDB()
+                        local h = m and m.hideExtraBtns
+                        if h and h.groupButton then self:Hide() end
+                    end)
+                end
+            else
+                groupBtn:Show()
+            end
+        end
     end
 
     -- Free Move: hook shift+drag on all indicator buttons and apply saved offsets
@@ -2718,8 +2736,8 @@ local function ApplyMinimap()
         local blocker = CreateFrame("Frame", nil, minimap)
         blocker:SetAllPoints()
         blocker:SetFrameLevel(minimap:GetFrameLevel() + 10)
-        blocker:EnableMouse(true)
         blocker:SetPassThroughButtons("LeftButton", "RightButton")
+        blocker:SetPropagateMouseMotion(true)
         blocker:SetScript("OnMouseUp", function(_, btn)
             if btn == "MiddleButton" and EBS._ToggleMicroMenu then
                 EBS._ToggleMicroMenu()
