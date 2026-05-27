@@ -1946,15 +1946,65 @@ StaticPopupDialogs["EBS_REMOVE_FRIEND"] = {
     hideOnEscape = true,
 }
 
+local function _matchGA(gi, charName, fullName)
+    if not gi or not gi.isOnline or gi.clientProgram ~= "WoW" then return false end
+    if not gi.characterName then return false end
+    if gi.characterName == charName then return true end
+    if fullName and gi.realmName and gi.realmName ~= "" then
+        if (gi.characterName .. "-" .. gi.realmName) == fullName then return true end
+    end
+    return false
+end
+
+local function FindBNetTagForChar(charName, fullName)
+    if not charName then return nil end
+    local num = BNGetNumFriends and BNGetNumFriends() or 0
+    for i = 1, num do
+        local acct = C_BattleNet and C_BattleNet.GetFriendAccountInfo and C_BattleNet.GetFriendAccountInfo(i)
+        if acct then
+            local numGA = C_BattleNet.GetFriendNumGameAccounts and C_BattleNet.GetFriendNumGameAccounts(i) or 0
+            for j = 1, numGA do
+                local gi = C_BattleNet.GetFriendGameAccountInfo and C_BattleNet.GetFriendGameAccountInfo(i, j)
+                if _matchGA(gi, charName, fullName) then
+                    return acct.accountName, acct.bnetAccountID
+                end
+            end
+            if numGA == 0 and _matchGA(acct.gameAccountInfo, charName, fullName) then
+                return acct.accountName, acct.bnetAccountID
+            end
+        end
+    end
+    return nil
+end
+
+local function _OpenWhisperEditBox(chatType, target)
+    local eb = ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend()
+            or (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
+    if not eb then return false end
+    eb:SetAttribute("chatType", chatType)
+    eb:SetAttribute("tellTarget", target)
+    if ChatEdit_UpdateHeader then ChatEdit_UpdateHeader(eb) end
+    if ChatEdit_ActivateChat then ChatEdit_ActivateChat(eb) else eb:Show() end
+    return true
+end
+
 local function FTTWhisperEntry(e)
     if not e then return end
-    if e.bnetTag and ChatFrame_SendBNetTell then
-        ChatFrame_SendBNetTell(e.bnetTag)
+    local tag = e.bnetTag or FindBNetTagForChar(e.name, e.full)
+    if tag then
+        if ChatFrame_SendBNetTell then
+            ChatFrame_SendBNetTell(tag)
+        else
+            _OpenWhisperEditBox("BN_WHISPER", tag)
+        end
         return
     end
     local target = e.full or e.name
-    if target and ChatFrame_OpenChat then
-        ChatFrame_OpenChat("/w " .. target .. " ")
+    if not target then return end
+    if ChatFrame_SendTell then
+        ChatFrame_SendTell(target)
+    else
+        _OpenWhisperEditBox("WHISPER", target)
     end
 end
 
