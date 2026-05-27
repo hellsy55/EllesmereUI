@@ -2075,7 +2075,11 @@ local function FTTShowRowMenu(rowBtn, e)
         root:CreateTitle(title)
 
         root:CreateButton("Whisper", function() FTTWhisperEntry(e) end)
-        root:CreateButton("Invite", function() FTTInviteEntry(e) end)
+        local canInviteDirectly = not IsInGroup()
+                or UnitIsGroupLeader("player")
+                or UnitIsGroupAssistant("player")
+        local inviteLabel = canInviteDirectly and "Invite" or "Suggest Invite"
+        root:CreateButton(inviteLabel, function() FTTInviteEntry(e) end)
         root:CreateButton("View Friends List", FTTViewFriendsFrame)
 
         if e.kind == "bnet" or e.kind == "char" then
