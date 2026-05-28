@@ -1691,11 +1691,7 @@ if inInstance or rb.showNonInstanced then
                 if buff.check == "huntersMark" then
                     isMissing = inCombat and _huntersMarkNeeded
                 elseif rb.showOthersMissing and buff.check == "raid" and (IsInGroup() or IsInRaid()) then
-                    if inCombat then
-                        isMissing = not PlayerHasAuraByID(buff.buffIDs)
-                    else
-                        isMissing = AnyGroupMemberMissingBuff(buff.buffIDs)
-                    end
+                    isMissing = AnyGroupMemberMissingBuff(buff.buffIDs)
                 else
                     isMissing = not PlayerHasAuraByID(buff.buffIDs)
                 end
@@ -3248,10 +3244,11 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
-        -- Drop broad UNIT_AURA during combat (group events are useless --
-        -- CollectRaidBuffs only checks player auras in combat). Evoker
-        -- keeps broad for ownOnRaid cache updates.
-        if _needGroupAura and not _isEvokerOwnOnRaid then _setBroad(false) end
+        -- Drop broad UNIT_AURA during combat unless we need group tracking.
+        -- Evoker keeps broad for ownOnRaid cache updates; showOthersMissing
+        -- keeps broad so AnyGroupMemberMissingBuff gets timely refreshes.
+        local keepBroad = _isEvokerOwnOnRaid or (db and db.profile.raidBuffs and db.profile.raidBuffs.showOthersMissing)
+        if _needGroupAura and not keepBroad then _setBroad(false) end
         -- Only flag Hunter's Mark needed if the target doesn't already have it
         _huntersMarkNeeded = true
         if C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID
@@ -3327,11 +3324,9 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
             RequestRefresh()
         else
             -- Group member aura change. Fast unit-type check via first byte.
-            -- In combat only Evoker reaches here (ownOnRaid cache); non-Evoker
-            -- classes unregister broad UNIT_AURA on combat start.
-            -- OOC: coalesce group events into a single deferred refresh instead
-            -- of calling RequestRefresh() per event (100+ events/sec in a raid
-            -- would each enter RequestRefresh just to hit the queued guard).
+            -- Broad UNIT_AURA stays registered in combat for Evoker ownOnRaid
+            -- and for showOthersMissing raid buff tracking. Coalesce group
+            -- events into a single deferred refresh to avoid per-event spam.
             local c = arg1 and arg1:byte(1)
             if c == 112 or c == 114 then  -- 'p' or 'r'
                 if _isEvokerOwnOnRaid and InCombat() and IsInGroup() then
@@ -3343,7 +3338,8 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
                             end
                         end
                     end
-                elseif not _groupAuraDirty then
+                end
+                if not _groupAuraDirty then
                     _groupAuraDirty = true
                     C_Timer.After(0.3, function()
                         _groupAuraDirty = false

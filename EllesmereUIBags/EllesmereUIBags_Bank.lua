@@ -9,7 +9,7 @@ local EUI = EllesmereUI
 --  Constants
 -------------------------------------------------------------------------------
 local SLOT_SIZE, SPACING = 34, 4
-local _canUseCache = {}  -- [itemID] = bool, stable per session
+local _canUseCache = {}  -- [itemID] = true (usable) | false (unusable), via tooltip red-text scan
 local HEADER_H    = 35
 local FOOTER_H    = 32
 local SIDEBAR_W   = 160
@@ -1465,11 +1465,31 @@ function EUI_Bank:RefreshBank()
                     if btn._textOverlay then btn.IconOverlay:SetParent(btn._textOverlay) end
                 else btn.IconOverlay:SetAlpha(0) end
             end
-            if btn.icon and info and info.itemID and itemLink and IsEquippableItem(itemLink) then
+            if btn.icon and info and info.itemID then
                 local id = info.itemID
                 local canUse = _canUseCache[id]
-                if canUse == nil and C_PlayerInfo and C_PlayerInfo.CanUseItem then
-                    canUse = C_PlayerInfo.CanUseItem(id)
+                if canUse == nil then
+                    canUse = true
+                    if IsEquippableItem(id) or C_Item.GetItemSpell(id) then
+                        local tip = C_TooltipInfo.GetItemByID(id)
+                        if tip and tip.lines then
+                            for _, row in ipairs(tip.lines) do
+                                local lc = row.leftColor
+                                if lc and lc.r == 1 and lc.g < 0.2 and lc.b < 0.2
+                                   and row.leftText ~= ITEM_SCRAPABLE_NOT
+                                   and row.leftText ~= CANNOT_UNEQUIP_COMBAT
+                                   and row.leftText ~= ITEM_DISENCHANT_NOT_DISENCHANTABLE then
+                                    canUse = false
+                                    break
+                                end
+                                local rc = row.rightColor
+                                if rc and rc.r == 1 and rc.g < 0.2 and rc.b < 0.2 then
+                                    canUse = false
+                                    break
+                                end
+                            end
+                        end
+                    end
                     _canUseCache[id] = canUse
                 end
                 if canUse == false then

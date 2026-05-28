@@ -1606,7 +1606,7 @@ end
 -- Apply an anchor relationship: position the child element relative to the target
 -- side: "LEFT", "RIGHT", "TOP", "BOTTOM" -- child is placed on that side of the target
 -- offsetX/offsetY: if present, position child relative to the anchor edge
-ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
+ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCascade)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
     if not childBar or not targetBar then return end
@@ -1715,11 +1715,12 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
         end
     end
 
-    -- For CDM/AB bars with a non-CENTER growth direction, read the bar's
-    -- live fixed edge and derive center from it. Anchor offsets are stored
-    -- center-based; converting center→edge uses current width which may differ
-    -- from save-time width (pre-icon-population). The saved edge position
-    -- (applied by BuildAllCDMBars/applyPos before this runs) is authoritative.
+    -- For CDM/AB bars with a non-CENTER growth direction, use edge-based
+    -- SetPoint so SetSize grows naturally from the fixed edge.
+    -- Edge preservation (overriding cx/cy with saved/live edge) only applies
+    -- to UNANCHORED bars whose own size changed. Anchored bars always use
+    -- the target-computed cx/cy -- the target's bounds + offsets are
+    -- authoritative and saved-edge data may be stale.
     local cdmEdgeAnchor
     local isCdmOrAB = childKey:sub(1, 4) == "CDM_"
         or (EllesmereUI._abBarKeys and EllesmereUI._abBarKeys[childKey])
@@ -1728,52 +1729,57 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
        and (isCDM or childKey == "StanceBar" or not EllesmereUI._applyingSavedPositions) then
         local growDir = GetBarGrowDirActual(childKey)
         if growDir and growDir ~= "CENTER" then
-            local cScale = childBar:GetEffectiveScale()
-            local ratio = cScale / uiS
-            -- For CDM bars, read the saved edge from cdmBarPositions.
-            -- This is width-independent (stored as LEFT/RIGHT/TOP anchor)
-            -- and immune to intermediate CENTER-based repositioning that
-            -- can overwrite live frame bounds during init.
-            local savedEdge
-            if isCDM and EllesmereUI._cdmBarPositions then
-                local sp = EllesmereUI._cdmBarPositions[childKey:sub(5)]
-                if sp then savedEdge = sp end
-            elseif childKey == "StanceBar" and EllesmereUI._abBarPositions then
-                local sp = EllesmereUI._abBarPositions[childKey]
-                if sp then savedEdge = sp end
-            end
-            local uw, uh = UIParent:GetSize()
-            if growDir == "RIGHT" then
-                cdmEdgeAnchor = "LEFT"
-                if savedEdge and savedEdge.point == "LEFT" and savedEdge.x then
-                    cx = (uw / 2 + savedEdge.x) * ratio + cW / 2
-                else
-                    local fL = childBar:GetLeft()
-                    if fL then cx = fL * ratio + cW / 2 end
+            -- Always set cdmEdgeAnchor so SetPoint uses the fixed edge
+            if growDir == "RIGHT" then cdmEdgeAnchor = "LEFT"
+            elseif growDir == "LEFT" then cdmEdgeAnchor = "RIGHT"
+            elseif growDir == "DOWN" then cdmEdgeAnchor = "TOP"
+            elseif growDir == "UP" then cdmEdgeAnchor = "BOTTOM" end
+            -- Edge preservation: override cx/cy with saved/live edge only
+            -- when the bar is NOT anchored to another element. Anchored bars
+            -- always derive position from their target's bounds + offsets;
+            -- the saved edge is stale after the target moves/resizes.
+            local anchorDB2 = GetAnchorDB()
+            local hasAnchorTarget = anchorDB2 and anchorDB2[childKey] and anchorDB2[childKey].target
+            if not hasAnchorTarget then
+                local cScale = childBar:GetEffectiveScale()
+                local ratio = cScale / uiS
+                local savedEdge
+                if isCDM and EllesmereUI._cdmBarPositions then
+                    local sp = EllesmereUI._cdmBarPositions[childKey:sub(5)]
+                    if sp then savedEdge = sp end
+                elseif childKey == "StanceBar" and EllesmereUI._abBarPositions then
+                    local sp = EllesmereUI._abBarPositions[childKey]
+                    if sp then savedEdge = sp end
                 end
-            elseif growDir == "LEFT" then
-                cdmEdgeAnchor = "RIGHT"
-                if savedEdge and savedEdge.point == "RIGHT" and savedEdge.x then
-                    cx = (uw / 2 + savedEdge.x) * ratio - cW / 2
-                else
-                    local fR = childBar:GetRight()
-                    if fR then cx = fR * ratio - cW / 2 end
-                end
-            elseif growDir == "DOWN" then
-                cdmEdgeAnchor = "TOP"
-                if savedEdge and savedEdge.point == "TOP" and savedEdge.y then
-                    cy = (uh / 2 + savedEdge.y) * ratio - cH / 2
-                else
-                    local fT = childBar:GetTop()
-                    if fT then cy = fT * ratio - cH / 2 end
-                end
-            elseif growDir == "UP" then
-                cdmEdgeAnchor = "BOTTOM"
-                if savedEdge and savedEdge.point == "BOTTOM" and savedEdge.y then
-                    cy = (uh / 2 + savedEdge.y) * ratio + cH / 2
-                else
-                    local fB = childBar:GetBottom()
-                    if fB then cy = fB * ratio + cH / 2 end
+                local uw, uh = UIParent:GetSize()
+                if growDir == "RIGHT" then
+                    if savedEdge and savedEdge.point == "LEFT" and savedEdge.x then
+                        cx = (uw / 2 + savedEdge.x) * ratio + cW / 2
+                    else
+                        local fL = childBar:GetLeft()
+                        if fL then cx = fL * ratio + cW / 2 end
+                    end
+                elseif growDir == "LEFT" then
+                    if savedEdge and savedEdge.point == "RIGHT" and savedEdge.x then
+                        cx = (uw / 2 + savedEdge.x) * ratio - cW / 2
+                    else
+                        local fR = childBar:GetRight()
+                        if fR then cx = fR * ratio - cW / 2 end
+                    end
+                elseif growDir == "DOWN" then
+                    if savedEdge and savedEdge.point == "TOP" and savedEdge.y then
+                        cy = (uh / 2 + savedEdge.y) * ratio - cH / 2
+                    else
+                        local fT = childBar:GetTop()
+                        if fT then cy = fT * ratio - cH / 2 end
+                    end
+                elseif growDir == "UP" then
+                    if savedEdge and savedEdge.point == "BOTTOM" and savedEdge.y then
+                        cy = (uh / 2 + savedEdge.y) * ratio + cH / 2
+                    else
+                        local fB = childBar:GetBottom()
+                        if fB then cy = fB * ratio + cH / 2 end
+                    end
                 end
             end
         end
@@ -1811,15 +1817,14 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove)
                 bEdgeX = PPa.SnapForES(bEdgeX, cS)
                 bEdgeY = PPa.SnapForES(bEdgeY, cS)
             end
-            -- Idempotent guard
             local skip = false
             local okPt, point, relTo, relPoint, curX, curY = pcall(childBar.GetPoint, childBar, 1)
             if okPt and point == cdmEdgeAnchor and relPoint == "CENTER" and relTo == UIParent then
                 local onePx = ((PP and PP.perfect) or 1) / cS
-                local tol = onePx * 0.5
+                local tol = onePx * 1.5
                 if curX and curY
-                   and math.abs(curX - bEdgeX) < tol
-                   and math.abs(curY - bEdgeY) < tol then
+                   and math.abs(curX - bEdgeX) <= tol
+                   and math.abs(curY - bEdgeY) <= tol then
                     skip = true
                 end
             end
@@ -1983,7 +1988,7 @@ PropagateAnchorChain = function(parentKey, visited, changedAxis)
                 dominated = (info.side == "LEFT" or info.side == "RIGHT")
             end
             if not dominated then
-                ApplyAnchorPosition(childKey, info.target, info.side)
+                ApplyAnchorPosition(childKey, info.target, info.side, nil, nil, true)
                 -- Do NOT call Sync() here -- ApplyAnchorPosition already positions
                 -- the mover correctly, and Sync() reads stale screen coords before
                 -- WoW's layout pass, which corrupts moverCX/moverCY.

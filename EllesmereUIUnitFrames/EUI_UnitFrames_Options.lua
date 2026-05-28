@@ -280,9 +280,11 @@ initFrame:SetScript("OnEvent", function(self)
         ["curhpshort"]   = "Health #",
         ["perhpnum"]     = "Health % | #",
         ["both"]         = "Health # | %",
+        ["absorb"]       = "Absorb Amount",
         ["none"]         = "None",
     }
     local healthTextOrder = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both" }
+    local healthTextOrderPlayer = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "absorb" }
 
     -- Text bar (BTB) text dropdown values (includes power options)
     local btbTextValues = {
@@ -1035,6 +1037,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local pct = _previewHealthPct or 0.70
                 local ppPct3 = _previewPowerPct or 0.85
                 return math.floor(pct * 100) .. "% | " .. math.floor(ppPct3 * 100) .. "%"
+            elseif content == "absorb" then
+                local maxHP = UnitHealthMax("player") or 1
+                return AbbreviateNumbers(math.floor(maxHP * 0.14))
             else
                 return ""
             end
@@ -4277,7 +4282,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 3: Left Text + Right Text
         local sharedTextRow
         sharedTextRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Left Text", values=healthTextValues, order=healthTextOrder,
+            { type="dropdown", text="Left Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
               getValue=function() return SVal("leftTextContent", "name") end,
               setValue=function(v)
                   SSet("leftTextContent", v)
@@ -4290,7 +4295,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return SVal("centerTextContent", "none") ~= "none" end,
               disabledTooltip="This option is disabled while a Center Text is selected.",
             },
-            { type="dropdown", text="Right Text", values=healthTextValues, order=healthTextOrder,
+            { type="dropdown", text="Right Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
               getValue=function() return SVal("rightTextContent", "both") end,
               setValue=function(v)
                   SSet("rightTextContent", v)
@@ -4312,14 +4317,15 @@ initFrame:SetScript("OnEvent", function(self)
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().leftTextContent = v end
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().leftTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().leftTextContent or "name") ~= v then return false end
+                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        if (UNIT_DB_MAP[key]().leftTextContent or "name") ~= expected then return false end
                     end
                     return true
                 end,
@@ -4330,7 +4336,7 @@ initFrame:SetScript("OnEvent", function(self)
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
                         local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().leftTextContent = v end
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().leftTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
@@ -4344,14 +4350,15 @@ initFrame:SetScript("OnEvent", function(self)
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().rightTextContent = v end
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().rightTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().rightTextContent or "both") ~= v then return false end
+                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        if (UNIT_DB_MAP[key]().rightTextContent or "both") ~= expected then return false end
                     end
                     return true
                 end,
@@ -4362,7 +4369,7 @@ initFrame:SetScript("OnEvent", function(self)
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
                         local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().rightTextContent = v end
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().rightTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
@@ -4502,7 +4509,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 4: Center Text + Reverse Fill
         local sharedCenterTextRow
         sharedCenterTextRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Center Text", values=healthTextValues, order=healthTextOrder,
+            { type="dropdown", text="Center Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
               getValue=function() return SVal("centerTextContent", "none") end,
               setValue=function(v)
                   SSet("centerTextContent", v)
@@ -4524,14 +4531,15 @@ initFrame:SetScript("OnEvent", function(self)
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().centerTextContent = v end
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().centerTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().centerTextContent or "none") ~= v then return false end
+                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        if (UNIT_DB_MAP[key]().centerTextContent or "none") ~= expected then return false end
                     end
                     return true
                 end,
@@ -4542,7 +4550,7 @@ initFrame:SetScript("OnEvent", function(self)
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
                         local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().centerTextContent = v end
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().centerTextContent = (v == "absorb" and key ~= "player") and "none" or v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },

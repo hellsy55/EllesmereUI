@@ -2321,7 +2321,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
 
     if circleMode then
         -- Circle layout: horizontal row around the clock
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             if clockBg and p.showClock then
                 ci.tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
@@ -2329,6 +2329,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
             end
             ci.tracking:Show()
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2357,11 +2359,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         -- Square layout: vertical stack on the left side
         local y = 0
 
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             ci.tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
             ci.tracking:Show()
             y = y - sz
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2574,7 +2578,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local heb = p.hideExtraBtns or {}
     local freeMove = p.freeMoveBtns
     local fmTargets = {}
-    if ci.tracking then fmTargets[#fmTargets + 1] = ci.tracking end
+    if ci.tracking and not p.hideTrackingButton then fmTargets[#fmTargets + 1] = ci.tracking end
     if ci.calendar and not p.hideGameTime then fmTargets[#fmTargets + 1] = ci.calendar end
     if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end

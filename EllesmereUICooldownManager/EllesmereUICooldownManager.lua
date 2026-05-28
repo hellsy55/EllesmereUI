@@ -2108,6 +2108,8 @@ BuildCDMBar = function(barIndex)
         frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
         frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
+        if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
+        if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
         if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
         if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
         frame._barKey = key
@@ -2300,14 +2302,17 @@ BuildCDMBar = function(barIndex)
             end
         end
     elseif anchorKey == "playerframe" then
-        -- Anchor to the player's unit frame
+        -- Anchor to the player's unit frame.
+        -- WoW's layout engine does not reliably propagate position changes
+        -- through native SetPoint anchors when the parent frame is repositioned
+        -- via ClearAllPoints + SetPoint (e.g. by the unlock anchor cascade).
+        -- Instead, we compute absolute UIParent coordinates from the player
+        -- frame's current bounds and hook its SetPoint to re-anchor when it moves.
         local playerFrame = EllesmereUI.FindPlayerUnitFrame()
         if playerFrame then
-            frame:ClearAllPoints()
             local side = barData.playerFrameSide or "LEFT"
             local oX = barData.playerFrameOffsetX or 0
             local oY = barData.playerFrameOffsetY or 0
-            -- Snap offsets to physical pixel grid
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and PPa.SnapForES then
                 local es = frame:GetEffectiveScale()
@@ -2431,6 +2436,7 @@ BuildCDMBar = function(barIndex)
     -- Always Show() so layout/children work.
     -- _CDMApplyVisibility is the single authority for alpha/hiding.
     frame:Show()
+
 end
 
 -- Compute stride respecting topRowCount override (only for numRows == 2)
@@ -5311,6 +5317,8 @@ function ECME:CDMFinishSetup()
                                 frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
                                 frame:SetFrameStrata("MEDIUM")
                                 frame:SetFrameLevel(5)
+                                if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
+                                if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
                                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
                                 if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
                                 frame._barKey = key

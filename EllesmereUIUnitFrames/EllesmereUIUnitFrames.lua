@@ -1131,6 +1131,13 @@ oUF.Tags.Methods["eui-curpp"] = [[function(u)
 end]]
 oUF.Tags.Events["eui-curpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
 
+-- eui-absorb: abbreviated absorb amount, blank when zero
+oUF.Tags.Methods["eui-absorb"] = [[function(u)
+    if not u or not UnitExists(u) then return "" end
+    return string.format("%s", C_StringUtil.TruncateWhenZero(UnitGetTotalAbsorbs(u) or 0))
+end]]
+oUF.Tags.Events["eui-absorb"] = "UNIT_ABSORB_AMOUNT_CHANGED"
+
 local optionsFrame
 local optionsCategoryID
 _G.EllesmereUF_StylesRegistered = _G.EllesmereUF_StylesRegistered or false
@@ -1284,6 +1291,7 @@ local function ContentToTag(content)
     elseif content == "curpp" then return "[curpp]"
     elseif content == "curhp_curpp" then return "[curhpshort] | [curpp]"
     elseif content == "perhp_perpp" then return "[perhp]% | [perpp]%"
+    elseif content == "absorb" then return "[eui-absorb]"
     else return nil end
 end
 
@@ -1300,6 +1308,7 @@ local ufTextWidths = {
     curpp       = 38,  -- "132"
     curhp_curpp = 75,  -- "132 K | 132"
     perhp_perpp = 75,  -- "86% | 86%"
+    absorb      = 38,  -- "12.3 K"
 }
 local function EstimateUFTextWidth(content)
     return (ufTextWidths[content] or 0) + UF_TEXT_PADDING

@@ -21,7 +21,7 @@ EUI_BagsWindow = CreateFrame("Frame", "EUI_BagsWindowFrame", UIParent)
 EUI_BagsWindow:Hide()
 
 local SLOT_SIZE, SPACING = 34, 4
-local _canUseCache = {}  -- [itemID] = bool, stable per session (class/level based)
+local _canUseCache = {}  -- [itemID] = true (usable) | false (unusable), via tooltip red-text scan
 -- Weak-keyed table for bank-deposit routing state. Writing custom keys onto
 -- ContainerFrameItemButtonTemplate frames during PreClick taints the secure
 -- execution chain and causes UseContainerItem() ADDON_ACTION_FORBIDDEN.
@@ -2282,11 +2282,31 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
                 btn.IconOverlay:SetAlpha(0)
             end
         end
-        if btn.icon and data._isGear and data.info and data.info.itemID then
+        if btn.icon and data.info and data.info.itemID then
             local id = data.info.itemID
             local canUse = _canUseCache[id]
-            if canUse == nil and C_PlayerInfo and C_PlayerInfo.CanUseItem then
-                canUse = C_PlayerInfo.CanUseItem(id)
+            if canUse == nil then
+                canUse = true
+                if IsEquippableItem(id) or C_Item.GetItemSpell(id) then
+                    local tip = C_TooltipInfo.GetItemByID(id)
+                    if tip and tip.lines then
+                        for _, row in ipairs(tip.lines) do
+                            local lc = row.leftColor
+                            if lc and lc.r == 1 and lc.g < 0.2 and lc.b < 0.2
+                               and row.leftText ~= ITEM_SCRAPABLE_NOT
+                               and row.leftText ~= CANNOT_UNEQUIP_COMBAT
+                               and row.leftText ~= ITEM_DISENCHANT_NOT_DISENCHANTABLE then
+                                canUse = false
+                                break
+                            end
+                            local rc = row.rightColor
+                            if rc and rc.r == 1 and rc.g < 0.2 and rc.b < 0.2 then
+                                canUse = false
+                                break
+                            end
+                        end
+                    end
+                end
                 _canUseCache[id] = canUse
             end
             if canUse == false then
