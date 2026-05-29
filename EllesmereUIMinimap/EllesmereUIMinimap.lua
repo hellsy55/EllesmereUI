@@ -1800,13 +1800,17 @@ local function GatherOnlineFriends()
                 if charName and realm and realm ~= "" then
                     full = charName .. "-" .. realm
                 end
+                -- Battle tag without the #discriminator (fall back to accountName/RealID)
+                local rawTag = acct.battleTag or acct.accountName
+                local tagName = rawTag and rawTag:match("^([^#]+)") or rawTag
                 local entry = {
-                    name = charName or acct.accountName or "???",
+                    name = charName or tagName or "???",
                     full = full,
                     class = classFile,
                     zone = zone,
                     level = gameInfo.characterLevel,
-                    bnetTag = acct.accountName,
+                    bnetTag = tagName,
+                    bnetName = acct.accountName or acct.battleTag,
                     bnetID = acct.bnetAccountID,
                     isFavorite = acct.isFavorite,
                     note = acct.note,
@@ -1859,9 +1863,13 @@ local function GatherOnlineFriends()
         if az ~= bz then return az < bz end
         return (a.name or "") < (b.name or "")
     end
+    -- Friends/favorites sort A-Z by battle tag (fall back to name); guild stays grouped by zone
+    local function byTag(a, b)
+        return (a.bnetTag or a.name or ""):lower() < (b.bnetTag or b.name or ""):lower()
+    end
     table.sort(guild, byZone)
-    table.sort(favorites, byZone)
-    table.sort(friends, byZone)
+    table.sort(favorites, byTag)
+    table.sort(friends, byTag)
 
     return guild, favorites, friends
 end
@@ -1990,7 +1998,7 @@ end
 
 local function FTTWhisperEntry(e)
     if not e then return end
-    local tag = e.bnetTag or FindBNetTagForChar(e.name, e.full)
+    local tag = e.bnetName or e.bnetTag or FindBNetTagForChar(e.name, e.full)
     if tag then
         if ChatFrame_SendBNetTell then
             ChatFrame_SendBNetTell(tag)
@@ -2308,6 +2316,10 @@ local function ShowFriendsTooltip(anchor)
 
             local cc = e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class]
             local colored = cc and cc:WrapTextInColorCode(e.name) or e.name
+            -- BNet friends: show battle tag before the in-game name, e.g. "Bigmacz (Unholyftw)"
+            if e.bnetTag then
+                colored = "|cffffd100" .. e.bnetTag .. "|r (" .. colored .. ")"
+            end
             row.name:SetText(colored)
             row.name:SetTextColor(1, 1, 1, 0.85)
 
