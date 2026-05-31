@@ -337,6 +337,13 @@ end
 -------------------------------------------------------------------------------
 local FONT_PATH   = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
     or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
+
+-- At very low UI scales the unlock overlays/top bar get hard to read, so we
+-- nudge them up. The "is the global UI scale below 0.6" check is inlined at each
+-- use site as `UIParent:GetEffectiveScale() < 0.6` rather than via a helper,
+-- because the overlay-builder functions are already at Lua 5.1's 60-upvalue
+-- limit and referencing a file-local helper would add an upvalue. UIParent is a
+-- global, so inlining costs no upvalue.
 local LOCK_INNER  = "Interface\\AddOns\\EllesmereUI\\media\\eui-unlocked-inner-2.png"
 local LOCK_OUTER  = "Interface\\AddOns\\EllesmereUI\\media\\eui-unlocked-outer-2.png"
 local LOCK_TOP    = "Interface\\AddOns\\EllesmereUI\\media\\eui-unlocked-top-2.png"
@@ -1734,13 +1741,29 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
             elseif growDir == "LEFT" then cdmEdgeAnchor = "RIGHT"
             elseif growDir == "DOWN" then cdmEdgeAnchor = "TOP"
             elseif growDir == "UP" then cdmEdgeAnchor = "BOTTOM" end
-            -- Edge preservation: override cx/cy with saved/live edge only
-            -- when the bar is NOT anchored to another element. Anchored bars
-            -- always derive position from their target's bounds + offsets;
-            -- the saved edge is stale after the target moves/resizes.
+            -- Edge preservation: override cx/cy with the saved/live edge so the
+            -- fixed growth edge stays put when the bar's OWN width changes (e.g.
+            -- a class with a different number of stance buttons / cooldowns).
+            --
+            -- It is skipped ONLY on a runtime cascade -- i.e. when this call was
+            -- triggered by the TARGET moving/resizing (PropagateAnchorChain passes
+            -- fromCascade=true). There the bar must follow its target via the
+            -- center offset; the absolute saved edge is stale once the target
+            -- relocates. This is the case v7.9.4 fixed and we preserve it.
+            --
+            -- On init, the bar's own resize, and the Save & Exit reapply (all
+            -- fromCascade=nil) the whole chain is at its saved positions, so the
+            -- width-independent saved edge is authoritative. Honoring it keeps the
+            -- growth edge fixed when the bar's width differs across characters
+            -- (different icon/stance counts) and stops the dw/2 layout nudge from
+            -- shifting the bar on save/reload.
+            --
+            -- The StanceBar anchors to the player frame (fixed position), so its
+            -- saved edge is never stale even on cascade -- always honor it.
             local anchorDB2 = GetAnchorDB()
             local hasAnchorTarget = anchorDB2 and anchorDB2[childKey] and anchorDB2[childKey].target
-            if not hasAnchorTarget then
+            local skipEdgePreserve = hasAnchorTarget and fromCascade and childKey ~= "StanceBar"
+            if not skipEdgePreserve then
                 local cScale = childBar:GetEffectiveScale()
                 local ratio = cScale / uiS
                 local savedEdge
@@ -3650,7 +3673,18 @@ local function NudgeMover(dx, dy)
         ai.offsetX = (ai.offsetX or 0) + dx
         ai.offsetY = (ai.offsetY or 0) + dy
         ApplyAnchorPosition(m._barKey, ai.target, ai.side)
-        pendingPositions[m._barKey] = { _anchored = true }
+        -- Capture the bar's resulting position so CommitPositions saves the real
+        -- (nudged) location. ApplyAnchorPosition always anchors the bar to
+        -- UIParent, so GetPoint(1) is UIParent-relative and safe to store.
+        -- A coordless {_anchored=true} marker would make CommitPositions fall
+        -- back to the pre-edit snapshot, reverting bars that read their saved
+        -- edge back on exit/reload (StanceBar, anchored CDM growth bars).
+        local bpt, brelTo, brp, bx, by = bar:GetPoint(1)
+        if bpt and brelTo == UIParent and bx ~= nil and by ~= nil then
+            pendingPositions[m._barKey] = { point = bpt, relPoint = brp, x = bx, y = by }
+        else
+            pendingPositions[m._barKey] = { _anchored = true }
+        end
     else
         -- Unanchored: read current position, add dx/dy
         local pt, _, relPt, offX, offY = bar:GetPoint(1)
@@ -3877,7 +3911,7 @@ local function CreateBlizzOwnedOverlay(def, parent)
     ov._brd = brd
     -- Label (always visible, same style as mover labels)
     local nameFs = ov:CreateFontString(nil, "OVERLAY")
-    nameFs:SetFont(FONT_PATH, 10, "")
+    nameFs:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
     nameFs:SetShadowOffset(1, -1)
     nameFs:SetShadowColor(0, 0, 0, 0.8)
     nameFs:SetPoint("CENTER", ov, "CENTER", 0, 0)
@@ -3887,7 +3921,7 @@ local function CreateBlizzOwnedOverlay(def, parent)
     ov._nameFs = nameFs
     -- Action text (hidden at idle, fades in on hover)
     local actionFs = ov:CreateFontString(nil, "OVERLAY")
-    actionFs:SetFont(FONT_PATH, 9, "")
+    actionFs:SetFont(FONT_PATH, 9 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
     actionFs:SetShadowOffset(1, -1)
     actionFs:SetShadowColor(0, 0, 0, 0.8)
     actionFs:SetPoint("TOP", nameFs, "BOTTOM", 0, -2)
@@ -4072,7 +4106,7 @@ local function CreateMover(barKey)
     labelFrame:SetClipsChildren(true)
     labelFrame:SetFrameLevel(mover:GetFrameLevel() + 3)
     local nameFS = labelFrame:CreateFontString(nil, "OVERLAY")
-    nameFS:SetFont(FONT_PATH, 10, "")
+    nameFS:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
     nameFS:SetShadowOffset(1, -1)
     nameFS:SetShadowColor(0, 0, 0, 0.8)
     nameFS:SetText(label)
@@ -4085,7 +4119,7 @@ local function CreateMover(barKey)
 
     -- Coordinate readout (shows during drag and selection, top-left of mover)
     local coordFS = labelFrame:CreateFontString(nil, "OVERLAY")
-    coordFS:SetFont(FONT_PATH, 9, "")
+    coordFS:SetFont(FONT_PATH, 9 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
     coordFS:SetShadowOffset(1, -1)
     coordFS:SetShadowColor(0, 0, 0, 0.8)
     coordFS:SetTextColor(1, 1, 1, 0.7)
@@ -4291,7 +4325,7 @@ local function CreateMover(barKey)
 
     -- Pick mode instruction text (shown when in pick mode, replaces all other text)
     local pickFS = labelFrame:CreateFontString(nil, "OVERLAY")
-    pickFS:SetFont(FONT_PATH, 10, "")
+    pickFS:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
     pickFS:SetShadowOffset(1, -1)
     pickFS:SetShadowColor(0, 0, 0, 0.8)
     pickFS:SetTextColor(1, 1, 1, 0.85)
@@ -6830,7 +6864,16 @@ local function CreateMover(barKey)
                                 ai.offsetX = (ai.offsetX or 0) + dx
                                 ai.offsetY = (ai.offsetY or 0) + dy
                                 ApplyAnchorPosition(barKey, ai.target, ai.side)
-                                pendingPositions[barKey] = { _anchored = true }
+                                -- Store the bar's resulting position (not a
+                                -- coordless marker) so CommitPositions saves the
+                                -- real location instead of falling back to the
+                                -- pre-edit snapshot and reverting the bar.
+                                local bpt, brelTo, brp, bx, by = b:GetPoint(1)
+                                if bpt and brelTo == UIParent and bx ~= nil and by ~= nil then
+                                    pendingPositions[barKey] = { point = bpt, relPoint = brp, x = bx, y = by }
+                                else
+                                    pendingPositions[barKey] = { _anchored = true }
+                                end
                             else
                                 -- Unanchored: absolute position
                                 local bS = b:GetEffectiveScale()
@@ -7169,6 +7212,10 @@ local function CreateHUD(parent)
     -- Pixel-perfect scale: 1 frame unit = 1 physical screen pixel
     local physW = (GetPhysicalScreenSize())
     local uiScale = GetScreenWidth() / physW
+    -- At very low UI scales the top bar gets too small to read; enlarge it 15%.
+    -- Bumping the base here propagates through every downstream scale use
+    -- (initial scale, user banner scale, slide-in offsets read GetScale()).
+    if UIParent:GetEffectiveScale() < 0.6 then uiScale = uiScale * 1.08 end
 
     hudFrame = CreateFrame("Frame", nil, parent)
     hudFrame:SetFrameStrata("TOOLTIP")
@@ -8534,8 +8581,8 @@ function ns.ShowUnlockTip()
         local ar, ag, ab = GetAccent()
 
         local tip = CreateFrame("Frame", nil, UIParent)
-        tip:SetFrameStrata("FULLSCREEN_DIALOG")
-        tip:SetFrameLevel(200)
+        tip:SetFrameStrata("TOOLTIP")
+        tip:SetFrameLevel(900)
         tip:SetSize(TIP_W, TIP_H)
         tip:EnableMouse(true)
 
@@ -8562,7 +8609,7 @@ function ns.ShowUnlockTip()
         -- Clip frame: sits above the popup top edge, clips to show only top half
         -- Shifted up 2px so the arrow appears 2px higher
         local arrowClip = CreateFrame("Frame", nil, tip)
-        arrowClip:SetFrameStrata("FULLSCREEN_DIALOG")
+        arrowClip:SetFrameStrata("TOOLTIP")
         arrowClip:SetFrameLevel(tip:GetFrameLevel() + 10)
         arrowClip:SetClipsChildren(true)
         -- Clip region: tall enough for the top half of the diamond
