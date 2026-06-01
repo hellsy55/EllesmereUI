@@ -2320,6 +2320,11 @@ local function ShowFriendsTooltip(anchor)
             if e.bnetTag then
                 colored = "|cffffd100" .. e.bnetTag .. "|r (" .. colored .. ")"
             end
+            -- Level to the right of the in-game name, e.g. "Unholyftw 80"
+            local lvl = tonumber(e.level)
+            if lvl and lvl > 0 then
+                colored = colored .. " |cffb0b0b0" .. lvl .. "|r"
+            end
             row.name:SetText(colored)
             row.name:SetTextColor(1, 1, 1, 0.85)
 
