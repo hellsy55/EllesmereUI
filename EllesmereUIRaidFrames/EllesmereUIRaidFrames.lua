@@ -8379,6 +8379,16 @@ local function ApplyPreviewData(f, index)
                 f._healthText:SetText(AbbreviateNumbers(fakeHP))
             end
             f._healthText:SetTextColor(htr, htg, htb, 0.9)
+        elseif mode == "numberPercent" and not isDead then
+            local fakeHP = healthPct * 12000
+            local numStr = AbbreviateNumbers and AbbreviateNumbers(fakeHP) or tostring(fakeHP)
+            f._healthText:SetFormattedText("%s | %d%%", numStr, healthPct)
+            f._healthText:SetTextColor(htr, htg, htb, 0.9)
+        elseif mode == "percentNumber" and not isDead then
+            local fakeHP = healthPct * 12000
+            local numStr = AbbreviateNumbers and AbbreviateNumbers(fakeHP) or tostring(fakeHP)
+            f._healthText:SetFormattedText("%d%% | %s", healthPct, numStr)
+            f._healthText:SetTextColor(htr, htg, htb, 0.9)
         else
             f._healthText:SetText("")
         end

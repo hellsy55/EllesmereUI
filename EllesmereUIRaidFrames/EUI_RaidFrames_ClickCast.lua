@@ -360,7 +360,12 @@ local function BuildMacroText(binding)
         end
         for _, sp in ipairs(spellList) do
             if sp.class == pClass then
-                lines[#lines + 1] = "/cast [@mouseover" .. guard .. "] " .. sp.name
+                -- Use the client-localized spell name. /cast resolves spells by
+                -- their localized name, so the hardcoded English sp.name silently
+                -- fails on non-English clients. Fall back to sp.name if the API
+                -- is unavailable or returns nothing.
+                local castName = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+                lines[#lines + 1] = "/cast [@mouseover" .. guard .. "] " .. castName
             end
         end
         if #lines == 0 then return nil end
@@ -1471,12 +1476,20 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
     end
     if hasDispel then
         for _, sp in ipairs(DISPEL_SPELLS) do
-            if sp.class == pClass then boundSpells[sp.name] = true end
+            if sp.class == pClass then
+                -- Match the localized name stored by the spell picker so the
+                -- "already bound" dimming works on non-English clients.
+                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+                boundSpells[n] = true
+            end
         end
     end
     if hasExternal then
         for _, sp in ipairs(EXTERNAL_SPELLS) do
-            if sp.class == pClass then boundSpells[sp.name] = true end
+            if sp.class == pClass then
+                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+                boundSpells[n] = true
+            end
         end
     end
     if hasDynamicRez then
